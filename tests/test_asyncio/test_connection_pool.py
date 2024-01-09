@@ -180,11 +180,8 @@ class TestConnectionPool:
         async with self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=redis.Connection
         ) as pool:
-            expected = (
-                "ConnectionPool<Connection<"
-                "host=localhost,port=6379,db=1,client_name=test-client>>"
-            )
-            assert repr(pool) == expected
+            expected = "host=localhost,port=6379,db=1,client_name=test-client"
+            assert expected in repr(pool)
 
     async def test_repr_contains_db_info_unix(self):
         connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
@@ -192,11 +189,8 @@ class TestConnectionPool:
             connection_kwargs=connection_kwargs,
             connection_class=redis.UnixDomainSocketConnection,
         ) as pool:
-            expected = (
-                "ConnectionPool<UnixDomainSocketConnection<"
-                "path=/abc,db=1,client_name=test-client>>"
-            )
-            assert repr(pool) == expected
+            expected = "path=/abc,db=1,client_name=test-client"
+            assert expected in repr(pool)
 
 
 class TestBlockingConnectionPool:
@@ -293,11 +287,8 @@ class TestBlockingConnectionPool:
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
         )
-        expected = (
-            "ConnectionPool<Connection<"
-            "host=localhost,port=6379,db=0,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "host=localhost,port=6379,db=0,client_name=test-client"
+        assert expected in repr(pool)
 
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
@@ -305,11 +296,8 @@ class TestBlockingConnectionPool:
             path="abc",
             client_name="test-client",
         )
-        expected = (
-            "ConnectionPool<UnixDomainSocketConnection<"
-            "path=abc,db=0,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "path=abc,db=0,client_name=test-client"
+        assert expected in repr(pool)
 
 
 class TestConnectionPoolURLParsing:
@@ -452,6 +440,31 @@ class TestConnectionPoolURLParsing:
             "Redis URL must specify one of the following schemes "
             "(redis://, rediss://, unix://)"
         )
+
+
+class TestBlockingConnectionPoolURLParsing:
+    def test_extra_typed_querystring_options(self):
+        pool = redis.BlockingConnectionPool.from_url(
+            "redis://localhost/2?socket_timeout=20&socket_connect_timeout=10"
+            "&socket_keepalive=&retry_on_timeout=Yes&max_connections=10&timeout=13.37"
+        )
+
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            "host": "localhost",
+            "db": 2,
+            "socket_timeout": 20.0,
+            "socket_connect_timeout": 10.0,
+            "retry_on_timeout": True,
+        }
+        assert pool.max_connections == 10
+        assert pool.timeout == 13.37
+
+    def test_invalid_extra_typed_querystring_options(self):
+        with pytest.raises(ValueError):
+            redis.BlockingConnectionPool.from_url(
+                "redis://localhost/2?timeout=_not_a_float_"
+            )
 
 
 class TestConnectionPoolUnixSocketURLParsing:
@@ -634,7 +647,10 @@ class TestConnection:
         connection = redis.Redis.from_url("redis://localhost")
         pool = connection.connection_pool
 
-        assert re.match("(.*)<(.*)<(.*)>>", repr(pool)).groups() == (
+        print(repr(pool))
+        assert re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
+        ).groups() == (
             "ConnectionPool",
             "Connection",
             "host=localhost,port=6379,db=0",
@@ -644,7 +660,9 @@ class TestConnection:
         connection = redis.Redis.from_url("unix:///path/to/socket")
         pool = connection.connection_pool
 
-        assert re.match("(.*)<(.*)<(.*)>>", repr(pool)).groups() == (
+        assert re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
+        ).groups() == (
             "ConnectionPool",
             "UnixDomainSocketConnection",
             "path=/path/to/socket,db=0",

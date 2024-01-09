@@ -1,3 +1,6 @@
+    * Fix return types for `get`, `set_path` and `strappend` in JSONCommands
+    * Connection.register_connect_callback() is made public.
+    * Fix async `read_response` to use `disable_decoding`.
     * Add 'aclose()' methods to async classes, deprecate async close().
     * Fix #2831, add auto_close_connection_pool=True arg to asyncio.Redis.from_url()
     * Fix incorrect redis.asyncio.Cluster type hint for `retry_on_error`
@@ -55,6 +58,8 @@
     * Fix for Unhandled exception related to self.host with unix socket (#2496)
     * Improve error output for master discovery 
     * Make `ClusterCommandsProtocol` an actual Protocol
+    * Add `sum` to DUPLICATE_POLICY documentation of `TS.CREATE`, `TS.ADD` and `TS.ALTER`
+    * Prevent async ClusterPipeline instances from becoming "false-y" in case of empty command stack (#3061)
 
 * 4.1.3 (Feb 8, 2022)
   * Fix flushdb and flushall (#1926)

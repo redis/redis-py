@@ -1,14 +1,12 @@
 import asyncio
 import socket
 import sys
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, TypedDict, Union
 
 if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
     from asyncio import timeout as async_timeout
 else:
     from async_timeout import timeout as async_timeout
-
-from redis.compat import TypedDict
 
 from ..exceptions import ConnectionError, InvalidResponse, RedisError
 from ..typing import EncodableT
@@ -198,10 +196,16 @@ class _AsyncHiredisParser(AsyncBaseParser):
         if not self._connected:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
 
-        response = self._reader.gets()
+        if disable_decoding:
+            response = self._reader.gets(False)
+        else:
+            response = self._reader.gets()
         while response is False:
             await self.read_from_socket()
-            response = self._reader.gets()
+            if disable_decoding:
+                response = self._reader.gets(False)
+            else:
+                response = self._reader.gets()
 
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad

@@ -15,14 +15,22 @@ from typing import (
     Mapping,
     MutableMapping,
     Optional,
+    Protocol,
     Set,
     Tuple,
     Type,
+    TypedDict,
     TypeVar,
     Union,
     cast,
 )
 
+from redis._cache import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_EVICTION_POLICY,
+    DEFAULT_WHITELIST,
+    _LocalCache,
+)
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,
@@ -49,7 +57,6 @@ from redis.commands import (
     AsyncSentinelCommands,
     list_or_args,
 )
-from redis.compat import Protocol, TypedDict
 from redis.credentials import CredentialProvider
 from redis.exceptions import (
     ConnectionError,
@@ -168,7 +175,7 @@ class Redis(
             warnings.warn(
                 DeprecationWarning(
                     '"auto_close_connection_pool" is deprecated '
-                    "since version 5.0.0. "
+                    "since version 5.0.1. "
                     "Please create a ConnectionPool explicitly and "
                     "provide to the Redis() constructor instead."
                 )
@@ -231,6 +238,13 @@ class Redis(
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        cache_enable: bool = False,
+        client_cache: Optional[_LocalCache] = None,
+        cache_max_size: int = 100,
+        cache_ttl: int = 0,
+        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
+        cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ):
         """
         Initialize a new Redis client.
@@ -247,7 +261,7 @@ class Redis(
             warnings.warn(
                 DeprecationWarning(
                     '"auto_close_connection_pool" is deprecated '
-                    "since version 5.0.0. "
+                    "since version 5.0.1. "
                     "Please create a ConnectionPool explicitly and "
                     "provide to the Redis() constructor instead."
                 )
@@ -280,6 +294,13 @@ class Redis(
                 "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
+                "cache_enable": cache_enable,
+                "client_cache": client_cache,
+                "cache_max_size": cache_max_size,
+                "cache_ttl": cache_ttl,
+                "cache_eviction_policy": cache_eviction_policy,
+                "cache_blacklist": cache_blacklist,
+                "cache_whitelist": cache_whitelist,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -337,7 +358,10 @@ class Redis(
         self._single_conn_lock = asyncio.Lock()
 
     def __repr__(self):
-        return f"{self.__class__.__name__}<{self.connection_pool!r}>"
+        return (
+            f"<{self.__class__.__module__}.{self.__class__.__name__}"
+            f"({self.connection_pool!r})>"
+        )
 
     def __await__(self):
         return self.initialize().__await__()
@@ -546,6 +570,7 @@ class Redis(
                 _grl().call_exception_handler(context)
             except RuntimeError:
                 pass
+            self.connection._close()
 
     async def aclose(self, close_connection_pool: Optional[bool] = None) -> None:
         """
@@ -565,7 +590,7 @@ class Redis(
         ):
             await self.connection_pool.disconnect()
 
-    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
+    @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="close")
     async def close(self, close_connection_pool: Optional[bool] = None) -> None:
         """
         Alias for aclose(), for backwards compatibility
@@ -596,24 +621,30 @@ class Redis(
     async def execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
         await self.initialize()
-        pool = self.connection_pool
         command_name = args[0]
+        keys = options.pop("keys", None)  # keys are used only for client side caching
+        pool = self.connection_pool
         conn = self.connection or await pool.get_connection(command_name, **options)
-
-        if self.single_connection_client:
-            await self._single_conn_lock.acquire()
-        try:
-            return await conn.retry.call_with_retry(
-                lambda: self._send_command_parse_response(
-                    conn, command_name, *args, **options
-                ),
-                lambda error: self._disconnect_raise(conn, error),
-            )
-        finally:
+        response_from_cache = await conn._get_from_local_cache(args)
+        if response_from_cache is not None:
+            return response_from_cache
+        else:
             if self.single_connection_client:
-                self._single_conn_lock.release()
-            if not self.connection:
-                await pool.release(conn)
+                await self._single_conn_lock.acquire()
+            try:
+                response = await conn.retry.call_with_retry(
+                    lambda: self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    ),
+                    lambda error: self._disconnect_raise(conn, error),
+                )
+                conn._add_to_local_cache(args, response, keys)
+                return response
+            finally:
+                if self.single_connection_client:
+                    self._single_conn_lock.release()
+                if not self.connection:
+                    await pool.release(conn)
 
     async def parse_response(
         self, connection: Connection, command_name: Union[str, bytes], **options
@@ -783,7 +814,7 @@ class PubSub:
 
     def __del__(self):
         if self.connection:
-            self.connection._deregister_connect_callback(self.on_connect)
+            self.connection.deregister_connect_callback(self.on_connect)
 
     async def aclose(self):
         # In case a connection property does not yet exist
@@ -794,7 +825,7 @@ class PubSub:
         async with self._lock:
             if self.connection:
                 await self.connection.disconnect()
-                self.connection._deregister_connect_callback(self.on_connect)
+                self.connection.deregister_connect_callback(self.on_connect)
                 await self.connection_pool.release(self.connection)
                 self.connection = None
             self.channels = {}
@@ -802,12 +833,12 @@ class PubSub:
             self.patterns = {}
             self.pending_unsubscribe_patterns = set()
 
-    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
+    @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="close")
     async def close(self) -> None:
         """Alias for aclose(), for backwards compatibility"""
         await self.aclose()
 
-    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="reset")
+    @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="reset")
     async def reset(self) -> None:
         """Alias for aclose(), for backwards compatibility"""
         await self.aclose()
@@ -857,11 +888,11 @@ class PubSub:
             )
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
-            self.connection._register_connect_callback(self.on_connect)
+            self.connection.register_connect_callback(self.on_connect)
         else:
             await self.connection.connect()
         if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
-            self.connection._parser.set_push_handler(self.push_handler_func)
+            self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
 
     async def _disconnect_raise_connect(self, conn, error):
         """
@@ -1274,6 +1305,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     def execute_command(
         self, *args, **kwargs
     ) -> Union["Pipeline", Awaitable["Pipeline"]]:
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         if (self.watching or args[0] == "WATCH") and not self.explicit_transaction:
             return self.immediate_execute_command(*args, **kwargs)
         return self.pipeline_execute_command(*args, **kwargs)
