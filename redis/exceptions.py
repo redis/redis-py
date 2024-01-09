@@ -81,7 +81,10 @@ class LockError(RedisError, ValueError):
     "Errors acquiring or releasing a lock"
     # NOTE: For backwards compatibility, this class derives from ValueError.
     # This was originally chosen to behave like threading.Lock.
-    pass
+
+    def __init__(self, message, lock_name=None):
+        self.message = message
+        self.lock_name = lock_name
 
 
 class LockNotOwnedError(LockError):
