@@ -6,6 +6,12 @@ import warnings
 from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
+from redis._cache import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_EVICTION_POLICY,
+    DEFAULT_WHITELIST,
+    _LocalCache,
+)
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -203,6 +209,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        cache_enable: bool = False,
+        client_cache: Optional[_LocalCache] = None,
+        cache_max_size: int = 100,
+        cache_ttl: int = 0,
+        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
+        cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -254,6 +267,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,
+                "cache_enable": cache_enable,
+                "client_cache": client_cache,
+                "cache_max_size": cache_max_size,
+                "cache_ttl": cache_ttl,
+                "cache_eviction_policy": cache_eviction_policy,
+                "cache_blacklist": cache_blacklist,
+                "cache_whitelist": cache_whitelist,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -311,7 +331,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.response_callbacks.update(_RedisCallbacksRESP2)
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}<{repr(self.connection_pool)}>"
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"({repr(self.connection_pool)})>"
+        )
 
     def get_encoder(self) -> "Encoder":
         """Get the connection pool's encoder"""
@@ -528,20 +551,26 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
-        pool = self.connection_pool
         command_name = args[0]
+        keys = options.pop("keys", None)
+        pool = self.connection_pool
         conn = self.connection or pool.get_connection(command_name, **options)
-
-        try:
-            return conn.retry.call_with_retry(
-                lambda: self._send_command_parse_response(
-                    conn, command_name, *args, **options
-                ),
-                lambda error: self._disconnect_raise(conn, error),
-            )
-        finally:
-            if not self.connection:
-                pool.release(conn)
+        response_from_cache = conn._get_from_local_cache(args)
+        if response_from_cache is not None:
+            return response_from_cache
+        else:
+            try:
+                response = conn.retry.call_with_retry(
+                    lambda: self._send_command_parse_response(
+                        conn, command_name, *args, **options
+                    ),
+                    lambda error: self._disconnect_raise(conn, error),
+                )
+                conn._add_to_local_cache(args, response, keys)
+                return response
+            finally:
+                if not self.connection:
+                    pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
@@ -693,7 +722,7 @@ class PubSub:
     def reset(self) -> None:
         if self.connection:
             self.connection.disconnect()
-            self.connection._deregister_connect_callback(self.on_connect)
+            self.connection.deregister_connect_callback(self.on_connect)
             self.connection_pool.release(self.connection)
             self.connection = None
         self.health_check_response_counter = 0
@@ -751,9 +780,9 @@ class PubSub:
             )
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
-            self.connection._register_connect_callback(self.on_connect)
+            self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
-                self.connection._parser.set_push_handler(self.push_handler_func)
+                self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}
         if not self.subscribed:
@@ -1253,6 +1282,7 @@ class Pipeline(Redis):
         self.explicit_transaction = True
 
     def execute_command(self, *args, **kwargs):
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         if (self.watching or args[0] == "WATCH") and not self.explicit_transaction:
             return self.immediate_execute_command(*args, **kwargs)
         return self.pipeline_execute_command(*args, **kwargs)

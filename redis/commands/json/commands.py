@@ -49,7 +49,7 @@ class JSONCommands:
             if stop is not None:
                 pieces.append(stop)
 
-        return self.execute_command("JSON.ARRINDEX", *pieces)
+        return self.execute_command("JSON.ARRINDEX", *pieces, keys=[name])
 
     def arrinsert(
         self, name: str, path: str, index: int, *args: List[JsonType]
@@ -72,7 +72,7 @@ class JSONCommands:
 
         For more information see `JSON.ARRLEN <https://redis.io/commands/json.arrlen>`_.
         """  # noqa
-        return self.execute_command("JSON.ARRLEN", name, str(path))
+        return self.execute_command("JSON.ARRLEN", name, str(path), keys=[name])
 
     def arrpop(
         self,
@@ -102,14 +102,14 @@ class JSONCommands:
 
         For more information see `JSON.TYPE <https://redis.io/commands/json.type>`_.
         """  # noqa
-        return self.execute_command("JSON.TYPE", name, str(path))
+        return self.execute_command("JSON.TYPE", name, str(path), keys=[name])
 
     def resp(self, name: str, path: Optional[str] = Path.root_path()) -> List:
         """Return the JSON value under ``path`` at key ``name``.
 
         For more information see `JSON.RESP <https://redis.io/commands/json.resp>`_.
         """  # noqa
-        return self.execute_command("JSON.RESP", name, str(path))
+        return self.execute_command("JSON.RESP", name, str(path), keys=[name])
 
     def objkeys(
         self, name: str, path: Optional[str] = Path.root_path()
@@ -119,7 +119,7 @@ class JSONCommands:
 
         For more information see `JSON.OBJKEYS <https://redis.io/commands/json.objkeys>`_.
         """  # noqa
-        return self.execute_command("JSON.OBJKEYS", name, str(path))
+        return self.execute_command("JSON.OBJKEYS", name, str(path), keys=[name])
 
     def objlen(self, name: str, path: Optional[str] = Path.root_path()) -> int:
         """Return the length of the dictionary JSON value under ``path`` at key
@@ -127,7 +127,7 @@ class JSONCommands:
 
         For more information see `JSON.OBJLEN <https://redis.io/commands/json.objlen>`_.
         """  # noqa
-        return self.execute_command("JSON.OBJLEN", name, str(path))
+        return self.execute_command("JSON.OBJLEN", name, str(path), keys=[name])
 
     def numincrby(self, name: str, path: str, number: int) -> str:
         """Increment the numeric (integer or floating point) JSON value under
@@ -173,7 +173,7 @@ class JSONCommands:
 
     def get(
         self, name: str, *args, no_escape: Optional[bool] = False
-    ) -> List[JsonType]:
+    ) -> Optional[List[JsonType]]:
         """
         Get the object stored as a JSON value at key ``name``.
 
@@ -197,7 +197,7 @@ class JSONCommands:
         # Handle case where key doesn't exist. The JSONDecoder would raise a
         # TypeError exception since it can't decode None
         try:
-            return self.execute_command("JSON.GET", *pieces)
+            return self.execute_command("JSON.GET", *pieces, keys=[name])
         except TypeError:
             return None
 
@@ -211,7 +211,7 @@ class JSONCommands:
         pieces = []
         pieces += keys
         pieces.append(str(path))
-        return self.execute_command("JSON.MGET", *pieces)
+        return self.execute_command("JSON.MGET", *pieces, keys=keys)
 
     def set(
         self,
@@ -324,7 +324,7 @@ class JSONCommands:
         nx: Optional[bool] = False,
         xx: Optional[bool] = False,
         decode_keys: Optional[bool] = False,
-    ) -> List[Dict[str, bool]]:
+    ) -> Dict[str, bool]:
         """
         Iterate over ``root_folder`` and set each JSON file to a value
         under ``json_path`` with the file name as the key.
@@ -364,7 +364,7 @@ class JSONCommands:
         pieces = [name]
         if path is not None:
             pieces.append(str(path))
-        return self.execute_command("JSON.STRLEN", *pieces)
+        return self.execute_command("JSON.STRLEN", *pieces, keys=[name])
 
     def toggle(
         self, name: str, path: Optional[str] = Path.root_path()
@@ -377,7 +377,7 @@ class JSONCommands:
         return self.execute_command("JSON.TOGGLE", name, str(path))
 
     def strappend(
-        self, name: str, value: str, path: Optional[int] = Path.root_path()
+        self, name: str, value: str, path: Optional[str] = Path.root_path()
     ) -> Union[int, List[Optional[int]]]:
         """Append to the string JSON value. If two options are specified after
         the key name, the path is determined to be the first. If a single
