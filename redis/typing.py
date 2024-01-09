@@ -7,12 +7,11 @@ from typing import (
     Awaitable,
     Iterable,
     Mapping,
+    Protocol,
     Type,
     TypeVar,
     Union,
 )
-
-from redis.compat import Protocol
 
 if TYPE_CHECKING:
     from redis._parsers import Encoder
@@ -33,6 +32,7 @@ KeyT = _StringLikeT  # Main redis key space
 PatternT = _StringLikeT  # Patterns matched against keys, fields etc
 FieldT = EncodableT  # Fields within hash tables, streams and geo commands
 KeysT = Union[KeyT, Iterable[KeyT]]
+ResponseT = Union[Awaitable, Any]
 ChannelT = _StringLikeT
 GroupT = _StringLikeT  # Consumer group
 ConsumerT = _StringLikeT  # Consumer name

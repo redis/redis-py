@@ -275,7 +275,7 @@ def _get_client(
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
-    if "protocol" not in redis_url:
+    if "protocol" not in redis_url and kwargs.get("protocol") is None:
         kwargs["protocol"] = request.config.getoption("--protocol")
 
     cluster_mode = REDIS_INFO["cluster_enabled"]
@@ -356,6 +356,7 @@ def _gen_cluster_mock_resp(r, response):
     connection = Mock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
+    connection._get_from_local_cache.return_value = None
     with mock.patch.object(r, "connection", connection):
         yield r
 
