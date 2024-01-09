@@ -1067,7 +1067,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             list<ClusterNode>
             dict<Any, ClusterNode>
         """
-        # kwargs.pop("keys", None)  # the keys are used only for client side caching
         target_nodes_specified = False
         is_default_node = False
         target_nodes = None
