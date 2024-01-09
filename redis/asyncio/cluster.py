@@ -18,6 +18,12 @@ from typing import (
     Union,
 )
 
+from redis._cache import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_EVICTION_POLICY,
+    DEFAULT_WHITELIST,
+    _LocalCache,
+)
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -267,6 +273,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_keyfile: Optional[str] = None,
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        cache_enable: bool = False,
+        client_cache: Optional[_LocalCache] = None,
+        cache_max_size: int = 100,
+        cache_ttl: int = 0,
+        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
+        cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -310,6 +323,14 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_timeout": socket_timeout,
             "retry": retry,
             "protocol": protocol,
+            # Client cache related kwargs
+            "cache_enable": cache_enable,
+            "client_cache": client_cache,
+            "cache_max_size": cache_max_size,
+            "cache_ttl": cache_ttl,
+            "cache_eviction_policy": cache_eviction_policy,
+            "cache_blacklist": cache_blacklist,
+            "cache_whitelist": cache_whitelist,
         }
 
         if ssl:
@@ -682,7 +703,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         :raises RedisClusterException: if target_nodes is not provided & the command
             can't be mapped to a slot
         """
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
         command = args[0]
         target_nodes = []
         target_nodes_specified = False
@@ -1039,16 +1059,24 @@ class ClusterNode:
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
+        keys = kwargs.pop("keys", None)
 
-        # Execute command
-        await connection.send_packed_command(connection.pack_command(*args), False)
-
-        # Read response
-        try:
-            return await self.parse_response(connection, args[0], **kwargs)
-        finally:
-            # Release connection
+        response_from_cache = await connection._get_from_local_cache(args)
+        if response_from_cache is not None:
             self._free.append(connection)
+            return response_from_cache
+        else:
+            # Execute command
+            await connection.send_packed_command(connection.pack_command(*args), False)
+
+            # Read response
+            try:
+                response = await self.parse_response(connection, args[0], **kwargs)
+                connection._add_to_local_cache(args, response, keys)
+                return response
+            finally:
+                # Release connection
+                self._free.append(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
