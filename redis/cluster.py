@@ -167,6 +167,13 @@ REDIS_ALLOWED_KEYS = (
     "ssl_password",
     "unix_socket_path",
     "username",
+    "cache_enable",
+    "client_cache",
+    "cache_max_size",
+    "cache_ttl",
+    "cache_eviction_policy",
+    "cache_blacklist",
+    "cache_whitelist",
 )
 KWARGS_DISABLED_KEYS = ("host", "port")
 
@@ -1060,7 +1067,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             list<ClusterNode>
             dict<Any, ClusterNode>
         """
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
         target_nodes_specified = False
         is_default_node = False
         target_nodes = None
@@ -1119,6 +1125,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """
         Send a command to a node in the cluster
         """
+        keys = kwargs.pop("keys", None)
         command = args[0]
         redis_node = None
         connection = None
@@ -1147,14 +1154,18 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
                     asking = False
-
-                connection.send_command(*args)
-                response = redis_node.parse_response(connection, command, **kwargs)
-                if command in self.cluster_response_callbacks:
-                    response = self.cluster_response_callbacks[command](
-                        response, **kwargs
-                    )
-                return response
+                response_from_cache = connection._get_from_local_cache(args)
+                if response_from_cache is not None:
+                    return response_from_cache
+                else:
+                    connection.send_command(*args)
+                    response = redis_node.parse_response(connection, command, **kwargs)
+                    if command in self.cluster_response_callbacks:
+                        response = self.cluster_response_callbacks[command](
+                            response, **kwargs
+                        )
+                    connection._add_to_local_cache(args, response, keys)
+                    return response
             except AuthenticationError:
                 raise
             except (ConnectionError, TimeoutError) as e:
