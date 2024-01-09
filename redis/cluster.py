@@ -2166,9 +2166,13 @@ class ClusterPipeline(RedisCluster):
         # we dont' multiplex on the sockets as they come available,
         # but that shouldn't make too much difference.
         node_commands = nodes.values()
-        for n in node_commands:
-            n.write()
-
+        try:
+            for n in node_commands:
+                n.write()
+        except Exception:
+            for n in node_commands:
+                n.connection_pool.release(n.connection)
+            raise
         for n in node_commands:
             n.read()
 
