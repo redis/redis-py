@@ -69,10 +69,9 @@ async def create_redis(request):
         url: str = request.config.getoption("--redis-url"),
         cls=redis.Redis,
         flushdb=True,
-        protocol=request.config.getoption("--protocol"),
         **kwargs,
     ):
-        if "protocol" not in url:
+        if "protocol" not in url and kwargs.get("protocol") is None:
             kwargs["protocol"] = request.config.getoption("--protocol")
 
         cluster_mode = REDIS_INFO["cluster_enabled"]
