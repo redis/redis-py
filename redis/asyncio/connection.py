@@ -227,6 +227,10 @@ class AbstractConnection:
             _cache = None
         self.client_cache = client_cache if client_cache is not None else _cache
         if self.client_cache is not None:
+            if self.protocol not in [3, "3"]:
+                raise RedisError(
+                    "client caching is only supported with protocol version 3 or higher"
+                )
             self.cache_blacklist = cache_blacklist
             self.cache_whitelist = cache_whitelist
 

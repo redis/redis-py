@@ -4,15 +4,25 @@ import pytest
 import redis
 from redis._cache import _LocalCache
 from redis.utils import HIREDIS_AVAILABLE
+from tests.conftest import _get_client
+
+
+@pytest.fixture()
+def r(request):
+    cache = request.param.get("cache")
+    kwargs = request.param.get("kwargs", {})
+    with _get_client(
+        redis.Redis, request, protocol=3, client_cache=cache, **kwargs
+    ) as client:
+        yield client, cache
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
-@pytest.mark.onlynoncluster
 class TestLocalCache:
-    def test_get_from_cache(self):
-        cache = _LocalCache()
-        r = redis.Redis(protocol=3, client_cache=cache)
-        r2 = redis.Redis(protocol=3)
+    @pytest.mark.onlynoncluster
+    @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
+    def test_get_from_cache(self, r, r2):
+        r, cache = r
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -28,11 +38,9 @@ class TestLocalCache:
         # get key from redis
         assert r.get("foo") == b"barbar"
 
-        r.flushdb()
-
-    def test_cache_max_size(self):
-        cache = _LocalCache(max_size=3)
-        r = redis.Redis(client_cache=cache, protocol=3)
+    @pytest.mark.parametrize("r", [{"cache": _LocalCache(max_size=3)}], indirect=True)
+    def test_cache_max_size(self, r):
+        r, cache = r
         # add 3 keys to redis
         r.set("foo", "bar")
         r.set("foo2", "bar2")
@@ -51,11 +59,9 @@ class TestLocalCache:
         # the first key is not in the local cache anymore
         assert cache.get(("GET", "foo")) is None
 
-        r.flushdb()
-
-    def test_cache_ttl(self):
-        cache = _LocalCache(ttl=1)
-        r = redis.Redis(client_cache=cache, protocol=3)
+    @pytest.mark.parametrize("r", [{"cache": _LocalCache(ttl=1)}], indirect=True)
+    def test_cache_ttl(self, r):
+        r, cache = r
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -67,11 +73,11 @@ class TestLocalCache:
         # the key is not in the local cache anymore
         assert cache.get(("GET", "foo")) is None
 
-        r.flushdb()
-
-    def test_cache_lfu_eviction(self):
-        cache = _LocalCache(max_size=3, eviction_policy="lfu")
-        r = redis.Redis(client_cache=cache, protocol=3)
+    @pytest.mark.parametrize(
+        "r", [{"cache": _LocalCache(max_size=3, eviction_policy="lfu")}], indirect=True
+    )
+    def test_cache_lfu_eviction(self, r):
+        r, cache = r
         # add 3 keys to redis
         r.set("foo", "bar")
         r.set("foo2", "bar2")
@@ -92,11 +98,14 @@ class TestLocalCache:
         assert cache.get(("GET", "foo")) == b"bar"
         assert cache.get(("GET", "foo2")) is None
 
-        r.flushdb()
-
-    def test_cache_decode_response(self):
-        cache = _LocalCache()
-        r = redis.Redis(decode_responses=True, client_cache=cache, protocol=3)
+    @pytest.mark.onlynoncluster
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_cache_decode_response(self, r):
+        r, cache = r
         r.set("foo", "bar")
         # get key from redis and save in local cache
         assert r.get("foo") == "bar"
@@ -111,30 +120,27 @@ class TestLocalCache:
         # get key from redis
         assert r.get("foo") == "barbar"
 
-        r.flushdb()
-
-    def test_cache_blacklist(self):
-        cache = _LocalCache()
-        r = redis.Redis(client_cache=cache, cache_blacklist=["LLEN"], protocol=3)
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"cache_blacklist": ["LLEN"]}}],
+        indirect=True,
+    )
+    def test_cache_blacklist(self, r):
+        r, cache = r
         # add list to redis
         r.lpush("mylist", "foo", "bar", "baz")
         assert r.llen("mylist") == 3
         assert r.lindex("mylist", 1) == b"bar"
         assert cache.get(("LLEN", "mylist")) is None
         assert cache.get(("LINDEX", "mylist", 1)) == b"bar"
-
-        r.flushdb()
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
 class TestClusterLocalCache:
-    def test_get_from_cache(self):
-        cache = _LocalCache()
-        r = redis.RedisCluster(
-            host="localhost", port=16379, protocol=3, client_cache=cache
-        )
-        r2 = redis.RedisCluster(host="localhost", port=16379, protocol=3)
+    @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
+    def test_get_from_cache(self, r, r2):
+        r, cache = r
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -151,87 +157,13 @@ class TestClusterLocalCache:
         # get key from redis
         assert r.get("foo") == b"barbar"
 
-        r.flushdb()
-
-    def test_cache_max_size(self):
-        cache = _LocalCache(max_size=3)
-        r = redis.RedisCluster(
-            host="localhost", port=16379, client_cache=cache, protocol=3
-        )
-        # add 3 keys to redis
-        r.set("foo", "bar")
-        r.set("foo2", "bar2")
-        r.set("foo3", "bar3")
-        # get 3 keys from redis and save in local cache
-        assert r.get("foo") == b"bar"
-        assert r.get("foo2") == b"bar2"
-        assert r.get("foo3") == b"bar3"
-        # get the 3 keys from local cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "foo2")) == b"bar2"
-        assert cache.get(("GET", "foo3")) == b"bar3"
-        # add 1 more key to redis (exceed the max size)
-        r.set("foo4", "bar4")
-        assert r.get("foo4") == b"bar4"
-        # the first key is not in the local cache anymore
-        assert cache.get(("GET", "foo")) is None
-
-        r.flushdb()
-
-    def test_cache_ttl(self):
-        cache = _LocalCache(ttl=1)
-        r = redis.RedisCluster(
-            host="localhost", port=16379, client_cache=cache, protocol=3
-        )
-        # add key to redis
-        r.set("foo", "bar")
-        # get key from redis and save in local cache
-        assert r.get("foo") == b"bar"
-        # get key from local cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        # wait for the key to expire
-        time.sleep(1)
-        # the key is not in the local cache anymore
-        assert cache.get(("GET", "foo")) is None
-
-        r.flushdb()
-
-    def test_cache_lfu_eviction(self):
-        cache = _LocalCache(max_size=3, eviction_policy="lfu")
-        r = redis.RedisCluster(
-            host="localhost", port=16379, client_cache=cache, protocol=3
-        )
-        # add 3 keys to redis
-        r.set("foo", "bar")
-        r.set("foo2", "bar2")
-        r.set("foo3", "bar3")
-        # get 3 keys from redis and save in local cache
-        assert r.get("foo") == b"bar"
-        assert r.get("foo2") == b"bar2"
-        assert r.get("foo3") == b"bar3"
-        # change the order of the keys in the cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "foo3")) == b"bar3"
-        # add 1 more key to redis (exceed the max size)
-        r.set("foo4", "bar4")
-        assert r.get("foo4") == b"bar4"
-        # test the eviction policy
-        assert len(cache.cache) == 3
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "foo2")) is None
-
-        r.flushdb()
-
-    def test_cache_decode_response(self):
-        cache = _LocalCache()
-        r = redis.RedisCluster(
-            host="localhost",
-            port=16379,
-            decode_responses=True,
-            client_cache=cache,
-            protocol=3,
-        )
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_cache_decode_response(self, r):
+        r, cache = r
         r.set("foo", "bar")
         # get key from redis and save in local cache
         assert r.get("foo") == "bar"
@@ -246,23 +178,3 @@ class TestClusterLocalCache:
         assert cache.get(("GET", "foo")) is None
         # get key from redis
         assert r.get("foo") == "barbar"
-
-        r.flushdb()
-
-    def test_cache_blacklist(self):
-        cache = _LocalCache()
-        r = redis.RedisCluster(
-            host="localhost",
-            port=16379,
-            client_cache=cache,
-            cache_blacklist=["LLEN"],
-            protocol=3,
-        )
-        # add list to redis
-        r.lpush("mylist", "foo", "bar", "baz")
-        assert r.llen("mylist") == 3
-        assert r.lindex("mylist", 1) == b"bar"
-        assert cache.get(("LLEN", "mylist")) is None
-        assert cache.get(("LINDEX", "mylist", 1)) == b"bar"
-
-        r.flushdb()
