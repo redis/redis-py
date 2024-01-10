@@ -2170,13 +2170,13 @@ class ClusterPipeline(RedisCluster):
             node_commands = nodes.values()
             for n in node_commands:
                 n.write()
-    
+
             for n in node_commands:
                 n.read()
         finally:
             for n in nodes.values():
                 n.connection_pool.release(n.connection)
-    
+
         # release all of the redis connections we allocated earlier
         # back into the connection pool.
         # we used to do this step as part of a try/finally block,
