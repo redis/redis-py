@@ -8,7 +8,7 @@ setup(
     long_description_content_type="text/markdown",
     keywords=["Redis", "key-value store", "database"],
     license="MIT",
-    version="5.1.0a1",
+    version="5.1.0b2",
     packages=find_packages(
         include=[
             "redis",
@@ -34,11 +34,10 @@ setup(
     },
     author="Redis Inc.",
     author_email="oss@redis.com",
-    python_requires=">=3.7",
+    python_requires=">=3.8",
     install_requires=[
-        'importlib-metadata >= 1.0; python_version < "3.8"',
         'typing-extensions; python_version<"3.8"',
-        'async-timeout>=4.0.2',
+        'async-timeout>=4.0.3',
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
@@ -49,7 +48,6 @@ setup(
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3 :: Only",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",

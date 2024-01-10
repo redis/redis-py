@@ -178,7 +178,11 @@ class _LocalCache:
     """
 
     def __init__(
-        self, max_size: int, ttl: int, eviction_policy: EvictionPolicy, **kwargs
+        self,
+        max_size: int = 100,
+        ttl: int = 0,
+        eviction_policy: EvictionPolicy = DEFAULT_EVICTION_POLICY,
+        **kwargs,
     ):
         self.max_size = max_size
         self.ttl = ttl
