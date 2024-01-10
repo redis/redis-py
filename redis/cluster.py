@@ -2195,8 +2195,8 @@ class ClusterPipeline(RedisCluster):
         # buffered result back from a previous command and
         # every single request after to that connection will always get
         # a mismatched result.
-        for n in nodes.values():
-            n.connection_pool.release(n.connection)
+        # for n in nodes.values():
+        #    n.connection_pool.release(n.connection)
 
         # if the response isn't an exception it is a
         # valid response from the node
