@@ -275,7 +275,7 @@ def _get_client(
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
-    if "protocol" not in redis_url:
+    if "protocol" not in redis_url and kwargs.get("protocol") is None:
         kwargs["protocol"] = request.config.getoption("--protocol")
 
     cluster_mode = REDIS_INFO["cluster_enabled"]
