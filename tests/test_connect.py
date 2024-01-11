@@ -107,6 +107,8 @@ class _RedisTCPServer(socketserver.TCPServer):
         newsocket, fromaddr = self.socket.accept()
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         context.load_cert_chain(certfile=self._certfile, keyfile=self._keyfile)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.maximum_version = ssl.TLSVersion.TLSv1_3
         connstream = context.wrap_socket(
             newsocket,
             server_side=True,
