@@ -15,6 +15,7 @@ def r(request):
         redis.Redis, request, protocol=3, client_cache=cache, **kwargs
     ) as client:
         yield client, cache
+        # client.flushdb()
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
@@ -133,6 +134,17 @@ class TestLocalCache:
         assert r.lindex("mylist", 1) == b"bar"
         assert cache.get(("LLEN", "mylist")) is None
         assert cache.get(("LINDEX", "mylist", 1)) == b"bar"
+
+    @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
+    def test_cache_return_copy(self, r):
+        r, cache = r
+        r.lpush("mylist", "foo", "bar", "baz")
+        assert r.lrange("mylist", 0, -1) == [b"baz", b"bar", b"foo"]
+        res = cache.get(("LRANGE", "mylist", 0, -1))
+        assert res == [b"baz", b"bar", b"foo"]
+        res.append(b"new")
+        check = cache.get(("LRANGE", "mylist", 0, -1))
+        assert check == [b"baz", b"bar", b"foo"]
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
