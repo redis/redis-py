@@ -5010,14 +5010,16 @@ class HashCommands(CommandsProtocol):
         """
         if key is None and not mapping and not items:
             raise DataError("'hset' with no key value pairs")
-        items = items or []
+        pieces = []
+        if items:
+            pieces.extend(items)
         if key is not None:
-            items.extend((key, value))
+            pieces.extend((key, value))
         if mapping:
             for pair in mapping.items():
-                items.extend(pair)
+                pieces.extend(pair)
 
-        return self.execute_command("HSET", name, *items)
+        return self.execute_command("HSET", name, *pieces)
 
     def hsetnx(self, name: str, key: str, value: str) -> Union[Awaitable[bool], bool]:
         """
