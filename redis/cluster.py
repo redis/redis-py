@@ -2174,29 +2174,26 @@ class ClusterPipeline(RedisCluster):
             for n in node_commands:
                 n.read()
         finally:
+            # release all of the redis connections we allocated earlier
+            # back into the connection pool.
+            # we used to do this step as part of a try/finally block,
+            # but it is really dangerous to
+            # release connections back into the pool if for some
+            # reason the socket has data still left in it
+            # from a previous operation. The write and
+            # read operations already have try/catch around them for
+            # all known types of errors including connection
+            # and socket level errors.
+            # So if we hit an exception, something really bad
+            # happened and putting any oF
+            # these connections back into the pool is a very bad idea.
+            # the socket might have unread buffer still sitting in it,
+            # and then the next time we read from it we pass the
+            # buffered result back from a previous command and
+            # every single request after to that connection will always get
+            # a mismatched result.
             for n in nodes.values():
                 n.connection_pool.release(n.connection)
-
-        # release all of the redis connections we allocated earlier
-        # back into the connection pool.
-        # we used to do this step as part of a try/finally block,
-        # but it is really dangerous to
-        # release connections back into the pool if for some
-        # reason the socket has data still left in it
-        # from a previous operation. The write and
-        # read operations already have try/catch around them for
-        # all known types of errors including connection
-        # and socket level errors.
-        # So if we hit an exception, something really bad
-        # happened and putting any oF
-        # these connections back into the pool is a very bad idea.
-        # the socket might have unread buffer still sitting in it,
-        # and then the next time we read from it we pass the
-        # buffered result back from a previous command and
-        # every single request after to that connection will always get
-        # a mismatched result.
-        # for n in nodes.values():
-        #    n.connection_pool.release(n.connection)
 
         # if the response isn't an exception it is a
         # valid response from the node
