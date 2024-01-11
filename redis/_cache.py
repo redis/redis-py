@@ -1,3 +1,4 @@
+import copy
 import random
 import time
 from collections import OrderedDict, defaultdict
@@ -226,7 +227,7 @@ class _LocalCache:
                 self.delete(command)
                 return
             self._update_access(command)
-            return self.cache[command]["response"]
+            return copy.deepcopy(self.cache[command]["response"])
 
     def delete(self, command: str):
         """
