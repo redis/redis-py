@@ -200,7 +200,7 @@ class _LocalCache(AbstractCache):
 
     def __init__(
         self,
-        max_size: int = 100,
+        max_size: int = 10000,
         ttl: int = 0,
         eviction_policy: EvictionPolicy = DEFAULT_EVICTION_POLICY,
         **kwargs,

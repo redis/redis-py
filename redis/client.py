@@ -211,7 +211,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         protocol: Optional[int] = 2,
         cache_enabled: bool = False,
         client_cache: Optional[AbstractCache] = None,
-        cache_max_size: int = 100,
+        cache_max_size: int = 10000,
         cache_ttl: int = 0,
         cache_policy: str = DEFAULT_EVICTION_POLICY,
         cache_blacklist: List[str] = DEFAULT_BLACKLIST,
