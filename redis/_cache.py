@@ -160,7 +160,27 @@ class EvictionPolicy(Enum):
     RANDOM = "random"
 
 
-class _LocalCache:
+class AbstractCache:
+    def set(self, command: str, response: ResponseT, keys_in_command: List[KeyT]):
+        raise NotImplementedError
+
+    def get(self, command: str) -> ResponseT:
+        raise NotImplementedError
+
+    def delete_command(self, command: str):
+        raise NotImplementedError
+
+    def delete_many(self, commands):
+        raise NotImplementedError
+
+    def flush(self):
+        raise NotImplementedError
+
+    def invalidate_key(self, key: KeyT):
+        raise NotImplementedError
+
+
+class _LocalCache(AbstractCache):
     """
     A caching mechanism for storing redis commands and their responses.
 
@@ -224,12 +244,12 @@ class _LocalCache:
         """
         if command in self.cache:
             if self._is_expired(command):
-                self.delete(command)
+                self.delete_command(command)
                 return
             self._update_access(command)
             return copy.deepcopy(self.cache[command]["response"])
 
-    def delete(self, command: str):
+    def delete_command(self, command: str):
         """
         Delete a redis command and its metadata from the cache.
 
@@ -285,7 +305,7 @@ class _LocalCache:
     def _evict(self):
         """Evict a redis command from the cache based on the eviction policy."""
         if self._is_expired(self.commands_ttl_list[0]):
-            self.delete(self.commands_ttl_list[0])
+            self.delete_command(self.commands_ttl_list[0])
         elif self.eviction_policy == EvictionPolicy.LRU.value:
             self.cache.popitem(last=False)
         elif self.eviction_policy == EvictionPolicy.LFU.value:
@@ -319,7 +339,7 @@ class _LocalCache:
         for key in keys:
             self.key_commands_map[key].remove(command)
 
-    def invalidate(self, key: KeyT):
+    def invalidate_key(self, key: KeyT):
         """
         Invalidate (delete) all redis commands associated with a specific key.
 
@@ -330,4 +350,4 @@ class _LocalCache:
             return
         commands = list(self.key_commands_map[key])
         for command in commands:
-            self.delete(command)
+            self.delete_command(command)
