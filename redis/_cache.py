@@ -1,6 +1,7 @@
 import copy
 import random
 import time
+from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
 from enum import Enum
 from typing import List
@@ -160,24 +161,35 @@ class EvictionPolicy(Enum):
     RANDOM = "random"
 
 
-class AbstractCache:
+class AbstractCache(ABC):
+    """
+    An abstract base class for client caching implementations.
+    If you want to implement your own cache you must support these methods.
+    """
+
+    @abstractmethod
     def set(self, command: str, response: ResponseT, keys_in_command: List[KeyT]):
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def get(self, command: str) -> ResponseT:
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def delete_command(self, command: str):
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def delete_many(self, commands):
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def flush(self):
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def invalidate_key(self, key: KeyT):
-        raise NotImplementedError
+        pass
 
 
 class _LocalCache(AbstractCache):
