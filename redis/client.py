@@ -10,7 +10,7 @@ from redis._cache import (
     DEFAULT_BLACKLIST,
     DEFAULT_EVICTION_POLICY,
     DEFAULT_WHITELIST,
-    _LocalCache,
+    AbstractCache,
 )
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import (
@@ -209,11 +209,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        cache_enable: bool = False,
-        client_cache: Optional[_LocalCache] = None,
-        cache_max_size: int = 100,
+        cache_enabled: bool = False,
+        client_cache: Optional[AbstractCache] = None,
+        cache_max_size: int = 10000,
         cache_ttl: int = 0,
-        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_policy: str = DEFAULT_EVICTION_POLICY,
         cache_blacklist: List[str] = DEFAULT_BLACKLIST,
         cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ) -> None:
@@ -267,11 +267,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,
-                "cache_enable": cache_enable,
+                "cache_enabled": cache_enabled,
                 "client_cache": client_cache,
                 "cache_max_size": cache_max_size,
                 "cache_ttl": cache_ttl,
-                "cache_eviction_policy": cache_eviction_policy,
+                "cache_policy": cache_policy,
                 "cache_blacklist": cache_blacklist,
                 "cache_whitelist": cache_whitelist,
             }
@@ -591,6 +591,33 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if command_name in self.response_callbacks:
             return self.response_callbacks[command_name](response, **options)
         return response
+
+    def flush_cache(self):
+        try:
+            if self.connection:
+                self.connection.client_cache.flush()
+            else:
+                self.connection_pool.flush_cache()
+        except AttributeError:
+            pass
+
+    def delete_command_from_cache(self, command):
+        try:
+            if self.connection:
+                self.connection.client_cache.delete_command(command)
+            else:
+                self.connection_pool.delete_command_from_cache(command)
+        except AttributeError:
+            pass
+
+    def invalidate_key_from_cache(self, key):
+        try:
+            if self.connection:
+                self.connection.client_cache.invalidate_key(key)
+            else:
+                self.connection_pool.invalidate_key_from_cache(key)
+        except AttributeError:
+            pass
 
 
 StrictRedis = Redis

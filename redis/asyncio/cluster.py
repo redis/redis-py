@@ -22,7 +22,7 @@ from redis._cache import (
     DEFAULT_BLACKLIST,
     DEFAULT_EVICTION_POLICY,
     DEFAULT_WHITELIST,
-    _LocalCache,
+    AbstractCache,
 )
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.helpers import (
@@ -273,11 +273,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_keyfile: Optional[str] = None,
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
-        cache_enable: bool = False,
-        client_cache: Optional[_LocalCache] = None,
+        cache_enabled: bool = False,
+        client_cache: Optional[AbstractCache] = None,
         cache_max_size: int = 100,
         cache_ttl: int = 0,
-        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_policy: str = DEFAULT_EVICTION_POLICY,
         cache_blacklist: List[str] = DEFAULT_BLACKLIST,
         cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ) -> None:
@@ -324,11 +324,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "retry": retry,
             "protocol": protocol,
             # Client cache related kwargs
-            "cache_enable": cache_enable,
+            "cache_enabled": cache_enabled,
             "client_cache": client_cache,
             "cache_max_size": cache_max_size,
             "cache_ttl": cache_ttl,
-            "cache_eviction_policy": cache_eviction_policy,
+            "cache_policy": cache_policy,
             "cache_blacklist": cache_blacklist,
             "cache_whitelist": cache_whitelist,
         }

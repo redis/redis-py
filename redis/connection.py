@@ -17,6 +17,7 @@ from ._cache import (
     DEFAULT_BLACKLIST,
     DEFAULT_EVICTION_POLICY,
     DEFAULT_WHITELIST,
+    AbstractCache,
     _LocalCache,
 )
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
@@ -157,11 +158,11 @@ class AbstractConnection:
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         command_packer: Optional[Callable[[], None]] = None,
-        cache_enable: bool = False,
-        client_cache: Optional[_LocalCache] = None,
-        cache_max_size: int = 100,
+        cache_enabled: bool = False,
+        client_cache: Optional[AbstractCache] = None,
+        cache_max_size: int = 10000,
         cache_ttl: int = 0,
-        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_policy: str = DEFAULT_EVICTION_POLICY,
         cache_blacklist: List[str] = DEFAULT_BLACKLIST,
         cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ):
@@ -229,8 +230,8 @@ class AbstractConnection:
                 # p = DEFAULT_RESP_VERSION
             self.protocol = p
         self._command_packer = self._construct_command_packer(command_packer)
-        if cache_enable:
-            _cache = _LocalCache(cache_max_size, cache_ttl, cache_eviction_policy)
+        if cache_enabled:
+            _cache = _LocalCache(cache_max_size, cache_ttl, cache_policy)
         else:
             _cache = None
         self.client_cache = client_cache if client_cache is not None else _cache
@@ -626,7 +627,7 @@ class AbstractConnection:
             self.client_cache.flush()
         else:
             for key in data[1]:
-                self.client_cache.invalidate(str_if_bytes(key))
+                self.client_cache.invalidate_key(str_if_bytes(key))
 
     def _get_from_local_cache(self, command: str):
         """
@@ -655,15 +656,6 @@ class AbstractConnection:
             and (self.cache_whitelist == [] or command[0] in self.cache_whitelist)
         ):
             self.client_cache.set(command, response, keys)
-
-    def delete_from_local_cache(self, command: str):
-        """
-        Delete the command from the local cache
-        """
-        try:
-            self.client_cache.delete(command)
-        except AttributeError:
-            pass
 
 
 class Connection(AbstractConnection):
@@ -1280,6 +1272,42 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
+
+    def flush_cache(self):
+        self._checkpid()
+        with self._lock:
+            connections = chain(self._available_connections, self._in_use_connections)
+
+            for connection in connections:
+                try:
+                    connection.client_cache.flush()
+                except AttributeError:
+                    # cache is not enabled
+                    pass
+
+    def delete_command_from_cache(self, command: str):
+        self._checkpid()
+        with self._lock:
+            connections = chain(self._available_connections, self._in_use_connections)
+
+            for connection in connections:
+                try:
+                    connection.client_cache.delete_command(command)
+                except AttributeError:
+                    # cache is not enabled
+                    pass
+
+    def invalidate_key_from_cache(self, key: str):
+        self._checkpid()
+        with self._lock:
+            connections = chain(self._available_connections, self._in_use_connections)
+
+            for connection in connections:
+                try:
+                    connection.client_cache.invalidate_key(key)
+                except AttributeError:
+                    # cache is not enabled
+                    pass
 
 
 class BlockingConnectionPool(ConnectionPool):

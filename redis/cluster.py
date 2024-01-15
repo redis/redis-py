@@ -167,11 +167,11 @@ REDIS_ALLOWED_KEYS = (
     "ssl_password",
     "unix_socket_path",
     "username",
-    "cache_enable",
+    "cache_enabled",
     "client_cache",
     "cache_max_size",
     "cache_ttl",
-    "cache_eviction_policy",
+    "cache_policy",
     "cache_blacklist",
     "cache_whitelist",
 )
