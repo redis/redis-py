@@ -148,7 +148,7 @@ jobs:
     env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: RE [${{ matrix.re-build }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
-     steps:
+    steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
