@@ -178,16 +178,16 @@ jobs:
         run: ./build.sh
 
       - name: Run tests
-         run: |
-           pip install -U setuptools wheel
-           pip install -r requirements.txt
-           pip install -r dev_requirements.txt
-           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-            pip install hiredis
-           fi
-           invoke devenv
-           sleep 10 # time to settle
-           invoke ${{matrix.test-type}}-tests
+        run: |
+          pip install -U setuptools wheel
+          pip install -r requirements.txt
+          pip install -r dev_requirements.txt
+          if [ "${{matrix.connection-type}}" == "hiredis" ]; then
+           pip install hiredis
+          fi
+          invoke devenv
+          sleep 10 # time to settle
+          invoke ${{matrix.test-type}}-tests
 
    build_and_test_package:
     name: Validate building and installing the package
