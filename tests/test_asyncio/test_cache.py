@@ -131,6 +131,17 @@ class TestLocalCache:
         assert cache.get(("LLEN", "mylist")) is None
         assert cache.get(("LINDEX", "mylist", 1)) == b"bar"
 
+    @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
+    async def test_cache_return_copy(self, r):
+        r, cache = r
+        await r.lpush("mylist", "foo", "bar", "baz")
+        assert await r.lrange("mylist", 0, -1) == [b"baz", b"bar", b"foo"]
+        res = cache.get(("LRANGE", "mylist", 0, -1))
+        assert res == [b"baz", b"bar", b"foo"]
+        res.append(b"new")
+        check = cache.get(("LRANGE", "mylist", 0, -1))
+        assert check == [b"baz", b"bar", b"foo"]
+
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
