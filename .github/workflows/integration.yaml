@@ -173,6 +173,7 @@ jobs:
           RE_CLUSTER_NAME: test
           RE_USE_OSS_CLUSTER: false
           RE_DB_PORT: 6379
+          password: ${{ secrets.PYPI_API_TOKEN }}
           DOCKER_ACCESS_TOKEN: ${{ secrets.DOCKER_ACCESS_TOKEN }}
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: ./build.sh
