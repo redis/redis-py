@@ -73,6 +73,5 @@ jobs:
           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
            pip install hiredis
           fi
-          invoke devenv
           sleep 10 # time to settle
           invoke ${{matrix.test-type}}-tests
