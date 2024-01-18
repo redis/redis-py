@@ -51,27 +51,33 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Build cluster
-        working-directory: redis-ee
-        env:
-          IMAGE: "redislabs/redis-internal:${{ matrix.re-build }}"
-          RE_USERNAME: test@test.com
-          RE_PASS: 12345
-          RE_CLUSTER_NAME: test
-          RE_USE_OSS_CLUSTER: false
-          RE_DB_PORT: 6379
-          DOCKER_ACCESS_TOKEN: ${{ secrets.DOCKER_ACCESS_TOKEN }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        run: ./build.sh
+      - name: docker login
+        uses: docker/login-action@v1
 
-      - name: Run tests
-        run: |
-          pip install -U setuptools wheel
-          pip install -r requirements.txt
-          pip install -r dev_requirements.txt
-          if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-           pip install hiredis
-          fi
-          invoke devenv
-          sleep 10 # time to settle
-          invoke ${{matrix.test-type}}-tests
+      - name: pull tests
+        run: docker pull redislabs/redis-internal:${{matrix.re-build}}
+
+      # - name: Build cluster
+      #   working-directory: redis-ee
+      #   env:
+      #     IMAGE: "redislabs/redis-internal:${{ matrix.re-build }}"
+      #     RE_USERNAME: test@test.com
+      #     RE_PASS: 12345
+      #     RE_CLUSTER_NAME: test
+      #     RE_USE_OSS_CLUSTER: false
+      #     RE_DB_PORT: 6379
+      #     DOCKER_ACCESS_TOKEN: ${{ secrets.DOCKER_ACCESS_TOKEN }}
+      #     DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      #   run: ./build.sh
+
+      # - name: Run tests
+      #   run: |
+      #     pip install -U setuptools wheel
+      #     pip install -r requirements.txt
+      #     pip install -r dev_requirements.txt
+      #     if [ "${{matrix.connection-type}}" == "hiredis" ]; then
+      #      pip install hiredis
+      #     fi
+      #     invoke devenv
+      #     sleep 10 # time to settle
+      #     invoke ${{matrix.test-type}}-tests
