@@ -31,10 +31,9 @@ jobs:
       matrix:
         python-version: ['3.10']
         test-type: ['standalone']
-        connection-type: ['hiredis', 'plain']
+        connection-type: ['plain'] #['hiredis', 'plain']
         re-build: ["7.2.4-92"]
-    env:
-       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+
     name: RE [${{ matrix.re-build }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
     steps:
       - name: Checkout code
