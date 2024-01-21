@@ -1017,6 +1017,7 @@ class TestRedisCommands:
             assert r.bitcount("mykey", 5, 30, "but")
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_not_empty_string(self, r):
         r["a"] = ""
@@ -1024,6 +1025,7 @@ class TestRedisCommands:
         assert r.get("r") is None
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_not(self, r):
         test_str = b"\xAA\x00\xFF\x55"
@@ -1043,6 +1045,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
+    @skip_if_redis_enterprise()
     def test_bitop_single_string(self, r):
         test_str = b"\x01\x02\xFF"
         r["a"] = test_str
@@ -1055,6 +1058,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
+    @skip_if_redis_enterprise()
     def test_bitop_string_operands(self, r):
         r["a"] = b"\x01\x02\xFF\xFF"
         r["b"] = b"\x01\x02\xFF"
@@ -1099,6 +1103,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_copy(self, r):
         assert r.copy("a", "b") == 0
         r.set("a", "foo")
@@ -1108,6 +1113,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_copy_and_replace(self, r):
         r.set("a", "foo1")
         r.set("b", "foo2")
@@ -1170,6 +1176,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_lcs(self, r):
         r.mset({"foo": "ohmytext", "bar": "mynewtext"})
         assert r.lcs("foo", "bar") == b"mytext"
@@ -1433,6 +1440,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_lmove(self, r):
         r.rpush("a", "one", "two", "three", "four")
         assert r.lmove("a", "b")
@@ -1440,6 +1448,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_blmove(self, r):
         r.rpush("a", "one", "two", "three", "four")
         assert r.blmove("a", "b", 5)
@@ -1453,6 +1462,7 @@ class TestRedisCommands:
             assert r[k] == v
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_msetnx(self, r):
         d = {"a": b"1", "b": b"2", "c": b"3"}
         assert r.msetnx(d)
@@ -1607,6 +1617,7 @@ class TestRedisCommands:
         assert r.randomkey() in (b"a", b"b", b"c")
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_rename(self, r):
         r["a"] = "1"
         assert r.rename("a", "b")
@@ -1614,6 +1625,7 @@ class TestRedisCommands:
         assert r["b"] == b"1"
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_renamenx(self, r):
         r["a"] = "1"
         r["b"] = "2"
@@ -1876,6 +1888,7 @@ class TestRedisCommands:
 
     # LIST COMMANDS
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_blpop(self, r):
         r.rpush("a", "1", "2")
         r.rpush("b", "3", "4")
@@ -1896,6 +1909,7 @@ class TestRedisCommands:
         assert_resp_response(r, r.blpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"])
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_brpop(self, r):
         r.rpush("a", "1", "2")
         r.rpush("b", "3", "4")
@@ -1916,6 +1930,7 @@ class TestRedisCommands:
         assert_resp_response(r, r.brpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"])
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_brpoplpush(self, r):
         r.rpush("a", "1", "2")
         r.rpush("b", "3", "4")
@@ -1926,12 +1941,14 @@ class TestRedisCommands:
         assert r.lrange("b", 0, -1) == [b"1", b"2", b"3", b"4"]
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_brpoplpush_empty_string(self, r):
         r.rpush("a", "")
         assert r.brpoplpush("a", "b") == b""
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_blmpop(self, r):
         r.rpush("a", "1", "2", "3", "4", "5")
         res = [b"a", [b"1", b"2"]]
@@ -1944,6 +1961,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_lmpop(self, r):
         r.rpush("foo", "1", "2", "3", "4", "5")
         result = [b"foo", [b"1", b"2"]]
@@ -2052,6 +2070,7 @@ class TestRedisCommands:
         assert r.rpop("a", 3) is None
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_rpoplpush(self, r):
         r.rpush("a", "a1", "a2", "a3")
         r.rpush("b", "b1", "b2", "b3")
@@ -2199,6 +2218,7 @@ class TestRedisCommands:
         assert r.scard("a") == 3
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sdiff(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sdiff("a", "b") == {b"1", b"2", b"3"}
@@ -2206,6 +2226,7 @@ class TestRedisCommands:
         assert r.sdiff("a", "b") == {b"1"}
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sdiffstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sdiffstore("c", "a", "b") == 3
@@ -2215,6 +2236,7 @@ class TestRedisCommands:
         assert r.smembers("c") == {b"1"}
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sinter(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sinter("a", "b") == set()
@@ -2223,6 +2245,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_sintercard(self, r):
         r.sadd("a", 1, 2, 3)
         r.sadd("b", 1, 2, 3)
@@ -2231,6 +2254,7 @@ class TestRedisCommands:
         assert r.sintercard(3, ["a", "b", "c"], limit=1) == 1
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
     def test_sinterstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sinterstore("c", "a", "b") == 0
@@ -2258,6 +2282,7 @@ class TestRedisCommands:
         assert r.smismember("a", ["1", "4", "2", "3"]) == result_list
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_smove(self, r):
         r.sadd("a", "a1", "a2")
         r.sadd("b", "b1", "b2")
@@ -2308,12 +2333,14 @@ class TestRedisCommands:
         assert r.smembers("a") == {b"1", b"3"}
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sunion(self, r):
         r.sadd("a", "1", "2")
         r.sadd("b", "2", "3")
         assert r.sunion("a", "b") == {b"1", b"2", b"3"}
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sunionstore(self, r):
         r.sadd("a", "1", "2")
         r.sadd("b", "2", "3")
@@ -2427,6 +2454,7 @@ class TestRedisCommands:
         assert r.zcount("a", 10, 20) == 0
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("6.2.0")
     def test_zdiff(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -2441,6 +2469,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_zdiffstore(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         r.zadd("b", {"a1": 1, "a2": 2})
@@ -2468,6 +2497,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_zinter(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -2507,6 +2537,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_zintercard(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -2515,6 +2546,7 @@ class TestRedisCommands:
         assert r.zintercard(3, ["a", "b", "c"], limit=1) == 1
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_zinterstore_sum(self, r):
         r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -2528,6 +2560,7 @@ class TestRedisCommands:
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_zinterstore_max(self, r):
         r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -2541,6 +2574,7 @@ class TestRedisCommands:
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_zinterstore_min(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         r.zadd("b", {"a1": 2, "a2": 3, "a3": 5})
@@ -2554,6 +2588,7 @@ class TestRedisCommands:
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_zinterstore_with_weight(self, r):
         r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -2608,6 +2643,7 @@ class TestRedisCommands:
         assert len(r.zrandmember("a", -10)) == 10
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("4.9.0")
     def test_bzpopmax(self, r):
         r.zadd("a", {"a1": 1, "a2": 2})
@@ -2632,6 +2668,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.9.0")
+    @skip_if_redis_enterprise()
     def test_bzpopmin(self, r):
         r.zadd("a", {"a1": 1, "a2": 2})
         r.zadd("b", {"b1": 10, "b2": 20})
@@ -2655,6 +2692,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_zmpop(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         assert_resp_response(
@@ -2675,6 +2713,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_bzmpop(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         assert_resp_response(
@@ -2771,6 +2810,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_zrangestore(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         assert r.zrangestore("b", "a", 0, 1)
@@ -2950,6 +2990,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_zunion(self, r):
         r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -2985,6 +3026,7 @@ class TestRedisCommands:
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_zunionstore_sum(self, r):
         r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -2998,6 +3040,7 @@ class TestRedisCommands:
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_zunionstore_max(self, r):
         r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -3011,6 +3054,7 @@ class TestRedisCommands:
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_zunionstore_min(self, r):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 4})
@@ -3024,6 +3068,7 @@ class TestRedisCommands:
         )
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_zunionstore_with_weight(self, r):
         r.zadd("a", {"a1": 1, "a2": 1, "a3": 1})
         r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
@@ -3056,6 +3101,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.9")
+    @skip_if_redis_enterprise()
     def test_pfcount(self, r):
         members = {b"1", b"2", b"3"}
         r.pfadd("a", *members)
@@ -3067,6 +3113,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.9")
+    @skip_if_redis_enterprise()
     def test_pfmerge(self, r):
         mema = {b"1", b"2", b"3"}
         memb = {b"2", b"3", b"4"}
@@ -3211,6 +3258,7 @@ class TestRedisCommands:
         assert r.sort("a", start=1, num=2) == [b"2", b"3"]
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sort_by(self, r):
         r["score:1"] = 8
         r["score:2"] = 3
@@ -3219,6 +3267,7 @@ class TestRedisCommands:
         assert r.sort("a", by="score:*") == [b"2", b"3", b"1"]
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sort_get(self, r):
         r["user:1"] = "u1"
         r["user:2"] = "u2"
@@ -3227,6 +3276,7 @@ class TestRedisCommands:
         assert r.sort("a", get="user:*") == [b"u1", b"u2", b"u3"]
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sort_get_multi(self, r):
         r["user:1"] = "u1"
         r["user:2"] = "u2"
@@ -3242,6 +3292,7 @@ class TestRedisCommands:
         ]
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sort_get_groups_two(self, r):
         r["user:1"] = "u1"
         r["user:2"] = "u2"
@@ -3280,6 +3331,7 @@ class TestRedisCommands:
             r.sort("a", groups=True)
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sort_groups_three_gets(self, r):
         r["user:1"] = "u1"
         r["user:2"] = "u2"
@@ -3303,12 +3355,14 @@ class TestRedisCommands:
         assert r.sort("a", alpha=True) == [b"a", b"b", b"c", b"d", b"e"]
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sort_store(self, r):
         r.rpush("a", "2", "3", "1")
         assert r.sort("a", store="sorted_values") == 3
         assert r.lrange("sorted_values", 0, -1) == [b"1", b"2", b"3"]
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sort_all_options(self, r):
         r["user:1:username"] = "zeus"
         r["user:2:username"] = "titan"
@@ -3344,6 +3398,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.0.0")
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_sort_ro(self, r):
         r["score:1"] = 8
         r["score:2"] = 3
@@ -3779,6 +3834,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_geosearchstore(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -3799,6 +3855,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_geosearchstore_dist(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -3948,6 +4005,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
+    @skip_if_redis_enterprise()
     def test_georadius_store(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
@@ -3962,6 +4020,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_unless_arch_bits(64)
     @skip_if_server_version_lt("3.2.0")
+    @skip_if_redis_enterprise()
     def test_georadius_store_dist(self, r):
         values = (2.1909389952632, 41.433791470673, "place1") + (
             2.1873744593677,
