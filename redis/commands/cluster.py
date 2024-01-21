@@ -44,7 +44,7 @@ from .core import (
     ScriptCommands,
 )
 from .helpers import list_or_args
-from .redismodules import RedisModuleCommands
+from .redismodules import AsyncRedisModuleCommands, RedisModuleCommands
 
 if TYPE_CHECKING:
     from redis.asyncio.cluster import TargetNodesT
@@ -907,6 +907,7 @@ class AsyncRedisClusterCommands(
     AsyncFunctionCommands,
     AsyncGearsCommands,
     AsyncModuleCommands,
+    AsyncRedisModuleCommands,
 ):
     """
     A class for all Redis Cluster commands
