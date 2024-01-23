@@ -1165,7 +1165,7 @@ class BlockingConnectionPool(ConnectionPool):
     connection from the pool when all of connections are in use, rather than
     raising a :py:class:`~redis.ConnectionError` (as the default
     :py:class:`~redis.asyncio.ConnectionPool` implementation does), it
-    makes blocks the current `Task` for a specified number of seconds until
+    blocks the current `Task` for a specified number of seconds until
     a connection becomes available.
 
     Use ``max_connections`` to increase / decrease the pool size::
