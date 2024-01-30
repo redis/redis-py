@@ -1,26 +1,24 @@
 import asyncio
 import logging
-import re
 import socket
 import ssl
+from unittest.mock import patch
 
 import pytest
 from redis.asyncio.connection import (
     Connection,
+    ResponseError,
     SSLConnection,
     UnixDomainSocketConnection,
 )
 
+from .. import resp
 from ..ssl_utils import get_ssl_filename
 
 _logger = logging.getLogger(__name__)
 
 
 _CLIENT_NAME = "test-suite-client"
-_CMD_SEP = b"\r\n"
-_SUCCESS_RESP = b"+OK" + _CMD_SEP
-_ERROR_RESP = b"-ERR" + _CMD_SEP
-_SUPPORTED_CMDS = {f"CLIENT SETNAME {_CLIENT_NAME}": _SUCCESS_RESP}
 
 
 @pytest.fixture
@@ -65,6 +63,90 @@ async def test_tcp_ssl_connect(tcp_address):
     await conn.disconnect()
 
 
+@pytest.mark.parametrize(
+    ("use_server_ver", "use_protocol", "use_auth", "use_client_name"),
+    [
+        (5, 2, False, True),
+        (5, 2, True, True),
+        (5, 3, True, True),
+        (6, 2, False, True),
+        (6, 2, True, True),
+        (6, 3, False, False),
+        (6, 3, True, False),
+        (6, 3, False, True),
+        (6, 3, True, True),
+    ],
+)
+# @pytest.mark.parametrize("use_protocol", [2, 3])
+# @pytest.mark.parametrize("use_auth", [False, True])
+async def test_tcp_auth(
+    tcp_address, use_protocol, use_auth, use_server_ver, use_client_name
+):
+    """
+    Test that various initial handshake cases are handled correctly by the client
+    """
+    got_auth = []
+    got_protocol = None
+    got_name = None
+
+    def on_auth(self, auth):
+        got_auth[:] = auth
+
+    def on_protocol(self, proto):
+        nonlocal got_protocol
+        got_protocol = proto
+
+    def on_setname(self, name):
+        nonlocal got_name
+        got_name = name
+
+    def get_server_version(self):
+        return use_server_ver
+
+    if use_auth:
+        auth_args = {"username": "myuser", "password": "mypassword"}
+    else:
+        auth_args = {}
+    got_protocol = None
+    host, port = tcp_address
+    conn = Connection(
+        host=host,
+        port=port,
+        client_name=_CLIENT_NAME if use_client_name else None,
+        socket_timeout=10,
+        protocol=use_protocol,
+        **auth_args,
+    )
+    try:
+        with patch.multiple(
+            resp.RespServer,
+            on_auth=on_auth,
+            get_server_version=get_server_version,
+            on_protocol=on_protocol,
+            on_setname=on_setname,
+        ):
+            if use_server_ver < 6 and use_protocol > 2:
+                with pytest.raises(ResponseError):
+                    await _assert_connect(conn, tcp_address)
+                return
+
+            await _assert_connect(conn, tcp_address)
+            if use_protocol == 3:
+                assert got_protocol == use_protocol
+            if use_auth:
+                if use_server_ver < 6:
+                    assert got_auth == ["mypassword"]
+                else:
+                    assert got_auth == ["myuser", "mypassword"]
+
+            if use_client_name:
+                assert got_name == _CLIENT_NAME
+            else:
+                assert got_name is None
+    finally:
+        await conn.disconnect()
+
+
 async def _assert_connect(conn, server_address, certfile=None, keyfile=None):
     stop_event = asyncio.Event()
     finished = asyncio.Event()
@@ -102,46 +184,34 @@ async def _assert_connect(conn, server_address, certfile=None, keyfile=None):
 
 
 async def _redis_request_handler(reader, writer, stop_event):
+    parser = resp.RespParser()
+    server = resp.RespServer()
     buffer = b""
-    command = None
-    command_ptr = None
-    fragment_length = None
-    while not stop_event.is_set() or buffer:
-        _logger.info(str(stop_event.is_set()))
-        try:
-            buffer += await asyncio.wait_for(reader.read(1024), timeout=0.5)
-        except TimeoutError:
-            continue
-        if not buffer:
-            continue
-        parts = re.split(_CMD_SEP, buffer)
-        buffer = parts[-1]
-        for fragment in parts[:-1]:
-            fragment = fragment.decode()
-            _logger.info("Command fragment: %s", fragment)
-
-            if fragment.startswith("*") and command is None:
-                command = [None for _ in range(int(fragment[1:]))]
-                command_ptr = 0
-                fragment_length = None
+    try:
+        # if client performs pipelining, we may need
+        # to adjust this code to not block when sending
+        # responses.
+        while not stop_event.is_set() or buffer:
+            _logger.info(str(stop_event.is_set()))
+            try:
+                command = parser.parse(buffer)
+                buffer = b""
+            except resp.NeedMoreData:
+                try:
+                    buffer = await asyncio.wait_for(reader.read(1024), timeout=0.5)
+                except TimeoutError:
+                    buffer = b""
+                    continue
+                if not buffer:
+                    break  # EOF
                 continue
 
-            if fragment.startswith("$") and command[command_ptr] is None:
-                fragment_length = int(fragment[1:])
-                continue
-
-            assert len(fragment) == fragment_length
-            command[command_ptr] = fragment
-            command_ptr += 1
-
-            if command_ptr < len(command):
-                continue
-
-            command = " ".join(command)
             _logger.info("Command %s", command)
-            resp = _SUPPORTED_CMDS.get(command, _ERROR_RESP)
-            _logger.info("Response from %s", resp)
-            writer.write(resp)
+            response = server.command(command)
+            _logger.info("Response %s", response)
+            writer.write(response)
             await writer.drain()
-            command = None
-    _logger.info("Exit handler")
+    except Exception:
+        _logger.exception("Error in handler")
+    finally:
+        _logger.info("Exit handler")
