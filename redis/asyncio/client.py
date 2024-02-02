@@ -924,11 +924,15 @@ class PubSub:
     async def _disconnect_raise_connect(self, conn, error):
         """
         Close the connection and raise an exception
-        if retry_on_timeout is not set or the error
-        is not a TimeoutError. Otherwise, try to reconnect
+        if retry_on_error is not set or the error is not one
+        of the specified error types. Otherwise, try to
+        reconnect
         """
         await conn.disconnect()
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             raise error
         await conn.connect()
 
@@ -1341,8 +1345,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         """
         Close the connection, reset watching state and
         raise an exception if we were watching,
-        retry_on_timeout is not set,
-        or the error is not a TimeoutError
+        if retry_on_error is not set or the error is not one
+        of the specified error types.
         """
         await conn.disconnect()
         # if we were already watching a variable, the watch is no longer
@@ -1353,9 +1357,12 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
-        # if retry_on_timeout is not set, or the error is not
-        # a TimeoutError, raise it
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        # if retry_on_error is not set or the error is not one
+        # of the specified error types, raise it
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             await self.aclose()
             raise
 
@@ -1530,8 +1537,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     async def _disconnect_raise_reset(self, conn: Connection, error: Exception):
         """
         Close the connection, raise an exception if we were watching,
-        and raise an exception if retry_on_timeout is not set,
-        or the error is not a TimeoutError
+        and raise an exception if retry_on_error is not set or the
+        error is not one of the specified error types.
         """
         await conn.disconnect()
         # if we were watching a variable, the watch is no longer valid
@@ -1541,9 +1548,12 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
-        # if retry_on_timeout is not set, or the error is not
-        # a TimeoutError, raise it
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        # if retry_on_error is not set or the error is not one
+        # of the specified error types, raise it
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             await self.reset()
             raise
 
