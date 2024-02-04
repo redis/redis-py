@@ -2143,6 +2143,8 @@ class ClusterPipeline(RedisCluster):
                     try:
                         connection = get_connection(redis_node, c.args)
                     except ConnectionError:
+                        for n in nodes.values():
+                            n.connection_pool.release(n.connection)
                         # Connection retries are being handled in the node's
                         # Retry object. Reinitialize the node -> slot table.
                         self.nodes_manager.initialize()
