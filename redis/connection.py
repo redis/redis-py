@@ -769,6 +769,7 @@ class SSLConnection(Connection):
         ssl_validate_ocsp_stapled=False,
         ssl_ocsp_context=None,
         ssl_ocsp_expected_cert=None,
+        ssl_min_version=None,
         **kwargs,
     ):
         """Constructor
@@ -787,6 +788,7 @@ class SSLConnection(Connection):
             ssl_validate_ocsp_stapled: If set, perform a validation on a stapled ocsp response
             ssl_ocsp_context: A fully initialized OpenSSL.SSL.Context object to be used in verifying the ssl_ocsp_expected_cert
             ssl_ocsp_expected_cert: A PEM armoured string containing the expected certificate to be returned from the ocsp verification service.
+            ssl_min_version: The lowest supported SSL version. It affects the supported SSL versions of the SSLContext. None leaves the default provided by ssl module.
 
         Raises:
             RedisError
@@ -819,6 +821,7 @@ class SSLConnection(Connection):
         self.ssl_validate_ocsp_stapled = ssl_validate_ocsp_stapled
         self.ssl_ocsp_context = ssl_ocsp_context
         self.ssl_ocsp_expected_cert = ssl_ocsp_expected_cert
+        self.ssl_min_version = ssl_min_version
         super().__init__(**kwargs)
 
     def _connect(self):
@@ -841,6 +844,8 @@ class SSLConnection(Connection):
             context.load_verify_locations(
                 cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
             )
+        if self.ssl_min_version is not None:
+            context.minimum_version = self.ssl_min_version
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
