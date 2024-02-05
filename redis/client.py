@@ -198,6 +198,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_validate_ocsp_stapled=False,
         ssl_ocsp_context=None,
         ssl_ocsp_expected_cert=None,
+        ssl_min_version=None,
         max_connections=None,
         single_connection_client=False,
         health_check_interval=0,
@@ -311,6 +312,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_validate_ocsp": ssl_validate_ocsp,
                             "ssl_ocsp_context": ssl_ocsp_context,
                             "ssl_ocsp_expected_cert": ssl_ocsp_expected_cert,
+                            "ssl_min_version": ssl_min_version,
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)
