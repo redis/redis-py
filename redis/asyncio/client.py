@@ -2,6 +2,7 @@ import asyncio
 import copy
 import inspect
 import re
+import ssl
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -225,6 +226,7 @@ class Redis(
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
+        ssl_min_version: Optional[ssl.TLSVersion] = None,
         max_connections: Optional[int] = None,
         single_connection_client: bool = False,
         health_check_interval: int = 0,
@@ -331,6 +333,7 @@ class Redis(
                             "ssl_ca_certs": ssl_ca_certs,
                             "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,
+                            "ssl_min_version": ssl_min_version,
                         }
                     )
             # This arg only used if no pool is passed in
