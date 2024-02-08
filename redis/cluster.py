@@ -1565,25 +1565,25 @@ class NodesManager:
                 # add this node to the nodes cache
                 tmp_nodes_cache[target_node.name] = target_node
 
+                target_replica_nodes = []
+                for replica_node in slot[3:]:
+                    host = str_if_bytes(replica_node[0])
+                    port = int(replica_node[1])
+                    host, port = self.remap_host_port(host, port)
+
+                    target_replica_node = self._get_or_create_cluster_node(
+                        host, port, REPLICA, tmp_nodes_cache
+                    )
+                    target_replica_nodes.append(target_replica_node)
+                    # add this node to the nodes cache
+                    tmp_nodes_cache[target_replica_node.name] = target_replica_node
+
                 for i in range(int(slot[0]), int(slot[1]) + 1):
                     if i not in tmp_slots:
                         tmp_slots[i] = []
                         tmp_slots[i].append(target_node)
-                        replica_nodes = [slot[j] for j in range(3, len(slot))]
-
-                        for replica_node in replica_nodes:
-                            host = str_if_bytes(replica_node[0])
-                            port = replica_node[1]
-                            host, port = self.remap_host_port(host, port)
-
-                            target_replica_node = self._get_or_create_cluster_node(
-                                host, port, REPLICA, tmp_nodes_cache
-                            )
+                        for target_replica_node in target_replica_nodes:
                             tmp_slots[i].append(target_replica_node)
-                            # add this node to the nodes cache
-                            tmp_nodes_cache[
-                                target_replica_node.name
-                            ] = target_replica_node
                     else:
                         # Validate that 2 nodes want to use the same slot cache
                         # setup
