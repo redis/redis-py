@@ -26,10 +26,10 @@ from redis.commands import (
     list_or_args,
 )
 from redis.connection import (
+    AbstractConnection,
     ConnectionPool,
     SSLConnection,
     UnixDomainSocketConnection,
-    AbstractConnection,
 )
 from redis.credentials import CredentialProvider
 from redis.exceptions import (
