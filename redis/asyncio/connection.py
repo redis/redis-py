@@ -823,6 +823,7 @@ class SSLConnection(Connection):
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
+        ssl_min_version: Optional[ssl.TLSVersion] = None,
         **kwargs,
     ):
         self.ssl_context: RedisSSLContext = RedisSSLContext(
@@ -832,6 +833,7 @@ class SSLConnection(Connection):
             ca_certs=ssl_ca_certs,
             ca_data=ssl_ca_data,
             check_hostname=ssl_check_hostname,
+            min_version=ssl_min_version,
         )
         super().__init__(**kwargs)
 
@@ -864,6 +866,10 @@ class SSLConnection(Connection):
     def check_hostname(self):
         return self.ssl_context.check_hostname
 
+    @property
+    def min_version(self):
+        return self.ssl_context.min_version
+
 
 class RedisSSLContext:
     __slots__ = (
@@ -874,6 +880,7 @@ class RedisSSLContext:
         "ca_data",
         "context",
         "check_hostname",
+        "min_version",
     )
 
     def __init__(
@@ -884,6 +891,7 @@ class RedisSSLContext:
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
         check_hostname: bool = False,
+        min_version: Optional[ssl.TLSVersion] = None,
     ):
         self.keyfile = keyfile
         self.certfile = certfile
@@ -903,6 +911,7 @@ class RedisSSLContext:
         self.ca_certs = ca_certs
         self.ca_data = ca_data
         self.check_hostname = check_hostname
+        self.min_version = min_version
         self.context: Optional[ssl.SSLContext] = None
 
     def get(self) -> ssl.SSLContext:
@@ -914,6 +923,8 @@ class RedisSSLContext:
                 context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
             if self.ca_certs or self.ca_data:
                 context.load_verify_locations(cafile=self.ca_certs, cadata=self.ca_data)
+            if self.min_version is not None:
+                context.minimum_version = self.min_version
             self.context = context
         return self.context
 
