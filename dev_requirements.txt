@@ -1,5 +1,4 @@
 click==8.0.4
-black==22.3.0
 ruff==0.2.1
 flynt~=0.69.0
 mock==4.0.3

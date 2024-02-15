@@ -826,9 +826,7 @@ _RedisCallbacksRESP3 = {
     else bool_ok(r),
     "COMMAND": parse_command_resp3,
     "CONFIG GET": lambda r: {
-        str_if_bytes(key)
-        if key is not None
-        else None: str_if_bytes(value)
+        str_if_bytes(key) if key is not None else None: str_if_bytes(value)
         if value is not None
         else None
         for key, value in r.items()

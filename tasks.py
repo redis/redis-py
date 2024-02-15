@@ -28,7 +28,7 @@ def build_docs(c):
 def linters(c):
     """Run code linters"""
     run("ruff tests redis")
-    run("black --target-version py37 --check --diff tests redis")
+    run("ruff format --check --diff tests redis")
     run("isort --check-only --diff tests redis")
     run("vulture redis whitelist.py --min-confidence 80")
     run("flynt --fail-on-change --dry-run tests redis")
