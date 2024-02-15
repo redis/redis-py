@@ -6,7 +6,6 @@ from redis.auth.token import JWToken, SimpleToken
 
 
 class TestToken:
-
     def test_simple_token(self):
         token = SimpleToken(
             "value",

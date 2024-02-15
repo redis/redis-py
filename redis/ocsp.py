@@ -57,7 +57,7 @@ def _check_certificate(issuer_cert, ocsp_bytes, validate=True):
     if ocsp_response.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL:
         if ocsp_response.certificate_status != ocsp.OCSPCertStatus.GOOD:
             raise ConnectionError(
-                f'Received an {str(ocsp_response.certificate_status).split(".")[1]} '
+                f"Received an {str(ocsp_response.certificate_status).split('.')[1]} "
                 "ocsp certificate status"
             )
     else:

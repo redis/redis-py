@@ -1,5 +1,4 @@
 build
-black==24.3.0
 click==8.0.4
 invoke==2.2.0
 mock
