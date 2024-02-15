@@ -3173,8 +3173,9 @@ class TestRedisCommands:
     def test_hmset(self, r):
         redis_class = type(r).__name__
         warning_message = (
-            r"^{0}\.hmset\(\) is deprecated\. "
-            r"Use {0}\.hset\(\) instead\.$".format(redis_class)
+            r"^{0}\.hmset\(\) is deprecated\. " r"Use {0}\.hset\(\) instead\.$".format(
+                redis_class
+            )
         )
         h = {b"a": b"1", b"b": b"2", b"c": b"3"}
         with pytest.warns(DeprecationWarning, match=warning_message):
