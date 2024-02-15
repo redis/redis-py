@@ -273,7 +273,7 @@ class Sentinel(SentinelCommands):
             )
         return (
             f"<{type(self).__module__}.{type(self).__name__}"
-            f'(sentinels=[{",".join(sentinel_addresses)}])>'
+            f"(sentinels=[{','.join(sentinel_addresses)}])>"
         )
 
     def check_master_state(self, state, service_name):

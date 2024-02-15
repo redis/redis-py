@@ -78,7 +78,6 @@ class SimpleToken(TokenInterface):
 
 
 class JWToken(TokenInterface):
-
     REQUIRED_FIELDS = {"exp"}
 
     def __init__(self, token: str):

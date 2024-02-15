@@ -1154,9 +1154,7 @@ class NodesManager:
             return self.nodes_cache.get(node_name)
         else:
             raise DataError(
-                "get_node requires one of the following: "
-                "1. node name "
-                "2. host and port"
+                "get_node requires one of the following: 1. node name 2. host and port"
             )
 
     def set_nodes(
@@ -1338,7 +1336,7 @@ class NodesManager:
                             if len(disagreements) > 5:
                                 raise RedisClusterException(
                                     f"startup_nodes could not agree on a valid "
-                                    f'slots cache: {", ".join(disagreements)}'
+                                    f"slots cache: {', '.join(disagreements)}"
                                 )
 
             # Validate if all slots are covered or if we should try next startup node
