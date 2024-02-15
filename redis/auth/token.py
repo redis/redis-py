@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 
 import jwt
+
 from redis.auth.err import InvalidTokenSchemaErr
 
 
