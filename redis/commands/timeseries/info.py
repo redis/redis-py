@@ -78,7 +78,7 @@ class TSInfo:
             self.chunk_size = response["chunkSize"]
         if "duplicatePolicy" in response:
             self.duplicate_policy = response["duplicatePolicy"]
-            if type(self.duplicate_policy) == bytes:
+            if type(self.duplicate_policy) == bytes:  # noqa: E721
                 self.duplicate_policy = self.duplicate_policy.decode()
 
     def get(self, item):
