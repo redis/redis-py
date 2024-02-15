@@ -27,7 +27,7 @@ def build_docs(c):
 @task
 def linters(c):
     """Run code linters"""
-    run("flake8 tests redis")
+    run("ruff tests redis")
     run("black --target-version py37 --check --diff tests redis")
     run("isort --check-only --diff tests redis")
     run("vulture redis whitelist.py --min-confidence 80")

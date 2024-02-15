@@ -1,0 +1,37 @@
+line-length = 88
+exclude = [
+    "*.egg-info",
+    "*.pyc",
+    ".git",
+    ".venv*",
+    ".venv*",
+    "build",
+    "dist",
+    "docker",
+    "docs/*",
+    "tasks.py",
+    "venv*",
+    "whitelist.py",
+]
+[lint]
+ignore = [
+    "E501",
+    "E741",
+    "F405",
+    "N801",
+    "N802",
+    "N803",
+    "N806",
+    "N815",
+    "N818",
+]
+extend-select = [
+    "E",
+    "F",
+    "N",
+    "W",
+    "I",
+]
+[lint.per-file-ignores]
+"redis/commands/search/indexDefinition.py" = ["N999"]
+"tests/*" = ["I"]
