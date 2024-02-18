@@ -105,15 +105,16 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     """
 
     @classmethod
-    def from_url(cls, url: str, **kwargs) -> "Redis":
+    def from_url(cls, url: str, **kwargs) -> Union["Redis", "RedisCluster"]:
         """
-        Return a Redis client object configured from the given URL
+        Return a Redis or RedisCluster client object configured from the given URL
 
         For example::
 
             redis://[[username]:[password]]@localhost:6379/0
             rediss://[[username]:[password]]@localhost:6379/0
             unix://[username@]/path/to/socket.sock?db=0[&password=password]
+            rediscluster://[[username]:[password]]@localhost:6379/0
 
         Three URL schemes are supported:
 
@@ -146,6 +147,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         arguments always win.
 
         """
+        if url.startswith("rediscluster"):
+            from .cluster import RedisCluster
+            return RedisCluster.from_url(url, **kwargs)
         single_connection_client = kwargs.pop("single_connection_client", False)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
         client = cls(
