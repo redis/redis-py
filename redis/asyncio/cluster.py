@@ -2,6 +2,7 @@ import asyncio
 import collections
 import random
 import socket
+import ssl
 import warnings
 from typing import (
     Any,
@@ -18,6 +19,12 @@ from typing import (
     Union,
 )
 
+from redis._cache import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_EVICTION_POLICY,
+    DEFAULT_WHITELIST,
+    AbstractCache,
+)
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -265,8 +272,16 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_keyfile: Optional[str] = None,
+        ssl_min_version: Optional[ssl.TLSVersion] = None,
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        cache_enabled: bool = False,
+        client_cache: Optional[AbstractCache] = None,
+        cache_max_size: int = 100,
+        cache_ttl: int = 0,
+        cache_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
+        cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -310,6 +325,14 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_timeout": socket_timeout,
             "retry": retry,
             "protocol": protocol,
+            # Client cache related kwargs
+            "cache_enabled": cache_enabled,
+            "client_cache": client_cache,
+            "cache_max_size": cache_max_size,
+            "cache_ttl": cache_ttl,
+            "cache_policy": cache_policy,
+            "cache_blacklist": cache_blacklist,
+            "cache_whitelist": cache_whitelist,
         }
 
         if ssl:
@@ -323,6 +346,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     "ssl_certfile": ssl_certfile,
                     "ssl_check_hostname": ssl_check_hostname,
                     "ssl_keyfile": ssl_keyfile,
+                    "ssl_min_version": ssl_min_version,
                 }
             )
 
@@ -682,7 +706,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         :raises RedisClusterException: if target_nodes is not provided & the command
             can't be mapped to a slot
         """
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
         command = args[0]
         target_nodes = []
         target_nodes_specified = False
@@ -1039,16 +1062,24 @@ class ClusterNode:
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
+        keys = kwargs.pop("keys", None)
 
-        # Execute command
-        await connection.send_packed_command(connection.pack_command(*args), False)
-
-        # Read response
-        try:
-            return await self.parse_response(connection, args[0], **kwargs)
-        finally:
-            # Release connection
+        response_from_cache = await connection._get_from_local_cache(args)
+        if response_from_cache is not None:
             self._free.append(connection)
+            return response_from_cache
+        else:
+            # Execute command
+            await connection.send_packed_command(connection.pack_command(*args), False)
+
+            # Read response
+            try:
+                response = await self.parse_response(connection, args[0], **kwargs)
+                connection._add_to_local_cache(args, response, keys)
+                return response
+            finally:
+                # Release connection
+                self._free.append(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
@@ -1429,7 +1460,8 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         self._command_stack = []
 
     def __bool__(self) -> bool:
-        return bool(self._command_stack)
+        "Pipeline instances should  always evaluate to True on Python 3+"
+        return True
 
     def __len__(self) -> int:
         return len(self._command_stack)

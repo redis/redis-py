@@ -64,6 +64,11 @@ def parse_list_to_dict(response):
     for i in range(0, len(response), 2):
         if isinstance(response[i], list):
             res["Child iterators"].append(parse_list_to_dict(response[i]))
+            try:
+                if isinstance(response[i + 1], list):
+                    res["Child iterators"].append(parse_list_to_dict(response[i + 1]))
+            except IndexError:
+                pass
         elif isinstance(response[i + 1], list):
             res["Child iterators"] = [parse_list_to_dict(response[i + 1])]
         else:

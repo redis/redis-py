@@ -1,5 +1,7 @@
+import copy
 import random
 import time
+from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
 from enum import Enum
 from typing import List
@@ -159,7 +161,38 @@ class EvictionPolicy(Enum):
     RANDOM = "random"
 
 
-class _LocalChace:
+class AbstractCache(ABC):
+    """
+    An abstract base class for client caching implementations.
+    If you want to implement your own cache you must support these methods.
+    """
+
+    @abstractmethod
+    def set(self, command: str, response: ResponseT, keys_in_command: List[KeyT]):
+        pass
+
+    @abstractmethod
+    def get(self, command: str) -> ResponseT:
+        pass
+
+    @abstractmethod
+    def delete_command(self, command: str):
+        pass
+
+    @abstractmethod
+    def delete_many(self, commands):
+        pass
+
+    @abstractmethod
+    def flush(self):
+        pass
+
+    @abstractmethod
+    def invalidate_key(self, key: KeyT):
+        pass
+
+
+class _LocalCache(AbstractCache):
     """
     A caching mechanism for storing redis commands and their responses.
 
@@ -178,7 +211,11 @@ class _LocalChace:
     """
 
     def __init__(
-        self, max_size: int, ttl: int, eviction_policy: EvictionPolicy, **kwargs
+        self,
+        max_size: int = 10000,
+        ttl: int = 0,
+        eviction_policy: EvictionPolicy = DEFAULT_EVICTION_POLICY,
+        **kwargs,
     ):
         self.max_size = max_size
         self.ttl = ttl
@@ -219,11 +256,12 @@ class _LocalChace:
         """
         if command in self.cache:
             if self._is_expired(command):
-                self.delete(command)
+                self.delete_command(command)
+                return
             self._update_access(command)
-            return self.cache[command]["response"]
+            return copy.deepcopy(self.cache[command]["response"])
 
-    def delete(self, command: str):
+    def delete_command(self, command: str):
         """
         Delete a redis command and its metadata from the cache.
 
@@ -266,28 +304,28 @@ class _LocalChace:
         Args:
             command (str): The redis command.
         """
-        if self.eviction_policy == EvictionPolicy.LRU:
+        if self.eviction_policy == EvictionPolicy.LRU.value:
             self.cache.move_to_end(command)
-        elif self.eviction_policy == EvictionPolicy.LFU:
+        elif self.eviction_policy == EvictionPolicy.LFU.value:
             self.cache[command]["access_count"] = (
                 self.cache.get(command, {}).get("access_count", 0) + 1
             )
             self.cache.move_to_end(command)
-        elif self.eviction_policy == EvictionPolicy.RANDOM:
+        elif self.eviction_policy == EvictionPolicy.RANDOM.value:
             pass  # Random eviction doesn't require updates
 
     def _evict(self):
         """Evict a redis command from the cache based on the eviction policy."""
         if self._is_expired(self.commands_ttl_list[0]):
-            self.delete(self.commands_ttl_list[0])
-        elif self.eviction_policy == EvictionPolicy.LRU:
+            self.delete_command(self.commands_ttl_list[0])
+        elif self.eviction_policy == EvictionPolicy.LRU.value:
             self.cache.popitem(last=False)
-        elif self.eviction_policy == EvictionPolicy.LFU:
+        elif self.eviction_policy == EvictionPolicy.LFU.value:
             min_access_command = min(
                 self.cache, key=lambda k: self.cache[k].get("access_count", 0)
             )
             self.cache.pop(min_access_command)
-        elif self.eviction_policy == EvictionPolicy.RANDOM:
+        elif self.eviction_policy == EvictionPolicy.RANDOM.value:
             random_command = random.choice(list(self.cache.keys()))
             self.cache.pop(random_command)
 
@@ -313,7 +351,7 @@ class _LocalChace:
         for key in keys:
             self.key_commands_map[key].remove(command)
 
-    def invalidate(self, key: KeyT):
+    def invalidate_key(self, key: KeyT):
         """
         Invalidate (delete) all redis commands associated with a specific key.
 
@@ -322,5 +360,6 @@ class _LocalChace:
         """
         if key not in self.key_commands_map:
             return
-        for command in self.key_commands_map[key]:
-            self.delete(command)
+        commands = list(self.key_commands_map[key])
+        for command in commands:
+            self.delete_command(command)

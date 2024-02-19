@@ -167,6 +167,13 @@ REDIS_ALLOWED_KEYS = (
     "ssl_password",
     "unix_socket_path",
     "username",
+    "cache_enabled",
+    "client_cache",
+    "cache_max_size",
+    "cache_ttl",
+    "cache_policy",
+    "cache_blacklist",
+    "cache_whitelist",
 )
 KWARGS_DISABLED_KEYS = ("host", "port")
 
@@ -1060,7 +1067,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             list<ClusterNode>
             dict<Any, ClusterNode>
         """
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
         target_nodes_specified = False
         is_default_node = False
         target_nodes = None
@@ -1119,6 +1125,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """
         Send a command to a node in the cluster
         """
+        keys = kwargs.pop("keys", None)
         command = args[0]
         redis_node = None
         connection = None
@@ -1147,14 +1154,18 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
                     asking = False
-
-                connection.send_command(*args)
-                response = redis_node.parse_response(connection, command, **kwargs)
-                if command in self.cluster_response_callbacks:
-                    response = self.cluster_response_callbacks[command](
-                        response, **kwargs
-                    )
-                return response
+                response_from_cache = connection._get_from_local_cache(args)
+                if response_from_cache is not None:
+                    return response_from_cache
+                else:
+                    connection.send_command(*args)
+                    response = redis_node.parse_response(connection, command, **kwargs)
+                    if command in self.cluster_response_callbacks:
+                        response = self.cluster_response_callbacks[command](
+                            response, **kwargs
+                        )
+                    connection._add_to_local_cache(args, response, keys)
+                    return response
             except AuthenticationError:
                 raise
             except (ConnectionError, TimeoutError) as e:
@@ -1776,9 +1787,9 @@ class ClusterPubSub(PubSub):
             )
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
-            self.connection._register_connect_callback(self.on_connect)
+            self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
-                self.connection._parser.set_push_handler(self.push_handler_func)
+                self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
         connection = self.connection
         self._execute(connection, connection.send_command, *args)
 
@@ -2132,6 +2143,8 @@ class ClusterPipeline(RedisCluster):
                     try:
                         connection = get_connection(redis_node, c.args)
                     except ConnectionError:
+                        for n in nodes.values():
+                            n.connection_pool.release(n.connection)
                         # Connection retries are being handled in the node's
                         # Retry object. Reinitialize the node -> slot table.
                         self.nodes_manager.initialize()
@@ -2155,32 +2168,34 @@ class ClusterPipeline(RedisCluster):
         # we dont' multiplex on the sockets as they come available,
         # but that shouldn't make too much difference.
         node_commands = nodes.values()
-        for n in node_commands:
-            n.write()
+        try:
+            node_commands = nodes.values()
+            for n in node_commands:
+                n.write()
 
-        for n in node_commands:
-            n.read()
-
-        # release all of the redis connections we allocated earlier
-        # back into the connection pool.
-        # we used to do this step as part of a try/finally block,
-        # but it is really dangerous to
-        # release connections back into the pool if for some
-        # reason the socket has data still left in it
-        # from a previous operation. The write and
-        # read operations already have try/catch around them for
-        # all known types of errors including connection
-        # and socket level errors.
-        # So if we hit an exception, something really bad
-        # happened and putting any oF
-        # these connections back into the pool is a very bad idea.
-        # the socket might have unread buffer still sitting in it,
-        # and then the next time we read from it we pass the
-        # buffered result back from a previous command and
-        # every single request after to that connection will always get
-        # a mismatched result.
-        for n in nodes.values():
-            n.connection_pool.release(n.connection)
+            for n in node_commands:
+                n.read()
+        finally:
+            # release all of the redis connections we allocated earlier
+            # back into the connection pool.
+            # we used to do this step as part of a try/finally block,
+            # but it is really dangerous to
+            # release connections back into the pool if for some
+            # reason the socket has data still left in it
+            # from a previous operation. The write and
+            # read operations already have try/catch around them for
+            # all known types of errors including connection
+            # and socket level errors.
+            # So if we hit an exception, something really bad
+            # happened and putting any oF
+            # these connections back into the pool is a very bad idea.
+            # the socket might have unread buffer still sitting in it,
+            # and then the next time we read from it we pass the
+            # buffered result back from a previous command and
+            # every single request after to that connection will always get
+            # a mismatched result.
+            for n in nodes.values():
+                n.connection_pool.release(n.connection)
 
         # if the response isn't an exception it is a
         # valid response from the node

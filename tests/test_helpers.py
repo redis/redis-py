@@ -41,6 +41,7 @@ def test_parse_to_dict():
                 "Child iterators",
                 ["Type", "bar", "Time", "0.0729", "Counter", 3],
                 ["Type", "barbar", "Time", "0.058", "Counter", 3],
+                ["Type", "barbarbar", "Time", "0.0234", "Counter", 3],
             ],
         ],
     ]
@@ -49,6 +50,7 @@ def test_parse_to_dict():
             "Child iterators": [
                 {"Counter": 3.0, "Time": 0.0729, "Type": "bar"},
                 {"Counter": 3.0, "Time": 0.058, "Type": "barbar"},
+                {"Counter": 3.0, "Time": 0.0234, "Type": "barbarbar"},
             ],
             "Counter": 3.0,
             "Time": 0.2089,

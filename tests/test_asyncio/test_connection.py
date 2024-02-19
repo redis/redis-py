@@ -68,8 +68,9 @@ async def test_single_connection():
             in_use = False
             return "foo"
 
-    mock_conn = mock.MagicMock()
+    mock_conn = mock.AsyncMock(spec=Connection)
     mock_conn.retry = Retry_()
+    mock_conn._get_from_local_cache.return_value = None
 
     async def get_conn(_):
         # Validate only one client is created in single-client mode when

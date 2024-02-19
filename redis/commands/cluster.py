@@ -7,13 +7,13 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Literal,
     Mapping,
     NoReturn,
     Optional,
     Union,
 )
 
-from redis.compat import Literal
 from redis.crc import key_slot
 from redis.exceptions import RedisClusterException, RedisError
 from redis.typing import (
@@ -44,7 +44,7 @@ from .core import (
     ScriptCommands,
 )
 from .helpers import list_or_args
-from .redismodules import RedisModuleCommands
+from .redismodules import AsyncRedisModuleCommands, RedisModuleCommands
 
 if TYPE_CHECKING:
     from redis.asyncio.cluster import TargetNodesT
@@ -907,6 +907,7 @@ class AsyncRedisClusterCommands(
     AsyncFunctionCommands,
     AsyncGearsCommands,
     AsyncModuleCommands,
+    AsyncRedisModuleCommands,
 ):
     """
     A class for all Redis Cluster commands

@@ -242,6 +242,13 @@ class TestLock:
             with self.get_lock(r, "foo", timeout=10, blocking=False):
                 r.set("foo", "a")
 
+    def test_lock_error_gives_correct_lock_name(self, r):
+        r.set("foo", "bar")
+        with pytest.raises(LockError) as excinfo:
+            with self.get_lock(r, "foo", blocking_timeout=0.1):
+                pass
+            assert excinfo.value.lock_name == "foo"
+
 
 class TestLockClassSelection:
     def test_lock_class_argument(self, r):
