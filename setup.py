@@ -36,7 +36,6 @@ setup(
     author_email="oss@redis.com",
     python_requires=">=3.8",
     install_requires=[
-        'typing-extensions; python_version<"3.8"',
         'async-timeout>=4.0.3',
     ],
     classifiers=[
