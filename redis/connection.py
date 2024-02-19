@@ -417,7 +417,7 @@ class AbstractConnection:
         if os.getpid() == self.pid:
             try:
                 conn_sock.shutdown(socket.SHUT_RDWR)
-            except OSError:
+            except (OSError, TypeError):
                 pass
 
         try:
