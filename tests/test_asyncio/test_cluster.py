@@ -127,7 +127,7 @@ async def slowlog(r: RedisCluster) -> None:
     await r.config_set("slowlog-max-len", old_max_length_value)
 
 
-async def get_mocked_redis_client(cluster_raise_error = False, *args, **kwargs) -> RedisCluster:
+async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
     """
     Return a stable RedisCluster object that have deterministic
     nodes and slots setup to remove the problem of different IP addresses
@@ -140,11 +140,8 @@ async def get_mocked_redis_client(cluster_raise_error = False, *args, **kwargs) 
 
         async def execute_command(*_args, **_kwargs):
             if _args[0] == "CLUSTER SLOTS":
-                if cluster_raise_error:
-                    raise ResponseError()
-                else:
-                    mock_cluster_slots = cluster_slots
-                    return mock_cluster_slots
+                mock_cluster_slots = cluster_slots
+                return mock_cluster_slots
             elif _args[0] == "COMMAND":
                 return {"get": [], "set": []}
             elif _args[0] == "INFO":
@@ -2461,7 +2458,6 @@ class TestNodesManager:
         """
         with pytest.raises(RedisClusterException) as e:
             rc = await get_mocked_redis_client(
-                
                 host=default_host, port=default_port, cluster_enabled=False
             )
             await rc.aclose()
