@@ -26,13 +26,15 @@ class TestSSL:
         sslclient = redis.from_url(ssl_url)
         with pytest.raises(ConnectionError) as e:
             sslclient.ping()
-            assert "SSL: CERTIFICATE_VERIFY_FAILED" in str(e)
+        assert "SSL: CERTIFICATE_VERIFY_FAILED" in str(e)
+        sslclient.close()
 
     def test_ssl_connection(self, request):
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
         r = redis.Redis(host=p[0], port=p[1], ssl=True, ssl_cert_reqs="none")
         assert r.ping()
+        r.close()
 
     def test_ssl_connection_without_ssl(self, request):
         ssl_url = request.config.option.redis_ssl_url
@@ -41,7 +43,8 @@ class TestSSL:
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
-            assert "Connection closed by server" in str(e)
+        assert "Connection closed by server" in str(e)
+        r.close()
 
     def test_validating_self_signed_certificate(self, request):
         ssl_url = request.config.option.redis_ssl_url
@@ -56,6 +59,7 @@ class TestSSL:
             ssl_ca_certs=self.SERVER_CERT,
         )
         assert r.ping()
+        r.close()
 
     def test_validating_self_signed_string_certificate(self, request):
         with open(self.SERVER_CERT) as f:
@@ -72,6 +76,7 @@ class TestSSL:
             ssl_ca_data=cert_data,
         )
         assert r.ping()
+        r.close()
 
     def _create_oscp_conn(self, request):
         ssl_url = request.config.option.redis_ssl_url
@@ -92,22 +97,25 @@ class TestSSL:
     def test_ssl_ocsp_called(self, request):
         r = self._create_oscp_conn(request)
         with pytest.raises(RedisError) as e:
-            assert r.ping()
-            assert "cryptography not installed" in str(e)
+            r.ping()
+        assert "cryptography is not installed" in str(e)
+        r.close()
 
     @skip_if_nocryptography()
     def test_ssl_ocsp_called_withcrypto(self, request):
         r = self._create_oscp_conn(request)
         with pytest.raises(ConnectionError) as e:
             assert r.ping()
-            assert "No AIA information present in ssl certificate" in str(e)
+        assert "No AIA information present in ssl certificate" in str(e)
+        r.close()
 
         # rediss://, url based
         ssl_url = request.config.option.redis_ssl_url
         sslclient = redis.from_url(ssl_url)
         with pytest.raises(ConnectionError) as e:
             sslclient.ping()
-            assert "No AIA information present in ssl certificate" in str(e)
+        assert "No AIA information present in ssl certificate" in str(e)
+        sslclient.close()
 
     @skip_if_nocryptography()
     def test_valid_ocsp_cert_http(self):
@@ -132,7 +140,7 @@ class TestSSL:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
                 with pytest.raises(ConnectionError) as e:
                     assert ocsp.is_valid()
-                    assert "REVOKED" in str(e)
+                assert "REVOKED" in str(e)
 
     @skip_if_nocryptography()
     def test_unauthorized_ocsp(self):
@@ -157,7 +165,7 @@ class TestSSL:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
                 with pytest.raises(ConnectionError) as e:
                     assert ocsp.is_valid()
-                    assert "from the" in str(e)
+                assert "from the" in str(e)
 
     @skip_if_nocryptography()
     def test_unauthorized_then_direct(self):
@@ -193,6 +201,7 @@ class TestSSL:
 
         with pytest.raises(RedisError):
             r.ping()
+        r.close()
 
         ctx = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
         ctx.use_certificate_file(self.SERVER_CERT)
@@ -213,7 +222,8 @@ class TestSSL:
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
-            assert "no ocsp response present" in str(e)
+        assert "no ocsp response present" in str(e)
+        r.close()
 
         r = redis.Redis(
             host=p[0],
@@ -228,4 +238,5 @@ class TestSSL:
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
-            assert "no ocsp response present" in str(e)
+        assert "no ocsp response present" in str(e)
+        r.close()
