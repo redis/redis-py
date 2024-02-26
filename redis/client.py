@@ -25,7 +25,12 @@ from redis.commands import (
     SentinelCommands,
     list_or_args,
 )
-from redis.connection import ConnectionPool, SSLConnection, UnixDomainSocketConnection
+from redis.connection import (
+    AbstractConnection,
+    ConnectionPool,
+    SSLConnection,
+    UnixDomainSocketConnection,
+)
 from redis.credentials import CredentialProvider
 from redis.exceptions import (
     ConnectionError,
@@ -839,11 +844,15 @@ class PubSub:
     def _disconnect_raise_connect(self, conn, error) -> None:
         """
         Close the connection and raise an exception
-        if retry_on_timeout is not set or the error
-        is not a TimeoutError. Otherwise, try to reconnect
+        if retry_on_error is not set or the error is not one
+        of the specified error types. Otherwise, try to
+        reconnect
         """
         conn.disconnect()
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             raise error
         conn.connect()
 
@@ -1320,8 +1329,8 @@ class Pipeline(Redis):
         """
         Close the connection, reset watching state and
         raise an exception if we were watching,
-        retry_on_timeout is not set,
-        or the error is not a TimeoutError
+        if retry_on_error is not set or the error is not one
+        of the specified error types.
         """
         conn.disconnect()
         # if we were already watching a variable, the watch is no longer
@@ -1332,9 +1341,12 @@ class Pipeline(Redis):
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
-        # if retry_on_timeout is not set, or the error is not
-        # a TimeoutError, raise it
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        # if retry_on_error is not set or the error is not one
+        # of the specified error types, raise it
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             self.reset()
             raise
 
@@ -1492,11 +1504,15 @@ class Pipeline(Redis):
                 if not exist:
                     s.sha = immediate("SCRIPT LOAD", s.script)
 
-    def _disconnect_raise_reset(self, conn: Redis, error: Exception) -> None:
+    def _disconnect_raise_reset(
+        self,
+        conn: AbstractConnection,
+        error: Exception,
+    ) -> None:
         """
         Close the connection, raise an exception if we were watching,
-        and raise an exception if TimeoutError is not part of retry_on_error,
-        or the error is not a TimeoutError
+        and raise an exception if retry_on_error is not set or the
+        error is not one of the specified error types.
         """
         conn.disconnect()
         # if we were watching a variable, the watch is no longer valid
@@ -1506,11 +1522,13 @@ class Pipeline(Redis):
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
-        # if TimeoutError is not part of retry_on_error, or the error
-        # is not a TimeoutError, raise it
-        if not (
-            TimeoutError in conn.retry_on_error and isinstance(error, TimeoutError)
+        # if retry_on_error is not set or the error is not one
+        # of the specified error types, raise it
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
         ):
+
             self.reset()
             raise error
 
