@@ -1,6 +1,5 @@
 import copy
 import os
-import select
 import socket
 import ssl
 import sys
@@ -609,11 +608,6 @@ class AbstractConnection:
             output.append(SYM_EMPTY.join(pieces))
         return output
 
-    def _socket_is_empty(self):
-        """Check if the socket is empty"""
-        r, _, _ = select.select([self._sock], [], [], 0)
-        return not bool(r)
-
     def _cache_invalidation_process(
         self, data: List[Union[str, Optional[List[str]]]]
     ) -> None:
@@ -639,7 +633,7 @@ class AbstractConnection:
             or command[0] not in self.cache_whitelist
         ):
             return None
-        while not self._socket_is_empty():
+        while self.can_read():
             self.read_response(push_request=True)
         return self.client_cache.get(command)
 
@@ -1187,12 +1181,15 @@ class ConnectionPool:
         try:
             # ensure this connection is connected to Redis
             connection.connect()
-            # connections that the pool provides should be ready to send
-            # a command. if not, the connection was either returned to the
+            # if client caching is not enabled connections that the pool
+            # provides should be ready to send a command.
+            # if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
+            # (if caching enabled the connection will not always be ready
+            # to send a command because it may contain invalidation messages)
             try:
-                if connection.can_read():
+                if connection.can_read() and connection.client_cache is None:
                     raise ConnectionError("Connection has data")
             except (ConnectionError, OSError):
                 connection.disconnect()
