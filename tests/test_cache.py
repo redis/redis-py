@@ -146,6 +146,7 @@ class TestLocalCache:
         check = cache.get(("LRANGE", "mylist", 0, -1))
         assert check == [b"baz", b"bar", b"foo"]
 
+    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize(
         "r",
         [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
