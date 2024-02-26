@@ -5,6 +5,7 @@ import inspect
 import socket
 import ssl
 import sys
+import warnings
 import weakref
 from abc import abstractmethod
 from itertools import chain
@@ -204,6 +205,24 @@ class AbstractConnection:
                 raise ConnectionError("protocol must be either 2 or 3")
             self.protocol = protocol
 
+    def __del__(self, _warnings: Any = warnings):
+        # For some reason, the individual streams don't get properly garbage
+        # collected and therefore produce no resource warnings.  We add one
+        # here, in the same style as those from the stdlib.
+        if getattr(self, "_writer", None):
+            _warnings.warn(
+                f"unclosed Connection {self!r}", ResourceWarning, source=self
+            )
+            self._close()
+
+    def _close(self):
+        """
+        Internal method to silently close the connection without waiting
+        """
+        if self._writer:
+            self._writer.close()
+            self._writer = self._reader = None
+
     def __repr__(self):
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
         return f"{self.__class__.__name__}<{repr_args}>"
@@ -216,12 +235,24 @@ class AbstractConnection:
     def is_connected(self):
         return self._reader is not None and self._writer is not None
 
-    def _register_connect_callback(self, callback):
+    def register_connect_callback(self, callback):
+        """
+        Register a callback to be called when the connection is established either
+        initially or reconnected.  This allows listeners to issue commands that
+        are ephemeral to the connection, for example pub/sub subscription or
+        key tracking.  The callback must be a _method_ and will be kept as
+        a weak reference.
+        """
         wm = weakref.WeakMethod(callback)
         if wm not in self._connect_callbacks:
             self._connect_callbacks.append(wm)
 
-    def _deregister_connect_callback(self, callback):
+    def deregister_connect_callback(self, callback):
+        """
+        De-register a previously registered callback.  It will no-longer receive
+        notifications on connection events.  Calling this is not required when the
+        listener goes away, since the callbacks are kept as weak methods.
+        """
         try:
             self._connect_callbacks.remove(weakref.WeakMethod(callback))
         except ValueError:
@@ -707,6 +738,7 @@ class SSLConnection(Connection):
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
+        ssl_min_version: Optional[ssl.TLSVersion] = None,
         **kwargs,
     ):
         self.ssl_context: RedisSSLContext = RedisSSLContext(
@@ -716,6 +748,7 @@ class SSLConnection(Connection):
             ca_certs=ssl_ca_certs,
             ca_data=ssl_ca_data,
             check_hostname=ssl_check_hostname,
+            min_version=ssl_min_version,
         )
         super().__init__(**kwargs)
 
@@ -748,6 +781,10 @@ class SSLConnection(Connection):
     def check_hostname(self):
         return self.ssl_context.check_hostname
 
+    @property
+    def min_version(self):
+        return self.ssl_context.min_version
+
 
 class RedisSSLContext:
     __slots__ = (
@@ -758,6 +795,7 @@ class RedisSSLContext:
         "ca_data",
         "context",
         "check_hostname",
+        "min_version",
     )
 
     def __init__(
@@ -768,6 +806,7 @@ class RedisSSLContext:
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
         check_hostname: bool = False,
+        min_version: Optional[ssl.TLSVersion] = None,
     ):
         self.keyfile = keyfile
         self.certfile = certfile
@@ -787,6 +826,7 @@ class RedisSSLContext:
         self.ca_certs = ca_certs
         self.ca_data = ca_data
         self.check_hostname = check_hostname
+        self.min_version = min_version
         self.context: Optional[ssl.SSLContext] = None
 
     def get(self) -> ssl.SSLContext:
@@ -798,6 +838,8 @@ class RedisSSLContext:
                 context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
             if self.ca_certs or self.ca_data:
                 context.load_verify_locations(cafile=self.ca_certs, cadata=self.ca_data)
+            if self.min_version is not None:
+                context.minimum_version = self.min_version
             self.context = context
         return self.context
 
@@ -861,6 +903,7 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "max_connections": int,
         "health_check_interval": int,
         "ssl_check_hostname": to_bool,
+        "timeout": float,
     }
 )
 
@@ -1017,7 +1060,7 @@ class ConnectionPool:
 
     def reset(self):
         self._available_connections = []
-        self._in_use_connections = set()
+        self._in_use_connections = weakref.WeakSet()
 
     def can_get_connection(self) -> bool:
         """Return True if a connection can be retrieved from the pool."""
@@ -1027,7 +1070,18 @@ class ConnectionPool:
         )
 
     async def get_connection(self, command_name, *keys, **options):
-        """Get a connection from the pool"""
+        """Get a connected connection from the pool"""
+        connection = self.get_available_connection()
+        try:
+            await self.ensure_connection(connection)
+        except BaseException:
+            await self.release(connection)
+            raise
+
+        return connection
+
+    def get_available_connection(self):
+        """Get a connection from the pool, without making sure it is connected"""
         try:
             connection = self._available_connections.pop()
         except IndexError:
@@ -1035,13 +1089,6 @@ class ConnectionPool:
                 raise ConnectionError("Too many connections") from None
             connection = self.make_connection()
         self._in_use_connections.add(connection)
-
-        try:
-            await self.ensure_connection(connection)
-        except BaseException:
-            await self.release(connection)
-            raise
-
         return connection
 
     def get_encoder(self):
@@ -1129,7 +1176,7 @@ class BlockingConnectionPool(ConnectionPool):
     connection from the pool when all of connections are in use, rather than
     raising a :py:class:`~redis.ConnectionError` (as the default
     :py:class:`~redis.asyncio.ConnectionPool` implementation does), it
-    makes blocks the current `Task` for a specified number of seconds until
+    blocks the current `Task` for a specified number of seconds until
     a connection becomes available.
 
     Use ``max_connections`` to increase / decrease the pool size::
@@ -1166,12 +1213,20 @@ class BlockingConnectionPool(ConnectionPool):
     async def get_connection(self, command_name, *keys, **options):
         """Gets a connection from the pool, blocking until one is available"""
         try:
-            async with async_timeout(self.timeout):
-                async with self._condition:
+            async with self._condition:
+                async with async_timeout(self.timeout):
                     await self._condition.wait_for(self.can_get_connection)
-                    return await super().get_connection(command_name, *keys, **options)
+                    connection = super().get_available_connection()
         except asyncio.TimeoutError as err:
             raise ConnectionError("No connection available.") from err
+
+        # We now perform the connection check outside of the lock.
+        try:
+            await self.ensure_connection(connection)
+            return connection
+        except BaseException:
+            await self.release(connection)
+            raise
 
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool."""

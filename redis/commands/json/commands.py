@@ -121,7 +121,9 @@ class JSONCommands:
         """  # noqa
         return self.execute_command("JSON.OBJKEYS", name, str(path))
 
-    def objlen(self, name: str, path: Optional[str] = Path.root_path()) -> int:
+    def objlen(
+        self, name: str, path: Optional[str] = Path.root_path()
+    ) -> List[Optional[int]]:
         """Return the length of the dictionary JSON value under ``path`` at key
         ``name``.
 
@@ -173,7 +175,7 @@ class JSONCommands:
 
     def get(
         self, name: str, *args, no_escape: Optional[bool] = False
-    ) -> List[JsonType]:
+    ) -> Optional[List[JsonType]]:
         """
         Get the object stored as a JSON value at key ``name``.
 
@@ -324,7 +326,7 @@ class JSONCommands:
         nx: Optional[bool] = False,
         xx: Optional[bool] = False,
         decode_keys: Optional[bool] = False,
-    ) -> List[Dict[str, bool]]:
+    ) -> Dict[str, bool]:
         """
         Iterate over ``root_folder`` and set each JSON file to a value
         under ``json_path`` with the file name as the key.
@@ -377,7 +379,7 @@ class JSONCommands:
         return self.execute_command("JSON.TOGGLE", name, str(path))
 
     def strappend(
-        self, name: str, value: str, path: Optional[int] = Path.root_path()
+        self, name: str, value: str, path: Optional[str] = Path.root_path()
     ) -> Union[int, List[Optional[int]]]:
         """Append to the string JSON value. If two options are specified after
         the key name, the path is determined to be the first. If a single

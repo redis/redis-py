@@ -85,6 +85,8 @@ async def test_single_connection():
 
     assert init_call_count == 1
     assert command_call_count == 2
+    r.connection = None  # it was a Mock
+    await r.aclose()
 
 
 @skip_if_server_version_lt("4.0.0")
@@ -143,6 +145,7 @@ async def test_connect_retry_on_timeout_error(connect_args):
     conn._connect.side_effect = mock_connect
     await conn.connect()
     assert conn._connect.call_count == 3
+    await conn.disconnect()
 
 
 async def test_connect_without_retry_on_os_error():
@@ -194,6 +197,7 @@ async def test_connection_parse_response_resume(r: redis.Redis):
         pytest.fail("didn't receive a response")
     assert response
     assert i > 0
+    await conn.disconnect()
 
 
 @pytest.mark.onlynoncluster
@@ -316,7 +320,8 @@ async def test_close_is_aclose(request):
     url: str = request.config.getoption("--redis-url")
     r1 = await Redis.from_url(url)
     with patch.object(r1, "aclose", mock_aclose):
-        await r1.close()
+        with pytest.deprecated_call():
+            await r1.close()
         assert calls == 1
 
     with pytest.deprecated_call():
@@ -436,3 +441,52 @@ async def test_redis_pool_auto_close_arg(request, auto_close):
 
     assert called == 0
     await pool.disconnect()
+
+
+async def test_client_garbage_collection(request):
+    """
+    Test that a Redis client will call _close() on any
+    connection that it holds at time of destruction
+    """
+
+    url: str = request.config.getoption("--redis-url")
+    pool = ConnectionPool.from_url(url)
+
+    # create a client with a connection from the pool
+    client = Redis(connection_pool=pool, single_connection_client=True)
+    await client.initialize()
+    with mock.patch.object(client, "connection") as a:
+        # we cannot, in unittests, or from asyncio, reliably trigger garbage collection
+        # so we must just invoke the handler
+        with pytest.warns(ResourceWarning):
+            client.__del__()
+            assert a._close.called
+
+    await client.aclose()
+    await pool.aclose()
+
+
+async def test_connection_garbage_collection(request):
+    """
+    Test that a Connection object will call close() on the
+    stream that it holds.
+    """
+
+    url: str = request.config.getoption("--redis-url")
+    pool = ConnectionPool.from_url(url)
+
+    # create a client with a connection from the pool
+    client = Redis(connection_pool=pool, single_connection_client=True)
+    await client.initialize()
+    conn = client.connection
+
+    with mock.patch.object(conn, "_reader"):
+        with mock.patch.object(conn, "_writer") as a:
+            # we cannot, in unittests, or from asyncio, reliably trigger
+            # garbage collection so we must just invoke the handler
+            with pytest.warns(ResourceWarning):
+                conn.__del__()
+                assert a.close.called
+
+    await client.aclose()
+    await pool.aclose()
