@@ -1192,12 +1192,18 @@ class ConnectionPool:
     async def ensure_connection(self, connection: AbstractConnection):
         """Ensure that the connection object is connected and valid"""
         await connection.connect()
-        # connections that the pool provides should be ready to send
-        # a command. if not, the connection was either returned to the
+        # if client caching is not enabled connections that the pool
+        # provides should be ready to send a command.
+        # if not, the connection was either returned to the
         # pool before all data has been read or the socket has been
         # closed. either way, reconnect and verify everything is good.
+        # (if caching enabled the connection will not always be ready
+        # to send a command because it may contain invalidation messages)
         try:
-            if await connection.can_read_destructive():
+            if (
+                await connection.can_read_destructive()
+                and connection.client_cache is None
+            ):
                 raise ConnectionError("Connection has data") from None
         except (ConnectionError, OSError):
             await connection.disconnect()
