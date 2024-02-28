@@ -261,7 +261,9 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
                 )
                 for _ in range(int(response))
             ]
-            await self.handle_push_response(response, disable_decoding, push_request)
+            response = await self.handle_push_response(
+                response, disable_decoding, push_request
+            )
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
 
