@@ -117,7 +117,9 @@ class _RESP3Parser(_RESPBase):
                 )
                 for _ in range(int(response))
             ]
-            self.handle_push_response(response, disable_decoding, push_request)
+            response = self.handle_push_response(
+                response, disable_decoding, push_request
+            )
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
 
