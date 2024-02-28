@@ -685,7 +685,7 @@ class AbstractConnection:
 
     def _socket_is_empty(self):
         """Check if the socket is empty"""
-        return not self._reader.at_eof()
+        return len(self._reader._buffer) == 0
 
     def _cache_invalidation_process(
         self, data: List[Union[str, Optional[List[str]]]]
