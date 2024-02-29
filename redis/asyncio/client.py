@@ -629,25 +629,27 @@ class Redis(
         pool = self.connection_pool
         conn = self.connection or await pool.get_connection(command_name, **options)
         response_from_cache = await conn._get_from_local_cache(args)
-        if response_from_cache is not None:
-            return response_from_cache
-        else:
-            if self.single_connection_client:
-                await self._single_conn_lock.acquire()
-            try:
-                response = await conn.retry.call_with_retry(
-                    lambda: self._send_command_parse_response(
-                        conn, command_name, *args, **options
-                    ),
-                    lambda error: self._disconnect_raise(conn, error),
-                )
-                conn._add_to_local_cache(args, response, keys)
-                return response
-            finally:
-                if self.single_connection_client:
-                    self._single_conn_lock.release()
-                if not self.connection:
-                    await pool.release(conn)
+        try:
+            if response_from_cache is not None:
+                return response_from_cache
+            else:
+                try:
+                    if self.single_connection_client:
+                        await self._single_conn_lock.acquire()
+                    response = await conn.retry.call_with_retry(
+                        lambda: self._send_command_parse_response(
+                            conn, command_name, *args, **options
+                        ),
+                        lambda error: self._disconnect_raise(conn, error),
+                    )
+                    conn._add_to_local_cache(args, response, keys)
+                    return response
+                finally:
+                    if self.single_connection_client:
+                        self._single_conn_lock.release()
+        finally:
+            if not self.connection:
+                await pool.release(conn)
 
     async def parse_response(
         self, connection: Connection, command_name: Union[str, bytes], **options
