@@ -563,10 +563,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         pool = self.connection_pool
         conn = self.connection or pool.get_connection(command_name, **options)
         response_from_cache = conn._get_from_local_cache(args)
-        if response_from_cache is not None:
-            return response_from_cache
-        else:
-            try:
+        try:
+            if response_from_cache is not None:
+                return response_from_cache
+            else:
                 response = conn.retry.call_with_retry(
                     lambda: self._send_command_parse_response(
                         conn, command_name, *args, **options
@@ -575,9 +575,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 )
                 conn._add_to_local_cache(args, response, keys)
                 return response
-            finally:
-                if not self.connection:
-                    pool.release(conn)
+        finally:
+            if not self.connection:
+                pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
