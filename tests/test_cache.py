@@ -146,6 +146,49 @@ class TestLocalCache:
         check = cache.get(("LRANGE", "mylist", 0, -1))
         assert check == [b"baz", b"bar", b"foo"]
 
+    @pytest.mark.onlynoncluster
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_csc_not_cause_disconnects(self, r):
+        r, cache = r
+        id1 = r.client_id()
+        r.mset({"a": 1, "b": 1, "c": 1, "d": 1, "e": 1, "f": 1})
+        assert r.mget("a", "b", "c", "d", "e", "f") == ["1", "1", "1", "1", "1", "1"]
+        id2 = r.client_id()
+
+        # client should get value from client cache
+        assert r.mget("a", "b", "c", "d", "e", "f") == ["1", "1", "1", "1", "1", "1"]
+        assert cache.get(("MGET", "a", "b", "c", "d", "e", "f")) == [
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+        ]
+
+        r.mset({"a": 2, "b": 2, "c": 2, "d": 2, "e": 2, "f": 2})
+        id3 = r.client_id()
+        # client should get value from redis server post invalidate messages
+        assert r.mget("a", "b", "c", "d", "e", "f") == ["2", "2", "2", "2", "2", "2"]
+
+        r.mset({"a": 3, "b": 3, "c": 3, "d": 3, "e": 3, "f": 3})
+        # need to check that we get correct value 3 and not 2
+        assert r.mget("a", "b", "c", "d", "e", "f") == ["3", "3", "3", "3", "3", "3"]
+        # client should get value from client cache
+        assert r.mget("a", "b", "c", "d", "e", "f") == ["3", "3", "3", "3", "3", "3"]
+
+        r.mset({"a": 4, "b": 4, "c": 4, "d": 4, "e": 4, "f": 4})
+        # need to check that we get correct value 4 and not 3
+        assert r.mget("a", "b", "c", "d", "e", "f") == ["4", "4", "4", "4", "4", "4"]
+        # client should get value from client cache
+        assert r.mget("a", "b", "c", "d", "e", "f") == ["4", "4", "4", "4", "4", "4"]
+        id4 = r.client_id()
+        assert id1 == id2 == id3 == id4
+
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster

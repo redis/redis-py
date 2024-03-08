@@ -2011,7 +2011,7 @@ class BasicKeyCommands(CommandsProtocol):
         options = {}
         if not args:
             options[EMPTY_RESPONSE] = []
-        options["keys"] = keys
+        options["keys"] = args
         return self.execute_command("MGET", *args, **options)
 
     def mset(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
