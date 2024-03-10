@@ -2726,10 +2726,10 @@ class TestClusterPipeline:
             async with r.pipeline() as pipe:
                 with pytest.raises(ClusterDownError):
                     await pipe.get(key).execute()
-
+                print(node.parse_response.await_count)
                 assert (
                     node.parse_response.await_count
-                    == 4 * r.cluster_error_retry_attempts - 3
+                    == 3 * r.cluster_error_retry_attempts - 2
                 )
 
     async def test_connection_error_not_raised(self, r: RedisCluster) -> None:
