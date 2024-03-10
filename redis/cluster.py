@@ -1527,9 +1527,9 @@ class NodesManager:
                 # Make sure cluster mode is enabled on this node
                 try:
                     cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
-                except ResponseError as e:
+                except ResponseError:
                     raise RedisClusterException(
-                        "Cluster mode is not enabled on this node."
+                        "Cluster mode is not enabled on this node"
                     )
                 startup_nodes_reachable = True
             except Exception as e:
