@@ -2726,7 +2726,6 @@ class TestClusterPipeline:
             async with r.pipeline() as pipe:
                 with pytest.raises(ClusterDownError):
                     await pipe.get(key).execute()
-                print(node.parse_response.await_count)
                 assert (
                     node.parse_response.await_count
                     == 3 * r.cluster_error_retry_attempts - 2
