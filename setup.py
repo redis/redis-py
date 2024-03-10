@@ -38,7 +38,7 @@ setup(
     install_requires=[
         'importlib-metadata >= 1.0; python_version < "3.8"',
         'typing-extensions; python_version<"3.8"',
-        'async-timeout>=4.0.3',
+        'async-timeout>=4.0.3; python_full_version<"3.11.3"',
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
