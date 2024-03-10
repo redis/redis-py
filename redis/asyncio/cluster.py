@@ -1257,7 +1257,7 @@ class NodesManager:
                     cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
                 except ResponseError:
                     raise RedisClusterException(
-                        "Cluster mode is not enabled on this node."
+                        "Cluster mode is not enabled on this node"
                     )
                 startup_nodes_reachable = True
             except Exception as e:
