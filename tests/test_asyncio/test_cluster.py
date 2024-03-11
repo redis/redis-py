@@ -127,7 +127,9 @@ async def slowlog(r: RedisCluster) -> None:
     await r.config_set("slowlog-max-len", old_max_length_value)
 
 
-async def get_mocked_redis_client(cluster_slots_raise_error=False, *args, **kwargs) -> RedisCluster:
+async def get_mocked_redis_client(
+    cluster_slots_raise_error=False, *args, **kwargs
+) -> RedisCluster:
     """
     Return a stable RedisCluster object that have deterministic
     nodes and slots setup to remove the problem of different IP addresses
@@ -2465,7 +2467,7 @@ class TestNodesManager:
                 cluster_slots_raise_error=True,
                 host=default_host,
                 port=default_port,
-                cluster_enabled=False
+                cluster_enabled=False,
             )
             await rc.aclose()
         assert "Cluster mode is not enabled on this node" in str(e.value)
