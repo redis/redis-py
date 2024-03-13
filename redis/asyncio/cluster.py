@@ -44,6 +44,7 @@ from redis.cluster import (
     SLOT_ID,
     AbstractRedisCluster,
     LoadBalancer,
+    ReadFromReplicasMode,
     block_pipeline_command,
     get_node_name,
     parse_cluster_slots,
@@ -136,9 +137,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         | See:
           https://redis.io/docs/manual/scaling/#redis-cluster-configuration-parameters
     :param read_from_replicas:
-        | Enable read from replicas in READONLY mode. You can read possibly stale data.
-          When set to true, read commands will be assigned between the primary and
-          its replications in a Round-Robin manner.
+        | Enable read from replicas in READONLY mode. You can read possibly
+          stale data.
+        | When set to true, read commands will be assigned between the
+          primary and its replications in a Round-Robin manner. When set to 
+          ReadFromReplicasMode.ReadFromReplicaOnly, it will only read from
+          the replicas
     :param reinitialize_steps:
         | Specifies the number of MOVED errors that need to occur before reinitializing
           the whole cluster topology. If a MOVED error occurs and the cluster does not
@@ -238,7 +242,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         # Cluster related kwargs
         startup_nodes: Optional[List["ClusterNode"]] = None,
         require_full_coverage: bool = True,
-        read_from_replicas: bool = False,
+        read_from_replicas: bool|ReadFromReplicasMode = False,
         reinitialize_steps: int = 5,
         cluster_error_retry_attempts: int = 3,
         connection_error_retry_attempts: int = 3,
@@ -350,7 +354,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 }
             )
 
-        if read_from_replicas:
+        self.read_from_replicas_mode = ReadFromReplicasMode.from_parameters(read_from_replicas)
+
+        if self.read_from_replicas_mode != ReadFromReplicasMode.ReadFromPrimary:
             # Call our on_connect function to configure READONLY mode
             kwargs["redis_connect_func"] = self.on_connect
 
@@ -392,7 +398,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             address_remap=address_remap,
         )
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
-        self.read_from_replicas = read_from_replicas
         self.reinitialize_steps = reinitialize_steps
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
         self.connection_error_retry_attempts = connection_error_retry_attempts
@@ -610,7 +615,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         return [
             self.nodes_manager.get_node_from_slot(
                 await self._determine_slot(command, *args),
-                self.read_from_replicas and command in READ_COMMANDS,
+                self.read_from_replicas_mode.get_replica_mode_for_command(command)
             )
         ]
 
@@ -791,7 +796,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     # refresh the target node
                     slot = await self._determine_slot(*args)
                     target_node = self.nodes_manager.get_node_from_slot(
-                        slot, self.read_from_replicas and args[0] in READ_COMMANDS
+                        slot, self.read_from_replicas_mode.get_replica_mode_for_command(args[0])
                     )
                     moved = False
 
@@ -1215,25 +1220,20 @@ class NodesManager:
         self._moved_exception = None
 
     def get_node_from_slot(
-        self, slot: int, read_from_replicas: bool = False
+        self, slot: int, read_from_replicas_mode: ReadFromReplicasMode
     ) -> "ClusterNode":
+        """
+        Gets a node that servers this hash slot
+        """
         if self._moved_exception:
             self._update_moved_slots()
-
-        try:
-            if read_from_replicas:
-                # get the server index in a Round-Robin manner
-                primary_name = self.slots_cache[slot][0].name
-                node_idx = self.read_load_balancer.get_server_index(
-                    primary_name, len(self.slots_cache[slot])
-                )
-                return self.slots_cache[slot][node_idx]
-            return self.slots_cache[slot][0]
-        except (IndexError, TypeError):
-            raise SlotNotCoveredError(
-                f'Slot "{slot}" not covered by the cluster. '
-                f'"require_full_coverage={self.require_full_coverage}"'
+        
+        return self.read_load_balancer.get_node_from_slot(
+            slot,
+            self.slots_cache.get(slot, None),
+            read_from_replicas_mode,
             )
+    
 
     def get_nodes_by_server_type(self, server_type: str) -> List["ClusterNode"]:
         return [
