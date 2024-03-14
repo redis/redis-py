@@ -322,7 +322,7 @@ def float_or_none(response):
     return float(response)
 
 
-def bool_ok(response):
+def bool_ok(response, **options):
     return str_if_bytes(response) == "OK"
 
 
@@ -629,8 +629,7 @@ def parse_client_info(value):
     "key1=value1 key2=value2 key3=value3"
     """
     client_info = {}
-    infos = str_if_bytes(value).split(" ")
-    for info in infos:
+    for info in str_if_bytes(value).strip().split():
         key, value = info.split("=")
         client_info[key] = value
 
@@ -700,6 +699,7 @@ _RedisCallbacks = {
     "CLIENT KILL": parse_client_kill,
     "CLIENT LIST": parse_client_list,
     "CLIENT PAUSE": bool_ok,
+    "CLIENT SETINFO": bool_ok,
     "CLIENT SETNAME": bool_ok,
     "CLIENT UNBLOCK": bool,
     "CLUSTER ADDSLOTS": bool_ok,
@@ -733,6 +733,7 @@ _RedisCallbacks = {
     "MODULE UNLOAD": bool,
     "PING": lambda r: str_if_bytes(r) == "PONG",
     "PUBSUB NUMSUB": parse_pubsub_numsub,
+    "PUBSUB SHARDNUMSUB": parse_pubsub_numsub,
     "QUIT": bool_ok,
     "SET": parse_set_result,
     "SCAN": parse_scan,

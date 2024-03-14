@@ -273,7 +273,7 @@ class TestRedisCommands:
             await user_client.hset("cache:0", "hkey", "hval")
 
         assert isinstance(await r.acl_log(), list)
-        assert len(await r.acl_log()) == 2
+        assert len(await r.acl_log()) == 3
         assert len(await r.acl_log(count=1)) == 1
         assert isinstance((await r.acl_log())[0], dict)
         expected = (await r.acl_log(count=1))[0]
@@ -354,6 +354,28 @@ class TestRedisCommands:
         assert_resp_response(
             r, await r.client_getname(), "redis_py_test", b"redis_py_test"
         )
+
+    @skip_if_server_version_lt("7.2.0")
+    async def test_client_setinfo(self, r: redis.Redis):
+        await r.ping()
+        info = await r.client_info()
+        assert info["lib-name"] == "redis-py"
+        assert info["lib-ver"] == redis.__version__
+        assert await r.client_setinfo("lib-name", "test")
+        assert await r.client_setinfo("lib-ver", "123")
+        info = await r.client_info()
+        assert info["lib-name"] == "test"
+        assert info["lib-ver"] == "123"
+        r2 = redis.asyncio.Redis(lib_name="test2", lib_version="1234")
+        info = await r2.client_info()
+        assert info["lib-name"] == "test2"
+        assert info["lib-ver"] == "1234"
+        await r2.aclose()
+        r3 = redis.asyncio.Redis(lib_name=None, lib_version=None)
+        info = await r3.client_info()
+        assert info["lib-name"] == ""
+        assert info["lib-ver"] == ""
+        await r3.aclose()
 
     @skip_if_server_version_lt("2.6.9")
     @pytest.mark.onlynoncluster
@@ -468,20 +490,6 @@ class TestRedisCommands:
         assert await r.client_no_touch("OFF") == b"OK"
         with pytest.raises(TypeError):
             await r.client_no_touch()
-
-    @skip_if_server_version_lt("7.2.0")
-    @pytest.mark.onlycluster
-    async def test_waitaof(self, r):
-        # must return a list of 2 elements
-        assert len(await r.waitaof(0, 0, 0)) == 2
-        assert len(await r.waitaof(1, 0, 0)) == 2
-        assert len(await r.waitaof(1, 0, 1000)) == 2
-
-        # value is out of range, value must between 0 and 1
-        with pytest.raises(exceptions.ResponseError):
-            await r.waitaof(2, 0, 0)
-        with pytest.raises(exceptions.ResponseError):
-            await r.waitaof(-1, 0, 0)
 
     async def test_config_get(self, r: redis.Redis):
         data = await r.config_get()
@@ -1801,9 +1809,11 @@ class TestRedisCommands:
     async def test_zrank_withscore(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
         assert await r.zrank("a", "a1") == 0
-        assert await r.rank("a", "a2") == 1
+        assert await r.zrank("a", "a2") == 1
         assert await r.zrank("a", "a6") is None
-        assert await r.zrank("a", "a3", withscore=True) == [2, "3"]
+        assert_resp_response(
+            r, await r.zrank("a", "a3", withscore=True), [2, b"3"], [2, 3.0]
+        )
         assert await r.zrank("a", "a6", withscore=True) is None
 
     async def test_zrem(self, r: redis.Redis):
@@ -1900,7 +1910,9 @@ class TestRedisCommands:
         assert await r.zrevrank("a", "a1") == 4
         assert await r.zrevrank("a", "a2") == 3
         assert await r.zrevrank("a", "a6") is None
-        assert await r.zrevrank("a", "a3", withscore=True) == [2, "3"]
+        assert_resp_response(
+            r, await r.zrevrank("a", "a3", withscore=True), [2, b"3"], [2, 3.0]
+        )
         assert await r.zrevrank("a", "a6", withscore=True) is None
 
     async def test_zscore(self, r: redis.Redis):
@@ -2857,13 +2869,15 @@ class TestRedisCommands:
         info = await r.xinfo_consumers(stream, group)
         assert len(info) == 2
         expected = [
-            {"name": consumer1.encode(), "pending": 1, "inactive": 2},
-            {"name": consumer2.encode(), "pending": 2, "inactive": 2},
+            {"name": consumer1.encode(), "pending": 1},
+            {"name": consumer2.encode(), "pending": 2},
         ]
 
-        # we can't determine the idle time, so just make sure it's an int
+        # we can't determine the idle and inactive time, so just make sure it's an int
         assert isinstance(info[0].pop("idle"), int)
         assert isinstance(info[1].pop("idle"), int)
+        assert isinstance(info[0].pop("inactive"), int)
+        assert isinstance(info[1].pop("inactive"), int)
         assert info == expected
 
     @skip_if_server_version_lt("5.0.0")
@@ -3201,7 +3215,6 @@ class TestRedisCommands:
         assert isinstance(await r.memory_usage("foo"), int)
 
     @skip_if_server_version_lt("4.0.0")
-    @pytest.mark.onlynoncluster
     async def test_module_list(self, r: redis.Redis):
         assert isinstance(await r.module_list(), list)
         for x in await r.module_list():

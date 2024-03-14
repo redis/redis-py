@@ -101,6 +101,8 @@ def parse_cluster_shards(resp, **options):
     """
     Parse CLUSTER SHARDS response.
     """
+    if isinstance(resp[0], dict):
+        return resp
     shards = []
     for x in resp:
         shard = {"slots": [], "nodes": []}
@@ -141,6 +143,8 @@ REDIS_ALLOWED_KEYS = (
     "encoding_errors",
     "errors",
     "host",
+    "lib_name",
+    "lib_version",
     "max_connections",
     "nodes_flag",
     "redis_connect_func",
@@ -163,6 +167,13 @@ REDIS_ALLOWED_KEYS = (
     "ssl_password",
     "unix_socket_path",
     "username",
+    "cache_enabled",
+    "client_cache",
+    "cache_max_size",
+    "cache_ttl",
+    "cache_policy",
+    "cache_blacklist",
+    "cache_whitelist",
 )
 KWARGS_DISABLED_KEYS = ("host", "port")
 
@@ -223,6 +234,7 @@ class AbstractRedisCluster:
                 "ACL WHOAMI",
                 "AUTH",
                 "CLIENT LIST",
+                "CLIENT SETINFO",
                 "CLIENT SETNAME",
                 "CLIENT GETNAME",
                 "CONFIG SET",
@@ -262,6 +274,7 @@ class AbstractRedisCluster:
                 "READONLY",
                 "CLUSTER INFO",
                 "CLUSTER MEET",
+                "CLUSTER MYSHARDID",
                 "CLUSTER NODES",
                 "CLUSTER REPLICAS",
                 "CLUSTER RESET",
@@ -280,10 +293,19 @@ class AbstractRedisCluster:
                 "READONLY",
                 "READWRITE",
                 "TIME",
+                "TFUNCTION LOAD",
+                "TFUNCTION DELETE",
+                "TFUNCTION LIST",
+                "TFCALL",
+                "TFCALLASYNC",
                 "GRAPH.CONFIG",
                 "LATENCY HISTORY",
                 "LATENCY LATEST",
                 "LATENCY RESET",
+                "MODULE LIST",
+                "MODULE LOAD",
+                "MODULE UNLOAD",
+                "MODULE LOADEX",
             ],
             DEFAULT_NODE,
         ),
@@ -296,6 +318,7 @@ class AbstractRedisCluster:
                 "FUNCTION LIST",
                 "FUNCTION LOAD",
                 "FUNCTION RESTORE",
+                "REDISGEARS_2.REFRESHCLUSTER",
                 "SCAN",
                 "SCRIPT EXISTS",
                 "SCRIPT FLUSH",
@@ -955,11 +978,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         # redis server to parse the keys. Besides, there is a bug in redis<7.0
         # where `self._get_command_keys()` fails anyway. So, we special case
         # EVAL/EVALSHA.
-        if command in ("EVAL", "EVALSHA"):
+        if command.upper() in ("EVAL", "EVALSHA"):
             # command syntax: EVAL "script body" num_keys ...
             if len(args) <= 2:
                 raise RedisClusterException(f"Invalid args in command: {args}")
-            num_actual_keys = args[2]
+            num_actual_keys = int(args[2])
             eval_keys = args[3 : 3 + num_actual_keys]
             # if there are 0 keys, that means the script can be run on any node
             # so we can just return a random slot
@@ -971,7 +994,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             if keys is None or len(keys) == 0:
                 # FCALL can call a function with 0 keys, that means the function
                 #  can be run on any node so we can just return a random slot
-                if command in ("FCALL", "FCALL_RO"):
+                if command.upper() in ("FCALL", "FCALL_RO"):
                     return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
                 raise RedisClusterException(
                     "No way to dispatch this command to Redis Cluster. "
@@ -1102,6 +1125,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """
         Send a command to a node in the cluster
         """
+        keys = kwargs.pop("keys", None)
         command = args[0]
         redis_node = None
         connection = None
@@ -1130,14 +1154,18 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
                     asking = False
-
-                connection.send_command(*args)
-                response = redis_node.parse_response(connection, command, **kwargs)
-                if command in self.cluster_response_callbacks:
-                    response = self.cluster_response_callbacks[command](
-                        response, **kwargs
-                    )
-                return response
+                response_from_cache = connection._get_from_local_cache(args)
+                if response_from_cache is not None:
+                    return response_from_cache
+                else:
+                    connection.send_command(*args)
+                    response = redis_node.parse_response(connection, command, **kwargs)
+                    if command in self.cluster_response_callbacks:
+                        response = self.cluster_response_callbacks[command](
+                            response, **kwargs
+                        )
+                    connection._add_to_local_cache(args, response, keys)
+                    return response
             except AuthenticationError:
                 raise
             except (ConnectionError, TimeoutError) as e:
@@ -1497,11 +1525,12 @@ class NodesManager:
                     )
                     self.startup_nodes[startup_node.name].redis_connection = r
                 # Make sure cluster mode is enabled on this node
-                if bool(r.info().get("cluster_enabled")) is False:
+                try:
+                    cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
+                except ResponseError:
                     raise RedisClusterException(
                         "Cluster mode is not enabled on this node"
                     )
-                cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
                 startup_nodes_reachable = True
             except Exception as e:
                 # Try the next startup node.
@@ -1761,7 +1790,7 @@ class ClusterPubSub(PubSub):
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
-                self.connection._parser.set_push_handler(self.push_handler_func)
+                self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
         connection = self.connection
         self._execute(connection, connection.send_command, *args)
 
@@ -1946,6 +1975,7 @@ class ClusterPipeline(RedisCluster):
         """
         Wrapper function for pipeline_execute_command
         """
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         return self.pipeline_execute_command(*args, **kwargs)
 
     def pipeline_execute_command(self, *args, **options):
@@ -2114,6 +2144,8 @@ class ClusterPipeline(RedisCluster):
                     try:
                         connection = get_connection(redis_node, c.args)
                     except ConnectionError:
+                        for n in nodes.values():
+                            n.connection_pool.release(n.connection)
                         # Connection retries are being handled in the node's
                         # Retry object. Reinitialize the node -> slot table.
                         self.nodes_manager.initialize()
@@ -2137,32 +2169,34 @@ class ClusterPipeline(RedisCluster):
         # we dont' multiplex on the sockets as they come available,
         # but that shouldn't make too much difference.
         node_commands = nodes.values()
-        for n in node_commands:
-            n.write()
+        try:
+            node_commands = nodes.values()
+            for n in node_commands:
+                n.write()
 
-        for n in node_commands:
-            n.read()
-
-        # release all of the redis connections we allocated earlier
-        # back into the connection pool.
-        # we used to do this step as part of a try/finally block,
-        # but it is really dangerous to
-        # release connections back into the pool if for some
-        # reason the socket has data still left in it
-        # from a previous operation. The write and
-        # read operations already have try/catch around them for
-        # all known types of errors including connection
-        # and socket level errors.
-        # So if we hit an exception, something really bad
-        # happened and putting any oF
-        # these connections back into the pool is a very bad idea.
-        # the socket might have unread buffer still sitting in it,
-        # and then the next time we read from it we pass the
-        # buffered result back from a previous command and
-        # every single request after to that connection will always get
-        # a mismatched result.
-        for n in nodes.values():
-            n.connection_pool.release(n.connection)
+            for n in node_commands:
+                n.read()
+        finally:
+            # release all of the redis connections we allocated earlier
+            # back into the connection pool.
+            # we used to do this step as part of a try/finally block,
+            # but it is really dangerous to
+            # release connections back into the pool if for some
+            # reason the socket has data still left in it
+            # from a previous operation. The write and
+            # read operations already have try/catch around them for
+            # all known types of errors including connection
+            # and socket level errors.
+            # So if we hit an exception, something really bad
+            # happened and putting any oF
+            # these connections back into the pool is a very bad idea.
+            # the socket might have unread buffer still sitting in it,
+            # and then the next time we read from it we pass the
+            # buffered result back from a previous command and
+            # every single request after to that connection will always get
+            # a mismatched result.
+            for n in nodes.values():
+                n.connection_pool.release(n.connection)
 
         # if the response isn't an exception it is a
         # valid response from the node
@@ -2180,7 +2214,7 @@ class ClusterPipeline(RedisCluster):
         )
         if attempt and allow_redirections:
             # RETRY MAGIC HAPPENS HERE!
-            # send these remaing commands one at a time using `execute_command`
+            # send these remaining commands one at a time using `execute_command`
             # in the main client. This keeps our retry logic
             # in one place mostly,
             # and allows us to be more confident in correctness of behavior.
@@ -2441,7 +2475,6 @@ class NodeCommands:
         """ """
         connection = self.connection
         for c in self.commands:
-
             # if there is a result on this command,
             # it means we ran into an exception
             # like a connection error. Trying to parse

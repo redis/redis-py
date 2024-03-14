@@ -1,3 +1,6 @@
+from contextlib import closing
+from unittest import mock
+
 import pytest
 import redis
 
@@ -285,6 +288,24 @@ class TestPipeline:
             assert unwatch_command["command"] == "UNWATCH"
 
     @pytest.mark.onlynoncluster
+    def test_close_is_reset(self, r):
+        with r.pipeline() as pipe:
+            called = 0
+
+            def mock_reset():
+                nonlocal called
+                called += 1
+
+            with mock.patch.object(pipe, "reset", mock_reset):
+                pipe.close()
+                assert called == 1
+
+    @pytest.mark.onlynoncluster
+    def test_closing(self, r):
+        with closing(r.pipeline()):
+            pass
+
+    @pytest.mark.onlynoncluster
     def test_transaction_callable(self, r):
         r["a"] = 1
         r["b"] = 2
@@ -369,7 +390,6 @@ class TestPipeline:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.0.0")
     def test_pipeline_discard(self, r):
-
         # empty pipeline should raise an error
         with r.pipeline() as pipe:
             pipe.set("key", "someval")

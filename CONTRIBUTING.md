@@ -78,15 +78,8 @@ It is possible to run only Redis client tests (with cluster mode disabled) by
 using `invoke standalone-tests`; similarly, RedisCluster tests can be run by using
 `invoke cluster-tests`.
 
-Each run of tox starts and stops the various dockers required. Sometimes
+Each run of tests starts and stops the various dockers required. Sometimes
 things get stuck, an `invoke clean` can help.
-
-Continuous Integration uses these same wrappers to run all of these
-tests against multiple versions of python. Feel free to test your
-changes against all the python versions supported, as declared by the
-tox.ini file (eg: tox -e py39). If you have the various python versions
-on your desktop, you can run *tox* by itself, to test all supported
-versions.
 
 ### Docker Tips
 
@@ -97,10 +90,6 @@ To get a bash shell inside of a container:
 
 `$ docker run -it <service> /bin/bash`
 
-**Note**: The term \"service\" refers to the \"services\" defined in the
-`tox.ini` file at the top of the repo: \"master\", \"replicaof\",
-\"sentinel_1\", \"sentinel_2\", \"sentinel_3\".
-
 Containers run a minimal Debian image that probably lacks tools you want
 to use. To install packages, first get a bash session (see previous tip)
 and then run:
@@ -110,23 +99,6 @@ and then run:
 You can see the logging output of a containers like this:
 
 `$ docker logs -f <service>`
-
-The command make test runs all tests in all tested Python
-environments. To run the tests in a single environment, like Python 3.9,
-use a command like this:
-
-`$ docker-compose run test tox -e py39 -- --redis-url=redis://master:6379/9`
-
-Here, the flag `-e py39` runs tests against the Python 3.9 tox
-environment. And note from the example that whenever you run tests like
-this, instead of using make test, you need to pass
-`-- --redis-url=redis://master:6379/9`. This points the tests at the
-\"master\" container.
-
-Our test suite uses `pytest`. You can run a specific test suite against
-a specific Python version like this:
-
-`$ docker-compose run test tox -e py37 -- --redis-url=redis://master:6379/9 tests/test_commands.py`
 
 ### Troubleshooting
 
@@ -179,6 +151,6 @@ you would like and how it should work.
 ## Code review process
 
 The core team regularly looks at pull requests. We will provide
-feedback as as soon as possible. After receiving our feedback, please respond
+feedback as soon as possible. After receiving our feedback, please respond
 within two weeks. After that time, we may close your PR if it isn't
 showing any activity.

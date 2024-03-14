@@ -24,7 +24,7 @@ The following trivial Lua script accepts two parameters: the name of a
 key and a multiplier value. The script fetches the value stored in the
 key, multiplies it with the multiplier value and returns the result.
 
-.. code:: pycon
+.. code:: python
 
    >>> r = redis.Redis()
    >>> lua = """
@@ -47,7 +47,7 @@ function. Script instances accept the following optional arguments:
 
 Continuing the example from above:
 
-.. code:: pycon
+.. code:: python
 
    >>> r.set('foo', 2)
    >>> multiply(keys=['foo'], args=[5])
@@ -60,7 +60,7 @@ executes the script and returns the result, 10.
 Script instances can be executed using a different client instance, even
 one that points to a completely different Redis server.
 
-.. code:: pycon
+.. code:: python
 
    >>> r2 = redis.Redis('redis2.example.com')
    >>> r2.set('foo', 3)
@@ -79,7 +79,7 @@ should be passed as the client argument when calling the script. Care is
 taken to ensure that the script is registered in Redis's script cache
 just prior to pipeline execution.
 
-.. code:: pycon
+.. code:: python
 
    >>> pipe = r.pipeline()
    >>> pipe.set('foo', 5)
@@ -92,19 +92,24 @@ Cluster Mode
 
 Cluster mode has limited support for lua scripting.
 
-The following commands are supported, with caveats: - ``EVAL`` and
-``EVALSHA``: The command is sent to the relevant node, depending on the
-keys (i.e., in ``EVAL "<script>" num_keys key_1 ... key_n ...``). The
-keys *must* all be on the same node. If the script requires 0 keys, *the
-command is sent to a random (primary) node*. - ``SCRIPT EXISTS``: The
-command is sent to all primaries. The result is a list of booleans
-corresponding to the input SHA hashes. Each boolean is an AND of “does
-the script exist on each node?”. In other words, each boolean is True
-iff the script exists on all nodes. - ``SCRIPT FLUSH``: The command is
-sent to all primaries. The result is a bool AND over all nodes’
-responses. - ``SCRIPT LOAD``: The command is sent to all primaries. The
-result is the SHA1 digest.
+The following commands are supported, with caveats:
 
-The following commands are not supported: - ``EVAL_RO`` - ``EVALSHA_RO``
+- ``EVAL`` and ``EVALSHA``: The command is sent to the relevant node,
+  depending on the keys (i.e., in ``EVAL "<script>" num_keys key_1 ...
+  key_n ...``). The keys *must* all be on the same node. If the script
+  requires 0 keys, *the command is sent to a random (primary) node*.
+- ``SCRIPT EXISTS``: The command is sent to all primaries. The result
+  is a list of booleans corresponding to the input SHA hashes. Each
+  boolean is an AND of “does the script exist on each node?”. In other
+  words, each boolean is True iff the script exists on all nodes.
+- ``SCRIPT FLUSH``: The command is sent to all primaries. The result
+  is a bool AND over all nodes’ responses.
+- ``SCRIPT LOAD``: The command is sent to all primaries. The result
+  is the SHA1 digest.
+
+The following commands are not supported:
+
+- ``EVAL_RO``
+- ``EVALSHA_RO``
 
 Using scripting within pipelines in cluster mode is **not supported**.

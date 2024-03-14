@@ -29,8 +29,8 @@ jobs:
      name: Dependency audit
      runs-on: ubuntu-latest
      steps:
-       - uses: actions/checkout@v3
-       - uses: pypa/gh-action-pip-audit@v1.0.0
+       - uses: actions/checkout@v4
+       - uses: pypa/gh-action-pip-audit@v1.0.8
          with:
            inputs: requirements.txt dev_requirements.txt
            ignore-vulns: |
@@ -40,8 +40,8 @@ jobs:
      name: Code linters
      runs-on: ubuntu-latest
      steps:
-       - uses: actions/checkout@v3
-       - uses: actions/setup-python@v4
+       - uses: actions/checkout@v4
+       - uses: actions/setup-python@v5
          with:
            python-version: 3.9
            cache: 'pip'
@@ -57,15 +57,15 @@ jobs:
        max-parallel: 15
        fail-fast: false
        matrix:
-         python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
+         python-version: ['3.8', '3.9', '3.10', '3.11', 'pypy-3.8', 'pypy-3.9']
          test-type: ['standalone', 'cluster']
          connection-type: ['hiredis', 'plain']
      env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
      name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
      steps:
-       - uses: actions/checkout@v3
-       - uses: actions/setup-python@v4
+       - uses: actions/checkout@v4
+       - uses: actions/setup-python@v5
          with:
            python-version: ${{ matrix.python-version }}
            cache: 'pip'
@@ -78,18 +78,17 @@ jobs:
             pip install hiredis
            fi
            invoke devenv
-           sleep 5 # time to settle
+           sleep 10 # time to settle
            invoke ${{matrix.test-type}}-tests
 
-       - uses: actions/upload-artifact@v2
+       - uses: actions/upload-artifact@v4
          if: success() || failure()
          with:
            name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}
            path: '${{matrix.test-type}}*results.xml'
 
        - name: Upload codecov coverage
-         uses: codecov/codecov-action@v3
-         if: ${{matrix.python-version == '3.11'}}
+         uses: codecov/codecov-action@v4
          with:
            fail_ci_if_error: false
 
@@ -111,7 +110,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.7', '3.11']
+        python-version: ['3.8', '3.11']
         test-type: ['standalone', 'cluster']
         connection-type: ['hiredis', 'plain']
         protocol: ['3']
@@ -119,8 +118,8 @@ jobs:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
@@ -146,8 +145,8 @@ jobs:
       matrix:
         extension: ['tar.gz', 'whl']
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: 3.9
       - name: Run installed unit tests
@@ -160,10 +159,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
+        python-version: ['3.8', '3.9', '3.10', '3.11', 'pypy-3.8', 'pypy-3.9']
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'

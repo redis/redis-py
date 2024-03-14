@@ -152,7 +152,6 @@ class TestPubSubSubscribeUnsubscribe:
     def _test_resubscribe_on_reconnection(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
     ):
-
         for key in keys:
             assert sub_func(key) is None
 
@@ -201,7 +200,6 @@ class TestPubSubSubscribeUnsubscribe:
     def _test_subscribed_property(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
     ):
-
         assert p.subscribed is False
         sub_func(keys[0])
         # we're now subscribed even though we haven't processed the

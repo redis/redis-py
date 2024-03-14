@@ -30,13 +30,15 @@ from redis.exceptions import (
 from redis.utils import str_if_bytes
 from tests.conftest import (
     assert_resp_response,
+    is_resp2_connection,
     skip_if_redis_enterprise,
+    skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
 
 from ..ssl_utils import get_ssl_filename
-from .compat import mock
+from .compat import aclosing, mock
 
 pytestmark = pytest.mark.onlycluster
 
@@ -125,7 +127,9 @@ async def slowlog(r: RedisCluster) -> None:
     await r.config_set("slowlog-max-len", old_max_length_value)
 
 
-async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
+async def get_mocked_redis_client(
+    cluster_slots_raise_error=False, *args, **kwargs
+) -> RedisCluster:
     """
     Return a stable RedisCluster object that have deterministic
     nodes and slots setup to remove the problem of different IP addresses
@@ -137,9 +141,13 @@ async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
     with mock.patch.object(ClusterNode, "execute_command") as execute_command_mock:
 
         async def execute_command(*_args, **_kwargs):
+
             if _args[0] == "CLUSTER SLOTS":
-                mock_cluster_slots = cluster_slots
-                return mock_cluster_slots
+                if cluster_slots_raise_error:
+                    raise ResponseError()
+                else:
+                    mock_cluster_slots = cluster_slots
+                    return mock_cluster_slots
             elif _args[0] == "COMMAND":
                 return {"get": [], "set": []}
             elif _args[0] == "INFO":
@@ -157,7 +165,7 @@ async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
 
             def cmd_init_mock(self, r: ClusterNode) -> None:
                 self.commands = {
-                    "GET": {
+                    "get": {
                         "name": "get",
                         "arity": 2,
                         "flags": ["readonly", "fast"],
@@ -173,9 +181,10 @@ async def get_mocked_redis_client(*args, **kwargs) -> RedisCluster:
 
 
 def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
-    connection = mock.AsyncMock()
+    connection = mock.AsyncMock(spec=Connection)
     connection.is_connected = True
     connection.read_response.return_value = response
+    connection._get_from_local_cache.return_value = None
     while node._free:
         node._free.pop()
     node._free.append(connection)
@@ -183,9 +192,10 @@ def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
 
 
 def mock_node_resp_exc(node: ClusterNode, exc: Exception) -> ClusterNode:
-    connection = mock.AsyncMock()
+    connection = mock.AsyncMock(spec=Connection)
     connection.is_connected = True
     connection.read_response.side_effect = exc
+    connection._get_from_local_cache.return_value = None
     while node._free:
         node._free.pop()
     node._free.append(connection)
@@ -268,7 +278,38 @@ class TestRedisClusterObj:
         cluster = await get_mocked_redis_client(host=default_host, port=default_port)
         assert cluster.get_node(host=default_host, port=default_port) is not None
 
-        await cluster.close()
+        await cluster.aclose()
+
+    async def test_aclosing(self) -> None:
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        called = 0
+
+        async def mock_aclose():
+            nonlocal called
+            called += 1
+
+        with mock.patch.object(cluster, "aclose", mock_aclose):
+            async with aclosing(cluster):
+                pass
+            assert called == 1
+        await cluster.aclose()
+
+    async def test_close_is_aclose(self) -> None:
+        """
+        Test that it is possible to use host & port arguments as startup node
+        args
+        """
+        cluster = await get_mocked_redis_client(host=default_host, port=default_port)
+        called = 0
+
+        async def mock_aclose():
+            nonlocal called
+            called += 1
+
+        with mock.patch.object(cluster, "aclose", mock_aclose):
+            await cluster.close()
+            assert called == 1
+        await cluster.aclose()
 
     async def test_startup_nodes(self) -> None:
         """
@@ -287,7 +328,7 @@ class TestRedisClusterObj:
             and cluster.get_node(host=default_host, port=port_2) is not None
         )
 
-        await cluster.close()
+        await cluster.aclose()
 
         startup_node = ClusterNode("127.0.0.1", 16379)
         async with RedisCluster(startup_nodes=[startup_node], client_name="test") as rc:
@@ -415,7 +456,7 @@ class TestRedisClusterObj:
                     )
                 )
 
-        await rc.close()
+        await rc.aclose()
 
     async def test_execute_command_errors(self, r: RedisCluster) -> None:
         """
@@ -459,7 +500,7 @@ class TestRedisClusterObj:
             conn = primary._free.pop()
             assert conn.read_response.called is not True
 
-        await r.close()
+        await r.aclose()
 
     async def test_execute_command_node_flag_all_nodes(self, r: RedisCluster) -> None:
         """
@@ -607,7 +648,7 @@ class TestRedisClusterObj:
 
                         def cmd_init_mock(self, r: ClusterNode) -> None:
                             self.commands = {
-                                "GET": {
+                                "get": {
                                     "name": "get",
                                     "arity": 2,
                                     "flags": ["readonly", "fast"],
@@ -688,7 +729,7 @@ class TestRedisClusterObj:
                 await read_cluster.get("foo")
                 mocks["send_command"].assert_has_calls([mock.call("READONLY")])
 
-                await read_cluster.close()
+                await read_cluster.aclose()
 
     async def test_keyslot(self, r: RedisCluster) -> None:
         """
@@ -760,7 +801,7 @@ class TestRedisClusterObj:
                 await rc.get("bar")
                 assert execute_command.failed_calls == rc.cluster_error_retry_attempts
 
-            await rc.close()
+            await rc.aclose()
 
     async def test_set_default_node_success(self, r: RedisCluster) -> None:
         """
@@ -818,6 +859,8 @@ class TestRedisClusterObj:
             assert all(await r.cluster_delslots(missing_slot))
             with pytest.raises(ClusterDownError):
                 await r.exists("foo")
+        except ResponseError as e:
+            assert "CLUSTERDOWN" in str(e)
         finally:
             try:
                 # Add back the missing slot
@@ -839,7 +882,7 @@ class TestRedisClusterObj:
                 *(rc.echo("i", target_nodes=RedisCluster.ALL_NODES) for i in range(100))
             )
         )
-        await rc.close()
+        await rc.aclose()
 
     def test_replace_cluster_node(self, r: RedisCluster) -> None:
         prev_default_node = r.get_default_node()
@@ -897,7 +940,7 @@ class TestRedisClusterObj:
                 assert await r.set("byte_string", b"giraffe")
                 assert await r.get("byte_string") == b"giraffe"
             finally:
-                await r.close()
+                await r.aclose()
         finally:
             await asyncio.gather(*[p.aclose() for p in proxies])
 
@@ -998,7 +1041,7 @@ class TestClusterRedisCommands:
         url = request.config.getoption("--redis-url")
         r = RedisCluster.from_url(url)
         assert 0 == await r.exists("a", "b", "c")
-        await r.close()
+        await r.aclose()
 
     @skip_if_redis_enterprise()
     async def test_cluster_myid(self, r: RedisCluster) -> None:
@@ -1061,15 +1104,18 @@ class TestClusterRedisCommands:
         assert node0._free.pop().read_response.called
         assert node1._free.pop().read_response.called
 
-        await r.close()
+        await r.aclose()
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
-    async def test_cluster_delslotsrange(self, r: RedisCluster):
+    async def test_cluster_delslotsrange(self):
+        r = await get_mocked_redis_client(host=default_host, port=default_port)
+        mock_all_nodes_resp(r, "OK")
         node = r.get_random_node()
-        mock_node_resp(node, "OK")
         await r.cluster_addslots(node, 1, 2, 3, 4, 5)
         assert await r.cluster_delslotsrange(1, 5)
+        assert node._free.pop().read_response.called
+        await r.aclose()
 
     @skip_if_redis_enterprise()
     async def test_cluster_failover(self, r: RedisCluster) -> None:
@@ -1255,11 +1301,18 @@ class TestClusterRedisCommands:
     async def test_cluster_links(self, r: RedisCluster):
         node = r.get_random_node()
         res = await r.cluster_links(node)
-        links_to = sum(x.count("to") for x in res)
-        links_for = sum(x.count("from") for x in res)
-        assert links_to == links_for
-        for i in range(0, len(res) - 1, 2):
-            assert res[i][3] == res[i + 1][3]
+        if is_resp2_connection(r):
+            links_to = sum(x.count(b"to") for x in res)
+            links_for = sum(x.count(b"from") for x in res)
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i][3] == res[i + 1][3]
+        else:
+            links_to = len(list(filter(lambda x: x[b"direction"] == b"to", res)))
+            links_for = len(list(filter(lambda x: x[b"direction"] == b"from", res)))
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i][b"node"] == res[i + 1][b"node"]
 
     @skip_if_redis_enterprise()
     async def test_readonly(self) -> None:
@@ -1272,7 +1325,7 @@ class TestClusterRedisCommands:
         for replica in r.get_replicas():
             assert replica._free.pop().read_response.called
 
-        await r.close()
+        await r.aclose()
 
     @skip_if_redis_enterprise()
     async def test_readwrite(self) -> None:
@@ -1285,7 +1338,7 @@ class TestClusterRedisCommands:
         for replica in r.get_replicas():
             assert replica._free.pop().read_response.called
 
-        await r.close()
+        await r.aclose()
 
     @skip_if_redis_enterprise()
     async def test_bgsave(self, r: RedisCluster) -> None:
@@ -1510,7 +1563,7 @@ class TestClusterRedisCommands:
         ]
         assert len(clients) == 1
         assert clients[0].get("name") == "redis-py-c1"
-        await r2.close()
+        await r2.aclose()
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_not_empty_string(self, r: RedisCluster) -> None:
@@ -1896,25 +1949,25 @@ class TestClusterRedisCommands:
             r,
             await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}b", b"b1", 10),
-            [b"b", b"b1", 10],
+            [b"{foo}b", b"b1", 10],
         )
         assert_resp_response(
             r,
             await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}b", b"b2", 20),
-            [b"b", b"b2", 20],
+            [b"{foo}b", b"b2", 20],
         )
         assert_resp_response(
             r,
             await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}a", b"a1", 1),
-            [b"a", b"a1", 1],
+            [b"{foo}a", b"a1", 1],
         )
         assert_resp_response(
             r,
             await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}a", b"a2", 2),
-            [b"a", b"a2", 2],
+            [b"{foo}a", b"a2", 2],
         )
         assert await r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) is None
         await r.zadd("{foo}c", {"c1": 100})
@@ -2280,7 +2333,7 @@ class TestClusterRedisCommands:
             await user_client.hset("{cache}:0", "hkey", "hval")
 
         assert isinstance(await r.acl_log(target_nodes=node), list)
-        assert len(await r.acl_log(target_nodes=node)) == 2
+        assert len(await r.acl_log(target_nodes=node)) == 3
         assert len(await r.acl_log(count=1, target_nodes=node)) == 1
         assert isinstance((await r.acl_log(target_nodes=node))[0], dict)
         assert "client-info" in (await r.acl_log(count=1, target_nodes=node))[0]
@@ -2288,7 +2341,7 @@ class TestClusterRedisCommands:
 
         await r.acl_deluser(username, target_nodes="primaries")
 
-        await user_client.close()
+        await user_client.aclose()
 
 
 class TestNodesManager:
@@ -2345,7 +2398,7 @@ class TestNodesManager:
                 cluster_slots=cluster_slots,
                 require_full_coverage=True,
             )
-            await rc.close()
+            await rc.aclose()
         assert str(ex.value).startswith(
             "All slots are not covered after query all startup_nodes."
         )
@@ -2371,7 +2424,7 @@ class TestNodesManager:
 
         assert 5460 not in rc.nodes_manager.slots_cache
 
-        await rc.close()
+        await rc.aclose()
 
     async def test_init_slots_cache(self) -> None:
         """
@@ -2402,7 +2455,7 @@ class TestNodesManager:
 
         assert len(n_manager.nodes_cache) == 6
 
-        await rc.close()
+        await rc.aclose()
 
     async def test_init_slots_cache_cluster_mode_disabled(self) -> None:
         """
@@ -2411,9 +2464,12 @@ class TestNodesManager:
         """
         with pytest.raises(RedisClusterException) as e:
             rc = await get_mocked_redis_client(
-                host=default_host, port=default_port, cluster_enabled=False
+                cluster_slots_raise_error=True,
+                host=default_host,
+                port=default_port,
+                cluster_enabled=False,
             )
-            await rc.close()
+            await rc.aclose()
         assert "Cluster mode is not enabled on this node" in str(e.value)
 
     async def test_empty_startup_nodes(self) -> None:
@@ -2500,7 +2556,7 @@ class TestNodesManager:
         for i in range(0, REDIS_CLUSTER_HASH_SLOTS):
             assert n.slots_cache[i] == [n_node]
 
-        await rc.close()
+        await rc.aclose()
 
     async def test_init_with_down_node(self) -> None:
         """
@@ -2672,10 +2728,9 @@ class TestClusterPipeline:
             async with r.pipeline() as pipe:
                 with pytest.raises(ClusterDownError):
                     await pipe.get(key).execute()
-
                 assert (
                     node.parse_response.await_count
-                    == 4 * r.cluster_error_retry_attempts - 3
+                    == 3 * r.cluster_error_retry_attempts - 2
                 )
 
     async def test_connection_error_not_raised(self, r: RedisCluster) -> None:
@@ -2744,6 +2799,7 @@ class TestClusterPipeline:
             assert ask_node._free.pop().read_response.await_count
             assert res == ["MOCK_OK"]
 
+    @skip_if_server_version_gte("7.0.0")
     async def test_moved_redirection_on_slave_with_default(
         self, r: RedisCluster
     ) -> None:

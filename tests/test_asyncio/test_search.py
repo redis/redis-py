@@ -77,7 +77,6 @@ async def createIndex(decoded_r, num_docs=100, definition=None):
 
     r = csv.reader(bzfp, delimiter=";")
     for n, line in enumerate(r):
-
         play, chapter, _, text = line[1], line[2], line[4], line[5]
 
         key = f"{play}:{chapter}".lower()
@@ -163,10 +162,8 @@ async def test_client(decoded_r: redis.Redis):
             )
         ).total
         both_total = (
-            await (
-                decoded_r.ft().search(
-                    Query("henry").no_content().limit_fields("play", "txt")
-                )
+            await decoded_r.ft().search(
+                Query("henry").no_content().limit_fields("play", "txt")
             )
         ).total
         assert 129 == txt_total
@@ -370,18 +367,14 @@ async def test_stopwords(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_filters(decoded_r: redis.Redis):
-    await (
-        decoded_r.ft().create_index(
-            (TextField("txt"), NumericField("num"), GeoField("loc"))
-        )
+    await decoded_r.ft().create_index(
+        (TextField("txt"), NumericField("num"), GeoField("loc"))
     )
-    await (
-        decoded_r.hset(
-            "doc1", mapping={"txt": "foo bar", "num": 3.141, "loc": "-0.441,51.458"}
-        )
+    await decoded_r.hset(
+        "doc1", mapping={"txt": "foo bar", "num": 3.141, "loc": "-0.441,51.458"}
     )
-    await (
-        decoded_r.hset("doc2", mapping={"txt": "foo baz", "num": 2, "loc": "-0.1,51.2"})
+    await decoded_r.hset(
+        "doc2", mapping={"txt": "foo baz", "num": 2, "loc": "-0.1,51.2"}
     )
 
     await waitForIndex(decoded_r, "idx")
@@ -432,10 +425,8 @@ async def test_filters(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_sort_by(decoded_r: redis.Redis):
-    await (
-        decoded_r.ft().create_index(
-            (TextField("txt"), NumericField("num", sortable=True))
-        )
+    await decoded_r.ft().create_index(
+        (TextField("txt"), NumericField("num", sortable=True))
     )
     await decoded_r.hset("doc1", mapping={"txt": "foo bar", "num": 1})
     await decoded_r.hset("doc2", mapping={"txt": "foo baz", "num": 2})
@@ -488,8 +479,8 @@ async def test_drop_index(decoded_r: redis.Redis):
 @pytest.mark.redismod
 async def test_example(decoded_r: redis.Redis):
     # Creating the index definition and schema
-    await (
-        decoded_r.ft().create_index((TextField("title", weight=5.0), TextField("body")))
+    await decoded_r.ft().create_index(
+        (TextField("title", weight=5.0), TextField("body"))
     )
 
     # Indexing a document
@@ -550,8 +541,8 @@ async def test_auto_complete(decoded_r: redis.Redis):
     await decoded_r.ft().sugadd("ac", Suggestion("pay2", payload="pl2"))
     await decoded_r.ft().sugadd("ac", Suggestion("pay3", payload="pl3"))
 
-    sugs = await (
-        decoded_r.ft().sugget("ac", "pay", with_payloads=True, with_scores=True)
+    sugs = await decoded_r.ft().sugget(
+        "ac", "pay", with_payloads=True, with_scores=True
     )
     assert 3 == len(sugs)
     for sug in sugs:
@@ -639,8 +630,8 @@ async def test_no_index(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 async def test_explain(decoded_r: redis.Redis):
-    await (
-        decoded_r.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
+    await decoded_r.ft().create_index(
+        (TextField("f1"), TextField("f2"), TextField("f3"))
     )
     res = await decoded_r.ft().explain("@f3:f3_val @f2:f2_val @f1:f1_val")
     assert res
@@ -903,10 +894,8 @@ async def test_alter_schema_add(decoded_r: redis.Redis):
 async def test_spell_check(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("f1"), TextField("f2")))
 
-    await (
-        decoded_r.hset(
-            "doc1", mapping={"f1": "some valid content", "f2": "this is sample text"}
-        )
+    await decoded_r.hset(
+        "doc1", mapping={"f1": "some valid content", "f2": "this is sample text"}
     )
     await decoded_r.hset("doc2", mapping={"f1": "very important", "f2": "lorem ipsum"})
     await waitForIndex(decoded_r, "idx")
@@ -1042,12 +1031,12 @@ async def test_scorer(decoded_r: redis.Redis):
         assert 1.0 == res.docs[0].score
         res = await decoded_r.ft().search(Query("quick").scorer("TFIDF").with_scores())
         assert 1.0 == res.docs[0].score
-        res = await (
-            decoded_r.ft().search(Query("quick").scorer("TFIDF.DOCNORM").with_scores())
+        res = await decoded_r.ft().search(
+            Query("quick").scorer("TFIDF.DOCNORM").with_scores()
         )
-        assert 0.1111111111111111 == res.docs[0].score
+        assert 0.14285714285714285 == res.docs[0].score
         res = await decoded_r.ft().search(Query("quick").scorer("BM25").with_scores())
-        assert 0.17699114465425977 == res.docs[0].score
+        assert 0.22471909420069797 == res.docs[0].score
         res = await decoded_r.ft().search(Query("quick").scorer("DISMAX").with_scores())
         assert 2.0 == res.docs[0].score
         res = await decoded_r.ft().search(
@@ -1066,9 +1055,9 @@ async def test_scorer(decoded_r: redis.Redis):
         res = await decoded_r.ft().search(
             Query("quick").scorer("TFIDF.DOCNORM").with_scores()
         )
-        assert 0.1111111111111111 == res["results"][0]["score"]
+        assert 0.14285714285714285 == res["results"][0]["score"]
         res = await decoded_r.ft().search(Query("quick").scorer("BM25").with_scores())
-        assert 0.17699114465425977 == res["results"][0]["score"]
+        assert 0.22471909420069797 == res["results"][0]["score"]
         res = await decoded_r.ft().search(Query("quick").scorer("DISMAX").with_scores())
         assert 2.0 == res["results"][0]["score"]
         res = await decoded_r.ft().search(
@@ -1514,7 +1503,7 @@ async def test_withsuffixtrie(decoded_r: redis.Redis):
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]["flags"]
         assert await decoded_r.ft().dropindex("idx")
 
-        # create withsuffixtrie index (text fiels)
+        # create withsuffixtrie index (text fields)
         assert await decoded_r.ft().create_index((TextField("t", withsuffixtrie=True)))
         waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()

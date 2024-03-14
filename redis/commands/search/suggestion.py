@@ -1,3 +1,5 @@
+from typing import Optional
+
 from ._util import to_string
 
 
@@ -7,12 +9,14 @@ class Suggestion:
     autocomplete server
     """
 
-    def __init__(self, string, score=1.0, payload=None):
+    def __init__(
+        self, string: str, score: float = 1.0, payload: Optional[str] = None
+    ) -> None:
         self.string = to_string(string)
         self.payload = to_string(payload)
         self.score = score
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.string
 
 
@@ -23,7 +27,7 @@ class SuggestionParser:
     the return value depending on what objects were requested
     """
 
-    def __init__(self, with_scores, with_payloads, ret):
+    def __init__(self, with_scores: bool, with_payloads: bool, ret) -> None:
         self.with_scores = with_scores
         self.with_payloads = with_payloads
 

@@ -37,7 +37,7 @@ the client and server.
 
 Pipelines are quite simple to use:
 
-.. code:: pycon
+.. code:: python
 
    >>> r = redis.Redis(...)
    >>> r.set('bing', 'baz')
@@ -54,7 +54,7 @@ Pipelines are quite simple to use:
 For ease of use, all commands being buffered into the pipeline return
 the pipeline object itself. Therefore calls can be chained like:
 
-.. code:: pycon
+.. code:: python
 
    >>> pipe.set('foo', 'bar').sadd('faz', 'baz').incr('auto_number').execute()
    [True, True, 6]
@@ -64,7 +64,7 @@ executed atomically as a group. This happens by default. If you want to
 disable the atomic nature of a pipeline but still want to buffer
 commands, you can turn off transactions.
 
-.. code:: pycon
+.. code:: python
 
    >>> pipe = r.pipeline(transaction=False)
 
@@ -84,7 +84,7 @@ prior the execution of that transaction, the entire transaction will be
 canceled and a WatchError will be raised. To implement our own
 client-side INCR command, we could do something like this:
 
-.. code:: pycon
+.. code:: python
 
    >>> with r.pipeline() as pipe:
    ...     while True:
@@ -117,7 +117,7 @@ Pipeline is used as a context manager (as in the example above) reset()
 will be called automatically. Of course you can do this the manual way
 by explicitly calling reset():
 
-.. code:: pycon
+.. code:: python
 
    >>> pipe = r.pipeline()
    >>> while True:
@@ -137,7 +137,7 @@ that should expect a single parameter, a pipeline object, and any number
 of keys to be WATCHed. Our client-side INCR command above can be written
 like this, which is much easier to read:
 
-.. code:: pycon
+.. code:: python
 
    >>> def client_side_incr(pipe):
    ...     current_value = pipe.get('OUR-SEQUENCE-KEY')
@@ -165,7 +165,7 @@ dramatically increase the throughput of Redis Cluster by significantly
 reducing the number of network round trips between the client and
 the server.
 
-.. code:: pycon
+.. code:: python
 
    >>> with rc.pipeline() as pipe:
    ...     pipe.set('foo', 'value1')
@@ -198,7 +198,7 @@ Publish / Subscribe
 redis-py includes a PubSub object that subscribes to channels and
 listens for new messages. Creating a PubSub object is easy.
 
-.. code:: pycon
+.. code:: python
 
    >>> r = redis.Redis(...)
    >>> p = r.pubsub()
@@ -206,7 +206,7 @@ listens for new messages. Creating a PubSub object is easy.
 Once a PubSub instance is created, channels and patterns can be
 subscribed to.
 
-.. code:: pycon
+.. code:: python
 
    >>> p.subscribe('my-first-channel', 'my-second-channel', ...)
    >>> p.psubscribe('my-*', ...)
@@ -215,7 +215,7 @@ The PubSub instance is now subscribed to those channels/patterns. The
 subscription confirmations can be seen by reading messages from the
 PubSub instance.
 
-.. code:: pycon
+.. code:: python
 
    >>> p.get_message()
    {'pattern': None, 'type': 'subscribe', 'channel': b'my-second-channel', 'data': 1}
@@ -240,7 +240,7 @@ following keys.
 
 Let's send a message now.
 
-.. code:: pycon
+.. code:: python
 
    # the publish method returns the number matching channel and pattern
    # subscriptions. 'my-first-channel' matches both the 'my-first-channel'
@@ -256,7 +256,7 @@ Let's send a message now.
 Unsubscribing works just like subscribing. If no arguments are passed to
 [p]unsubscribe, all channels or patterns will be unsubscribed from.
 
-.. code:: pycon
+.. code:: python
 
    >>> p.unsubscribe()
    >>> p.punsubscribe('my-*')
@@ -279,7 +279,7 @@ the message dictionary is created and passed to the message handler. In
 this case, a None value is returned from get_message() since the message
 was already handled.
 
-.. code:: pycon
+.. code:: python
 
    >>> def my_handler(message):
    ...     print('MY HANDLER: ', message['data'])
@@ -305,7 +305,7 @@ passing ignore_subscribe_messages=True to r.pubsub(). This will cause
 all subscribe/unsubscribe messages to be read, but they won't bubble up
 to your application.
 
-.. code:: pycon
+.. code:: python
 
    >>> p = r.pubsub(ignore_subscribe_messages=True)
    >>> p.subscribe('my-channel')
@@ -325,7 +325,7 @@ to a message handler. If there's no data to be read, get_message() will
 immediately return None. This makes it trivial to integrate into an
 existing event loop inside your application.
 
-.. code:: pycon
+.. code:: python
 
    >>> while True:
    >>>     message = p.get_message()
@@ -339,14 +339,14 @@ your application doesn't need to do anything else but receive and act on
 messages received from redis, listen() is an easy way to get up an
 running.
 
-.. code:: pycon
+.. code:: python
 
    >>> for message in p.listen():
    ...     # do something with the message
 
 The third option runs an event loop in a separate thread.
 pubsub.run_in_thread() creates a new thread and starts the event loop.
-The thread object is returned to the caller of [un_in_thread(). The
+The thread object is returned to the caller of run_in_thread(). The
 caller can use the thread.stop() method to shut down the event loop and
 thread. Behind the scenes, this is simply a wrapper around get_message()
 that runs in a separate thread, essentially creating a tiny non-blocking
@@ -360,7 +360,7 @@ handlers. Therefore, redis-py prevents you from calling run_in_thread()
 if you're subscribed to patterns or channels that don't have message
 handlers attached.
 
-.. code:: pycon
+.. code:: python
 
    >>> p.subscribe(**{'my-channel': my_handler})
    >>> thread = p.run_in_thread(sleep_time=0.001)
@@ -374,7 +374,7 @@ appropriately. The exception handler will take as arguments the
 exception itself, the pubsub object, and the worker thread returned by
 run_in_thread.
 
-.. code:: pycon
+.. code:: python
 
    >>> p.subscribe(**{'my-channel': my_handler})
    >>> def exception_handler(ex, pubsub, thread):
@@ -401,7 +401,7 @@ when reconnecting. Messages that were published while the client was
 disconnected cannot be delivered. When you're finished with a PubSub
 object, call its .close() method to shutdown the connection.
 
-.. code:: pycon
+.. code:: python
 
    >>> p = r.pubsub()
    >>> ...
@@ -410,7 +410,7 @@ object, call its .close() method to shutdown the connection.
 The PUBSUB set of subcommands CHANNELS, NUMSUB and NUMPAT are also
 supported:
 
-.. code:: pycon
+.. code:: python
 
    >>> r.pubsub_channels()
    [b'foo', b'bar']
@@ -421,6 +421,38 @@ supported:
    >>> r.pubsub_numpat()
    1204
 
+Sharded pubsub
+~~~~~~~~~~~~~~
+
+`Sharded pubsub <https://redis.io/docs/interact/pubsub/#:~:text=Sharded%20Pub%2FSub%20helps%20to,the%20shard%20of%20a%20cluster.>`_ is a feature introduced with Redis 7.0, and fully supported by redis-py as of 5.0. It helps scale the usage of pub/sub in cluster mode, by having the cluster shard messages to nodes that own a slot for a shard channel. Here, the cluster ensures the published shard messages are forwarded to the appropriate nodes. Clients subscribe to a channel by connecting to either the master responsible for the slot, or any of its replicas.
+
+This makes use of the `SSUBSCRIBE <https://redis.io/commands/ssubscribe>`_ and `SPUBLISH <https://redis.io/commands/spublish>`_ commands within Redis.
+
+The following, is a simplified example:
+
+.. code:: python
+
+    >>> from redis.cluster import RedisCluster, ClusterNode
+    >>> r = RedisCluster(startup_nodes=[ClusterNode('localhost', 6379), ClusterNode('localhost', 6380)])
+    >>> p = r.pubsub()
+    >>> p.ssubscribe('foo')
+    >>> # assume someone sends a message along the channel via a publish
+    >>> message = p.get_sharded_message()
+
+Similarly, the same process can be used to acquire sharded pubsub messages, that have already been sent to a specific node, by passing the node to get_sharded_message:
+
+.. code:: python
+
+    >>> from redis.cluster import RedisCluster, ClusterNode
+    >>> first_node = ClusterNode['localhost', 6379]
+    >>> second_node = ClusterNode['localhost', 6380]
+    >>> r = RedisCluster(startup_nodes=[first_node, second_node])
+    >>> p = r.pubsub()
+    >>> p.ssubscribe('foo')
+    >>> # assume someone sends a message along the channel via a publish
+    >>> message = p.get_sharded_message(target_node=second_node)
+
+
 Monitor
 ~~~~~~~
 
@@ -428,7 +460,7 @@ redis-py includes a Monitor object that streams every command processed
 by the Redis server. Use listen() on the Monitor object to block until a
 command is received.
 
-.. code:: pycon
+.. code:: python
 
    >>> r = redis.Redis(...)
    >>> with r.monitor() as m:

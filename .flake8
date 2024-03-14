@@ -4,7 +4,6 @@ exclude =
     *.egg-info,
     *.pyc,
     .git,
-    .tox,
     .venv*,
     build,
     docs/*,
@@ -15,7 +14,12 @@ exclude =
     whitelist.py,
     tasks.py
 ignore =
-    F405
-    W503
-    E203
     E126
+    E203
+    F405
+    N801
+    N802
+    N803
+    N806
+    N815
+    W503

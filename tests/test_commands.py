@@ -201,8 +201,9 @@ class TestRedisCommands:
             r.acl_genpass(-5)
             r.acl_genpass(5555)
 
-        r.acl_genpass(555)
+        password = r.acl_genpass(555)
         assert isinstance(password, (str, bytes))
+        assert len(password) == 139
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
@@ -396,7 +397,7 @@ class TestRedisCommands:
             user_client.hset("cache:0", "hkey", "hval")
 
         assert isinstance(r.acl_log(), list)
-        assert len(r.acl_log()) == 2
+        assert len(r.acl_log()) == 3
         assert len(r.acl_log(count=1)) == 1
         assert isinstance(r.acl_log()[0], dict)
         expected = r.acl_log(count=1)[0]
@@ -516,7 +517,6 @@ class TestRedisCommands:
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
     def test_client_tracking(self, r, r2):
-
         # simple case
         assert r.client_tracking_on()
         assert r.client_tracking_off()
@@ -553,6 +553,26 @@ class TestRedisCommands:
     def test_client_setname(self, r):
         assert r.client_setname("redis_py_test")
         assert_resp_response(r, r.client_getname(), "redis_py_test", b"redis_py_test")
+
+    @skip_if_server_version_lt("7.2.0")
+    def test_client_setinfo(self, r: redis.Redis):
+        r.ping()
+        info = r.client_info()
+        assert info["lib-name"] == "redis-py"
+        assert info["lib-ver"] == redis.__version__
+        assert r.client_setinfo("lib-name", "test")
+        assert r.client_setinfo("lib-ver", "123")
+        info = r.client_info()
+        assert info["lib-name"] == "test"
+        assert info["lib-ver"] == "123"
+        r2 = redis.Redis(lib_name="test2", lib_version="1234")
+        info = r2.client_info()
+        assert info["lib-name"] == "test2"
+        assert info["lib-ver"] == "1234"
+        r3 = redis.Redis(lib_name=None, lib_version=None)
+        info = r3.client_info()
+        assert info["lib-name"] == ""
+        assert info["lib-ver"] == ""
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.9")
@@ -724,20 +744,6 @@ class TestRedisCommands:
         assert r.client_no_touch("OFF") == b"OK"
         with pytest.raises(TypeError):
             r.client_no_touch()
-
-    @pytest.mark.onlycluster
-    @skip_if_server_version_lt("7.2.0")
-    def test_waitaof(self, r):
-        # must return a list of 2 elements
-        assert len(r.waitaof(0, 0, 0)) == 2
-        assert len(r.waitaof(1, 0, 0)) == 2
-        assert len(r.waitaof(1, 0, 1000)) == 2
-
-        # value is out of range, value must between 0 and 1
-        with pytest.raises(exceptions.ResponseError):
-            r.waitaof(2, 0, 0)
-        with pytest.raises(exceptions.ResponseError):
-            r.waitaof(-1, 0, 0)
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("3.2.0")
@@ -1791,6 +1797,57 @@ class TestRedisCommands:
         assert r.substr("a", 3, 5) == b"345"
         assert r.substr("a", 3, -2) == b"345678"
 
+    def generate_lib_code(self, lib_name):
+        return f"""#!js api_version=1.0 name={lib_name}\n redis.registerFunction('foo', ()=>{{return 'bar'}})"""  # noqa
+
+    def try_delete_libs(self, r, *lib_names):
+        for lib_name in lib_names:
+            try:
+                r.tfunction_delete(lib_name)
+            except Exception:
+                pass
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfunction_load_delete(self, r):
+        self.try_delete_libs(r, "lib1")
+        lib_code = self.generate_lib_code("lib1")
+        assert r.tfunction_load(lib_code)
+        assert r.tfunction_delete("lib1")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfunction_list(self, r):
+        self.try_delete_libs(r, "lib1", "lib2", "lib3")
+        assert r.tfunction_load(self.generate_lib_code("lib1"))
+        assert r.tfunction_load(self.generate_lib_code("lib2"))
+        assert r.tfunction_load(self.generate_lib_code("lib3"))
+
+        # test error thrown when verbose > 4
+        with pytest.raises(redis.exceptions.DataError):
+            assert r.tfunction_list(verbose=8)
+
+        functions = r.tfunction_list(verbose=1)
+        assert len(functions) == 3
+
+        expected_names = [b"lib1", b"lib2", b"lib3"]
+        actual_names = [functions[0][13], functions[1][13], functions[2][13]]
+
+        assert sorted(expected_names) == sorted(actual_names)
+        assert r.tfunction_delete("lib1")
+        assert r.tfunction_delete("lib2")
+        assert r.tfunction_delete("lib3")
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfcall(self, r):
+        self.try_delete_libs(r, "lib1")
+        assert r.tfunction_load(self.generate_lib_code("lib1"))
+        assert r.tfcall("lib1", "foo") == b"bar"
+        assert r.tfcall_async("lib1", "foo") == b"bar"
+
+        assert r.tfunction_delete("lib1")
+
     def test_ttl(self, r):
         r["a"] = "1"
         assert r.expire("a", 10)
@@ -2783,9 +2840,9 @@ class TestRedisCommands:
     def test_zrank_withscore(self, r: redis.Redis):
         r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
         assert r.zrank("a", "a1") == 0
-        assert r.rank("a", "a2") == 1
+        assert r.zrank("a", "a2") == 1
         assert r.zrank("a", "a6") is None
-        assert r.zrank("a", "a3", withscore=True) == [2, "3"]
+        assert_resp_response(r, r.zrank("a", "a3", withscore=True), [2, b"3"], [2, 3.0])
         assert r.zrank("a", "a6", withscore=True) is None
 
     def test_zrem(self, r):
@@ -2880,7 +2937,9 @@ class TestRedisCommands:
         assert r.zrevrank("a", "a1") == 4
         assert r.zrevrank("a", "a2") == 3
         assert r.zrevrank("a", "a6") is None
-        assert r.zrevrank("a", "a3", withscore=True) == [2, "3"]
+        assert_resp_response(
+            r, r.zrevrank("a", "a3", withscore=True), [2, b"3"], [2, 3.0]
+        )
         assert r.zrevrank("a", "a6", withscore=True) is None
 
     def test_zscore(self, r):
@@ -4333,13 +4392,15 @@ class TestRedisCommands:
         info = r.xinfo_consumers(stream, group)
         assert len(info) == 2
         expected = [
-            {"name": consumer1.encode(), "pending": 1, "inactive": 2},
-            {"name": consumer2.encode(), "pending": 2, "inactive": 2},
+            {"name": consumer1.encode(), "pending": 1},
+            {"name": consumer2.encode(), "pending": 2},
         ]
 
-        # we can't determine the idle time, so just make sure it's an int
+        # we can't determine the idle and inactive time, so just make sure it's an int
         assert isinstance(info[0].pop("idle"), int)
         assert isinstance(info[1].pop("idle"), int)
+        assert isinstance(info[0].pop("inactive"), int)
+        assert isinstance(info[1].pop("inactive"), int)
         assert info == expected
 
     @skip_if_server_version_lt("7.0.0")
@@ -4848,7 +4909,6 @@ class TestRedisCommands:
     def test_latency_reset(self, r: redis.Redis):
         assert r.latency_reset() == 0
 
-    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
     def test_module_list(self, r):
@@ -4951,7 +5011,6 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_restore(self, r):
-
         # standard restore
         key = "foo"
         r.set(key, "bar")
@@ -5015,6 +5074,7 @@ class TestRedisCommands:
         r.execute_command.assert_called_with("SHUTDOWN", "ABORT")
 
     @pytest.mark.replica
+    @pytest.mark.xfail(strict=False)
     @skip_if_server_version_lt("2.8.0")
     @skip_if_redis_enterprise()
     def test_sync(self, r):

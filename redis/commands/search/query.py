@@ -1,3 +1,6 @@
+from typing import List, Optional, Union
+
+
 class Query:
     """
     Query is used to build complex queries that have more parameters than just
@@ -8,52 +11,52 @@ class Query:
     i.e. `Query("foo").verbatim().filter(...)` etc.
     """
 
-    def __init__(self, query_string):
+    def __init__(self, query_string: str) -> None:
         """
         Create a new query object.
         The query string is set in the constructor, and other options have
         setter functions.
         """
 
-        self._query_string = query_string
-        self._offset = 0
-        self._num = 10
-        self._no_content = False
-        self._no_stopwords = False
-        self._fields = None
-        self._verbatim = False
-        self._with_payloads = False
-        self._with_scores = False
-        self._scorer = False
-        self._filters = list()
-        self._ids = None
-        self._slop = -1
-        self._timeout = None
-        self._in_order = False
-        self._sortby = None
-        self._return_fields = []
-        self._summarize_fields = []
-        self._highlight_fields = []
-        self._language = None
-        self._expander = None
-        self._dialect = None
+        self._query_string: str = query_string
+        self._offset: int = 0
+        self._num: int = 10
+        self._no_content: bool = False
+        self._no_stopwords: bool = False
+        self._fields: Optional[List[str]] = None
+        self._verbatim: bool = False
+        self._with_payloads: bool = False
+        self._with_scores: bool = False
+        self._scorer: Optional[str] = None
+        self._filters: List = list()
+        self._ids: Optional[List[str]] = None
+        self._slop: int = -1
+        self._timeout: Optional[float] = None
+        self._in_order: bool = False
+        self._sortby: Optional[SortbyField] = None
+        self._return_fields: List = []
+        self._summarize_fields: List = []
+        self._highlight_fields: List = []
+        self._language: Optional[str] = None
+        self._expander: Optional[str] = None
+        self._dialect: Optional[int] = None
 
-    def query_string(self):
+    def query_string(self) -> str:
         """Return the query string of this query only."""
         return self._query_string
 
-    def limit_ids(self, *ids):
+    def limit_ids(self, *ids) -> "Query":
         """Limit the results to a specific set of pre-known document
         ids of any length."""
         self._ids = ids
         return self
 
-    def return_fields(self, *fields):
+    def return_fields(self, *fields) -> "Query":
         """Add fields to return fields."""
         self._return_fields += fields
         return self
 
-    def return_field(self, field, as_field=None):
+    def return_field(self, field: str, as_field: Optional[str] = None) -> "Query":
         """Add field to return fields (Optional: add 'AS' name
         to the field)."""
         self._return_fields.append(field)
@@ -61,12 +64,18 @@ class Query:
             self._return_fields += ("AS", as_field)
         return self
 
-    def _mk_field_list(self, fields):
+    def _mk_field_list(self, fields: List[str]) -> List:
         if not fields:
             return []
         return [fields] if isinstance(fields, str) else list(fields)
 
-    def summarize(self, fields=None, context_len=None, num_frags=None, sep=None):
+    def summarize(
+        self,
+        fields: Optional[List] = None,
+        context_len: Optional[int] = None,
+        num_frags: Optional[int] = None,
+        sep: Optional[str] = None,
+    ) -> "Query":
         """
         Return an abridged format of the field, containing only the segments of
         the field which contain the matching term(s).
@@ -98,7 +107,9 @@ class Query:
         self._summarize_fields = args
         return self
 
-    def highlight(self, fields=None, tags=None):
+    def highlight(
+        self, fields: Optional[List[str]] = None, tags: Optional[List[str]] = None
+    ) -> None:
         """
         Apply specified markup to matched term(s) within the returned field(s).
 
@@ -116,7 +127,7 @@ class Query:
         self._highlight_fields = args
         return self
 
-    def language(self, language):
+    def language(self, language: str) -> "Query":
         """
         Analyze the query as being in the specified language.
 
@@ -125,19 +136,19 @@ class Query:
         self._language = language
         return self
 
-    def slop(self, slop):
+    def slop(self, slop: int) -> "Query":
         """Allow a maximum of N intervening non matched terms between
         phrase terms (0 means exact phrase).
         """
         self._slop = slop
         return self
 
-    def timeout(self, timeout):
+    def timeout(self, timeout: float) -> "Query":
         """overrides the timeout parameter of the module"""
         self._timeout = timeout
         return self
 
-    def in_order(self):
+    def in_order(self) -> "Query":
         """
         Match only documents where the query terms appear in
         the same order in the document.
@@ -146,7 +157,7 @@ class Query:
         self._in_order = True
         return self
 
-    def scorer(self, scorer):
+    def scorer(self, scorer: str) -> "Query":
         """
         Use a different scoring function to evaluate document relevance.
         Default is `TFIDF`.
@@ -157,7 +168,7 @@ class Query:
         self._scorer = scorer
         return self
 
-    def get_args(self):
+    def get_args(self) -> List[str]:
         """Format the redis arguments for this query and return them."""
         args = [self._query_string]
         args += self._get_args_tags()
@@ -165,7 +176,7 @@ class Query:
         args += ["LIMIT", self._offset, self._num]
         return args
 
-    def _get_args_tags(self):
+    def _get_args_tags(self) -> List[str]:
         args = []
         if self._no_content:
             args.append("NOCONTENT")
@@ -194,7 +205,7 @@ class Query:
             args += self._ids
         if self._slop >= 0:
             args += ["SLOP", self._slop]
-        if self._timeout:
+        if self._timeout is not None:
             args += ["TIMEOUT", self._timeout]
         if self._in_order:
             args.append("INORDER")
@@ -216,7 +227,7 @@ class Query:
 
         return args
 
-    def paging(self, offset, num):
+    def paging(self, offset: int, num: int) -> "Query":
         """
         Set the paging for the query (defaults to 0..10).
 
@@ -227,19 +238,19 @@ class Query:
         self._num = num
         return self
 
-    def verbatim(self):
+    def verbatim(self) -> "Query":
         """Set the query to be verbatim, i.e. use no query expansion
         or stemming.
         """
         self._verbatim = True
         return self
 
-    def no_content(self):
+    def no_content(self) -> "Query":
         """Set the query to only return ids and not the document content."""
         self._no_content = True
         return self
 
-    def no_stopwords(self):
+    def no_stopwords(self) -> "Query":
         """
         Prevent the query from being filtered for stopwords.
         Only useful in very big queries that you are certain contain
@@ -248,17 +259,17 @@ class Query:
         self._no_stopwords = True
         return self
 
-    def with_payloads(self):
+    def with_payloads(self) -> "Query":
         """Ask the engine to return document payloads."""
         self._with_payloads = True
         return self
 
-    def with_scores(self):
+    def with_scores(self) -> "Query":
         """Ask the engine to return document search scores."""
         self._with_scores = True
         return self
 
-    def limit_fields(self, *fields):
+    def limit_fields(self, *fields: List[str]) -> "Query":
         """
         Limit the search to specific TEXT fields only.
 
@@ -268,7 +279,7 @@ class Query:
         self._fields = fields
         return self
 
-    def add_filter(self, flt):
+    def add_filter(self, flt: "Filter") -> "Query":
         """
         Add a numeric or geo filter to the query.
         **Currently only one of each filter is supported by the engine**
@@ -280,7 +291,7 @@ class Query:
         self._filters.append(flt)
         return self
 
-    def sort_by(self, field, asc=True):
+    def sort_by(self, field: str, asc: bool = True) -> "Query":
         """
         Add a sortby field to the query.
 
@@ -290,7 +301,7 @@ class Query:
         self._sortby = SortbyField(field, asc)
         return self
 
-    def expander(self, expander):
+    def expander(self, expander: str) -> "Query":
         """
         Add a expander field to the query.
 
@@ -310,7 +321,7 @@ class Query:
 
 
 class Filter:
-    def __init__(self, keyword, field, *args):
+    def __init__(self, keyword: str, field: str, *args: List[str]) -> None:
         self.args = [keyword, field] + list(args)
 
 
@@ -318,7 +329,14 @@ class NumericFilter(Filter):
     INF = "+inf"
     NEG_INF = "-inf"
 
-    def __init__(self, field, minval, maxval, minExclusive=False, maxExclusive=False):
+    def __init__(
+        self,
+        field: str,
+        minval: Union[int, str],
+        maxval: Union[int, str],
+        minExclusive: bool = False,
+        maxExclusive: bool = False,
+    ) -> None:
         args = [
             minval if not minExclusive else f"({minval}",
             maxval if not maxExclusive else f"({maxval}",
@@ -333,10 +351,12 @@ class GeoFilter(Filter):
     FEET = "ft"
     MILES = "mi"
 
-    def __init__(self, field, lon, lat, radius, unit=KILOMETERS):
+    def __init__(
+        self, field: str, lon: float, lat: float, radius: float, unit: str = KILOMETERS
+    ) -> None:
         Filter.__init__(self, "GEOFILTER", field, lon, lat, radius, unit)
 
 
 class SortbyField:
-    def __init__(self, field, asc=True):
+    def __init__(self, field: str, asc=True) -> None:
         self.args = [field, "ASC" if asc else "DESC"]

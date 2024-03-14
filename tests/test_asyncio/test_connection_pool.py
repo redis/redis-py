@@ -1,5 +1,4 @@
 import asyncio
-import os
 import re
 
 import pytest
@@ -8,7 +7,7 @@ import redis.asyncio as redis
 from redis.asyncio.connection import Connection, to_bool
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
-from .compat import mock
+from .compat import aclosing, mock
 from .conftest import asynccontextmanager
 from .test_pubsub import wait_for_message
 
@@ -43,7 +42,7 @@ class TestRedisAutoReleaseConnectionPool:
         new_conn = await self.create_two_conn(r)
         assert new_conn != r.connection
         assert self.get_total_connected_connections(r.connection_pool) == 2
-        await r.close()
+        await r.aclose()
         assert self.has_no_connected_connections(r.connection_pool)
 
     async def test_do_not_auto_disconnect_redis_created_pool(self, r2: redis.Redis):
@@ -53,7 +52,7 @@ class TestRedisAutoReleaseConnectionPool:
         )
         new_conn = await self.create_two_conn(r2)
         assert self.get_total_connected_connections(r2.connection_pool) == 2
-        await r2.close()
+        await r2.aclose()
         assert r2.connection_pool._in_use_connections == {new_conn}
         assert new_conn.is_connected
         assert len(r2.connection_pool._available_connections) == 1
@@ -62,7 +61,7 @@ class TestRedisAutoReleaseConnectionPool:
     async def test_auto_release_override_true_manual_created_pool(self, r: redis.Redis):
         assert r.auto_close_connection_pool is True, "This is from the class fixture"
         await self.create_two_conn(r)
-        await r.close()
+        await r.aclose()
         assert self.get_total_connected_connections(r.connection_pool) == 2, (
             "The connection pool should not be disconnected as a manually created "
             "connection pool was passed in in conftest.py"
@@ -73,7 +72,7 @@ class TestRedisAutoReleaseConnectionPool:
     async def test_close_override(self, r: redis.Redis, auto_close_conn_pool):
         r.auto_close_connection_pool = auto_close_conn_pool
         await self.create_two_conn(r)
-        await r.close(close_connection_pool=True)
+        await r.aclose(close_connection_pool=True)
         assert self.has_no_connected_connections(r.connection_pool)
 
     @pytest.mark.parametrize("auto_close_conn_pool", [True, False])
@@ -82,7 +81,7 @@ class TestRedisAutoReleaseConnectionPool:
     ):
         r.auto_close_connection_pool = auto_close_conn_pool
         new_conn = await self.create_two_conn(r)
-        await r.close(close_connection_pool=False)
+        await r.aclose(close_connection_pool=False)
         assert not self.has_no_connected_connections(r.connection_pool)
         assert r.connection_pool._in_use_connections == {new_conn}
         assert r.connection_pool._available_connections[0].is_connected
@@ -94,7 +93,9 @@ class DummyConnection(Connection):
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-        self.pid = os.getpid()
+
+    def repr_pieces(self):
+        return [("id", id(self)), ("kwargs", self.kwargs)]
 
     async def connect(self):
         pass
@@ -134,6 +135,16 @@ class TestConnectionPool:
             assert isinstance(connection, DummyConnection)
             assert connection.kwargs == connection_kwargs
 
+    async def test_aclosing(self):
+        connection_kwargs = {"foo": "bar", "biz": "baz"}
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            max_connections=None,
+            **connection_kwargs,
+        )
+        async with aclosing(pool):
+            pass
+
     async def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
@@ -169,11 +180,8 @@ class TestConnectionPool:
         async with self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=redis.Connection
         ) as pool:
-            expected = (
-                "ConnectionPool<Connection<"
-                "host=localhost,port=6379,db=1,client_name=test-client>>"
-            )
-            assert repr(pool) == expected
+            expected = "host=localhost,port=6379,db=1,client_name=test-client"
+            assert expected in repr(pool)
 
     async def test_repr_contains_db_info_unix(self):
         connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
@@ -181,11 +189,8 @@ class TestConnectionPool:
             connection_kwargs=connection_kwargs,
             connection_class=redis.UnixDomainSocketConnection,
         ) as pool:
-            expected = (
-                "ConnectionPool<UnixDomainSocketConnection<"
-                "path=/abc,db=1,client_name=test-client>>"
-            )
-            assert repr(pool) == expected
+            expected = "path=/abc,db=1,client_name=test-client"
+            assert expected in repr(pool)
 
 
 class TestBlockingConnectionPool:
@@ -282,11 +287,8 @@ class TestBlockingConnectionPool:
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
         )
-        expected = (
-            "ConnectionPool<Connection<"
-            "host=localhost,port=6379,db=0,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "host=localhost,port=6379,db=0,client_name=test-client"
+        assert expected in repr(pool)
 
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
@@ -294,11 +296,8 @@ class TestBlockingConnectionPool:
             path="abc",
             client_name="test-client",
         )
-        expected = (
-            "ConnectionPool<UnixDomainSocketConnection<"
-            "path=abc,db=0,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "path=abc,db=0,client_name=test-client"
+        assert expected in repr(pool)
 
 
 class TestConnectionPoolURLParsing:
@@ -441,6 +440,31 @@ class TestConnectionPoolURLParsing:
             "Redis URL must specify one of the following schemes "
             "(redis://, rediss://, unix://)"
         )
+
+
+class TestBlockingConnectionPoolURLParsing:
+    def test_extra_typed_querystring_options(self):
+        pool = redis.BlockingConnectionPool.from_url(
+            "redis://localhost/2?socket_timeout=20&socket_connect_timeout=10"
+            "&socket_keepalive=&retry_on_timeout=Yes&max_connections=10&timeout=13.37"
+        )
+
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            "host": "localhost",
+            "db": 2,
+            "socket_timeout": 20.0,
+            "socket_connect_timeout": 10.0,
+            "retry_on_timeout": True,
+        }
+        assert pool.max_connections == 10
+        assert pool.timeout == 13.37
+
+    def test_invalid_extra_typed_querystring_options(self):
+        with pytest.raises(ValueError):
+            redis.BlockingConnectionPool.from_url(
+                "redis://localhost/2?timeout=_not_a_float_"
+            )
 
 
 class TestConnectionPoolUnixSocketURLParsing:
@@ -623,7 +647,10 @@ class TestConnection:
         connection = redis.Redis.from_url("redis://localhost")
         pool = connection.connection_pool
 
-        assert re.match("(.*)<(.*)<(.*)>>", repr(pool)).groups() == (
+        print(repr(pool))
+        assert re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
+        ).groups() == (
             "ConnectionPool",
             "Connection",
             "host=localhost,port=6379,db=0",
@@ -633,7 +660,9 @@ class TestConnection:
         connection = redis.Redis.from_url("unix:///path/to/socket")
         pool = connection.connection_pool
 
-        assert re.match("(.*)<(.*)<(.*)>>", repr(pool)).groups() == (
+        assert re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
+        ).groups() == (
             "ConnectionPool",
             "UnixDomainSocketConnection",
             "path=/path/to/socket,db=0",

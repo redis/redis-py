@@ -2,6 +2,7 @@ import asyncio
 import copy
 import inspect
 import re
+import ssl
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -14,16 +15,23 @@ from typing import (
     List,
     Mapping,
     MutableMapping,
-    NoReturn,
     Optional,
+    Protocol,
     Set,
     Tuple,
     Type,
+    TypedDict,
     TypeVar,
     Union,
     cast,
 )
 
+from redis._cache import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_EVICTION_POLICY,
+    DEFAULT_WHITELIST,
+    AbstractCache,
+)
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,
@@ -50,7 +58,6 @@ from redis.commands import (
     AsyncSentinelCommands,
     list_or_args,
 )
-from redis.compat import Protocol, TypedDict
 from redis.credentials import CredentialProvider
 from redis.exceptions import (
     ConnectionError,
@@ -62,7 +69,14 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.typing import ChannelT, EncodableT, KeyT
-from redis.utils import HIREDIS_AVAILABLE, _set_info_logger, safe_str, str_if_bytes
+from redis.utils import (
+    HIREDIS_AVAILABLE,
+    _set_info_logger,
+    deprecated_function,
+    get_lib_version,
+    safe_str,
+    str_if_bytes,
+)
 
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
 _KeyT = TypeVar("_KeyT", bound=KeyT)
@@ -104,7 +118,13 @@ class Redis(
     response_callbacks: MutableMapping[Union[str, bytes], ResponseCallbackT]
 
     @classmethod
-    def from_url(cls, url: str, **kwargs):
+    def from_url(
+        cls,
+        url: str,
+        single_connection_client: bool = False,
+        auto_close_connection_pool: Optional[bool] = None,
+        **kwargs,
+    ):
         """
         Return a Redis client object configured from the given URL
 
@@ -128,10 +148,13 @@ class Redis(
 
         There are several ways to specify a database number. The first value
         found will be used:
-            1. A ``db`` querystring option, e.g. redis://localhost?db=0
-            2. If using the redis:// or rediss:// schemes, the path argument
+
+        1. A ``db`` querystring option, e.g. redis://localhost?db=0
+
+        2. If using the redis:// or rediss:// schemes, the path argument
                of the url, e.g. redis://localhost/0
-            3. A ``db`` keyword argument to this function.
+
+        3. A ``db`` keyword argument to this function.
 
         If none of these options are specified, the default db=0 is used.
 
@@ -144,12 +167,40 @@ class Redis(
         arguments always win.
 
         """
-        single_connection_client = kwargs.pop("single_connection_client", False)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
-        return cls(
+        client = cls(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
         )
+        if auto_close_connection_pool is not None:
+            warnings.warn(
+                DeprecationWarning(
+                    '"auto_close_connection_pool" is deprecated '
+                    "since version 5.0.1. "
+                    "Please create a ConnectionPool explicitly and "
+                    "provide to the Redis() constructor instead."
+                )
+            )
+        else:
+            auto_close_connection_pool = True
+        client.auto_close_connection_pool = auto_close_connection_pool
+        return client
+
+    @classmethod
+    def from_pool(
+        cls: Type["Redis"],
+        connection_pool: ConnectionPool,
+    ) -> "Redis":
+        """
+        Return a Redis client from the given connection pool.
+        The Redis client will take ownership of the connection pool and
+        close it when the Redis client is closed.
+        """
+        client = cls(
+            connection_pool=connection_pool,
+        )
+        client.auto_close_connection_pool = True
+        return client
 
     def __init__(
         self,
@@ -176,16 +227,26 @@ class Redis(
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
+        ssl_min_version: Optional[ssl.TLSVersion] = None,
         max_connections: Optional[int] = None,
         single_connection_client: bool = False,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
+        lib_name: Optional[str] = "redis-py",
+        lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
-        auto_close_connection_pool: bool = True,
+        auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        cache_enabled: bool = False,
+        client_cache: Optional[AbstractCache] = None,
+        cache_max_size: int = 100,
+        cache_ttl: int = 0,
+        cache_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
+        cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ):
         """
         Initialize a new Redis client.
@@ -196,13 +257,22 @@ class Redis(
         """
         kwargs: Dict[str, Any]
         # auto_close_connection_pool only has an effect if connection_pool is
-        # None. This is a similar feature to the missing __del__ to resolve #1103,
-        # but it accounts for whether a user wants to manually close the connection
-        # pool, as a similar feature to ConnectionPool's __del__.
-        self.auto_close_connection_pool = (
-            auto_close_connection_pool if connection_pool is None else False
-        )
+        # None. It is assumed that if connection_pool is not None, the user
+        # wants to manage the connection pool themselves.
+        if auto_close_connection_pool is not None:
+            warnings.warn(
+                DeprecationWarning(
+                    '"auto_close_connection_pool" is deprecated '
+                    "since version 5.0.1. "
+                    "Please create a ConnectionPool explicitly and "
+                    "provide to the Redis() constructor instead."
+                )
+            )
+        else:
+            auto_close_connection_pool = True
+
         if not connection_pool:
+            # Create internal connection pool, expected to be closed by Redis instance
             if not retry_on_error:
                 retry_on_error = []
             if retry_on_timeout is True:
@@ -222,8 +292,17 @@ class Redis(
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
+                "lib_name": lib_name,
+                "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
+                "cache_enabled": cache_enabled,
+                "client_cache": client_cache,
+                "cache_max_size": cache_max_size,
+                "cache_ttl": cache_ttl,
+                "cache_policy": cache_policy,
+                "cache_blacklist": cache_blacklist,
+                "cache_whitelist": cache_whitelist,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -255,9 +334,16 @@ class Redis(
                             "ssl_ca_certs": ssl_ca_certs,
                             "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,
+                            "ssl_min_version": ssl_min_version,
                         }
                     )
+            # This arg only used if no pool is passed in
+            self.auto_close_connection_pool = auto_close_connection_pool
             connection_pool = ConnectionPool(**kwargs)
+        else:
+            # If a pool is passed in, do not close it
+            self.auto_close_connection_pool = False
+
         self.connection_pool = connection_pool
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
@@ -275,7 +361,10 @@ class Redis(
         self._single_conn_lock = asyncio.Lock()
 
     def __repr__(self):
-        return f"{self.__class__.__name__}<{self.connection_pool!r}>"
+        return (
+            f"<{self.__class__.__module__}.{self.__class__.__name__}"
+            f"({self.connection_pool!r})>"
+        )
 
     def __await__(self):
         return self.initialize().__await__()
@@ -466,19 +555,27 @@ class Redis(
         return await self.initialize()
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.close()
+        await self.aclose()
 
     _DEL_MESSAGE = "Unclosed Redis client"
 
-    def __del__(self, _warnings: Any = warnings) -> None:
+    # passing _warnings and _grl as argument default since they may be gone
+    # by the time __del__ is called at shutdown
+    def __del__(
+        self,
+        _warn: Any = warnings.warn,
+        _grl: Any = asyncio.get_running_loop,
+    ) -> None:
         if hasattr(self, "connection") and (self.connection is not None):
-            _warnings.warn(
-                f"Unclosed client session {self!r}", ResourceWarning, source=self
-            )
-            context = {"client": self, "message": self._DEL_MESSAGE}
-            asyncio.get_running_loop().call_exception_handler(context)
+            _warn(f"Unclosed client session {self!r}", ResourceWarning, source=self)
+            try:
+                context = {"client": self, "message": self._DEL_MESSAGE}
+                _grl().call_exception_handler(context)
+            except RuntimeError:
+                pass
+            self.connection._close()
 
-    async def close(self, close_connection_pool: Optional[bool] = None) -> None:
+    async def aclose(self, close_connection_pool: Optional[bool] = None) -> None:
         """
         Closes Redis client connection
 
@@ -495,6 +592,13 @@ class Redis(
             close_connection_pool is None and self.auto_close_connection_pool
         ):
             await self.connection_pool.disconnect()
+
+    @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="close")
+    async def close(self, close_connection_pool: Optional[bool] = None) -> None:
+        """
+        Alias for aclose(), for backwards compatibility
+        """
+        await self.aclose(close_connection_pool)
 
     async def _send_command_parse_response(self, conn, command_name, *args, **options):
         """
@@ -520,22 +624,30 @@ class Redis(
     async def execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
         await self.initialize()
-        pool = self.connection_pool
         command_name = args[0]
+        keys = options.pop("keys", None)  # keys are used only for client side caching
+        pool = self.connection_pool
         conn = self.connection or await pool.get_connection(command_name, **options)
-
-        if self.single_connection_client:
-            await self._single_conn_lock.acquire()
+        response_from_cache = await conn._get_from_local_cache(args)
         try:
-            return await conn.retry.call_with_retry(
-                lambda: self._send_command_parse_response(
-                    conn, command_name, *args, **options
-                ),
-                lambda error: self._disconnect_raise(conn, error),
-            )
+            if response_from_cache is not None:
+                return response_from_cache
+            else:
+                try:
+                    if self.single_connection_client:
+                        await self._single_conn_lock.acquire()
+                    response = await conn.retry.call_with_retry(
+                        lambda: self._send_command_parse_response(
+                            conn, command_name, *args, **options
+                        ),
+                        lambda error: self._disconnect_raise(conn, error),
+                    )
+                    conn._add_to_local_cache(args, response, keys)
+                    return response
+                finally:
+                    if self.single_connection_client:
+                        self._single_conn_lock.release()
         finally:
-            if self.single_connection_client:
-                self._single_conn_lock.release()
             if not self.connection:
                 await pool.release(conn)
 
@@ -564,6 +676,33 @@ class Redis(
             return await retval if inspect.isawaitable(retval) else retval
         return response
 
+    def flush_cache(self):
+        try:
+            if self.connection:
+                self.connection.client_cache.flush()
+            else:
+                self.connection_pool.flush_cache()
+        except AttributeError:
+            pass
+
+    def delete_command_from_cache(self, command):
+        try:
+            if self.connection:
+                self.connection.client_cache.delete_command(command)
+            else:
+                self.connection_pool.delete_command_from_cache(command)
+        except AttributeError:
+            pass
+
+    def invalidate_key_from_cache(self, key):
+        try:
+            if self.connection:
+                self.connection.client_cache.invalidate_key(key)
+            else:
+                self.connection_pool.invalidate_key_from_cache(key)
+        except AttributeError:
+            pass
+
 
 StrictRedis = Redis
 
@@ -584,7 +723,7 @@ class Monitor:
     listen() method yields commands from monitor.
     """
 
-    monitor_re = re.compile(r"\[(\d+) (.*)\] (.*)")
+    monitor_re = re.compile(r"\[(\d+) (.*?)\] (.*)")
     command_re = re.compile(r'"(.*?)(?<!\\)"')
 
     def __init__(self, connection_pool: ConnectionPool):
@@ -703,17 +842,22 @@ class PubSub:
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.reset()
+        await self.aclose()
 
     def __del__(self):
         if self.connection:
-            self.connection.clear_connect_callbacks()
+            self.connection.deregister_connect_callback(self.on_connect)
 
-    async def reset(self):
+    async def aclose(self):
+        # In case a connection property does not yet exist
+        # (due to a crash earlier in the Redis() constructor), return
+        # immediately as there is nothing to clean-up.
+        if not hasattr(self, "connection"):
+            return
         async with self._lock:
             if self.connection:
                 await self.connection.disconnect()
-                self.connection.clear_connect_callbacks()
+                self.connection.deregister_connect_callback(self.on_connect)
                 await self.connection_pool.release(self.connection)
                 self.connection = None
             self.channels = {}
@@ -721,13 +865,15 @@ class PubSub:
             self.patterns = {}
             self.pending_unsubscribe_patterns = set()
 
-    def close(self) -> Awaitable[NoReturn]:
-        # In case a connection property does not yet exist
-        # (due to a crash earlier in the Redis() constructor), return
-        # immediately as there is nothing to clean-up.
-        if not hasattr(self, "connection"):
-            return
-        return self.reset()
+    @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="close")
+    async def close(self) -> None:
+        """Alias for aclose(), for backwards compatibility"""
+        await self.aclose()
+
+    @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="reset")
+    async def reset(self) -> None:
+        """Alias for aclose(), for backwards compatibility"""
+        await self.aclose()
 
     async def on_connect(self, connection: Connection):
         """Re-subscribe to any channels and patterns previously subscribed to"""
@@ -778,16 +924,20 @@ class PubSub:
         else:
             await self.connection.connect()
         if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
-            self.connection._parser.set_push_handler(self.push_handler_func)
+            self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
 
     async def _disconnect_raise_connect(self, conn, error):
         """
         Close the connection and raise an exception
-        if retry_on_timeout is not set or the error
-        is not a TimeoutError. Otherwise, try to reconnect
+        if retry_on_error is not set or the error is not one
+        of the specified error types. Otherwise, try to
+        reconnect
         """
         await conn.disconnect()
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             raise error
         await conn.connect()
 
@@ -1171,6 +1321,10 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             await self.connection_pool.release(self.connection)
             self.connection = None
 
+    async def aclose(self) -> None:
+        """Alias for reset(), a standard method name for cleanup"""
+        await self.reset()
+
     def multi(self):
         """
         Start a transactional block of the pipeline after WATCH commands
@@ -1187,6 +1341,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     def execute_command(
         self, *args, **kwargs
     ) -> Union["Pipeline", Awaitable["Pipeline"]]:
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         if (self.watching or args[0] == "WATCH") and not self.explicit_transaction:
             return self.immediate_execute_command(*args, **kwargs)
         return self.pipeline_execute_command(*args, **kwargs)
@@ -1195,22 +1350,25 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         """
         Close the connection, reset watching state and
         raise an exception if we were watching,
-        retry_on_timeout is not set,
-        or the error is not a TimeoutError
+        if retry_on_error is not set or the error is not one
+        of the specified error types.
         """
         await conn.disconnect()
         # if we were already watching a variable, the watch is no longer
         # valid since this connection has died. raise a WatchError, which
         # indicates the user should retry this transaction.
         if self.watching:
-            await self.reset()
+            await self.aclose()
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
-        # if retry_on_timeout is not set, or the error is not
-        # a TimeoutError, raise it
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
-            await self.reset()
+        # if retry_on_error is not set or the error is not one
+        # of the specified error types, raise it
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
+            await self.aclose()
             raise
 
     async def immediate_execute_command(self, *args, **options):
@@ -1384,8 +1542,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     async def _disconnect_raise_reset(self, conn: Connection, error: Exception):
         """
         Close the connection, raise an exception if we were watching,
-        and raise an exception if retry_on_timeout is not set,
-        or the error is not a TimeoutError
+        and raise an exception if retry_on_error is not set or the
+        error is not one of the specified error types.
         """
         await conn.disconnect()
         # if we were watching a variable, the watch is no longer valid
@@ -1395,9 +1553,12 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
-        # if retry_on_timeout is not set, or the error is not
-        # a TimeoutError, raise it
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        # if retry_on_error is not set or the error is not one
+        # of the specified error types, raise it
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             await self.reset()
             raise
 

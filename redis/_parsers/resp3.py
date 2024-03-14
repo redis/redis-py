@@ -6,15 +6,18 @@ from ..typing import EncodableT
 from .base import _AsyncRESPBase, _RESPBase
 from .socket import SERVER_CLOSED_CONNECTION_ERROR
 
+_INVALIDATION_MESSAGE = [b"invalidate", "invalidate"]
+
 
 class _RESP3Parser(_RESPBase):
     """RESP3 protocol implementation"""
 
     def __init__(self, socket_read_size):
         super().__init__(socket_read_size)
-        self.push_handler_func = self.handle_push_response
+        self.pubsub_push_handler_func = self.handle_pubsub_push_response
+        self.invalidations_push_handler_func = None
 
-    def handle_push_response(self, response):
+    def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
         logger.info("Push response: " + str(response))
         return response
@@ -96,8 +99,9 @@ class _RESP3Parser(_RESPBase):
                 pass
         # map response
         elif byte == b"%":
-            # we use this approach and not dict comprehension here
-            # because this dict comprehension fails in python 3.7
+            # We cannot use a dict-comprehension to parse stream.
+            # Evaluation order of key:val expression in dict comprehension only
+            # became defined to be left-right in version 3.8
             resp_dict = {}
             for _ in range(int(response)):
                 key = self._read_response(disable_decoding=disable_decoding)
@@ -113,13 +117,9 @@ class _RESP3Parser(_RESPBase):
                 )
                 for _ in range(int(response))
             ]
-            res = self.push_handler_func(response)
-            if not push_request:
-                return self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
-                )
-            else:
-                return res
+            response = self.handle_push_response(
+                response, disable_decoding, push_request
+            )
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
 
@@ -127,16 +127,32 @@ class _RESP3Parser(_RESPBase):
             response = self.encoder.decode(response)
         return response
 
-    def set_push_handler(self, push_handler_func):
-        self.push_handler_func = push_handler_func
+    def handle_push_response(self, response, disable_decoding, push_request):
+        if response[0] in _INVALIDATION_MESSAGE:
+            res = self.invalidation_push_handler_func(response)
+        else:
+            res = self.pubsub_push_handler_func(response)
+        if not push_request:
+            return self._read_response(
+                disable_decoding=disable_decoding, push_request=push_request
+            )
+        else:
+            return res
+
+    def set_pubsub_push_handler(self, pubsub_push_handler_func):
+        self.pubsub_push_handler_func = pubsub_push_handler_func
+
+    def set_invalidation_push_handler(self, invalidations_push_handler_func):
+        self.invalidation_push_handler_func = invalidations_push_handler_func
 
 
 class _AsyncRESP3Parser(_AsyncRESPBase):
     def __init__(self, socket_read_size):
         super().__init__(socket_read_size)
-        self.push_handler_func = self.handle_push_response
+        self.pubsub_push_handler_func = self.handle_pubsub_push_response
+        self.invalidations_push_handler_func = None
 
-    def handle_push_response(self, response):
+    def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
         logger.info("Push response: " + str(response))
         return response
@@ -225,12 +241,16 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
                 pass
         # map response
         elif byte == b"%":
-            response = {
-                (await self._read_response(disable_decoding=disable_decoding)): (
-                    await self._read_response(disable_decoding=disable_decoding)
+            # We cannot use a dict-comprehension to parse stream.
+            # Evaluation order of key:val expression in dict comprehension only
+            # became defined to be left-right in version 3.8
+            resp_dict = {}
+            for _ in range(int(response)):
+                key = await self._read_response(disable_decoding=disable_decoding)
+                resp_dict[key] = await self._read_response(
+                    disable_decoding=disable_decoding, push_request=push_request
                 )
-                for _ in range(int(response))
-            }
+            response = resp_dict
         # push response
         elif byte == b">":
             response = [
@@ -241,15 +261,9 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
                 )
                 for _ in range(int(response))
             ]
-            res = self.push_handler_func(response)
-            if not push_request:
-                return await (
-                    self._read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
-                    )
-                )
-            else:
-                return res
+            response = await self.handle_push_response(
+                response, disable_decoding, push_request
+            )
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
 
@@ -257,5 +271,20 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
             response = self.encoder.decode(response)
         return response
 
-    def set_push_handler(self, push_handler_func):
-        self.push_handler_func = push_handler_func
+    async def handle_push_response(self, response, disable_decoding, push_request):
+        if response[0] in _INVALIDATION_MESSAGE:
+            res = self.invalidation_push_handler_func(response)
+        else:
+            res = self.pubsub_push_handler_func(response)
+        if not push_request:
+            return await self._read_response(
+                disable_decoding=disable_decoding, push_request=push_request
+            )
+        else:
+            return res
+
+    def set_pubsub_push_handler(self, pubsub_push_handler_func):
+        self.pubsub_push_handler_func = pubsub_push_handler_func
+
+    def set_invalidation_push_handler(self, invalidations_push_handler_func):
+        self.invalidation_push_handler_func = invalidations_push_handler_func

@@ -2,6 +2,7 @@ import argparse
 import random
 import time
 from typing import Callable, TypeVar
+from unittest import mock
 from unittest.mock import Mock
 from urllib.parse import urlparse
 
@@ -9,7 +10,7 @@ import pytest
 import redis
 from packaging.version import Version
 from redis.backoff import NoBackoff
-from redis.connection import parse_url
+from redis.connection import Connection, parse_url
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
 
@@ -39,7 +40,6 @@ class BooleanOptionalAction(argparse.Action):
         help=None,
         metavar=None,
     ):
-
         _option_strings = []
         for option_string in option_strings:
             _option_strings.append(option_string)
@@ -72,7 +72,6 @@ class BooleanOptionalAction(argparse.Action):
 
 
 def pytest_addoption(parser):
-
     parser.addoption(
         "--redis-url",
         default=default_redis_url,
@@ -131,6 +130,7 @@ def pytest_sessionstart(session):
         enterprise = info["enterprise"]
     except redis.ConnectionError:
         # provide optimistic defaults
+        info = {}
         version = "10.0.0"
         arch_bits = 64
         cluster_enabled = False
@@ -145,9 +145,7 @@ def pytest_sessionstart(session):
     # module info
     try:
         REDIS_INFO["modules"] = info["modules"]
-    except redis.exceptions.ConnectionError:
-        pass
-    except KeyError:
+    except (KeyError, redis.exceptions.ConnectionError):
         pass
 
     if cluster_enabled:
@@ -277,7 +275,7 @@ def _get_client(
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
-    if "protocol" not in redis_url:
+    if "protocol" not in redis_url and kwargs.get("protocol") is None:
         kwargs["protocol"] = request.config.getoption("--protocol")
 
     cluster_mode = REDIS_INFO["cluster_enabled"]
@@ -355,23 +353,24 @@ def sslclient(request):
 
 
 def _gen_cluster_mock_resp(r, response):
-    connection = Mock()
+    connection = Mock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
-    r.connection = connection
-    return r
+    connection._get_from_local_cache.return_value = None
+    with mock.patch.object(r, "connection", connection):
+        yield r
 
 
 @pytest.fixture()
 def mock_cluster_resp_ok(request, **kwargs):
     r = _get_client(redis.Redis, request, **kwargs)
-    return _gen_cluster_mock_resp(r, "OK")
+    yield from _gen_cluster_mock_resp(r, "OK")
 
 
 @pytest.fixture()
 def mock_cluster_resp_int(request, **kwargs):
     r = _get_client(redis.Redis, request, **kwargs)
-    return _gen_cluster_mock_resp(r, 2)
+    yield from _gen_cluster_mock_resp(r, 2)
 
 
 @pytest.fixture()
@@ -385,7 +384,7 @@ def mock_cluster_resp_info(request, **kwargs):
         "cluster_my_epoch:2\r\ncluster_stats_messages_sent:170262\r\n"
         "cluster_stats_messages_received:105653\r\n"
     )
-    return _gen_cluster_mock_resp(r, response)
+    yield from _gen_cluster_mock_resp(r, response)
 
 
 @pytest.fixture()
@@ -409,7 +408,7 @@ def mock_cluster_resp_nodes(request, **kwargs):
         "fbb23ed8cfa23f17eaf27ff7d0c410492a1093d6 172.17.0.7:7002 "
         "master,fail - 1447829446956 1447829444948 1 disconnected\n"
     )
-    return _gen_cluster_mock_resp(r, response)
+    yield from _gen_cluster_mock_resp(r, response)
 
 
 @pytest.fixture()
@@ -420,7 +419,7 @@ def mock_cluster_resp_slaves(request, **kwargs):
         "slave 19efe5a631f3296fdf21a5441680f893e8cc96ec 0 "
         "1447836789290 3 connected']"
     )
-    return _gen_cluster_mock_resp(r, response)
+    yield from _gen_cluster_mock_resp(r, response)
 
 
 @pytest.fixture(scope="session")

@@ -2,11 +2,10 @@ import asyncio
 import copy
 import enum
 import inspect
-import os
 import socket
 import ssl
 import sys
-import threading
+import warnings
 import weakref
 from abc import abstractmethod
 from itertools import chain
@@ -18,9 +17,11 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Protocol,
     Set,
     Tuple,
     Type,
+    TypedDict,
     TypeVar,
     Union,
 )
@@ -35,22 +36,27 @@ else:
 
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.compat import Protocol, TypedDict
 from redis.connection import DEFAULT_RESP_VERSION
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
-    ChildDeadlockedError,
     ConnectionError,
     DataError,
     RedisError,
     ResponseError,
     TimeoutError,
 )
-from redis.typing import EncodableT
-from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
+from redis.typing import EncodableT, KeysT, ResponseT
+from redis.utils import HIREDIS_AVAILABLE, get_lib_version, str_if_bytes
 
+from .._cache import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_EVICTION_POLICY,
+    DEFAULT_WHITELIST,
+    AbstractCache,
+    _LocalCache,
+)
 from .._parsers import (
     BaseParser,
     Encoder,
@@ -97,10 +103,11 @@ class AbstractConnection:
     """Manages communication to and from a Redis server"""
 
     __slots__ = (
-        "pid",
         "db",
         "username",
         "client_name",
+        "lib_name",
+        "lib_version",
         "credential_provider",
         "password",
         "socket_timeout",
@@ -114,6 +121,9 @@ class AbstractConnection:
         "encoder",
         "ssl_context",
         "protocol",
+        "client_cache",
+        "cache_blacklist",
+        "cache_whitelist",
         "_reader",
         "_writer",
         "_parser",
@@ -140,12 +150,21 @@ class AbstractConnection:
         socket_read_size: int = 65536,
         health_check_interval: float = 0,
         client_name: Optional[str] = None,
+        lib_name: Optional[str] = "redis-py",
+        lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
         redis_connect_func: Optional[ConnectCallbackT] = None,
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        cache_enabled: bool = False,
+        client_cache: Optional[AbstractCache] = None,
+        cache_max_size: int = 10000,
+        cache_ttl: int = 0,
+        cache_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
+        cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -154,9 +173,10 @@ class AbstractConnection:
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
-        self.pid = os.getpid()
         self.db = db
         self.client_name = client_name
+        self.lib_name = lib_name
+        self.lib_version = lib_version
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
@@ -202,10 +222,40 @@ class AbstractConnection:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
             self.protocol = protocol
+        if cache_enabled:
+            _cache = _LocalCache(cache_max_size, cache_ttl, cache_policy)
+        else:
+            _cache = None
+        self.client_cache = client_cache if client_cache is not None else _cache
+        if self.client_cache is not None:
+            if self.protocol not in [3, "3"]:
+                raise RedisError(
+                    "client caching is only supported with protocol version 3 or higher"
+                )
+            self.cache_blacklist = cache_blacklist
+            self.cache_whitelist = cache_whitelist
+
+    def __del__(self, _warnings: Any = warnings):
+        # For some reason, the individual streams don't get properly garbage
+        # collected and therefore produce no resource warnings.  We add one
+        # here, in the same style as those from the stdlib.
+        if getattr(self, "_writer", None):
+            _warnings.warn(
+                f"unclosed Connection {self!r}", ResourceWarning, source=self
+            )
+            self._close()
+
+    def _close(self):
+        """
+        Internal method to silently close the connection without waiting
+        """
+        if self._writer:
+            self._writer.close()
+            self._writer = self._reader = None
 
     def __repr__(self):
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
-        return f"{self.__class__.__name__}<{repr_args}>"
+        return f"<{self.__class__.__module__}.{self.__class__.__name__}({repr_args})>"
 
     @abstractmethod
     def repr_pieces(self):
@@ -216,10 +266,27 @@ class AbstractConnection:
         return self._reader is not None and self._writer is not None
 
     def register_connect_callback(self, callback):
-        self._connect_callbacks.append(weakref.WeakMethod(callback))
+        """
+        Register a callback to be called when the connection is established either
+        initially or reconnected.  This allows listeners to issue commands that
+        are ephemeral to the connection, for example pub/sub subscription or
+        key tracking.  The callback must be a _method_ and will be kept as
+        a weak reference.
+        """
+        wm = weakref.WeakMethod(callback)
+        if wm not in self._connect_callbacks:
+            self._connect_callbacks.append(wm)
 
-    def clear_connect_callbacks(self):
-        self._connect_callbacks = []
+    def deregister_connect_callback(self, callback):
+        """
+        De-register a previously registered callback.  It will no-longer receive
+        notifications on connection events.  Calling this is not required when the
+        listener goes away, since the callbacks are kept as weak methods.
+        """
+        try:
+            self._connect_callbacks.remove(weakref.WeakMethod(callback))
+        except ValueError:
+            pass
 
     def set_parser(self, parser_class: Type[BaseParser]) -> None:
         """
@@ -262,6 +329,8 @@ class AbstractConnection:
 
         # run any user callbacks. right now the only internal callback
         # is for pubsub channel/pattern resubscription
+        # first, remove any dead weakrefs
+        self._connect_callbacks = [ref for ref in self._connect_callbacks if ref()]
         for ref in self._connect_callbacks:
             callback = ref()
             task = callback(self)
@@ -347,9 +416,28 @@ class AbstractConnection:
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
-        # if a database is specified, switch to it
+        # set the library name and version, pipeline for lower startup latency
+        if self.lib_name:
+            await self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
+        if self.lib_version:
+            await self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
+        # if a database is specified, switch to it. Also pipeline this
         if self.db:
             await self.send_command("SELECT", self.db)
+        # if client caching is enabled, start tracking
+        if self.client_cache:
+            await self.send_command("CLIENT", "TRACKING", "ON")
+            await self.read_response()
+            self._parser.set_invalidation_push_handler(self._cache_invalidation_process)
+
+        # read responses from pipeline
+        for _ in (sent for sent in (self.lib_name, self.lib_version) if sent):
+            try:
+                await self.read_response()
+            except ResponseError:
+                pass
+
+        if self.db:
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
@@ -361,12 +449,11 @@ class AbstractConnection:
                 if not self.is_connected:
                     return
                 try:
-                    if os.getpid() == self.pid:
-                        self._writer.close()  # type: ignore[union-attr]
-                        # wait for close to finish, except when handling errors and
-                        # forcefully disconnecting.
-                        if not nowait:
-                            await self._writer.wait_closed()  # type: ignore[union-attr]
+                    self._writer.close()  # type: ignore[union-attr]
+                    # wait for close to finish, except when handling errors and
+                    # forcefully disconnecting.
+                    if not nowait:
+                        await self._writer.wait_closed()  # type: ignore[union-attr]
                 except OSError:
                     pass
                 finally:
@@ -376,6 +463,9 @@ class AbstractConnection:
             raise TimeoutError(
                 f"Timed out closing connection after {self.socket_connect_timeout}"
             ) from None
+        finally:
+            if self.client_cache:
+                self.client_cache.flush()
 
     async def _send_ping(self):
         """Send PING, expect PONG in return"""
@@ -593,6 +683,53 @@ class AbstractConnection:
             output.append(SYM_EMPTY.join(pieces))
         return output
 
+    def _socket_is_empty(self):
+        """Check if the socket is empty"""
+        return len(self._reader._buffer) == 0
+
+    def _cache_invalidation_process(
+        self, data: List[Union[str, Optional[List[str]]]]
+    ) -> None:
+        """
+        Invalidate (delete) all redis commands associated with a specific key.
+        `data` is a list of strings, where the first string is the invalidation message
+        and the second string is the list of keys to invalidate.
+        (if the list of keys is None, then all keys are invalidated)
+        """
+        if data[1] is not None:
+            self.client_cache.flush()
+        else:
+            for key in data[1]:
+                self.client_cache.invalidate_key(str_if_bytes(key))
+
+    async def _get_from_local_cache(self, command: str):
+        """
+        If the command is in the local cache, return the response
+        """
+        if (
+            self.client_cache is None
+            or command[0] in self.cache_blacklist
+            or command[0] not in self.cache_whitelist
+        ):
+            return None
+        while not self._socket_is_empty():
+            await self.read_response(push_request=True)
+        return self.client_cache.get(command)
+
+    def _add_to_local_cache(
+        self, command: Tuple[str], response: ResponseT, keys: List[KeysT]
+    ):
+        """
+        Add the command and response to the local cache if the command
+        is allowed to be cached
+        """
+        if (
+            self.client_cache is not None
+            and (self.cache_blacklist == [] or command[0] not in self.cache_blacklist)
+            and (self.cache_whitelist == [] or command[0] in self.cache_whitelist)
+        ):
+            self.client_cache.set(command, response, keys)
+
 
 class Connection(AbstractConnection):
     "Manages TCP communication to and from a Redis server"
@@ -686,6 +823,7 @@ class SSLConnection(Connection):
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
+        ssl_min_version: Optional[ssl.TLSVersion] = None,
         **kwargs,
     ):
         self.ssl_context: RedisSSLContext = RedisSSLContext(
@@ -695,6 +833,7 @@ class SSLConnection(Connection):
             ca_certs=ssl_ca_certs,
             ca_data=ssl_ca_data,
             check_hostname=ssl_check_hostname,
+            min_version=ssl_min_version,
         )
         super().__init__(**kwargs)
 
@@ -727,6 +866,10 @@ class SSLConnection(Connection):
     def check_hostname(self):
         return self.ssl_context.check_hostname
 
+    @property
+    def min_version(self):
+        return self.ssl_context.min_version
+
 
 class RedisSSLContext:
     __slots__ = (
@@ -737,6 +880,7 @@ class RedisSSLContext:
         "ca_data",
         "context",
         "check_hostname",
+        "min_version",
     )
 
     def __init__(
@@ -747,6 +891,7 @@ class RedisSSLContext:
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
         check_hostname: bool = False,
+        min_version: Optional[ssl.TLSVersion] = None,
     ):
         self.keyfile = keyfile
         self.certfile = certfile
@@ -766,6 +911,7 @@ class RedisSSLContext:
         self.ca_certs = ca_certs
         self.ca_data = ca_data
         self.check_hostname = check_hostname
+        self.min_version = min_version
         self.context: Optional[ssl.SSLContext] = None
 
     def get(self) -> ssl.SSLContext:
@@ -777,6 +923,8 @@ class RedisSSLContext:
                 context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
             if self.ca_certs or self.ca_data:
                 context.load_verify_locations(cafile=self.ca_certs, cadata=self.ca_data)
+            if self.min_version is not None:
+                context.minimum_version = self.min_version
             self.context = context
         return self.context
 
@@ -840,6 +988,7 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "max_connections": int,
         "health_check_interval": int,
         "ssl_check_hostname": to_bool,
+        "timeout": float,
     }
 )
 
@@ -948,10 +1097,13 @@ class ConnectionPool:
 
         There are several ways to specify a database number. The first value
         found will be used:
-            1. A ``db`` querystring option, e.g. redis://localhost?db=0
-            2. If using the redis:// or rediss:// schemes, the path argument
+
+        1. A ``db`` querystring option, e.g. redis://localhost?db=0
+
+        2. If using the redis:// or rediss:// schemes, the path argument
                of the url, e.g. redis://localhost/0
-            3. A ``db`` keyword argument to this function.
+
+        3. A ``db`` keyword argument to this function.
 
         If none of these options are specified, the default db=0 is used.
 
@@ -981,123 +1133,47 @@ class ConnectionPool:
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
-        # a lock to protect the critical section in _checkpid().
-        # this lock is acquired when the process id changes, such as
-        # after a fork. during this time, multiple threads in the child
-        # process could attempt to acquire this lock. the first thread
-        # to acquire the lock will reset the data structures and lock
-        # object of this pool. subsequent threads acquiring this lock
-        # will notice the first thread already did the work and simply
-        # release the lock.
-        self._fork_lock = threading.Lock()
-        self._lock = asyncio.Lock()
-        self._created_connections: int
-        self._available_connections: List[AbstractConnection]
-        self._in_use_connections: Set[AbstractConnection]
-        self.reset()  # lgtm [py/init-calls-subclass]
+        self._available_connections: List[AbstractConnection] = []
+        self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
 
     def __repr__(self):
         return (
-            f"{self.__class__.__name__}"
-            f"<{self.connection_class(**self.connection_kwargs)!r}>"
+            f"<{self.__class__.__module__}.{self.__class__.__name__}"
+            f"({self.connection_class(**self.connection_kwargs)!r})>"
         )
 
     def reset(self):
-        self._lock = asyncio.Lock()
-        self._created_connections = 0
         self._available_connections = []
-        self._in_use_connections = set()
+        self._in_use_connections = weakref.WeakSet()
 
-        # this must be the last operation in this method. while reset() is
-        # called when holding _fork_lock, other threads in this process
-        # can call _checkpid() which compares self.pid and os.getpid() without
-        # holding any lock (for performance reasons). keeping this assignment
-        # as the last operation ensures that those other threads will also
-        # notice a pid difference and block waiting for the first thread to
-        # release _fork_lock. when each of these threads eventually acquire
-        # _fork_lock, they will notice that another thread already called
-        # reset() and they will immediately release _fork_lock and continue on.
-        self.pid = os.getpid()
-
-    def _checkpid(self):
-        # _checkpid() attempts to keep ConnectionPool fork-safe on modern
-        # systems. this is called by all ConnectionPool methods that
-        # manipulate the pool's state such as get_connection() and release().
-        #
-        # _checkpid() determines whether the process has forked by comparing
-        # the current process id to the process id saved on the ConnectionPool
-        # instance. if these values are the same, _checkpid() simply returns.
-        #
-        # when the process ids differ, _checkpid() assumes that the process
-        # has forked and that we're now running in the child process. the child
-        # process cannot use the parent's file descriptors (e.g., sockets).
-        # therefore, when _checkpid() sees the process id change, it calls
-        # reset() in order to reinitialize the child's ConnectionPool. this
-        # will cause the child to make all new connection objects.
-        #
-        # _checkpid() is protected by self._fork_lock to ensure that multiple
-        # threads in the child process do not call reset() multiple times.
-        #
-        # there is an extremely small chance this could fail in the following
-        # scenario:
-        #   1. process A calls _checkpid() for the first time and acquires
-        #      self._fork_lock.
-        #   2. while holding self._fork_lock, process A forks (the fork()
-        #      could happen in a different thread owned by process A)
-        #   3. process B (the forked child process) inherits the
-        #      ConnectionPool's state from the parent. that state includes
-        #      a locked _fork_lock. process B will not be notified when
-        #      process A releases the _fork_lock and will thus never be
-        #      able to acquire the _fork_lock.
-        #
-        # to mitigate this possible deadlock, _checkpid() will only wait 5
-        # seconds to acquire _fork_lock. if _fork_lock cannot be acquired in
-        # that time it is assumed that the child is deadlocked and a
-        # redis.ChildDeadlockedError error is raised.
-        if self.pid != os.getpid():
-            acquired = self._fork_lock.acquire(timeout=5)
-            if not acquired:
-                raise ChildDeadlockedError
-            # reset() the instance for the new process if another thread
-            # hasn't already done so
-            try:
-                if self.pid != os.getpid():
-                    self.reset()
-            finally:
-                self._fork_lock.release()
+    def can_get_connection(self) -> bool:
+        """Return True if a connection can be retrieved from the pool."""
+        return (
+            self._available_connections
+            or len(self._in_use_connections) < self.max_connections
+        )
 
     async def get_connection(self, command_name, *keys, **options):
-        """Get a connection from the pool"""
-        self._checkpid()
-        async with self._lock:
-            try:
-                connection = self._available_connections.pop()
-            except IndexError:
-                connection = self.make_connection()
-            self._in_use_connections.add(connection)
-
+        """Get a connected connection from the pool"""
+        connection = self.get_available_connection()
         try:
-            # ensure this connection is connected to Redis
-            await connection.connect()
-            # connections that the pool provides should be ready to send
-            # a command. if not, the connection was either returned to the
-            # pool before all data has been read or the socket has been
-            # closed. either way, reconnect and verify everything is good.
-            try:
-                if await connection.can_read_destructive():
-                    raise ConnectionError("Connection has data") from None
-            except (ConnectionError, OSError):
-                await connection.disconnect()
-                await connection.connect()
-                if await connection.can_read_destructive():
-                    raise ConnectionError("Connection not ready") from None
+            await self.ensure_connection(connection)
         except BaseException:
-            # release the connection back to the pool so that we don't
-            # leak it
             await self.release(connection)
             raise
 
+        return connection
+
+    def get_available_connection(self):
+        """Get a connection from the pool, without making sure it is connected"""
+        try:
+            connection = self._available_connections.pop()
+        except IndexError:
+            if len(self._in_use_connections) >= self.max_connections:
+                raise ConnectionError("Too many connections") from None
+            connection = self.make_connection()
+        self._in_use_connections.add(connection)
         return connection
 
     def get_encoder(self):
@@ -1110,35 +1186,37 @@ class ConnectionPool:
         )
 
     def make_connection(self):
-        """Create a new connection"""
-        if self._created_connections >= self.max_connections:
-            raise ConnectionError("Too many connections")
-        self._created_connections += 1
+        """Create a new connection.  Can be overridden by child classes."""
         return self.connection_class(**self.connection_kwargs)
+
+    async def ensure_connection(self, connection: AbstractConnection):
+        """Ensure that the connection object is connected and valid"""
+        await connection.connect()
+        # if client caching is not enabled connections that the pool
+        # provides should be ready to send a command.
+        # if not, the connection was either returned to the
+        # pool before all data has been read or the socket has been
+        # closed. either way, reconnect and verify everything is good.
+        # (if caching enabled the connection will not always be ready
+        # to send a command because it may contain invalidation messages)
+        try:
+            if (
+                await connection.can_read_destructive()
+                and connection.client_cache is None
+            ):
+                raise ConnectionError("Connection has data") from None
+        except (ConnectionError, OSError):
+            await connection.disconnect()
+            await connection.connect()
+            if await connection.can_read_destructive():
+                raise ConnectionError("Connection not ready") from None
 
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool"""
-        self._checkpid()
-        async with self._lock:
-            try:
-                self._in_use_connections.remove(connection)
-            except KeyError:
-                # Gracefully fail when a connection is returned to this pool
-                # that the pool doesn't actually own
-                pass
-
-            if self.owns_connection(connection):
-                self._available_connections.append(connection)
-            else:
-                # pool doesn't own this connection. do not add it back
-                # to the pool and decrement the count so that another
-                # connection can take its place if needed
-                self._created_connections -= 1
-                await connection.disconnect()
-                return
-
-    def owns_connection(self, connection: AbstractConnection):
-        return connection.pid == self.pid
+        # Connections should always be returned to the correct pool,
+        # not doing so is an error that will cause an exception here.
+        self._in_use_connections.remove(connection)
+        self._available_connections.append(connection)
 
     async def disconnect(self, inuse_connections: bool = True):
         """
@@ -1148,21 +1226,23 @@ class ConnectionPool:
         current in use, potentially by other tasks. Otherwise only disconnect
         connections that are idle in the pool.
         """
-        self._checkpid()
-        async with self._lock:
-            if inuse_connections:
-                connections: Iterable[AbstractConnection] = chain(
-                    self._available_connections, self._in_use_connections
-                )
-            else:
-                connections = self._available_connections
-            resp = await asyncio.gather(
-                *(connection.disconnect() for connection in connections),
-                return_exceptions=True,
+        if inuse_connections:
+            connections: Iterable[AbstractConnection] = chain(
+                self._available_connections, self._in_use_connections
             )
-            exc = next((r for r in resp if isinstance(r, BaseException)), None)
-            if exc:
-                raise exc
+        else:
+            connections = self._available_connections
+        resp = await asyncio.gather(
+            *(connection.disconnect() for connection in connections),
+            return_exceptions=True,
+        )
+        exc = next((r for r in resp if isinstance(r, BaseException)), None)
+        if exc:
+            raise exc
+
+    async def aclose(self) -> None:
+        """Close the pool, disconnecting all connections"""
+        await self.disconnect()
 
     def set_retry(self, retry: "Retry") -> None:
         for conn in self._available_connections:
@@ -1170,24 +1250,54 @@ class ConnectionPool:
         for conn in self._in_use_connections:
             conn.retry = retry
 
+    def flush_cache(self):
+        connections = chain(self._available_connections, self._in_use_connections)
+
+        for connection in connections:
+            try:
+                connection.client_cache.flush()
+            except AttributeError:
+                # cache is not enabled
+                pass
+
+    def delete_command_from_cache(self, command: str):
+        connections = chain(self._available_connections, self._in_use_connections)
+
+        for connection in connections:
+            try:
+                connection.client_cache.delete_command(command)
+            except AttributeError:
+                # cache is not enabled
+                pass
+
+    def invalidate_key_from_cache(self, key: str):
+        connections = chain(self._available_connections, self._in_use_connections)
+
+        for connection in connections:
+            try:
+                connection.client_cache.invalidate_key(key)
+            except AttributeError:
+                # cache is not enabled
+                pass
+
 
 class BlockingConnectionPool(ConnectionPool):
     """
-    Thread-safe blocking connection pool::
+    A blocking connection pool::
 
-        >>> from redis.client import Redis
-        >>> client = Redis(connection_pool=BlockingConnectionPool())
+        >>> from redis.asyncio import Redis, BlockingConnectionPool
+        >>> client = Redis.from_pool(BlockingConnectionPool())
 
     It performs the same function as the default
-    :py:class:`~redis.ConnectionPool` implementation, in that,
+    :py:class:`~redis.asyncio.ConnectionPool` implementation, in that,
     it maintains a pool of reusable connections that can be shared by
-    multiple redis clients (safely across threads if required).
+    multiple async redis clients.
 
     The difference is that, in the event that a client tries to get a
     connection from the pool when all of connections are in use, rather than
     raising a :py:class:`~redis.ConnectionError` (as the default
-    :py:class:`~redis.ConnectionPool` implementation does), it
-    makes the client wait ("blocks") for a specified number of seconds until
+    :py:class:`~redis.asyncio.ConnectionPool` implementation does), it
+    blocks the current `Task` for a specified number of seconds until
     a connection becomes available.
 
     Use ``max_connections`` to increase / decrease the pool size::
@@ -1210,131 +1320,37 @@ class BlockingConnectionPool(ConnectionPool):
         max_connections: int = 50,
         timeout: Optional[int] = 20,
         connection_class: Type[AbstractConnection] = Connection,
-        queue_class: Type[asyncio.Queue] = asyncio.LifoQueue,
+        queue_class: Type[asyncio.Queue] = asyncio.LifoQueue,  # deprecated
         **connection_kwargs,
     ):
-
-        self.queue_class = queue_class
-        self.timeout = timeout
-        self._connections: List[AbstractConnection]
         super().__init__(
             connection_class=connection_class,
             max_connections=max_connections,
             **connection_kwargs,
         )
-
-    def reset(self):
-        # Create and fill up a thread safe queue with ``None`` values.
-        self.pool = self.queue_class(self.max_connections)
-        while True:
-            try:
-                self.pool.put_nowait(None)
-            except asyncio.QueueFull:
-                break
-
-        # Keep a list of actual connection instances so that we can
-        # disconnect them later.
-        self._connections = []
-
-        # this must be the last operation in this method. while reset() is
-        # called when holding _fork_lock, other threads in this process
-        # can call _checkpid() which compares self.pid and os.getpid() without
-        # holding any lock (for performance reasons). keeping this assignment
-        # as the last operation ensures that those other threads will also
-        # notice a pid difference and block waiting for the first thread to
-        # release _fork_lock. when each of these threads eventually acquire
-        # _fork_lock, they will notice that another thread already called
-        # reset() and they will immediately release _fork_lock and continue on.
-        self.pid = os.getpid()
-
-    def make_connection(self):
-        """Make a fresh connection."""
-        connection = self.connection_class(**self.connection_kwargs)
-        self._connections.append(connection)
-        return connection
+        self._condition = asyncio.Condition()
+        self.timeout = timeout
 
     async def get_connection(self, command_name, *keys, **options):
-        """
-        Get a connection, blocking for ``self.timeout`` until a connection
-        is available from the pool.
-
-        If the connection returned is ``None`` then creates a new connection.
-        Because we use a last-in first-out queue, the existing connections
-        (having been returned to the pool after the initial ``None`` values
-        were added) will be returned before ``None`` values. This means we only
-        create new connections when we need to, i.e.: the actual number of
-        connections will only increase in response to demand.
-        """
-        # Make sure we haven't changed process.
-        self._checkpid()
-
-        # Try and get a connection from the pool. If one isn't available within
-        # self.timeout then raise a ``ConnectionError``.
-        connection = None
+        """Gets a connection from the pool, blocking until one is available"""
         try:
-            async with async_timeout(self.timeout):
-                connection = await self.pool.get()
-        except (asyncio.QueueEmpty, asyncio.TimeoutError):
-            # Note that this is not caught by the redis client and will be
-            # raised unless handled by application code. If you want never to
-            raise ConnectionError("No connection available.")
+            async with self._condition:
+                async with async_timeout(self.timeout):
+                    await self._condition.wait_for(self.can_get_connection)
+                    connection = super().get_available_connection()
+        except asyncio.TimeoutError as err:
+            raise ConnectionError("No connection available.") from err
 
-        # If the ``connection`` is actually ``None`` then that's a cue to make
-        # a new connection to add to the pool.
-        if connection is None:
-            connection = self.make_connection()
-
+        # We now perform the connection check outside of the lock.
         try:
-            # ensure this connection is connected to Redis
-            await connection.connect()
-            # connections that the pool provides should be ready to send
-            # a command. if not, the connection was either returned to the
-            # pool before all data has been read or the socket has been
-            # closed. either way, reconnect and verify everything is good.
-            try:
-                if await connection.can_read_destructive():
-                    raise ConnectionError("Connection has data") from None
-            except (ConnectionError, OSError):
-                await connection.disconnect()
-                await connection.connect()
-                if await connection.can_read_destructive():
-                    raise ConnectionError("Connection not ready") from None
+            await self.ensure_connection(connection)
+            return connection
         except BaseException:
-            # release the connection back to the pool so that we don't leak it
             await self.release(connection)
             raise
 
-        return connection
-
     async def release(self, connection: AbstractConnection):
         """Releases the connection back to the pool."""
-        # Make sure we haven't changed process.
-        self._checkpid()
-        if not self.owns_connection(connection):
-            # pool doesn't own this connection. do not add it back
-            # to the pool. instead add a None value which is a placeholder
-            # that will cause the pool to recreate the connection if
-            # its needed.
-            await connection.disconnect()
-            self.pool.put_nowait(None)
-            return
-
-        # Put the connection back into the pool.
-        try:
-            self.pool.put_nowait(connection)
-        except asyncio.QueueFull:
-            # perhaps the pool has been reset() after a fork? regardless,
-            # we don't want this connection
-            pass
-
-    async def disconnect(self, inuse_connections: bool = True):
-        """Disconnects all connections in the pool."""
-        self._checkpid()
-        async with self._lock:
-            resp = await asyncio.gather(
-                *(connection.disconnect() for connection in self._connections),
-                return_exceptions=True,
-            )
-            exc = next((r for r in resp if isinstance(r, BaseException)), None)
-            if exc:
-                raise exc
+        async with self._condition:
+            await super().release(connection)
+            self._condition.notify()

@@ -15,6 +15,8 @@ class DelayProxy:
         self.send_event = asyncio.Event()
         self.server = None
         self.task = None
+        self.cond = asyncio.Condition()
+        self.running = 0
 
     async def __aenter__(self):
         await self.start()
@@ -49,24 +51,24 @@ class DelayProxy:
     async def handle(self, reader, writer):
         # establish connection to redis
         redis_reader, redis_writer = await asyncio.open_connection(*self.redis_addr)
-        try:
-            pipe1 = asyncio.create_task(
-                self.pipe(reader, redis_writer, "to redis:", self.send_event)
-            )
-            pipe2 = asyncio.create_task(self.pipe(redis_reader, writer, "from redis:"))
-            await asyncio.gather(pipe1, pipe2)
-        finally:
-            redis_writer.close()
+        pipe1 = asyncio.create_task(
+            self.pipe(reader, redis_writer, "to redis:", self.send_event)
+        )
+        pipe2 = asyncio.create_task(self.pipe(redis_reader, writer, "from redis:"))
+        await asyncio.gather(pipe1, pipe2)
 
     async def stop(self):
-        # clean up enough so that we can reuse the looper
+        # shutdown the server
         self.task.cancel()
         try:
             await self.task
         except asyncio.CancelledError:
             pass
-        loop = self.server.get_loop()
-        await loop.shutdown_asyncgens()
+        await self.server.wait_closed()
+        # Server does not wait for all spawned tasks.  We must do that also to ensure
+        # that all sockets are closed.
+        async with self.cond:
+            await self.cond.wait_for(lambda: self.running == 0)
 
     async def pipe(
         self,
@@ -75,32 +77,43 @@ class DelayProxy:
         name="",
         event: asyncio.Event = None,
     ):
-        while True:
-            data = await reader.read(1000)
-            if not data:
-                break
-            # print(f"{name} read {len(data)} delay {self.delay}")
-            if event:
-                event.set()
-            await asyncio.sleep(self.delay)
-            writer.write(data)
-            await writer.drain()
+        self.running += 1
+        try:
+            while True:
+                data = await reader.read(1000)
+                if not data:
+                    break
+                # print(f"{name} read {len(data)} delay {self.delay}")
+                if event:
+                    event.set()
+                await asyncio.sleep(self.delay)
+                writer.write(data)
+                await writer.drain()
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except RuntimeError:
+                # ignore errors on close pertaining to no event loop. Don't want
+                # to clutter the test output with errors if being garbage collected
+                pass
+            async with self.cond:
+                self.running -= 1
+                if self.running == 0:
+                    self.cond.notify_all()
 
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
 async def test_standalone(delay, master_host):
-
     # create a tcp socket proxy that relays data to Redis and back,
     # inserting 0.1 seconds of delay
     async with DelayProxy(addr=("127.0.0.1", 5380), redis_addr=master_host) as dp:
-
         for b in [True, False]:
             # note that we connect to proxy, rather than to Redis directly
             async with Redis(
                 host="127.0.0.1", port=5380, single_connection_client=b
             ) as r:
-
                 await r.set("foo", "foo")
                 await r.set("bar", "bar")
 
@@ -180,7 +193,6 @@ async def test_standalone_pipeline(delay, master_host):
 
 @pytest.mark.onlycluster
 async def test_cluster(master_host):
-
     delay = 0.1
     cluster_port = 16379
     remap_base = 7372
@@ -204,8 +216,9 @@ async def test_cluster(master_host):
             p.send_event.clear()
 
     async def wait_for_send():
-        asyncio.wait(
-            [p.send_event.wait() for p in proxies], return_when=asyncio.FIRST_COMPLETED
+        await asyncio.wait(
+            [asyncio.Task(p.send_event.wait()) for p in proxies],
+            return_when=asyncio.FIRST_COMPLETED,
         )
 
     @contextlib.contextmanager
@@ -219,11 +232,10 @@ async def test_cluster(master_host):
         for p in proxies:
             await stack.enter_async_context(p)
 
-        with contextlib.closing(
-            RedisCluster.from_url(
-                f"redis://127.0.0.1:{remap_base}", address_remap=remap
-            )
-        ) as r:
+        r = RedisCluster.from_url(
+            f"redis://127.0.0.1:{remap_base}", address_remap=remap
+        )
+        try:
             await r.initialize()
             await r.set("foo", "foo")
             await r.set("bar", "bar")
@@ -241,10 +253,12 @@ async def test_cluster(master_host):
             with pytest.raises(asyncio.CancelledError):
                 await t
 
-            # try a number of requests to excercise all the connections
+            # try a number of requests to exercise all the connections
             async def doit():
                 assert await r.get("bar") == b"bar"
                 assert await r.ping()
                 assert await r.get("foo") == b"foo"
 
             await asyncio.gather(*[doit() for _ in range(10)])
+        finally:
+            await r.close()

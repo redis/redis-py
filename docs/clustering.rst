@@ -26,7 +26,7 @@ cluster instance can be created:
 
 -  Using ‘host’ and ‘port’ arguments:
 
-.. code:: pycon
+.. code:: python
 
    >>> from redis.cluster import RedisCluster as Redis
    >>> rc = Redis(host='localhost', port=6379)
@@ -35,14 +35,14 @@ cluster instance can be created:
 
 -  Using the Redis URL specification:
 
-.. code:: pycon
+.. code:: python
 
    >>> from redis.cluster import RedisCluster as Redis
    >>> rc = Redis.from_url("redis://localhost:6379/0")
 
 -  Directly, via the ClusterNode class:
 
-.. code:: pycon
+.. code:: python
 
    >>> from redis.cluster import RedisCluster as Redis
    >>> from redis.cluster import ClusterNode
@@ -77,7 +77,7 @@ you can change it using the ‘set_default_node’ method.
 The ‘target_nodes’ parameter is explained in the following section,
 ‘Specifying Target Nodes’.
 
-.. code:: pycon
+.. code:: python
 
    >>> # target-nodes: the node that holds 'foo1's key slot
    >>> rc.set('foo1', 'bar1')
@@ -92,7 +92,7 @@ The ‘target_nodes’ parameter is explained in the following section,
    >>> # target-node: default-node
    >>> rc.ping()
 
-Specfiying Target Nodes
+Specifying Target Nodes
 -----------------------
 
 As mentioned above, all non key-based RedisCluster commands accept the
@@ -105,7 +105,7 @@ topology of the cluster changes during the execution of a command, the
 client will be able to resolve the nodes flag again with the new
 topology and attempt to retry executing the command.
 
-.. code:: pycon
+.. code:: python
 
    >>> from redis.cluster import RedisCluster as Redis
    >>> # run cluster-meet command on all of the cluster's nodes
@@ -127,7 +127,7 @@ topology changes, a retry attempt will not be made, since the passed
 target node/s may no longer be valid, and the relevant cluster or
 connection error will be returned.
 
-.. code:: pycon
+.. code:: python
 
    >>> node = rc.get_node('localhost', 6379)
    >>> # Get the keys only for that specific node
@@ -140,7 +140,7 @@ In addition, the RedisCluster instance can query the Redis instance of a
 specific node and execute commands on that node directly. The Redis
 client, however, does not handle cluster failures and retries.
 
-.. code:: pycon
+.. code:: python
 
    >>> cluster_node = rc.get_node(host='localhost', port=6379)
    >>> print(cluster_node)
@@ -170,7 +170,7 @@ to the relevant slots, sending the commands to the slots’ node owners.
 Non-atomic operations batch the keys according to their hash value, and
 then each batch is sent separately to the slot’s owner.
 
-.. code:: pycon
+.. code:: python
 
    # Atomic operations can be used when all keys are mapped to the same slot
    >>> rc.mset({'{foo}1': 'bar1', '{foo}2': 'bar2'})
@@ -202,7 +202,7 @@ the commands are not currently recommended for use. See
 documentation <https://redis-py-cluster.readthedocs.io/en/stable/pubsub.html>`__
 for more.
 
-.. code:: pycon
+.. code:: python
 
    >>> p1 = rc.pubsub()
    # p1 connection will be set to the node that holds 'foo' keyslot
@@ -224,7 +224,7 @@ READONLY mode can be set at runtime by calling the readonly() method
 with target_nodes=‘replicas’, and read-write access can be restored by
 calling the readwrite() method.
 
-.. code:: pycon
+.. code:: python
 
    >>> from cluster import RedisCluster as Redis
    # Use 'debug' log level to print the node that the command is executed on

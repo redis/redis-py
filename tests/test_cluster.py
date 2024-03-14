@@ -10,6 +10,7 @@ from time import sleep
 from unittest.mock import DEFAULT, Mock, call, patch
 
 import pytest
+import redis
 from redis import Redis
 from redis._parsers import CommandsParser
 from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
@@ -43,6 +44,7 @@ from tests.test_pubsub import wait_for_message
 from .conftest import (
     _get_client,
     assert_resp_response,
+    is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -149,7 +151,9 @@ def slowlog(request, r):
     r.config_set("slowlog-max-len", 128)
 
 
-def get_mocked_redis_client(func=None, *args, **kwargs):
+def get_mocked_redis_client(
+    func=None, cluster_slots_raise_error=False, *args, **kwargs
+):
     """
     Return a stable RedisCluster object that have deterministic
     nodes and slots setup to remove the problem of different IP addresses
@@ -162,8 +166,11 @@ def get_mocked_redis_client(func=None, *args, **kwargs):
 
         def execute_command(*_args, **_kwargs):
             if _args[0] == "CLUSTER SLOTS":
-                mock_cluster_slots = cluster_slots
-                return mock_cluster_slots
+                if cluster_slots_raise_error:
+                    raise ResponseError()
+                else:
+                    mock_cluster_slots = cluster_slots
+                    return mock_cluster_slots
             elif _args[0] == "COMMAND":
                 return {"get": [], "set": []}
             elif _args[0] == "INFO":
@@ -201,6 +208,7 @@ def get_mocked_redis_client(func=None, *args, **kwargs):
 def mock_node_resp(node, response):
     connection = Mock()
     connection.read_response.return_value = response
+    connection._get_from_local_cache.return_value = None
     node.redis_connection.connection = connection
     return node
 
@@ -208,6 +216,7 @@ def mock_node_resp(node, response):
 def mock_node_resp_func(node, func):
     connection = Mock()
     connection.read_response.side_effect = func
+    connection._get_from_local_cache.return_value = None
     node.redis_connection.connection = connection
     return node
 
@@ -476,6 +485,7 @@ class TestRedisClusterObj:
         redis_mock_node.execute_command.side_effect = mock_execute_command
         # Mock response value for all other commands
         redis_mock_node.parse_response.return_value = "MOCK_OK"
+        redis_mock_node.connection._get_from_local_cache.return_value = None
         for node in r.get_nodes():
             if node.port != primary.port:
                 node.redis_connection = redis_mock_node
@@ -775,6 +785,8 @@ class TestRedisClusterObj:
             assert all(r.cluster_delslots(missing_slot))
             with pytest.raises(ClusterDownError):
                 r.exists("foo")
+        except ResponseError as e:
+            assert "CLUSTERDOWN" in str(e)
         finally:
             try:
                 # Add back the missing slot
@@ -1157,8 +1169,15 @@ class TestClusterRedisCommands:
             b"health",
         ]
         for x in cluster_shards:
-            assert list(x.keys()) == ["slots", "nodes"]
-            for node in x["nodes"]:
+            assert_resp_response(
+                r, list(x.keys()), ["slots", "nodes"], [b"slots", b"nodes"]
+            )
+            try:
+                x["nodes"]
+                key = "nodes"
+            except KeyError:
+                key = b"nodes"
+            for node in x[key]:
                 for attribute in node.keys():
                     assert attribute in attributes
 
@@ -1415,11 +1434,18 @@ class TestClusterRedisCommands:
     def test_cluster_links(self, r):
         node = r.get_random_node()
         res = r.cluster_links(node)
-        links_to = sum(x.count("to") for x in res)
-        links_for = sum(x.count("from") for x in res)
-        assert links_to == links_for
-        for i in range(0, len(res) - 1, 2):
-            assert res[i][3] == res[i + 1][3]
+        if is_resp2_connection(r):
+            links_to = sum(x.count(b"to") for x in res)
+            links_for = sum(x.count(b"from") for x in res)
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i][3] == res[i + 1][3]
+        else:
+            links_to = len(list(filter(lambda x: x[b"direction"] == b"to", res)))
+            links_for = len(list(filter(lambda x: x[b"direction"] == b"from", res)))
+            assert links_to == links_for
+            for i in range(0, len(res) - 1, 2):
+                assert res[i][b"node"] == res[i + 1][b"node"]
 
     def test_cluster_flshslots_not_implemented(self, r):
         with pytest.raises(NotImplementedError):
@@ -2041,25 +2067,25 @@ class TestClusterRedisCommands:
             r,
             r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}b", b"b1", 10),
-            [b"b", b"b1", 10],
+            [b"{foo}b", b"b1", 10],
         )
         assert_resp_response(
             r,
             r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}b", b"b2", 20),
-            [b"b", b"b2", 20],
+            [b"{foo}b", b"b2", 20],
         )
         assert_resp_response(
             r,
             r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}a", b"a1", 1),
-            [b"a", b"a1", 1],
+            [b"{foo}a", b"a1", 1],
         )
         assert_resp_response(
             r,
             r.bzpopmin(["{foo}b", "{foo}a"], timeout=1),
             (b"{foo}a", b"a2", 2),
-            [b"a", b"a2", 2],
+            [b"{foo}a", b"a2", 2],
         )
         assert r.bzpopmin(["{foo}b", "{foo}a"], timeout=1) is None
         r.zadd("{foo}c", {"c1": 100})
@@ -2408,11 +2434,62 @@ class TestClusterRedisCommands:
             user_client.hset("{cache}:0", "hkey", "hval")
 
         assert isinstance(r.acl_log(target_nodes=node), list)
-        assert len(r.acl_log(target_nodes=node)) == 2
+        assert len(r.acl_log(target_nodes=node)) == 3
         assert len(r.acl_log(count=1, target_nodes=node)) == 1
         assert isinstance(r.acl_log(target_nodes=node)[0], dict)
         assert "client-info" in r.acl_log(count=1, target_nodes=node)[0]
         assert r.acl_log_reset(target_nodes=node)
+
+    def generate_lib_code(self, lib_name):
+        return f"""#!js api_version=1.0 name={lib_name}\n redis.registerFunction('foo', ()=>{{return 'bar'}})"""  # noqa
+
+    def try_delete_libs(self, r, *lib_names):
+        for lib_name in lib_names:
+            try:
+                r.tfunction_delete(lib_name)
+            except Exception:
+                pass
+
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfunction_load_delete(self, r):
+        r.gears_refresh_cluster()
+        self.try_delete_libs(r, "lib1")
+        lib_code = self.generate_lib_code("lib1")
+        assert r.tfunction_load(lib_code)
+        assert r.tfunction_delete("lib1")
+
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfunction_list(self, r):
+        r.gears_refresh_cluster()
+        self.try_delete_libs(r, "lib1", "lib2", "lib3")
+        assert r.tfunction_load(self.generate_lib_code("lib1"))
+        assert r.tfunction_load(self.generate_lib_code("lib2"))
+        assert r.tfunction_load(self.generate_lib_code("lib3"))
+
+        # test error thrown when verbose > 4
+        with pytest.raises(DataError):
+            assert r.tfunction_list(verbose=8)
+
+        functions = r.tfunction_list(verbose=1)
+        assert len(functions) == 3
+
+        expected_names = [b"lib1", b"lib2", b"lib3"]
+        actual_names = [functions[0][13], functions[1][13], functions[2][13]]
+
+        assert sorted(expected_names) == sorted(actual_names)
+        assert r.tfunction_delete("lib1")
+        assert r.tfunction_delete("lib2")
+        assert r.tfunction_delete("lib3")
+
+    @skip_if_server_version_lt("7.1.140")
+    def test_tfcall(self, r):
+        r.gears_refresh_cluster()
+        self.try_delete_libs(r, "lib1")
+        assert r.tfunction_load(self.generate_lib_code("lib1"))
+        assert r.tfcall("lib1", "foo") == b"bar"
+        assert r.tfcall_async("lib1", "foo") == b"bar"
+
+        assert r.tfunction_delete("lib1")
 
 
 @pytest.mark.onlycluster
@@ -2582,7 +2659,10 @@ class TestNodesManager:
         """
         with pytest.raises(RedisClusterException) as e:
             get_mocked_redis_client(
-                host=default_host, port=default_port, cluster_enabled=False
+                cluster_slots_raise_error=True,
+                host=default_host,
+                port=default_port,
+                cluster_enabled=False,
             )
             assert "Cluster mode is not enabled on this node" in str(e.value)
 
@@ -3178,6 +3258,31 @@ class TestClusterPipeline:
             assert first_node.redis_connection.connection.read_response.called
             assert ask_node.redis_connection.connection.read_response.called
             assert res == ["MOCK_OK"]
+
+    def test_return_previously_acquired_connections(self, r):
+        # in order to ensure that a pipeline will make use of connections
+        #   from different nodes
+        assert r.keyslot("a") != r.keyslot("b")
+
+        orig_func = redis.cluster.get_connection
+        with patch("redis.cluster.get_connection") as get_connection:
+
+            def raise_error(target_node, *args, **kwargs):
+                if get_connection.call_count == 2:
+                    raise ConnectionError("mocked error")
+                else:
+                    return orig_func(target_node, *args, **kwargs)
+
+            get_connection.side_effect = raise_error
+
+            r.pipeline().get("a").get("b").execute()
+
+        # 4 = 2 get_connections per execution * 2 executions
+        assert get_connection.call_count == 4
+        for cluster_node in r.nodes_manager.nodes_cache.values():
+            connection_pool = cluster_node.redis_connection.connection_pool
+            num_of_conns = len(connection_pool._available_connections)
+            assert num_of_conns == connection_pool._created_connections
 
     def test_empty_stack(self, r):
         """

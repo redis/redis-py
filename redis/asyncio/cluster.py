@@ -2,6 +2,7 @@ import asyncio
 import collections
 import random
 import socket
+import ssl
 import warnings
 from typing import (
     Any,
@@ -18,6 +19,12 @@ from typing import (
     Union,
 )
 
+from redis._cache import (
+    DEFAULT_BLACKLIST,
+    DEFAULT_EVICTION_POLICY,
+    DEFAULT_WHITELIST,
+    AbstractCache,
+)
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -62,7 +69,13 @@ from redis.exceptions import (
     TryAgainError,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
-from redis.utils import dict_merge, safe_str, str_if_bytes
+from redis.utils import (
+    deprecated_function,
+    dict_merge,
+    get_lib_version,
+    safe_str,
+    str_if_bytes,
+)
 
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
@@ -237,6 +250,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         username: Optional[str] = None,
         password: Optional[str] = None,
         client_name: Optional[str] = None,
+        lib_name: Optional[str] = "redis-py",
+        lib_version: Optional[str] = get_lib_version(),
         # Encoding related kwargs
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
@@ -257,8 +272,16 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_keyfile: Optional[str] = None,
+        ssl_min_version: Optional[ssl.TLSVersion] = None,
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        cache_enabled: bool = False,
+        client_cache: Optional[AbstractCache] = None,
+        cache_max_size: int = 100,
+        cache_ttl: int = 0,
+        cache_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
+        cache_whitelist: List[str] = DEFAULT_WHITELIST,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -288,6 +311,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "username": username,
             "password": password,
             "client_name": client_name,
+            "lib_name": lib_name,
+            "lib_version": lib_version,
             # Encoding related kwargs
             "encoding": encoding,
             "encoding_errors": encoding_errors,
@@ -300,6 +325,14 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_timeout": socket_timeout,
             "retry": retry,
             "protocol": protocol,
+            # Client cache related kwargs
+            "cache_enabled": cache_enabled,
+            "client_cache": client_cache,
+            "cache_max_size": cache_max_size,
+            "cache_ttl": cache_ttl,
+            "cache_policy": cache_policy,
+            "cache_blacklist": cache_blacklist,
+            "cache_whitelist": cache_whitelist,
         }
 
         if ssl:
@@ -313,6 +346,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     "ssl_certfile": ssl_certfile,
                     "ssl_check_hostname": ssl_check_hostname,
                     "ssl_keyfile": ssl_keyfile,
+                    "ssl_min_version": ssl_min_version,
                 }
             )
 
@@ -391,12 +425,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                         )
                         self._initialize = False
                     except BaseException:
-                        await self.nodes_manager.close()
-                        await self.nodes_manager.close("startup_nodes")
+                        await self.nodes_manager.aclose()
+                        await self.nodes_manager.aclose("startup_nodes")
                         raise
         return self
 
-    async def close(self) -> None:
+    async def aclose(self) -> None:
         """Close all connections & client if initialized."""
         if not self._initialize:
             if not self._lock:
@@ -404,28 +438,37 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             async with self._lock:
                 if not self._initialize:
                     self._initialize = True
-                    await self.nodes_manager.close()
-                    await self.nodes_manager.close("startup_nodes")
+                    await self.nodes_manager.aclose()
+                    await self.nodes_manager.aclose("startup_nodes")
+
+    @deprecated_function(version="5.0.0", reason="Use aclose() instead", name="close")
+    async def close(self) -> None:
+        """alias for aclose() for backwards compatibility"""
+        await self.aclose()
 
     async def __aenter__(self) -> "RedisCluster":
         return await self.initialize()
 
     async def __aexit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        await self.close()
+        await self.aclose()
 
     def __await__(self) -> Generator[Any, None, "RedisCluster"]:
         return self.initialize().__await__()
 
     _DEL_MESSAGE = "Unclosed RedisCluster client"
 
-    def __del__(self) -> None:
+    def __del__(
+        self,
+        _warn: Any = warnings.warn,
+        _grl: Any = asyncio.get_running_loop,
+    ) -> None:
         if hasattr(self, "_initialize") and not self._initialize:
-            warnings.warn(f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self)
+            _warn(f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self)
             try:
                 context = {"client": self, "message": self._DEL_MESSAGE}
-                asyncio.get_running_loop().call_exception_handler(context)
+                _grl().call_exception_handler(context)
             except RuntimeError:
-                ...
+                pass
 
     async def on_connect(self, connection: Connection) -> None:
         await connection.on_connect()
@@ -584,13 +627,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         # EVAL/EVALSHA.
         # - issue: https://github.com/redis/redis/issues/9493
         # - fix: https://github.com/redis/redis/pull/9733
-        if command in ("EVAL", "EVALSHA"):
+        if command.upper() in ("EVAL", "EVALSHA"):
             # command syntax: EVAL "script body" num_keys ...
             if len(args) < 2:
                 raise RedisClusterException(
                     f"Invalid args in command: {command, *args}"
                 )
-            keys = args[2 : 2 + args[1]]
+            keys = args[2 : 2 + int(args[1])]
             # if there are 0 keys, that means the script can be run on any node
             # so we can just return a random slot
             if not keys:
@@ -600,7 +643,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             if not keys:
                 # FCALL can call a function with 0 keys, that means the function
                 #  can be run on any node so we can just return a random slot
-                if command in ("FCALL", "FCALL_RO"):
+                if command.upper() in ("FCALL", "FCALL_RO"):
                     return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
                 raise RedisClusterException(
                     "No way to dispatch this command to Redis Cluster. "
@@ -763,13 +806,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 self.nodes_manager.startup_nodes.pop(target_node.name, None)
                 # Hard force of reinitialize of the node/slots setup
                 # and try again with the new setup
-                await self.close()
+                await self.aclose()
                 raise
             except ClusterDownError:
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
-                await self.close()
+                await self.aclose()
                 await asyncio.sleep(0.25)
                 raise
             except MovedError as e:
@@ -786,7 +829,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     self.reinitialize_steps
                     and self.reinitialize_counter % self.reinitialize_steps == 0
                 ):
-                    await self.close()
+                    await self.aclose()
                     # Reset the counter
                     self.reinitialize_counter = 0
                 else:
@@ -954,17 +997,20 @@ class ClusterNode:
 
     _DEL_MESSAGE = "Unclosed ClusterNode object"
 
-    def __del__(self) -> None:
+    def __del__(
+        self,
+        _warn: Any = warnings.warn,
+        _grl: Any = asyncio.get_running_loop,
+    ) -> None:
         for connection in self._connections:
             if connection.is_connected:
-                warnings.warn(
-                    f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self
-                )
+                _warn(f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self)
+
                 try:
                     context = {"client": self, "message": self._DEL_MESSAGE}
-                    asyncio.get_running_loop().call_exception_handler(context)
+                    _grl().call_exception_handler(context)
                 except RuntimeError:
-                    ...
+                    pass
                 break
 
     async def disconnect(self) -> None:
@@ -1016,16 +1062,24 @@ class ClusterNode:
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
+        keys = kwargs.pop("keys", None)
 
-        # Execute command
-        await connection.send_packed_command(connection.pack_command(*args), False)
-
-        # Read response
-        try:
-            return await self.parse_response(connection, args[0], **kwargs)
-        finally:
-            # Release connection
+        response_from_cache = await connection._get_from_local_cache(args)
+        if response_from_cache is not None:
             self._free.append(connection)
+            return response_from_cache
+        else:
+            # Execute command
+            await connection.send_packed_command(connection.pack_command(*args), False)
+
+            # Read response
+            try:
+                response = await self.parse_response(connection, args[0], **kwargs)
+                connection._add_to_local_cache(args, response, keys)
+                return response
+            finally:
+                # Release connection
+                self._free.append(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
@@ -1113,13 +1167,13 @@ class NodesManager:
         if remove_old:
             for name in list(old.keys()):
                 if name not in new:
-                    asyncio.create_task(old.pop(name).disconnect())
+                    task = asyncio.create_task(old.pop(name).disconnect())  # noqa
 
         for name, node in new.items():
             if name in old:
                 if old[name] is node:
                     continue
-                asyncio.create_task(old[name].disconnect())
+                task = asyncio.create_task(old[name].disconnect())  # noqa
             old[name] = node
 
     def _update_moved_slots(self) -> None:
@@ -1199,13 +1253,12 @@ class NodesManager:
         for startup_node in self.startup_nodes.values():
             try:
                 # Make sure cluster mode is enabled on this node
-                if not (await startup_node.execute_command("INFO")).get(
-                    "cluster_enabled"
-                ):
+                try:
+                    cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
+                except ResponseError:
                     raise RedisClusterException(
                         "Cluster mode is not enabled on this node"
                     )
-                cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
                 startup_nodes_reachable = True
             except Exception as e:
                 # Try the next startup node.
@@ -1319,7 +1372,7 @@ class NodesManager:
         # If initialize was called after a MovedError, clear it
         self._moved_exception = None
 
-    async def close(self, attr: str = "nodes_cache") -> None:
+    async def aclose(self, attr: str = "nodes_cache") -> None:
         self.default_node = None
         await asyncio.gather(
             *(
@@ -1406,7 +1459,8 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         self._command_stack = []
 
     def __bool__(self) -> bool:
-        return bool(self._command_stack)
+        "Pipeline instances should  always evaluate to True on Python 3+"
+        return True
 
     def __len__(self) -> int:
         return len(self._command_stack)
@@ -1425,6 +1479,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
               or List[:class:`~.ClusterNode`] or Dict[Any, :class:`~.ClusterNode`]
             - Rest of the kwargs are passed to the Redis connection
         """
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         self._command_stack.append(
             PipelineCommand(len(self._command_stack), *args, **kwargs)
         )
@@ -1467,7 +1522,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                     if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                         # Try again with the new cluster setup.
                         exception = e
-                        await self._client.close()
+                        await self._client.aclose()
                         await asyncio.sleep(0.25)
                     else:
                         # All other errors should be raised.

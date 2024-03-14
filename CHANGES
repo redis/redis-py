@@ -1,3 +1,10 @@
+    * Allow to control the minimum SSL version
+    * Add an optional lock_name attribute to LockError.
+    * Fix return types for `get`, `set_path` and `strappend` in JSONCommands
+    * Connection.register_connect_callback() is made public.
+    * Fix async `read_response` to use `disable_decoding`.
+    * Add 'aclose()' methods to async classes, deprecate async close().
+    * Fix #2831, add auto_close_connection_pool=True arg to asyncio.Redis.from_url()
     * Fix incorrect redis.asyncio.Cluster type hint for `retry_on_error`
     * Fix dead weakref in sentinel connection causing ReferenceError (#2767)
     * Fix #2768, Fix KeyError: 'first-entry' in parse_xinfo_stream.
@@ -10,6 +17,7 @@
     * asyncio: Fix memory leak caused by hiredis (#2693)
     * Allow data to drain from async PythonParser when reading during a disconnect()
     * Use asyncio.timeout() instead of async_timeout.timeout() for python >= 3.11 (#2602)
+    * Add a Dependabot configuration to auto-update GitHub action versions.
     * Add test and fix async HiredisParser when reading during a disconnect() (#2349)
     * Use hiredis-py pack_command if available.
     * Support `.unlink()` in ClusterPipeline
@@ -52,323 +60,325 @@
     * Fix for Unhandled exception related to self.host with unix socket (#2496)
     * Improve error output for master discovery 
     * Make `ClusterCommandsProtocol` an actual Protocol
+    * Add `sum` to DUPLICATE_POLICY documentation of `TS.CREATE`, `TS.ADD` and `TS.ALTER`
+    * Prevent async ClusterPipeline instances from becoming "false-y" in case of empty command stack (#3061)
 
 * 4.1.3 (Feb 8, 2022)
-    * Fix flushdb and flushall (#1926)
-    * Add redis5 and redis4 dockers (#1871)
-    * Change json.clear test multi to be up to date with redisjson (#1922)
-    * Fixing volume for unstable_cluster docker (#1914)
-    * Update changes file with changes since 4.0.0-beta2 (#1915)
+  * Fix flushdb and flushall (#1926)
+  * Add redis5 and redis4 dockers (#1871)
+  * Change json.clear test multi to be up to date with redisjson (#1922)
+  * Fixing volume for unstable_cluster docker (#1914)
+  * Update changes file with changes since 4.0.0-beta2 (#1915)
 * 4.1.2 (Jan 27, 2022)
-    * Invalid OCSP certificates should raise ConnectionError on failed validation (#1907)
-    * Added retry mechanism on socket timeouts when connecting to the server (#1895)
-    * LMOVE, BLMOVE return incorrect responses (#1906)
-    * Fixing AttributeError in UnixDomainSocketConnection (#1903)
-    * Fixing TypeError in GraphCommands.explain (#1901)
-    * For tests, increasing wait time for the cluster (#1908)
-    * Increased pubsub's wait_for_messages timeout to prevent flaky tests (#1893)
-    * README code snippets formatted to highlight properly (#1888)
-    * Fix link in the main page (#1897)
-    * Documentation fixes: JSON Example, SSL Connection Examples, RTD version (#1887)
-    * Direct link to readthedocs (#1885)
+  * Invalid OCSP certificates should raise ConnectionError on failed validation (#1907)
+  * Added retry mechanism on socket timeouts when connecting to the server (#1895)
+  * LMOVE, BLMOVE return incorrect responses (#1906)
+  * Fixing AttributeError in UnixDomainSocketConnection (#1903)
+  * Fixing TypeError in GraphCommands.explain (#1901)
+  * For tests, increasing wait time for the cluster (#1908)
+  * Increased pubsub's wait_for_messages timeout to prevent flaky tests (#1893)
+  * README code snippets formatted to highlight properly (#1888)
+  * Fix link in the main page (#1897)
+  * Documentation fixes: JSON Example, SSL Connection Examples, RTD version (#1887)
+  * Direct link to readthedocs (#1885)
 * 4.1.1 (Jan 17, 2022)
-    * Add retries to connections in Sentinel Pools (#1879)
-    * OCSP Stapling Support (#1873)
-    * Define incr/decr as aliases of incrby/decrby (#1874)
-    * FT.CREATE - support MAXTEXTFIELDS, TEMPORARY, NOHL, NOFREQS, SKIPINITIALSCAN (#1847)
-    * Timeseries docs fix (#1877)
-    * get_connection: catch OSError too (#1832)
-    * Set keys var otherwise variable not created (#1853)
-    * Clusters should optionally require full slot coverage (#1845)
-    * Triple quote docstrings in client.py PEP 257 (#1876)
-    * syncing requirements (#1870)
-    * Typo and typing in GraphCommands documentation (#1855)
-    * Allowing poetry and redis-py to install together (#1854)
-    * setup.py: Add project_urls for PyPI (#1867)
-    * Support test with redis unstable docker (#1850)
-    * Connection examples (#1835)
-    * Documentation cleanup (#1841)
+  * Add retries to connections in Sentinel Pools (#1879)
+  * OCSP Stapling Support (#1873)
+  * Define incr/decr as aliases of incrby/decrby (#1874)
+  * FT.CREATE - support MAXTEXTFIELDS, TEMPORARY, NOHL, NOFREQS, SKIPINITIALSCAN (#1847)
+  * Timeseries docs fix (#1877)
+  * get_connection: catch OSError too (#1832)
+  * Set keys var otherwise variable not created (#1853)
+  * Clusters should optionally require full slot coverage (#1845)
+  * Triple quote docstrings in client.py PEP 257 (#1876)
+  * syncing requirements (#1870)
+  * Typo and typing in GraphCommands documentation (#1855)
+  * Allowing poetry and redis-py to install together (#1854)
+  * setup.py: Add project_urls for PyPI (#1867)
+  * Support test with redis unstable docker (#1850)
+  * Connection examples (#1835)
+  * Documentation cleanup (#1841)
 * 4.1.0 (Dec 26, 2021)
-    * OCSP stapling support (#1820)
-    * Support for SELECT (#1825)
-    * Support for specifying error types with retry (#1817)
-    * Support for RESET command since Redis 6.2.0 (#1824)
-    * Support CLIENT TRACKING (#1612)
-    * Support WRITE in CLIENT PAUSE (#1549)
-    * JSON set_file and set_path support (#1818)
-    * Allow ssl_ca_path with rediss:// urls (#1814)
-    * Support for password-encrypted SSL private keys (#1782)
-    * Support SYNC and PSYNC (#1741)
-    * Retry on error exception and timeout fixes (#1821)
-    * Fixing read race condition during pubsub (#1737)
-    * Fixing exception in listen (#1823)
-    * Fixed MovedError, and stopped iterating through startup nodes when slots are fully covered (#1819)
-    * Socket not closing after server disconnect (#1797)
-    * Single sourcing the package version (#1791)
-    * Ensure redis_connect_func is set on uds connection (#1794)
-    * SRTALGO - Skip for redis versions greater than 7.0.0 (#1831)
-    * Documentation updates (#1822)
-    * Add CI action to install package from repository commit hash (#1781) (#1790)
-    * Fix link in lmove docstring (#1793)
-    * Disabling JSON.DEBUG tests (#1787)
-    * Migrated targeted nodes to kwargs in Cluster Mode (#1762)
-    * Added support for MONITOR in clusters (#1756)
-    * Adding ROLE Command (#1610)
-    * Integrate RedisBloom support (#1683)
-    * Adding RedisGraph support (#1556)
-    * Allow overriding connection class via keyword arguments (#1752)
-    * Aggregation LOAD * support for RediSearch (#1735)
-    * Adding cluster, bloom, and graph docs (#1779)
-    * Add packaging to setup_requires, and use >= to play nice to setup.py (fixes #1625) (#1780)
-    * Fixing the license link in the readme (#1778)
-    * Removing distutils from tests (#1773)
-    * Fix cluster ACL tests (#1774)
-    * Improved RedisCluster's reinitialize_steps and documentation (#1765)
-    * Added black and isort (#1734)
-    * Link Documents for all module commands (#1711)
-    * Pyupgrade + flynt + f-strings (#1759)
-    * Remove unused aggregation subclasses in RediSearch (#1754)
-    * Adding RedisCluster client to support Redis Cluster Mode (#1660)
-    * Support RediSearch FT.PROFILE command (#1727)
-    * Adding support for non-decodable commands (#1731)
-    * COMMAND GETKEYS support (#1738)
-    * RedisJSON 2.0.4 behaviour support (#1747)
-    * Removing deprecating distutils (PEP 632) (#1730)
-    * Updating PR template (#1745)
-    * Removing duplication of Script class (#1751)
-    * Splitting documentation for read the docs (#1743)
-    * Improve code coverage for aggregation tests (#1713)
-    * Fixing COMMAND GETKEYS tests (#1750)
-    * GitHub release improvements (#1684)
+  * OCSP stapling support (#1820)
+  * Support for SELECT (#1825)
+  * Support for specifying error types with retry (#1817)
+  * Support for RESET command since Redis 6.2.0 (#1824)
+  * Support CLIENT TRACKING (#1612)
+  * Support WRITE in CLIENT PAUSE (#1549)
+  * JSON set_file and set_path support (#1818)
+  * Allow ssl_ca_path with rediss:// urls (#1814)
+  * Support for password-encrypted SSL private keys (#1782)
+  * Support SYNC and PSYNC (#1741)
+  * Retry on error exception and timeout fixes (#1821)
+  * Fixing read race condition during pubsub (#1737)
+  * Fixing exception in listen (#1823)
+  * Fixed MovedError, and stopped iterating through startup nodes when slots are fully covered (#1819)
+  * Socket not closing after server disconnect (#1797)
+  * Single sourcing the package version (#1791)
+  * Ensure redis_connect_func is set on uds connection (#1794)
+  * SRTALGO - Skip for redis versions greater than 7.0.0 (#1831)
+  * Documentation updates (#1822)
+  * Add CI action to install package from repository commit hash (#1781) (#1790)
+  * Fix link in lmove docstring (#1793)
+  * Disabling JSON.DEBUG tests (#1787)
+  * Migrated targeted nodes to kwargs in Cluster Mode (#1762)
+  * Added support for MONITOR in clusters (#1756)
+  * Adding ROLE Command (#1610)
+  * Integrate RedisBloom support (#1683)
+  * Adding RedisGraph support (#1556)
+  * Allow overriding connection class via keyword arguments (#1752)
+  * Aggregation LOAD * support for RediSearch (#1735)
+  * Adding cluster, bloom, and graph docs (#1779)
+  * Add packaging to setup_requires, and use >= to play nice to setup.py (fixes #1625) (#1780)
+  * Fixing the license link in the readme (#1778)
+  * Removing distutils from tests (#1773)
+  * Fix cluster ACL tests (#1774)
+  * Improved RedisCluster's reinitialize_steps and documentation (#1765)
+  * Added black and isort (#1734)
+  * Link Documents for all module commands (#1711)
+  * Pyupgrade + flynt + f-strings (#1759)
+  * Remove unused aggregation subclasses in RediSearch (#1754)
+  * Adding RedisCluster client to support Redis Cluster Mode (#1660)
+  * Support RediSearch FT.PROFILE command (#1727)
+  * Adding support for non-decodable commands (#1731)
+  * COMMAND GETKEYS support (#1738)
+  * RedisJSON 2.0.4 behaviour support (#1747)
+  * Removing deprecating distutils (PEP 632) (#1730)
+  * Updating PR template (#1745)
+  * Removing duplication of Script class (#1751)
+  * Splitting documentation for read the docs (#1743)
+  * Improve code coverage for aggregation tests (#1713)
+  * Fixing COMMAND GETKEYS tests (#1750)
+  * GitHub release improvements (#1684)
 * 4.0.2 (Nov 22, 2021)
-    * Restoring Sentinel commands to redis client (#1723)
-    * Better removal of hiredis warning (#1726)
-    * Adding links to redis documents in function calls (#1719)
+  * Restoring Sentinel commands to redis client (#1723)
+  * Better removal of hiredis warning (#1726)
+  * Adding links to redis documents in function calls (#1719)
 * 4.0.1 (Nov 17, 2021)
-    * Removing command on initial connections (#1722)
-    * Removing hiredis warning when not installed (#1721)
+  * Removing command on initial connections (#1722)
+  * Removing hiredis warning when not installed (#1721)
 * 4.0.0 (Nov 15, 2021)
-    * FT.EXPLAINCLI intentionally raising NotImplementedError
-    * Restoring ZRANGE desc for Redis < 6.2.0 (#1697)
-    * Response parsing occasionally fails to parse floats (#1692)
-    * Re-enabling read-the-docs (#1707)
-    * Call HSET after FT.CREATE to avoid keyspace scan (#1706)
-    * Unit tests fixes for compatibility (#1703)
-    * Improve documentation about Locks (#1701)
-    * Fixes to allow --redis-url to pass through all tests (#1700)
-    * Fix unit tests running against Redis 4.0.0 (#1699)
-    * Search alias test fix (#1695)
-    * Adding RediSearch/RedisJSON tests (#1691)
-    * Updating codecov rules (#1689)
-    * Tests to validate custom JSON decoders (#1681)
-    * Added breaking icon to release drafter (#1702)
-    * Removing dependency on six (#1676)
-    * Re-enable pipeline support for JSON and TimeSeries (#1674)
-    * Export Sentinel, and SSL like other classes (#1671)
-    * Restore zrange functionality for older versions of Redis (#1670)
-    * Fixed garbage collection deadlock (#1578)
-    * Tests to validate built python packages (#1678)
-    * Sleep for flaky search test (#1680)
-    * Test function renames, to match standards (#1679)
-    * Docstring improvements for Redis class (#1675)
-    * Fix georadius tests (#1672)
-    * Improvements to JSON coverage (#1666)
-    * Add python_requires setuptools check for python > 3.6 (#1656)
-    * SMISMEMBER support (#1667)
-    * Exposing the module version in loaded_modules (#1648)
-    * RedisTimeSeries support (#1652)
-    * Support for json multipath ($) (#1663)
-    * Added boolean parsing to PEXPIRE and PEXPIREAT (#1665)
-    * Add python_requires setuptools check for python > 3.6 (#1656)
-    * Adding vulture for static analysis (#1655)
-    * Starting to clean the docs (#1657)
-    * Update README.md (#1654)
-    * Adding description format for package (#1651)
-    * Publish to pypi as releases are generated with the release drafter (#1647)
-    * Restore actions to prs (#1653)
-    * Fixing the package to include commands (#1649)
-    * Re-enabling codecov as part of CI process (#1646)
-    * Adding support for redisearch (#1640) Thanks @chayim
-    * redisjson support (#1636) Thanks @chayim
-    * Sentinel: Add SentinelManagedSSLConnection (#1419) Thanks @AbdealiJK
-    * Enable floating parameters in SET (ex and px) (#1635) Thanks @AvitalFineRedis
-    * Add warning when hiredis not installed. Recommend installation. (#1621) Thanks @adiamzn
-    * Raising NotImplementedError for SCRIPT DEBUG and DEBUG SEGFAULT (#1624) Thanks @chayim
-    * CLIENT REDIR command support (#1623) Thanks @chayim
-    * REPLICAOF command implementation (#1622) Thanks @chayim
-    * Add support to NX XX and CH to GEOADD (#1605) Thanks @AvitalFineRedis
-    * Add support to ZRANGE and ZRANGESTORE parameters (#1603) Thanks @AvitalFineRedis
-    * Pre 6.2 redis should default to None for script flush (#1641) Thanks @chayim
-    * Add FULL option to XINFO SUMMARY (#1638) Thanks @agusdmb
-    * Geosearch test should use any=True (#1594) Thanks @Andrew-Chen-Wang
-    * Removing packaging dependency (#1626) Thanks @chayim
-    * Fix client_kill_filter docs for skimpy (#1596) Thanks @Andrew-Chen-Wang
-    * Normalize minid and maxlen docs (#1593) Thanks @Andrew-Chen-Wang
-    * Update docs for multiple usernames for ACL DELUSER (#1595) Thanks @Andrew-Chen-Wang
-    * Fix grammar of get param in set command (#1588) Thanks @Andrew-Chen-Wang
-    * Fix docs for client_kill_filter (#1584) Thanks @Andrew-Chen-Wang
-    * Convert README & CONTRIBUTING from rst to md (#1633) Thanks @davidylee
-    * Test BYLEX param in zrangestore (#1634) Thanks @AvitalFineRedis
-    * Tox integrations with invoke and docker (#1632) Thanks @chayim
-    * Adding the release drafter to help simplify release notes (#1618). Thanks @chayim
-    * BACKWARDS INCOMPATIBLE: Removed support for end of life Python 2.7. #1318
-    * BACKWARDS INCOMPATIBLE: All values within Redis URLs are unquoted via
+  * FT.EXPLAINCLI intentionally raising NotImplementedError
+  * Restoring ZRANGE desc for Redis < 6.2.0 (#1697)
+  * Response parsing occasionally fails to parse floats (#1692)
+  * Re-enabling read-the-docs (#1707)
+  * Call HSET after FT.CREATE to avoid keyspace scan (#1706)
+  * Unit tests fixes for compatibility (#1703)
+  * Improve documentation about Locks (#1701)
+  * Fixes to allow --redis-url to pass through all tests (#1700)
+  * Fix unit tests running against Redis 4.0.0 (#1699)
+  * Search alias test fix (#1695)
+  * Adding RediSearch/RedisJSON tests (#1691)
+  * Updating codecov rules (#1689)
+  * Tests to validate custom JSON decoders (#1681)
+  * Added breaking icon to release drafter (#1702)
+  * Removing dependency on six (#1676)
+  * Re-enable pipeline support for JSON and TimeSeries (#1674)
+  * Export Sentinel, and SSL like other classes (#1671)
+  * Restore zrange functionality for older versions of Redis (#1670)
+  * Fixed garbage collection deadlock (#1578)
+  * Tests to validate built python packages (#1678)
+  * Sleep for flaky search test (#1680)
+  * Test function renames, to match standards (#1679)
+  * Docstring improvements for Redis class (#1675)
+  * Fix georadius tests (#1672)
+  * Improvements to JSON coverage (#1666)
+  * Add python_requires setuptools check for python > 3.6 (#1656)
+  * SMISMEMBER support (#1667)
+  * Exposing the module version in loaded_modules (#1648)
+  * RedisTimeSeries support (#1652)
+  * Support for json multipath ($) (#1663)
+  * Added boolean parsing to PEXPIRE and PEXPIREAT (#1665)
+  * Add python_requires setuptools check for python > 3.6 (#1656)
+  * Adding vulture for static analysis (#1655)
+  * Starting to clean the docs (#1657)
+  * Update README.md (#1654)
+  * Adding description format for package (#1651)
+  * Publish to pypi as releases are generated with the release drafter (#1647)
+  * Restore actions to prs (#1653)
+  * Fixing the package to include commands (#1649)
+  * Re-enabling codecov as part of CI process (#1646)
+  * Adding support for redisearch (#1640) Thanks @chayim
+  * redisjson support (#1636) Thanks @chayim
+  * Sentinel: Add SentinelManagedSSLConnection (#1419) Thanks @AbdealiJK
+  * Enable floating parameters in SET (ex and px) (#1635) Thanks @AvitalFineRedis
+  * Add warning when hiredis not installed. Recommend installation. (#1621) Thanks @adiamzn
+  * Raising NotImplementedError for SCRIPT DEBUG and DEBUG SEGFAULT (#1624) Thanks @chayim
+  * CLIENT REDIR command support (#1623) Thanks @chayim
+  * REPLICAOF command implementation (#1622) Thanks @chayim
+  * Add support to NX XX and CH to GEOADD (#1605) Thanks @AvitalFineRedis
+  * Add support to ZRANGE and ZRANGESTORE parameters (#1603) Thanks @AvitalFineRedis
+  * Pre 6.2 redis should default to None for script flush (#1641) Thanks @chayim
+  * Add FULL option to XINFO SUMMARY (#1638) Thanks @agusdmb
+  * Geosearch test should use any=True (#1594) Thanks @Andrew-Chen-Wang
+  * Removing packaging dependency (#1626) Thanks @chayim
+  * Fix client_kill_filter docs for skimpy (#1596) Thanks @Andrew-Chen-Wang
+  * Normalize minid and maxlen docs (#1593) Thanks @Andrew-Chen-Wang
+  * Update docs for multiple usernames for ACL DELUSER (#1595) Thanks @Andrew-Chen-Wang
+  * Fix grammar of get param in set command (#1588) Thanks @Andrew-Chen-Wang
+  * Fix docs for client_kill_filter (#1584) Thanks @Andrew-Chen-Wang
+  * Convert README & CONTRIBUTING from rst to md (#1633) Thanks @davidylee
+  * Test BYLEX param in zrangestore (#1634) Thanks @AvitalFineRedis
+  * Tox integrations with invoke and docker (#1632) Thanks @chayim
+  * Adding the release drafter to help simplify release notes (#1618). Thanks @chayim
+  * BACKWARDS INCOMPATIBLE: Removed support for end of life Python 2.7. #1318
+  * BACKWARDS INCOMPATIBLE: All values within Redis URLs are unquoted via
       urllib.parse.unquote. Prior versions of redis-py supported this by
       specifying the ``decode_components`` flag to the ``from_url`` functions.
       This is now done by default and cannot be disabled. #589
-    * POTENTIALLY INCOMPATIBLE: Redis commands were moved into a mixin
+  * POTENTIALLY INCOMPATIBLE: Redis commands were moved into a mixin
       (see commands.py). Anyone importing ``redis.client`` to access commands
       directly should import ``redis.commands``. #1534, #1550
-    * Removed technical debt on REDIS_6_VERSION placeholder. Thanks @chayim #1582.
-    * Various docus fixes. Thanks @Andrew-Chen-Wang #1585, #1586.
-    * Support for LOLWUT command, available since Redis 5.0.0.
+  * Removed technical debt on REDIS_6_VERSION placeholder. Thanks @chayim #1582.
+  * Various docus fixes. Thanks @Andrew-Chen-Wang #1585, #1586.
+  * Support for LOLWUT command, available since Redis 5.0.0.
       Thanks @brainix #1568.
-    * Added support for CLIENT REPLY, available in Redis 3.2.0.
+  * Added support for CLIENT REPLY, available in Redis 3.2.0.
       Thanks @chayim #1581.
-    * Support for Auto-reconnect PubSub on get_message. Thanks @luhn #1574.
-    * Fix RST syntax error in README/ Thanks @JanCBrammer #1451.
-    * IDLETIME and FREQ support for RESTORE. Thanks @chayim #1580.
-    * Supporting args with MODULE LOAD. Thanks @chayim #1579.
-    * Updating RedisLabs with Redis. Thanks @gkorland #1575.
-    * Added support for ASYNC to SCRIPT FLUSH available in Redis 6.2.0.
+  * Support for Auto-reconnect PubSub on get_message. Thanks @luhn #1574.
+  * Fix RST syntax error in README/ Thanks @JanCBrammer #1451.
+  * IDLETIME and FREQ support for RESTORE. Thanks @chayim #1580.
+  * Supporting args with MODULE LOAD. Thanks @chayim #1579.
+  * Updating RedisLabs with Redis. Thanks @gkorland #1575.
+  * Added support for ASYNC to SCRIPT FLUSH available in Redis 6.2.0.
       Thanks @chayim. #1567
-    * Added CLIENT LIST fix to support multiple client ids available in
+  * Added CLIENT LIST fix to support multiple client ids available in
       Redis 2.8.12. Thanks @chayim #1563.
-    * Added DISCARD support for pipelines available in Redis 2.0.0.
+  * Added DISCARD support for pipelines available in Redis 2.0.0.
       Thanks @chayim #1565.
-    * Added ACL DELUSER support for deleting lists of users available in
+  * Added ACL DELUSER support for deleting lists of users available in
       Redis 6.2.0. Thanks @chayim. #1562
-    * Added CLIENT TRACKINFO support available in Redis 6.2.0.
+  * Added CLIENT TRACKINFO support available in Redis 6.2.0.
       Thanks @chayim. #1560
-    * Added GEOSEARCH and GEOSEARCHSTORE support available in Redis 6.2.0.
+  * Added GEOSEARCH and GEOSEARCHSTORE support available in Redis 6.2.0.
       Thanks @AvitalFine Redis. #1526
-    * Added LPUSHX support for lists available in Redis 4.0.0.
+  * Added LPUSHX support for lists available in Redis 4.0.0.
       Thanks @chayim. #1559
-    * Added support for QUIT available in Redis 1.0.0.
+  * Added support for QUIT available in Redis 1.0.0.
       Thanks @chayim. #1558
-    * Added support for COMMAND COUNT available in Redis 2.8.13.
+  * Added support for COMMAND COUNT available in Redis 2.8.13.
       Thanks @chayim. #1554.
-    * Added CREATECONSUMER support for XGROUP available in Redis 6.2.0.
+  * Added CREATECONSUMER support for XGROUP available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1553
-    * Including slowly complexity in INFO if available.
+  * Including slowly complexity in INFO if available.
       Thanks @ian28223 #1489.
-    * Added support for STRALGO available in Redis 6.0.0.
+  * Added support for STRALGO available in Redis 6.0.0.
       Thanks @AvitalFineRedis. #1528
-    * Addes support for ZMSCORE available in Redis 6.2.0.
+  * Addes support for ZMSCORE available in Redis 6.2.0.
       Thanks @2014BDuck and @jiekun.zhu. #1437
-    * Support MINID and LIMIT on XADD available in Redis 6.2.0.
+  * Support MINID and LIMIT on XADD available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1548
-    * Added sentinel commands FLUSHCONFIG, CKQUORUM, FAILOVER, and RESET
+  * Added sentinel commands FLUSHCONFIG, CKQUORUM, FAILOVER, and RESET
       available in Redis 2.8.12.
       Thanks @otherpirate. #834
-    * Migrated Version instead of StrictVersion for Python 3.10.
+  * Migrated Version instead of StrictVersion for Python 3.10.
       Thanks @tirkarthi. #1552
-    * Added retry mechanism with backoff. Thanks @nbraun-amazon. #1494
-    * Migrated commands to a mixin. Thanks @chayim. #1534
-    * Added support for ZUNION, available in Redis 6.2.0. Thanks
+  * Added retry mechanism with backoff. Thanks @nbraun-amazon. #1494
+  * Migrated commands to a mixin. Thanks @chayim. #1534
+  * Added support for ZUNION, available in Redis 6.2.0. Thanks
       @AvitalFineRedis. #1522
-    * Added support for CLIENT LIST with ID, available in Redis 6.2.0.
+  * Added support for CLIENT LIST with ID, available in Redis 6.2.0.
       Thanks @chayim. #1505
-    * Added support for MINID and LIMIT with xtrim, available in Reds 6.2.0.
+  * Added support for MINID and LIMIT with xtrim, available in Reds 6.2.0.
       Thanks @chayim. #1508
-    * Implemented LMOVE and BLMOVE commands, available in Redis 6.2.0.
+  * Implemented LMOVE and BLMOVE commands, available in Redis 6.2.0.
       Thanks @chayim. #1504
-    * Added GET argument to SET command, available in Redis 6.2.0.
+  * Added GET argument to SET command, available in Redis 6.2.0.
       Thanks @2014BDuck. #1412
-    * Documentation fixes. Thanks @enjoy-binbin @jonher937. #1496 #1532
-    * Added support for XAUTOCLAIM, available in Redis 6.2.0.
+  * Documentation fixes. Thanks @enjoy-binbin @jonher937. #1496 #1532
+  * Added support for XAUTOCLAIM, available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1529
-    * Added IDLE support for XPENDING, available in Redis 6.2.0.
+  * Added IDLE support for XPENDING, available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1523
-    * Add a count parameter to lpop/rpop, available in Redis 6.2.0.
+  * Add a count parameter to lpop/rpop, available in Redis 6.2.0.
       Thanks @wavenator. #1487
-    * Added a (pypy) trove classifier for Python 3.9.
+  * Added a (pypy) trove classifier for Python 3.9.
       Thanks @D3X. #1535
-    * Added ZINTER support, available in Redis 6.2.0.
+  * Added ZINTER support, available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1520
-    * Added ZINTER support, available in Redis 6.2.0.
+  * Added ZINTER support, available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1520
-    * Added ZDIFF and ZDIFFSTORE support, available in Redis 6.2.0.
+  * Added ZDIFF and ZDIFFSTORE support, available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1518
-    * Added ZRANGESTORE support, available in Redis 6.2.0.
+  * Added ZRANGESTORE support, available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1521
-    * Added LT and GT support for ZADD, available in Redis 6.2.0.
+  * Added LT and GT support for ZADD, available in Redis 6.2.0.
       Thanks @chayim. #1509
-    * Added ZRANDMEMBER support, available in Redis 6.2.0.
+  * Added ZRANDMEMBER support, available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1519
-    * Added GETDEL support, available in Redis 6.2.0.
+  * Added GETDEL support, available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1514
-    * Added CLIENT KILL laddr filter, available in Redis 6.2.0.
+  * Added CLIENT KILL laddr filter, available in Redis 6.2.0.
       Thanks @chayim. #1506
-    * Added CLIENT UNPAUSE, available in Redis 6.2.0.
+  * Added CLIENT UNPAUSE, available in Redis 6.2.0.
       Thanks @chayim. #1512
-    * Added NOMKSTREAM support for XADD, available in Redis 6.2.0.
+  * Added NOMKSTREAM support for XADD, available in Redis 6.2.0.
       Thanks @chayim. #1507
-    * Added HRANDFIELD support, available in Redis 6.2.0.
+  * Added HRANDFIELD support, available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1513
-    * Added CLIENT INFO support, available in Redis 6.2.0.
+  * Added CLIENT INFO support, available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1517
-    * Added GETEX support, available in Redis 6.2.0.
+  * Added GETEX support, available in Redis 6.2.0.
       Thanks @AvitalFineRedis. #1515
-    * Added support for COPY command, available in Redis 6.2.0.
+  * Added support for COPY command, available in Redis 6.2.0.
       Thanks @malinaa96. #1492
-    * Provide a development and testing environment via docker. Thanks
+  * Provide a development and testing environment via docker. Thanks
       @abrookins. #1365
-    * Added support for the LPOS command available in Redis 6.0.6. Thanks
+  * Added support for the LPOS command available in Redis 6.0.6. Thanks
       @aparcar #1353/#1354
-    * Added support for the ACL LOG command available in Redis 6. Thanks
+  * Added support for the ACL LOG command available in Redis 6. Thanks
       @2014BDuck. #1307
-    * Added support for ABSTTL option of the RESTORE command available in
+  * Added support for ABSTTL option of the RESTORE command available in
       Redis 5.0. Thanks @charettes. #1423
 * 3.5.3 (June 1, 2020)
-    * Restore try/except clauses to __del__ methods. These will be removed
+  * Restore try/except clauses to __del__ methods. These will be removed
       in 4.0 when more explicit resource management if enforced. #1339
-    * Update the master_address when Sentinels promote a new master. #847
-    * Update SentinelConnectionPool to not forcefully disconnect other in-use
+  * Update the master_address when Sentinels promote a new master. #847
+  * Update SentinelConnectionPool to not forcefully disconnect other in-use
       connections which can negatively affect threaded applications. #1345
 * 3.5.2 (May 14, 2020)
-    * Tune the locking in ConnectionPool.get_connection so that the lock is
+  * Tune the locking in ConnectionPool.get_connection so that the lock is
       not held while waiting for the socket to establish and validate the
       TCP connection.
 * 3.5.1 (May 9, 2020)
-    * Fix for HSET argument validation to allow any non-None key. Thanks
+  * Fix for HSET argument validation to allow any non-None key. Thanks
       @AleksMat, #1337, #1341
 * 3.5.0 (April 29, 2020)
-    * Removed exception trapping from __del__ methods. redis-py objects that
+  * Removed exception trapping from __del__ methods. redis-py objects that
       hold various resources implement __del__ cleanup methods to release
       those resources when the object goes out of scope. This provides a
       fallback for when these objects aren't explicitly closed by user code.
       Prior to this change any errors encountered in closing these resources
       would be hidden from the user. Thanks @jdufresne. #1281
-    * Expanded support for connection strings specifying a username connecting
+  * Expanded support for connection strings specifying a username connecting
       to pre-v6 servers. #1274
-    * Optimized Lock's blocking_timeout and sleep. If the lock cannot be
+  * Optimized Lock's blocking_timeout and sleep. If the lock cannot be
       acquired and the sleep value would cause the loop to sleep beyond
       blocking_timeout, fail immediately. Thanks @clslgrnc. #1263
-    * Added support for passing Python memoryviews to Redis command args that
+  * Added support for passing Python memoryviews to Redis command args that
       expect strings or bytes. The memoryview instance is sent directly to
       the socket such that there are zero copies made of the underlying data
       during command packing. Thanks @Cody-G. #1265, #1285
-    * HSET command now can accept multiple pairs. HMSET has been marked as
+  * HSET command now can accept multiple pairs. HMSET has been marked as
       deprecated now. Thanks to @laixintao #1271
-    * Don't manually DISCARD when encountering an ExecAbortError.
+  * Don't manually DISCARD when encountering an ExecAbortError.
       Thanks @nickgaya, #1300/#1301
-    * Reset the watched state of pipelines after calling exec. This saves
+  * Reset the watched state of pipelines after calling exec. This saves
       a roundtrip to the server by not having to call UNWATCH within
       Pipeline.reset(). Thanks @nickgaya, #1299/#1302
-    * Added the KEEPTTL option for the SET command. Thanks
+  * Added the KEEPTTL option for the SET command. Thanks
       @laixintao #1304/#1280
-    * Added the MEMORY STATS command. #1268
-    * Lock.extend() now has a new option, `replace_ttl`. When False (the
+  * Added the MEMORY STATS command. #1268
+  * Lock.extend() now has a new option, `replace_ttl`. When False (the
       default), Lock.extend() adds the `additional_time` to the lock's existing
       TTL. When replace_ttl=True, the lock's existing TTL is replaced with
       the value of `additional_time`.
-    * Add testing and support for PyPy.
+  * Add testing and support for PyPy.
 * 3.4.1
-    * Move the username argument in the Redis and Connection classes to the
+  * Move the username argument in the Redis and Connection classes to the
       end of the argument list. This helps those poor souls that specify all
       their connection options as non-keyword arguments. #1276
-    * Prior to ACL support, redis-py ignored the username component of
+  * Prior to ACL support, redis-py ignored the username component of
       Connection URLs. With ACL support, usernames are no longer ignored and
       are used to authenticate against an ACL rule. Some cloud vendors with
       managed Redis instances (like Heroku) provide connection URLs with a
@@ -376,33 +386,33 @@
       username to Redis servers < 6.0.0 results in an error. Attempt to detect
       this condition and retry the AUTH command with only the password such
       that authentication continues to work for these users. #1274
-    * Removed the __eq__ hooks to Redis and ConnectionPool that were added
+  * Removed the __eq__ hooks to Redis and ConnectionPool that were added
       in 3.4.0. This ended up being a bad idea as two separate connection
       pools be considered equal yet manage a completely separate set of
       connections.
 * 3.4.0
-    * Allow empty pipelines to be executed if there are WATCHed keys.
+  * Allow empty pipelines to be executed if there are WATCHed keys.
       This is a convenient way to test if any of the watched keys changed
       without actually running any other commands. Thanks @brianmaissy.
       #1233, #1234
-    * Removed support for end of life Python 3.4.
-    * Added support for all ACL commands in Redis 6. Thanks @IAmATeaPot418
+  * Removed support for end of life Python 3.4.
+  * Added support for all ACL commands in Redis 6. Thanks @IAmATeaPot418
       for helping.
-    * Pipeline instances now always evaluate to True. Prior to this change,
+  * Pipeline instances now always evaluate to True. Prior to this change,
       pipeline instances relied on __len__ for boolean evaluation which
       meant that pipelines with no commands on the stack would be considered
       False. #994
-    * Client instances and Connection pools now support a 'client_name'
+  * Client instances and Connection pools now support a 'client_name'
       argument. If supplied, all connections created will call CLIENT SETNAME
       as soon as the connection is opened. Thanks to @Habbie for supplying
       the basis of this change. #802
-    * Added the 'ssl_check_hostname' argument to specify whether SSL
+  * Added the 'ssl_check_hostname' argument to specify whether SSL
       connections should require the server hostname to match the hostname
       specified in the SSL cert. By default 'ssl_check_hostname' is False
       for backwards compatibility. #1196
-    * Slightly optimized command packing. Thanks @Deneby67. #1255
-    * Added support for the TYPE argument to SCAN. Thanks @netocp. #1220
-    * Better thread and fork safety in ConnectionPool and
+  * Slightly optimized command packing. Thanks @Deneby67. #1255
+  * Added support for the TYPE argument to SCAN. Thanks @netocp. #1220
+  * Better thread and fork safety in ConnectionPool and
       BlockingConnectionPool. Added better locking to synchronize critical
       sections rather than relying on CPython-specific implementation details
       relating to atomic operations. Adjusted how the pools identify and
@@ -410,636 +420,636 @@
       raised by child processes in the very unlikely chance that a deadlock
       is encountered. Thanks @gmbnomis, @mdellweg, @yht804421715. #1270,
       #1138, #1178, #906, #1262
-    * Added __eq__ hooks to the Redis and ConnectionPool classes.
+  * Added __eq__ hooks to the Redis and ConnectionPool classes.
       Thanks @brainix. #1240
 * 3.3.11
-    * Further fix for the SSLError -> TimeoutError mapping to work
+  * Further fix for the SSLError -> TimeoutError mapping to work
       on obscure releases of Python 2.7.
 * 3.3.10
-    * Fixed a potential error handling bug for the SSLError -> TimeoutError
+  * Fixed a potential error handling bug for the SSLError -> TimeoutError
       mapping introduced in 3.3.9. Thanks @zbristow. #1224
 * 3.3.9
-    * Mapped Python 2.7 SSLError to TimeoutError where appropriate. Timeouts
+  * Mapped Python 2.7 SSLError to TimeoutError where appropriate. Timeouts
       should now consistently raise TimeoutErrors on Python 2.7 for both
       unsecured and secured connections. Thanks @zbristow. #1222
 * 3.3.8
-    * Fixed MONITOR parsing to properly parse IPv6 client addresses, unix
+  * Fixed MONITOR parsing to properly parse IPv6 client addresses, unix
       socket connections and commands issued from Lua. Thanks @kukey. #1201
 * 3.3.7
-    * Fixed a regression introduced in 3.3.0 where socket.error exceptions
+  * Fixed a regression introduced in 3.3.0 where socket.error exceptions
       (or subclasses) could potentially be raised instead of
       redis.exceptions.ConnectionError. #1202
 * 3.3.6
-    * Fixed a regression in 3.3.5 that caused PubSub.get_message() to raise
+  * Fixed a regression in 3.3.5 that caused PubSub.get_message() to raise
       a socket.timeout exception when passing a timeout value. #1200
 * 3.3.5
-    * Fix an issue where socket.timeout errors could be handled by the wrong
+  * Fix an issue where socket.timeout errors could be handled by the wrong
       exception handler in Python 2.7.
 * 3.3.4
-    * More specifically identify nonblocking read errors for both SSL and
+  * More specifically identify nonblocking read errors for both SSL and
       non-SSL connections. 3.3.1, 3.3.2 and 3.3.3 on Python 2.7 could
       potentially mask a ConnectionError. #1197
 * 3.3.3
-    * The SSL module in Python < 2.7.9 handles non-blocking sockets
+  * The SSL module in Python < 2.7.9 handles non-blocking sockets
       differently than 2.7.9+. This patch accommodates older versions. #1197
 * 3.3.2
-    * Further fixed a regression introduced in 3.3.0 involving SSL and
+  * Further fixed a regression introduced in 3.3.0 involving SSL and
       non-blocking sockets. #1197
 * 3.3.1
-    * Fixed a regression introduced in 3.3.0 involving SSL and non-blocking
+  * Fixed a regression introduced in 3.3.0 involving SSL and non-blocking
       sockets. #1197
 * 3.3.0
-    * Resolve a race condition with the PubSubWorkerThread. #1150
-    * Cleanup socket read error messages. Thanks Vic Yu. #1159
-    * Cleanup the Connection's selector correctly. Thanks Bruce Merry. #1153
-    * Added a Monitor object to make working with MONITOR output easy.
+  * Resolve a race condition with the PubSubWorkerThread. #1150
+  * Cleanup socket read error messages. Thanks Vic Yu. #1159
+  * Cleanup the Connection's selector correctly. Thanks Bruce Merry. #1153
+  * Added a Monitor object to make working with MONITOR output easy.
       Thanks Roey Prat #1033
-    * Internal cleanup: Removed the legacy Token class which was necessary
+  * Internal cleanup: Removed the legacy Token class which was necessary
       with older version of Python that are no longer supported. #1066
-    * Response callbacks are now case insensitive. This allows users that
+  * Response callbacks are now case insensitive. This allows users that
       call Redis.execute_command() directly to pass lower-case command
       names and still get reasonable responses. #1168
-    * Added support for hiredis-py 1.0.0 encoding error support. This should
+  * Added support for hiredis-py 1.0.0 encoding error support. This should
       make the PythonParser and the HiredisParser behave identically
       when encountering encoding errors. Thanks Brian Candler. #1161/#1162
-    * All authentication errors now properly raise AuthenticationError.
+  * All authentication errors now properly raise AuthenticationError.
       AuthenticationError is now a subclass of ConnectionError, which will
       cause the connection to be disconnected and cleaned up appropriately.
       #923
-    * Add READONLY and READWRITE commands. Thanks @theodesp. #1114
-    * Remove selectors in favor of nonblocking sockets. Selectors had
+  * Add READONLY and READWRITE commands. Thanks @theodesp. #1114
+  * Remove selectors in favor of nonblocking sockets. Selectors had
       issues in some environments including eventlet and gevent. This should
       resolve those issues with no other side effects.
-    * Fixed an issue with XCLAIM and previously claimed but not removed
+  * Fixed an issue with XCLAIM and previously claimed but not removed
       messages. Thanks @thomdask. #1192/#1191
-    * Allow for single connection client instances. These instances
+  * Allow for single connection client instances. These instances
       are not thread safe but offer other benefits including a subtle
       performance increase.
-    * Added extensive health checks that keep the connections lively.
+  * Added extensive health checks that keep the connections lively.
       Passing the "health_check_interval=N" option to the Redis client class
       or to a ConnectionPool ensures that a round trip PING/PONG is successful
       before any command if the underlying connection has been idle for more
       than N seconds. ConnectionErrors and TimeoutErrors are automatically
       retried once for health checks.
-    * Changed the PubSubWorkerThread to use a threading.Event object rather
+  * Changed the PubSubWorkerThread to use a threading.Event object rather
       than a boolean to control the thread's life cycle. Thanks Timothy
       Rule. #1194/#1195.
-    * Fixed a bug in Pipeline error handling that would incorrectly retry
+  * Fixed a bug in Pipeline error handling that would incorrectly retry
       ConnectionErrors.
 * 3.2.1
-    * Fix SentinelConnectionPool to work in multiprocess/forked environments.
+  * Fix SentinelConnectionPool to work in multiprocess/forked environments.
 * 3.2.0
-    * Added support for `select.poll` to test whether data can be read
+  * Added support for `select.poll` to test whether data can be read
       on a socket. This should allow for significantly more connections to
       be used with pubsub. Fixes #486/#1115
-    * Attempt to guarantee that the ConnectionPool hands out healthy
+  * Attempt to guarantee that the ConnectionPool hands out healthy
       connections. Healthy connections are those that have an established
       socket connection to the Redis server, are ready to accept a command
       and have no data available to read. Fixes #1127/#886
-    * Use the socket.IPPROTO_TCP constant instead of socket.SOL_TCP.
+  * Use the socket.IPPROTO_TCP constant instead of socket.SOL_TCP.
       IPPROTO_TCP is available on more interpreters (Jython for instance).
       Thanks @Junnplus. #1130
-    * Fixed a regression introduced in 3.0 that mishandles exceptions not
+  * Fixed a regression introduced in 3.0 that mishandles exceptions not
       derived from the base Exception class. KeyboardInterrupt and
       gevent.timeout notable. Thanks Christian Fersch. #1128/#1129
-    * Significant improvements to handing connections with forked processes.
+  * Significant improvements to handing connections with forked processes.
       Parent and child processes no longer trample on each others' connections.
       Thanks to Jay Rolette for the patch and highlighting this issue.
       #504/#732/#784/#863
-    * PythonParser no longer closes the associated connection's socket. The
+  * PythonParser no longer closes the associated connection's socket. The
       connection itself will close the socket. #1108/#1085
 * 3.1.0
-    * Connection URLs must have one of the following schemes:
+  * Connection URLs must have one of the following schemes:
       redis://, rediss://, unix://. Thanks @jdupl123. #961/#969
-    * Fixed an issue with retry_on_timeout logic that caused some TimeoutErrors
+  * Fixed an issue with retry_on_timeout logic that caused some TimeoutErrors
       to be retried. Thanks Aaron Yang. #1022/#1023
-    * Added support for SNI for SSL. Thanks @oridistor and Roey Prat. #1087
-    * Fixed ConnectionPool repr for pools with no connections. Thanks
+  * Added support for SNI for SSL. Thanks @oridistor and Roey Prat. #1087
+  * Fixed ConnectionPool repr for pools with no connections. Thanks
       Cody Scott. #1043/#995
-    * Fixed GEOHASH to return a None value when specifying a place that
+  * Fixed GEOHASH to return a None value when specifying a place that
       doesn't exist on the server. Thanks @guybe7. #1126
-    * Fixed XREADGROUP to return an empty dictionary for messages that
+  * Fixed XREADGROUP to return an empty dictionary for messages that
       have been deleted but still exist in the unacknowledged queue. Thanks
       @xeizmendi. #1116
-    * Added an owned method to Lock objects. owned returns a boolean
+  * Added an owned method to Lock objects. owned returns a boolean
       indicating whether the current lock instance still owns the lock.
       Thanks Dave Johansen. #1112
-    * Allow lock.acquire() to accept an optional token argument. If
+  * Allow lock.acquire() to accept an optional token argument. If
       provided, the token argument is used as the unique value used to claim
       the lock. Thankd Dave Johansen. #1112
-    * Added a reacquire method to Lock objects. reacquire attempts to renew
+  * Added a reacquire method to Lock objects. reacquire attempts to renew
       the lock such that the timeout is extended to the same value that the
       lock was initially acquired with. Thanks Ihor Kalnytskyi. #1014
-    * Stream names found within XREAD and XREADGROUP responses now properly
+  * Stream names found within XREAD and XREADGROUP responses now properly
       respect the decode_responses flag.
-    * XPENDING_RANGE now requires the user the specify the min, max and
+  * XPENDING_RANGE now requires the user the specify the min, max and
       count arguments. Newer versions of Redis prevent count from being
       infinite so it's left to the user to specify these values explicitly.
-    * ZADD now returns None when xx=True and incr=True and an element
+  * ZADD now returns None when xx=True and incr=True and an element
       is specified that doesn't exist in the sorted set. This matches
       what the server returns in this case. #1084
-    * Added client_kill_filter that accepts various filters to identify
+  * Added client_kill_filter that accepts various filters to identify
       and kill clients. Thanks Theofanis Despoudis. #1098
-    * Fixed a race condition that occurred when unsubscribing and
+  * Fixed a race condition that occurred when unsubscribing and
       resubscribing to the same channel or pattern in rapid succession.
       Thanks Marcin Raczyński. #764
-    * Added a LockNotOwnedError that is raised when trying to extend or
+  * Added a LockNotOwnedError that is raised when trying to extend or
       release a lock that is no longer owned. This is a subclass of LockError
       so previous code should continue to work as expected. Thanks Joshua
       Harlow. #1095
-    * Fixed a bug in GEORADIUS that forced decoding of places without
+  * Fixed a bug in GEORADIUS that forced decoding of places without
       respecting the decode_responses option. Thanks Bo Bayles. #1082
 * 3.0.1
-    * Fixed regression with UnixDomainSocketConnection caused by 3.0.0.
+  * Fixed regression with UnixDomainSocketConnection caused by 3.0.0.
       Thanks Jyrki Muukkonen
-    * Fixed an issue with the new asynchronous flag on flushdb and flushall.
+  * Fixed an issue with the new asynchronous flag on flushdb and flushall.
       Thanks rogeryen
-    * Updated Lock.locked() method to indicate whether *any* process has
+  * Updated Lock.locked() method to indicate whether *any* process has
       acquired the lock, not just the current one. This is in line with
       the behavior of threading.Lock. Thanks Alan Justino da Silva
 * 3.0.0
   BACKWARDS INCOMPATIBLE CHANGES
-    * When using a Lock as a context manager and the lock fails to be acquired
+  * When using a Lock as a context manager and the lock fails to be acquired
       a LockError is now raised. This prevents the code block inside the
       context manager from being executed if the lock could not be acquired.
-    * Renamed LuaLock to Lock.
-    * Removed the pipeline based Lock implementation in favor of the LuaLock
+  * Renamed LuaLock to Lock.
+  * Removed the pipeline based Lock implementation in favor of the LuaLock
       implementation.
-    * Only bytes, strings and numbers (ints, longs and floats) are acceptable
+  * Only bytes, strings and numbers (ints, longs and floats) are acceptable
       for keys and values. Previously redis-py attempted to cast other types
       to str() and store the result. This caused must confusion and frustration
       when passing boolean values (cast to 'True' and 'False') or None values
       (cast to 'None'). It is now the user's responsibility to cast all
       key names and values to bytes, strings or numbers before passing the
       value to redis-py.
-    * The StrictRedis class has been renamed to Redis. StrictRedis will
+  * The StrictRedis class has been renamed to Redis. StrictRedis will
       continue to exist as an alias of Redis for the foreseeable future.
-    * The legacy Redis client class has been removed. It caused much confusion
+  * The legacy Redis client class has been removed. It caused much confusion
       to users.
-    * ZINCRBY arguments 'value' and 'amount' have swapped order to match the
+  * ZINCRBY arguments 'value' and 'amount' have swapped order to match the
       the Redis server. The new argument order is: keyname, amount, value.
-    * MGET no longer raises an error if zero keys are passed in. Instead an
+  * MGET no longer raises an error if zero keys are passed in. Instead an
       empty list is returned.
-    * MSET and MSETNX now require all keys/values to be specified in a single
+  * MSET and MSETNX now require all keys/values to be specified in a single
       dictionary argument named mapping. This was changed to allow for future
       options to these commands in the future.
-    * ZADD now requires all element names/scores be specified in a single
+  * ZADD now requires all element names/scores be specified in a single
       dictionary argument named mapping. This was required to allow the NX,
       XX, CH and INCR options to be specified.
-    * ssl_cert_reqs now has a default value of 'required' by default. This
+  * ssl_cert_reqs now has a default value of 'required' by default. This
       should make connecting to a remote Redis server over SSL more secure.
       Thanks u2mejc
-    * Removed support for EOL Python 2.6 and 3.3. Thanks jdufresne
+  * Removed support for EOL Python 2.6 and 3.3. Thanks jdufresne
   OTHER CHANGES
-    * Added missing DECRBY command. Thanks derek-dchu
-    * CLUSTER INFO and CLUSTER NODES responses are now properly decoded to
+  * Added missing DECRBY command. Thanks derek-dchu
+  * CLUSTER INFO and CLUSTER NODES responses are now properly decoded to
       strings.
-    * Added a 'locked()' method to Lock objects. This method returns True
+  * Added a 'locked()' method to Lock objects. This method returns True
       if the lock has been acquired and owned by the current process,
       otherwise False.
-    * EXISTS now supports multiple keys. It's return value is now the number
+  * EXISTS now supports multiple keys. It's return value is now the number
       of keys in the list that exist.
-    * Ensure all commands can accept key names as bytes. This fixes issues
+  * Ensure all commands can accept key names as bytes. This fixes issues
       with BLPOP, BRPOP and SORT.
-    * All errors resulting from bad user input are raised as DataError
+  * All errors resulting from bad user input are raised as DataError
       exceptions. DataError is a subclass of RedisError so this should be
       transparent to anyone previously catching these.
-    * Added support for NX, XX, CH and INCR options to ZADD
-    * Added support for the MIGRATE command
-    * Added support for the MEMORY USAGE and MEMORY PURGE commands. Thanks
+  * Added support for NX, XX, CH and INCR options to ZADD
+  * Added support for the MIGRATE command
+  * Added support for the MEMORY USAGE and MEMORY PURGE commands. Thanks
       Itamar Haber
-    * Added support for the 'asynchronous' argument to FLUSHDB and FLUSHALL
+  * Added support for the 'asynchronous' argument to FLUSHDB and FLUSHALL
       commands. Thanks Itamar Haber
-    * Added support for the BITFIELD command. Thanks Charles Leifer and
+  * Added support for the BITFIELD command. Thanks Charles Leifer and
       Itamar Haber
-    * Improved performance on pipeline requests with large chunks of data.
+  * Improved performance on pipeline requests with large chunks of data.
       Thanks tzickel
-    * Fixed test suite to not fail if another client is connected to the
+  * Fixed test suite to not fail if another client is connected to the
       server the tests are running against.
-    * Added support for SWAPDB. Thanks Itamar Haber
-    * Added support for all STREAM commands. Thanks Roey Prat and Itamar Haber
-    * SHUTDOWN now accepts the 'save' and 'nosave' arguments. Thanks
+  * Added support for SWAPDB. Thanks Itamar Haber
+  * Added support for all STREAM commands. Thanks Roey Prat and Itamar Haber
+  * SHUTDOWN now accepts the 'save' and 'nosave' arguments. Thanks
       dwilliams-kenzan
-    * Added support for ZPOPMAX, ZPOPMIN, BZPOPMAX, BZPOPMIN. Thanks
+  * Added support for ZPOPMAX, ZPOPMIN, BZPOPMAX, BZPOPMIN. Thanks
       Itamar Haber
-    * Added support for the 'type' argument in CLIENT LIST. Thanks Roey Prat
-    * Added support for CLIENT PAUSE. Thanks Roey Prat
-    * Added support for CLIENT ID and CLIENT UNBLOCK. Thanks Itamar Haber
-    * GEODIST now returns a None value when referencing a place that does
+  * Added support for the 'type' argument in CLIENT LIST. Thanks Roey Prat
+  * Added support for CLIENT PAUSE. Thanks Roey Prat
+  * Added support for CLIENT ID and CLIENT UNBLOCK. Thanks Itamar Haber
+  * GEODIST now returns a None value when referencing a place that does
       not exist. Thanks qingping209
-    * Added a ping() method to pubsub objects. Thanks krishan-carbon
-    * Fixed a bug with keys in the INFO dict that contained ':' symbols.
+  * Added a ping() method to pubsub objects. Thanks krishan-carbon
+  * Fixed a bug with keys in the INFO dict that contained ':' symbols.
       Thanks mzalimeni
-    * Fixed the select system call retry compatibility with Python 2.x.
+  * Fixed the select system call retry compatibility with Python 2.x.
       Thanks lddubeau
-    * max_connections is now a valid querystring argument for creating
+  * max_connections is now a valid querystring argument for creating
       connection pools from URLs. Thanks mmaslowskicc
-    * Added the UNLINK command. Thanks yozel
-    * Added socket_type option to Connection for configurability.
+  * Added the UNLINK command. Thanks yozel
+  * Added socket_type option to Connection for configurability.
       Thanks garlicnation
-    * Lock.do_acquire now atomically sets acquires the lock and sets the
+  * Lock.do_acquire now atomically sets acquires the lock and sets the
       expire value via set(nx=True, px=timeout). Thanks 23doors
-    * Added 'count' argument to SPOP. Thanks AlirezaSadeghi
-    * Fixed an issue parsing client_list responses that contained an '='.
+  * Added 'count' argument to SPOP. Thanks AlirezaSadeghi
+  * Fixed an issue parsing client_list responses that contained an '='.
       Thanks swilly22
 * 2.10.6
-    * Various performance improvements. Thanks cjsimpson
-    * Fixed a bug with SRANDMEMBER where the behavior for `number=0` did
+  * Various performance improvements. Thanks cjsimpson
+  * Fixed a bug with SRANDMEMBER where the behavior for `number=0` did
       not match the spec. Thanks Alex Wang
-    * Added HSTRLEN command. Thanks Alexander Putilin
-    * Added the TOUCH command. Thanks Anis Jonischkeit
-    * Remove unnecessary calls to the server when registering Lua scripts.
+  * Added HSTRLEN command. Thanks Alexander Putilin
+  * Added the TOUCH command. Thanks Anis Jonischkeit
+  * Remove unnecessary calls to the server when registering Lua scripts.
       Thanks Ben Greenberg
-    * SET's EX and PX arguments now allow values of zero. Thanks huangqiyin
-    * Added PUBSUB {CHANNELS, NUMPAT, NUMSUB} commands. Thanks Angus Pearson
-    * PubSub connections that encounter `InterruptedError`s now
+  * SET's EX and PX arguments now allow values of zero. Thanks huangqiyin
+  * Added PUBSUB {CHANNELS, NUMPAT, NUMSUB} commands. Thanks Angus Pearson
+  * PubSub connections that encounter `InterruptedError`s now
       retry automatically. Thanks Carlton Gibson and Seth M. Larson
-    * LPUSH and RPUSH commands run on PyPy now correctly returns the number
+  * LPUSH and RPUSH commands run on PyPy now correctly returns the number
       of items of the list. Thanks Jeong YunWon
-    * Added support to automatically retry socket EINTR errors. Thanks
+  * Added support to automatically retry socket EINTR errors. Thanks
       Thomas Steinacher
-    * PubSubWorker threads started with `run_in_thread` are now daemonized
+  * PubSubWorker threads started with `run_in_thread` are now daemonized
       so the thread shuts down when the running process goes away. Thanks
       Keith Ainsworth
-    * Added support for GEO commands. Thanks Pau Freixes, Alex DeBrie and
+  * Added support for GEO commands. Thanks Pau Freixes, Alex DeBrie and
       Abraham Toriz
-    * Made client construction from URLs smarter. Thanks Tim Savage
-    * Added support for CLUSTER * commands. Thanks Andy Huang
-    * The RESTORE command now accepts an optional `replace` boolean.
+  * Made client construction from URLs smarter. Thanks Tim Savage
+  * Added support for CLUSTER * commands. Thanks Andy Huang
+  * The RESTORE command now accepts an optional `replace` boolean.
       Thanks Yoshinari Takaoka
-    * Attempt to connect to a new Sentinel if a TimeoutError occurs. Thanks
+  * Attempt to connect to a new Sentinel if a TimeoutError occurs. Thanks
       Bo Lopker
-    * Fixed a bug in the client's `__getitem__` where a KeyError would be
+  * Fixed a bug in the client's `__getitem__` where a KeyError would be
       raised if the value returned by the server is an empty string.
       Thanks Javier Candeira.
-    * Socket timeouts when connecting to a server are now properly raised
+  * Socket timeouts when connecting to a server are now properly raised
       as TimeoutErrors.
 * 2.10.5
-    * Allow URL encoded parameters in Redis URLs. Characters like a "/" can
+  * Allow URL encoded parameters in Redis URLs. Characters like a "/" can
       now be URL encoded and redis-py will correctly decode them. Thanks
       Paul Keene.
-    * Added support for the WAIT command. Thanks https://github.com/eshizhan
-    * Better shutdown support for the PubSub Worker Thread. It now properly
+  * Added support for the WAIT command. Thanks <https://github.com/eshizhan>
+  * Better shutdown support for the PubSub Worker Thread. It now properly
       cleans up the connection, unsubscribes from any channels and patterns
       previously subscribed to and consumes any waiting messages on the socket.
-    * Added the ability to sleep for a brief period in the event of a
+  * Added the ability to sleep for a brief period in the event of a
       WatchError occurring. Thanks Joshua Harlow.
-    * Fixed a bug with pipeline error reporting when dealing with characters
+  * Fixed a bug with pipeline error reporting when dealing with characters
       in error messages that could not be encoded to the connection's
       character set. Thanks Hendrik Muhs.
-    * Fixed a bug in Sentinel connections that would inadvertently connect
+  * Fixed a bug in Sentinel connections that would inadvertently connect
       to the master when the connection pool resets. Thanks
-      https://github.com/df3n5
-    * Better timeout support in Pubsub get_message. Thanks Andy Isaacson.
-    * Fixed a bug with the HiredisParser that would cause the parser to
+      <https://github.com/df3n5>
+  * Better timeout support in Pubsub get_message. Thanks Andy Isaacson.
+  * Fixed a bug with the HiredisParser that would cause the parser to
       get stuck in an endless loop if a specific number of bytes were
       delivered from the socket. This fix also increases performance of
       parsing large responses from the Redis server.
-    * Added support for ZREVRANGEBYLEX.
-    * ConnectionErrors are now raised if Redis refuses a connection due to
+  * Added support for ZREVRANGEBYLEX.
+  * ConnectionErrors are now raised if Redis refuses a connection due to
       the maxclients limit being exceeded. Thanks Roman Karpovich.
-    * max_connections can now be set when instantiating client instances.
+  * max_connections can now be set when instantiating client instances.
       Thanks Ohad Perry.
 * 2.10.4
     (skipped due to a PyPI snafu)
 * 2.10.3
-    * Fixed a bug with the bytearray support introduced in 2.10.2. Thanks
+  * Fixed a bug with the bytearray support introduced in 2.10.2. Thanks
       Josh Owen.
 * 2.10.2
-    * Added support for Hiredis's new bytearray support. Thanks
-      https://github.com/tzickel
-    * POSSIBLE BACKWARDS INCOMPATIBLE CHANGE: Fixed a possible race condition
+  * Added support for Hiredis's new bytearray support. Thanks
+      <https://github.com/tzickel>
+  * POSSIBLE BACKWARDS INCOMPATIBLE CHANGE: Fixed a possible race condition
       when multiple threads share the same Lock instance with a timeout. Lock
       tokens are now stored in thread local storage by default. If you have
       code that acquires a lock in one thread and passes that lock instance to
       another thread to release it, you need to disable thread local storage.
       Refer to the doc strings on the Lock class about the thread_local
       argument information.
-    * Fixed a regression in from_url where "charset" and "errors" weren't
+  * Fixed a regression in from_url where "charset" and "errors" weren't
       valid options. "encoding" and "encoding_errors" are still accepted
       and preferred.
-    * The "charset" and "errors" options have been deprecated. Passing
+  * The "charset" and "errors" options have been deprecated. Passing
       either to StrictRedis.__init__ or from_url will still work but will
       also emit a DeprecationWarning. Instead use the "encoding" and
       "encoding_errors" options.
-    * Fixed a compatibility bug with Python 3 when the server closes a
+  * Fixed a compatibility bug with Python 3 when the server closes a
       connection.
-    * Added BITPOS command. Thanks https://github.com/jettify.
-    * Fixed a bug when attempting to send large values to Redis in a Pipeline.
+  * Added BITPOS command. Thanks <https://github.com/jettify>.
+  * Fixed a bug when attempting to send large values to Redis in a Pipeline.
 * 2.10.1
-    * Fixed a bug where Sentinel connections to a server that's no longer a
+  * Fixed a bug where Sentinel connections to a server that's no longer a
       master and receives a READONLY error will disconnect and reconnect to
       the master.
 * 2.10.0
-    * Discontinued support for Python 2.5. Upgrade. You'll be happier.
-    * The HiRedis parser will now properly raise ConnectionErrors.
-    * Completely refactored PubSub support. Fixes all known PubSub bugs and
+  * Discontinued support for Python 2.5. Upgrade. You'll be happier.
+  * The HiRedis parser will now properly raise ConnectionErrors.
+  * Completely refactored PubSub support. Fixes all known PubSub bugs and
       adds a bunch of new features. Docs can be found in the README under the
       new "Publish / Subscribe" section.
-    * Added the new HyperLogLog commands (PFADD, PFCOUNT, PFMERGE). Thanks
+  * Added the new HyperLogLog commands (PFADD, PFCOUNT, PFMERGE). Thanks
       Pepijn de Vos and Vincent Ohprecio.
-    * Updated TTL and PTTL commands with Redis 2.8+ semantics. Thanks Markus
+  * Updated TTL and PTTL commands with Redis 2.8+ semantics. Thanks Markus
       Kaiserswerth.
-    * *SCAN commands now return a long (int on Python3) cursor value rather
+  * *SCAN commands now return a long (int on Python3) cursor value rather
       than the string representation. This might be slightly backwards
-      incompatible in code using *SCAN commands loops such as
+incompatible in code using*SCAN commands loops such as
       "while cursor != '0':".
-    * Added extra *SCAN commands that return iterators instead of the normal
+  * Added extra *SCAN commands that return iterators instead of the normal
       [cursor, data] type. Use scan_iter, hscan_iter, sscan_iter, and
       zscan_iter for iterators. Thanks Mathieu Longtin.
-    * Added support for SLOWLOG commands. Thanks Rick van Hattem.
-    * Added lexicographical commands ZRANGEBYLEX, ZREMRANGEBYLEX, and ZLEXCOUNT
+  * Added support for SLOWLOG commands. Thanks Rick van Hattem.
+  * Added lexicographical commands ZRANGEBYLEX, ZREMRANGEBYLEX, and ZLEXCOUNT
       for sorted sets.
-    * Connection objects now support an optional argument, socket_read_size,
+  * Connection objects now support an optional argument, socket_read_size,
       indicating how much data to read during each socket.recv() call. After
       benchmarking, increased the default size to 64k, which dramatically
       improves performance when fetching large values, such as many results
       in a pipeline or a large (>1MB) string value.
-    * Improved the pack_command and send_packed_command functions to increase
+  * Improved the pack_command and send_packed_command functions to increase
       performance when sending large (>1MB) values.
-    * Sentinel Connections to master servers now detect when a READONLY error
+  * Sentinel Connections to master servers now detect when a READONLY error
       is encountered and disconnect themselves and all other active connections
       to the same master so that the new master can be discovered.
-    * Fixed Sentinel state parsing on Python 3.
-    * Added support for SENTINEL MONITOR, SENTINEL REMOVE, and SENTINEL SET
+  * Fixed Sentinel state parsing on Python 3.
+  * Added support for SENTINEL MONITOR, SENTINEL REMOVE, and SENTINEL SET
       commands. Thanks Greg Murphy.
-    * INFO output that doesn't follow the "key:value" format will now be
+  * INFO output that doesn't follow the "key:value" format will now be
       appended to a key named "__raw__" in the INFO dictionary. Thanks Pedro
       Larroy.
-    * The "vagrant" directory contains a complete vagrant environment for
+  * The "vagrant" directory contains a complete vagrant environment for
       redis-py developers. The environment runs a Redis master, a Redis slave,
       and 3 Sentinels. Future iterations of the test suite will incorporate
       more integration style tests, ensuring things like failover happen
       correctly.
-    * It's now possible to create connection pool instances from a URL.
+  * It's now possible to create connection pool instances from a URL.
       StrictRedis.from_url() now uses this feature to create a connection pool
       instance and use that when creating a new client instance. Thanks
-      https://github.com/chillipino
-    * When creating client instances or connection pool instances from an URL,
+      <https://github.com/chillipino>
+  * When creating client instances or connection pool instances from an URL,
       it's now possible to pass additional options to the connection pool with
       querystring arguments.
-    * Fixed a bug where some encodings (like utf-16) were unusable on Python 3
+  * Fixed a bug where some encodings (like utf-16) were unusable on Python 3
       as command names and literals would get encoded.
-    * Added an SSLConnection class that allows for secure connections through
+  * Added an SSLConnection class that allows for secure connections through
       stunnel or other means. Construct an SSL connection with the ssl=True
       option on client classes, using the rediss:// scheme from an URL, or
       by passing the SSLConnection class to a connection pool's
-      connection_class argument. Thanks https://github.com/oranagra.
-    * Added a socket_connect_timeout option to control how long to wait while
+      connection_class argument. Thanks <https://github.com/oranagra>.
+  * Added a socket_connect_timeout option to control how long to wait while
       establishing a TCP connection before timing out. This lets the client
       fail fast when attempting to connect to a downed server while keeping
       a more lenient timeout for all other socket operations.
-    * Added TCP Keep-alive support by passing use the socket_keepalive=True
+  * Added TCP Keep-alive support by passing use the socket_keepalive=True
       option. Finer grain control can be achieved using the
       socket_keepalive_options option which expects a dictionary with any of
       the keys (socket.TCP_KEEPIDLE, socket.TCP_KEEPCNT, socket.TCP_KEEPINTVL)
       and integers for values. Thanks Yossi Gottlieb.
-    * Added a `retry_on_timeout` option that controls how socket.timeout errors
+  * Added a `retry_on_timeout` option that controls how socket.timeout errors
       are handled. By default it is set to False and will cause the client to
       raise a TimeoutError anytime a socket.timeout is encountered. If
       `retry_on_timeout` is set to True, the client will retry a command that
       timed out once like other `socket.error`s.
-    * Completely refactored the Lock system. There is now a LuaLock class
+  * Completely refactored the Lock system. There is now a LuaLock class
       that's used when the Redis server is capable of running Lua scripts along
       with a fallback class for Redis servers < 2.6. The new locks fix several
       subtle race consider that the old lock could face. In additional, a
       new method, "extend" is available on lock instances that all a lock
       owner to extend the amount of time they have the lock for. Thanks to
-      Eli Finkelshteyn and https://github.com/chillipino for contributions.
+      Eli Finkelshteyn and <https://github.com/chillipino> for contributions.
 * 2.9.1
-    * IPv6 support. Thanks https://github.com/amashinchi
+  * IPv6 support. Thanks <https://github.com/amashinchi>
 * 2.9.0
-    * Performance improvement for packing commands when using the PythonParser.
+  * Performance improvement for packing commands when using the PythonParser.
       Thanks Guillaume Viot.
-    * Executing an empty pipeline transaction no longer sends MULTI/EXEC to
+  * Executing an empty pipeline transaction no longer sends MULTI/EXEC to
       the server. Thanks EliFinkelshteyn.
-    * Errors when authenticating (incorrect password) and selecting a database
+  * Errors when authenticating (incorrect password) and selecting a database
       now close the socket.
-    * Full Sentinel support thanks to Vitja Makarov. Thanks!
-    * Better repr support for client and connection pool instances. Thanks
+  * Full Sentinel support thanks to Vitja Makarov. Thanks!
+  * Better repr support for client and connection pool instances. Thanks
       Mark Roberts.
-    * Error messages that the server sends to the client are now included
+  * Error messages that the server sends to the client are now included
       in the client error message. Thanks Sangjin Lim.
-    * Added the SCAN, SSCAN, HSCAN, and ZSCAN commands. Thanks Jingchao Hu.
-    * ResponseErrors generated by pipeline execution provide addition context
+  * Added the SCAN, SSCAN, HSCAN, and ZSCAN commands. Thanks Jingchao Hu.
+  * ResponseErrors generated by pipeline execution provide addition context
       including the position of the command in the pipeline and the actual
       command text generated the error.
-    * ConnectionPools now play nicer in threaded environments that fork. Thanks
+  * ConnectionPools now play nicer in threaded environments that fork. Thanks
       Christian Joergensen.
 * 2.8.0
-    * redis-py should play better with gevent when a gevent Timeout is raised.
+  * redis-py should play better with gevent when a gevent Timeout is raised.
       Thanks leifkb.
-    * Added SENTINEL command. Thanks Anna Janackova.
-    * Fixed a bug where pipelines could potentially corrupt a connection
+  * Added SENTINEL command. Thanks Anna Janackova.
+  * Fixed a bug where pipelines could potentially corrupt a connection
       if the MULTI command generated a ResponseError. Thanks EliFinkelshteyn
       for the report.
-    * Connections now call socket.shutdown() prior to socket.close() to
+  * Connections now call socket.shutdown() prior to socket.close() to
       ensure communication ends immediately per the note at
-      https://docs.python.org/2/library/socket.html#socket.socket.close
+      <https://docs.python.org/2/library/socket.html#socket.socket.close>
       Thanks to David Martin for pointing this out.
-    * Lock checks are now based on floats rather than ints. Thanks
+  * Lock checks are now based on floats rather than ints. Thanks
       Vitja Makarov.
 * 2.7.6
-    * Added CONFIG RESETSTAT command. Thanks Yossi Gottlieb.
-    * Fixed a bug introduced in 2.7.3 that caused issues with script objects
+  * Added CONFIG RESETSTAT command. Thanks Yossi Gottlieb.
+  * Fixed a bug introduced in 2.7.3 that caused issues with script objects
       and pipelines. Thanks Carpentier Pierre-Francois.
-    * Converted redis-py's test suite to use the awesome py.test library.
-    * Fixed a bug introduced in 2.7.5 that prevented a ConnectionError from
+  * Converted redis-py's test suite to use the awesome py.test library.
+  * Fixed a bug introduced in 2.7.5 that prevented a ConnectionError from
       being raised when the Redis server is LOADING data.
-    * Added a BusyLoadingError exception that's raised when the Redis server
+  * Added a BusyLoadingError exception that's raised when the Redis server
       is starting up and not accepting commands yet. BusyLoadingError
       subclasses ConnectionError, which this state previously returned.
       Thanks Yossi Gottlieb.
 * 2.7.5
-    * DEL, HDEL and ZREM commands now return the numbers of keys deleted
+  * DEL, HDEL and ZREM commands now return the numbers of keys deleted
       instead of just True/False.
-    * from_url now supports URIs with a port number. Thanks Aaron Westendorf.
+  * from_url now supports URIs with a port number. Thanks Aaron Westendorf.
 * 2.7.4
-    * Added missing INCRBY method. Thanks Krzysztof Dorosz.
-    * SET now accepts the EX, PX, NX and XX options from Redis 2.6.12. These
+  * Added missing INCRBY method. Thanks Krzysztof Dorosz.
+  * SET now accepts the EX, PX, NX and XX options from Redis 2.6.12. These
       options will generate errors if these options are used when connected
       to a Redis server < 2.6.12. Thanks George Yoshida.
 * 2.7.3
-    * Fixed a bug with BRPOPLPUSH and lists with empty strings.
-    * All empty except: clauses have been replaced to only catch Exception
+  * Fixed a bug with BRPOPLPUSH and lists with empty strings.
+  * All empty except: clauses have been replaced to only catch Exception
       subclasses. This prevents a KeyboardInterrupt from triggering exception
       handlers. Thanks Lucian Branescu Mihaila.
-    * All exceptions that are the result of redis server errors now share a
+  * All exceptions that are the result of redis server errors now share a
       command Exception subclass, ServerError. Thanks Matt Robenolt.
-    * Prevent DISCARD from being called if MULTI wasn't also called. Thanks
+  * Prevent DISCARD from being called if MULTI wasn't also called. Thanks
       Pete Aykroyd.
-    * SREM now returns an integer indicating the number of items removed from
-      the set. Thanks https://github.com/ronniekk.
-    * Fixed a bug with BGSAVE and BGREWRITEAOF response callbacks with Python3.
+  * SREM now returns an integer indicating the number of items removed from
+      the set. Thanks <https://github.com/ronniekk>.
+  * Fixed a bug with BGSAVE and BGREWRITEAOF response callbacks with Python3.
       Thanks Nathan Wan.
-    * Added CLIENT GETNAME and CLIENT SETNAME commands.
-      Thanks https://github.com/bitterb.
-    * It's now possible to use len() on a pipeline instance to determine the
+  * Added CLIENT GETNAME and CLIENT SETNAME commands.
+      Thanks <https://github.com/bitterb>.
+  * It's now possible to use len() on a pipeline instance to determine the
       number of commands that will be executed. Thanks Jon Parise.
-    * Fixed a bug in INFO's parse routine with floating point numbers. Thanks
+  * Fixed a bug in INFO's parse routine with floating point numbers. Thanks
       Ali Onur Uyar.
-    * Fixed a bug with BITCOUNT to allow `start` and `end` to both be zero.
+  * Fixed a bug with BITCOUNT to allow `start` and `end` to both be zero.
       Thanks Tim Bart.
-    * The transaction() method now accepts a boolean keyword argument,
+  * The transaction() method now accepts a boolean keyword argument,
       value_from_callable. By default, or if False is passes, the transaction()
       method will return the value of the pipelines execution. Otherwise, it
       will return whatever func() returns.
-    * Python3 compatibility fix ensuring we're not already bytes(). Thanks
+  * Python3 compatibility fix ensuring we're not already bytes(). Thanks
       Salimane Adjao Moustapha.
-    * Added PSETEX. Thanks YAMAMOTO Takashi.
-    * Added a BlockingConnectionPool to limit the number of connections that
+  * Added PSETEX. Thanks YAMAMOTO Takashi.
+  * Added a BlockingConnectionPool to limit the number of connections that
       can be created. Thanks James Arthur.
-    * SORT now accepts a `groups` option that if specified, will return
+  * SORT now accepts a `groups` option that if specified, will return
       tuples of n-length, where n is the number of keys specified in the GET
       argument. This allows for convenient row-based iteration. Thanks
       Ionuț Arțăriși.
 * 2.7.2
-    * Parse errors are now *always* raised on multi/exec pipelines, regardless
+  * Parse errors are now *always* raised on multi/exec pipelines, regardless
       of the `raise_on_error` flag. See
-      https://groups.google.com/forum/?hl=en&fromgroups=#!topic/redis-db/VUiEFT8U8U0
+      <https://groups.google.com/forum/?hl=en&fromgroups=#!topic/redis-db/VUiEFT8U8U0>
       for more info.
 * 2.7.1
-    * Packaged tests with source code
+  * Packaged tests with source code
 * 2.7.0
-    * Added BITOP and BITCOUNT commands. Thanks Mark Tozzi.
-    * Added the TIME command. Thanks Jason Knight.
-    * Added support for LUA scripting. Thanks to Angus Peart, Drew Smathers,
+  * Added BITOP and BITCOUNT commands. Thanks Mark Tozzi.
+  * Added the TIME command. Thanks Jason Knight.
+  * Added support for LUA scripting. Thanks to Angus Peart, Drew Smathers,
       Issac Kelly, Louis-Philippe Perron, Sean Bleier, Jeffrey Kaditz, and
       Dvir Volk for various patches and contributions to this feature.
-    * Changed the default error handling in pipelines. By default, the first
+  * Changed the default error handling in pipelines. By default, the first
       error in a pipeline will now be raised. A new parameter to the
       pipeline's execute, `raise_on_error`, can be set to False to keep the
       old behavior of embeedding the exception instances in the result.
-    * Fixed a bug with pipelines where parse errors won't corrupt the
+  * Fixed a bug with pipelines where parse errors won't corrupt the
       socket.
-    * Added the optional `number` argument to SRANDMEMBER for use with
+  * Added the optional `number` argument to SRANDMEMBER for use with
       Redis 2.6+ servers.
-    * Added PEXPIRE/PEXPIREAT/PTTL commands. Thanks Luper Rouch.
-    * Added INCRBYFLOAT/HINCRBYFLOAT commands. Thanks Nikita Uvarov.
-    * High precision floating point values won't lose their precision when
+  * Added PEXPIRE/PEXPIREAT/PTTL commands. Thanks Luper Rouch.
+  * Added INCRBYFLOAT/HINCRBYFLOAT commands. Thanks Nikita Uvarov.
+  * High precision floating point values won't lose their precision when
       being sent to the Redis server. Thanks Jason Oster and Oleg Pudeyev.
-    * Added CLIENT LIST/CLIENT KILL commands
+  * Added CLIENT LIST/CLIENT KILL commands
 * 2.6.2
-    * `from_url` is now available as a classmethod on client classes. Thanks
+  * `from_url` is now available as a classmethod on client classes. Thanks
       Jon Parise for the patch.
-    * Fixed several encoding errors resulting from the Python 3.x support.
+  * Fixed several encoding errors resulting from the Python 3.x support.
 * 2.6.1
-    * Python 3.x support! Big thanks to Alex Grönholm.
-    * Fixed a bug in the PythonParser's read_response that could hide an error
+  * Python 3.x support! Big thanks to Alex Grönholm.
+  * Fixed a bug in the PythonParser's read_response that could hide an error
       from the client (#251).
 * 2.6.0
-    * Changed (p)subscribe and (p)unsubscribe to no longer return messages
+  * Changed (p)subscribe and (p)unsubscribe to no longer return messages
       indicating the channel was subscribed/unsubscribed to. These messages
       are available in the listen() loop instead. This is to prevent the
       following scenario:
-        * Client A is subscribed to "foo"
-        * Client B publishes message to "foo"
-        * Client A subscribes to channel "bar" at the same time.
+    * Client A is subscribed to "foo"
+    * Client B publishes message to "foo"
+    * Client A subscribes to channel "bar" at the same time.
       Prior to this change, the subscribe() call would return the published
       messages on "foo" rather than the subscription confirmation to "bar".
-    * Added support for GETRANGE, thanks Jean-Philippe Caruana
-    * A new setting "decode_responses" specifies whether return values from
+  * Added support for GETRANGE, thanks Jean-Philippe Caruana
+  * A new setting "decode_responses" specifies whether return values from
       Redis commands get decoded automatically using the client's charset
       value. Thanks to Frankie Dintino for the patch.
 * 2.4.13
-    * redis.from_url() can take an URL representing a Redis connection string
+  * redis.from_url() can take an URL representing a Redis connection string
       and return a client object. Thanks Kenneth Reitz for the patch.
 * 2.4.12
-    * ConnectionPool is now fork-safe. Thanks Josiah Carson for the patch.
+  * ConnectionPool is now fork-safe. Thanks Josiah Carson for the patch.
 * 2.4.11
-    * AuthenticationError will now be correctly raised if an invalid password
+  * AuthenticationError will now be correctly raised if an invalid password
       is supplied.
-    * If Hiredis is unavailable, the HiredisParser will raise a RedisError
+  * If Hiredis is unavailable, the HiredisParser will raise a RedisError
       if selected manually.
-    * Made the INFO command more tolerant of Redis changes formatting. Fix
+  * Made the INFO command more tolerant of Redis changes formatting. Fix
       for #217.
 * 2.4.10
-    * Buffer reads from socket in the PythonParser. Fix for a Windows-specific
+  * Buffer reads from socket in the PythonParser. Fix for a Windows-specific
       bug (#205).
-    * Added the OBJECT and DEBUG OBJECT commands.
-    * Added __del__ methods for classes that hold on to resources that need to
+  * Added the OBJECT and DEBUG OBJECT commands.
+  * Added __del__ methods for classes that hold on to resources that need to
       be cleaned up. This should prevent resource leakage when these objects
       leave scope due to misuse or unhandled exceptions. Thanks David Wolever
       for the suggestion.
-    * Added the ECHO command for completeness.
-    * Fixed a bug where attempting to subscribe to a PubSub channel of a Redis
+  * Added the ECHO command for completeness.
+  * Fixed a bug where attempting to subscribe to a PubSub channel of a Redis
       server that's down would blow out the stack. Fixes #179 and #195. Thanks
       Ovidiu Predescu for the test case.
-    * StrictRedis's TTL command now returns a -1 when querying a key with no
+  * StrictRedis's TTL command now returns a -1 when querying a key with no
       expiration. The Redis class continues to return None.
-    * ZADD and SADD now return integer values indicating the number of items
+  * ZADD and SADD now return integer values indicating the number of items
       added. Thanks Homer Strong.
-    * Renamed the base client class to StrictRedis, replacing ZADD and LREM in
+  * Renamed the base client class to StrictRedis, replacing ZADD and LREM in
       favor of their official argument order. The Redis class is now a subclass
       of StrictRedis, implementing the legacy redis-py implementations of ZADD
       and LREM. Docs have been updated to suggesting the use of StrictRedis.
-    * SETEX in StrictRedis is now compliant with official Redis SETEX command.
+  * SETEX in StrictRedis is now compliant with official Redis SETEX command.
       the name, value, time implementation moved to "Redis" for backwards
       compatibility.
 * 2.4.9
-    * Removed socket retry logic in Connection. This is the responsibility of
+  * Removed socket retry logic in Connection. This is the responsibility of
       the caller to determine if the command is safe and can be retried. Thanks
       David Wolver.
-    * Added some extra guards around various types of exceptions being raised
+  * Added some extra guards around various types of exceptions being raised
       when sending or parsing data. Thanks David Wolver and Denis Bilenko.
 * 2.4.8
-    * Imported with_statement from __future__ for Python 2.5 compatibility.
+  * Imported with_statement from __future__ for Python 2.5 compatibility.
 * 2.4.7
-    * Fixed a bug where some connections were not getting released back to the
+  * Fixed a bug where some connections were not getting released back to the
       connection pool after pipeline execution.
-    * Pipelines can now be used as context managers. This is the preferred way
+  * Pipelines can now be used as context managers. This is the preferred way
       of use to ensure that connections get cleaned up properly. Thanks
       David Wolever.
-    * Added a convenience method called transaction() on the base Redis class.
+  * Added a convenience method called transaction() on the base Redis class.
       This method eliminates much of the boilerplate used when using pipelines
       to watch Redis keys. See the documentation for details on usage.
 * 2.4.6
-    * Variadic arguments for SADD, SREM, ZREN, HDEL, LPUSH, and RPUSH. Thanks
+  * Variadic arguments for SADD, SREM, ZREN, HDEL, LPUSH, and RPUSH. Thanks
       Raphaël Vinot.
-    * (CRITICAL) Fixed an error in the Hiredis parser that occasionally caused
+  * (CRITICAL) Fixed an error in the Hiredis parser that occasionally caused
       the socket connection to become corrupted and unusable. This became
       noticeable once connection pools started to be used.
-    * ZRANGE, ZREVRANGE, ZRANGEBYSCORE, and ZREVRANGEBYSCORE now take an
+  * ZRANGE, ZREVRANGE, ZRANGEBYSCORE, and ZREVRANGEBYSCORE now take an
       additional optional argument, score_cast_func, which is a callable used
       to cast the score value in the return type. The default is float.
-    * Removed the PUBLISH method from the PubSub class. Connections that are
+  * Removed the PUBLISH method from the PubSub class. Connections that are
       [P]SUBSCRIBEd cannot issue PUBLISH commands, so it doesn't make sense
       to have it here.
-    * Pipelines now contain WATCH and UNWATCH. Calling WATCH or UNWATCH from
+  * Pipelines now contain WATCH and UNWATCH. Calling WATCH or UNWATCH from
       the base client class will result in a deprecation warning. After
       WATCHing one or more keys, the pipeline will be placed in immediate
       execution mode until UNWATCH or MULTI are called. Refer to the new
       pipeline docs in the README for more information. Thanks to David Wolever
       and Randall Leeds for greatly helping with this.
 * 2.4.5
-    * The PythonParser now works better when reading zero length strings.
+  * The PythonParser now works better when reading zero length strings.
 * 2.4.4
-    * Fixed a typo introduced in 2.4.3
+  * Fixed a typo introduced in 2.4.3
 * 2.4.3
-    * Fixed a bug in the UnixDomainSocketConnection caused when trying to
+  * Fixed a bug in the UnixDomainSocketConnection caused when trying to
       form an error message after a socket error.
 * 2.4.2
-    * Fixed a bug in pipeline that caused an exception while trying to
+  * Fixed a bug in pipeline that caused an exception while trying to
       reconnect after a connection timeout.
 * 2.4.1
-    * Fixed a bug in the PythonParser if disconnect is called before connect.
+  * Fixed a bug in the PythonParser if disconnect is called before connect.
 * 2.4.0
-    * WARNING: 2.4 contains several backwards incompatible changes.
-    * Completely refactored Connection objects. Moved much of the Redis
+  * WARNING: 2.4 contains several backwards incompatible changes.
+  * Completely refactored Connection objects. Moved much of the Redis
       protocol packing for requests here, and eliminated the nasty dependencies
       it had on the client to do AUTH and SELECT commands on connect.
-    * Connection objects now have a parser attribute. Parsers are responsible
+  * Connection objects now have a parser attribute. Parsers are responsible
       for reading data Redis sends. Two parsers ship with redis-py: a
       PythonParser and the HiRedis parser. redis-py will automatically use the
       HiRedis parser if you have the Python hiredis module installed, otherwise
       it will fall back to the PythonParser. You can force or the other, or even
       an external one by passing the `parser_class` argument to ConnectionPool.
-    * Added a UnixDomainSocketConnection for users wanting to talk to the Redis
+  * Added a UnixDomainSocketConnection for users wanting to talk to the Redis
       instance running on a local machine only. You can use this connection
       by passing it to the `connection_class` argument of the ConnectionPool.
-    * Connections no longer derive from threading.local. See threading.local
+  * Connections no longer derive from threading.local. See threading.local
       note below.
-    * ConnectionPool has been completely refactored. The ConnectionPool now
+  * ConnectionPool has been completely refactored. The ConnectionPool now
       maintains a list of connections. The redis-py client only hangs on to
       a ConnectionPool instance, calling get_connection() anytime it needs to
       send a command. When get_connection() is called, the command name and
@@ -1048,83 +1058,83 @@
       belong to and return a connection to it. ConnectionPool also implements
       disconnect() to force all connections in the pool to disconnect from
       the Redis server.
-    * redis-py no longer support the SELECT command. You can still connect to
+  * redis-py no longer support the SELECT command. You can still connect to
       a specific database by specifying it when instantiating a client instance
       or by creating a connection pool. If you need to talk to multiple
       databases within your application, you should use a separate client
       instance for each database you want to talk to.
-    * Completely refactored Publish/Subscribe support. The subscribe and listen
+  * Completely refactored Publish/Subscribe support. The subscribe and listen
       commands are no longer available on the redis-py Client class. Instead,
       the `pubsub` method returns an instance of the PubSub class which contains
       all publish/subscribe support. Note, you can still PUBLISH from the
       redis-py client class if you desire.
-    * Removed support for all previously deprecated commands or options.
-    * redis-py no longer uses threading.local in any way. Since the Client
+  * Removed support for all previously deprecated commands or options.
+  * redis-py no longer uses threading.local in any way. Since the Client
       class no longer holds on to a connection, it's no longer needed. You can
       now pass client instances between threads, and commands run on those
       threads will retrieve an available connection from the pool, use it and
       release it. It should now be trivial to use redis-py with eventlet or
       greenlet.
-    * ZADD now accepts pairs of value=score keyword arguments. This should help
+  * ZADD now accepts pairs of value=score keyword arguments. This should help
       resolve the long standing #72. The older value and score arguments have
       been deprecated in favor of the keyword argument style.
-    * Client instances now get their own copy of RESPONSE_CALLBACKS. The new
+  * Client instances now get their own copy of RESPONSE_CALLBACKS. The new
       set_response_callback method adds a user defined callback to the instance.
-    * Support Jython, fixing #97. Thanks to Adam Vandenberg for the patch.
-    * Using __getitem__ now properly raises a KeyError when the key is not
+  * Support Jython, fixing #97. Thanks to Adam Vandenberg for the patch.
+  * Using __getitem__ now properly raises a KeyError when the key is not
       found. Thanks Ionuț Arțăriși for the patch.
-    * Newer Redis versions return a LOADING message for some commands while
+  * Newer Redis versions return a LOADING message for some commands while
       the database is loading from disk during server start. This could cause
       problems with SELECT. We now force a socket disconnection prior to
       raising a ResponseError so subsequent connections have to reconnect and
       re-select the appropriate database. Thanks to Benjamin Anderson for
       finding this and fixing.
 * 2.2.4
-    * WARNING: Potential backwards incompatible change - Changed order of
+  * WARNING: Potential backwards incompatible change - Changed order of
       parameters of ZREVRANGEBYSCORE to match those of the actual Redis command.
       This is only backwards-incompatible if you were passing max and min via
       keyword args. If passing by normal args, nothing in user code should have
       to change. Thanks Stéphane Angel for the fix.
-    * Fixed INFO to properly parse the Redis data correctly for both 2.2.x and
+  * Fixed INFO to properly parse the Redis data correctly for both 2.2.x and
       2.3+. Thanks Stéphane Angel for the fix.
-    * Lock objects now store their timeout value as a float. This allows floats
+  * Lock objects now store their timeout value as a float. This allows floats
       to be used as timeout values. No changes to existing code required.
-    * WATCH now supports multiple keys. Thanks Rich Schumacher.
-    * Broke out some code that was Python 2.4 incompatible. redis-py should
+  * WATCH now supports multiple keys. Thanks Rich Schumacher.
+  * Broke out some code that was Python 2.4 incompatible. redis-py should
       now be usable on 2.4, but this hasn't actually been tested. Thanks
       Dan Colish for the patch.
-    * Optimized some code using izip and islice. Should have a pretty good
+  * Optimized some code using izip and islice. Should have a pretty good
       speed up on larger data sets. Thanks Dan Colish.
-    * Better error handling when submitting an empty mapping to HMSET. Thanks
+  * Better error handling when submitting an empty mapping to HMSET. Thanks
       Dan Colish.
-    * Subscription status is now reset after every (re)connection.
+  * Subscription status is now reset after every (re)connection.
 * 2.2.3
-    * Added support for Hiredis. To use, simply "pip install hiredis" or
+  * Added support for Hiredis. To use, simply "pip install hiredis" or
       "easy_install hiredis". Thanks for Pieter Noordhuis for the hiredis-py
       bindings and the patch to redis-py.
-    * The connection class is chosen based on whether hiredis is installed
+  * The connection class is chosen based on whether hiredis is installed
       or not. To force the use of the PythonConnection, simply create
       your own ConnectionPool instance with the connection_class argument
       assigned to to PythonConnection class.
-    * Added missing command ZREVRANGEBYSCORE. Thanks Jay Baird for the patch.
-    * The INFO command should be parsed correctly on 2.2.x server versions
+  * Added missing command ZREVRANGEBYSCORE. Thanks Jay Baird for the patch.
+  * The INFO command should be parsed correctly on 2.2.x server versions
       and is backwards compatible with older versions. Thanks Brett Hoerner.
 * 2.2.2
-    * Fixed a bug in ZREVRANK where retrieving the rank of a value not in
+  * Fixed a bug in ZREVRANK where retrieving the rank of a value not in
       the zset would raise an error.
-    * Fixed a bug in Connection.send where the errno import was getting
+  * Fixed a bug in Connection.send where the errno import was getting
       overwritten by a local variable.
-    * Fixed a bug in SLAVEOF when promoting an existing slave to a master.
-    * Reverted change of download URL back to redis-VERSION.tar.gz. 2.2.1's
+  * Fixed a bug in SLAVEOF when promoting an existing slave to a master.
+  * Reverted change of download URL back to redis-VERSION.tar.gz. 2.2.1's
       change of this actually broke Pypi for Pip installs. Sorry!
 * 2.2.1
-    * Changed archive name to redis-py-VERSION.tar.gz to not conflict
+  * Changed archive name to redis-py-VERSION.tar.gz to not conflict
       with the Redis server archive.
 * 2.2.0
-    * Implemented SLAVEOF
-    * Implemented CONFIG as config_get and config_set
-    * Implemented GETBIT/SETBIT
-    * Implemented BRPOPLPUSH
-    * Implemented STRLEN
-    * Implemented PERSIST
-    * Implemented SETRANGE
+  * Implemented SLAVEOF
+  * Implemented CONFIG as config_get and config_set
+  * Implemented GETBIT/SETBIT
+  * Implemented BRPOPLPUSH
+  * Implemented STRLEN
+  * Implemented PERSIST
+  * Implemented SETRANGE

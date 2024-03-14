@@ -24,7 +24,10 @@ class SentinelManagedConnection(Connection):
 
     def __repr__(self):
         pool = self.connection_pool
-        s = f"{type(self).__name__}<service={pool.service_name}%s>"
+        s = (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"(service={pool.service_name}%s)>"
+        )
         if self.host:
             host_info = f",host={self.host},port={self.port}"
             s = s % host_info
@@ -55,12 +58,17 @@ class SentinelManagedConnection(Connection):
         return self.retry.call_with_retry(self._connect_retry, lambda error: None)
 
     def read_response(
-        self, disable_decoding=False, *, disconnect_on_error: Optional[bool] = False
+        self,
+        disable_decoding=False,
+        *,
+        disconnect_on_error: Optional[bool] = False,
+        push_request: Optional[bool] = False,
     ):
         try:
             return super().read_response(
                 disable_decoding=disable_decoding,
                 disconnect_on_error=disconnect_on_error,
+                push_request=push_request,
             )
         except ReadOnlyError:
             if self.connection_pool.is_master:
@@ -157,7 +165,10 @@ class SentinelConnectionPool(ConnectionPool):
 
     def __repr__(self):
         role = "master" if self.is_master else "slave"
-        return f"{type(self).__name__}<service={self.service_name}({role})"
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"(service={self.service_name}({role}))>"
+        )
 
     def reset(self):
         super().reset()
@@ -239,6 +250,7 @@ class Sentinel(SentinelCommands):
         once - If set to True, then execute the resulting command on a single
         node at random, rather than across the entire sentinel cluster.
         """
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         once = bool(kwargs.get("once", False))
         if "once" in kwargs.keys():
             kwargs.pop("once")
@@ -256,7 +268,10 @@ class Sentinel(SentinelCommands):
             sentinel_addresses.append(
                 "{host}:{port}".format_map(sentinel.connection_pool.connection_kwargs)
             )
-        return f'{type(self).__name__}<sentinels=[{",".join(sentinel_addresses)}]>'
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f'(sentinels=[{",".join(sentinel_addresses)}])>'
+        )
 
     def check_master_state(self, state, service_name):
         if not state["is_master"] or state["is_sdown"] or state["is_odown"]:
@@ -348,10 +363,8 @@ class Sentinel(SentinelCommands):
         kwargs["is_master"] = True
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
+        return redis_class.from_pool(
+            connection_pool_class(service_name, self, **connection_kwargs)
         )
 
     def slave_for(
@@ -381,8 +394,6 @@ class Sentinel(SentinelCommands):
         kwargs["is_master"] = False
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
+        return redis_class.from_pool(
+            connection_pool_class(service_name, self, **connection_kwargs)
         )

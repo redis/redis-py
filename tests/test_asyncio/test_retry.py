@@ -131,5 +131,8 @@ class TestRedisClientRetry:
         assert r.get_retry()._retries == new_retry_policy._retries
         assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
         assert exiting_conn.retry._retries == new_retry_policy._retries
+        await r.connection_pool.release(exiting_conn)
         new_conn = await r.connection_pool.get_connection("_")
         assert new_conn.retry._retries == new_retry_policy._retries
+        await r.connection_pool.release(new_conn)
+        await r.aclose()
