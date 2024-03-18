@@ -354,7 +354,12 @@ def parse_scan(response, **options):
 
 def parse_hscan(response, **options):
     cursor, r = response
-    return int(cursor), r and pairs_to_dict(r) or {}
+    no_values = options.get("no_values", False)
+    if no_values:
+        payload = r or []
+    else:
+        payload = r and pairs_to_dict(r) or {}
+    return int(cursor), payload
 
 
 def parse_zscan(response, **options):
