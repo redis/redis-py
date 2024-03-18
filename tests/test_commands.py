@@ -707,6 +707,15 @@ class TestRedisCommands:
             assert c["user"] != killuser
         r.acl_deluser(killuser)
 
+    @skip_if_server_version_lt("7.4.0")
+    @skip_if_redis_enterprise()
+    def test_client_kill_filter_by_maxage(self, r, request):
+        _get_client(redis.Redis, request, flushdb=False)
+        time.sleep(4)
+        assert len(r.client_list()) == 2
+        r.client_kill_filter(maxage=2)
+        assert len(r.client_list()) == 1
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.9.50")
     @skip_if_redis_enterprise()
