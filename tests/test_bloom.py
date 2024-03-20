@@ -5,7 +5,12 @@ import redis.commands.bf
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
 
-from .conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
+from .conftest import (
+    assert_resp_response,
+    is_resp2_connection,
+    skip_ifmodversion_lt,
+    skip_if_redis_enterprise,
+)
 
 
 def intlist(obj):
@@ -248,6 +253,7 @@ def test_cms(client):
 
 
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 def test_cms_merge(client):
     assert client.cms().initbydim("A", 1000, 5)
     assert client.cms().initbydim("B", 1000, 5)
@@ -373,6 +379,7 @@ def test_tdigest_reset(client):
 
 
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 def test_tdigest_merge(client):
     assert client.tdigest().create("to-tDigest", 10)
     assert client.tdigest().create("from-tDigest", 10)

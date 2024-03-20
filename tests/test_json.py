@@ -4,7 +4,12 @@ from redis import Redis, exceptions
 from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
 
-from .conftest import _get_client, assert_resp_response, skip_ifmodversion_lt
+from .conftest import (
+    _get_client,
+    assert_resp_response,
+    skip_ifmodversion_lt,
+    skip_if_redis_enterprise,
+)
 
 
 @pytest.fixture
@@ -309,6 +314,7 @@ def test_objlen(client):
     assert len(obj) == client.json().objlen("obj")
 
 
+@skip_if_redis_enterprise()
 def test_json_commands_in_pipeline(client):
     p = client.json().pipeline()
     p.set("foo", Path.root_path(), "bar")
