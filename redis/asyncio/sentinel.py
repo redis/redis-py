@@ -228,7 +228,7 @@ class Sentinel(AsyncSentinelCommands):
         once = bool(kwargs.get("once", False))
         if "once" in kwargs.keys():
             kwargs.pop("once")
-        
+
         # Check if command suppose to return boolean response.
         bool_resp = bool(kwargs.get("bool_resp", False))
         if "bool_resp" in kwargs.keys():
@@ -236,7 +236,7 @@ class Sentinel(AsyncSentinelCommands):
 
         if once:
             return await random.choice(self.sentinels).execute_command(*args, **kwargs)
-        
+
         tasks = [
             asyncio.Task(sentinel.execute_command(*args, **kwargs))
             for sentinel in self.sentinels
@@ -245,7 +245,7 @@ class Sentinel(AsyncSentinelCommands):
 
         if bool_resp:
             return reduce(lambda x, y: x and y, responses)
-        
+
         return responses
 
     def __repr__(self):

@@ -13,7 +13,9 @@ class SentinelCommands:
 
     def sentinel_get_master_addr_by_name(self, service_name):
         """Returns a (host, port) pair for the given ``service_name``"""
-        return self.execute_command("SENTINEL GET-MASTER-ADDR-BY-NAME", service_name, once=True)
+        return self.execute_command(
+            "SENTINEL GET-MASTER-ADDR-BY-NAME", service_name, once=True
+        )
 
     def sentinel_master(self, service_name):
         """Returns a dictionary containing the specified masters state."""
@@ -25,7 +27,9 @@ class SentinelCommands:
 
     def sentinel_monitor(self, name, ip, port, quorum):
         """Add a new master to Sentinel to be monitored"""
-        return self.execute_command("SENTINEL MONITOR", name, ip, port, quorum, bool_resp=True)
+        return self.execute_command(
+            "SENTINEL MONITOR", name, ip, port, quorum, bool_resp=True
+        )
 
     def sentinel_remove(self, name):
         """Remove a master from Sentinel's monitoring"""
@@ -52,7 +56,9 @@ class SentinelCommands:
         failover in progress), and removes every slave and sentinel already
         discovered and associated with the master.
         """
-        return self.execute_command("SENTINEL RESET", pattern, once=True, bool_resp=True)
+        return self.execute_command(
+            "SENTINEL RESET", pattern, once=True, bool_resp=True
+        )
 
     def sentinel_failover(self, new_master_name):
         """
@@ -61,7 +67,9 @@ class SentinelCommands:
         configuration will be published so that the other Sentinels will
         update their configurations).
         """
-        return self.execute_command("SENTINEL FAILOVER", new_master_name, bool_resp=True)
+        return self.execute_command(
+            "SENTINEL FAILOVER", new_master_name, bool_resp=True
+        )
 
     def sentinel_ckquorum(self, new_master_name):
         """
@@ -72,7 +80,9 @@ class SentinelCommands:
         This command should be used in monitoring systems to check if a
         Sentinel deployment is ok.
         """
-        return self.execute_command("SENTINEL CKQUORUM", new_master_name, once=True, bool_resp=True)
+        return self.execute_command(
+            "SENTINEL CKQUORUM", new_master_name, once=True, bool_resp=True
+        )
 
     def sentinel_flushconfig(self):
         """
