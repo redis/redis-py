@@ -1,6 +1,7 @@
 import asyncio
 import random
 import weakref
+from functools import reduce
 from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type
 
 from redis.asyncio.client import Redis
@@ -227,16 +228,25 @@ class Sentinel(AsyncSentinelCommands):
         once = bool(kwargs.get("once", False))
         if "once" in kwargs.keys():
             kwargs.pop("once")
+        
+        # Check if command suppose to return boolean response.
+        bool_resp = bool(kwargs.get("bool_resp", False))
+        if "bool_resp" in kwargs.keys():
+            kwargs.pop("bool_resp")
 
         if once:
-            await random.choice(self.sentinels).execute_command(*args, **kwargs)
-        else:
-            tasks = [
-                asyncio.Task(sentinel.execute_command(*args, **kwargs))
-                for sentinel in self.sentinels
-            ]
-            await asyncio.gather(*tasks)
-        return True
+            return await random.choice(self.sentinels).execute_command(*args, **kwargs)
+        
+        tasks = [
+            asyncio.Task(sentinel.execute_command(*args, **kwargs))
+            for sentinel in self.sentinels
+        ]
+        responses = await asyncio.gather(*tasks)
+
+        if bool_resp:
+            return reduce(lambda x, y: x and y, responses)
+        
+        return responses
 
     def __repr__(self):
         sentinel_addresses = []

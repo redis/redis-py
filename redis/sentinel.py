@@ -1,5 +1,6 @@
 import random
 import weakref
+from functools import reduce
 from typing import Optional
 
 from redis.client import Redis
@@ -254,13 +255,23 @@ class Sentinel(SentinelCommands):
         once = bool(kwargs.get("once", False))
         if "once" in kwargs.keys():
             kwargs.pop("once")
+        
+        # Check if command suppose to return boolean response.
+        bool_resp = bool(kwargs.get("bool_resp", False))
+        if "bool_resp" in kwargs.keys():
+            kwargs.pop("bool_resp")
 
         if once:
-            random.choice(self.sentinels).execute_command(*args, **kwargs)
-        else:
-            for sentinel in self.sentinels:
-                sentinel.execute_command(*args, **kwargs)
-        return True
+            return random.choice(self.sentinels).execute_command(*args, **kwargs)
+
+        responses = []
+        for sentinel in self.sentinels:
+            responses.append(sentinel.execute_command(*args, **kwargs))
+        
+        if bool_resp:
+            return reduce(lambda x, y: x and y, responses)
+        
+        return responses
 
     def __repr__(self):
         sentinel_addresses = []
