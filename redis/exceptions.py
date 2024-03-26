@@ -217,5 +217,4 @@ class SlotNotCoveredError(RedisClusterException):
     pass
 
 
-class MaxConnectionsError(ConnectionError):
-    ...
+class MaxConnectionsError(ConnectionError): ...

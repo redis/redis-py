@@ -3399,9 +3399,7 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMEMBERS", name, keys=[name])
 
-    def smismember(
-        self, name: str, values: List, *args: List
-    ) -> Union[
+    def smismember(self, name: str, values: List, *args: List) -> Union[
         Awaitable[List[Union[Literal[0], Literal[1]]]],
         List[Union[Literal[0], Literal[1]]],
     ]:
