@@ -402,10 +402,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.response_callbacks = kwargs["response_callbacks"]
         self.result_callbacks = self.__class__.RESULT_CALLBACKS.copy()
-        self.result_callbacks[
-            "CLUSTER SLOTS"
-        ] = lambda cmd, res, **kwargs: parse_cluster_slots(
-            list(res.values())[0], **kwargs
+        self.result_callbacks["CLUSTER SLOTS"] = (
+            lambda cmd, res, **kwargs: parse_cluster_slots(
+                list(res.values())[0], **kwargs
+            )
         )
 
         self._initialize = True
@@ -1318,9 +1318,9 @@ class NodesManager:
                                 )
                             tmp_slots[i].append(target_replica_node)
                             # add this node to the nodes cache
-                            tmp_nodes_cache[
-                                target_replica_node.name
-                            ] = target_replica_node
+                            tmp_nodes_cache[target_replica_node.name] = (
+                                target_replica_node
+                            )
                     else:
                         # Validate that 2 nodes want to use the same slot cache
                         # setup
