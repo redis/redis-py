@@ -88,13 +88,11 @@ if TYPE_CHECKING:
 
 
 class ResponseCallbackProtocol(Protocol):
-    def __call__(self, response: Any, **kwargs):
-        ...
+    def __call__(self, response: Any, **kwargs): ...
 
 
 class AsyncResponseCallbackProtocol(Protocol):
-    async def __call__(self, response: Any, **kwargs):
-        ...
+    async def __call__(self, response: Any, **kwargs): ...
 
 
 ResponseCallbackT = Union[ResponseCallbackProtocol, AsyncResponseCallbackProtocol]
@@ -1220,13 +1218,11 @@ class PubSub:
 
 
 class PubsubWorkerExceptionHandler(Protocol):
-    def __call__(self, e: BaseException, pubsub: PubSub):
-        ...
+    def __call__(self, e: BaseException, pubsub: PubSub): ...
 
 
 class AsyncPubsubWorkerExceptionHandler(Protocol):
-    async def __call__(self, e: BaseException, pubsub: PubSub):
-        ...
+    async def __call__(self, e: BaseException, pubsub: PubSub): ...
 
 
 PSWorkerThreadExcHandlerT = Union[
