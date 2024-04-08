@@ -2,6 +2,7 @@ import asyncio
 import copy
 import enum
 import inspect
+import os
 import socket
 import ssl
 import sys
@@ -1125,7 +1126,7 @@ class ConnectionPool:
         max_connections: Optional[int] = None,
         **connection_kwargs,
     ):
-        max_connections = max_connections or 2**31
+        max_connections = max_connections or os.cpu_count() * 10
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
@@ -1317,7 +1318,7 @@ class BlockingConnectionPool(ConnectionPool):
 
     def __init__(
         self,
-        max_connections: int = 50,
+        max_connections: int = os.cpu_count() * 10,
         timeout: Optional[int] = 20,
         connection_class: Type[AbstractConnection] = Connection,
         queue_class: Type[asyncio.Queue] = asyncio.LifoQueue,  # deprecated

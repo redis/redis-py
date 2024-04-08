@@ -1079,7 +1079,7 @@ class ConnectionPool:
         max_connections: Optional[int] = None,
         **connection_kwargs,
     ):
-        max_connections = max_connections or 2**31
+        max_connections = max_connections or os.cpu_count() * 10
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
@@ -1348,7 +1348,7 @@ class BlockingConnectionPool(ConnectionPool):
 
     def __init__(
         self,
-        max_connections=50,
+        max_connections=os.cpu_count() * 10,
         timeout=20,
         connection_class=Connection,
         queue_class=LifoQueue,
@@ -1454,7 +1454,10 @@ class BlockingConnectionPool(ConnectionPool):
             # that will cause the pool to recreate the connection if
             # its needed.
             connection.disconnect()
-            self.pool.put_nowait(None)
+            try:
+                self.pool.put_nowait(None)
+            except Full:
+                pass
             return
 
         # Put the connection back into the pool.

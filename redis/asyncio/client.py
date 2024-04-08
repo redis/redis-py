@@ -39,6 +39,7 @@ from redis._parsers.helpers import (
     bool_ok,
 )
 from redis.asyncio.connection import (
+    BlockingConnectionPool,
     Connection,
     ConnectionPool,
     SSLConnection,
@@ -160,12 +161,12 @@ class Redis(
         Boolean arguments can be specified with string values "True"/"False"
         or "Yes"/"No". Values that cannot be properly cast cause a
         ``ValueError`` to be raised. Once parsed, the querystring arguments
-        and keyword arguments are passed to the ``ConnectionPool``'s
+        and keyword arguments are passed to the ``BlockingConnectionPool``'s
         class initializer. In the case of conflicting arguments, querystring
         arguments always win.
 
         """
-        connection_pool = ConnectionPool.from_url(url, **kwargs)
+        connection_pool = BlockingConnectionPool.from_url(url, **kwargs)
         client = cls(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
@@ -337,7 +338,7 @@ class Redis(
                     )
             # This arg only used if no pool is passed in
             self.auto_close_connection_pool = auto_close_connection_pool
-            connection_pool = ConnectionPool(**kwargs)
+            connection_pool = BlockingConnectionPool(**kwargs)
         else:
             # If a pool is passed in, do not close it
             self.auto_close_connection_pool = False

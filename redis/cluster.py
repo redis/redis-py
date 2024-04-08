@@ -12,7 +12,7 @@ from redis.backoff import default_backoff
 from redis.client import CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
-from redis.connection import ConnectionPool, DefaultParser, parse_url
+from redis.connection import BlockingConnectionPool, DefaultParser, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
@@ -487,7 +487,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         Boolean arguments can be specified with string values "True"/"False"
         or "Yes"/"No". Values that cannot be properly cast cause a
         ``ValueError`` to be raised. Once parsed, the querystring arguments
-        and keyword arguments are passed to the ``ConnectionPool``'s
+        and keyword arguments are passed to the ``BlockingConnectionPool``'s
         class initializer. In the case of conflicting arguments, querystring
         arguments always win.
 
@@ -1321,7 +1321,7 @@ class NodesManager:
         require_full_coverage=False,
         lock=None,
         dynamic_startup_nodes=True,
-        connection_pool_class=ConnectionPool,
+        connection_pool_class=BlockingConnectionPool,
         address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
         **kwargs,
     ):

@@ -27,6 +27,7 @@ from redis.commands import (
 )
 from redis.connection import (
     AbstractConnection,
+    BlockingConnectionPool,
     ConnectionPool,
     SSLConnection,
     UnixDomainSocketConnection,
@@ -141,13 +142,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         Boolean arguments can be specified with string values "True"/"False"
         or "Yes"/"No". Values that cannot be properly cast cause a
         ``ValueError`` to be raised. Once parsed, the querystring arguments
-        and keyword arguments are passed to the ``ConnectionPool``'s
+        and keyword arguments are passed to the ``BlockingConnectionPool``'s
         class initializer. In the case of conflicting arguments, querystring
         arguments always win.
 
         """
         single_connection_client = kwargs.pop("single_connection_client", False)
-        connection_pool = ConnectionPool.from_url(url, **kwargs)
+        connection_pool = BlockingConnectionPool.from_url(url, **kwargs)
         client = cls(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
@@ -320,7 +321,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_min_version": ssl_min_version,
                         }
                     )
-            connection_pool = ConnectionPool(**kwargs)
+            connection_pool = BlockingConnectionPool(**kwargs)
             self.auto_close_connection_pool = True
         else:
             self.auto_close_connection_pool = False

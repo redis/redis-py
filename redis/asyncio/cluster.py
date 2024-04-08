@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import os
 import random
 import socket
 import ssl
@@ -242,7 +243,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         reinitialize_steps: int = 5,
         cluster_error_retry_attempts: int = 3,
         connection_error_retry_attempts: int = 3,
-        max_connections: int = 2**31,
+        max_connections: int = os.cpu_count() * 10,
         # Client related kwargs
         db: Union[str, int] = 0,
         path: Optional[str] = None,
@@ -964,7 +965,7 @@ class ClusterNode:
         port: Union[str, int],
         server_type: Optional[str] = None,
         *,
-        max_connections: int = 2**31,
+        max_connections: int = os.cpu_count() * 10,
         connection_class: Type[Connection] = Connection,
         **connection_kwargs: Any,
     ) -> None:

@@ -647,11 +647,10 @@ class TestConnection:
         connection = redis.Redis.from_url("redis://localhost")
         pool = connection.connection_pool
 
-        print(repr(pool))
         assert re.match(
             r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
         ).groups() == (
-            "ConnectionPool",
+            "BlockingConnectionPool",
             "Connection",
             "host=localhost,port=6379,db=0",
         )
@@ -663,7 +662,7 @@ class TestConnection:
         assert re.match(
             r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
         ).groups() == (
-            "ConnectionPool",
+            "BlockingConnectionPool",
             "UnixDomainSocketConnection",
             "path=/path/to/socket,db=0",
         )
