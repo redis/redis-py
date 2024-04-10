@@ -2859,11 +2859,13 @@ class TestClusterPipeline:
 
     async def test_can_run_concurrent_pipelines(self, r: RedisCluster) -> None:
         """Test that the pipeline can be used concurrently."""
+        r = RedisCluster(host="localhost", port=16379, max_connections=100)
         await asyncio.gather(
             *(self.test_redis_cluster_pipeline(r) for i in range(100)),
             *(self.test_multi_key_operation_with_a_single_slot(r) for i in range(100)),
             *(self.test_multi_key_operation_with_multi_slots(r) for i in range(100)),
         )
+        r.flushdb()
 
     @pytest.mark.onlycluster
     async def test_pipeline_with_default_node_error_command(self, create_redis):

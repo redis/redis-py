@@ -3281,8 +3281,7 @@ class TestClusterPipeline:
         assert get_connection.call_count == 4
         for cluster_node in r.nodes_manager.nodes_cache.values():
             connection_pool = cluster_node.redis_connection.connection_pool
-            num_of_conns = len(connection_pool._available_connections)
-            assert num_of_conns == connection_pool._created_connections
+            assert len(connection_pool._connections) < 2
 
     def test_empty_stack(self, r):
         """

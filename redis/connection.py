@@ -1425,12 +1425,15 @@ class BlockingConnectionPool(ConnectionPool):
         try:
             # ensure this connection is connected to Redis
             connection.connect()
-            # connections that the pool provides should be ready to send
-            # a command. if not, the connection was either returned to the
+            # if client caching is not enabled connections that the pool
+            # provides should be ready to send a command.
+            # if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
+            # (if caching enabled the connection will not always be ready
+            # to send a command because it may contain invalidation messages)
             try:
-                if connection.can_read():
+                if connection.can_read() and connection.client_cache is None:
                     raise ConnectionError("Connection has data")
             except (ConnectionError, OSError):
                 connection.disconnect()
@@ -1473,3 +1476,38 @@ class BlockingConnectionPool(ConnectionPool):
         self._checkpid()
         for connection in self._connections:
             connection.disconnect()
+
+    def set_retry(self, retry: "Retry") -> None:
+        self.connection_kwargs.update({"retry": retry})
+        for conn in self._connections:
+            conn.retry = retry
+
+    def flush_cache(self):
+        self._checkpid()
+        with self._lock:
+            for connection in self._connections:
+                try:
+                    connection.client_cache.flush()
+                except AttributeError:
+                    # cache is not enabled
+                    pass
+
+    def delete_command_from_cache(self, command: str):
+        self._checkpid()
+        with self._lock:
+            for connection in self._connections:
+                try:
+                    connection.client_cache.delete_command(command)
+                except AttributeError:
+                    # cache is not enabled
+                    pass
+
+    def invalidate_key_from_cache(self, key: str):
+        self._checkpid()
+        with self._lock:
+            for connection in self._connections:
+                try:
+                    connection.client_cache.invalidate_key(key)
+                except AttributeError:
+                    # cache is not enabled
+                    pass
