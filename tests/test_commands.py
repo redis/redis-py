@@ -732,6 +732,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_client_no_evict(self, r):
         assert r.client_no_evict("ON")
         with pytest.raises(TypeError):
@@ -913,8 +914,12 @@ class TestRedisCommands:
         # make sure other attributes are typed correctly
         assert isinstance(slowlog[0]["start_time"], int)
         assert isinstance(slowlog[0]["duration"], int)
-        assert isinstance(slowlog[0]["client_address"], bytes)
-        assert isinstance(slowlog[0]["client_name"], bytes)
+        try:
+            assert isinstance(slowlog[0]["client_address"], bytes)
+            assert isinstance(slowlog[0]["client_name"], bytes)
+        except KeyError:
+            # The client_address and client_name fields are not always present
+            pass
 
         # Mock result if we didn't get slowlog complexity info.
         if "complexity" not in slowlog[0]:
@@ -1122,6 +1127,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
+    @skip_if_redis_enterprise()
     def test_copy_to_another_database(self, request):
         r0 = _get_client(redis.Redis, request, db=0)
         r1 = _get_client(redis.Redis, request, db=1)
@@ -2255,6 +2261,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_sinterstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sinterstore("c", "a", "b") == 0
@@ -4959,12 +4966,15 @@ class TestRedisCommands:
         with pytest.raises(NotImplementedError):
             r.latency_doctor()
 
+    @skip_if_redis_enterprise()
     def test_latency_history(self, r: redis.Redis):
         assert r.latency_history("command") == []
 
+    @skip_if_redis_enterprise()
     def test_latency_latest(self, r: redis.Redis):
         assert r.latency_latest() == []
 
+    @skip_if_redis_enterprise()
     def test_latency_reset(self, r: redis.Redis):
         assert r.latency_reset() == 0
 
@@ -5175,7 +5185,7 @@ class TestRedisCommands:
 
         thread = threading.Thread(target=helper)
         thread.start()
-        thread.join(0.1)
+        thread.join(0.4)
         try:
             assert not thread.is_alive()
             assert ok

@@ -379,13 +379,21 @@ def parse_slowlog_get(response, **options):
         # an O(N) complexity) instead of the command.
         if isinstance(item[3], list):
             result["command"] = space.join(item[3])
-            result["client_address"] = item[4]
-            result["client_name"] = item[5]
+            try:
+                result["client_address"] = item[4]
+                result["client_name"] = item[5]
+            except IndexError:
+                # The client address and name are not always present (in enterprise)
+                pass
         else:
             result["complexity"] = item[3]
             result["command"] = space.join(item[4])
-            result["client_address"] = item[5]
-            result["client_name"] = item[6]
+            try:
+                result["client_address"] = item[5]
+                result["client_name"] = item[6]
+            except IndexError:
+                # The client address and name are not always present (in enterprise)
+                pass
         return result
 
     return [parse_item(item) for item in response]
@@ -650,7 +658,11 @@ def parse_client_info(value):
         "omem",
         "tot-mem",
     }:
-        client_info[int_key] = int(client_info[int_key])
+        try:
+            client_info[int_key] = int(client_info[int_key])
+        except KeyError:
+            # not all fields exist in enterprise
+            pass
     return client_info
 
 

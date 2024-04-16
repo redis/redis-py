@@ -7,6 +7,7 @@ from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
+    skip_if_redis_enterprise,
     skip_ifmodversion_lt,
 )
 
@@ -235,6 +236,7 @@ async def test_cms(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 async def test_cms_merge(decoded_r: redis.Redis):
     assert await decoded_r.cms().initbydim("A", 1000, 5)
     assert await decoded_r.cms().initbydim("B", 1000, 5)
@@ -366,6 +368,7 @@ async def test_tdigest_reset(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 async def test_tdigest_merge(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("to-tDigest", 10)
     assert await decoded_r.tdigest().create("from-tDigest", 10)

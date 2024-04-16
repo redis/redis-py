@@ -18,7 +18,11 @@ import redis.asyncio as redis
 from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE
-from tests.conftest import get_protocol_version, skip_if_server_version_lt
+from tests.conftest import (
+    get_protocol_version,
+    skip_if_redis_enterprise,
+    skip_if_server_version_lt,
+)
 
 from .compat import aclosing, create_task, mock
 
@@ -674,6 +678,7 @@ class TestPubSubPings:
 @pytest.mark.onlynoncluster
 class TestPubSubConnectionKilled:
     @skip_if_server_version_lt("3.0.0")
+    @skip_if_redis_enterprise()
     async def test_connection_error_raised_when_connection_dies(
         self, r: redis.Redis, pubsub
     ):

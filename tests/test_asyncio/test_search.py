@@ -500,6 +500,7 @@ async def test_example(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_if_redis_enterprise()
 async def test_auto_complete(decoded_r: redis.Redis):
     n = 0
     with open(TITLES_CSV) as f:
