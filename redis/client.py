@@ -25,7 +25,12 @@ from redis.commands import (
     SentinelCommands,
     list_or_args,
 )
-from redis.connection import ConnectionPool, SSLConnection, UnixDomainSocketConnection
+from redis.connection import (
+    AbstractConnection,
+    ConnectionPool,
+    SSLConnection,
+    UnixDomainSocketConnection,
+)
 from redis.credentials import CredentialProvider
 from redis.exceptions import (
     ConnectionError,
@@ -198,6 +203,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_validate_ocsp_stapled=False,
         ssl_ocsp_context=None,
         ssl_ocsp_expected_cert=None,
+        ssl_min_version=None,
         max_connections=None,
         single_connection_client=False,
         health_check_interval=0,
@@ -311,6 +317,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_validate_ocsp": ssl_validate_ocsp,
                             "ssl_ocsp_context": ssl_ocsp_context,
                             "ssl_ocsp_expected_cert": ssl_ocsp_expected_cert,
+                            "ssl_min_version": ssl_min_version,
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)
@@ -556,10 +563,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         pool = self.connection_pool
         conn = self.connection or pool.get_connection(command_name, **options)
         response_from_cache = conn._get_from_local_cache(args)
-        if response_from_cache is not None:
-            return response_from_cache
-        else:
-            try:
+        try:
+            if response_from_cache is not None:
+                return response_from_cache
+            else:
                 response = conn.retry.call_with_retry(
                     lambda: self._send_command_parse_response(
                         conn, command_name, *args, **options
@@ -568,9 +575,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 )
                 conn._add_to_local_cache(args, response, keys)
                 return response
-            finally:
-                if not self.connection:
-                    pool.release(conn)
+        finally:
+            if not self.connection:
+                pool.release(conn)
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
@@ -837,11 +844,15 @@ class PubSub:
     def _disconnect_raise_connect(self, conn, error) -> None:
         """
         Close the connection and raise an exception
-        if retry_on_timeout is not set or the error
-        is not a TimeoutError. Otherwise, try to reconnect
+        if retry_on_error is not set or the error is not one
+        of the specified error types. Otherwise, try to
+        reconnect
         """
         conn.disconnect()
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             raise error
         conn.connect()
 
@@ -1318,8 +1329,8 @@ class Pipeline(Redis):
         """
         Close the connection, reset watching state and
         raise an exception if we were watching,
-        retry_on_timeout is not set,
-        or the error is not a TimeoutError
+        if retry_on_error is not set or the error is not one
+        of the specified error types.
         """
         conn.disconnect()
         # if we were already watching a variable, the watch is no longer
@@ -1330,9 +1341,12 @@ class Pipeline(Redis):
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
-        # if retry_on_timeout is not set, or the error is not
-        # a TimeoutError, raise it
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        # if retry_on_error is not set or the error is not one
+        # of the specified error types, raise it
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             self.reset()
             raise
 
@@ -1490,11 +1504,15 @@ class Pipeline(Redis):
                 if not exist:
                     s.sha = immediate("SCRIPT LOAD", s.script)
 
-    def _disconnect_raise_reset(self, conn: Redis, error: Exception) -> None:
+    def _disconnect_raise_reset(
+        self,
+        conn: AbstractConnection,
+        error: Exception,
+    ) -> None:
         """
         Close the connection, raise an exception if we were watching,
-        and raise an exception if TimeoutError is not part of retry_on_error,
-        or the error is not a TimeoutError
+        and raise an exception if retry_on_error is not set or the
+        error is not one of the specified error types.
         """
         conn.disconnect()
         # if we were watching a variable, the watch is no longer valid
@@ -1504,11 +1522,13 @@ class Pipeline(Redis):
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
-        # if TimeoutError is not part of retry_on_error, or the error
-        # is not a TimeoutError, raise it
-        if not (
-            TimeoutError in conn.retry_on_error and isinstance(error, TimeoutError)
+        # if retry_on_error is not set or the error is not one
+        # of the specified error types, raise it
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
         ):
+
             self.reset()
             raise error
 

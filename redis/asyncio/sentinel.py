@@ -108,9 +108,11 @@ class SentinelConnectionPool(ConnectionPool):
     def __init__(self, service_name, sentinel_manager, **kwargs):
         kwargs["connection_class"] = kwargs.get(
             "connection_class",
-            SentinelManagedSSLConnection
-            if kwargs.pop("ssl", False)
-            else SentinelManagedConnection,
+            (
+                SentinelManagedSSLConnection
+                if kwargs.pop("ssl", False)
+                else SentinelManagedConnection
+            ),
         )
         self.is_master = kwargs.pop("is_master", True)
         self.check_connection = kwargs.pop("check_connection", False)

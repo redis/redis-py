@@ -2011,7 +2011,7 @@ class BasicKeyCommands(CommandsProtocol):
         options = {}
         if not args:
             options[EMPTY_RESPONSE] = []
-        options["keys"] = keys
+        options["keys"] = args
         return self.execute_command("MGET", *args, **options)
 
     def mset(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
@@ -3399,9 +3399,7 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMEMBERS", name, keys=[name])
 
-    def smismember(
-        self, name: str, values: List, *args: List
-    ) -> Union[
+    def smismember(self, name: str, values: List, *args: List) -> Union[
         Awaitable[List[Union[Literal[0], Literal[1]]]],
         List[Union[Literal[0], Literal[1]]],
     ]:

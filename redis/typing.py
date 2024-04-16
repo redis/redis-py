@@ -54,12 +54,10 @@ ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Except
 class CommandsProtocol(Protocol):
     connection_pool: Union["AsyncConnectionPool", "ConnectionPool"]
 
-    def execute_command(self, *args, **options):
-        ...
+    def execute_command(self, *args, **options): ...
 
 
 class ClusterCommandsProtocol(CommandsProtocol, Protocol):
     encoder: "Encoder"
 
-    def execute_command(self, *args, **options) -> Union[Any, Awaitable]:
-        ...
+    def execute_command(self, *args, **options) -> Union[Any, Awaitable]: ...
