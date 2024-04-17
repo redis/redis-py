@@ -159,6 +159,8 @@ _KEYS = "keys"
 _CTIME = "ctime"
 _ACCESS_COUNT = "access_count"
 
+IMMUTABLES = (bytes, str, int, float, bool, type(None), tuple)
+
 
 class AbstractCache(ABC):
     """
@@ -267,7 +269,12 @@ class _LocalCache(AbstractCache):
                 self.delete_command(command)
                 return
             self._update_access(command)
-            return copy.deepcopy(self.cache[command]["response"])
+            response = self.cache[command]["response"]
+            return (
+                response
+                if isinstance(response, IMMUTABLES)
+                else copy.deepcopy(response)
+            )
 
     def delete_command(self, command: Union[str, Sequence[str]]):
         """
