@@ -87,13 +87,11 @@ else:
 
 
 class ConnectCallbackProtocol(Protocol):
-    def __call__(self, connection: "AbstractConnection"):
-        ...
+    def __call__(self, connection: "AbstractConnection"): ...
 
 
 class AsyncConnectCallbackProtocol(Protocol):
-    async def __call__(self, connection: "AbstractConnection"):
-        ...
+    async def __call__(self, connection: "AbstractConnection"): ...
 
 
 ConnectCallbackT = Union[ConnectCallbackProtocol, AsyncConnectCallbackProtocol]
@@ -319,9 +317,11 @@ class AbstractConnection:
                 await self.on_connect()
             else:
                 # Use the passed function redis_connect_func
-                await self.redis_connect_func(self) if asyncio.iscoroutinefunction(
-                    self.redis_connect_func
-                ) else self.redis_connect_func(self)
+                (
+                    await self.redis_connect_func(self)
+                    if asyncio.iscoroutinefunction(self.redis_connect_func)
+                    else self.redis_connect_func(self)
+                )
         except RedisError:
             # clean up after any error in on_connect
             await self.disconnect()
@@ -685,7 +685,7 @@ class AbstractConnection:
 
     def _socket_is_empty(self):
         """Check if the socket is empty"""
-        return not self._reader.at_eof()
+        return len(self._reader._buffer) == 0
 
     def _cache_invalidation_process(
         self, data: List[Union[str, Optional[List[str]]]]
@@ -823,6 +823,7 @@ class SSLConnection(Connection):
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
+        ssl_min_version: Optional[ssl.TLSVersion] = None,
         **kwargs,
     ):
         self.ssl_context: RedisSSLContext = RedisSSLContext(
@@ -832,6 +833,7 @@ class SSLConnection(Connection):
             ca_certs=ssl_ca_certs,
             ca_data=ssl_ca_data,
             check_hostname=ssl_check_hostname,
+            min_version=ssl_min_version,
         )
         super().__init__(**kwargs)
 
@@ -864,6 +866,10 @@ class SSLConnection(Connection):
     def check_hostname(self):
         return self.ssl_context.check_hostname
 
+    @property
+    def min_version(self):
+        return self.ssl_context.min_version
+
 
 class RedisSSLContext:
     __slots__ = (
@@ -874,6 +880,7 @@ class RedisSSLContext:
         "ca_data",
         "context",
         "check_hostname",
+        "min_version",
     )
 
     def __init__(
@@ -884,6 +891,7 @@ class RedisSSLContext:
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
         check_hostname: bool = False,
+        min_version: Optional[ssl.TLSVersion] = None,
     ):
         self.keyfile = keyfile
         self.certfile = certfile
@@ -903,6 +911,7 @@ class RedisSSLContext:
         self.ca_certs = ca_certs
         self.ca_data = ca_data
         self.check_hostname = check_hostname
+        self.min_version = min_version
         self.context: Optional[ssl.SSLContext] = None
 
     def get(self) -> ssl.SSLContext:
@@ -914,6 +923,8 @@ class RedisSSLContext:
                 context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
             if self.ca_certs or self.ca_data:
                 context.load_verify_locations(cafile=self.ca_certs, cadata=self.ca_data)
+            if self.min_version is not None:
+                context.minimum_version = self.min_version
             self.context = context
         return self.context
 
@@ -1181,12 +1192,18 @@ class ConnectionPool:
     async def ensure_connection(self, connection: AbstractConnection):
         """Ensure that the connection object is connected and valid"""
         await connection.connect()
-        # connections that the pool provides should be ready to send
-        # a command. if not, the connection was either returned to the
+        # if client caching is not enabled connections that the pool
+        # provides should be ready to send a command.
+        # if not, the connection was either returned to the
         # pool before all data has been read or the socket has been
         # closed. either way, reconnect and verify everything is good.
+        # (if caching enabled the connection will not always be ready
+        # to send a command because it may contain invalidation messages)
         try:
-            if await connection.can_read_destructive():
+            if (
+                await connection.can_read_destructive()
+                and connection.client_cache is None
+            ):
                 raise ConnectionError("Connection has data") from None
         except (ConnectionError, OSError):
             await connection.disconnect()
@@ -1280,7 +1297,7 @@ class BlockingConnectionPool(ConnectionPool):
     connection from the pool when all of connections are in use, rather than
     raising a :py:class:`~redis.ConnectionError` (as the default
     :py:class:`~redis.asyncio.ConnectionPool` implementation does), it
-    makes blocks the current `Task` for a specified number of seconds until
+    blocks the current `Task` for a specified number of seconds until
     a connection becomes available.
 
     Use ``max_connections`` to increase / decrease the pool size::

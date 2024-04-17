@@ -2,6 +2,7 @@ import asyncio
 import collections
 import random
 import socket
+import ssl
 import warnings
 from typing import (
     Any,
@@ -271,6 +272,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_keyfile: Optional[str] = None,
+        ssl_min_version: Optional[ssl.TLSVersion] = None,
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
         cache_enabled: bool = False,
@@ -344,6 +346,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     "ssl_certfile": ssl_certfile,
                     "ssl_check_hostname": ssl_check_hostname,
                     "ssl_keyfile": ssl_keyfile,
+                    "ssl_min_version": ssl_min_version,
                 }
             )
 
@@ -399,10 +402,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.response_callbacks = kwargs["response_callbacks"]
         self.result_callbacks = self.__class__.RESULT_CALLBACKS.copy()
-        self.result_callbacks[
-            "CLUSTER SLOTS"
-        ] = lambda cmd, res, **kwargs: parse_cluster_slots(
-            list(res.values())[0], **kwargs
+        self.result_callbacks["CLUSTER SLOTS"] = (
+            lambda cmd, res, **kwargs: parse_cluster_slots(
+                list(res.values())[0], **kwargs
+            )
         )
 
         self._initialize = True
@@ -1250,13 +1253,12 @@ class NodesManager:
         for startup_node in self.startup_nodes.values():
             try:
                 # Make sure cluster mode is enabled on this node
-                if not (await startup_node.execute_command("INFO")).get(
-                    "cluster_enabled"
-                ):
+                try:
+                    cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
+                except ResponseError:
                     raise RedisClusterException(
                         "Cluster mode is not enabled on this node"
                     )
-                cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
                 startup_nodes_reachable = True
             except Exception as e:
                 # Try the next startup node.
@@ -1316,9 +1318,9 @@ class NodesManager:
                                 )
                             tmp_slots[i].append(target_replica_node)
                             # add this node to the nodes cache
-                            tmp_nodes_cache[
-                                target_replica_node.name
-                            ] = target_replica_node
+                            tmp_nodes_cache[target_replica_node.name] = (
+                                target_replica_node
+                            )
                     else:
                         # Validate that 2 nodes want to use the same slot cache
                         # setup

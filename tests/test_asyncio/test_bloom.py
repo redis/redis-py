@@ -16,7 +16,6 @@ def intlist(obj):
     return [int(v) for v in obj]
 
 
-@pytest.mark.redismod
 async def test_create(decoded_r: redis.Redis):
     """Test CREATE/RESERVE calls"""
     assert await decoded_r.bf().create("bloom", 0.01, 1000)
@@ -31,13 +30,11 @@ async def test_create(decoded_r: redis.Redis):
     assert await decoded_r.topk().reserve("topk", 5, 100, 5, 0.9)
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 async def test_tdigest_create(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 100)
 
 
-@pytest.mark.redismod
 async def test_bf_add(decoded_r: redis.Redis):
     assert await decoded_r.bf().create("bloom", 0.01, 1000)
     assert 1 == await decoded_r.bf().add("bloom", "foo")
@@ -50,7 +47,6 @@ async def test_bf_add(decoded_r: redis.Redis):
     assert [1, 0] == intlist(await decoded_r.bf().mexists("bloom", "foo", "noexist"))
 
 
-@pytest.mark.redismod
 async def test_bf_insert(decoded_r: redis.Redis):
     assert await decoded_r.bf().create("bloom", 0.01, 1000)
     assert [1] == intlist(await decoded_r.bf().insert("bloom", ["foo"]))
@@ -81,7 +77,6 @@ async def test_bf_insert(decoded_r: redis.Redis):
     )
 
 
-@pytest.mark.redismod
 async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
     # Store a filter
     await decoded_r.bf().create("myBloom", "0.0001", "1000")
@@ -133,7 +128,6 @@ async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
     await decoded_r.bf().create("myBloom", "0.0001", "10000000")
 
 
-@pytest.mark.redismod
 async def test_bf_info(decoded_r: redis.Redis):
     expansion = 4
     # Store a filter
@@ -165,7 +159,6 @@ async def test_bf_info(decoded_r: redis.Redis):
         assert True
 
 
-@pytest.mark.redismod
 async def test_bf_card(decoded_r: redis.Redis):
     # return 0 if the key does not exist
     assert await decoded_r.bf().card("not_exist") == 0
@@ -180,7 +173,6 @@ async def test_bf_card(decoded_r: redis.Redis):
         await decoded_r.bf().card("setKey")
 
 
-@pytest.mark.redismod
 async def test_cf_add_and_insert(decoded_r: redis.Redis):
     assert await decoded_r.cf().create("cuckoo", 1000)
     assert await decoded_r.cf().add("cuckoo", "filter")
@@ -206,7 +198,6 @@ async def test_cf_add_and_insert(decoded_r: redis.Redis):
     )
 
 
-@pytest.mark.redismod
 async def test_cf_exists_and_del(decoded_r: redis.Redis):
     assert await decoded_r.cf().create("cuckoo", 1000)
     assert await decoded_r.cf().add("cuckoo", "filter")
@@ -218,7 +209,6 @@ async def test_cf_exists_and_del(decoded_r: redis.Redis):
     assert 0 == await decoded_r.cf().count("cuckoo", "filter")
 
 
-@pytest.mark.redismod
 async def test_cms(decoded_r: redis.Redis):
     assert await decoded_r.cms().initbydim("dim", 1000, 5)
     assert await decoded_r.cms().initbyprob("prob", 0.01, 0.01)
@@ -234,7 +224,6 @@ async def test_cms(decoded_r: redis.Redis):
     assert 25 == info["count"]
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_if_redis_enterprise()
 async def test_cms_merge(decoded_r: redis.Redis):
@@ -253,7 +242,6 @@ async def test_cms_merge(decoded_r: redis.Redis):
     assert [16, 15, 21] == await decoded_r.cms().query("C", "foo", "bar", "baz")
 
 
-@pytest.mark.redismod
 async def test_topk(decoded_r: redis.Redis):
     # test list with empty buckets
     assert await decoded_r.topk().reserve("topk", 3, 50, 4, 0.9)
@@ -334,7 +322,6 @@ async def test_topk(decoded_r: redis.Redis):
     assert 0.9 == round(float(info["decay"]), 1)
 
 
-@pytest.mark.redismod
 async def test_topk_incrby(decoded_r: redis.Redis):
     await decoded_r.flushdb()
     assert await decoded_r.topk().reserve("topk", 3, 10, 3, 1)
@@ -349,7 +336,6 @@ async def test_topk_incrby(decoded_r: redis.Redis):
         )
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 async def test_tdigest_reset(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 10)
@@ -366,7 +352,6 @@ async def test_tdigest_reset(decoded_r: redis.Redis):
     )
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_if_redis_enterprise()
 async def test_tdigest_merge(decoded_r: redis.Redis):
@@ -395,7 +380,6 @@ async def test_tdigest_merge(decoded_r: redis.Redis):
     assert 4.0 == await decoded_r.tdigest().max("to-tDigest")
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 async def test_tdigest_min_and_max(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 100)
@@ -406,7 +390,6 @@ async def test_tdigest_min_and_max(decoded_r: redis.Redis):
     assert 1 == await decoded_r.tdigest().min("tDigest")
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 @skip_ifmodversion_lt("2.4.0", "bf")
 async def test_tdigest_quantile(decoded_r: redis.Redis):
@@ -435,7 +418,6 @@ async def test_tdigest_quantile(decoded_r: redis.Redis):
     assert [3.0, 5.0] == res
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 async def test_tdigest_cdf(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 100)
@@ -447,7 +429,6 @@ async def test_tdigest_cdf(decoded_r: redis.Redis):
     assert [0.1, 0.9] == [round(x, 1) for x in res]
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 @skip_ifmodversion_lt("2.4.0", "bf")
 async def test_tdigest_trimmed_mean(decoded_r: redis.Redis):
@@ -458,7 +439,6 @@ async def test_tdigest_trimmed_mean(decoded_r: redis.Redis):
     assert 4.5 == await decoded_r.tdigest().trimmed_mean("tDigest", 0.4, 0.5)
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 async def test_tdigest_rank(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("t-digest", 500)
@@ -469,7 +449,6 @@ async def test_tdigest_rank(decoded_r: redis.Redis):
     assert [-1, 20, 9] == await decoded_r.tdigest().rank("t-digest", -20, 20, 9)
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 async def test_tdigest_revrank(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("t-digest", 500)
@@ -479,7 +458,6 @@ async def test_tdigest_revrank(decoded_r: redis.Redis):
     assert [-1, 19, 9] == await decoded_r.tdigest().revrank("t-digest", 21, 0, 10)
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 async def test_tdigest_byrank(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("t-digest", 500)
@@ -491,7 +469,6 @@ async def test_tdigest_byrank(decoded_r: redis.Redis):
         (await decoded_r.tdigest().byrank("t-digest", -1))[0]
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 async def test_tdigest_byrevrank(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("t-digest", 500)
@@ -503,8 +480,7 @@ async def test_tdigest_byrevrank(decoded_r: redis.Redis):
         (await decoded_r.tdigest().byrevrank("t-digest", -1))[0]
 
 
-# @pytest.mark.redismod
-# async def test_pipeline(decoded_r: redis.Redis):
+# # async def test_pipeline(decoded_r: redis.Redis):
 #     pipeline = await decoded_r.bf().pipeline()
 #     assert not await decoded_r.bf().execute_command("get pipeline")
 #

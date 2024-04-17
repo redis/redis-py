@@ -1525,11 +1525,12 @@ class NodesManager:
                     )
                     self.startup_nodes[startup_node.name].redis_connection = r
                 # Make sure cluster mode is enabled on this node
-                if bool(r.info().get("cluster_enabled")) is False:
+                try:
+                    cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
+                except ResponseError:
                     raise RedisClusterException(
                         "Cluster mode is not enabled on this node"
                     )
-                cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
                 startup_nodes_reachable = True
             except Exception as e:
                 # Try the next startup node.
@@ -1581,9 +1582,9 @@ class NodesManager:
                             )
                             tmp_slots[i].append(target_replica_node)
                             # add this node to the nodes cache
-                            tmp_nodes_cache[
-                                target_replica_node.name
-                            ] = target_replica_node
+                            tmp_nodes_cache[target_replica_node.name] = (
+                                target_replica_node
+                            )
                     else:
                         # Validate that 2 nodes want to use the same slot cache
                         # setup
@@ -2143,6 +2144,8 @@ class ClusterPipeline(RedisCluster):
                     try:
                         connection = get_connection(redis_node, c.args)
                     except ConnectionError:
+                        for n in nodes.values():
+                            n.connection_pool.release(n.connection)
                         # Connection retries are being handled in the node's
                         # Retry object. Reinitialize the node -> slot table.
                         self.nodes_manager.initialize()
