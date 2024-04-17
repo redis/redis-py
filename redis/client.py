@@ -265,7 +265,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "encoding_errors": encoding_errors,
                 "decode_responses": decode_responses,
                 "retry_on_error": retry_on_error,
-                "retry": copy.deepcopy(retry),
+                "retry": retry if retry is None else copy.deepcopy(retry),
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
