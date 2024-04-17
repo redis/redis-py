@@ -32,7 +32,7 @@ jobs:
         python-version: ['3.10']
         test-type: ['standalone']
         connection-type: ['hiredis', 'plain']
-        re-build: ["7.2.4-92"]
+        re-build: ["latest"]
     env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: RE [${{ matrix.re-build }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
@@ -61,8 +61,6 @@ jobs:
           RE_CLUSTER_NAME: test
           RE_USE_OSS_CLUSTER: false
           RE_DB_PORT: 6379
-          DOCKER_ACCESS_TOKEN: ${{ secrets.DOCKER_ACCESS_TOKEN }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: ./build.sh
 
       - name: Run tests
