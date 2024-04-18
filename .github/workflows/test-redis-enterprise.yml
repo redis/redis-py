@@ -55,7 +55,7 @@ jobs:
       - name: Build cluster
         working-directory: redis-ee
         env:
-          IMAGE: "redislabs/redis-internal:${{ matrix.re-build }}"
+          IMAGE: "redislabs/redis:${{ matrix.re-build }}"
           RE_USERNAME: test@test.com
           RE_PASS: 12345
           RE_CLUSTER_NAME: test
