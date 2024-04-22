@@ -685,6 +685,7 @@ class SSLConnection(Connection):
         ssl_ocsp_context=None,
         ssl_ocsp_expected_cert=None,
         ssl_min_version=None,
+        ssl_ciphers=None,
         **kwargs,
     ):
         """Constructor
@@ -704,6 +705,7 @@ class SSLConnection(Connection):
             ssl_ocsp_context: A fully initialized OpenSSL.SSL.Context object to be used in verifying the ssl_ocsp_expected_cert
             ssl_ocsp_expected_cert: A PEM armoured string containing the expected certificate to be returned from the ocsp verification service.
             ssl_min_version: The lowest supported SSL version. It affects the supported SSL versions of the SSLContext. None leaves the default provided by ssl module.
+            ssl_ciphers: A string listing the ciphers that are allowed to be used. Defaults to None, which means that the default ciphers are used. See https://docs.python.org/3/library/ssl.html#ssl.SSLContext.set_ciphers for more information.
 
         Raises:
             RedisError
@@ -737,6 +739,7 @@ class SSLConnection(Connection):
         self.ssl_ocsp_context = ssl_ocsp_context
         self.ssl_ocsp_expected_cert = ssl_ocsp_expected_cert
         self.ssl_min_version = ssl_min_version
+        self.ssl_ciphers = ssl_ciphers
         super().__init__(**kwargs)
 
     def _connect(self):
@@ -761,6 +764,8 @@ class SSLConnection(Connection):
             )
         if self.ssl_min_version is not None:
             context.minimum_version = self.ssl_min_version
+        if self.ssl_ciphers:
+            context.set_ciphers(self.ssl_ciphers)
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
