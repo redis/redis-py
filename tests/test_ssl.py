@@ -78,6 +78,68 @@ class TestSSL:
         assert r.ping()
         r.close()
 
+    @pytest.mark.parametrize(
+        "ssl_ciphers",
+        [
+            "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
+            "DHE-RSA-AES256-GCM-SHA384",
+            "ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305",
+        ],
+    )
+    def test_ssl_connection_tls12_custom_ciphers(self, request, ssl_ciphers):
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_min_version=ssl.TLSVersion.TLSv1_3,
+            ssl_ciphers=ssl_ciphers,
+        )
+        assert r.ping()
+        r.close()
+
+    def test_ssl_connection_tls12_custom_ciphers_invalid(self, request):
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_min_version=ssl.TLSVersion.TLSv1_2,
+            ssl_ciphers="foo:bar",
+        )
+        with pytest.raises(RedisError) as e:
+            r.ping()
+        assert "No cipher can be selected" in str(e)
+        r.close()
+
+    @pytest.mark.parametrize(
+        "ssl_ciphers",
+        [
+            "TLS_CHACHA20_POLY1305_SHA256",
+            "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
+        ],
+    )
+    def test_ssl_connection_tls13_custom_ciphers(self, request, ssl_ciphers):
+        # TLSv1.3 does not support changing the ciphers
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_min_version=ssl.TLSVersion.TLSv1_2,
+            ssl_ciphers=ssl_ciphers,
+        )
+        with pytest.raises(RedisError) as e:
+            r.ping()
+        assert "No cipher can be selected" in str(e)
+        r.close()
+
     def _create_oscp_conn(self, request):
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
