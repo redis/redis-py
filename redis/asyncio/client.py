@@ -221,6 +221,7 @@ class Redis(
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_min_version: Optional[ssl.TLSVersion] = None,
+        ssl_ciphers: Optional[str] = None,
         max_connections: Optional[int] = None,
         single_connection_client: bool = False,
         health_check_interval: int = 0,
@@ -314,6 +315,7 @@ class Redis(
                             "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,
                             "ssl_min_version": ssl_min_version,
+                            "ssl_ciphers": ssl_ciphers,
                         }
                     )
             # This arg only used if no pool is passed in

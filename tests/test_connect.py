@@ -72,6 +72,31 @@ def test_tcp_ssl_connect(tcp_address, ssl_min_version):
 
 
 @pytest.mark.ssl
+@pytest.mark.parametrize(
+    "ssl_ciphers",
+    [
+        "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "ECDHE-RSA-AES128-GCM-SHA256",
+    ],
+)
+def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
+    host, port = tcp_address
+    certfile = get_ssl_filename("server-cert.pem")
+    keyfile = get_ssl_filename("server-key.pem")
+    conn = SSLConnection(
+        host=host,
+        port=port,
+        client_name=_CLIENT_NAME,
+        ssl_ca_certs=certfile,
+        socket_timeout=10,
+        ssl_min_version=ssl.TLSVersion.TLSv1_2,
+        ssl_ciphers=ssl_ciphers,
+    )
+    _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+
+
+@pytest.mark.ssl
 @pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3")
 def test_tcp_ssl_version_mismatch(tcp_address):
     host, port = tcp_address

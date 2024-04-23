@@ -739,6 +739,7 @@ class SSLConnection(Connection):
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_min_version: Optional[ssl.TLSVersion] = None,
+        ssl_ciphers: Optional[str] = None,
         **kwargs,
     ):
         self.ssl_context: RedisSSLContext = RedisSSLContext(
@@ -749,6 +750,7 @@ class SSLConnection(Connection):
             ca_data=ssl_ca_data,
             check_hostname=ssl_check_hostname,
             min_version=ssl_min_version,
+            ciphers=ssl_ciphers,
         )
         super().__init__(**kwargs)
 
@@ -796,6 +798,7 @@ class RedisSSLContext:
         "context",
         "check_hostname",
         "min_version",
+        "ciphers",
     )
 
     def __init__(
@@ -807,6 +810,7 @@ class RedisSSLContext:
         ca_data: Optional[str] = None,
         check_hostname: bool = False,
         min_version: Optional[ssl.TLSVersion] = None,
+        ciphers: Optional[str] = None,
     ):
         self.keyfile = keyfile
         self.certfile = certfile
@@ -827,6 +831,7 @@ class RedisSSLContext:
         self.ca_data = ca_data
         self.check_hostname = check_hostname
         self.min_version = min_version
+        self.ciphers = ciphers
         self.context: Optional[ssl.SSLContext] = None
 
     def get(self) -> ssl.SSLContext:
@@ -840,6 +845,8 @@ class RedisSSLContext:
                 context.load_verify_locations(cafile=self.ca_certs, cadata=self.ca_data)
             if self.min_version is not None:
                 context.minimum_version = self.min_version
+            if self.ciphers is not None:
+                context.set_ciphers(self.ciphers)
             self.context = context
         return self.context
 

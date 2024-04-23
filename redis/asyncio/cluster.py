@@ -267,6 +267,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_check_hostname: bool = False,
         ssl_keyfile: Optional[str] = None,
         ssl_min_version: Optional[ssl.TLSVersion] = None,
+        ssl_ciphers: Optional[str] = None,
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
     ) -> None:
@@ -326,6 +327,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     "ssl_check_hostname": ssl_check_hostname,
                     "ssl_keyfile": ssl_keyfile,
                     "ssl_min_version": ssl_min_version,
+                    "ssl_ciphers": ssl_ciphers,
                 }
             )
 
