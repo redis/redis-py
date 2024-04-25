@@ -1,8 +1,12 @@
 import time
+from collections import defaultdict
+from typing import List
 
+import cachetools
 import pytest
 import redis
-from redis._cache import _LocalCache
+from redis._cache import AbstractCache, _LocalCache
+from redis.typing import KeyT, ResponseT
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import _get_client
 
@@ -16,6 +20,11 @@ def r(request):
     ) as client:
         yield client, cache
         # client.flushdb()
+
+
+@pytest.fixture()
+def local_cache():
+    return _LocalCache()
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
@@ -189,6 +198,123 @@ class TestLocalCache:
         id4 = r.client_id()
         assert id1 == id2 == id3 == id4
 
+    @pytest.mark.onlynoncluster
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_multiple_commands_same_key(self, r):
+        r, cache = r
+        r.mset({"a": 1, "b": 1})
+        assert r.mget("a", "b") == ["1", "1"]
+        # value should be in local cache
+        assert cache.get(("MGET", "a", "b")) == ["1", "1"]
+        # set only one key
+        r.set("a", 2)
+        # send any command to redis (process invalidation in background)
+        r.ping()
+        # the command is not in the local cache anymore
+        assert cache.get(("MGET", "a", "b")) is None
+        # get from redis
+        assert r.mget("a", "b") == ["2", "1"]
+
+    @pytest.mark.onlynoncluster
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_delete_one_command(self, r):
+        r, cache = r
+        r.mset({"a": 1, "b": 1})
+        r.set("c", 1)
+        assert r.mget("a", "b") == ["1", "1"]
+        assert r.get("c") == "1"
+        # values should be in local cache
+        assert cache.get(("MGET", "a", "b")) == ["1", "1"]
+        assert cache.get(("GET", "c")) == "1"
+        # delete one command from the cache
+        cache.delete_command(("MGET", "a", "b"))
+        # the other command is still in the local cache anymore
+        assert cache.get(("MGET", "a", "b")) is None
+        assert cache.get(("GET", "c")) == "1"
+        # get from redis
+        assert r.mget("a", "b") == ["1", "1"]
+        assert r.get("c") == "1"
+
+    @pytest.mark.onlynoncluster
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_delete_several_commands(self, r):
+        r, cache = r
+        r.mset({"a": 1, "b": 1})
+        r.set("c", 1)
+        assert r.mget("a", "b") == ["1", "1"]
+        assert r.get("c") == "1"
+        # values should be in local cache
+        assert cache.get(("MGET", "a", "b")) == ["1", "1"]
+        assert cache.get(("GET", "c")) == "1"
+        # delete the commands from the cache
+        cache.delete_commands([("MGET", "a", "b"), ("GET", "c")])
+        # the commands are not in the local cache anymore
+        assert cache.get(("MGET", "a", "b")) is None
+        assert cache.get(("GET", "c")) is None
+        # get from redis
+        assert r.mget("a", "b") == ["1", "1"]
+        assert r.get("c") == "1"
+
+    @pytest.mark.onlynoncluster
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_invalidate_key(self, r):
+        r, cache = r
+        r.mset({"a": 1, "b": 1})
+        r.set("c", 1)
+        assert r.mget("a", "b") == ["1", "1"]
+        assert r.get("c") == "1"
+        # values should be in local cache
+        assert cache.get(("MGET", "a", "b")) == ["1", "1"]
+        assert cache.get(("GET", "c")) == "1"
+        # invalidate one key from the cache
+        cache.invalidate_key("b")
+        # one other command is still in the local cache anymore
+        assert cache.get(("MGET", "a", "b")) is None
+        assert cache.get(("GET", "c")) == "1"
+        # get from redis
+        assert r.mget("a", "b") == ["1", "1"]
+        assert r.get("c") == "1"
+
+    @pytest.mark.onlynoncluster
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_flush_entire_cache(self, r):
+        r, cache = r
+        r.mset({"a": 1, "b": 1})
+        r.set("c", 1)
+        assert r.mget("a", "b") == ["1", "1"]
+        assert r.get("c") == "1"
+        # values should be in local cache
+        assert cache.get(("MGET", "a", "b")) == ["1", "1"]
+        assert cache.get(("GET", "c")) == "1"
+        # flush the local cache
+        cache.flush()
+        # the commands are not in the local cache anymore
+        assert cache.get(("MGET", "a", "b")) is None
+        assert cache.get(("GET", "c")) is None
+        # get from redis
+        assert r.mget("a", "b") == ["1", "1"]
+        assert r.get("c") == "1"
+
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
@@ -233,3 +359,101 @@ class TestClusterLocalCache:
         assert cache.get(("GET", "foo")) is None
         # get key from redis
         assert r.get("foo") == "barbar"
+
+
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+@pytest.mark.onlynoncluster
+class TestSentinelLocalCache:
+
+    def test_get_from_cache(self, local_cache, master):
+        master.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert master.get("foo") == b"bar"
+        # get key from local cache
+        assert local_cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        master.set("foo", "barbar")
+        # send any command to redis (process invalidation in background)
+        master.ping()
+        # the command is not in the local cache anymore
+        assert local_cache.get(("GET", "foo")) is None
+        # get key from redis
+        assert master.get("foo") == b"barbar"
+
+    @pytest.mark.parametrize(
+        "sentinel_setup",
+        [{"kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_cache_decode_response(self, local_cache, sentinel_setup, master):
+        master.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert master.get("foo") == "bar"
+        # get key from local cache
+        assert local_cache.get(("GET", "foo")) == "bar"
+        # change key in redis (cause invalidation)
+        master.set("foo", "barbar")
+        # send any command to redis (process invalidation in background)
+        master.ping()
+        # the command is not in the local cache anymore
+        assert local_cache.get(("GET", "foo")) is None
+        # get key from redis
+        assert master.get("foo") == "barbar"
+
+
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+@pytest.mark.onlynoncluster
+class TestCustomCache:
+    class _CustomCache(AbstractCache):
+        def __init__(self):
+            self.responses = cachetools.LRUCache(maxsize=1000)
+            self.keys_to_commands = defaultdict(list)
+            self.commands_to_keys = defaultdict(list)
+
+        def set(self, command: str, response: ResponseT, keys_in_command: List[KeyT]):
+            self.responses[command] = response
+            for key in keys_in_command:
+                self.keys_to_commands[key].append(tuple(command))
+                self.commands_to_keys[command].append(tuple(keys_in_command))
+
+        def get(self, command: str) -> ResponseT:
+            return self.responses.get(command)
+
+        def delete_command(self, command: str):
+            self.responses.pop(command, None)
+            keys = self.commands_to_keys.pop(command, [])
+            for key in keys:
+                if command in self.keys_to_commands[key]:
+                    self.keys_to_commands[key].remove(command)
+
+        def delete_commands(self, commands):
+            for command in commands:
+                self.delete_command(command)
+
+        def flush(self):
+            self.responses.clear()
+            self.commands_to_keys.clear()
+            self.keys_to_commands.clear()
+
+        def invalidate_key(self, key: KeyT):
+            commands = self.keys_to_commands.pop(key, [])
+            for command in commands:
+                self.delete_command(command)
+
+    @pytest.mark.parametrize("r", [{"cache": _CustomCache()}], indirect=True)
+    def test_get_from_cache(self, r, r2):
+        r, cache = r
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") == b"bar"
+        # get key from local cache
+        assert cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        r2.set("foo", "barbar")
+        # send any command to redis (process invalidation in background)
+        r.ping()
+        # the command is not in the local cache anymore
+        assert cache.get(("GET", "foo")) is None
+        # get key from redis
+        assert r.get("foo") == b"barbar"

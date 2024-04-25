@@ -14,6 +14,11 @@ async def r(request, create_redis):
     yield r, cache
 
 
+@pytest_asyncio.fixture()
+async def local_cache():
+    yield _LocalCache()
+
+
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 class TestLocalCache:
     @pytest.mark.onlynoncluster
@@ -228,3 +233,43 @@ class TestClusterLocalCache:
         assert cache.get(("GET", "foo")) is None
         # get key from redis
         assert await r.get("foo") == "barbar"
+
+
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+@pytest.mark.onlynoncluster
+class TestSentinelLocalCache:
+
+    async def test_get_from_cache(self, local_cache, master):
+        await master.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert await master.get("foo") == b"bar"
+        # get key from local cache
+        assert local_cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        await master.set("foo", "barbar")
+        # send any command to redis (process invalidation in background)
+        await master.ping()
+        # the command is not in the local cache anymore
+        assert local_cache.get(("GET", "foo")) is None
+        # get key from redis
+        assert await master.get("foo") == b"barbar"
+
+    @pytest.mark.parametrize(
+        "sentinel_setup",
+        [{"kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    async def test_cache_decode_response(self, local_cache, sentinel_setup, master):
+        await master.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert await master.get("foo") == "bar"
+        # get key from local cache
+        assert local_cache.get(("GET", "foo")) == "bar"
+        # change key in redis (cause invalidation)
+        await master.set("foo", "barbar")
+        # send any command to redis (process invalidation in background)
+        await master.ping()
+        # the command is not in the local cache anymore
+        assert local_cache.get(("GET", "foo")) is None
+        # get key from redis
+        assert await master.get("foo") == "barbar"
