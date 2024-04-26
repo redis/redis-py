@@ -5081,6 +5081,485 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HSTRLEN", name, key, keys=[name])
 
+    def hexpire(
+        self,
+        name: KeyT,
+        seconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
+        """
+        Set or update the expiration time for fields within a hash key, using relative
+        time in seconds.
+
+        If a field already has an expiration time, the behavior of the update can be
+        controlled using the ``nx``, ``xx``, ``gt``, and ``lt`` parameters.
+
+        The return value provides detailed information about the outcome for each field.
+
+        :param name: The name of the hash key.
+        :param seconds: Expiration time in seconds, relative. Can be an integer, or a
+                        Python `timedelta` object.
+        :param fields: List of fields within the hash to apply the expiration time to.
+        :param nx: Set expiry only when the field has no expiry.
+        :param xx: Set expiry only when the field has an existing expiry.
+        :param gt: Set expiry only when the new expiry is greater than current one.
+        :param lt: Set expiry only when the new expiry is less than current one.
+        :return: If the key does not exist, returns `None`. If the key exists, returns a
+                 list which contains for each field in the request:
+                  - `-2` if the field does not exist.
+                  - `0` if the specified NX | XX | GT | LT condition was not met.
+                  - `1` if the expiration time was set or updated.
+                  - `2` if the field was deleted because the specified expiration time
+                    is in the past.
+
+        Example:
+            >>> import redis
+            >>> import time
+            >>>
+            >>> r = redis.Redis(host='localhost', port=6379)
+            >>> _ = r.delete('vehicle:10')
+            >>> r.hset('vehicle:10', 'id', 'f3a64766-5dec-4e07-b5f8-3c0f8e1a5e4b')
+            1
+            >>> r.hset('vehicle:10', 'longitude', '-122.335167')
+            1
+            >>> r.hset('vehicle:10', 'latitude', '37.779284')
+            1
+            >>> r.hexpire('vehicle:10', 1, 'longitude', 'latitude', 'foobar')
+            [1, 1, -2]
+            >>> time.sleep(2)
+            >>> r.hexists('vehicle:10', 'longitude')
+            False
+            >>> r.hgetall('vehicle:10')
+            {b'id': b'f3a64766-5dec-4e07-b5f8-3c0f8e1a5e4b'}
+
+        For more information see https://redis.io/commands/hexpire
+        """
+        if isinstance(seconds, datetime.timedelta):
+            seconds = int(seconds.total_seconds())
+
+        options = []
+        if nx:
+            options.append("NX")
+        if xx:
+            options.append("XX")
+        if gt:
+            options.append("GT")
+        if lt:
+            options.append("LT")
+
+        return self.execute_command(
+            "HEXPIRE", name, seconds, *options, len(fields), *fields
+        )
+
+    def hpexpire(
+        self,
+        name: KeyT,
+        milliseconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
+        """
+        Set or update the expiration time for fields within a hash key, using relative
+        time in milliseconds.
+
+        If a field already has an expiration time, the behavior of the update can be
+        controlled using the ``nx``, ``xx``, ``gt``, and ``lt`` parameters.
+
+        The return value provides detailed information about the outcome for each field.
+
+        :param name: The name of the hash key.
+        :param milliseconds: Expiration time in milliseconds, relative. Can be an
+                             integer, or a Python `timedelta` object.
+        :param fields: List of fields within the hash to apply the expiration time to.
+        :param nx: Set expiry only when the field has no expiry.
+        :param xx: Set expiry only when the field has an existing expiry.
+        :param gt: Set expiry only when the new expiry is greater than current one.
+        :param lt: Set expiry only when the new expiry is less than current one.
+        :return: If the key does not exist, returns `None`. If the key exists, returns a
+                 list which contains for each field in the request:
+                  - `-2` if the field does not exist.
+                  - `0` if the specified NX | XX | GT | LT condition was not met.
+                  - `1` if the expiration time was set or updated.
+                  - `2` if the field was deleted because the specified expiration time
+                    is in the past.
+
+        Example:
+            >>> import redis
+            >>> import time
+            >>>
+            >>> r = redis.Redis(host='localhost', port=6379)
+            >>> _ = r.delete('sensor:456')
+            >>> r.hset('sensor:456', 'id', 'sensor_456')
+            1
+            >>> r.hset('sensor:456', 'temperature', '36.6')
+            1
+            >>> r.hset('sensor:456', 'alert', 'overheat')
+            1
+            >>> r.hpexpire('sensor:456', 800, 'temperature', 'alert')
+            [1, 1]
+            >>> time.sleep(0.9)
+            >>> r.hexists('sensor:456', 'alert')
+            False
+            >>> r.hgetall('sensor:456')
+            {b'id': b'sensor_456'}
+
+        For more information see https://redis.io/commands/hpexpire
+        """
+        if isinstance(milliseconds, datetime.timedelta):
+            milliseconds = int(milliseconds.total_seconds() * 1000)
+
+        options = []
+        if nx:
+            options.append("NX")
+        if xx:
+            options.append("XX")
+        if gt:
+            options.append("GT")
+        if lt:
+            options.append("LT")
+
+        return self.execute_command(
+            "HPEXPIRE", name, milliseconds, *options, len(fields), *fields
+        )
+
+    def hexpireat(
+        self,
+        name: KeyT,
+        unix_time_seconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
+        """
+        Set or update the expiration time for fields within a hash key, using an
+        absolute Unix timestamp in seconds.
+
+        If a field already has an expiration time, the behavior of the update can be
+        controlled using the ``nx``, ``xx``, ``gt``, and ``lt`` parameters.
+
+        The return value provides detailed information about the outcome for each field.
+
+        :param name: The name of the hash key.
+        :param unix_time_seconds: Expiration time as Unix timestamp in milliseconds. Can
+                                  be an integer or a Python `datetime` object.
+        :param fields: List of fields within the hash to apply the expiration time to.
+        :param nx: Set expiry only when the field has no expiry.
+        :param xx: Set expiry only when the field has an existing expiration time.
+        :param gt: Set expiry only when the new expiry is greater than current one.
+        :param lt: Set expiry only when the new expiry is less than current one.
+        :return: If the key does not exist, returns `None`. If the key exists, returns a
+                 list which contains for each field in the request:
+                  - `-2` if the field does not exist.
+                  - `0` if the specified NX | XX | GT | LT condition was not met.
+                  - `1` if the expiration time was set or updated.
+                  - `2` if the field was deleted because the specified expiration time
+                    is in the past.
+
+        Example:
+            >>> import redis
+            >>> from datetime import datetime, timedelta
+            >>>
+            >>> r = redis.Redis(host='localhost', port=6379)
+            >>> _ = r.delete('vehicle:10')
+            >>> r.hset('vehicle:10', 'id', 'f3a64766-5dec-4e07-b5f8-3c0f8e1a5e4b')
+            1
+            >>> r.hset('vehicle:10', 'longitude', '-122.335167')
+            1
+            >>> r.hset('vehicle:10', 'latitude', '37.779284')
+            1
+            >>> exp_time = datetime.now() + timedelta(seconds=1)
+            >>> r.hexpireat('vehicle:10', exp_time, 'longitude', 'latitude', 'foobar')
+            [1, 1, -2]
+            >>> time.sleep(2)
+            >>> r.hexists('vehicle:10', 'longitude')
+            False
+            >>> r.hgetall('vehicle:10')
+            {b'id': b'f3a64766-5dec-4e07-b5f8-3c0f8e1a5e4b'}
+
+        For more information see https://redis.io/commands/hexpireat
+        """
+        if isinstance(unix_time_seconds, datetime.datetime):
+            unix_time_seconds = int(unix_time_seconds.timestamp())
+
+        options = []
+        if nx:
+            options.append("NX")
+        if xx:
+            options.append("XX")
+        if gt:
+            options.append("GT")
+        if lt:
+            options.append("LT")
+
+        return self.execute_command(
+            "HEXPIREAT", name, unix_time_seconds, *options, len(fields), *fields
+        )
+
+    def hpexpireat(
+        self,
+        name: KeyT,
+        unix_time_milliseconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
+        """
+        Set or update the expiration time for fields within a hash key, using an
+        absolute Unix timestamp in milliseconds.
+
+        If a field already has an expiration time, the behavior of the update can be
+        controlled using the ``nx``, ``xx``, ``gt``, and ``lt`` parameters.
+
+        The return value provides detailed information about the outcome for each field.
+
+        :param name: The name of the hash key.
+        :param unix_time_milliseconds: Expiration time as Unix timestamp in
+                                       milliseconds. Can be an integer or a Python
+                                       `datetime` object.
+        :param fields: List of fields within the hash to apply the expiry.
+        :param nx: Set expiry only when the field has no expiry.
+        :param xx: Set expiry only when the field has an existing expiry.
+        :param gt: Set expiry only when the new expiry is greater than current one.
+        :param lt: Set expiry only when the new expiry is less than current one.
+        :return: If the key does not exist, returns `None`. If the key exists, returns a
+                 list which contains for each field in the request:
+                  - `-2` if the field does not exist.
+                  - `0` if the specified NX | XX | GT | LT condition was not met.
+                  - `1` if the expiration time was set or updated.
+                  - `2` if the field was deleted because the specified expiration time
+                    is in the past.
+
+        Examples:
+            >>> import redis
+            >>> from datetime import datetime, timedelta
+            >>>
+            >>> r = redis.Redis(host='localhost', port=6379)
+            >>> _ = r.delete('sensor:456')
+            >>> r.hset('sensor:456', 'id', 'sensor_456')
+            1
+            >>> r.hset('sensor:456', 'temperature', '36.6')
+            1
+            >>> r.hset('sensor:456', 'alert', 'overheat')
+            1
+            >>> exp_time = datetime.now() + timedelta(milliseconds=800)
+            >>> r.hpexpireat('sensor:456', exp_time, 'temperature', 'alert')
+            [1, 1]
+            >>> time.sleep(0.9)
+            >>> r.hexists('sensor:456', 'alert')
+            False
+            >>> r.hgetall('sensor:456')
+            {b'id': b'sensor_456'}
+
+        For more information see https://redis.io/commands/hpexpireat
+        """
+        if isinstance(unix_time_milliseconds, datetime.datetime):
+            unix_time_milliseconds = int(unix_time_milliseconds.timestamp() * 1000)
+
+        options = []
+        if nx:
+            options.append("NX")
+        if xx:
+            options.append("XX")
+        if gt:
+            options.append("GT")
+        if lt:
+            options.append("LT")
+
+        return self.execute_command(
+            "HPEXPIREAT", name, unix_time_milliseconds, *options, len(fields), *fields
+        )
+
+    def hpersist(self, name: KeyT, *fields: str) -> ResponseT:
+        """
+        Removes the expiration time for each specified field in a hash.
+
+        :param name: The name of the hash key.
+        :param fields: A list of fields within the hash from which to remove the
+                       expiration time from.
+        :return: If the key does not exist, returns `None`. If the key exists, returns a
+                 list which contains for each field in the request:
+                  - `-2` if the field does not exist.
+                  - `-1` if the field exists but has no associated expiration time.
+                  - `1` if the expiration time was successfully removed from the field.
+
+        Example:
+            >>> import redis
+            >>>
+            >>> r = redis.Redis(host='localhost', port=6379)
+            >>> _ = r.delete('vehicle:10')
+            >>> r.hset('vehicle:10', 'id', 'f3a64766-5dec-4e07-b5f8-3c0f8e1a5e4b')
+            1
+            >>> r.hset('vehicle:10', 'longitude', '-122.335167')
+            1
+            >>> r.hset('vehicle:10', 'latitude', '37.779284')
+            1
+            >>> r.hexpire('vehicle:10', 5, 'longitude', 'latitude')
+            [1, 1]
+            >>> r.hpersist('vehicle:10', 'id', 'longitude', 'foobar')
+            [-1, 1, -2]
+
+        For more information see https://redis.io/commands/hpersist
+        """
+        return self.execute_command("HPERSIST", name, len(fields), *fields)
+
+    def hexpiretime(self, key: str, *fields: str) -> ResponseT:
+        """
+        Returns the expiration times of hash fields as Unix timestamps in seconds.
+
+        :param key: The hash key.
+        :param fields: A list of fields within the hash for which to get the expiration
+                       time.
+        :return: `None` if the key does not exist. Otherwise, a list containing the
+                 result for each field, in the same order as requested. The result for
+                 each field can be:
+                  - `-2` if the field does not exist.
+                  - `-1` if the field exists but has no associated expire time.
+                  - A positive integer representing the expiration Unix timestamp in
+                    seconds, if the field has an associated expiration time.
+
+        Examples:
+            >>> import redis
+            >>> from datetime import datetime, timedelta
+            >>>
+            >>> r = redis.Redis(host='localhost', port=6379)
+            >>> _ = r.delete('vehicle:10')
+            >>> r.hset('vehicle:10', 'id', 'f3a64766-5dec-4e07-b5f8-3c0f8e1a5e4b')
+            1
+            >>> r.hset('vehicle:10', 'longitude', '-122.335167')
+            1
+            >>> r.hset('vehicle:10', 'latitude', '37.779284')
+            1
+            >>> r.hexpireat('vehicle:10', 32503672800, 'longitude', 'latitude')
+            [1, 1]
+            >>> r.hexpiretime('vehicle:10', 'id', 'longitude', 'foobar')
+            [-1, 32503672800, -2]
+
+        For more information see https://redis.io/commands/hexpiretime
+        """
+        return self.execute_command("HEXPIRETIME", key, len(fields), *fields)
+
+    def hpexpiretime(self, key: str, *fields: str) -> ResponseT:
+        """
+        Returns the expiration times of hash fields as Unix timestamps in milliseconds.
+
+        :param key: The hash key.
+        :param fields: A list of fields within the hash for which to get the expiration
+                       time.
+        :return: `None` if the key does not exist. Otherwise, a list containing the
+                 result for each field, in the same order as requested. The result for
+                 each field can be:
+                  - `-2` if the field does not exist.
+                  - `-1` if the field exists but has no associated expire time.
+                  - A positive integer representing the expiration Unix timestamp in
+                    milliseconds, if the field has an associated expiration time.
+
+        Examples:
+            >>> import redis
+            >>> from datetime import datetime, timedelta
+            >>>
+            >>> r = redis.Redis(host='localhost', port=6379)
+            >>> _ = r.delete('vehicle:10')
+            >>> r.hset('vehicle:10', 'id', 'f3a64766-5dec-4e07-b5f8-3c0f8e1a5e4b')
+            1
+            >>> r.hset('vehicle:10', 'longitude', '-122.335167')
+            1
+            >>> r.hset('vehicle:10', 'latitude', '37.779284')
+            1
+            >>> r.hexpireat('vehicle:10', 32503672800, 'longitude', 'latitude')
+            [1, 1]
+            >>> r.hpexpiretime('vehicle:10', 'id', 'longitude', 'foobar')
+            [-1, 32503672800000, -2]
+
+        For more information see https://redis.io/commands/hpexpiretime
+        """
+        return self.execute_command("HPEXPIRETIME", key, len(fields), *fields)
+
+    def httl(self, key: str, *fields: str) -> ResponseT:
+        """
+        Returns the TTL (Time To Live) in seconds for each specified field within a hash
+        key.
+
+        :param key: The hash key.
+        :param fields: A list of fields within the hash for which to get the TTL.
+        :return: `None` if the key does not exist. Otherwise, a list containing the
+                 result for each field, in the same order as requested. The result for
+                 each field can be:
+                  - `-2` if the field does not exist.
+                  - `-1` if the field exists but has no associated expire time.
+                  - A positive integer representing the TTL in seconds if the field has
+                    an associated expiration time.
+
+        Examples:
+            >>> import redis
+            >>>
+            >>> r = redis.Redis(host='localhost', port=6379)
+            >>> _ = r.delete('vehicle:10')
+            >>> r.hset('vehicle:10', 'id', 'f3a64766-5dec-4e07-b5f8-3c0f8e1a5e4b')
+            1
+            >>> r.hset('vehicle:10', 'longitude', '-122.335167')
+            1
+            >>> r.hset('vehicle:10', 'latitude', '37.779284')
+            1
+            >>> r.hexpire('vehicle:10', 5, 'longitude', 'latitude')
+            [1, 1]
+            >>> # Note: we can't know precisely the returned value for 'longitude',
+            >>> #       because time passes between the two commands. It can be 5, or 4.
+            >>> r.httl('vehicle:10', 'id', 'longitude', 'foobar') # doctest: +ELLIPSIS
+            [-1, ..., -2]
+
+        For more information see https://redis.io/commands/httl
+        """
+        return self.execute_command("HTTL", key, len(fields), *fields)
+
+    def hpttl(self, key: str, *fields: str) -> ResponseT:
+        """
+        Returns the TTL (Time To Live) in milliseconds for each specified field within a
+        hash key.
+
+        :param key: The hash key.
+        :param fields: A list of fields within the hash for which to get the TTL.
+        :return: `None` if the key does not exist. Otherwise, a list containing the
+                 result for each field, in the same order as requested. The result for
+                 each field can be:
+                  - `-2` if the field does not exist.
+                  - `-1` if the field exists but has no associated expire time.
+                  - A positive integer representing the TTL in milliseconds if the field
+                    has an associated expiration time.
+
+        Examples:
+            >>> import redis
+            >>>
+            >>> r = redis.Redis(host='localhost', port=6379)
+            >>> _ = r.delete('vehicle:10')
+            >>> r.hset('vehicle:10', 'id', 'f3a64766-5dec-4e07-b5f8-3c0f8e1a5e4b')
+            1
+            >>> r.hset('vehicle:10', 'longitude', '-122.335167')
+            1
+            >>> r.hset('vehicle:10', 'latitude', '37.779284')
+            1
+            >>> r.hexpire('vehicle:10', 5, 'longitude', 'latitude')
+            [1, 1]
+            >>> # Note: we can't know precisely the returned value for 'longitude'
+            >>> #       because time passes between the two commands.
+            >>> #       It can be 5000, or a bit less.
+            >>> r.hpttl('vehicle:10', 'id', 'longitude', 'foobar') # doctest: +ELLIPSIS
+            [-1, ..., -2]
+
+        For more information see https://redis.io/commands/hpttl
+        """
+        return self.execute_command("HPTTL", key, len(fields), *fields)
+
 
 AsyncHashCommands = HashCommands
 
