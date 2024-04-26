@@ -1,7 +1,8 @@
 import asyncio
 import random
 import weakref
-from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type
+import uuid
+from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type, Any
 
 from redis.asyncio.client import Redis
 from redis.asyncio.connection import (
@@ -65,6 +66,22 @@ class SentinelManagedConnection(Connection):
             self._connect_retry,
             lambda error: asyncio.sleep(0),
         )
+    
+    async def _connect_to_address_retry(self, host: str, port: int) -> None:
+        if self._reader:
+            return  # already connected
+        try:
+            return await self.connect_to((host, port))
+        except ConnectionError as exc:
+            raise SlaveNotFoundError
+
+    async def connect_to_address(self, host: str, port: int) -> None:
+        # Connect to the specified host and port
+        # instead of connecting to the master / rotated slaves
+        return await self.retry.call_with_retry(
+            lambda: self._connect_to_address_retry(host, port),
+            lambda error: asyncio.sleep(0),
+        )
 
     async def read_response(
         self,
@@ -122,6 +139,7 @@ class SentinelConnectionPool(ConnectionPool):
         self.sentinel_manager = sentinel_manager
         self.master_address = None
         self.slave_rr_counter = None
+        self._request_id_to_replica_address = {}
 
     def __repr__(self):
         return (
@@ -152,6 +170,11 @@ class SentinelConnectionPool(ConnectionPool):
 
     async def rotate_slaves(self) -> AsyncIterator:
         """Round-robin slave balancer"""
+        (
+            server_host,
+            server_port,
+        ) = self._request_id_to_replica_address.get(iter_req_id, (None, None))
+        
         slaves = await self.sentinel_manager.discover_slaves(self.service_name)
         if slaves:
             if self.slave_rr_counter is None:
@@ -166,6 +189,102 @@ class SentinelConnectionPool(ConnectionPool):
         except MasterNotFoundError:
             pass
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
+
+    async def get_connection(
+        self, command_name: str, *keys: Any, **options: Any
+    ) -> SentinelManagedConnection:
+        """
+        Get a connection from the pool.
+        `xxx_scan_iter` commands needs to be handled specially.
+        If the client is created using a connection pool, in replica mode,
+        all `scan` command-equivalent of the `xxx_scan_iter` commands needs
+        to be issued to the same Redis replica.
+
+        The way each server positions each key is different with one another,
+        and the cursor acts as the 'offset' of the scan. 
+        Hence, all scans coming from a single xxx_scan_iter_channel command 
+        should go to the same replica.
+        """
+        # If not an iter command or in master mode, call super()
+        # No custom logic for master, because there's only 1 master.
+        # The bug is only when Redis has the possibility to connect to multiple replicas
+        if not (iter_req_id := options.get("_iter_req_id", None)) or self.is_master:
+            return await super().get_connection(command_name, *keys, **options)  # type: ignore[no-any-return]
+
+        # Check if this iter request has already been directed to a particular server
+        # Check if this iter request has already been directed to a particular server
+        (
+            server_host,
+            server_port,
+        ) = self._request_id_to_replica_address.get(iter_req_id, (None, None))
+        connection = None
+        # If this is the first scan request of the iter command,
+        # get a connection from the pool
+        if server_host is None or server_port is None:
+            try:
+                connection = self._available_connections.pop()  # type: ignore [assignment]
+            except IndexError:
+                connection = self.make_connection()
+        # If this is not the first scan request of the iter command
+        else:
+            # Check from the available connections, if any of the connection
+            # is connected to the host and port that we want
+            # If yes, use that connection
+            for available_connection in self._available_connections.copy():
+                if (
+                    available_connection.host == server_host
+                    and available_connection.port == server_port
+                ):
+                    self._available_connections.remove(available_connection)
+                    connection = available_connection  # type: ignore[assignment]
+            # If not, make a new dummy connection object, and set its host and port
+            # to the one that we want later in the call to ``connect_to_address``
+            if not connection:
+                connection = self.make_connection()
+        assert connection
+        self._in_use_connections.add(connection)
+        try:
+            # ensure this connection is connected to Redis
+            # If this is the first scan request,
+            # just call the SentinelManagedConnection.connect()
+            # This will call rotate_slaves
+            # and connect to a random replica
+            if server_port is None or server_port is None:
+                await connection.connect()
+            # If this is not the first scan request,
+            # connect to the particular address and port
+            else:
+                # This will connect to the host and port that we've specified above
+                await connection.connect_to_address(server_host, server_port)  # type: ignore[arg-type]
+            # connections that the pool provides should be ready to send
+            # a command. if not, the connection was either returned to the
+            # pool before all data has been read or the socket has been
+            # closed. either way, reconnect and verify everything is good.
+            try:
+                # type ignore below:
+                # attr Not defined in redis stubs and
+                # we don't need to create a subclass to help with this single attr
+                if await connection.can_read_destructive():  # type: ignore[attr-defined]
+                    raise ConnectionError("Connection has data") from None
+            except (ConnectionError, OSError):
+                await connection.disconnect()
+                await connection.connect()
+                # type ignore below: similar to above
+                if await connection.can_read_destructive():  # type: ignore[attr-defined]
+                    raise ConnectionError("Connection not ready") from None
+        except BaseException:
+            # release the connection back to the pool so that we don't
+            # leak it
+            await self.release(connection)
+            raise
+        # Store the connection to the dictionary
+        self._request_id_to_replica_address[iter_req_id] = (
+            connection.host,
+            connection.port,
+        )
+
+        return connection
+
 
 
 class Sentinel(AsyncSentinelCommands):
