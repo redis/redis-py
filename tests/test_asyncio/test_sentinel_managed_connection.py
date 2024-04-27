@@ -82,7 +82,7 @@ class SentinelManagedConnectionMockForMasterMode(SentinelManagedConnectionMock):
 async def connection_pool_replica_mock() -> SentinelConnectionPool:
     sentinel_manager = Sentinel([["master", 400]])
     # Give a random slave
-    sentinel_manager.discover_slaves = AsyncMock(return_value=["replica", 5000])  # type: ignore[method-assign]
+    sentinel_manager.discover_slaves = AsyncMock(return_value=["replica", 5000])
     # Create connection pool with our mock connection object
     connection_pool = SentinelConnectionPool(
         "usasm",
@@ -97,7 +97,7 @@ async def connection_pool_replica_mock() -> SentinelConnectionPool:
 async def connection_pool_master_mock() -> SentinelConnectionPool:
     sentinel_manager = Sentinel([["master", 400]])
     # Give a random slave
-    sentinel_manager.discover_master = AsyncMock(return_value=["replica", 5000])  # type: ignore[method-assign]
+    sentinel_manager.discover_master = AsyncMock(return_value=["replica", 5000])
     # Create connection pool with our mock connection object
     connection_pool = SentinelConnectionPool(
         "usasm",
