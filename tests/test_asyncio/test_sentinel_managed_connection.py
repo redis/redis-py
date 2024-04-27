@@ -41,15 +41,6 @@ async def test_connect_retry_on_timeout_error(connect_args):
     assert conn._connect.call_count == 3
     await conn.disconnect()
 
-
-def same_address(
-    connection_1: SentinelManagedConnection,
-    connection_2: SentinelManagedConnection,
-) -> bool:
-    return bool(
-        connection_1.host == connection_2.host and connection_1.port == connection_2.port
-    )
-
 class SentinelManagedConnectionMock(SentinelManagedConnection):
     async def connect_to_address(self, host: str, port: int) -> None:
         self.host = host
@@ -104,7 +95,7 @@ async def connection_pool_replica_mock() -> SentinelConnectionPool:
 
 @pytest_asyncio.fixture()
 async def connection_pool_master_mock() -> SentinelConnectionPool:
-    sentinel_manager = Sentinel([["master", 400]]) 
+    sentinel_manager = Sentinel([["master", 400]])
     # Give a random slave
     sentinel_manager.discover_master = AsyncMock(return_value=["replica", 5000])  # type: ignore[method-assign]
     # Create connection pool with our mock connection object
@@ -116,6 +107,14 @@ async def connection_pool_master_mock() -> SentinelConnectionPool:
     )
     return connection_pool
 
+
+def same_address(
+    connection_1: SentinelManagedConnection,
+    connection_2: SentinelManagedConnection,
+) -> bool:
+    return bool(
+        connection_1.host == connection_2.host and connection_1.port == connection_2.port
+    )
 
 async def test_connection_pool_connects_to_same_address_if_same_iter_req_id_in_replica_mode(
     connection_pool_replica_mock: SentinelConnectionPool,
@@ -197,7 +196,7 @@ async def test_connection_pool_connects_to_same_address_if_no_iter_req_id_in_mas
         await connection_pool_master_mock.get_connection("ANY_COMMAND"),
         connection_for_random_req
     )
-    
+
     assert same_address(
         await connection_pool_master_mock.get_connection("ANY_COMMAND"),
         connection_for_req_1,
