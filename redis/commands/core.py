@@ -1,8 +1,8 @@
 # from __future__ import annotations
 
-import uuid
 import datetime
 import hashlib
+import uuid
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -3226,12 +3226,19 @@ class AsyncScanCommands(ScanCommands):
             HASH, LIST, SET, STREAM, STRING, ZSET
             Additionally, Redis modules can expose other types as well.
         """
-        # DO NOT inline this statement to the scan call
-        iter_req_id = uuid.uuid4() # each iter command should have an ID to maintain connection to the same replica
+        #  DO NOT inline this statement to the scan call
+        #  Each iter command should have an ID to maintain
+        #  connection to the same replica
+        iter_req_id = uuid.uuid4()
         cursor = "0"
         while cursor != 0:
             cursor, data = await self.scan(
-                cursor=cursor, match=match, count=count, _type=_type, _iter_req_id=iter_req_id, **kwargs
+                cursor=cursor,
+                match=match,
+                count=count,
+                _type=_type,
+                _iter_req_id=iter_req_id,
+                **kwargs,
             )
             for d in data:
                 yield d
@@ -3250,8 +3257,10 @@ class AsyncScanCommands(ScanCommands):
 
         ``count`` allows for hint the minimum number of returns
         """
-        # DO NOT inline this statement to the scan call
-        iter_req_id = uuid.uuid4() # each iter command should have an ID to maintain connection to the same replica
+        #  DO NOT inline this statement to the scan call
+        #  Each iter command should have an ID to maintain
+        #  connection to the same replica
+        iter_req_id = uuid.uuid4()
         cursor = "0"
         while cursor != 0:
             cursor, data = await self.sscan(
@@ -3277,8 +3286,10 @@ class AsyncScanCommands(ScanCommands):
 
         ``no_values`` indicates to return only the keys, without values
         """
-        # DO NOT inline this statement to the scan call
-        iter_req_id = uuid.uuid4() # each iter command should have an ID to maintain connection to the same replica
+        #  DO NOT inline this statement to the scan call
+        #  Each iter command should have an ID to maintain
+        #  connection to the same replica
+        iter_req_id = uuid.uuid4()
         cursor = "0"
         while cursor != 0:
             cursor, data = await self.hscan(
@@ -3312,8 +3323,10 @@ class AsyncScanCommands(ScanCommands):
 
         ``score_cast_func`` a callable used to cast the score return value
         """
-        # DO NOT inline this statement to the scan call
-        iter_req_id = uuid.uuid4() # each iter command should have an ID to maintain connection to the same replica
+        #  DO NOT inline this statement to the scan call
+        #  Each iter command should have an ID to maintain
+        #  connection to the same replica
+        iter_req_id = uuid.uuid4()
         cursor = "0"
         while cursor != 0:
             cursor, data = await self.zscan(
@@ -3322,7 +3335,7 @@ class AsyncScanCommands(ScanCommands):
                 match=match,
                 count=count,
                 score_cast_func=score_cast_func,
-                _iter_req_id=iter_req_id
+                _iter_req_id=iter_req_id,
             )
             for d in data:
                 yield d

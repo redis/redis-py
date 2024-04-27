@@ -1,8 +1,16 @@
 import asyncio
 import random
 import weakref
-import uuid
-from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type, Any
+from typing import (
+    Any,
+    AsyncIterator,
+    Iterable,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+)
 
 from redis.asyncio.client import Redis
 from redis.asyncio.connection import (
@@ -66,13 +74,13 @@ class SentinelManagedConnection(Connection):
             self._connect_retry,
             lambda error: asyncio.sleep(0),
         )
-    
+
     async def _connect_to_address_retry(self, host: str, port: int) -> None:
         if self._reader:
             return  # already connected
         try:
             return await self.connect_to((host, port))
-        except ConnectionError as exc:
+        except ConnectionError:
             raise SlaveNotFoundError
 
     async def connect_to_address(self, host: str, port: int) -> None:
@@ -170,11 +178,6 @@ class SentinelConnectionPool(ConnectionPool):
 
     async def rotate_slaves(self) -> AsyncIterator:
         """Round-robin slave balancer"""
-        (
-            server_host,
-            server_port,
-        ) = self._request_id_to_replica_address.get(iter_req_id, (None, None))
-        
         slaves = await self.sentinel_manager.discover_slaves(self.service_name)
         if slaves:
             if self.slave_rr_counter is None:
@@ -201,15 +204,15 @@ class SentinelConnectionPool(ConnectionPool):
         to be issued to the same Redis replica.
 
         The way each server positions each key is different with one another,
-        and the cursor acts as the 'offset' of the scan. 
-        Hence, all scans coming from a single xxx_scan_iter_channel command 
+        and the cursor acts as the 'offset' of the scan.
+        Hence, all scans coming from a single xxx_scan_iter_channel command
         should go to the same replica.
         """
         # If not an iter command or in master mode, call super()
         # No custom logic for master, because there's only 1 master.
         # The bug is only when Redis has the possibility to connect to multiple replicas
         if not (iter_req_id := options.get("_iter_req_id", None)) or self.is_master:
-            return await super().get_connection(command_name, *keys, **options)  # type: ignore[no-any-return]
+            return await super().get_connection(command_name, *keys, **options)
 
         # Check if this iter request has already been directed to a particular server
         # Check if this iter request has already been directed to a particular server
@@ -222,7 +225,7 @@ class SentinelConnectionPool(ConnectionPool):
         # get a connection from the pool
         if server_host is None or server_port is None:
             try:
-                connection = self._available_connections.pop()  # type: ignore [assignment]
+                connection = self._available_connections.pop()
             except IndexError:
                 connection = self.make_connection()
         # If this is not the first scan request of the iter command
@@ -236,7 +239,7 @@ class SentinelConnectionPool(ConnectionPool):
                     and available_connection.port == server_port
                 ):
                     self._available_connections.remove(available_connection)
-                    connection = available_connection  # type: ignore[assignment]
+                    connection = available_connection
             # If not, make a new dummy connection object, and set its host and port
             # to the one that we want later in the call to ``connect_to_address``
             if not connection:
@@ -255,22 +258,18 @@ class SentinelConnectionPool(ConnectionPool):
             # connect to the particular address and port
             else:
                 # This will connect to the host and port that we've specified above
-                await connection.connect_to_address(server_host, server_port)  # type: ignore[arg-type]
+                await connection.connect_to_address(server_host, server_port)
             # connections that the pool provides should be ready to send
             # a command. if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
             try:
-                # type ignore below:
-                # attr Not defined in redis stubs and
-                # we don't need to create a subclass to help with this single attr
-                if await connection.can_read_destructive():  # type: ignore[attr-defined]
+                if await connection.can_read_destructive():
                     raise ConnectionError("Connection has data") from None
             except (ConnectionError, OSError):
                 await connection.disconnect()
                 await connection.connect()
-                # type ignore below: similar to above
-                if await connection.can_read_destructive():  # type: ignore[attr-defined]
+                if await connection.can_read_destructive():
                     raise ConnectionError("Connection not ready") from None
         except BaseException:
             # release the connection back to the pool so that we don't
@@ -284,7 +283,6 @@ class SentinelConnectionPool(ConnectionPool):
         )
 
         return connection
-
 
 
 class Sentinel(AsyncSentinelCommands):
