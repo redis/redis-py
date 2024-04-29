@@ -1380,7 +1380,9 @@ class TestRedisCommands:
         assert sorted(keys) == [b"a", b"b", b"c"]
         keys = list([k async for k in r.hscan_iter("a", match="a", no_values=True)])
         assert keys == [b"a"]
-        keys = list([k async for k in r.hscan_iter("a", match="a_notset", no_values=True)])
+        keys = list(
+            [k async for k in r.hscan_iter("a", match="a_notset", no_values=True)]
+        )
         assert keys == []
 
     @skip_if_server_version_lt("2.8.0")
