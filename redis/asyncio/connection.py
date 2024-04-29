@@ -87,13 +87,11 @@ else:
 
 
 class ConnectCallbackProtocol(Protocol):
-    def __call__(self, connection: "AbstractConnection"):
-        ...
+    def __call__(self, connection: "AbstractConnection"): ...
 
 
 class AsyncConnectCallbackProtocol(Protocol):
-    async def __call__(self, connection: "AbstractConnection"):
-        ...
+    async def __call__(self, connection: "AbstractConnection"): ...
 
 
 ConnectCallbackT = Union[ConnectCallbackProtocol, AsyncConnectCallbackProtocol]
@@ -319,9 +317,11 @@ class AbstractConnection:
                 await self.on_connect()
             else:
                 # Use the passed function redis_connect_func
-                await self.redis_connect_func(self) if asyncio.iscoroutinefunction(
-                    self.redis_connect_func
-                ) else self.redis_connect_func(self)
+                (
+                    await self.redis_connect_func(self)
+                    if asyncio.iscoroutinefunction(self.redis_connect_func)
+                    else self.redis_connect_func(self)
+                )
         except RedisError:
             # clean up after any error in on_connect
             await self.disconnect()
