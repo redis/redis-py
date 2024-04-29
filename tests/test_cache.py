@@ -17,8 +17,14 @@ def r(request):
     cache = request.param.get("cache")
     kwargs = request.param.get("kwargs", {})
     protocol = request.param.get("protocol", 3)
+    single_connection_client = request.param.get("single_connection_client", False)
     with _get_client(
-        redis.Redis, request, protocol=protocol, client_cache=cache, **kwargs
+        redis.Redis,
+        request,
+        single_connection_client=single_connection_client,
+        protocol=protocol,
+        client_cache=cache,
+        **kwargs,
     ) as client:
         yield client, cache
         # client.flushdb()
@@ -367,6 +373,28 @@ class TestLocalCache:
         assert r.execute_command("SET", "b", "2") is True
         assert r.execute_command("GET", "b") == "2"  # keys not provided, not cached
         assert cache.get(("GET", "b")) is None
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "single_connection_client": True}],
+        indirect=True,
+    )
+    def test_single_connection(self, r):
+        r, cache = r
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") == b"bar"
+        # get key from local cache
+        assert cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        r.set("foo", "barbar")
+        # send any command to redis (process invalidation in background)
+        r.ping()
+        # the command is not in the local cache anymore
+        assert cache.get(("GET", "foo")) is None
+        # get key from redis
+        assert r.get("foo") == b"barbar"
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
