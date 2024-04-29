@@ -28,8 +28,8 @@ def local_cache():
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+@pytest.mark.onlynoncluster
 class TestLocalCache:
-    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
     def test_get_from_cache(self, r, r2):
         r, cache = r
@@ -108,7 +108,6 @@ class TestLocalCache:
         assert cache.get(("GET", "foo")) == b"bar"
         assert cache.get(("GET", "foo2")) is None
 
-    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize(
         "r",
         [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
@@ -155,7 +154,6 @@ class TestLocalCache:
         check = cache.get(("LRANGE", "mylist", 0, -1))
         assert check == [b"baz", b"bar", b"foo"]
 
-    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize(
         "r",
         [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
@@ -198,7 +196,6 @@ class TestLocalCache:
         id4 = r.client_id()
         assert id1 == id2 == id3 == id4
 
-    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize(
         "r",
         [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
@@ -219,7 +216,6 @@ class TestLocalCache:
         # get from redis
         assert r.mget("a", "b") == ["2", "1"]
 
-    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize(
         "r",
         [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
@@ -243,7 +239,6 @@ class TestLocalCache:
         assert r.mget("a", "b") == ["1", "1"]
         assert r.get("c") == "1"
 
-    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize(
         "r",
         [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
@@ -267,7 +262,6 @@ class TestLocalCache:
         assert r.mget("a", "b") == ["1", "1"]
         assert r.get("c") == "1"
 
-    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize(
         "r",
         [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
@@ -291,7 +285,6 @@ class TestLocalCache:
         assert r.mget("a", "b") == ["1", "1"]
         assert r.get("c") == "1"
 
-    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize(
         "r",
         [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],

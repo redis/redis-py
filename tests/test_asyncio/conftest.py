@@ -154,7 +154,7 @@ async def sentinel_setup(local_cache, request):
     )
     yield sentinel
     for s in sentinel.sentinels:
-        await s.close()
+        await s.aclose()
 
 
 @pytest_asyncio.fixture()
@@ -162,7 +162,7 @@ async def master(request, sentinel_setup):
     master_service = request.config.getoption("--master-service")
     master = sentinel_setup.master_for(master_service)
     yield master
-    await master.close()
+    await master.aclose()
 
 
 def _gen_cluster_mock_resp(r, response):
