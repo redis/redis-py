@@ -136,6 +136,20 @@ class TestLocalCache:
         assert cache.get(("LLEN", "mylist")) is None
         assert cache.get(("LINDEX", "mylist", 1)) == b"bar"
 
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"cache_whitelist": ["LLEN"]}}],
+        indirect=True,
+    )
+    async def test_cache_whitelist(self, r):
+        r, cache = r
+        # add list to redis
+        await r.lpush("mylist", "foo", "bar", "baz")
+        assert await r.llen("mylist") == 3
+        assert await r.lindex("mylist", 1) == b"bar"
+        assert cache.get(("LLEN", "mylist")) == 3
+        assert cache.get(("LINDEX", "mylist", 1)) is None
+
     @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
     async def test_cache_return_copy(self, r):
         r, cache = r

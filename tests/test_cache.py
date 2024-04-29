@@ -5,7 +5,8 @@ from typing import List
 import cachetools
 import pytest
 import redis
-from redis._cache import AbstractCache, _LocalCache
+from redis import RedisError
+from redis._cache import AbstractCache, EvictionPolicy, _LocalCache
 from redis.typing import KeyT, ResponseT
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import _get_client
@@ -15,8 +16,9 @@ from tests.conftest import _get_client
 def r(request):
     cache = request.param.get("cache")
     kwargs = request.param.get("kwargs", {})
+    protocol = request.param.get("protocol", 3)
     with _get_client(
-        redis.Redis, request, protocol=3, client_cache=cache, **kwargs
+        redis.Redis, request, protocol=protocol, client_cache=cache, **kwargs
     ) as client:
         yield client, cache
         # client.flushdb()
@@ -48,8 +50,12 @@ class TestLocalCache:
         # get key from redis
         assert r.get("foo") == b"barbar"
 
-    @pytest.mark.parametrize("r", [{"cache": _LocalCache(max_size=3)}], indirect=True)
-    def test_cache_max_size(self, r):
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(max_size=3)}],
+        indirect=True,
+    )
+    def test_cache_lru_eviction(self, r):
         r, cache = r
         # add 3 keys to redis
         r.set("foo", "bar")
@@ -84,7 +90,9 @@ class TestLocalCache:
         assert cache.get(("GET", "foo")) is None
 
     @pytest.mark.parametrize(
-        "r", [{"cache": _LocalCache(max_size=3, eviction_policy="lfu")}], indirect=True
+        "r",
+        [{"cache": _LocalCache(max_size=3, eviction_policy=EvictionPolicy.LFU)}],
+        indirect=True,
     )
     def test_cache_lfu_eviction(self, r):
         r, cache = r
@@ -142,6 +150,19 @@ class TestLocalCache:
         assert r.lindex("mylist", 1) == b"bar"
         assert cache.get(("LLEN", "mylist")) is None
         assert cache.get(("LINDEX", "mylist", 1)) == b"bar"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"cache_whitelist": ["LLEN"]}}],
+        indirect=True,
+    )
+    def test_cache_whitelist(self, r):
+        r, cache = r
+        r.lpush("mylist", "foo", "bar", "baz")
+        assert r.llen("mylist") == 3
+        assert r.lindex("mylist", 1) == b"bar"
+        assert cache.get(("LLEN", "mylist")) == 3
+        assert cache.get(("LINDEX", "mylist", 1)) is None
 
     @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
     def test_cache_return_copy(self, r):
@@ -307,6 +328,11 @@ class TestLocalCache:
         # get from redis
         assert r.mget("a", "b") == ["1", "1"]
         assert r.get("c") == "1"
+
+    def test_cache_not_available_with_resp2(self, request):
+        with pytest.raises(RedisError) as e:
+            _get_client(redis.Redis, request, protocol=2, client_cache=_LocalCache())
+        assert "protocol version 3 or higher" in str(e.value)
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")

@@ -8,7 +8,14 @@ from typing import Iterable, List, Union
 
 from redis.typing import KeyT, ResponseT
 
-DEFAULT_EVICTION_POLICY = "lru"
+
+class EvictionPolicy(Enum):
+    LRU = "lru"
+    LFU = "lfu"
+    RANDOM = "random"
+
+
+DEFAULT_EVICTION_POLICY = EvictionPolicy.LRU
 
 DEFAULT_BLACKLIST = [
     "BF.CARD",
@@ -151,12 +158,6 @@ _RESPONSE = "response"
 _KEYS = "keys"
 _CTIME = "ctime"
 _ACCESS_COUNT = "access_count"
-
-
-class EvictionPolicy(Enum):
-    LRU = "lru"
-    LFU = "lfu"
-    RANDOM = "random"
 
 
 class AbstractCache(ABC):
@@ -314,28 +315,28 @@ class _LocalCache(AbstractCache):
         Args:
             command (Union[str, Iterable[str]]): The redis command.
         """
-        if self.eviction_policy == EvictionPolicy.LRU.value:
+        if self.eviction_policy == EvictionPolicy.LRU:
             self.cache.move_to_end(command)
-        elif self.eviction_policy == EvictionPolicy.LFU.value:
+        elif self.eviction_policy == EvictionPolicy.LFU:
             self.cache[command]["access_count"] = (
                 self.cache.get(command, {}).get("access_count", 0) + 1
             )
             self.cache.move_to_end(command)
-        elif self.eviction_policy == EvictionPolicy.RANDOM.value:
+        elif self.eviction_policy == EvictionPolicy.RANDOM:
             pass  # Random eviction doesn't require updates
 
     def _evict(self):
         """Evict a redis command from the cache based on the eviction policy."""
         if self._is_expired(self.commands_ttl_list[0]):
             self.delete_command(self.commands_ttl_list[0])
-        elif self.eviction_policy == EvictionPolicy.LRU.value:
+        elif self.eviction_policy == EvictionPolicy.LRU:
             self.cache.popitem(last=False)
-        elif self.eviction_policy == EvictionPolicy.LFU.value:
+        elif self.eviction_policy == EvictionPolicy.LFU:
             min_access_command = min(
                 self.cache, key=lambda k: self.cache[k].get("access_count", 0)
             )
             self.cache.pop(min_access_command)
-        elif self.eviction_policy == EvictionPolicy.RANDOM.value:
+        elif self.eviction_policy == EvictionPolicy.RANDOM:
             random_command = random.choice(list(self.cache.keys()))
             self.cache.pop(random_command)
 
