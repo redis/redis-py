@@ -2170,7 +2170,7 @@ class TestRedisCommands:
         r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
         cursor, keys = r.hscan("a", no_values=True)
         assert cursor == 0
-        assert keys == [b"a", b"b", b"c"]
+        assert sorted(keys) == [b"a", b"b", b"c"]
         _, keys = r.hscan("a", match="a", no_values=True)
         assert keys == [b"a"]
         _, keys = r.hscan("a_notset", no_values=True)
