@@ -16,6 +16,8 @@ exclude =
 ignore =
     E126
     E203
+    E701
+    E704
     F405
     N801
     N802
