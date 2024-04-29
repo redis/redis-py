@@ -334,6 +334,40 @@ class TestLocalCache:
             _get_client(redis.Redis, request, protocol=2, client_cache=_LocalCache())
         assert "protocol version 3 or higher" in str(e.value)
 
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_execute_command_args_not_split(self, r):
+        r, cache = r
+        assert r.execute_command("SET a 1") == "OK"
+        assert r.execute_command("GET a") == "1"
+        # "get a" is not whitelisted by default, the args should be separated
+        assert cache.get(("GET a",)) is None
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_execute_command_keys_provided(self, r):
+        r, cache = r
+        assert r.execute_command("SET", "b", "2") is True
+        assert r.execute_command("GET", "b", keys=["b"]) == "2"
+        assert cache.get(("GET", "b")) == "2"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_execute_command_keys_not_provided(self, r):
+        r, cache = r
+        assert r.execute_command("SET", "b", "2") is True
+        assert r.execute_command("GET", "b") == "2"  # keys not provided, not cached
+        assert cache.get(("GET", "b")) is None
+
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
@@ -378,6 +412,28 @@ class TestClusterLocalCache:
         assert cache.get(("GET", "foo")) is None
         # get key from redis
         assert r.get("foo") == "barbar"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_execute_command_keys_provided(self, r):
+        r, cache = r
+        assert r.execute_command("SET", "b", "2") is True
+        assert r.execute_command("GET", "b", keys=["b"]) == "2"
+        assert cache.get(("GET", "b")) == "2"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    def test_execute_command_keys_not_provided(self, r):
+        r, cache = r
+        assert r.execute_command("SET", "b", "2") is True
+        assert r.execute_command("GET", "b") == "2"  # keys not provided, not cached
+        assert cache.get(("GET", "b")) is None
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")

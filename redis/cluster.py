@@ -1164,7 +1164,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                         response = self.cluster_response_callbacks[command](
                             response, **kwargs
                         )
-                    connection._add_to_local_cache(args, response, keys)
+                    if keys:
+                        connection._add_to_local_cache(args, response, keys)
                     return response
             except AuthenticationError:
                 raise

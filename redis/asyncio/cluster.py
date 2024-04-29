@@ -1075,7 +1075,8 @@ class ClusterNode:
             # Read response
             try:
                 response = await self.parse_response(connection, args[0], **kwargs)
-                connection._add_to_local_cache(args, response, keys)
+                if keys:
+                    connection._add_to_local_cache(args, response, keys)
                 return response
             finally:
                 # Release connection

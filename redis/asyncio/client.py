@@ -640,7 +640,8 @@ class Redis(
                         ),
                         lambda error: self._disconnect_raise(conn, error),
                     )
-                    conn._add_to_local_cache(args, response, keys)
+                    if keys:
+                        conn._add_to_local_cache(args, response, keys)
                     return response
                 finally:
                     if self.single_connection_client:

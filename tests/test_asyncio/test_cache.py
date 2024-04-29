@@ -19,9 +19,9 @@ async def local_cache():
     yield _LocalCache()
 
 
+@pytest.mark.onlynoncluster
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 class TestLocalCache:
-    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
     async def test_get_from_cache(self, r, r2):
         r, cache = r
@@ -102,7 +102,6 @@ class TestLocalCache:
         assert cache.get(("GET", "foo")) == b"bar"
         assert cache.get(("GET", "foo2")) is None
 
-    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize(
         "r",
         [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
@@ -163,7 +162,6 @@ class TestLocalCache:
         check = cache.get(("LRANGE", "mylist", 0, -1))
         assert check == [b"baz", b"bar", b"foo"]
 
-    @pytest.mark.onlynoncluster
     @pytest.mark.parametrize(
         "r",
         [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
@@ -204,6 +202,30 @@ class TestLocalCache:
         assert await r.mget("a", "b", "c", "d", "e") == ["4", "4", "4", "4", "4"]
         id4 = await r.client_id()
         assert id1 == id2 == id3 == id4
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    async def test_execute_command_keys_provided(self, r):
+        r, cache = r
+        assert await r.execute_command("SET", "b", "2") is True
+        assert await r.execute_command("GET", "b", keys=["b"]) == "2"
+        assert cache.get(("GET", "b")) == "2"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    async def test_execute_command_keys_not_provided(self, r):
+        r, cache = r
+        assert await r.execute_command("SET", "b", "2") is True
+        assert (
+            await r.execute_command("GET", "b") == "2"
+        )  # keys not provided, not cached
+        assert cache.get(("GET", "b")) is None
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
@@ -249,6 +271,30 @@ class TestClusterLocalCache:
         assert cache.get(("GET", "foo")) is None
         # get key from redis
         assert await r.get("foo") == "barbar"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    async def test_execute_command_keys_provided(self, r):
+        r, cache = r
+        assert await r.execute_command("SET", "b", "2") is True
+        assert await r.execute_command("GET", "b", keys=["b"]) == "2"
+        assert cache.get(("GET", "b")) == "2"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    async def test_execute_command_keys_not_provided(self, r):
+        r, cache = r
+        assert await r.execute_command("SET", "b", "2") is True
+        assert (
+            await r.execute_command("GET", "b") == "2"
+        )  # keys not provided, not cached
+        assert cache.get(("GET", "b")) is None
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
