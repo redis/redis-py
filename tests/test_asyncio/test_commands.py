@@ -1,6 +1,7 @@
 """
 Tests async overrides of commands from their mixins
 """
+
 import asyncio
 import binascii
 import datetime
