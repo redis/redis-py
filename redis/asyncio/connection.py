@@ -51,9 +51,9 @@ from redis.typing import EncodableT, KeysT, ResponseT
 from redis.utils import HIREDIS_AVAILABLE, get_lib_version, str_if_bytes
 
 from .._cache import (
-    DEFAULT_BLACKLIST,
+    DEFAULT_ALLOW_LIST,
+    DEFAULT_DENY_LIST,
     DEFAULT_EVICTION_POLICY,
-    DEFAULT_WHITELIST,
     AbstractCache,
     _LocalCache,
 )
@@ -120,8 +120,8 @@ class AbstractConnection:
         "ssl_context",
         "protocol",
         "client_cache",
-        "cache_blacklist",
-        "cache_whitelist",
+        "cache_deny_list",
+        "cache_allow_list",
         "_reader",
         "_writer",
         "_parser",
@@ -161,8 +161,8 @@ class AbstractConnection:
         cache_max_size: int = 10000,
         cache_ttl: int = 0,
         cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
-        cache_whitelist: List[str] = DEFAULT_WHITELIST,
+        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
+        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -230,8 +230,8 @@ class AbstractConnection:
                 raise RedisError(
                     "client caching is only supported with protocol version 3 or higher"
                 )
-            self.cache_blacklist = cache_blacklist
-            self.cache_whitelist = cache_whitelist
+            self.cache_deny_list = cache_deny_list
+            self.cache_allow_list = cache_allow_list
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage
@@ -708,8 +708,8 @@ class AbstractConnection:
         """
         if (
             self.client_cache is None
-            or command[0] in self.cache_blacklist
-            or command[0] not in self.cache_whitelist
+            or command[0] in self.cache_deny_list
+            or command[0] not in self.cache_allow_list
         ):
             return None
         while not self._socket_is_empty():
@@ -725,8 +725,8 @@ class AbstractConnection:
         """
         if (
             self.client_cache is not None
-            and (self.cache_blacklist == [] or command[0] not in self.cache_blacklist)
-            and (self.cache_whitelist == [] or command[0] in self.cache_whitelist)
+            and (self.cache_deny_list == [] or command[0] not in self.cache_deny_list)
+            and (self.cache_allow_list == [] or command[0] in self.cache_allow_list)
         ):
             self.client_cache.set(command, response, keys)
 

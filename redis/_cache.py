@@ -17,7 +17,7 @@ class EvictionPolicy(Enum):
 
 DEFAULT_EVICTION_POLICY = EvictionPolicy.LRU
 
-DEFAULT_BLACKLIST = [
+DEFAULT_DENY_LIST = [
     "BF.CARD",
     "BF.DEBUG",
     "BF.EXISTS",
@@ -77,7 +77,7 @@ DEFAULT_BLACKLIST = [
     "TTL",
 ]
 
-DEFAULT_WHITELIST = [
+DEFAULT_ALLOW_LIST = [
     "BITCOUNT",
     "BITFIELD_RO",
     "BITPOS",

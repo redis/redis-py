@@ -172,8 +172,8 @@ REDIS_ALLOWED_KEYS = (
     "cache_max_size",
     "cache_ttl",
     "cache_policy",
-    "cache_blacklist",
-    "cache_whitelist",
+    "cache_deny_list",
+    "cache_allow_list",
 )
 KWARGS_DISABLED_KEYS = ("host", "port")
 

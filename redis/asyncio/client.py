@@ -27,9 +27,9 @@ from typing import (
 )
 
 from redis._cache import (
-    DEFAULT_BLACKLIST,
+    DEFAULT_ALLOW_LIST,
+    DEFAULT_DENY_LIST,
     DEFAULT_EVICTION_POLICY,
-    DEFAULT_WHITELIST,
     AbstractCache,
 )
 from redis._parsers.helpers import (
@@ -243,8 +243,8 @@ class Redis(
         cache_max_size: int = 100,
         cache_ttl: int = 0,
         cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
-        cache_whitelist: List[str] = DEFAULT_WHITELIST,
+        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
+        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ):
         """
         Initialize a new Redis client.
@@ -299,8 +299,8 @@ class Redis(
                 "cache_max_size": cache_max_size,
                 "cache_ttl": cache_ttl,
                 "cache_policy": cache_policy,
-                "cache_blacklist": cache_blacklist,
-                "cache_whitelist": cache_whitelist,
+                "cache_deny_list": cache_deny_list,
+                "cache_allow_list": cache_allow_list,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:

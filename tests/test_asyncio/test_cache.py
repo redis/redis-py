@@ -125,10 +125,10 @@ class TestLocalCache:
 
     @pytest.mark.parametrize(
         "r",
-        [{"cache": _LocalCache(), "kwargs": {"cache_blacklist": ["LLEN"]}}],
+        [{"cache": _LocalCache(), "kwargs": {"cache_deny_list": ["LLEN"]}}],
         indirect=True,
     )
-    async def test_cache_blacklist(self, r):
+    async def test_cache_deny_list(self, r):
         r, cache = r
         # add list to redis
         await r.lpush("mylist", "foo", "bar", "baz")
@@ -139,10 +139,10 @@ class TestLocalCache:
 
     @pytest.mark.parametrize(
         "r",
-        [{"cache": _LocalCache(), "kwargs": {"cache_whitelist": ["LLEN"]}}],
+        [{"cache": _LocalCache(), "kwargs": {"cache_allow_list": ["LLEN"]}}],
         indirect=True,
     )
-    async def test_cache_whitelist(self, r):
+    async def test_cache_allow_list(self, r):
         r, cache = r
         # add list to redis
         await r.lpush("mylist", "foo", "bar", "baz")

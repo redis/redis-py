@@ -13,9 +13,9 @@ from typing import Any, Callable, List, Optional, Tuple, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ._cache import (
-    DEFAULT_BLACKLIST,
+    DEFAULT_ALLOW_LIST,
+    DEFAULT_DENY_LIST,
     DEFAULT_EVICTION_POLICY,
-    DEFAULT_WHITELIST,
     AbstractCache,
     _LocalCache,
 )
@@ -162,8 +162,8 @@ class AbstractConnection:
         cache_max_size: int = 10000,
         cache_ttl: int = 0,
         cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
-        cache_whitelist: List[str] = DEFAULT_WHITELIST,
+        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
+        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ):
         """
         Initialize a new Connection.
@@ -239,8 +239,8 @@ class AbstractConnection:
                 raise RedisError(
                     "client caching is only supported with protocol version 3 or higher"
                 )
-            self.cache_blacklist = cache_blacklist
-            self.cache_whitelist = cache_whitelist
+            self.cache_deny_list = cache_deny_list
+            self.cache_allow_list = cache_allow_list
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -629,8 +629,8 @@ class AbstractConnection:
         """
         if (
             self.client_cache is None
-            or command[0] in self.cache_blacklist
-            or command[0] not in self.cache_whitelist
+            or command[0] in self.cache_deny_list
+            or command[0] not in self.cache_allow_list
         ):
             return None
         while self.can_read():
@@ -646,8 +646,8 @@ class AbstractConnection:
         """
         if (
             self.client_cache is not None
-            and (self.cache_blacklist == [] or command[0] not in self.cache_blacklist)
-            and (self.cache_whitelist == [] or command[0] in self.cache_whitelist)
+            and (self.cache_deny_list == [] or command[0] not in self.cache_deny_list)
+            and (self.cache_allow_list == [] or command[0] in self.cache_allow_list)
         ):
             self.client_cache.set(command, response, keys)
 
