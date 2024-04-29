@@ -1,4 +1,5 @@
 import socket
+from typing import Tuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -71,7 +72,7 @@ class SentinelManagedConnectionMockForReplicaMode(SentinelManagedConnectionMock)
 
 
 class SentinelManagedConnectionMockForMasterMode(SentinelManagedConnectionMock):
-    async def connect_to(self, address: tuple[str, int]) -> None:
+    async def connect_to(self, address: Tuple[str, int]) -> None:
         """
         This simulates the behavior of connect_to when
         :py:class:`~redis.SentinelConnectionPool`
