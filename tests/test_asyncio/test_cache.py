@@ -2,7 +2,7 @@ import time
 
 import pytest
 import pytest_asyncio
-from redis._cache import _LocalCache
+from redis._cache import EvictionPolicy, _LocalCache
 from redis.utils import HIREDIS_AVAILABLE
 
 
@@ -41,7 +41,7 @@ class TestLocalCache:
         assert await r.get("foo") == b"barbar"
 
     @pytest.mark.parametrize("r", [{"cache": _LocalCache(max_size=3)}], indirect=True)
-    async def test_cache_max_size(self, r):
+    async def test_cache_lru_eviction(self, r):
         r, cache = r
         # add 3 keys to redis
         await r.set("foo", "bar")
@@ -76,7 +76,9 @@ class TestLocalCache:
         assert cache.get(("GET", "foo")) is None
 
     @pytest.mark.parametrize(
-        "r", [{"cache": _LocalCache(max_size=3, eviction_policy="lfu")}], indirect=True
+        "r",
+        [{"cache": _LocalCache(max_size=3, eviction_policy=EvictionPolicy.LFU)}],
+        indirect=True,
     )
     async def test_cache_lfu_eviction(self, r):
         r, cache = r
