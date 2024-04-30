@@ -4,7 +4,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
 from enum import Enum
-from typing import Iterable, List, Union
+from typing import List, Sequence, Union
 
 from redis.typing import KeyT, ResponseT
 
@@ -169,22 +169,22 @@ class AbstractCache(ABC):
     @abstractmethod
     def set(
         self,
-        command: Union[str, Iterable[str]],
+        command: Union[str, Sequence[str]],
         response: ResponseT,
         keys_in_command: List[KeyT],
     ):
         pass
 
     @abstractmethod
-    def get(self, command: Union[str, Iterable[str]]) -> ResponseT:
+    def get(self, command: Union[str, Sequence[str]]) -> ResponseT:
         pass
 
     @abstractmethod
-    def delete_command(self, command: Union[str, Iterable[str]]):
+    def delete_command(self, command: Union[str, Sequence[str]]):
         pass
 
     @abstractmethod
-    def delete_commands(self, commands: List[Union[str, Iterable[str]]]):
+    def delete_commands(self, commands: List[Union[str, Sequence[str]]]):
         pass
 
     @abstractmethod
@@ -229,7 +229,7 @@ class _LocalCache(AbstractCache):
 
     def set(
         self,
-        command: Union[str, Iterable[str]],
+        command: Union[str, Sequence[str]],
         response: ResponseT,
         keys_in_command: List[KeyT],
     ):
@@ -237,7 +237,7 @@ class _LocalCache(AbstractCache):
         Set a redis command and its response in the cache.
 
         Args:
-            command (Union[str, Iterable[str]]): The redis command.
+            command (Union[str, Sequence[str]]): The redis command.
             response (ResponseT): The response associated with the command.
             keys_in_command (List[KeyT]): The list of keys used in the command.
         """
@@ -252,12 +252,12 @@ class _LocalCache(AbstractCache):
         self._update_key_commands_map(keys_in_command, command)
         self.commands_ttl_list.append(command)
 
-    def get(self, command: Union[str, Iterable[str]]) -> ResponseT:
+    def get(self, command: Union[str, Sequence[str]]) -> ResponseT:
         """
         Get the response for a redis command from the cache.
 
         Args:
-            command (Union[str, Iterable[str]]): The redis command.
+            command (Union[str, Sequence[str]]): The redis command.
 
         Returns:
             ResponseT: The response associated with the command, or None if the command is not in the cache.  # noqa
@@ -269,12 +269,12 @@ class _LocalCache(AbstractCache):
             self._update_access(command)
             return copy.deepcopy(self.cache[command]["response"])
 
-    def delete_command(self, command: Union[str, Iterable[str]]):
+    def delete_command(self, command: Union[str, Sequence[str]]):
         """
         Delete a redis command and its metadata from the cache.
 
         Args:
-            command (Union[str, Iterable[str]]): The redis command to be deleted.
+            command (Union[str, Sequence[str]]): The redis command to be deleted.
         """
         if command in self.cache:
             keys_in_command = self.cache[command].get("keys")
@@ -282,12 +282,12 @@ class _LocalCache(AbstractCache):
             self.commands_ttl_list.remove(command)
             del self.cache[command]
 
-    def delete_commands(self, commands: List[Union[str, Iterable[str]]]):
+    def delete_commands(self, commands: List[Union[str, Sequence[str]]]):
         """
         Delete multiple commands and their metadata from the cache.
 
         Args:
-            commands (List[Union[str, Iterable[str]]]): The list of commands to be
+            commands (List[Union[str, Sequence[str]]]): The list of commands to be
             deleted.
         """
         for command in commands:
@@ -299,12 +299,12 @@ class _LocalCache(AbstractCache):
         self.key_commands_map.clear()
         self.commands_ttl_list = []
 
-    def _is_expired(self, command: Union[str, Iterable[str]]) -> bool:
+    def _is_expired(self, command: Union[str, Sequence[str]]) -> bool:
         """
         Check if a redis command has expired based on its time-to-live.
 
         Args:
-            command (Union[str, Iterable[str]]): The redis command.
+            command (Union[str, Sequence[str]]): The redis command.
 
         Returns:
             bool: True if the command has expired, False otherwise.
@@ -313,12 +313,12 @@ class _LocalCache(AbstractCache):
             return False
         return time.monotonic() - self.cache[command]["ctime"] > self.ttl
 
-    def _update_access(self, command: Union[str, Iterable[str]]):
+    def _update_access(self, command: Union[str, Sequence[str]]):
         """
         Update the access information for a redis command based on the eviction policy.
 
         Args:
-            command (Union[str, Iterable[str]]): The redis command.
+            command (Union[str, Sequence[str]]): The redis command.
         """
         if self.eviction_policy == EvictionPolicy.LRU:
             self.cache.move_to_end(command)
@@ -346,27 +346,27 @@ class _LocalCache(AbstractCache):
             self.cache.pop(random_command)
 
     def _update_key_commands_map(
-        self, keys: List[KeyT], command: Union[str, Iterable[str]]
+        self, keys: List[KeyT], command: Union[str, Sequence[str]]
     ):
         """
         Update the key_commands_map with command that uses the keys.
 
         Args:
             keys (List[KeyT]): The list of keys used in the command.
-            command (Union[str, Iterable[str]]): The redis command.
+            command (Union[str, Sequence[str]]): The redis command.
         """
         for key in keys:
             self.key_commands_map[key].add(command)
 
     def _del_key_commands_map(
-        self, keys: List[KeyT], command: Union[str, Iterable[str]]
+        self, keys: List[KeyT], command: Union[str, Sequence[str]]
     ):
         """
         Remove a redis command from the key_commands_map.
 
         Args:
             keys (List[KeyT]): The list of keys used in the redis command.
-            command (Union[str, Iterable[str]]): The redis command.
+            command (Union[str, Sequence[str]]): The redis command.
         """
         for key in keys:
             self.key_commands_map[key].remove(command)

@@ -9,7 +9,7 @@ from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Any, Callable, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, List, Optional, Sequence, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ._cache import (
@@ -623,7 +623,7 @@ class AbstractConnection:
             for key in data[1]:
                 self.client_cache.invalidate_key(str_if_bytes(key))
 
-    def _get_from_local_cache(self, command: str):
+    def _get_from_local_cache(self, command: Sequence[str]):
         """
         If the command is in the local cache, return the response
         """
@@ -638,7 +638,7 @@ class AbstractConnection:
         return self.client_cache.get(command)
 
     def _add_to_local_cache(
-        self, command: Tuple[str], response: ResponseT, keys: List[KeysT]
+        self, command: Sequence[str], response: ResponseT, keys: List[KeysT]
     ):
         """
         Add the command and response to the local cache if the command
@@ -658,14 +658,14 @@ class AbstractConnection:
         except AttributeError:
             pass
 
-    def delete_command_from_cache(self, command):
+    def delete_command_from_cache(self, command: Union[str, Sequence[str]]):
         try:
             if self.client_cache:
                 self.client_cache.delete_command(command)
         except AttributeError:
             pass
 
-    def invalidate_key_from_cache(self, key):
+    def invalidate_key_from_cache(self, key: KeysT):
         try:
             if self.client_cache:
                 self.client_cache.invalidate_key(key)

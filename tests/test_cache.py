@@ -1,6 +1,6 @@
 import time
 from collections import defaultdict
-from typing import Iterable, List, Union
+from typing import List, Sequence, Union
 
 import cachetools
 import pytest
@@ -535,7 +535,7 @@ class TestCustomCache:
 
         def set(
             self,
-            command: Union[str, Iterable[str]],
+            command: Union[str, Sequence[str]],
             response: ResponseT,
             keys_in_command: List[KeyT],
         ):
@@ -544,17 +544,17 @@ class TestCustomCache:
                 self.keys_to_commands[key].append(tuple(command))
                 self.commands_to_keys[command].append(tuple(keys_in_command))
 
-        def get(self, command: Union[str, Iterable[str]]) -> ResponseT:
+        def get(self, command: Union[str, Sequence[str]]) -> ResponseT:
             return self.responses.get(command)
 
-        def delete_command(self, command: Union[str, Iterable[str]]):
+        def delete_command(self, command: Union[str, Sequence[str]]):
             self.responses.pop(command, None)
             keys = self.commands_to_keys.pop(command, [])
             for key in keys:
                 if command in self.keys_to_commands[key]:
                     self.keys_to_commands[key].remove(command)
 
-        def delete_commands(self, commands: List[Union[str, Iterable[str]]]):
+        def delete_commands(self, commands: List[Union[str, Sequence[str]]]):
             for command in commands:
                 self.delete_command(command)
 
