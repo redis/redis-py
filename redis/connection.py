@@ -652,25 +652,16 @@ class AbstractConnection:
             self.client_cache.set(command, response, keys)
 
     def flush_cache(self):
-        try:
-            if self.client_cache:
-                self.client_cache.flush()
-        except AttributeError:
-            pass
+        if self.client_cache:
+            self.client_cache.flush()
 
     def delete_command_from_cache(self, command: Union[str, Sequence[str]]):
-        try:
-            if self.client_cache:
-                self.client_cache.delete_command(command)
-        except AttributeError:
-            pass
+        if self.client_cache:
+            self.client_cache.delete_command(command)
 
     def invalidate_key_from_cache(self, key: KeysT):
-        try:
-            if self.client_cache:
-                self.client_cache.invalidate_key(key)
-        except AttributeError:
-            pass
+        if self.client_cache:
+            self.client_cache.invalidate_key(key)
 
 
 class Connection(AbstractConnection):
@@ -1300,37 +1291,22 @@ class ConnectionPool:
         self._checkpid()
         with self._lock:
             connections = chain(self._available_connections, self._in_use_connections)
-
             for connection in connections:
-                try:
-                    connection.client_cache.flush()
-                except AttributeError:
-                    # cache is not enabled
-                    pass
+                connection.flush_cache()
 
     def delete_command_from_cache(self, command: str):
         self._checkpid()
         with self._lock:
             connections = chain(self._available_connections, self._in_use_connections)
-
             for connection in connections:
-                try:
-                    connection.client_cache.delete_command(command)
-                except AttributeError:
-                    # cache is not enabled
-                    pass
+                connection.delete_command_from_cache(command)
 
     def invalidate_key_from_cache(self, key: str):
         self._checkpid()
         with self._lock:
             connections = chain(self._available_connections, self._in_use_connections)
-
             for connection in connections:
-                try:
-                    connection.client_cache.invalidate_key(key)
-                except AttributeError:
-                    # cache is not enabled
-                    pass
+                connection.invalidate_key_from_cache(key)
 
 
 class BlockingConnectionPool(ConnectionPool):

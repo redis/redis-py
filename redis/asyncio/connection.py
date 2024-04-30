@@ -731,25 +731,16 @@ class AbstractConnection:
             self.client_cache.set(command, response, keys)
 
     def flush_cache(self):
-        try:
-            if self.client_cache:
-                self.client_cache.flush()
-        except AttributeError:
-            pass
+        if self.client_cache:
+            self.client_cache.flush()
 
     def delete_command_from_cache(self, command):
-        try:
-            if self.client_cache:
-                self.client_cache.delete_command(command)
-        except AttributeError:
-            pass
+        if self.client_cache:
+            self.client_cache.delete_command(command)
 
     def invalidate_key_from_cache(self, key):
-        try:
-            if self.client_cache:
-                self.client_cache.invalidate_key(key)
-        except AttributeError:
-            pass
+        if self.client_cache:
+            self.client_cache.invalidate_key(key)
 
 
 class Connection(AbstractConnection):

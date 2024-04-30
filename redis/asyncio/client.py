@@ -676,31 +676,22 @@ class Redis(
         return response
 
     def flush_cache(self):
-        try:
-            if self.connection:
-                self.connection.client_cache.flush()
-            else:
-                self.connection_pool.flush_cache()
-        except AttributeError:
-            pass
+        if self.connection:
+            self.connection.flush_cache()
+        else:
+            self.connection_pool.flush_cache()
 
     def delete_command_from_cache(self, command):
-        try:
-            if self.connection:
-                self.connection.client_cache.delete_command(command)
-            else:
-                self.connection_pool.delete_command_from_cache(command)
-        except AttributeError:
-            pass
+        if self.connection:
+            self.connection.delete_command_from_cache(command)
+        else:
+            self.connection_pool.delete_command_from_cache(command)
 
     def invalidate_key_from_cache(self, key):
-        try:
-            if self.connection:
-                self.connection.client_cache.invalidate_key(key)
-            else:
-                self.connection_pool.invalidate_key_from_cache(key)
-        except AttributeError:
-            pass
+        if self.connection:
+            self.connection.invalidate_key_from_cache(key)
+        else:
+            self.connection_pool.invalidate_key_from_cache(key)
 
 
 StrictRedis = Redis
