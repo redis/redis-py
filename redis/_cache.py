@@ -167,19 +167,24 @@ class AbstractCache(ABC):
     """
 
     @abstractmethod
-    def set(self, command: str, response: ResponseT, keys_in_command: List[KeyT]):
+    def set(
+        self,
+        command: Union[str, Iterable[str]],
+        response: ResponseT,
+        keys_in_command: List[KeyT],
+    ):
         pass
 
     @abstractmethod
-    def get(self, command: str) -> ResponseT:
+    def get(self, command: Union[str, Iterable[str]]) -> ResponseT:
         pass
 
     @abstractmethod
-    def delete_command(self, command: str):
+    def delete_command(self, command: Union[str, Iterable[str]]):
         pass
 
     @abstractmethod
-    def delete_commands(self, commands):
+    def delete_commands(self, commands: List[Union[str, Iterable[str]]]):
         pass
 
     @abstractmethod
