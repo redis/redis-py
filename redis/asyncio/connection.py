@@ -730,6 +730,27 @@ class AbstractConnection:
         ):
             self.client_cache.set(command, response, keys)
 
+    def flush_cache(self):
+        try:
+            if self.client_cache:
+                self.client_cache.flush()
+        except AttributeError:
+            pass
+
+    def delete_command_from_cache(self, command):
+        try:
+            if self.client_cache:
+                self.client_cache.delete_command(command)
+        except AttributeError:
+            pass
+
+    def invalidate_key_from_cache(self, key):
+        try:
+            if self.client_cache:
+                self.client_cache.invalidate_key(key)
+        except AttributeError:
+            pass
+
 
 class Connection(AbstractConnection):
     "Manages TCP communication to and from a Redis server"
@@ -1252,33 +1273,18 @@ class ConnectionPool:
 
     def flush_cache(self):
         connections = chain(self._available_connections, self._in_use_connections)
-
         for connection in connections:
-            try:
-                connection.client_cache.flush()
-            except AttributeError:
-                # cache is not enabled
-                pass
+            connection.flush_cache()
 
     def delete_command_from_cache(self, command: str):
         connections = chain(self._available_connections, self._in_use_connections)
-
         for connection in connections:
-            try:
-                connection.client_cache.delete_command(command)
-            except AttributeError:
-                # cache is not enabled
-                pass
+            connection.delete_command_from_cache(command)
 
     def invalidate_key_from_cache(self, key: str):
         connections = chain(self._available_connections, self._in_use_connections)
-
         for connection in connections:
-            try:
-                connection.client_cache.invalidate_key(key)
-            except AttributeError:
-                # cache is not enabled
-                pass
+            connection.invalidate_key_from_cache(key)
 
 
 class BlockingConnectionPool(ConnectionPool):

@@ -227,6 +227,75 @@ class TestLocalCache:
         )  # keys not provided, not cached
         assert cache.get(("GET", "b")) is None
 
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    async def test_delete_one_command(self, r):
+        r, cache = r
+        assert await r.mset({"a": 1, "b": 1}) is True
+        assert await r.set("c", 1) is True
+        assert await r.mget("a", "b") == ["1", "1"]
+        assert await r.get("c") == "1"
+        # values should be in local cache
+        assert cache.get(("MGET", "a", "b")) == ["1", "1"]
+        assert cache.get(("GET", "c")) == "1"
+        # delete one command from the cache
+        r.delete_command_from_cache(("MGET", "a", "b"))
+        # the other command is still in the local cache anymore
+        assert cache.get(("MGET", "a", "b")) is None
+        assert cache.get(("GET", "c")) == "1"
+        # get from redis
+        assert await r.mget("a", "b") == ["1", "1"]
+        assert await r.get("c") == "1"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    async def test_invalidate_key(self, r):
+        r, cache = r
+        assert await r.mset({"a": 1, "b": 1}) is True
+        assert await r.set("c", 1) is True
+        assert await r.mget("a", "b") == ["1", "1"]
+        assert await r.get("c") == "1"
+        # values should be in local cache
+        assert cache.get(("MGET", "a", "b")) == ["1", "1"]
+        assert cache.get(("GET", "c")) == "1"
+        # invalidate one key from the cache
+        r.invalidate_key_from_cache("b")
+        # one other command is still in the local cache anymore
+        assert cache.get(("MGET", "a", "b")) is None
+        assert cache.get(("GET", "c")) == "1"
+        # get from redis
+        assert await r.mget("a", "b") == ["1", "1"]
+        assert await r.get("c") == "1"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    async def test_flush_entire_cache(self, r):
+        r, cache = r
+        assert await r.mset({"a": 1, "b": 1}) is True
+        assert await r.set("c", 1) is True
+        assert await r.mget("a", "b") == ["1", "1"]
+        assert await r.get("c") == "1"
+        # values should be in local cache
+        assert cache.get(("MGET", "a", "b")) == ["1", "1"]
+        assert cache.get(("GET", "c")) == "1"
+        # flush the local cache
+        r.flush_cache()
+        # the commands are not in the local cache anymore
+        assert cache.get(("MGET", "a", "b")) is None
+        assert cache.get(("GET", "c")) is None
+        # get from redis
+        assert await r.mget("a", "b") == ["1", "1"]
+        assert await r.get("c") == "1"
+
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
@@ -295,6 +364,75 @@ class TestClusterLocalCache:
             await r.execute_command("GET", "b") == "2"
         )  # keys not provided, not cached
         assert cache.get(("GET", "b")) is None
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    async def test_delete_one_command(self, r):
+        r, cache = r
+        assert await r.mset({"a{a}": 1, "b{a}": 1}) is True
+        assert await r.set("c", 1) is True
+        assert await r.mget("a{a}", "b{a}") == ["1", "1"]
+        assert await r.get("c") == "1"
+        # values should be in local cache
+        assert cache.get(("MGET", "a{a}", "b{a}")) == ["1", "1"]
+        assert cache.get(("GET", "c")) == "1"
+        # delete one command from the cache
+        r.delete_command_from_cache(("MGET", "a{a}", "b{a}"))
+        # the other command is still in the local cache anymore
+        assert cache.get(("MGET", "a{a}", "b{a}")) is None
+        assert cache.get(("GET", "c")) == "1"
+        # get from redis
+        assert await r.mget("a{a}", "b{a}") == ["1", "1"]
+        assert await r.get("c") == "1"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    async def test_invalidate_key(self, r):
+        r, cache = r
+        assert await r.mset({"a{a}": 1, "b{a}": 1}) is True
+        assert await r.set("c", 1) is True
+        assert await r.mget("a{a}", "b{a}") == ["1", "1"]
+        assert await r.get("c") == "1"
+        # values should be in local cache
+        assert cache.get(("MGET", "a{a}", "b{a}")) == ["1", "1"]
+        assert cache.get(("GET", "c")) == "1"
+        # invalidate one key from the cache
+        r.invalidate_key_from_cache("b{a}")
+        # one other command is still in the local cache anymore
+        assert cache.get(("MGET", "a{a}", "b{a}")) is None
+        assert cache.get(("GET", "c")) == "1"
+        # get from redis
+        assert await r.mget("a{a}", "b{a}") == ["1", "1"]
+        assert await r.get("c") == "1"
+
+    @pytest.mark.parametrize(
+        "r",
+        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        indirect=True,
+    )
+    async def test_flush_entire_cache(self, r):
+        r, cache = r
+        assert await r.mset({"a{a}": 1, "b{a}": 1}) is True
+        assert await r.set("c", 1) is True
+        assert await r.mget("a{a}", "b{a}") == ["1", "1"]
+        assert await r.get("c") == "1"
+        # values should be in local cache
+        assert cache.get(("MGET", "a{a}", "b{a}")) == ["1", "1"]
+        assert cache.get(("GET", "c")) == "1"
+        # flush the local cache
+        r.flush_cache()
+        # the commands are not in the local cache anymore
+        assert cache.get(("MGET", "a{a}", "b{a}")) is None
+        assert cache.get(("GET", "c")) is None
+        # get from redis
+        assert await r.mget("a{a}", "b{a}") == ["1", "1"]
+        assert await r.get("c") == "1"
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")

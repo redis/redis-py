@@ -936,6 +936,18 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             thread_local=thread_local,
         )
 
+    def flush_cache(self):
+        if self.nodes_manager:
+            self.nodes_manager.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        if self.nodes_manager:
+            self.nodes_manager.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        if self.nodes_manager:
+            self.nodes_manager.invalidate_key_from_cache(key)
+
 
 class ClusterNode:
     """
@@ -1106,6 +1118,18 @@ class ClusterNode:
         self._free.append(connection)
 
         return ret
+
+    def flush_cache(self):
+        for connection in self._connections:
+            connection.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        for connection in self._connections:
+            connection.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        for connection in self._connections:
+            connection.invalidate_key_from_cache(key)
 
 
 class NodesManager:
@@ -1391,6 +1415,18 @@ class NodesManager:
         if self.address_remap:
             return self.address_remap((host, port))
         return host, port
+
+    def flush_cache(self):
+        for node in self.nodes_cache.values():
+            node.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        for node in self.nodes_cache.values():
+            node.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        for node in self.nodes_cache.values():
+            node.invalidate_key_from_cache(key)
 
 
 class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands):
