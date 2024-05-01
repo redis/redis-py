@@ -1,6 +1,6 @@
 import pytest
 import redis
-from tests.conftest import skip_if_server_version_lt
+from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
 from .compat import aclosing, mock
 from .conftest import wait_for_command
@@ -12,6 +12,7 @@ class TestPipeline:
         async with r.pipeline() as pipe:
             assert pipe
 
+    @skip_if_redis_enterprise()
     async def test_pipeline(self, r):
         async with r.pipeline() as pipe:
             (
@@ -34,6 +35,7 @@ class TestPipeline:
             (pipe.set("a", memoryview(b"a1")).get("a"))
             assert await pipe.execute() == [True, b"a1"]
 
+    @skip_if_redis_enterprise()
     async def test_pipeline_length(self, r):
         async with r.pipeline() as pipe:
             # Initially empty.
@@ -85,6 +87,7 @@ class TestPipeline:
 
             assert await r.get("a") == b"bad"
 
+    @skip_if_redis_enterprise()
     async def test_exec_error_in_response(self, r):
         """
         an invalid pipeline command at exec time adds the exception instance
@@ -191,6 +194,7 @@ class TestPipeline:
             assert await r.get("z") == b"zzz"
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_watch_succeed(self, r):
         await r.set("a", 1)
         await r.set("b", 2)
@@ -209,6 +213,7 @@ class TestPipeline:
             assert not pipe.watching
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_watch_failure(self, r):
         await r.set("a", 1)
         await r.set("b", 2)
@@ -224,6 +229,7 @@ class TestPipeline:
             assert not pipe.watching
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_watch_failure_in_empty_transaction(self, r):
         await r.set("a", 1)
         await r.set("b", 2)
@@ -238,6 +244,7 @@ class TestPipeline:
             assert not pipe.watching
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_unwatch(self, r):
         await r.set("a", 1)
         await r.set("b", 2)
@@ -251,6 +258,7 @@ class TestPipeline:
             assert await pipe.execute() == [b"1"]
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_watch_exec_no_unwatch(self, r):
         await r.set("a", 1)
         await r.set("b", 2)
@@ -305,6 +313,7 @@ class TestPipeline:
             pass
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_transaction_callable(self, r):
         await r.set("a", 1)
         await r.set("b", 2)
@@ -368,6 +377,7 @@ class TestPipeline:
 
         assert await r.get(key) == b"1"
 
+    @skip_if_redis_enterprise()
     async def test_pipeline_with_bitfield(self, r):
         async with r.pipeline() as pipe:
             pipe.set("a", "1")
@@ -394,6 +404,7 @@ class TestPipeline:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.0.0")
+    @skip_if_redis_enterprise()
     async def test_pipeline_discard(self, r):
         # empty pipeline should raise an error
         async with r.pipeline() as pipe:

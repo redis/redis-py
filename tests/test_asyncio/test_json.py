@@ -2,7 +2,11 @@ import pytest
 import redis.asyncio as redis
 from redis import exceptions
 from redis.commands.json.path import Path
-from tests.conftest import assert_resp_response, skip_ifmodversion_lt
+from tests.conftest import (
+    assert_resp_response,
+    skip_if_redis_enterprise,
+    skip_ifmodversion_lt,
+)
 
 
 async def test_json_setbinarykey(decoded_r: redis.Redis):
@@ -95,6 +99,7 @@ async def test_jsonsetexistentialmodifiersshouldsucceed(decoded_r: redis.Redis):
         await decoded_r.json().set("obj", Path("foo"), "baz", nx=True, xx=True)
 
 
+@skip_if_redis_enterprise()
 async def test_mgetshouldsucceed(decoded_r: redis.Redis):
     await decoded_r.json().set("1", Path.root_path(), 1)
     await decoded_r.json().set("2", Path.root_path(), 2)

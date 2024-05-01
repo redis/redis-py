@@ -193,6 +193,7 @@ class TestPubSubSubscribeUnsubscribe:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_resubscribe_to_shard_channels_on_reconnection(self, r):
         kwargs = make_subscribe_test_data(r.pubsub(), "shard_channel")
         self._test_resubscribe_on_reconnection(**kwargs)
@@ -792,6 +793,7 @@ class TestPubSubSubcommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_pubsub_shardchannels(self, r):
         p = r.pubsub()
         p.ssubscribe("foo", "bar", "baz", "quux")

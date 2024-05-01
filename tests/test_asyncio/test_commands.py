@@ -2911,6 +2911,7 @@ class TestRedisCommands:
         assert await r.xgroup_destroy(stream, group)
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     async def test_xgroup_setid(self, r: redis.Redis):
         stream = "stream"
         group = "group"

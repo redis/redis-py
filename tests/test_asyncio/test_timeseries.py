@@ -6,6 +6,7 @@ import redis.asyncio as redis
 from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
+    skip_if_redis_enterprise,
     skip_ifmodversion_lt,
 )
 
@@ -175,6 +176,7 @@ async def test_incrby_decrby(decoded_r: redis.Redis):
     assert_resp_response(decoded_r, 128, info.get("chunk_size"), info.get("chunkSize"))
 
 
+@skip_if_redis_enterprise()
 async def test_create_and_delete_rule(decoded_r: redis.Redis):
     # test rule creation
     time = 100

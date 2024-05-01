@@ -87,11 +87,13 @@ else:
 
 
 class ConnectCallbackProtocol(Protocol):
-    def __call__(self, connection: "AbstractConnection"): ...
+    def __call__(self, connection: "AbstractConnection"):
+        ...
 
 
 class AsyncConnectCallbackProtocol(Protocol):
-    async def __call__(self, connection: "AbstractConnection"): ...
+    async def __call__(self, connection: "AbstractConnection"):
+        ...
 
 
 ConnectCallbackT = Union[ConnectCallbackProtocol, AsyncConnectCallbackProtocol]

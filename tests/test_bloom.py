@@ -8,8 +8,8 @@ from redis.utils import HIREDIS_AVAILABLE
 from .conftest import (
     assert_resp_response,
     is_resp2_connection,
-    skip_ifmodversion_lt,
     skip_if_redis_enterprise,
+    skip_ifmodversion_lt,
 )
 
 

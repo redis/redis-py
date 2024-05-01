@@ -7,8 +7,8 @@ from redis.commands.json.path import Path
 from .conftest import (
     _get_client,
     assert_resp_response,
-    skip_ifmodversion_lt,
     skip_if_redis_enterprise,
+    skip_ifmodversion_lt,
 )
 
 
@@ -107,6 +107,7 @@ def test_jsonsetexistentialmodifiersshouldsucceed(client):
         client.json().set("obj", Path("foo"), "baz", nx=True, xx=True)
 
 
+@skip_if_redis_enterprise()
 def test_mgetshouldsucceed(client):
     client.json().set("1", Path.root_path(), 1)
     client.json().set("2", Path.root_path(), 2)

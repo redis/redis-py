@@ -5,6 +5,7 @@ import pytest
 from redis.asyncio import Redis
 from redis.asyncio.cluster import RedisCluster
 from redis.asyncio.connection import async_timeout
+from tests.conftest import skip_if_redis_enterprise
 
 
 class DelayProxy:
@@ -141,6 +142,7 @@ async def test_standalone(delay, master_host):
 
 
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 @pytest.mark.parametrize("delay", argvalues=[0.05, 0.5, 1, 2])
 async def test_standalone_pipeline(delay, master_host):
     async with DelayProxy(addr=("127.0.0.1", 5380), redis_addr=master_host) as dp:

@@ -778,6 +778,7 @@ class TestRedisCommands:
         # # assert 'maxmemory' in data
         # assert data['maxmemory'].isdigit()
 
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("7.0.0")
     def test_config_get_multi_params(self, r: redis.Redis):
         res = r.config_get("*max-*-entries*", "maxmemory")
@@ -4422,6 +4423,7 @@ class TestRedisCommands:
         assert r.xgroup_destroy(stream, group)
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_redis_enterprise()
     def test_xgroup_setid(self, r):
         stream = "stream"
         group = "group"
