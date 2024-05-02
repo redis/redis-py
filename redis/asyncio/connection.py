@@ -87,13 +87,11 @@ else:
 
 
 class ConnectCallbackProtocol(Protocol):
-    def __call__(self, connection: "AbstractConnection"):
-        ...
+    def __call__(self, connection: "AbstractConnection"): ...
 
 
 class AsyncConnectCallbackProtocol(Protocol):
-    async def __call__(self, connection: "AbstractConnection"):
-        ...
+    async def __call__(self, connection: "AbstractConnection"): ...
 
 
 ConnectCallbackT = Union[ConnectCallbackProtocol, AsyncConnectCallbackProtocol]
@@ -698,7 +696,7 @@ class AbstractConnection:
         and the second string is the list of keys to invalidate.
         (if the list of keys is None, then all keys are invalidated)
         """
-        if data[1] is not None:
+        if data[1] is None:
             self.client_cache.flush()
         else:
             for key in data[1]:

@@ -2132,6 +2132,7 @@ class TestRedisCommands:
 
     # SCAN COMMANDS
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("2.8.0")
     def test_scan(self, r):
         r.set("a", 1)
@@ -2144,6 +2145,7 @@ class TestRedisCommands:
         assert set(keys) == {b"a"}
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     @skip_if_server_version_lt("6.0.0")
     def test_scan_type(self, r):
         r.sadd("a-set", 1)

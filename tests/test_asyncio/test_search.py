@@ -326,6 +326,7 @@ async def test_client(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 async def test_scores(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("txt"),))
 
@@ -1013,6 +1014,7 @@ async def test_phonetic_matcher(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 async def test_scorer(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("description"),))
 

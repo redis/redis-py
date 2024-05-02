@@ -122,6 +122,7 @@ class TestPipeline:
             assert pipe.set("z", "zzz").execute() == [True]
             assert r["z"] == b"zzz"
 
+    @skip_if_redis_enterprise()
     def test_exec_error_raised(self, r):
         r["c"] = "a"
         with r.pipeline() as pipe:
@@ -144,7 +145,7 @@ class TestPipeline:
         """
         for error_switch in (True, False):
             with r.pipeline() as pipe:
-                pipe.set("a", 1).mget([]).set("c", 3)
+                pipe.set("a", 1).mget([]).set("a", 3)
                 result = pipe.execute(raise_on_error=error_switch)
 
                 assert result[0]

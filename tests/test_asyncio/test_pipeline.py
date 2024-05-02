@@ -117,6 +117,7 @@ class TestPipeline:
             assert await pipe.set("z", "zzz").execute() == [True]
             assert await r.get("z") == b"zzz"
 
+    @skip_if_redis_enterprise()
     async def test_exec_error_raised(self, r):
         await r.set("c", "a")
         async with r.pipeline() as pipe:
@@ -139,7 +140,7 @@ class TestPipeline:
         """
         for error_switch in (True, False):
             async with r.pipeline() as pipe:
-                pipe.set("a", 1).mget([]).set("c", 3)
+                pipe.set("a", 1).mget([]).set("a", 3)
                 result = await pipe.execute(raise_on_error=error_switch)
 
                 assert result[0]

@@ -1,7 +1,11 @@
 import pytest
 from redis.exceptions import ResponseError
 
-from .conftest import assert_resp_response, skip_if_server_version_lt
+from .conftest import (
+    assert_resp_response,
+    skip_if_redis_enterprise,
+    skip_if_server_version_lt,
+)
 
 engine = "lua"
 lib = "mylib"
@@ -51,6 +55,7 @@ class TestFunction:
             r.function_flush("ABC")
 
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     def test_function_list(self, r):
         r.function_load(f"#!{engine} name={lib} \n {function}")
         res = [

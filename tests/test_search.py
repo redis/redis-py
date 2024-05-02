@@ -311,6 +311,7 @@ def test_client(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 def test_scores(client):
     client.ft().create_index((TextField("txt"),))
 
@@ -931,6 +932,7 @@ def test_phonetic_matcher(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 def test_scorer(client):
     client.ft().create_index((TextField("description"),))
 
@@ -1942,6 +1944,7 @@ def test_profile(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 def test_profile_limited(client):
     client.ft().create_index((TextField("t"),))
     client.ft().client.hset("1", "t", "hello")
