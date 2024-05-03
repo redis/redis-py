@@ -4,7 +4,12 @@ import uuid
 from types import SimpleNamespace, TracebackType
 from typing import Optional, Type
 
-from redis.exceptions import LockError, LockNotOwnedError
+from redis.exceptions import (
+    IndefiniteLockError,
+    LockAquireError,
+    LockNotLockedError,
+    LockNotOwnedError,
+)
 from redis.typing import Number
 
 
@@ -157,7 +162,7 @@ class Lock:
     def __enter__(self) -> "Lock":
         if self.acquire():
             return self
-        raise LockError(
+        raise LockAquireError(
             "Unable to acquire lock within the time specified",
             lock_name=self.name,
         )
@@ -251,7 +256,9 @@ class Lock:
         """
         expected_token = self.local.token
         if expected_token is None:
-            raise LockError("Cannot release an unlocked lock", lock_name=self.name)
+            raise LockNotLockedError(
+                "Cannot release an unlocked lock", lock_name=self.name
+            )
         self.local.token = None
         self.do_release(expected_token)
 
@@ -276,9 +283,13 @@ class Lock:
         `additional_time`.
         """
         if self.local.token is None:
-            raise LockError("Cannot extend an unlocked lock", lock_name=self.name)
+            raise LockNotLockedError(
+                "Cannot extend an unlocked lock", lock_name=self.name
+            )
         if self.timeout is None:
-            raise LockError("Cannot extend a lock with no timeout", lock_name=self.name)
+            raise IndefiniteLockError(
+                "Cannot extend a lock with no timeout", lock_name=self.name
+            )
         return self.do_extend(additional_time, replace_ttl)
 
     def do_extend(self, additional_time: int, replace_ttl: bool) -> bool:
@@ -301,9 +312,11 @@ class Lock:
         Resets a TTL of an already acquired lock back to a timeout value.
         """
         if self.local.token is None:
-            raise LockError("Cannot reacquire an unlocked lock", lock_name=self.name)
+            raise LockNotLockedError(
+                "Cannot reacquire an unlocked lock", lock_name=self.name
+            )
         if self.timeout is None:
-            raise LockError(
+            raise IndefiniteLockError(
                 "Cannot reacquire a lock with no timeout",
                 lock_name=self.name,
             )

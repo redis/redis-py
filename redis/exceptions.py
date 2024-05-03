@@ -87,6 +87,21 @@ class LockError(RedisError, ValueError):
         self.lock_name = lock_name
 
 
+class LockAquireError(LockError):
+    "Error acquring a lock in a given time"
+    ...
+
+
+class IndefiniteLockError(LockError):
+    "Error whilst trying to adjust lifetime of a lock that is indefinite"
+    ...
+
+
+class LockNotLockedError(LockError):
+    "Error whilst trying to perform an operation on an unlocked lock"
+    ...
+
+
 class LockNotOwnedError(LockError):
     "Error trying to extend or release a lock that is (no longer) owned"
     pass

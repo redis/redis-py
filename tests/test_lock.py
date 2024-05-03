@@ -2,7 +2,13 @@ import time
 
 import pytest
 from redis.client import Redis
-from redis.exceptions import LockError, LockNotOwnedError
+from redis.exceptions import (
+    IndefiniteLockError,
+    LockAquireError,
+    LockError,
+    LockNotLockedError,
+    LockNotOwnedError,
+)
 from redis.lock import Lock
 
 from .conftest import _get_client
@@ -129,7 +135,7 @@ class TestLock:
 
     def test_context_manager_raises_when_locked_not_acquired(self, r):
         r.set("foo", "bar")
-        with pytest.raises(LockError):
+        with pytest.raises(LockAquireError):
             with self.get_lock(r, "foo", blocking_timeout=0.1):
                 pass
 
@@ -148,7 +154,7 @@ class TestLock:
 
     def test_releasing_unlocked_lock_raises_error(self, r):
         lock = self.get_lock(r, "foo")
-        with pytest.raises(LockError):
+        with pytest.raises(LockNotLockedError):
             lock.release()
 
     def test_releasing_lock_no_longer_owned_raises_error(self, r):
@@ -187,13 +193,13 @@ class TestLock:
 
     def test_extending_unlocked_lock_raises_error(self, r):
         lock = self.get_lock(r, "foo", timeout=10)
-        with pytest.raises(LockError):
+        with pytest.raises(LockNotLockedError):
             lock.extend(10)
 
     def test_extending_lock_with_no_timeout_raises_error(self, r):
         lock = self.get_lock(r, "foo")
         assert lock.acquire(blocking=False)
-        with pytest.raises(LockError):
+        with pytest.raises(IndefiniteLockError):
             lock.extend(10)
         lock.release()
 
@@ -215,13 +221,13 @@ class TestLock:
 
     def test_reacquiring_unlocked_lock_raises_error(self, r):
         lock = self.get_lock(r, "foo", timeout=10)
-        with pytest.raises(LockError):
+        with pytest.raises(LockNotLockedError):
             lock.reacquire()
 
     def test_reacquiring_lock_with_no_timeout_raises_error(self, r):
         lock = self.get_lock(r, "foo")
         assert lock.acquire(blocking=False)
-        with pytest.raises(LockError):
+        with pytest.raises(IndefiniteLockError):
             lock.reacquire()
         lock.release()
 
@@ -234,7 +240,7 @@ class TestLock:
 
     def test_context_manager_reacquiring_lock_with_no_timeout_raises_error(self, r):
         with self.get_lock(r, "foo", timeout=None, blocking=False) as lock:
-            with pytest.raises(LockError):
+            with pytest.raises(IndefiniteLockError):
                 lock.reacquire()
 
     def test_context_manager_reacquiring_lock_no_longer_owned_raises_error(self, r):

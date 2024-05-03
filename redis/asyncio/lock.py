@@ -4,7 +4,12 @@ import uuid
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Awaitable, Optional, Union
 
-from redis.exceptions import LockError, LockNotOwnedError
+from redis.exceptions import (
+    IndefiniteLockError,
+    LockAquireError,
+    LockNotLockedError,
+    LockNotOwnedError,
+)
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis, RedisCluster
@@ -159,7 +164,7 @@ class Lock:
     async def __aenter__(self):
         if await self.acquire():
             return self
-        raise LockError("Unable to acquire lock within the time specified")
+        raise LockAquireError("Unable to acquire lock within the time specified")
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self.release()
@@ -249,7 +254,7 @@ class Lock:
         """Releases the already acquired lock"""
         expected_token = self.local.token
         if expected_token is None:
-            raise LockError("Cannot release an unlocked lock")
+            raise LockNotLockedError("Cannot release an unlocked lock")
         self.local.token = None
         return self.do_release(expected_token)
 
@@ -275,9 +280,9 @@ class Lock:
         `additional_time`.
         """
         if self.local.token is None:
-            raise LockError("Cannot extend an unlocked lock")
+            raise LockNotLockedError("Cannot extend an unlocked lock")
         if self.timeout is None:
-            raise LockError("Cannot extend a lock with no timeout")
+            raise IndefiniteLockError("Cannot extend a lock with no timeout")
         return self.do_extend(additional_time, replace_ttl)
 
     async def do_extend(self, additional_time, replace_ttl) -> bool:
@@ -297,9 +302,9 @@ class Lock:
         Resets a TTL of an already acquired lock back to a timeout value.
         """
         if self.local.token is None:
-            raise LockError("Cannot reacquire an unlocked lock")
+            raise LockNotLockedError("Cannot reacquire an unlocked lock")
         if self.timeout is None:
-            raise LockError("Cannot reacquire a lock with no timeout")
+            raise IndefiniteLockError("Cannot reacquire a lock with no timeout")
         return self.do_reacquire()
 
     async def do_reacquire(self) -> bool:
