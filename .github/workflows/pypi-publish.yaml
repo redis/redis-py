@@ -27,6 +27,10 @@ jobs:
           python setup.py build
           python setup.py sdist bdist_wheel
 
+      - name: Basic package test prior to upload
+        run: |
+          twine check dist/*
+
       - name: Publish to Pypi
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
