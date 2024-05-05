@@ -441,6 +441,8 @@ def test_json_forget_with_dollar(client):
     client.json().forget("not_a_document", "..a")
 
 
+@pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 def test_json_mget_dollar(client):
     # Test mget with multi paths
     client.json().set(
@@ -462,10 +464,13 @@ def test_json_mget_dollar(client):
     # Test mget with single path
     client.json().mget("doc1", "$..a") == [1, 3, None]
     # Test mget with multi path
-    client.json().mget(["doc1", "doc2"], "$..a") == [[1, 3, None], [4, 6, [None]]]
+    assert client.json().mget(["doc1", "doc2"], "$..a") == [
+        [1, 3, None],
+        [4, 6, [None]],
+    ]
 
     # Test missing key
-    client.json().mget(["doc1", "missing_doc"], "$..a") == [[1, 3, None], None]
+    assert client.json().mget(["doc1", "missing_doc"], "$..a") == [[1, 3, None], None]
     res = client.json().mget(["missing_doc1", "missing_doc2"], "$..a")
     assert res == [None, None]
 

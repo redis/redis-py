@@ -431,6 +431,7 @@ async def test_json_forget_with_dollar(decoded_r: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 async def test_json_mget_dollar(decoded_r: redis.Redis):
     # Test mget with multi paths
     await decoded_r.json().set(

@@ -1324,6 +1324,7 @@ class TestRedisCommands:
     # SCAN COMMANDS
     @skip_if_server_version_lt("2.8.0")
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_scan(self, r: redis.Redis):
         await r.set("a", 1)
         await r.set("b", 2)
@@ -1336,6 +1337,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     @pytest.mark.onlynoncluster
+    @skip_if_redis_enterprise()
     async def test_scan_type(self, r: redis.Redis):
         await r.sadd("a-set", 1)
         await r.hset("a-hash", "foo", 2)
