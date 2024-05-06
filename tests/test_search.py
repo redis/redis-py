@@ -1017,6 +1017,7 @@ def test_config(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 def test_aggregations_groupby(client):
     # Creating the index definition and schema
     client.ft().create_index(

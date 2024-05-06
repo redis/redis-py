@@ -1111,6 +1111,7 @@ async def test_config(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 async def test_aggregations_groupby(decoded_r: redis.Redis):
     # Creating the index definition and schema
     await decoded_r.ft().create_index(
