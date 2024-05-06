@@ -6,11 +6,16 @@ import pytest
 import redis
 from redis.exceptions import ConnectionError, RedisError
 
-from .conftest import skip_if_cryptography, skip_if_nocryptography
+from .conftest import (
+    skip_if_cryptography,
+    skip_if_nocryptography,
+    skip_if_redis_enterprise,
+)
 from .ssl_utils import get_ssl_filename
 
 
 @pytest.mark.ssl
+@skip_if_redis_enterprise()
 class TestSSL:
     """Tests for SSL connections
 

@@ -11,6 +11,7 @@ from redis.asyncio.sentinel import (
     SentinelConnectionPool,
     SlaveNotFoundError,
 )
+from tests.conftest import skip_if_redis_enterprise
 
 
 @pytest_asyncio.fixture(scope="module")
@@ -182,6 +183,7 @@ async def test_discover_slaves(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 async def test_master_for(cluster, sentinel, master_ip):
     async with sentinel.master_for("mymaster", db=9) as master:
         assert await master.ping()
@@ -193,6 +195,7 @@ async def test_master_for(cluster, sentinel, master_ip):
 
 
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 async def test_slave_for(cluster, sentinel):
     cluster.slaves = [
         {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}

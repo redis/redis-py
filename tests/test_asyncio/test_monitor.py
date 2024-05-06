@@ -59,6 +59,6 @@ class TestMonitor:
     async def test_lua_script_in_enterprise(self, r):
         async with r.monitor() as m:
             script = 'return redis.call("GET", "foo")'
-            assert await r.eval(script, 0) is None
+            assert await r.eval(script, 1, "foo") is None
             response = await wait_for_command(r, m, "GET foo")
             assert response is None
