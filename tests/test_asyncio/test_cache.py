@@ -4,6 +4,7 @@ import pytest
 import pytest_asyncio
 from redis._cache import _LocalCache
 from redis.utils import HIREDIS_AVAILABLE
+from tests.conftest import skip_if_server_version_lt
 
 
 @pytest_asyncio.fixture
@@ -15,6 +16,7 @@ async def r(request, create_redis):
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+@skip_if_server_version_lt("7.4.0")
 class TestLocalCache:
     @pytest.mark.onlynoncluster
     @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
@@ -187,6 +189,7 @@ class TestLocalCache:
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
+@skip_if_server_version_lt("7.4.0")
 class TestClusterLocalCache:
     @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
     async def test_get_from_cache(self, r, r2):
