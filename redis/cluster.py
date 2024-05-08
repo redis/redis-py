@@ -172,8 +172,8 @@ REDIS_ALLOWED_KEYS = (
     "cache_max_size",
     "cache_ttl",
     "cache_policy",
-    "cache_blacklist",
-    "cache_whitelist",
+    "cache_deny_list",
+    "cache_allow_list",
 )
 KWARGS_DISABLED_KEYS = ("host", "port")
 
@@ -1164,7 +1164,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                         response = self.cluster_response_callbacks[command](
                             response, **kwargs
                         )
-                    connection._add_to_local_cache(args, response, keys)
+                    if keys:
+                        connection._add_to_local_cache(args, response, keys)
                     return response
             except AuthenticationError:
                 raise
@@ -1265,6 +1266,18 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """
         setattr(self, funcname, func)
 
+    def flush_cache(self):
+        if self.nodes_manager:
+            self.nodes_manager.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        if self.nodes_manager:
+            self.nodes_manager.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        if self.nodes_manager:
+            self.nodes_manager.invalidate_key_from_cache(key)
+
 
 class ClusterNode:
     def __init__(self, host, port, server_type=None, redis_connection=None):
@@ -1292,6 +1305,18 @@ class ClusterNode:
     def __del__(self):
         if self.redis_connection is not None:
             self.redis_connection.close()
+
+    def flush_cache(self):
+        if self.redis_connection is not None:
+            self.redis_connection.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        if self.redis_connection is not None:
+            self.redis_connection.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        if self.redis_connection is not None:
+            self.redis_connection.invalidate_key_from_cache(key)
 
 
 class LoadBalancer:
@@ -1658,6 +1683,18 @@ class NodesManager:
         if self.address_remap:
             return self.address_remap((host, port))
         return host, port
+
+    def flush_cache(self):
+        for node in self.nodes_cache.values():
+            node.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        for node in self.nodes_cache.values():
+            node.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        for node in self.nodes_cache.values():
+            node.invalidate_key_from_cache(key)
 
 
 class ClusterPubSub(PubSub):
