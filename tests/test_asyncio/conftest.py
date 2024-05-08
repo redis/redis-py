@@ -7,6 +7,7 @@ import pytest_asyncio
 import redis.asyncio as redis
 from packaging.version import Version
 from redis._parsers import _AsyncHiredisParser, _AsyncRESP2Parser
+from redis.asyncio import Sentinel
 from redis.asyncio.client import Monitor
 from redis.asyncio.connection import Connection, parse_url
 from redis.asyncio.retry import Retry
@@ -134,6 +135,34 @@ async def r2(create_redis):
 @pytest_asyncio.fixture()
 async def decoded_r(create_redis):
     return await create_redis(decode_responses=True)
+
+
+@pytest_asyncio.fixture()
+async def sentinel_setup(local_cache, request):
+    sentinel_ips = request.config.getoption("--sentinels")
+    sentinel_endpoints = [
+        (ip.strip(), int(port.strip()))
+        for ip, port in (endpoint.split(":") for endpoint in sentinel_ips.split(","))
+    ]
+    kwargs = request.param.get("kwargs", {}) if hasattr(request, "param") else {}
+    sentinel = Sentinel(
+        sentinel_endpoints,
+        socket_timeout=0.1,
+        client_cache=local_cache,
+        protocol=3,
+        **kwargs,
+    )
+    yield sentinel
+    for s in sentinel.sentinels:
+        await s.aclose()
+
+
+@pytest_asyncio.fixture()
+async def master(request, sentinel_setup):
+    master_service = request.config.getoption("--master-service")
+    master = sentinel_setup.master_for(master_service)
+    yield master
+    await master.aclose()
 
 
 def _gen_cluster_mock_resp(r, response):
