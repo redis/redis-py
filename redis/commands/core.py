@@ -3106,6 +3106,7 @@ class ScanCommands(CommandsProtocol):
         cursor: int = 0,
         match: Union[PatternT, None] = None,
         count: Union[int, None] = None,
+        no_values: Union[bool, None] = None,
     ) -> ResponseT:
         """
         Incrementally return key/value slices in a hash. Also return a cursor
@@ -3115,6 +3116,8 @@ class ScanCommands(CommandsProtocol):
 
         ``count`` allows for hint the minimum number of returns
 
+        ``no_values`` indicates to return only the keys, without values.
+
         For more information see https://redis.io/commands/hscan
         """
         pieces: list[EncodableT] = [name, cursor]
@@ -3122,13 +3125,16 @@ class ScanCommands(CommandsProtocol):
             pieces.extend([b"MATCH", match])
         if count is not None:
             pieces.extend([b"COUNT", count])
-        return self.execute_command("HSCAN", *pieces)
+        if no_values is not None:
+            pieces.extend([b"NOVALUES"])
+        return self.execute_command("HSCAN", *pieces, no_values=no_values)
 
     def hscan_iter(
         self,
         name: str,
         match: Union[PatternT, None] = None,
         count: Union[int, None] = None,
+        no_values: Union[bool, None] = None,
     ) -> Iterator:
         """
         Make an iterator using the HSCAN command so that the client doesn't
@@ -3137,11 +3143,18 @@ class ScanCommands(CommandsProtocol):
         ``match`` allows for filtering the keys by pattern
 
         ``count`` allows for hint the minimum number of returns
+
+        ``no_values`` indicates to return only the keys, without values
         """
         cursor = "0"
         while cursor != 0:
-            cursor, data = self.hscan(name, cursor=cursor, match=match, count=count)
-            yield from data.items()
+            cursor, data = self.hscan(
+                name, cursor=cursor, match=match, count=count, no_values=no_values
+            )
+            if no_values:
+                yield from data
+            else:
+                yield from data.items()
 
     def zscan(
         self,
@@ -3257,6 +3270,7 @@ class AsyncScanCommands(ScanCommands):
         name: str,
         match: Union[PatternT, None] = None,
         count: Union[int, None] = None,
+        no_values: Union[bool, None] = None,
     ) -> AsyncIterator:
         """
         Make an iterator using the HSCAN command so that the client doesn't
@@ -3265,14 +3279,20 @@ class AsyncScanCommands(ScanCommands):
         ``match`` allows for filtering the keys by pattern
 
         ``count`` allows for hint the minimum number of returns
+
+        ``no_values`` indicates to return only the keys, without values
         """
         cursor = "0"
         while cursor != 0:
             cursor, data = await self.hscan(
-                name, cursor=cursor, match=match, count=count
+                name, cursor=cursor, match=match, count=count, no_values=no_values
             )
-            for it in data.items():
-                yield it
+            if no_values:
+                for it in data:
+                    yield it
+            else:
+                for it in data.items():
+                    yield it
 
     async def zscan_iter(
         self,
