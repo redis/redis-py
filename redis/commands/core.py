@@ -461,6 +461,7 @@ class ManagementCommands(CommandsProtocol):
         skipme: Union[bool, None] = None,
         laddr: Union[bool, None] = None,
         user: str = None,
+        maxage: Union[int, None] = None,
         **kwargs,
     ) -> ResponseT:
         """
@@ -474,6 +475,7 @@ class ManagementCommands(CommandsProtocol):
         options. If skipme is not provided, the server defaults to skipme=True
         :param laddr: Kills a client by its 'local (bind) address:port'
         :param user: Kills a client for a specific user name
+        :param maxage: Kills clients that are older than the specified age in seconds
         """
         args = []
         if _type is not None:
@@ -496,6 +498,8 @@ class ManagementCommands(CommandsProtocol):
             args.extend((b"LADDR", laddr))
         if user is not None:
             args.extend((b"USER", user))
+        if maxage is not None:
+            args.extend((b"MAXAGE", maxage))
         if not args:
             raise DataError(
                 "CLIENT KILL <filter> <value> ... ... <filter> "
