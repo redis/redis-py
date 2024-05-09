@@ -1349,6 +1349,19 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         _, dic = await r.hscan("a", match="a")
         assert dic == {b"a": b"1"}
+        _, dic = await r.hscan("a_notset", match="a")
+        assert dic == {}
+
+    @skip_if_server_version_lt("7.4.0")
+    async def test_hscan_novalues(self, r: redis.Redis):
+        await r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
+        cursor, keys = await r.hscan("a", no_values=True)
+        assert cursor == 0
+        assert sorted(keys) == [b"a", b"b", b"c"]
+        _, keys = await r.hscan("a", match="a", no_values=True)
+        assert keys == [b"a"]
+        _, keys = await r.hscan("a_notset", match="a", no_values=True)
+        assert keys == []
 
     @skip_if_server_version_lt("2.8.0")
     async def test_hscan_iter(self, r: redis.Redis):
@@ -1357,6 +1370,20 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         dic = {k: v async for k, v in r.hscan_iter("a", match="a")}
         assert dic == {b"a": b"1"}
+        dic = {k: v async for k, v in r.hscan_iter("a_notset", match="a")}
+        assert dic == {}
+
+    @skip_if_server_version_lt("7.4.0")
+    async def test_hscan_iter_novalues(self, r: redis.Redis):
+        await r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
+        keys = list([k async for k in r.hscan_iter("a", no_values=True)])
+        assert sorted(keys) == [b"a", b"b", b"c"]
+        keys = list([k async for k in r.hscan_iter("a", match="a", no_values=True)])
+        assert keys == [b"a"]
+        keys = list(
+            [k async for k in r.hscan_iter("a", match="a_notset", no_values=True)]
+        )
+        assert keys == []
 
     @skip_if_server_version_lt("2.8.0")
     async def test_zscan(self, r: redis.Redis):
