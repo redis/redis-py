@@ -3068,7 +3068,7 @@ class ScanCommands(CommandsProtocol):
             pieces.extend([b"MATCH", match])
         if count is not None:
             pieces.extend([b"COUNT", count])
-        return self.execute_command("SSCAN", *pieces,)
+        return self.execute_command("SSCAN", *pieces, **kwargs)
 
     def sscan_iter(
         self,
@@ -3293,11 +3293,7 @@ class AsyncScanCommands(ScanCommands):
         cursor = "0"
         while cursor != 0:
             cursor, data = await self.hscan(
-<<<<<<< HEAD
-                name, cursor=cursor, match=match, count=count, no_values=no_values
-=======
-                name, cursor=cursor, match=match, count=count, _iter_req_id=iter_req_id
->>>>>>> 39aaec6 (fix scan iter command issued to different replicas)
+                name, cursor=cursor, match=match, count=count, no_values=no_values, _iter_req_id=iter_req_id
             )
             if no_values:
                 for it in data:
