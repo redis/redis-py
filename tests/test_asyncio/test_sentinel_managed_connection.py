@@ -129,7 +129,7 @@ async def test_connects_to_same_address_if_same_id_replica(
     """
     Assert that the connection address is the same if the ``_iter_req_id`` is the same
     when we are in replica mode using a
-    :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`
+    :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`.
     """
     connection_for_req_1 = await connection_pool_replica_mock.get_connection(
         "ANY", _iter_req_id=1
@@ -148,7 +148,7 @@ async def test_connects_to_same_conn_object_if_same_id_and_conn_released_replica
     when we are in replica mode using a
     :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`
     and if we release the connection back to the connection pool before
-    trying to connect again
+    trying to connect again.
     """
     connection_for_req_1 = await connection_pool_replica_mock.get_connection(
         "ANY", _iter_req_id=1
@@ -164,7 +164,7 @@ async def test_connects_to_diff_address_if_no_iter_req_id_replica(
     connection_pool_replica_mock: SentinelConnectionPool,
 ) -> None:
     """
-    Assert that the connection object is different if no _iter_req_id is supplied
+    Assert that the connection object is different if no _iter_req_id is supplied.
     In reality, they can be the same, but in this case, we're not
     releasing the connection to the pool so they should always be different.
     """
@@ -191,7 +191,7 @@ async def test_connects_to_same_address_if_same_iter_req_id_master(
     """
     Assert that the connection address is the same if the ``_iter_req_id`` is the same
     when we are in master mode using a
-    :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`
+    :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`.
     """
     connection_for_req_1 = await connection_pool_master_mock.get_connection(
         "ANY", _iter_req_id=1
@@ -210,7 +210,7 @@ async def test_connects_to_same_conn_object_if_same_iter_req_id_and_released_mas
     when we are in master mode using a
     :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`
     and if we release the connection back to the connection pool before
-    trying to connect again
+    trying to connect again.
     """
     connection_for_req_1 = await connection_pool_master_mock.get_connection(
         "ANY", _iter_req_id=1
@@ -221,14 +221,14 @@ async def test_connects_to_same_conn_object_if_same_iter_req_id_and_released_mas
     )
 
 
-async def test_connects_to_same_address_if_no_iter_req_id_in_master(
+async def test_connects_to_same_address_if_no_iter_req_id_master(
     connection_pool_master_mock: SentinelConnectionPool,
 ) -> None:
     """
     Assert that connection address is always the same regardless if
     there's an ``iter_req_id`` or not
     when we are in master mode using a
-    :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`
+    :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`.
     """
     connection_for_req_1 = await connection_pool_master_mock.get_connection(
         "ANY", _iter_req_id=1
