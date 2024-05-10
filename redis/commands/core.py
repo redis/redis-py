@@ -3293,7 +3293,12 @@ class AsyncScanCommands(ScanCommands):
         cursor = "0"
         while cursor != 0:
             cursor, data = await self.hscan(
-                name, cursor=cursor, match=match, count=count, no_values=no_values, _iter_req_id=iter_req_id
+                name,
+                cursor=cursor,
+                match=match,
+                count=count,
+                no_values=no_values,
+                _iter_req_id=iter_req_id,
             )
             if no_values:
                 for it in data:
