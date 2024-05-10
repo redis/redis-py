@@ -1,18 +1,18 @@
 import socket
+import uuid
 from typing import Tuple
-from unittest.mock import AsyncMock, ANY
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 import pytest_asyncio
-import uuid
 from redis.asyncio.retry import Retry
-from redis.commands.core import AsyncScanCommands
 from redis.asyncio.sentinel import (
     Sentinel,
     SentinelConnectionPool,
     SentinelManagedConnection,
 )
 from redis.backoff import NoBackoff
+from redis.commands.core import AsyncScanCommands
 
 from .compat import mock
 
@@ -251,20 +251,20 @@ async def test_connects_to_same_address_if_no_iter_req_id_master(
 async def test_scan_iter_family_executes_commands_with_same_iter_req_id():
     """Assert that all calls to execute_command receives the _iter_req_id kwarg"""
     with mock.patch.object(
-        AsyncScanCommands,
-        "execute_command", 
-        AsyncMock(return_value=(0, []))
+        AsyncScanCommands, "execute_command", AsyncMock(return_value=(0, []))
     ) as mock_execute_command, mock.patch.object(uuid, "uuid4", return_value="uuid"):
         [a async for a in AsyncScanCommands().scan_iter()]
-        mock_execute_command.assert_called_with('SCAN', '0', _iter_req_id="uuid")
+        mock_execute_command.assert_called_with("SCAN", "0", _iter_req_id="uuid")
         [a async for a in AsyncScanCommands().sscan_iter("")]
-        mock_execute_command.assert_called_with('SSCAN', '', '0', _iter_req_id="uuid")
+        mock_execute_command.assert_called_with("SSCAN", "", "0", _iter_req_id="uuid")
     with mock.patch.object(
-        AsyncScanCommands,
-        "execute_command", 
-        AsyncMock(return_value=(0, {}))
+        AsyncScanCommands, "execute_command", AsyncMock(return_value=(0, {}))
     ) as mock_execute_command, mock.patch.object(uuid, "uuid4", return_value="uuid"):
         [a async for a in AsyncScanCommands().hscan_iter("")]
-        mock_execute_command.assert_called_with('HSCAN', '', '0', no_values=None, _iter_req_id="uuid")
+        mock_execute_command.assert_called_with(
+            "HSCAN", "", "0", no_values=None, _iter_req_id="uuid"
+        )
         [a async for a in AsyncScanCommands().zscan_iter("")]
-        mock_execute_command.assert_called_with('ZSCAN', '', '0', score_cast_func=ANY, _iter_req_id="uuid")
+        mock_execute_command.assert_called_with(
+            "ZSCAN", "", "0", score_cast_func=ANY, _iter_req_id="uuid"
+        )
