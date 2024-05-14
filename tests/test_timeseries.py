@@ -3,8 +3,8 @@ import time
 from time import sleep
 
 import pytest
-import redis
 
+import redis
 from .conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
 
 
@@ -970,3 +970,83 @@ def test_uncompressed(client):
         assert compressed_info.memory_usage != uncompressed_info.memory_usage
     else:
         assert compressed_info["memoryUsage"] != uncompressed_info["memoryUsage"]
+
+
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+def test_create_with_insertion_filters(client):
+    client.ts().create(
+        "time-series-1",
+        duplicate_policy="last",
+        ignore_max_time_diff=5,
+        ignore_max_val_diff=10.0,
+    )
+    assert 1000 == client.ts().add("time-series-1", 1000, 1.0)
+    assert 1010 == client.ts().add("time-series-1", 1010, 11.0)
+    # Within 5 ms of the last timestamp and value diff less than 10.0
+    assert 1010 == client.ts().add("time-series-1", 1013, 10.0)
+    # Value difference less than 10.0, but timestamp diff larger than 5 ms
+    assert 1020 == client.ts().add("time-series-1", 1020, 11.5)
+    # Timestamp diff less than 5 ms, but value diff larger than 10.0
+    assert 1021 == client.ts().add("time-series-1", 1021, 22.0)
+
+    data_points = client.ts().range("time-series-1", '-', '+')
+    expected_points = [(1000, 1.0), (1010, 11.0), (1020, 11.5), (1021, 22.0)]
+    assert expected_points == data_points
+
+
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+def test_create_with_insertion_filters_other_duplicate_policy(client):
+    client.ts().create(
+        "time-series-1",
+        ignore_max_time_diff=5,
+        ignore_max_val_diff=10.0,
+    )
+    assert 1000 == client.ts().add("time-series-1", 1000, 1.0)
+    assert 1010 == client.ts().add("time-series-1", 1010, 11.0)
+    # Within 5 ms of the last timestamp and value diff less than 10.0.
+    # Still accepted because the duplicate_policy is not `last`.
+    assert 1013 == client.ts().add("time-series-1", 1013, 10.0)
+
+    data_points = client.ts().range("time-series-1", '-', '+')
+    expected_points = [(1000, 1.0), (1010, 11.0), (1013, 10)]
+    assert expected_points == data_points
+
+
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+def test_alter_with_insertion_filters(client):
+    assert 1000 == client.ts().add("time-series-1", 1000, 1.0)
+    assert 1010 == client.ts().add("time-series-1", 1010, 11.0)
+    assert 1013 == client.ts().add("time-series-1", 1013, 10.0)
+
+    client.ts().alter(
+        "time-series-1",
+        duplicate_policy="last",
+        ignore_max_time_diff=5,
+        ignore_max_val_diff=10.0
+    )
+
+    # Within 5 ms of the last timestamp and value diff less than 10.0.
+    assert 1013 == client.ts().add("time-series-1", 1015, 11.5)
+
+    data_points = client.ts().range("time-series-1", '-', '+')
+    expected_points = [(1000, 1.0), (1010, 11.0), (1013, 10.0)]
+    assert expected_points == data_points
+
+
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+def test_add_with_insertion_filters(client):
+    assert 1000 == client.ts().add(
+        "time-series-1",
+        1000,
+        1.0,
+        duplicate_policy="last",
+        ignore_max_time_diff=5,
+        ignore_max_val_diff=10.0,
+    )
+
+    # Within 5 ms of the last timestamp and value diff less than 10.0.
+    assert 1000 == client.ts().add("time-series-1", 1004, 3.0)
+
+    data_points = client.ts().range("time-series-1", '-', '+')
+    expected_points = [(1000, 1.0)]
+    assert expected_points == data_points
