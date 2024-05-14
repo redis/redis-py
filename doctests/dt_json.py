@@ -227,7 +227,7 @@ print(res7)  # >>> [['Phoebe', 'Quaoar']]
 assert res7 == ["Phoebe", "Quaoar"]
 # REMOVE_END
 
-# STEP_START filters
+# STEP_START filter1
 res8 = r.json().get(
     "bikes:inventory",
     "$..mountain_bikes[?(@.price < 3000 && @.specs.weight < 10)]",
@@ -235,13 +235,25 @@ res8 = r.json().get(
 print(
     res8
 )  # >>> [{'id': 'bike:2', 'model': 'Quaoar', 'description': "Redesigned for the 2020 model year, this bike impressed our testers and is the best all-around trail bike we've ever tested. The Shimano gear system effectively does away with an external cassette, so is super low maintenance in terms of wear and tear. All in all it's an impressive package for the price, making it very competitive.", 'price': 2072, 'specs': {'material': 'aluminium', 'weight': 7.9}, 'colors': ['black', 'white']}]
+# STEP_END
 
+# REMOVE_START
+assert res8 == [{'id': 'bike:2', 'model': 'Quaoar', 'description': "Redesigned for the 2020 model year, this bike impressed our testers and is the best all-around trail bike we've ever tested. The Shimano gear system effectively does away with an external cassette, so is super low maintenance in terms of wear and tear. All in all it's an impressive package for the price, making it very competitive.", 'price': 2072, 'specs': {'material': 'aluminium', 'weight': 7.9}, 'colors': ['black', 'white']}]
+# REMOVE_END
+
+# STEP_START filter2
 #  names of bikes made from an alloy
 res9 = r.json().get(
     "bikes:inventory", "$..[?(@.specs.material == 'alloy')].model"
 )
-print(res9)  # >>> [['Weywot', 'Mimas']]
+print(res9)  # >>> ['Weywot', 'Mimas']
+# STEP_END
 
+# REMOVE_START
+assert res9 == ['Weywot', 'Mimas']
+# REMOVE_END
+
+# STEP_START filter3
 res10 = r.json().get(
     "bikes:inventory", "$..[?(@.specs.material =~ '(?i)al')].model"
 )
@@ -250,6 +262,19 @@ print(res10)  # >>> ['Quaoar', 'Weywot', 'Salacia', 'Mimas']
 
 # REMOVE_START
 assert res10 == ["Quaoar", "Weywot", "Salacia", "Mimas"]
+# REMOVE_END
+
+# STEP_START filter4
+res11 = r.json().set("bikes:inventory", "$.inventory.mountain_bikes[0].regex_pat", "(?i)al")
+res12 = r.json().set("bikes:inventory", "$.inventory.mountain_bikes[1].regex_pat", "(?i)al")
+res13 = r.json().set("bikes:inventory", "$.inventory.mountain_bikes[2].regex_pat", "(?i)al")
+
+res14 = r.json().get("bikes:inventory", "$.inventory.mountain_bikes[?(@.specs.material =~ @.regex_pat)].model")
+print(res14)    # >>> ['Quaoar', 'Weywot']
+# STEP_END
+
+# REMOVE_START
+assert res14 == ['Quaoar', 'Weywot']
 # REMOVE_END
 
 # STEP_START update_bikes
@@ -267,7 +292,17 @@ print(res13)  # >>> [1920, 2072, 3264, 1475, 3941]
 assert res12 == [1820, 1972, 3164, 1375, 3841]
 # REMOVE_END
 
-# STEP_START update_filters
+# STEP_START update_filters1
+res16 = r.json().set("bikes:inventory", "$.inventory.*[?(@.price<2000)].price", 1500)
+res17 = r.json().get("bikes:inventory", "$..price")
+print(res17)    # >>> [1500, 2072, 3264, 1500, 3941]
+# STEP_END
+
+# REMOVE_START
+assert res17 == [1500, 2072, 3264, 1500, 3941]
+# REMOVE_END
+
+# STEP_START update_filters2
 res14 = r.json().arrappend(
     "bikes:inventory", "$.inventory.*[?(@.price<2000)].colors", "pink"
 )
