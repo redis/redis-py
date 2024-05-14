@@ -838,10 +838,10 @@ def test_spell_check(client):
         res = client.ft().spellcheck("lorm", include="dict")
         assert len(res["lorm"]) == 3
         assert (
-            res["lorm"][0]["suggestion"],
-            res["lorm"][1]["suggestion"],
-            res["lorm"][2]["suggestion"],
-        ) == ("lorem", "lore", "lorm")
+                   res["lorm"][0]["suggestion"],
+                   res["lorm"][1]["suggestion"],
+                   res["lorm"][2]["suggestion"],
+               ) == ("lorem", "lore", "lorm")
         assert (res["lorm"][0]["score"], res["lorm"][1]["score"]) == ("0.5", "0")
 
         # test spellcheck exclude
@@ -869,9 +869,9 @@ def test_spell_check(client):
         assert "lore" in res["results"]["lorm"][1].keys()
         assert "lorm" in res["results"]["lorm"][2].keys()
         assert (
-            res["results"]["lorm"][0]["lorem"],
-            res["results"]["lorm"][1]["lore"],
-        ) == (0.5, 0)
+                   res["results"]["lorm"][0]["lorem"],
+                   res["results"]["lorm"][1]["lore"],
+               ) == (0.5, 0)
 
         # test spellcheck exclude
         res = client.ft().spellcheck("lorm", exclude="dict")
@@ -940,7 +940,8 @@ def test_scorer(client):
     client.hset(
         "doc2",
         mapping={
-            "description": "Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do."  # noqa
+            "description": "Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do."
+            # noqa
         },
     )
 
@@ -992,12 +993,12 @@ def test_get(client):
     )
 
     assert [
-        ["f1", "some valid content dd2", "f2", "this is sample text f2"]
-    ] == client.ft().get("doc2")
+               ["f1", "some valid content dd2", "f2", "this is sample text f2"]
+           ] == client.ft().get("doc2")
     assert [
-        ["f1", "some valid content dd1", "f2", "this is sample text f1"],
-        ["f1", "some valid content dd2", "f2", "this is sample text f2"],
-    ] == client.ft().get("doc1", "doc2")
+               ["f1", "some valid content dd1", "f2", "this is sample text f1"],
+               ["f1", "some valid content dd2", "f2", "this is sample text f2"],
+           ] == client.ft().get("doc1", "doc2")
 
 
 @pytest.mark.redismod
@@ -1040,7 +1041,8 @@ def test_aggregations_groupby(client):
         "ai",
         mapping={
             "title": "RedisAI",
-            "body": "RedisAI executes Deep Learning/Machine Learning models and managing their data.",  # noqa
+            "body": "RedisAI executes Deep Learning/Machine Learning models and managing their data.",
+            # noqa
             "parent": "redis",
             "random_num": 3,
         },
@@ -1049,7 +1051,8 @@ def test_aggregations_groupby(client):
         "json",
         mapping={
             "title": "RedisJson",
-            "body": "RedisJSON implements ECMA-404 The JSON Data Interchange Standard as a native data type.",  # noqa
+            "body": "RedisJSON implements ECMA-404 The JSON Data Interchange Standard as a native data type.",
+            # noqa
             "parent": "redis",
             "random_num": 8,
         },
@@ -1462,25 +1465,25 @@ def test_index_definition(client):
     )
 
     assert [
-        "ON",
-        "JSON",
-        "PREFIX",
-        2,
-        "hset:",
-        "henry",
-        "FILTER",
-        "@f1==32",
-        "LANGUAGE_FIELD",
-        "play",
-        "LANGUAGE",
-        "English",
-        "SCORE_FIELD",
-        "chapter",
-        "SCORE",
-        0.5,
-        "PAYLOAD_FIELD",
-        "txt",
-    ] == definition.args
+               "ON",
+               "JSON",
+               "PREFIX",
+               2,
+               "hset:",
+               "henry",
+               "FILTER",
+               "@f1==32",
+               "LANGUAGE_FIELD",
+               "play",
+               "LANGUAGE",
+               "English",
+               "SCORE_FIELD",
+               "chapter",
+               "SCORE",
+               0.5,
+               "PAYLOAD_FIELD",
+               "txt",
+           ] == definition.args
 
     createIndex(client.ft(), num_docs=500, definition=definition)
 
@@ -2284,3 +2287,106 @@ def test_geoshape(client: redis.Redis):
     assert result.docs[0]["id"] == "small"
     result = client.ft().search(q2, query_params=qp2)
     assert len(result.docs) == 2
+
+
+@pytest.mark.redismod
+def test_search_missing_fields(client):
+    definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
+
+    fields = [
+        TextField("title", sortable=True),
+        NumericField("price", is_missing=True),
+        TagField("features", is_missing=True),
+        GeoField("location", is_missing=True),
+        GeoShapeField("boundary", is_missing=True),
+        VectorField("image_embedding", "HNSW",
+                    {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "L2"},
+                    is_missing=True),
+        TextField("description", is_missing=True),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+    client.hset("property:1", mapping={
+        "title": "Luxury Villa in Malibu",
+        "price": "5000000",
+        "features": "pool,sea view,modern",
+        "location": "34.0259,-118.7798",
+        "boundary": "POLYGON((34.0259 -118.7798, 34.0260 -118.7799, 34.0261 -118.7797, 34.0259 -118.7798))",
+        "image_embedding": "0.5,0.8",
+        "description": "A stunning modern villa overlooking the Pacific Ocean."
+    })
+
+    # Missing title
+    client.hset("property:2", mapping={
+        "price": "1500000",
+        "features": "garden,garage",
+        "location": "40.7128,-74.0060",
+        "boundary": "POLYGON((40.7127 -74.0061, 40.7129 -74.0062, 40.7130 -74.0060, 40.7128 -74.0060))",
+        "image_embedding": "0.2,0.3",
+        "description": "Cozy family home in the heart of New York City."
+    })
+
+    # Missing price
+    client.hset("property:3", mapping={
+        "title": "Country House",
+        "features": "large garden,privacy",
+        "location": "51.5074,-0.1278",
+        "boundary": "POLYGON((51.5073 -0.1279, 51.5075 -0.1280, 51.5076 -0.1276, 51.5074 -0.1278))",
+        "image_embedding": "0.6,0.4",
+        "description": "Spacious country house with a large garden and lots of privacy."
+    })
+
+    # Missing features
+    client.hset("property:4", mapping={
+        "title": "Downtown Flat",
+        "price": "850000",
+        "location": "48.8566,2.3522",
+        "boundary": "POLYGON((48.8565 2.3521, 48.8567 2.3523, 48.8568 2.3520, 48.8566 2.3522))",
+        "image_embedding": "0.1,0.9",
+        "description": "Modern flat in central Paris with easy access to metro."
+    })
+
+    # Missing location
+    client.hset("property:5", mapping={
+        "title": "Beachfront Bungalow",
+        "price": "2900000",
+        "features": "beachfront,sun deck",
+        "boundary": "POLYGON((26.1224 -80.1373, 26.1225 -80.1374, 26.1226 -80.1372, 26.1224 -80.1373))",
+        "image_embedding": "0.7,0.2",
+        "description": "Beautiful bungalow right on the beach."
+    })
+
+    # Missing boundary
+    client.hset("property:6", mapping={
+        "title": "Mountain Cabin",
+        "price": "600000",
+        "features": "mountain view,fireplace",
+        "location": "39.5501,-105.7821",
+        "image_embedding": "0.8,0.1",
+        "description": "Rustic cabin in the Rocky Mountains, perfect for a winter getaway."
+    })
+
+    # Missing image embedding
+    client.hset("property:7", mapping={
+        "title": "Urban Studio",
+        "price": "1200000",
+        "features": "rooftop,open floor plan",
+        "location": "34.0522,-118.2437",
+        "boundary": "POLYGON((34.0521 -118.2438, 34.0523 -118.2439, 34.0524 -118.2436, 34.0522 -118.2437))",
+        "description": "Stylish studio in downtown Los Angeles with a spacious rooftop."
+    })
+
+    # Missing description
+    client.hset("property:8", mapping={
+        "title": "Suburban Home",
+        "price": "800000",
+        "features": "quiet neighborhood,backyard",
+        "location": "37.7749,-122.4194",
+        "boundary": "POLYGON((37.7748 -122.4195, 37.7750 -122.4196, 37.7751 -122.4193, 37.7749 -122.4194))",
+        "image_embedding": "0.4,0.6"
+    })
+
+    q = Query("ismissing(@price)")
+    res = client.ft().search(q)
+    assert res is not None

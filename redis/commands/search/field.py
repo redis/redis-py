@@ -1,9 +1,12 @@
-from typing import List
+from typing import List, Optional
 
 from redis import DataError
 
 
 class Field:
+    """
+    A class representing a field in a document.
+    """
     NUMERIC = "NUMERIC"
     TEXT = "TEXT"
     WEIGHT = "WEIGHT"
@@ -14,6 +17,9 @@ class Field:
     NOINDEX = "NOINDEX"
     AS = "AS"
     GEOSHAPE = "GEOSHAPE"
+    IS_MISSING = "ISMISSING"
+    IS_EMPTY = "ISEMPTY"
+    IS_NULL = "ISNULL"
 
     def __init__(
         self,
@@ -21,8 +27,30 @@ class Field:
         args: List[str] = None,
         sortable: bool = False,
         no_index: bool = False,
+        is_missing: bool = False,
+        is_empty: bool = False,
+        is_null: bool = False,
+        null_flags: Optional[List[str]] = None,
         as_name: str = None,
     ):
+        """
+        Create a new field object.
+
+        Args:
+            name: The name of the field.
+            args:
+            sortable: If `True`, the field will be sortable.
+            no_index: If `True`, the field will not be indexed.
+            is_missing: If `True`, it will be possible to search for documents that have
+                        this field missing.
+            is_empty: If `True`, it will be possible to search for documents that have
+                      an empty value for this field.
+            is_null: If `True`, it will be possible to search for documents that have
+                     a `null` value for this field.
+            null_flags: If provided, this list of custom flags will be assimilated to
+                        the `null` value.
+            as_name: If provided, this alias will be used for the field.
+        """
         if args is None:
             args = []
         self.name = name
@@ -34,6 +62,15 @@ class Field:
             self.args_suffix.append(Field.SORTABLE)
         if no_index:
             self.args_suffix.append(Field.NOINDEX)
+        if is_missing:
+            self.args_suffix.append(Field.IS_MISSING)
+        if is_empty:
+            self.args_suffix.append(Field.IS_EMPTY)
+        if is_null:
+            self.args_suffix.append(Field.IS_NULL)
+            if null_flags:
+                self.args_suffix.append(len(null_flags))
+                self.args_suffix += null_flags
 
         if no_index and not sortable:
             raise ValueError("Non-Sortable non-Indexable fields are ignored")
