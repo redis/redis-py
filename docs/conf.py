@@ -10,6 +10,7 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
+import datetime
 import os
 import sys
 
@@ -30,11 +31,14 @@ extensions = [
     "nbsphinx",
     "sphinx_gallery.load_style",
     "sphinx.ext.autodoc",
-    "sphinx_autodoc_typehints",
-    "sphinx.ext.doctest",
     "sphinx.ext.viewcode",
     "sphinx.ext.autosectionlabel",
+    "sphinx.ext.napoleon",
 ]
+
+# Napoleon settings. We only accept Google-style docstrings.
+napoleon_google_docstring = True
+napoleon_numpy_docstring = False
 
 # AutosectionLabel settings.
 # Uses a <page>:<label> schema which doesn't work for duplicate sub-section
@@ -43,6 +47,7 @@ autosectionlabel_prefix_document = True
 autosectionlabel_maxdepth = 2
 
 # AutodocTypehints settings.
+autodoc_typehints = 'description'
 always_document_param_types = True
 typehints_defaults = "comma"
 
@@ -60,7 +65,8 @@ master_doc = "index"
 
 # General information about the project.
 project = "redis-py"
-copyright = "2023, Redis Inc"
+current_year = datetime.datetime.now().year
+copyright = f"{current_year}, Redis Inc"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
