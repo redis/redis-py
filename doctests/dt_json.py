@@ -284,7 +284,9 @@ assert res8 == [
 
 # STEP_START filter2
 #  names of bikes made from an alloy
-res9 = r.json().get("bikes:inventory", "$..[?(@.specs.material == 'alloy')].model")
+res9 = r.json().get(
+    "bikes:inventory", "$..[?(@.specs.material == 'alloy')].model"
+)
 print(res9)  # >>> ['Weywot', 'Mimas']
 # STEP_END
 
@@ -293,7 +295,9 @@ assert res9 == ["Weywot", "Mimas"]
 # REMOVE_END
 
 # STEP_START filter3
-res10 = r.json().get("bikes:inventory", "$..[?(@.specs.material =~ '(?i)al')].model")
+res10 = r.json().get(
+    "bikes:inventory", "$..[?(@.specs.material =~ '(?i)al')].model"
+)
 print(res10)  # >>> ['Quaoar', 'Weywot', 'Salacia', 'Mimas']
 # STEP_END
 
@@ -341,7 +345,9 @@ assert res17 == [1920, 2072, 3264, 1475, 3941]
 # REMOVE_END
 
 # STEP_START update_filters1
-res18 = r.json().set("bikes:inventory", "$.inventory.*[?(@.price<2000)].price", 1500)
+res18 = r.json().set(
+    "bikes:inventory", "$.inventory.*[?(@.price<2000)].price", 1500
+)
 res19 = r.json().get("bikes:inventory", "$..price")
 print(res19)  # >>> [1500, 2072, 3264, 1500, 3941]
 # STEP_END
