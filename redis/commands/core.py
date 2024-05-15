@@ -199,69 +199,58 @@ class ACLCommands(CommandsProtocol):
         """
         Create or update an ACL user.
 
-        Create or update the ACL for ``username``. If the user already exists,
+        Create or update the ACL for `username`. If the user already exists,
         the existing ACL is completely overwritten and replaced with the
         specified values.
 
-        ``enabled`` is a boolean indicating whether the user should be allowed
-        to authenticate or not. Defaults to ``False``.
+        For more information, see https://redis.io/commands/acl-setuser
 
-        ``nopass`` is a boolean indicating whether the can authenticate without
-        a password. This cannot be True if ``passwords`` are also specified.
-
-        ``passwords`` if specified is a list of plain text passwords
-        to add to or remove from the user. Each password must be prefixed with
-        a '+' to add or a '-' to remove. For convenience, the value of
-        ``passwords`` can be a simple prefixed string when adding or
-        removing a single password.
-
-        ``hashed_passwords`` if specified is a list of SHA-256 hashed passwords
-        to add to or remove from the user. Each hashed password must be
-        prefixed with a '+' to add or a '-' to remove. For convenience,
-        the value of ``hashed_passwords`` can be a simple prefixed string when
-        adding or removing a single password.
-
-        ``categories`` if specified is a list of strings representing category
-        permissions. Each string must be prefixed with either a '+' to add the
-        category permission or a '-' to remove the category permission.
-
-        ``commands`` if specified is a list of strings representing command
-        permissions. Each string must be prefixed with either a '+' to add the
-        command permission or a '-' to remove the command permission.
-
-        ``keys`` if specified is a list of key patterns to grant the user
-        access to. Keys patterns allow '*' to support wildcard matching. For
-        example, '*' grants access to all keys while 'cache:*' grants access
-        to all keys that are prefixed with 'cache:'. ``keys`` should not be
-        prefixed with a '~'.
-
-        ``reset`` is a boolean indicating whether the user should be fully
-        reset prior to applying the new ACL. Setting this to True will
-        remove all existing passwords, flags and privileges from the user and
-        then apply the specified rules. If this is False, the user's existing
-        passwords, flags and privileges will be kept and any new specified
-        rules will be applied on top.
-
-        ``reset_keys`` is a boolean indicating whether the user's key
-        permissions should be reset prior to applying any new key permissions
-        specified in ``keys``. If this is False, the user's existing
-        key permissions will be kept and any new specified key permissions
-        will be applied on top.
-
-        ``reset_channels`` is a boolean indicating whether the user's channel
-        permissions should be reset prior to applying any new channel permissions
-        specified in ``channels``.If this is False, the user's existing
-        channel permissions will be kept and any new specified channel permissions
-        will be applied on top.
-
-        ``reset_passwords`` is a boolean indicating whether to remove all
-        existing passwords and the 'nopass' flag from the user prior to
-        applying any new passwords specified in 'passwords' or
-        'hashed_passwords'. If this is False, the user's existing passwords
-        and 'nopass' status will be kept and any new specified passwords
-        or hashed_passwords will be applied on top.
-
-        For more information see https://redis.io/commands/acl-setuser
+        Args:
+            username: The name of the user whose ACL is to be created or updated.
+            enabled: Indicates whether the user should be allowed to authenticate.
+                     Defaults to `False`.
+            nopass: Indicates whether the user can authenticate without a password.
+                    This cannot be `True` if `passwords` are also specified.
+            passwords: A list of plain text passwords to add to or remove from the user.
+                       Each password must be prefixed with a '+' to add or a '-' to
+                       remove. For convenience, a single prefixed string can be used
+                       when adding or removing a single password.
+            hashed_passwords: A list of SHA-256 hashed passwords to add to or remove
+                              from the user. Each hashed password must be prefixed with
+                              a '+' to add or a '-' to remove. For convenience, a single
+                              prefixed string can be used when adding or removing a
+                              single password.
+            categories: A list of strings representing category permissions. Each string
+                        must be prefixed with either a '+' to add the category
+                        permission or a '-' to remove the category permission.
+            commands: A list of strings representing command permissions. Each string
+                      must be prefixed with either a '+' to add the command permission
+                      or a '-' to remove the command permission.
+            keys: A list of key patterns to grant the user access to. Key patterns allow
+                  '*' to support wildcard matching. For example, '*' grants access to
+                  all keys while 'cache:*' grants access to all keys that are prefixed
+                  with 'cache:'. `keys` should not be prefixed with a '~'.
+            reset: Indicates whether the user should be fully reset prior to applying
+                   the new ACL. Setting this to `True` will remove all existing
+                   passwords, flags, and privileges from the user and then apply the
+                   specified rules. If `False`, the user's existing passwords, flags,
+                   and privileges will be kept and any new specified rules will be
+                   applied on top.
+            reset_keys: Indicates whether the user's key permissions should be reset
+                        prior to applying any new key permissions specified in `keys`.
+                        If `False`, the user's existing key permissions will be kept and
+                        any new specified key permissions will be applied on top.
+            reset_channels: Indicates whether the user's channel permissions should be
+                            reset prior to applying any new channel permissions
+                            specified in `channels`. If `False`, the user's existing
+                            channel permissions will be kept and any new specified
+                            channel permissions will be applied on top.
+            reset_passwords: Indicates whether to remove all existing passwords and the
+                             `nopass` flag from the user prior to applying any new
+                             passwords specified in `passwords` or `hashed_passwords`.
+                             If `False`, the user's existing passwords and `nopass`
+                             status will be kept and any new specified passwords or
+                             hashed passwords will be applied on top.
         """
         encoder = self.get_encoder()
         pieces: List[EncodableT] = [username]
