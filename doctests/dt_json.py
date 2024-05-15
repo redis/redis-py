@@ -154,11 +154,12 @@ inventory_json = {
             {
                 "id": "bike:2",
                 "model": "Quaoar",
-                "description": "Redesigned for the 2020 model year, this bike impressed "
-                "our testers and is the best all-around trail bike we've ever tested. The "
-                "Shimano gear system effectively does away with an external cassette, so "
-                "is super low maintenance in terms of wear and tear. All in all it's an "
-                "impressive package for the price, making it very competitive.",
+                "description": "Redesigned for the 2020 model year, this bike "
+                "impressed our testers and is the best all-around trail bike we've "
+                "ever tested. The Shimano gear system effectively does away with an "
+                "external cassette, so is super low maintenance in terms of wear "
+                "and tear. All in all it's an impressive package for the price, "
+                "making it very competitive.",
                 "price": 2072,
                 "specs": {"material": "aluminium", "weight": 7.9},
                 "colors": ["black", "white"],
@@ -166,11 +167,12 @@ inventory_json = {
             {
                 "id": "bike:3",
                 "model": "Weywot",
-                "description": "This bike gives kids aged six years and older a durable "
-                "and uberlight mountain bike for their first experience on tracks and easy "
-                "cruising through forests and fields. A set of powerful Shimano hydraulic "
-                "disc brakes provide ample stopping ability. If you're after a budget option, "
-                "this is one of the best bikes you could get.",
+                "description": "This bike gives kids aged six years and older "
+                "a durable and uberlight mountain bike for their first experience "
+                "on tracks and easy cruising through forests and fields. A set of "
+                "powerful Shimano hydraulic disc brakes provide ample stopping "
+                "ability. If you're after a budget option, this is one of the best "
+                "bikes you could get.",
                 "price": 3264,
                 "specs": {"material": "alloy", "weight": 13.8},
             },
@@ -179,10 +181,11 @@ inventory_json = {
             {
                 "id": "bike:4",
                 "model": "Salacia",
-                "description": "This bike is a great option for anyone who just wants a "
-                "bike to get about on With a slick-shifting Claris gears from Shimano\u2019s, "
-                "this is a bike which doesn\u2019t break the bank and delivers craved "
-                "performance.  It\u2019s for the rider who wants both efficiency and capability.",
+                "description": "This bike is a great option for anyone who just "
+                "wants a bike to get about on With a slick-shifting Claris gears "
+                "from Shimano\u2019s, this is a bike which doesn\u2019t break the "
+                "bank and delivers craved performance.  It\u2019s for the rider "
+                "who wants both efficiency and capability.",
                 "price": 1475,
                 "specs": {"material": "aluminium", "weight": 16.6},
                 "colors": ["black", "silver"],
@@ -190,13 +193,14 @@ inventory_json = {
             {
                 "id": "bike:5",
                 "model": "Mimas",
-                "description": "A real joy to ride, this bike got very high scores in last "
-                "years Bike of the year report. The carefully crafted 50-34 tooth chainset "
-                "and 11-32 tooth cassette give an easy-on-the-legs bottom gear for climbing, "
-                "and the high-quality Vittoria Zaffiro tires give balance and grip.It includes "
+                "description": "A real joy to ride, this bike got very high "
+                "scores in last years Bike of the year report. The carefully "
+                "crafted 50-34 tooth chainset and 11-32 tooth cassette give an "
+                "easy-on-the-legs bottom gear for climbing, and the high-quality "
+                "Vittoria Zaffiro tires give balance and grip.It includes "
                 "a low-step frame , our memory foam seat, bump-resistant shocks and "
-                "conveniently placed thumb throttle. Put it all together and you get a bike "
-                "that helps redefine what can be done for this price.",
+                "conveniently placed thumb throttle. Put it all together and you "
+                "get a bike that helps redefine what can be done for this price.",
                 "price": 3941,
                 "specs": {"material": "alloy", "weight": 11.6},
             },
@@ -214,7 +218,8 @@ res2 = r.json().get("bikes:inventory", "$.inventory.*")
 print(
     res2
 )
-# >>>    [[{'id': 'bike:1', 'model': 'Phoebe', 'description': 'This is a mid-travel trail slayer...
+# >>>    [[{'id': 'bike:1', 'model': 'Phoebe',
+# >>>       'description': 'This is a mid-travel trail slayer...
 # STEP_END
 
 # STEP_START get_mtnbikes
@@ -259,18 +264,20 @@ res8 = r.json().get(
 )
 print(
     res8
-)  # >>> [{'id': 'bike:2', 'model': 'Quaoar', 'description': "Redesigned for the 2020 model year...
+)  # >>> [{'id': 'bike:2', 'model': 'Quaoar',
+#           'description': "Redesigned for the 2020 model year...
 # STEP_END
 
 # REMOVE_START
 assert res8 == [{
     'id': 'bike:2', 'model': 'Quaoar',
-    'description': "Redesigned for the 2020 model year, this bike impressed our testers "
-    "and is the best all-around trail bike we've ever tested. The Shimano gear system "
-    "effectively does away with an external cassette, so is super low maintenance in terms "
-    "of wear and tear. All in all it's an impressive package for the price, making it very "
-    "competitive.", 
-    'price': 2072, 'specs': {'material': 'aluminium', 'weight': 7.9}, 'colors': ['black', 'white']}]
+    'description': "Redesigned for the 2020 model year, this bike impressed "
+    "our testers and is the best all-around trail bike we've ever tested. "
+    "The Shimano gear system effectively does away with an external cassette, "
+    "so is super low maintenance in terms of wear and tear. All in all it's "
+    "an impressive package for the price, making it very competitive.",
+    'price': 2072, 'specs': {'material': 'aluminium', 'weight': 7.9},
+    'colors': ['black', 'white']}]
 # REMOVE_END
 
 # STEP_START filter2
@@ -297,9 +304,21 @@ assert res10 == ["Quaoar", "Weywot", "Salacia", "Mimas"]
 # REMOVE_END
 
 # STEP_START filter4
-res11 = r.json().set("bikes:inventory", "$.inventory.mountain_bikes[0].regex_pat", "(?i)al")
-res12 = r.json().set("bikes:inventory", "$.inventory.mountain_bikes[1].regex_pat", "(?i)al")
-res13 = r.json().set("bikes:inventory", "$.inventory.mountain_bikes[2].regex_pat", "(?i)al")
+res11 = r.json().set(
+    "bikes:inventory",
+    "$.inventory.mountain_bikes[0].regex_pat",
+    "(?i)al"
+)
+res12 = r.json().set(
+    "bikes:inventory",
+    "$.inventory.mountain_bikes[1].regex_pat",
+    "(?i)al"
+)
+res13 = r.json().set(
+    "bikes:inventory",
+    "$.inventory.mountain_bikes[2].regex_pat",
+    "(?i)al"
+)
 
 res14 = r.json().get(
     "bikes:inventory",
@@ -313,44 +332,46 @@ assert res14 == ['Quaoar', 'Weywot']
 # REMOVE_END
 
 # STEP_START update_bikes
-res11 = r.json().get("bikes:inventory", "$..price")
-print(res11)  # >>> [1920, 2072, 3264, 1475, 3941]
+res15 = r.json().get("bikes:inventory", "$..price")
+print(res15)  # >>> [1920, 2072, 3264, 1475, 3941]
 
-res12 = r.json().numincrby("bikes:inventory", "$..price", -100)
-print(res12)  # >>> [1820, 1972, 3164, 1375, 3841]
+res16 = r.json().numincrby("bikes:inventory", "$..price", -100)
+print(res16)  # >>> [1820, 1972, 3164, 1375, 3841]
 
-res13 = r.json().numincrby("bikes:inventory", "$..price", 100)
-print(res13)  # >>> [1920, 2072, 3264, 1475, 3941]
+res17 = r.json().numincrby("bikes:inventory", "$..price", 100)
+print(res17)  # >>> [1920, 2072, 3264, 1475, 3941]
 # STEP_END
 
 # REMOVE_START
-assert res12 == [1820, 1972, 3164, 1375, 3841]
+assert res15 == [1920, 2072, 3264, 1475, 3941]
+assert res16 == [1820, 1972, 3164, 1375, 3841]
+assert res17 == [1920, 2072, 3264, 1475, 3941]
 # REMOVE_END
 
 # STEP_START update_filters1
-res16 = r.json().set("bikes:inventory", "$.inventory.*[?(@.price<2000)].price", 1500)
-res17 = r.json().get("bikes:inventory", "$..price")
-print(res17)    # >>> [1500, 2072, 3264, 1500, 3941]
+res18 = r.json().set("bikes:inventory", "$.inventory.*[?(@.price<2000)].price", 1500)
+res19 = r.json().get("bikes:inventory", "$..price")
+print(res19)    # >>> [1500, 2072, 3264, 1500, 3941]
 # STEP_END
 
 # REMOVE_START
-assert res17 == [1500, 2072, 3264, 1500, 3941]
+assert res19 == [1500, 2072, 3264, 1500, 3941]
 # REMOVE_END
 
 # STEP_START update_filters2
-res14 = r.json().arrappend(
+res20 = r.json().arrappend(
     "bikes:inventory", "$.inventory.*[?(@.price<2000)].colors", "pink"
 )
-print(res14)  # >>> [3, 3]
+print(res20)  # >>> [3, 3]
 
-res15 = r.json().get("bikes:inventory", "$..[*].colors")
+res21 = r.json().get("bikes:inventory", "$..[*].colors")
 print(
-    res15
+    res21
 )  # >>> [['black', 'silver', 'pink'], ['black', 'white'], ['black', 'silver', 'pink']]
 # STEP_END
 
 # REMOVE_START
-assert res15 == [
+assert res21 == [
     ["black", "silver", "pink"],
     ["black", "white"],
     ["black", "silver", "pink"],
