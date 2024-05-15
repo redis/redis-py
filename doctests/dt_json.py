@@ -215,9 +215,7 @@ print(res1)  # >>> True
 
 # STEP_START get_bikes
 res2 = r.json().get("bikes:inventory", "$.inventory.*")
-print(
-    res2
-)
+print(res2)
 # >>>    [[{'id': 'bike:1', 'model': 'Phoebe',
 # >>>       'description': 'This is a mid-travel trail slayer...
 # STEP_END
@@ -262,22 +260,26 @@ res8 = r.json().get(
     "bikes:inventory",
     "$..mountain_bikes[?(@.price < 3000 && @.specs.weight < 10)]",
 )
-print(
-    res8
-)  # >>> [{'id': 'bike:2', 'model': 'Quaoar',
+print(res8)
+# >>> [{'id': 'bike:2', 'model': 'Quaoar',
 #           'description': "Redesigned for the 2020 model year...
 # STEP_END
 
 # REMOVE_START
-assert res8 == [{
-    'id': 'bike:2', 'model': 'Quaoar',
-    'description': "Redesigned for the 2020 model year, this bike impressed "
-    "our testers and is the best all-around trail bike we've ever tested. "
-    "The Shimano gear system effectively does away with an external cassette, "
-    "so is super low maintenance in terms of wear and tear. All in all it's "
-    "an impressive package for the price, making it very competitive.",
-    'price': 2072, 'specs': {'material': 'aluminium', 'weight': 7.9},
-    'colors': ['black', 'white']}]
+assert res8 == [
+    {
+        'id': 'bike:2',
+        'model': 'Quaoar',
+        'description': "Redesigned for the 2020 model year, this bike impressed "
+        "our testers and is the best all-around trail bike we've ever tested. "
+        "The Shimano gear system effectively does away with an external cassette, "
+        "so is super low maintenance in terms of wear and tear. All in all it's "
+        "an impressive package for the price, making it very competitive.",
+        'price': 2072,
+        'specs': {'material': 'aluminium', 'weight': 7.9},
+        'colors': ['black', 'white']
+    }
+]
 # REMOVE_END
 
 # STEP_START filter2
@@ -289,7 +291,7 @@ print(res9)  # >>> ['Weywot', 'Mimas']
 # STEP_END
 
 # REMOVE_START
-assert res9 == ['Weywot', 'Mimas']
+assert res9 == ["Weywot", "Mimas"]
 # REMOVE_END
 
 # STEP_START filter3
@@ -305,19 +307,13 @@ assert res10 == ["Quaoar", "Weywot", "Salacia", "Mimas"]
 
 # STEP_START filter4
 res11 = r.json().set(
-    "bikes:inventory",
-    "$.inventory.mountain_bikes[0].regex_pat",
-    "(?i)al"
+    "bikes:inventory", "$.inventory.mountain_bikes[0].regex_pat", "(?i)al"
 )
 res12 = r.json().set(
-    "bikes:inventory",
-    "$.inventory.mountain_bikes[1].regex_pat",
-    "(?i)al"
+    "bikes:inventory", "$.inventory.mountain_bikes[1].regex_pat", "(?i)al"
 )
 res13 = r.json().set(
-    "bikes:inventory",
-    "$.inventory.mountain_bikes[2].regex_pat",
-    "(?i)al"
+    "bikes:inventory", "$.inventory.mountain_bikes[2].regex_pat", "(?i)al"
 )
 
 res14 = r.json().get(
@@ -328,7 +324,7 @@ print(res14)    # >>> ['Quaoar', 'Weywot']
 # STEP_END
 
 # REMOVE_START
-assert res14 == ['Quaoar', 'Weywot']
+assert res14 == ["Quaoar", "Weywot"]
 # REMOVE_END
 
 # STEP_START update_bikes
@@ -349,7 +345,9 @@ assert res17 == [1920, 2072, 3264, 1475, 3941]
 # REMOVE_END
 
 # STEP_START update_filters1
-res18 = r.json().set("bikes:inventory", "$.inventory.*[?(@.price<2000)].price", 1500)
+res18 = r.json().set(
+    "bikes:inventory", "$.inventory.*[?(@.price<2000)].price", 1500
+)
 res19 = r.json().get("bikes:inventory", "$..price")
 print(res19)    # >>> [1500, 2072, 3264, 1500, 3941]
 # STEP_END
