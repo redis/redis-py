@@ -1,0 +1,12 @@
+[tool.poetry]
+name = "redis"
+version = "5.1.0b5"
+description = "Python client for Redis database and key-value store"
+authors = ["Redis Inc. <oss@redis.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
