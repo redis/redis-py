@@ -36,10 +36,7 @@ from redis.sentinel import (
 )
 from redis.utils import from_url
 
-if sys.version_info >= (3, 8):
-    from importlib import metadata
-else:
-    import importlib_metadata as metadata
+from importlib import metadata
 
 
 def int_or_str(value):

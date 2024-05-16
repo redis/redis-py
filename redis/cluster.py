@@ -1851,8 +1851,7 @@ class ClusterPubSub(PubSub):
 
     def _pubsubs_generator(self):
         while True:
-            for pubsub in self.node_pubsub_mapping.values():
-                yield pubsub
+            yield from self.node_pubsub_mapping.values()
 
     def get_sharded_message(
         self, ignore_subscribe_messages=False, timeout=0.0, target_node=None

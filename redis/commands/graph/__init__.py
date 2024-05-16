@@ -252,7 +252,7 @@ class AsyncGraph(Graph, AsyncGraphCommands):
         return await self.query(q, read_only=read_only)
 
     async def labels(self):
-        return ((await self.call_procedure(DB_LABELS, read_only=True))).result_set
+        return (await self.call_procedure(DB_LABELS, read_only=True)).result_set
 
     async def property_keys(self):
         return (await self.call_procedure(DB_PROPERTYKEYS, read_only=True)).result_set
