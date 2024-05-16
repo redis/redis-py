@@ -501,8 +501,10 @@ class TestConnection:
         with pytest.raises(redis.RedisError):
             bad_connection.info()
         pool = bad_connection.connection_pool
-        assert len(pool._available_connections) == 1
-        assert not pool._available_connections[0]._sock
+        con = pool.pool.get()
+        assert con is not None
+        assert pool.pool.get() is None
+        assert not con._sock
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
@@ -570,7 +572,7 @@ class TestConnection:
         assert re.match(
             r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
         ).groups() == (
-            "ConnectionPool",
+            "BlockingConnectionPool",
             "Connection",
             "host=localhost,port=6379,db=0",
         )
@@ -582,7 +584,7 @@ class TestConnection:
         assert re.match(
             r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
         ).groups() == (
-            "ConnectionPool",
+            "BlockingConnectionPool",
             "UnixDomainSocketConnection",
             "path=/path/to/socket,db=0",
         )
