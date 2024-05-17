@@ -1,11 +1,44 @@
 [tool.poetry]
 name = "redis"
 version = "5.1.0b5"
-description = "Python client for Redis database and key-value store"
+description = "Python client for Redis database and key-value store."
+license = "MIT"
 authors = ["Redis Inc. <oss@redis.com>"]
+readme = "README.md"
+repository = "https://github.com/redis/redis-py"
+documentation = "https://redis.readthedocs.io"
+keywords = ["redis", "key-value store", "database"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+packages = [
+    { include = "redis" },
+    { include = "redis._parsers" },
+    { include = "redis.asyncio" },
+    { include = "redis.commands" },
+    { include = "redis.commands.bf" },
+    { include = "redis.commands.json" },
+    { include = "redis.commands.search" },
+    { include = "redis.commands.timeseries" },
+    { include = "redis.commands.graph" },
+    { include = "redis.parsers" },
+]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = ">=3.8,<3.12"
 
 [build-system]
 requires = ["poetry-core"]
