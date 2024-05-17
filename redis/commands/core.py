@@ -5148,7 +5148,7 @@ class HashCommands(CommandsProtocol):
             options.append("LT")
 
         return self.execute_command(
-            "HEXPIRE", name, seconds, *options, len(fields), *fields
+            "HEXPIRE", name, seconds, *options, "FIELDS", len(fields), *fields
         )
 
     def hpexpire(
@@ -5205,7 +5205,7 @@ class HashCommands(CommandsProtocol):
             options.append("LT")
 
         return self.execute_command(
-            "HPEXPIRE", name, milliseconds, *options, len(fields), *fields
+            "HPEXPIRE", name, milliseconds, *options, "FIELDS", len(fields), *fields
         )
 
     def hexpireat(
@@ -5262,7 +5262,7 @@ class HashCommands(CommandsProtocol):
             options.append("LT")
 
         return self.execute_command(
-            "HEXPIREAT", name, unix_time_seconds, *options, len(fields), *fields
+            "HEXPIREAT", name, unix_time_seconds, *options, "FIELDS", len(fields), *fields
         )
 
     def hpexpireat(
@@ -5319,7 +5319,7 @@ class HashCommands(CommandsProtocol):
             options.append("LT")
 
         return self.execute_command(
-            "HPEXPIREAT", name, unix_time_milliseconds, *options, len(fields), *fields
+            "HPEXPIREAT", name, unix_time_milliseconds, *options, "FIELDS", len(fields), *fields
         )
 
     def hpersist(self, name: KeyT, *fields: str) -> ResponseT:
@@ -5340,7 +5340,7 @@ class HashCommands(CommandsProtocol):
                 - `-1` if the field exists but has no associated expiration time.
                 - `1` if the expiration time was successfully removed from the field.
         """
-        return self.execute_command("HPERSIST", name, len(fields), *fields)
+        return self.execute_command("HPERSIST", name, "FIELDS", len(fields), *fields)
 
     def hexpiretime(self, key: str, *fields: str) -> ResponseT:
         """
@@ -5362,7 +5362,7 @@ class HashCommands(CommandsProtocol):
                 - A positive integer representing the expiration Unix timestamp in
                   seconds, if the field has an associated expiration time.
         """
-        return self.execute_command("HEXPIRETIME", key, len(fields), *fields)
+        return self.execute_command("HEXPIRETIME", key, "FIELDS", len(fields), *fields)
 
     def hpexpiretime(self, key: str, *fields: str) -> ResponseT:
         """
@@ -5384,7 +5384,7 @@ class HashCommands(CommandsProtocol):
                 - A positive integer representing the expiration Unix timestamp in
                   milliseconds, if the field has an associated expiration time.
         """
-        return self.execute_command("HPEXPIRETIME", key, len(fields), *fields)
+        return self.execute_command("HPEXPIRETIME", key, "FIELDS", len(fields), *fields)
 
     def httl(self, key: str, *fields: str) -> ResponseT:
         """
@@ -5406,7 +5406,7 @@ class HashCommands(CommandsProtocol):
                 - A positive integer representing the TTL in seconds if the field has
                   an associated expiration time.
         """
-        return self.execute_command("HTTL", key, len(fields), *fields)
+        return self.execute_command("HTTL", key, "FIELDS", len(fields), *fields)
 
     def hpttl(self, key: str, *fields: str) -> ResponseT:
         """
@@ -5428,7 +5428,7 @@ class HashCommands(CommandsProtocol):
                 - A positive integer representing the TTL in milliseconds if the field
                   has an associated expiration time.
         """
-        return self.execute_command("HPTTL", key, len(fields), *fields)
+        return self.execute_command("HPTTL", key, "FIELDS", len(fields), *fields)
 
 
 AsyncHashCommands = HashCommands
