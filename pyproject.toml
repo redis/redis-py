@@ -8,6 +8,8 @@ readme = "README.md"
 repository = "https://github.com/redis/redis-py"
 documentation = "https://redis.readthedocs.io"
 keywords = ["redis", "key-value store", "database"]
+packages = [{ include = "redis" }]
+include = ["redis/py.typed"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
@@ -24,18 +26,10 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-packages = [
-    { include = "redis" },
-    { include = "redis._parsers" },
-    { include = "redis.asyncio" },
-    { include = "redis.commands" },
-    { include = "redis.commands.bf" },
-    { include = "redis.commands.json" },
-    { include = "redis.commands.search" },
-    { include = "redis.commands.timeseries" },
-    { include = "redis.commands.graph" },
-    { include = "redis.parsers" },
-]
+
+[tool.poetry.urls]
+"Changes" = "https://github.com/redis/redis-py/releases"
+"Issue tracker" = "https://github.com/redis/redis-py/issues"
 
 [tool.poetry.dependencies]
 python = ">=3.8,<3.12"
@@ -60,6 +54,10 @@ ujson = ">=4.2.0"
 wheel = ">=0.30.0"
 urllib3 = "<2"
 uvloop = "^0.19.0"
+
+[tool.poetry.extras]
+hiredis = ["hiredis>=1.0.0"]
+ocsp = ["cryptography>=36.0.1", "pyopenssl==20.0.1", "requests>=2.26.0"]
 
 [build-system]
 requires = ["poetry-core"]
