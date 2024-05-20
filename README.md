@@ -19,17 +19,15 @@ The Python interface to the Redis key-value store.
 
 ## How do I Redis?
 
-[Learn for free at Redis University](https://university.redis.com/)
+[Learn for free at Redis University](https://redis.io/university/)
 
-[Build faster with the Redis Launchpad](https://launchpad.redis.com/)
+[Try the Redis Cloud](https://redis.io/try-free/)
 
-[Try the Redis Cloud](https://redis.com/try-free/)
+[Dive in developer tutorials](https://redis.io/learn)
 
-[Dive in developer tutorials](https://developer.redis.com/)
+[Join the Redis community](https://redis.io/community/)
 
-[Join the Redis community](https://redis.com/community/)
-
-[Work at Redis](https://redis.com/company/careers/jobs/)
+[Work at Redis](https://redis.io/careers/)
 
 ## Installation
 
@@ -159,7 +157,7 @@ The following example shows how to utilize [Redis Pub/Sub](https://redis.io/docs
 
 ### Author
 
-redis-py is developed and maintained by [Redis Inc](https://redis.com). It can be found [here](
+redis-py is developed and maintained by [Redis Inc](https://redis.io). It can be found [here](
 https://github.com/redis/redis-py), or downloaded from [pypi](https://pypi.org/project/redis/).
 
 Special thanks to:
@@ -171,4 +169,4 @@ Special thanks to:
     system.
 -   Paul Hubbard for initial packaging support.
 
-[![Redis](./docs/logo-redis.png)](https://www.redis.com)
+[![Redis](./docs/_static/logo-redis.svg)](https://redis.io)
