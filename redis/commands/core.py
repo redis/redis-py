@@ -5269,7 +5269,7 @@ AsyncPubSubCommands = PubSubCommands
 class ScriptCommands(CommandsProtocol):
     """
     Redis Lua script commands. see:
-    https://redis.com/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
+    https://redis.io/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
     """
 
     def _eval(
