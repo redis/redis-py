@@ -1,38 +1,38 @@
-name: Publish tag to Pypi
+name: 🏷️ Publish release to PyPI
 
 on:
   release:
-    types: [published]
-
-permissions:
-  contents: read  #  to fetch code (actions/checkout)
+    types:
+      - created
 
 jobs:
-
-  build_and_package:
+  build-and-publish:
+    name: 🔨 Build and publish package
     runs-on: ubuntu-latest
+    permissions:
+      # To fetch the code (actions/checkout)
+      contents: read
+    strategy:
+      matrix:
+        python-version: ['3.9.19']
+        poetry-version: ['1.8.3']
     steps:
-      - uses: actions/checkout@v4
-      - name: install python
+      - name: 📂 Checkout repository
+        uses: actions/checkout@v4
+      - name: 🐍 Setup Python (${{ matrix.python-version }})
         uses: actions/setup-python@v5
         with:
-          python-version: 3.9
-      - name: Install dev tools
+          python-version: ${{ matrix.python-version }}
+      - name: 📦 Install Poetry
+        uses: snok/install-poetry@v1
+        with: 
+          version: ${{ matrix.poetry-version }}
+          virtualenvs-create: false
+          installer-parallel: true
+      - name: 📦 Install dependencies and configure credentials
         run: |
-          pip install -r dev_requirements.txt
-          pip install twine wheel
-
-      - name: Build package
-        run: |
-          python setup.py build
-          python setup.py sdist bdist_wheel
-
-      - name: Basic package test prior to upload
-        run: |
-          twine check dist/*
-
-      - name: Publish to Pypi
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          poetry run pip install --no-deps --upgrade pip
+          poetry install --with dev --no-interaction --no-ansi
+          poetry config pypi-token.pypi ${{ secrets.PYPI_API_TOKEN }}
+      - name: 🚀 Build and publish package
+        run: poetry publish --build
