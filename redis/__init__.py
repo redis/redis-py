@@ -1,4 +1,4 @@
-import sys
+from importlib import metadata
 
 from redis import asyncio  # noqa
 from redis.backoff import default_backoff
@@ -35,8 +35,6 @@ from redis.sentinel import (
     SentinelManagedSSLConnection,
 )
 from redis.utils import from_url
-
-from importlib import metadata
 
 
 def int_or_str(value):

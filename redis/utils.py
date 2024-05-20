@@ -1,5 +1,4 @@
 import logging
-import sys
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Dict, Mapping, Union
