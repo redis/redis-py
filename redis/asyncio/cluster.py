@@ -275,7 +275,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_min_version: Optional[ssl.TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
         protocol: Optional[int] = 2,
-        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         cache_enabled: bool = False,
         client_cache: Optional[AbstractCache] = None,
         cache_max_size: int = 100,
@@ -1152,7 +1152,7 @@ class NodesManager:
         startup_nodes: List["ClusterNode"],
         require_full_coverage: bool,
         connection_kwargs: Dict[str, Any],
-        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
     ) -> None:
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.require_full_coverage = require_full_coverage
