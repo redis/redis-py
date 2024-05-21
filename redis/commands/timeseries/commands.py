@@ -98,7 +98,6 @@ class TimeSeriesCommands:
         self,
         key: KeyT,
         retention_msecs: Optional[int] = None,
-        uncompressed: Optional[bool] = False,
         labels: Optional[Dict[str, str]] = None,
         chunk_size: Optional[int] = None,
         duplicate_policy: Optional[str] = None,
@@ -118,8 +117,6 @@ class TimeSeriesCommands:
             retention_msecs:
                 Maximum age for samples, compared to the highest reported timestamp in
                 milliseconds. If None or 0 is passed, the series is not trimmed at all.
-            uncompressed:
-                Changes data storage from compressed (default) to uncompressed.
             labels:
                 A dictionary of label-value pairs that represent metadata labels of the
                 key.
@@ -156,7 +153,6 @@ class TimeSeriesCommands:
         """
         params = [key]
         self._append_retention(params, retention_msecs)
-        self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
         self._append_labels(params, labels)
@@ -943,7 +939,7 @@ class TimeSeriesCommands:
     def _append_uncompressed(params: List[str], uncompressed: Optional[bool]):
         """Append UNCOMPRESSED tag to params."""
         if uncompressed:
-            params.extend(["UNCOMPRESSED"])
+            params.extend(["ENCODING", "UNCOMPRESSED"])
 
     @staticmethod
     def _append_with_labels(

@@ -958,12 +958,15 @@ def test_pipeline(client):
 def test_uncompressed(client):
     client.ts().create("compressed")
     client.ts().create("uncompressed", uncompressed=True)
+    for i in range(1000):
+        client.ts().add("compressed", i, i)
+        client.ts().add("uncompressed", i, i)
     compressed_info = client.ts().info("compressed")
     uncompressed_info = client.ts().info("uncompressed")
     if is_resp2_connection(client):
-        assert compressed_info.memory_usage != uncompressed_info.memory_usage
+        assert compressed_info.memory_usage < uncompressed_info.memory_usage
     else:
-        assert compressed_info["memoryUsage"] != uncompressed_info["memoryUsage"]
+        assert compressed_info["memoryUsage"] < uncompressed_info["memoryUsage"]
 
 
 @skip_ifmodversion_lt("1.12.0", "timeseries")
