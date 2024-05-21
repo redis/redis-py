@@ -1,4 +1,5 @@
     * Fixed sentinel execute command response
+    * Update `ResponseT` type hint
     * Allow to control the minimum SSL version
     * Add an optional lock_name attribute to LockError.
     * Fix return types for `get`, `set_path` and `strappend` in JSONCommands
