@@ -3,8 +3,8 @@ import time
 from time import sleep
 
 import pytest
-
 import redis
+
 from .conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
 
 
@@ -103,7 +103,7 @@ def test_add(client):
 
 
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-def test_add_duplicate_policy(client):
+def test_add_on_duplicate(client):
     # Test for duplicate policy BLOCK
     assert 1 == client.ts().add("time-serie-add-ooo-block", 1, 5.0)
     with pytest.raises(Exception):
@@ -111,30 +111,24 @@ def test_add_duplicate_policy(client):
 
     # Test for duplicate policy LAST
     assert 1 == client.ts().add("time-serie-add-ooo-last", 1, 5.0)
-    assert 1 == client.ts().add(
-        "time-serie-add-ooo-last", 1, 10.0, duplicate_policy="last"
-    )
+    assert 1 == client.ts().add("time-serie-add-ooo-last", 1, 10.0, on_duplicate="last")
     assert 10.0 == client.ts().get("time-serie-add-ooo-last")[1]
 
     # Test for duplicate policy FIRST
     assert 1 == client.ts().add("time-serie-add-ooo-first", 1, 5.0)
     assert 1 == client.ts().add(
-        "time-serie-add-ooo-first", 1, 10.0, duplicate_policy="first"
+        "time-serie-add-ooo-first", 1, 10.0, on_duplicate="first"
     )
     assert 5.0 == client.ts().get("time-serie-add-ooo-first")[1]
 
     # Test for duplicate policy MAX
     assert 1 == client.ts().add("time-serie-add-ooo-max", 1, 5.0)
-    assert 1 == client.ts().add(
-        "time-serie-add-ooo-max", 1, 10.0, duplicate_policy="max"
-    )
+    assert 1 == client.ts().add("time-serie-add-ooo-max", 1, 10.0, on_duplicate="max")
     assert 10.0 == client.ts().get("time-serie-add-ooo-max")[1]
 
     # Test for duplicate policy MIN
     assert 1 == client.ts().add("time-serie-add-ooo-min", 1, 5.0)
-    assert 1 == client.ts().add(
-        "time-serie-add-ooo-min", 1, 10.0, duplicate_policy="min"
-    )
+    assert 1 == client.ts().add("time-serie-add-ooo-min", 1, 10.0, on_duplicate="min")
     assert 5.0 == client.ts().get("time-serie-add-ooo-min")[1]
 
 
@@ -982,14 +976,11 @@ def test_create_with_insertion_filters(client):
     )
     assert 1000 == client.ts().add("time-series-1", 1000, 1.0)
     assert 1010 == client.ts().add("time-series-1", 1010, 11.0)
-    # Within 5 ms of the last timestamp and value diff less than 10.0
     assert 1010 == client.ts().add("time-series-1", 1013, 10.0)
-    # Value difference less than 10.0, but timestamp diff larger than 5 ms
     assert 1020 == client.ts().add("time-series-1", 1020, 11.5)
-    # Timestamp diff less than 5 ms, but value diff larger than 10.0
     assert 1021 == client.ts().add("time-series-1", 1021, 22.0)
 
-    data_points = client.ts().range("time-series-1", '-', '+')
+    data_points = client.ts().range("time-series-1", "-", "+")
     expected_points = [(1000, 1.0), (1010, 11.0), (1020, 11.5), (1021, 22.0)]
     assert expected_points == data_points
 
@@ -1003,11 +994,10 @@ def test_create_with_insertion_filters_other_duplicate_policy(client):
     )
     assert 1000 == client.ts().add("time-series-1", 1000, 1.0)
     assert 1010 == client.ts().add("time-series-1", 1010, 11.0)
-    # Within 5 ms of the last timestamp and value diff less than 10.0.
     # Still accepted because the duplicate_policy is not `last`.
     assert 1013 == client.ts().add("time-series-1", 1013, 10.0)
 
-    data_points = client.ts().range("time-series-1", '-', '+')
+    data_points = client.ts().range("time-series-1", "-", "+")
     expected_points = [(1000, 1.0), (1010, 11.0), (1013, 10)]
     assert expected_points == data_points
 
@@ -1022,13 +1012,12 @@ def test_alter_with_insertion_filters(client):
         "time-series-1",
         duplicate_policy="last",
         ignore_max_time_diff=5,
-        ignore_max_val_diff=10.0
+        ignore_max_val_diff=10.0,
     )
 
-    # Within 5 ms of the last timestamp and value diff less than 10.0.
     assert 1013 == client.ts().add("time-series-1", 1015, 11.5)
 
-    data_points = client.ts().range("time-series-1", '-', '+')
+    data_points = client.ts().range("time-series-1", "-", "+")
     expected_points = [(1000, 1.0), (1010, 11.0), (1013, 10.0)]
     assert expected_points == data_points
 
@@ -1044,9 +1033,56 @@ def test_add_with_insertion_filters(client):
         ignore_max_val_diff=10.0,
     )
 
-    # Within 5 ms of the last timestamp and value diff less than 10.0.
     assert 1000 == client.ts().add("time-series-1", 1004, 3.0)
 
-    data_points = client.ts().range("time-series-1", '-', '+')
+    data_points = client.ts().range("time-series-1", "-", "+")
     expected_points = [(1000, 1.0)]
+    assert expected_points == data_points
+
+
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+def test_incrby_with_insertion_filters(client):
+    assert 1000 == client.ts().incrby(
+        "time-series-1",
+        1.0,
+        timestamp=1000,
+        duplicate_policy="last",
+        ignore_max_time_diff=5,
+        ignore_max_val_diff=10.0,
+    )
+
+    assert 1000 == client.ts().incrby("time-series-1", 3.0, timestamp=1000)
+
+    data_points = client.ts().range("time-series-1", "-", "+")
+    expected_points = [(1000, 1.0)]
+    assert expected_points == data_points
+
+    assert 1000 == client.ts().incrby("time-series-1", 10.1, timestamp=1000)
+
+    data_points = client.ts().range("time-series-1", "-", "+")
+    expected_points = [(1000, 11.1)]
+    assert expected_points == data_points
+
+
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+def test_decrby_with_insertion_filters(client):
+    assert 1000 == client.ts().decrby(
+        "time-series-1",
+        1.0,
+        timestamp=1000,
+        duplicate_policy="last",
+        ignore_max_time_diff=5,
+        ignore_max_val_diff=10.0,
+    )
+
+    assert 1000 == client.ts().decrby("time-series-1", 3.0, timestamp=1000)
+
+    data_points = client.ts().range("time-series-1", "-", "+")
+    expected_points = [(1000, -1.0)]
+    assert expected_points == data_points
+
+    assert 1000 == client.ts().decrby("time-series-1", 10.1, timestamp=1000)
+
+    data_points = client.ts().range("time-series-1", "-", "+")
+    expected_points = [(1000, -11.1)]
     assert expected_points == data_points

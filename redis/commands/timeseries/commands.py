@@ -88,7 +88,7 @@ class TimeSeriesCommands:
         self._append_retention(params, retention_msecs)
         self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
-        self._append_duplicate_policy(params, CREATE_CMD, duplicate_policy)
+        self._append_duplicate_policy(params, duplicate_policy)
         self._append_labels(params, labels)
         self._append_ignore_filters(params, ignore_max_time_diff, ignore_max_val_diff)
 
@@ -98,6 +98,7 @@ class TimeSeriesCommands:
         self,
         key: KeyT,
         retention_msecs: Optional[int] = None,
+        uncompressed: Optional[bool] = False,
         labels: Optional[Dict[str, str]] = None,
         chunk_size: Optional[int] = None,
         duplicate_policy: Optional[str] = None,
@@ -117,6 +118,8 @@ class TimeSeriesCommands:
             retention_msecs:
                 Maximum age for samples, compared to the highest reported timestamp in
                 milliseconds. If None or 0 is passed, the series is not trimmed at all.
+            uncompressed:
+                Changes data storage from compressed (default) to uncompressed.
             labels:
                 A dictionary of label-value pairs that represent metadata labels of the
                 key.
@@ -153,8 +156,9 @@ class TimeSeriesCommands:
         """
         params = [key]
         self._append_retention(params, retention_msecs)
+        self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
-        self._append_duplicate_policy(params, ALTER_CMD, duplicate_policy)
+        self._append_duplicate_policy(params, duplicate_policy)
         self._append_labels(params, labels)
         self._append_ignore_filters(params, ignore_max_time_diff, ignore_max_val_diff)
 
@@ -172,6 +176,7 @@ class TimeSeriesCommands:
         duplicate_policy: Optional[str] = None,
         ignore_max_time_diff: Optional[int] = None,
         ignore_max_val_diff: Optional[Number] = None,
+        on_duplicate: Optional[str] = None,
     ):
         """
         Append (or create and append) a new sample to a time series.
@@ -225,14 +230,18 @@ class TimeSeriesCommands:
                 is lower than this threshold, the new entry is ignored. Only applicable
                 if `duplicate_policy` is set to `last`, and if `ignore_max_time_diff` is
                 also set. Available since RedisTimeSeries version 1.12.0.
+            on_duplicate:
+                Use a specific duplicate policy for the specified timestamp. Overrides
+                the duplicate policy set by `duplicate_policy`.
         """
         params = [key, timestamp, value]
         self._append_retention(params, retention_msecs)
         self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
-        self._append_duplicate_policy(params, ADD_CMD, duplicate_policy)
+        self._append_duplicate_policy(params, duplicate_policy)
         self._append_labels(params, labels)
         self._append_ignore_filters(params, ignore_max_time_diff, ignore_max_val_diff)
+        self._append_on_duplicate(params, on_duplicate)
 
         return self.execute_command(ADD_CMD, *params)
 
@@ -260,6 +269,9 @@ class TimeSeriesCommands:
         uncompressed: Optional[bool] = False,
         labels: Optional[Dict[str, str]] = None,
         chunk_size: Optional[int] = None,
+        duplicate_policy: Optional[str] = None,
+        ignore_max_time_diff: Optional[int] = None,
+        ignore_max_val_diff: Optional[Number] = None,
     ):
         """
         Increment (or create an time-series and increment) the latest sample's of a series.
@@ -276,21 +288,52 @@ class TimeSeriesCommands:
                 Timestamp of the sample. `*` can be used for automatic timestamp (using
                 the system clock).
             retention_msecs:
-                Maximum age for samples compared to last event time (in milliseconds).
-                If `None` or `0` is passed then  the series is not trimmed at all.
+                Maximum age for samples, compared to the highest reported timestamp in
+                milliseconds. If None or 0 is passed, the series is not trimmed at all.
             uncompressed:
-                Changes data storage from compressed (by default) to uncompressed.
+                Changes data storage from compressed (default) to uncompressed.
             labels:
-                Set of label-value pairs that represent metadata labels of the key.
+                A dictionary of label-value pairs that represent metadata labels of the
+                key.
             chunk_size:
-                Memory size, in bytes, allocated for each data chunk.
+                Memory size, in bytes, allocated for each data chunk. Must be a multiple
+                of 8 in the range [128..1048576].
+            duplicate_policy:
+                Policy for handling multiple samples with identical timestamps. Can be
+                one of:
+                    - 'block': An error will occur for any out of order sample.
+                    - 'first': Ignore the new value.
+                    - 'last': Override with the latest value.
+                    - 'min': Only override if the value is lower than the existing
+                      value.
+                    - 'max': Only override if the value is higher than the existing
+                      value.
+                    - 'sum': If a previous sample exists, add the new sample to it so
+                      that the updated value is equal to (previous + new). If no
+                      previous sample exists, set the updated value equal to the new
+                      value.
+            ignore_max_time_diff:
+                A non-negative integer value, in milliseconds, that sets an ignore
+                threshold for added timestamps. If the difference between the last
+                timestamp and the new timestamp is lower than this threshold, the new
+                entry is ignored. Only applicable if `duplicate_policy` is set to
+                `last`, and if `ignore_max_val_diff` is also set. Available since
+                RedisTimeSeries version 1.12.0.
+            ignore_max_val_diff:
+                A non-negative floating point value, that sets an ignore threshold for
+                added values. If the difference between the last value and the new value
+                is lower than this threshold, the new entry is ignored. Only applicable
+                if `duplicate_policy` is set to `last`, and if `ignore_max_time_diff` is
+                also set. Available since RedisTimeSeries version 1.12.0.
         """
         params = [key, value]
         self._append_timestamp(params, timestamp)
         self._append_retention(params, retention_msecs)
         self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
+        self._append_duplicate_policy(params, duplicate_policy)
         self._append_labels(params, labels)
+        self._append_ignore_filters(params, ignore_max_time_diff, ignore_max_val_diff)
 
         return self.execute_command(INCRBY_CMD, *params)
 
@@ -303,6 +346,9 @@ class TimeSeriesCommands:
         uncompressed: Optional[bool] = False,
         labels: Optional[Dict[str, str]] = None,
         chunk_size: Optional[int] = None,
+        duplicate_policy: Optional[str] = None,
+        ignore_max_time_diff: Optional[int] = None,
+        ignore_max_val_diff: Optional[Number] = None,
     ):
         """
         Decrement (or create an time-series and decrement) the latest sample's of a series.
@@ -319,21 +365,52 @@ class TimeSeriesCommands:
                 Timestamp of the sample. `*` can be used for automatic timestamp (using
                 the system clock).
             retention_msecs:
-                Maximum age for samples compared to last event time (in milliseconds).
-                If `None` or `0` is passed then the series is not trimmed at all.
+                Maximum age for samples, compared to the highest reported timestamp in
+                milliseconds. If None or 0 is passed, the series is not trimmed at all.
             uncompressed:
-                Changes data storage from compressed (by default) to uncompressed.
+                Changes data storage from compressed (default) to uncompressed.
             labels:
-                Set of label-value pairs that represent metadata labels of the key.
+                A dictionary of label-value pairs that represent metadata labels of the
+                key.
             chunk_size:
-                Memory size, in bytes, allocated for each data chunk.
+                Memory size, in bytes, allocated for each data chunk. Must be a multiple
+                of 8 in the range [128..1048576].
+            duplicate_policy:
+                Policy for handling multiple samples with identical timestamps. Can be
+                one of:
+                    - 'block': An error will occur for any out of order sample.
+                    - 'first': Ignore the new value.
+                    - 'last': Override with the latest value.
+                    - 'min': Only override if the value is lower than the existing
+                      value.
+                    - 'max': Only override if the value is higher than the existing
+                      value.
+                    - 'sum': If a previous sample exists, add the new sample to it so
+                      that the updated value is equal to (previous + new). If no
+                      previous sample exists, set the updated value equal to the new
+                      value.
+            ignore_max_time_diff:
+                A non-negative integer value, in milliseconds, that sets an ignore
+                threshold for added timestamps. If the difference between the last
+                timestamp and the new timestamp is lower than this threshold, the new
+                entry is ignored. Only applicable if `duplicate_policy` is set to
+                `last`, and if `ignore_max_val_diff` is also set. Available since
+                RedisTimeSeries version 1.12.0.
+            ignore_max_val_diff:
+                A non-negative floating point value, that sets an ignore threshold for
+                added values. If the difference between the last value and the new value
+                is lower than this threshold, the new entry is ignored. Only applicable
+                if `duplicate_policy` is set to `last`, and if `ignore_max_time_diff` is
+                also set. Available since RedisTimeSeries version 1.12.0.
         """
         params = [key, value]
         self._append_timestamp(params, timestamp)
         self._append_retention(params, retention_msecs)
         self._append_uncompressed(params, uncompressed)
         self._append_chunk_size(params, chunk_size)
+        self._append_duplicate_policy(params, duplicate_policy)
         self._append_labels(params, labels)
+        self._append_ignore_filters(params, ignore_max_time_diff, ignore_max_val_diff)
 
         return self.execute_command(DECRBY_CMD, *params)
 
@@ -942,17 +1019,16 @@ class TimeSeriesCommands:
             params.extend(["CHUNK_SIZE", chunk_size])
 
     @staticmethod
-    def _append_duplicate_policy(
-        params: List[str], command: Optional[str], duplicate_policy: Optional[str]
-    ):
-        """Append DUPLICATE_POLICY property to params on CREATE
-        and ON_DUPLICATE on ADD.
-        """
+    def _append_duplicate_policy(params: List[str], duplicate_policy: Optional[str]):
+        """Append DUPLICATE_POLICY property to params."""
         if duplicate_policy is not None:
-            if command == "TS.ADD":
-                params.extend(["ON_DUPLICATE", duplicate_policy])
-            else:
-                params.extend(["DUPLICATE_POLICY", duplicate_policy])
+            params.extend(["DUPLICATE_POLICY", duplicate_policy])
+
+    @staticmethod
+    def _append_on_duplicate(params: List[str], on_duplicate: Optional[str]):
+        """Append ON_DUPLICATE property to params."""
+        if on_duplicate is not None:
+            params.extend(["ON_DUPLICATE", on_duplicate])
 
     @staticmethod
     def _append_filer_by_ts(params: List[str], ts_list: Optional[List[int]]):
