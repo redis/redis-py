@@ -270,8 +270,9 @@ class TimeSeriesCommands:
         ignore_max_val_diff: Optional[Number] = None,
     ):
         """
-        Increment (or create an time-series and increment) the latest sample's of a series.
-        This command can be used as a counter or gauge that automatically gets history as a time series.
+        Increment (or create a time-series and increment) the latest sample's of a
+        series. This command can be used as a counter or gauge that automatically gets
+        history as a time series.
 
         For more information: https://redis.io/commands/ts.incrby/
 
@@ -347,8 +348,9 @@ class TimeSeriesCommands:
         ignore_max_val_diff: Optional[Number] = None,
     ):
         """
-        Decrement (or create an time-series and decrement) the latest sample's of a series.
-        This command can be used as a counter or gauge that automatically gets history as a time series.
+        Decrement (or create a time-series and decrement) the latest sample's of a
+        series. This command can be used as a counter or gauge that automatically gets
+        history as a time series.
 
         For more information: https://redis.io/commands/ts.decrby/
 
