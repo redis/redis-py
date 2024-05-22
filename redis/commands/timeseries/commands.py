@@ -91,7 +91,9 @@ class TimeSeriesCommands:
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
         self._append_labels(params, labels)
-        self._append_ignore_filters(params, ignore_max_time_diff, ignore_max_val_diff)
+        self._append_insertion_filters(
+            params, ignore_max_time_diff, ignore_max_val_diff
+        )
 
         return self.execute_command(CREATE_CMD, *params)
 
@@ -158,7 +160,9 @@ class TimeSeriesCommands:
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
         self._append_labels(params, labels)
-        self._append_ignore_filters(params, ignore_max_time_diff, ignore_max_val_diff)
+        self._append_insertion_filters(
+            params, ignore_max_time_diff, ignore_max_val_diff
+        )
 
         return self.execute_command(ALTER_CMD, *params)
 
@@ -240,7 +244,9 @@ class TimeSeriesCommands:
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
         self._append_labels(params, labels)
-        self._append_ignore_filters(params, ignore_max_time_diff, ignore_max_val_diff)
+        self._append_insertion_filters(
+            params, ignore_max_time_diff, ignore_max_val_diff
+        )
         self._append_on_duplicate(params, on_duplicate)
 
         return self.execute_command(ADD_CMD, *params)
@@ -288,8 +294,8 @@ class TimeSeriesCommands:
         ignore_max_val_diff: Optional[Number] = None,
     ):
         """
-        Increment the latest sample's of a series. When specified key does not exist, a
-        new time series is created.
+        Increment the latest sample's of a series. When the specified key does not
+        exist, a new time series is created.
 
         This command can be used as a counter or gauge that automatically gets history
         as a time series.
@@ -360,7 +366,9 @@ class TimeSeriesCommands:
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
         self._append_labels(params, labels)
-        self._append_ignore_filters(params, ignore_max_time_diff, ignore_max_val_diff)
+        self._append_insertion_filters(
+            params, ignore_max_time_diff, ignore_max_val_diff
+        )
 
         return self.execute_command(INCRBY_CMD, *params)
 
@@ -378,8 +386,8 @@ class TimeSeriesCommands:
         ignore_max_val_diff: Optional[Number] = None,
     ):
         """
-        Decrement the latest sample's of a series. When specified key does not exist, a
-        new time series is created.
+        Decrement the latest sample's of a series. When the specified key does not
+        exist, a new time series is created.
 
         This command can be used as a counter or gauge that automatically gets history
         as a time series.
@@ -450,7 +458,9 @@ class TimeSeriesCommands:
         self._append_chunk_size(params, chunk_size)
         self._append_duplicate_policy(params, duplicate_policy)
         self._append_labels(params, labels)
-        self._append_ignore_filters(params, ignore_max_time_diff, ignore_max_val_diff)
+        self._append_insertion_filters(
+            params, ignore_max_time_diff, ignore_max_val_diff
+        )
 
         return self.execute_command(DECRBY_CMD, *params)
 
@@ -1109,7 +1119,7 @@ class TimeSeriesCommands:
             params.append("EMPTY")
 
     @staticmethod
-    def _append_ignore_filters(
+    def _append_insertion_filters(
         params: List[str],
         ignore_max_time_diff: Optional[int] = None,
         ignore_max_val_diff: Optional[Number] = None,
