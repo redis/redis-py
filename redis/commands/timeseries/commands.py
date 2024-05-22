@@ -37,17 +37,17 @@ class TimeSeriesCommands:
         ignore_max_val_diff: Optional[Number] = None,
     ):
         """
-        Creates a new time-series.
+        Create a new time-series.
 
-        For more information, see the Redis command details:
-        https://redis.io/commands/ts.create/
+        For more information see https://redis.io/commands/ts.create/
 
         Args:
             key:
                 The time-series key.
             retention_msecs:
                 Maximum age for samples, compared to the highest reported timestamp in
-                milliseconds. If None or 0 is passed, the series is not trimmed at all.
+                milliseconds. If `None` or `0` is passed, the series is not trimmed at
+                all.
             uncompressed:
                 Changes data storage from compressed (default) to uncompressed.
             labels:
@@ -55,11 +55,12 @@ class TimeSeriesCommands:
                 key.
             chunk_size:
                 Memory size, in bytes, allocated for each data chunk. Must be a multiple
-                of 8 in the range [128..1048576].
+                of 8 in the range `[48..1048576]`. In earlier versions of the module the
+                minimum value was different.
             duplicate_policy:
                 Policy for handling multiple samples with identical timestamps. Can be
                 one of:
-                    - 'block': An error will occur for any out of order sample.
+                    - 'block': An error will occur and the new value will be ignored.
                     - 'first': Ignore the new value.
                     - 'last': Override with the latest value.
                     - 'min': Only override if the value is lower than the existing
@@ -105,28 +106,29 @@ class TimeSeriesCommands:
         ignore_max_val_diff: Optional[Number] = None,
     ):
         """
-        Update the retention, chunk size, duplicate policy, and labels of an existing
-        time series.
+        Update an existing time series.
 
-        For more information, see the Redis command details:
-        https://redis.io/commands/ts.alter/
+        For more information see https://redis.io/commands/ts.alter/
 
         Args:
             key:
                 The time-series key.
             retention_msecs:
                 Maximum age for samples, compared to the highest reported timestamp in
-                milliseconds. If None or 0 is passed, the series is not trimmed at all.
+                milliseconds. If `None` or `0` is passed, the series is not trimmed at
+                all.
             labels:
                 A dictionary of label-value pairs that represent metadata labels of the
                 key.
             chunk_size:
                 Memory size, in bytes, allocated for each data chunk. Must be a multiple
-                of 8 in the range [128..1048576].
+                of 8 in the range `[48..1048576]`. In earlier versions of the module the
+                minimum value was different. Changing this value does not affect
+                existing chunks.
             duplicate_policy:
                 Policy for handling multiple samples with identical timestamps. Can be
                 one of:
-                    - 'block': An error will occur for any out of order sample.
+                    - 'block': An error will occur and the new value will be ignored.
                     - 'first': Ignore the new value.
                     - 'last': Override with the latest value.
                     - 'min': Only override if the value is lower than the existing
@@ -175,10 +177,10 @@ class TimeSeriesCommands:
         on_duplicate: Optional[str] = None,
     ):
         """
-        Append (or create and append) a new sample to a time series.
+        Append a sample to a time series. When the specified key does not exist, a new
+        time series is created.
 
-        For more information, see the Redis command details:
-        https://redis.io/commands/ts.add/
+        For more information see https://redis.io/commands/ts.add/
 
         Args:
             key:
@@ -190,7 +192,8 @@ class TimeSeriesCommands:
                 Numeric data value of the sample.
             retention_msecs:
                 Maximum age for samples, compared to the highest reported timestamp in
-                milliseconds. If None or 0 is passed, the series is not trimmed at all.
+                milliseconds. If `None` or `0` is passed, the series is not trimmed at
+                all.
             uncompressed:
                 Changes data storage from compressed (default) to uncompressed.
             labels:
@@ -198,11 +201,12 @@ class TimeSeriesCommands:
                 key.
             chunk_size:
                 Memory size, in bytes, allocated for each data chunk. Must be a multiple
-                of 8 in the range [128..1048576].
+                of 8 in the range `[48..1048576]`. In earlier versions of the module the
+                minimum value was different.
             duplicate_policy:
                 Policy for handling multiple samples with identical timestamps. Can be
                 one of:
-                    - 'block': An error will occur for any out of order sample.
+                    - 'block': An error will occur and the new value will be ignored.
                     - 'first': Ignore the new value.
                     - 'last': Override with the latest value.
                     - 'min': Only override if the value is lower than the existing
@@ -243,12 +247,26 @@ class TimeSeriesCommands:
 
     def madd(self, ktv_tuples: List[Tuple[KeyT, Union[int, str], Number]]):
         """
-        Append (or create and append) a new `value` to series `key` with `timestamp`.
-        Expects a list of `tuples` as (`key`,`timestamp`, `value`).
+        Append new samples to one or more time series.
 
-        Return value is an array with timestamps of insertions.
+        Each time series must already exist.
 
-        For more information: https://redis.io/commands/ts.madd/
+        The method expects a list of tuples. Each tuple should contain three elements:
+        (`key`, `timestamp`, `value`). The `value` will be appended to the time series
+        identified by 'key', at the given 'timestamp'.
+
+        For more information see https://redis.io/commands/ts.madd/
+
+        Args:
+            ktv_tuples:
+                A list of tuples, where each tuple contains:
+                    - `key`: The key of the time series.
+                    - `timestamp`: The timestamp at which the value should be appended.
+                    - `value`: The value to append to the time series.
+
+        Returns:
+            A list that contains, for each sample, either the timestamp that was used,
+            or an error, if the sample could not be added.
         """
         params = []
         for ktv in ktv_tuples:
@@ -270,23 +288,31 @@ class TimeSeriesCommands:
         ignore_max_val_diff: Optional[Number] = None,
     ):
         """
-        Increment (or create a time-series and increment) the latest sample's of a
-        series. This command can be used as a counter or gauge that automatically gets
-        history as a time series.
+        Increment the latest sample's of a series. When specified key does not exist, a
+        new time series is created.
 
-        For more information: https://redis.io/commands/ts.incrby/
+        This command can be used as a counter or gauge that automatically gets history
+        as a time series.
+
+        For more information see https://redis.io/commands/ts.incrby/
 
         Args:
             key:
                 The time-series key.
             value:
-                Numeric data value of the sample.
+                Numeric value to be added (addend).
             timestamp:
                 Timestamp of the sample. `*` can be used for automatic timestamp (using
-                the system clock).
+                the system clock). `timestamp` must be equal to or higher than the
+                maximum existing timestamp in the series. When equal, the value of the
+                sample with the maximum existing timestamp is increased. If it is
+                higher, a new sample with a timestamp set to `timestamp` is created, and
+                its value is set to the value of the sample with the maximum existing
+                timestamp plus the addend.
             retention_msecs:
                 Maximum age for samples, compared to the highest reported timestamp in
-                milliseconds. If None or 0 is passed, the series is not trimmed at all.
+                milliseconds. If `None` or `0` is passed, the series is not trimmed at
+                all.
             uncompressed:
                 Changes data storage from compressed (default) to uncompressed.
             labels:
@@ -294,11 +320,12 @@ class TimeSeriesCommands:
                 key.
             chunk_size:
                 Memory size, in bytes, allocated for each data chunk. Must be a multiple
-                of 8 in the range [128..1048576].
+                of 8 in the range `[48..1048576]`. In earlier versions of the module the
+                minimum value was different.
             duplicate_policy:
                 Policy for handling multiple samples with identical timestamps. Can be
                 one of:
-                    - 'block': An error will occur for any out of order sample.
+                    - 'block': An error will occur and the new value will be ignored.
                     - 'first': Ignore the new value.
                     - 'last': Override with the latest value.
                     - 'min': Only override if the value is lower than the existing
@@ -322,6 +349,9 @@ class TimeSeriesCommands:
                 is lower than this threshold, the new entry is ignored. Only applicable
                 if `duplicate_policy` is set to `last`, and if `ignore_max_time_diff` is
                 also set. Available since RedisTimeSeries version 1.12.0.
+
+        Returns:
+            The timestamp of the sample that was modified or added.
         """
         params = [key, value]
         self._append_timestamp(params, timestamp)
@@ -348,23 +378,31 @@ class TimeSeriesCommands:
         ignore_max_val_diff: Optional[Number] = None,
     ):
         """
-        Decrement (or create a time-series and decrement) the latest sample's of a
-        series. This command can be used as a counter or gauge that automatically gets
-        history as a time series.
+        Decrement the latest sample's of a series. When specified key does not exist, a
+        new time series is created.
 
-        For more information: https://redis.io/commands/ts.decrby/
+        This command can be used as a counter or gauge that automatically gets history
+        as a time series.
+
+        For more information see https://redis.io/commands/ts.decrby/
 
         Args:
             key:
                 The time-series key.
             value:
-                Numeric data value of the sample.
+                Numeric value to subtract (subtrahend).
             timestamp:
                 Timestamp of the sample. `*` can be used for automatic timestamp (using
-                the system clock).
+                the system clock). `timestamp` must be equal to or higher than the
+                maximum existing timestamp in the series. When equal, the value of the
+                sample with the maximum existing timestamp is decreased. If it is
+                higher, a new sample with a timestamp set to `timestamp` is created, and
+                its value is set to the value of the sample with the maximum existing
+                timestamp minus subtrahend.
             retention_msecs:
                 Maximum age for samples, compared to the highest reported timestamp in
-                milliseconds. If None or 0 is passed, the series is not trimmed at all.
+                milliseconds. If `None` or `0` is passed, the series is not trimmed at
+                all.
             uncompressed:
                 Changes data storage from compressed (default) to uncompressed.
             labels:
@@ -372,11 +410,12 @@ class TimeSeriesCommands:
                 key.
             chunk_size:
                 Memory size, in bytes, allocated for each data chunk. Must be a multiple
-                of 8 in the range [128..1048576].
+                of 8 in the range `[48..1048576]`. In earlier versions of the module the
+                minimum value was different.
             duplicate_policy:
                 Policy for handling multiple samples with identical timestamps. Can be
                 one of:
-                    - 'block': An error will occur for any out of order sample.
+                    - 'block': An error will occur and the new value will be ignored.
                     - 'first': Ignore the new value.
                     - 'last': Override with the latest value.
                     - 'min': Only override if the value is lower than the existing
@@ -400,6 +439,9 @@ class TimeSeriesCommands:
                 is lower than this threshold, the new entry is ignored. Only applicable
                 if `duplicate_policy` is set to `last`, and if `ignore_max_time_diff` is
                 also set. Available since RedisTimeSeries version 1.12.0.
+
+        Returns:
+            The timestamp of the sample that was modified or added.
         """
         params = [key, value]
         self._append_timestamp(params, timestamp)
@@ -416,7 +458,10 @@ class TimeSeriesCommands:
         """
         Delete all samples between two timestamps for a given time series.
 
-        For more information: https://redis.io/commands/ts.del/
+        The given timestamp interval is closed (inclusive), meaning that samples whose
+        timestamp equals `from_time` or `to_time` are also deleted.
+
+        For more information see https://redis.io/commands/ts.del/
 
         Args:
             key:
@@ -425,6 +470,9 @@ class TimeSeriesCommands:
                 Start timestamp for the range deletion.
             to_time:
                 End timestamp for the range deletion.
+
+        Returns:
+            The number of samples deleted.
         """
         return self.execute_command(DEL_CMD, key, from_time, to_time)
 
@@ -439,7 +487,7 @@ class TimeSeriesCommands:
         """
         Create a compaction rule from values added to `source_key` into `dest_key`.
 
-        For more information: https://redis.io/commands/ts.createrule/
+        For more information see https://redis.io/commands/ts.createrule/
 
         Args:
             source_key:
@@ -467,7 +515,7 @@ class TimeSeriesCommands:
         """
         Delete a compaction rule from `source_key` to `dest_key`.
 
-        For more information: https://redis.io/commands/ts.deleterule/
+        For more information see https://redis.io/commands/ts.deleterule/
         """
         return self.execute_command(DELETERULE_CMD, source_key, dest_key)
 
@@ -519,7 +567,7 @@ class TimeSeriesCommands:
         """
         Query a range in forward direction for a specific time-series.
 
-        For more information: https://redis.io/commands/ts.range/
+        For more information see https://redis.io/commands/ts.range/
 
         Args:
             key:
@@ -595,7 +643,7 @@ class TimeSeriesCommands:
 
         **Note**: This command is only available since RedisTimeSeries >= v1.4
 
-        For more information: https://redis.io/commands/ts.revrange/
+        For more information see https://redis.io/commands/ts.revrange/
 
         Args:
             key:
@@ -709,7 +757,7 @@ class TimeSeriesCommands:
         """
         Query a range across multiple time-series by filters in forward direction.
 
-        For more information: https://redis.io/commands/ts.mrange/
+        For more information see https://redis.io/commands/ts.mrange/
 
         Args:
             from_time:
@@ -803,7 +851,7 @@ class TimeSeriesCommands:
         """
         Query a range across multiple time-series by filters in reverse direction.
 
-        For more information: https://redis.io/commands/ts.mrevrange/
+        For more information see https://redis.io/commands/ts.mrevrange/
 
         Args:
             from_time:
@@ -878,7 +926,7 @@ class TimeSeriesCommands:
         """
         Get the last sample of `key`.
 
-        For more information: https://redis.io/commands/ts.get/
+        For more information see https://redis.io/commands/ts.get/
 
         Args:
             latest:
@@ -899,7 +947,7 @@ class TimeSeriesCommands:
         """
         Get the last samples matching the specific `filter`.
 
-        For more information: https://redis.io/commands/ts.mget/
+        For more information see https://redis.io/commands/ts.mget/
 
         Args:
             filters:
@@ -925,7 +973,7 @@ class TimeSeriesCommands:
         """
         Get information of `key`.
 
-        For more information: https://redis.io/commands/ts.info/
+        For more information see https://redis.io/commands/ts.info/
         """
         return self.execute_command(INFO_CMD, key, keys=[key])
 
@@ -933,7 +981,7 @@ class TimeSeriesCommands:
         """
         Get all time series keys matching the `filter` list.
 
-        For more information: https://redis.io/commands/ts.queryindex/
+        For more information see https://redis.io/commands/ts.queryindex/
         """
         return self.execute_command(QUERYINDEX_CMD, *filters)
 

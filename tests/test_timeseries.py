@@ -4,6 +4,7 @@ from time import sleep
 
 import pytest
 import redis
+from redis import ResponseError
 
 from .conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
 
@@ -137,6 +138,14 @@ def test_madd(client):
     assert [1, 2, 3] == client.ts().madd([("a", 1, 5), ("a", 2, 10), ("a", 3, 15)])
 
 
+def test_madd_missing_timeseries(client):
+    response = client.ts().madd([("a", 1, 5), ("a", 2, 10)])
+    assert isinstance(response, list)
+    assert len(response) == 2
+    assert isinstance(response[0], ResponseError)
+    assert isinstance(response[1], ResponseError)
+
+
 def test_incrby_decrby(client):
     for _ in range(100):
         assert client.ts().incrby(1, 1)
@@ -192,8 +201,8 @@ def test_create_and_delete_rule(client):
 def test_del_range(client):
     try:
         client.ts().delete("test", 0, 100)
-    except Exception as e:
-        assert e.__str__() != ""
+    except ResponseError as e:
+        assert "key does not exist" in str(e)
 
     for i in range(100):
         client.ts().add(1, i, i % 7)
