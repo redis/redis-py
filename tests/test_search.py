@@ -1387,8 +1387,8 @@ def test_aggregations_apply(client):
         assert res_set == {"6373878785249699840", "6373878758592700416"}
     else:
         res_set = {
-                res["results"][0]["extra_attributes"]["CreatedDateTimeUTC"],
-                res["results"][1]["extra_attributes"]["CreatedDateTimeUTC"],
+            res["results"][0]["extra_attributes"]["CreatedDateTimeUTC"],
+            res["results"][1]["extra_attributes"]["CreatedDateTimeUTC"],
         }
         assert res_set == {"6373878785249699840", "6373878758592700416"}
 
