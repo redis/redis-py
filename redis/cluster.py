@@ -172,8 +172,8 @@ REDIS_ALLOWED_KEYS = (
     "cache_max_size",
     "cache_ttl",
     "cache_policy",
-    "cache_blacklist",
-    "cache_whitelist",
+    "cache_deny_list",
+    "cache_allow_list",
 )
 KWARGS_DISABLED_KEYS = ("host", "port")
 
@@ -506,7 +506,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         read_from_replicas: bool = False,
         dynamic_startup_nodes: bool = True,
         url: Optional[str] = None,
-        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         **kwargs,
     ):
         """
@@ -1164,7 +1164,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                         response = self.cluster_response_callbacks[command](
                             response, **kwargs
                         )
-                    connection._add_to_local_cache(args, response, keys)
+                    if keys:
+                        connection._add_to_local_cache(args, response, keys)
                     return response
             except AuthenticationError:
                 raise
@@ -1265,6 +1266,18 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """
         setattr(self, funcname, func)
 
+    def flush_cache(self):
+        if self.nodes_manager:
+            self.nodes_manager.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        if self.nodes_manager:
+            self.nodes_manager.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        if self.nodes_manager:
+            self.nodes_manager.invalidate_key_from_cache(key)
+
 
 class ClusterNode:
     def __init__(self, host, port, server_type=None, redis_connection=None):
@@ -1292,6 +1305,18 @@ class ClusterNode:
     def __del__(self):
         if self.redis_connection is not None:
             self.redis_connection.close()
+
+    def flush_cache(self):
+        if self.redis_connection is not None:
+            self.redis_connection.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        if self.redis_connection is not None:
+            self.redis_connection.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        if self.redis_connection is not None:
+            self.redis_connection.invalidate_key_from_cache(key)
 
 
 class LoadBalancer:
@@ -1322,7 +1347,7 @@ class NodesManager:
         lock=None,
         dynamic_startup_nodes=True,
         connection_pool_class=ConnectionPool,
-        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1525,11 +1550,12 @@ class NodesManager:
                     )
                     self.startup_nodes[startup_node.name].redis_connection = r
                 # Make sure cluster mode is enabled on this node
-                if bool(r.info().get("cluster_enabled")) is False:
+                try:
+                    cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
+                except ResponseError:
                     raise RedisClusterException(
                         "Cluster mode is not enabled on this node"
                     )
-                cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
                 startup_nodes_reachable = True
             except Exception as e:
                 # Try the next startup node.
@@ -1581,9 +1607,9 @@ class NodesManager:
                             )
                             tmp_slots[i].append(target_replica_node)
                             # add this node to the nodes cache
-                            tmp_nodes_cache[
-                                target_replica_node.name
-                            ] = target_replica_node
+                            tmp_nodes_cache[target_replica_node.name] = (
+                                target_replica_node
+                            )
                     else:
                         # Validate that 2 nodes want to use the same slot cache
                         # setup
@@ -1657,6 +1683,18 @@ class NodesManager:
         if self.address_remap:
             return self.address_remap((host, port))
         return host, port
+
+    def flush_cache(self):
+        for node in self.nodes_cache.values():
+            node.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        for node in self.nodes_cache.values():
+            node.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        for node in self.nodes_cache.values():
+            node.invalidate_key_from_cache(key)
 
 
 class ClusterPubSub(PubSub):

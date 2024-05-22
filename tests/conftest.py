@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import pytest
 import redis
 from packaging.version import Version
+from redis import Sentinel
 from redis.backoff import NoBackoff
 from redis.connection import Connection, parse_url
 from redis.exceptions import RedisClusterException
@@ -103,6 +104,19 @@ def pytest_addoption(parser):
 
     parser.addoption(
         "--uvloop", action=BooleanOptionalAction, help="Run tests with uvloop"
+    )
+
+    parser.addoption(
+        "--sentinels",
+        action="store",
+        default="localhost:26379,localhost:26380,localhost:26381",
+        help="Comma-separated list of sentinel IPs and ports",
+    )
+    parser.addoption(
+        "--master-service",
+        action="store",
+        default="redis-py-test",
+        help="Name of the Redis master service that the sentinels are monitoring",
     )
 
 
@@ -350,6 +364,34 @@ def r2(request):
 def sslclient(request):
     with _get_client(redis.Redis, request, ssl=True) as client:
         yield client
+
+
+@pytest.fixture()
+def sentinel_setup(local_cache, request):
+    sentinel_ips = request.config.getoption("--sentinels")
+    sentinel_endpoints = [
+        (ip.strip(), int(port.strip()))
+        for ip, port in (endpoint.split(":") for endpoint in sentinel_ips.split(","))
+    ]
+    kwargs = request.param.get("kwargs", {}) if hasattr(request, "param") else {}
+    sentinel = Sentinel(
+        sentinel_endpoints,
+        socket_timeout=0.1,
+        client_cache=local_cache,
+        protocol=3,
+        **kwargs,
+    )
+    yield sentinel
+    for s in sentinel.sentinels:
+        s.close()
+
+
+@pytest.fixture()
+def master(request, sentinel_setup):
+    master_service = request.config.getoption("--master-service")
+    master = sentinel_setup.master_for(master_service)
+    yield master
+    master.close()
 
 
 def _gen_cluster_mock_resp(r, response):

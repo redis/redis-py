@@ -32,7 +32,7 @@ KeyT = _StringLikeT  # Main redis key space
 PatternT = _StringLikeT  # Patterns matched against keys, fields etc
 FieldT = EncodableT  # Fields within hash tables, streams and geo commands
 KeysT = Union[KeyT, Iterable[KeyT]]
-ResponseT = Union[Awaitable, Any]
+ResponseT = Union[Awaitable[Any], Any]
 ChannelT = _StringLikeT
 GroupT = _StringLikeT  # Consumer group
 ConsumerT = _StringLikeT  # Consumer name
@@ -54,12 +54,10 @@ ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Except
 class CommandsProtocol(Protocol):
     connection_pool: Union["AsyncConnectionPool", "ConnectionPool"]
 
-    def execute_command(self, *args, **options):
-        ...
+    def execute_command(self, *args, **options): ...
 
 
 class ClusterCommandsProtocol(CommandsProtocol, Protocol):
     encoder: "Encoder"
 
-    def execute_command(self, *args, **options) -> Union[Any, Awaitable]:
-        ...
+    def execute_command(self, *args, **options) -> Union[Any, Awaitable]: ...

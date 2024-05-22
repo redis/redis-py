@@ -7,9 +7,9 @@ from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 from redis._cache import (
-    DEFAULT_BLACKLIST,
+    DEFAULT_ALLOW_LIST,
+    DEFAULT_DENY_LIST,
     DEFAULT_EVICTION_POLICY,
-    DEFAULT_WHITELIST,
     AbstractCache,
 )
 from redis._parsers.encoders import Encoder
@@ -204,6 +204,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_ocsp_context=None,
         ssl_ocsp_expected_cert=None,
         ssl_min_version=None,
+        ssl_ciphers=None,
         max_connections=None,
         single_connection_client=False,
         health_check_interval=0,
@@ -220,8 +221,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         cache_max_size: int = 10000,
         cache_ttl: int = 0,
         cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
-        cache_whitelist: List[str] = DEFAULT_WHITELIST,
+        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
+        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -278,8 +279,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "cache_max_size": cache_max_size,
                 "cache_ttl": cache_ttl,
                 "cache_policy": cache_policy,
-                "cache_blacklist": cache_blacklist,
-                "cache_whitelist": cache_whitelist,
+                "cache_deny_list": cache_deny_list,
+                "cache_allow_list": cache_allow_list,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -318,6 +319,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ocsp_context": ssl_ocsp_context,
                             "ssl_ocsp_expected_cert": ssl_ocsp_expected_cert,
                             "ssl_min_version": ssl_min_version,
+                            "ssl_ciphers": ssl_ciphers,
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)
@@ -573,7 +575,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     ),
                     lambda error: self._disconnect_raise(conn, error),
                 )
-                conn._add_to_local_cache(args, response, keys)
+                if keys:
+                    conn._add_to_local_cache(args, response, keys)
                 return response
         finally:
             if not self.connection:
@@ -600,31 +603,22 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         return response
 
     def flush_cache(self):
-        try:
-            if self.connection:
-                self.connection.client_cache.flush()
-            else:
-                self.connection_pool.flush_cache()
-        except AttributeError:
-            pass
+        if self.connection:
+            self.connection.flush_cache()
+        else:
+            self.connection_pool.flush_cache()
 
     def delete_command_from_cache(self, command):
-        try:
-            if self.connection:
-                self.connection.client_cache.delete_command(command)
-            else:
-                self.connection_pool.delete_command_from_cache(command)
-        except AttributeError:
-            pass
+        if self.connection:
+            self.connection.delete_command_from_cache(command)
+        else:
+            self.connection_pool.delete_command_from_cache(command)
 
     def invalidate_key_from_cache(self, key):
-        try:
-            if self.connection:
-                self.connection.client_cache.invalidate_key(key)
-            else:
-                self.connection_pool.invalidate_key_from_cache(key)
-        except AttributeError:
-            pass
+        if self.connection:
+            self.connection.invalidate_key_from_cache(key)
+        else:
+            self.connection_pool.invalidate_key_from_cache(key)
 
 
 StrictRedis = Redis

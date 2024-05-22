@@ -58,15 +58,42 @@ def test_uds_connect(uds_address):
 )
 def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     host, port = tcp_address
-    certfile = get_ssl_filename("server-cert.pem")
-    keyfile = get_ssl_filename("server-key.pem")
+    certfile = get_ssl_filename("client-cert.pem")
+    keyfile = get_ssl_filename("client-key.pem")
+    ca_certfile = get_ssl_filename("ca-cert.pem")
     conn = SSLConnection(
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
-        ssl_ca_certs=certfile,
+        ssl_ca_certs=ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl_min_version,
+    )
+    _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+
+
+@pytest.mark.ssl
+@pytest.mark.parametrize(
+    "ssl_ciphers",
+    [
+        "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "ECDHE-RSA-AES128-GCM-SHA256",
+    ],
+)
+def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
+    host, port = tcp_address
+    certfile = get_ssl_filename("client-cert.pem")
+    keyfile = get_ssl_filename("client-key.pem")
+    ca_certfile = get_ssl_filename("ca-cert.pem")
+    conn = SSLConnection(
+        host=host,
+        port=port,
+        client_name=_CLIENT_NAME,
+        ssl_ca_certs=ca_certfile,
+        socket_timeout=10,
+        ssl_min_version=ssl.TLSVersion.TLSv1_2,
+        ssl_ciphers=ssl_ciphers,
     )
     _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
 

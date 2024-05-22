@@ -17,7 +17,7 @@ on:
     - cron: '0 1 * * *' # nightly build
 
 concurrency:
-  group: ${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.event.pull_request.number || github.ref }}-integration
   cancel-in-progress: true
 
 permissions:
