@@ -59,45 +59,6 @@ def parse_to_list(response):
     return res
 
 
-def parse_list_to_dict(response):
-    res = {}
-    for i in range(0, len(response), 2):
-        if isinstance(response[i], list):
-            res["Child iterators"].append(parse_list_to_dict(response[i]))
-            try:
-                if isinstance(response[i + 1], list):
-                    res["Child iterators"].append(parse_list_to_dict(response[i + 1]))
-            except IndexError:
-                pass
-        elif isinstance(response[i + 1], list):
-            res["Child iterators"] = [parse_list_to_dict(response[i + 1])]
-        else:
-            try:
-                res[response[i]] = float(response[i + 1])
-            except (TypeError, ValueError):
-                res[response[i]] = response[i + 1]
-    return res
-
-
-def parse_to_dict(response):
-    if response is None:
-        return {}
-
-    res = {}
-    for det in response:
-        if isinstance(det[1], list):
-            res[det[0]] = parse_list_to_dict(det[1])
-        else:
-            try:  # try to set the attribute. may be provided without value
-                try:  # try to convert the value to float
-                    res[det[0]] = float(det[1])
-                except (TypeError, ValueError):
-                    res[det[0]] = det[1]
-            except IndexError:
-                pass
-    return res
-
-
 def random_string(length=10):
     """
     Returns a random N character long string.

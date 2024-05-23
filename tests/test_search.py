@@ -108,12 +108,21 @@ def createIndex(client, num_docs=100, definition=None):
 
 @pytest.fixture
 def client(request):
-    r = _get_client(redis.Redis, request, decode_responses=True)
+    if hasattr(request, "param"):
+        protocol = request.param.get("protocol", None)
+    else:
+        protocol = None
+    r = _get_client(redis.Redis, request, decode_responses=True, protocol=protocol)
     r.flushdb()
     return r
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_client(client):
     num_docs = 500
     createIndex(client.ft(), num_docs=num_docs)
@@ -311,6 +320,11 @@ def test_client(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_scores(client):
     client.ft().create_index((TextField("txt"),))
 
@@ -332,6 +346,11 @@ def test_scores(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_stopwords(client):
     client.ft().create_index((TextField("txt"),), stopwords=["foo", "bar", "baz"])
     client.hset("doc1", mapping={"txt": "foo bar"})
@@ -350,6 +369,11 @@ def test_stopwords(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_filters(client):
     client.ft().create_index((TextField("txt"), NumericField("num"), GeoField("loc")))
     client.hset(
@@ -403,6 +427,11 @@ def test_filters(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_sort_by(client):
     client.ft().create_index((TextField("txt"), NumericField("num", sortable=True)))
     client.hset("doc1", mapping={"txt": "foo bar", "num": 1})
@@ -525,6 +554,11 @@ def test_auto_complete(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_no_index(client):
     client.ft().create_index(
         (
@@ -616,6 +650,11 @@ def test_explaincli(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_summarize(client):
     createIndex(client.ft())
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
@@ -660,6 +699,11 @@ def test_summarize(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_alias(client):
     index1 = getClient(client)
     index2 = getClient(client)
@@ -723,6 +767,11 @@ def test_alias(client):
 
 @pytest.mark.redismod
 @pytest.mark.xfail(strict=False)
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_alias_basic(client):
     # Creating a client with one index
     index1 = getClient(client).ft("testAlias")
@@ -771,6 +820,11 @@ def test_alias_basic(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_textfield_sortable_nostem(client):
     # Creating the index definition with sortable and no_stem
     client.ft().create_index((TextField("txt", sortable=True, no_stem=True),))
@@ -786,6 +840,11 @@ def test_textfield_sortable_nostem(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_alter_schema_add(client):
     # Creating the index definition and schema
     client.ft().create_index(TextField("title"))
@@ -810,6 +869,11 @@ def test_alter_schema_add(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_spell_check(client):
     client.ft().create_index((TextField("f1"), TextField("f2")))
 
@@ -879,6 +943,11 @@ def test_spell_check(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_dict_operations(client):
     client.ft().create_index((TextField("f1"), TextField("f2")))
     # Add three items
@@ -898,6 +967,11 @@ def test_dict_operations(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_phonetic_matcher(client):
     client.ft().create_index((TextField("name"),))
     client.hset("doc1", mapping={"name": "Jon"})
@@ -931,6 +1005,11 @@ def test_phonetic_matcher(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_scorer(client):
     client.ft().create_index((TextField("description"),))
 
@@ -1015,6 +1094,11 @@ def test_config(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_aggregations_groupby(client):
     # Creating the index definition and schema
     client.ft().create_index(
@@ -1264,6 +1348,11 @@ def test_aggregations_groupby(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_aggregations_sort_by_and_limit(client):
     client.ft().create_index((TextField("t1"), TextField("t2")))
 
@@ -1323,6 +1412,11 @@ def test_aggregations_sort_by_and_limit(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_aggregations_load(client):
     client.ft().create_index((TextField("t1"), TextField("t2")))
 
@@ -1361,6 +1455,11 @@ def test_aggregations_load(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_aggregations_apply(client):
     client.ft().create_index(
         (
@@ -1396,6 +1495,11 @@ def test_aggregations_apply(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_aggregations_filter(client):
     client.ft().create_index(
         (TextField("name", sortable=True), NumericField("age", sortable=True))
@@ -1499,6 +1603,11 @@ def test_expire(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_skip_initial_scan(client):
     client.hset("doc1", "foo", "bar")
     q = Query("@foo:bar")
@@ -1584,6 +1693,11 @@ def test_create_client_definition_hash(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_create_client_definition_json(client):
     """
     Create definition with IndexType.JSON as index type (ON JSON),
@@ -1609,6 +1723,11 @@ def test_create_client_definition_json(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_fields_as_name(client):
     # create index
     SCHEMA = (
@@ -1636,6 +1755,11 @@ def test_fields_as_name(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_casesensitive(client):
     # create index
     SCHEMA = (TagField("t", case_sensitive=False),)
@@ -1671,6 +1795,11 @@ def test_casesensitive(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_search_return_fields(client):
     res = client.json().set(
         "doc:1",
@@ -1708,6 +1837,11 @@ def test_search_return_fields(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_synupdate(client):
     definition = IndexDefinition(index_type=IndexType.HASH)
     client.ft().create_index(
@@ -1754,6 +1888,11 @@ def test_syndump(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_create_json_with_alias(client):
     """
     Create definition with IndexType.JSON as index type (ON JSON) with two
@@ -1799,6 +1938,11 @@ def test_create_json_with_alias(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_json_with_multipath(client):
     """
     Create definition with IndexType.JSON as index type (ON JSON),
@@ -1843,6 +1987,11 @@ def test_json_with_multipath(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_json_with_jsonpath(client):
     definition = IndexDefinition(index_type=IndexType.JSON)
     client.ft().create_index(
@@ -1894,6 +2043,11 @@ def test_json_with_jsonpath(client):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_if_redis_enterprise()
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_profile(client):
     client.ft().create_index((TextField("t"),))
     client.ft().client.hset("1", "t", "hello")
@@ -1903,10 +2057,11 @@ def test_profile(client):
     q = Query("hello|world").no_content()
     if is_resp2_connection(client):
         res, det = client.ft().profile(q)
-        assert det["Iterators profile"]["Counter"] == 2.0
-        assert len(det["Iterators profile"]["Child iterators"]) == 2
-        assert det["Iterators profile"]["Type"] == "UNION"
-        assert det["Parsing time"] < 0.5
+        iterators_profile = det["Shards"][0]["Iterators profile"]
+        assert iterators_profile["Counter"] == 2
+        assert len(iterators_profile["Child iterators"]) == 2
+        assert iterators_profile["Type"] == "UNION"
+        assert float(det["Shards"][0]["Parsing time"]) < 0.5
         assert len(res.docs) == 2  # check also the search result
 
         # check using AggregateRequest
@@ -1916,16 +2071,17 @@ def test_profile(client):
             .apply(prefix="startswith(@t, 'hel')")
         )
         res, det = client.ft().profile(req)
-        assert det["Iterators profile"]["Counter"] == 2
-        assert det["Iterators profile"]["Type"] == "WILDCARD"
-        assert isinstance(det["Parsing time"], float)
+        iterators_profile = det["Shards"][0]["Iterators profile"]
+        assert iterators_profile["Counter"] == 2
+        assert iterators_profile["Type"] == "WILDCARD"
         assert len(res.rows) == 2  # check also the search result
     else:
         res = client.ft().profile(q)
-        assert res["profile"]["Iterators profile"][0]["Counter"] == 2.0
-        assert res["profile"]["Iterators profile"][0]["Type"] == "UNION"
-        assert res["profile"]["Parsing time"] < 0.5
-        assert len(res["results"]) == 2  # check also the search result
+        iterators_profile = res["Profile"]["Shards"][0]["Iterators profile"]
+        assert iterators_profile["Counter"] == 2
+        assert iterators_profile["Type"] == "UNION"
+        assert res["Profile"]["Shards"][0]["Parsing time"] < 0.5
+        assert len(res["Results"]["results"]) == 2  # check also the search result
 
         # check using AggregateRequest
         req = (
@@ -1934,14 +2090,20 @@ def test_profile(client):
             .apply(prefix="startswith(@t, 'hel')")
         )
         res = client.ft().profile(req)
-        assert res["profile"]["Iterators profile"][0]["Counter"] == 2
-        assert res["profile"]["Iterators profile"][0]["Type"] == "WILDCARD"
-        assert isinstance(res["profile"]["Parsing time"], float)
-        assert len(res["results"]) == 2  # check also the search result
+        iterators_profile = res["Profile"]["Shards"][0]["Iterators profile"]
+        assert iterators_profile["Counter"] == 2
+        assert iterators_profile["Type"] == "WILDCARD"
+        assert isinstance(res["Profile"]["Shards"][0]["Parsing time"], float)
+        assert len(res["Results"]["results"]) == 2  # check also the search result
 
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_profile_limited(client):
     client.ft().create_index((TextField("t"),))
     client.ft().client.hset("1", "t", "hello")
@@ -1952,33 +2114,39 @@ def test_profile_limited(client):
     q = Query("%hell% hel*")
     if is_resp2_connection(client):
         res, det = client.ft().profile(q, limited=True)
+        iterators_profile = det["Shards"][0]["Iterators profile"]
         assert (
-            det["Iterators profile"]["Child iterators"][0]["Child iterators"]
+            iterators_profile["Child iterators"][0]["Child iterators"]
             == "The number of iterators in the union is 3"
         )
         assert (
-            det["Iterators profile"]["Child iterators"][1]["Child iterators"]
+            iterators_profile["Child iterators"][1]["Child iterators"]
             == "The number of iterators in the union is 4"
         )
-        assert det["Iterators profile"]["Type"] == "INTERSECT"
+        assert iterators_profile["Type"] == "INTERSECT"
         assert len(res.docs) == 3  # check also the search result
     else:
         res = client.ft().profile(q, limited=True)
-        iterators_profile = res["profile"]["Iterators profile"]
+        iterators_profile = res["Profile"]["Shards"][0]["Iterators profile"]
         assert (
-            iterators_profile[0]["Child iterators"][0]["Child iterators"]
+            iterators_profile["Child iterators"][0]["Child iterators"]
             == "The number of iterators in the union is 3"
         )
         assert (
-            iterators_profile[0]["Child iterators"][1]["Child iterators"]
+            iterators_profile["Child iterators"][1]["Child iterators"]
             == "The number of iterators in the union is 4"
         )
-        assert iterators_profile[0]["Type"] == "INTERSECT"
-        assert len(res["results"]) == 3  # check also the search result
+        assert iterators_profile["Type"] == "INTERSECT"
+        assert len(res["Results"]["results"]) == 3  # check also the search result
 
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_profile_query_params(client):
     client.ft().create_index(
         (
@@ -1994,22 +2162,29 @@ def test_profile_query_params(client):
     q = Query(query).return_field("__v_score").sort_by("__v_score", True).dialect(2)
     if is_resp2_connection(client):
         res, det = client.ft().profile(q, query_params={"vec": "aaaaaaaa"})
-        assert det["Iterators profile"]["Counter"] == 2.0
-        assert det["Iterators profile"]["Type"] == "VECTOR"
+        iterators_profile = det["Shards"][0]["Iterators profile"]
+        assert iterators_profile["Counter"] == 2.0
+        assert iterators_profile["Type"] == "VECTOR"
         assert res.total == 2
         assert "a" == res.docs[0].id
         assert "0" == res.docs[0].__getattribute__("__v_score")
     else:
         res = client.ft().profile(q, query_params={"vec": "aaaaaaaa"})
-        assert res["profile"]["Iterators profile"][0]["Counter"] == 2
-        assert res["profile"]["Iterators profile"][0]["Type"] == "VECTOR"
-        assert res["total_results"] == 2
-        assert "a" == res["results"][0]["id"]
-        assert "0" == res["results"][0]["extra_attributes"]["__v_score"]
+        iterators_profile = res["Profile"]["Shards"][0]["Iterators profile"]
+        assert iterators_profile["Counter"] == 2
+        assert iterators_profile["Type"] == "VECTOR"
+        assert res["Results"]["total_results"] == 2
+        assert "a" == res["Results"]["results"][0]["id"]
+        assert "0" == res["Results"]["results"][0]["extra_attributes"]["__v_score"]
 
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_vector_field(client):
     client.flushdb()
     client.ft().create_index(
@@ -2051,6 +2226,11 @@ def test_vector_field_error(r):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_text_params(client):
     client.flushdb()
     client.ft().create_index((TextField("name"),))
@@ -2074,6 +2254,11 @@ def test_text_params(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_numeric_params(client):
     client.flushdb()
     client.ft().create_index((NumericField("numval"),))
@@ -2098,6 +2283,11 @@ def test_numeric_params(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_geo_params(client):
     client.ft().create_index((GeoField("g")))
     client.hset("doc1", mapping={"g": "29.69465, 34.95126"})
@@ -2121,6 +2311,11 @@ def test_geo_params(client):
 
 @pytest.mark.redismod
 @skip_if_redis_enterprise()
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_search_commands_in_pipeline(client):
     p = client.ft().pipeline()
     p.create_index((TextField("txt"),))
@@ -2195,6 +2390,11 @@ def test_dialect(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_expire_while_search(client: redis.Redis):
     client.ft().create_index((TextField("txt"),))
     client.hset("hset:1", "txt", "a")
@@ -2218,6 +2418,11 @@ def test_expire_while_search(client: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.experimental
+@pytest.mark.parametrize(
+    "client",
+    [{"protocol": 2}, {"protocol": 3}],
+    indirect=True,
+)
 def test_withsuffixtrie(client: redis.Redis):
     # create index
     assert client.ft().create_index((TextField("txt"),))
