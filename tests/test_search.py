@@ -1383,16 +1383,14 @@ def test_aggregations_apply(client):
     )
     res = client.ft().aggregate(req)
     if is_resp2_connection(client):
-        res_set = set([res.rows[0][1], res.rows[1][1]])
-        assert res_set == set(["6373878785249699840", "6373878758592700416"])
+        res_set = {res.rows[0][1], res.rows[1][1]}
+        assert res_set == {"6373878785249699840", "6373878758592700416"}
     else:
-        res_set = set(
-            [
-                res["results"][0]["extra_attributes"]["CreatedDateTimeUTC"],
-                res["results"][1]["extra_attributes"]["CreatedDateTimeUTC"],
-            ],
-        )
-        assert res_set == set(["6373878785249699840", "6373878758592700416"])
+        res_set = {
+            res["results"][0]["extra_attributes"]["CreatedDateTimeUTC"],
+            res["results"][1]["extra_attributes"]["CreatedDateTimeUTC"],
+        }
+        assert res_set == {"6373878785249699840", "6373878758592700416"}
 
 
 @pytest.mark.redismod
@@ -2099,7 +2097,7 @@ def test_numeric_params(client):
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_geo_params(client):
-    client.ft().create_index((GeoField("g")))
+    client.ft().create_index(GeoField("g"))
     client.hset("doc1", mapping={"g": "29.69465, 34.95126"})
     client.hset("doc2", mapping={"g": "29.69350, 34.94737"})
     client.hset("doc3", mapping={"g": "29.68746, 34.94882"})
@@ -2228,14 +2226,14 @@ def test_withsuffixtrie(client: redis.Redis):
         assert client.ft().dropindex("idx")
 
         # create withsuffixtrie index (text fields)
-        assert client.ft().create_index((TextField("t", withsuffixtrie=True)))
+        assert client.ft().create_index(TextField("t", withsuffixtrie=True))
         waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]
         assert client.ft().dropindex("idx")
 
         # create withsuffixtrie index (tag field)
-        assert client.ft().create_index((TagField("t", withsuffixtrie=True)))
+        assert client.ft().create_index(TagField("t", withsuffixtrie=True))
         waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]
@@ -2245,14 +2243,14 @@ def test_withsuffixtrie(client: redis.Redis):
         assert client.ft().dropindex("idx")
 
         # create withsuffixtrie index (text fields)
-        assert client.ft().create_index((TextField("t", withsuffixtrie=True)))
+        assert client.ft().create_index(TextField("t", withsuffixtrie=True))
         waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
         assert client.ft().dropindex("idx")
 
         # create withsuffixtrie index (tag field)
-        assert client.ft().create_index((TagField("t", withsuffixtrie=True)))
+        assert client.ft().create_index(TagField("t", withsuffixtrie=True))
         waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
@@ -2271,7 +2269,7 @@ def test_query_timeout(r: redis.Redis):
 
 @pytest.mark.redismod
 def test_geoshape(client: redis.Redis):
-    client.ft().create_index((GeoShapeField("geom", GeoShapeField.FLAT)))
+    client.ft().create_index(GeoShapeField("geom", GeoShapeField.FLAT))
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
     client.hset("small", "geom", "POLYGON((1 1, 1 100, 100 100, 100 1, 1 1))")
     client.hset("large", "geom", "POLYGON((1 1, 1 200, 200 200, 200 1, 1 1))")

@@ -1487,14 +1487,14 @@ async def test_withsuffixtrie(decoded_r: redis.Redis):
         assert await decoded_r.ft().dropindex("idx")
 
         # create withsuffixtrie index (text field)
-        assert await decoded_r.ft().create_index((TextField("t", withsuffixtrie=True)))
+        assert await decoded_r.ft().create_index(TextField("t", withsuffixtrie=True))
         await waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]
         assert await decoded_r.ft().dropindex("idx")
 
         # create withsuffixtrie index (tag field)
-        assert await decoded_r.ft().create_index((TagField("t", withsuffixtrie=True)))
+        assert await decoded_r.ft().create_index(TagField("t", withsuffixtrie=True))
         await waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]
@@ -1504,14 +1504,14 @@ async def test_withsuffixtrie(decoded_r: redis.Redis):
         assert await decoded_r.ft().dropindex("idx")
 
         # create withsuffixtrie index (text fields)
-        assert await decoded_r.ft().create_index((TextField("t", withsuffixtrie=True)))
+        assert await decoded_r.ft().create_index(TextField("t", withsuffixtrie=True))
         waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
         assert await decoded_r.ft().dropindex("idx")
 
         # create withsuffixtrie index (tag field)
-        assert await decoded_r.ft().create_index((TagField("t", withsuffixtrie=True)))
+        assert await decoded_r.ft().create_index(TagField("t", withsuffixtrie=True))
         waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
