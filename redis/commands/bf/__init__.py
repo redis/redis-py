@@ -5,7 +5,7 @@ from .commands import *  # noqa
 from .info import BFInfo, CFInfo, CMSInfo, TDigestInfo, TopKInfo
 
 
-class AbstractBloom(object):
+class AbstractBloom:
     """
     The client allows to interact with RedisBloom and use all of
     it's functionality.
