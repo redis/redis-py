@@ -5126,8 +5126,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns `None`. If the key exists, returns a list
-            which contains for each field in the request:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
                 - `-2` if the field does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
@@ -5187,8 +5187,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns `None`. If the key exists, returns a list
-            which contains for each field in the request:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
                 - `-2` if the field does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
@@ -5248,8 +5248,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns `None`. If the key exists, returns a list
-            which contains for each field in the request:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
                 - `-2` if the field does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
@@ -5315,8 +5315,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns `None`. If the key exists, returns a list
-            which contains for each field in the request:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
                 - `-2` if the field does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
@@ -5362,8 +5362,8 @@ class HashCommands(CommandsProtocol):
                     expiration time.
 
         Returns:
-            If the key does not exist, returns `None`. If the key exists, returns a list
-            which contains for each field in the request:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
                 - `-2` if the field does not exist.
                 - `-1` if the field exists but has no associated expiration time.
                 - `1` if the expiration time was successfully removed from the field.
@@ -5382,9 +5382,8 @@ class HashCommands(CommandsProtocol):
                     time.
 
         Returns:
-            `None` if the key does not exist. Otherwise, a list containing the result
-            for each field, in the same order as requested. The result for each field
-            can be:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
                 - `-2` if the field does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the expiration Unix timestamp in
@@ -5406,9 +5405,8 @@ class HashCommands(CommandsProtocol):
                     time.
 
         Returns:
-            `None` if the key does not exist. Otherwise, a list containing the result
-            for each field, in the same order as requested. The result for each field
-            can be:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
                 - `-2` if the field does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the expiration Unix timestamp in
@@ -5430,9 +5428,8 @@ class HashCommands(CommandsProtocol):
             fields: A list of fields within the hash for which to get the TTL.
 
         Returns:
-            `None` if the key does not exist. Otherwise, a list containing the result
-            for each field, in the same order as requested. The result for each field
-            can be:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
                 - `-2` if the field does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the TTL in seconds if the field has
@@ -5454,9 +5451,8 @@ class HashCommands(CommandsProtocol):
             fields: A list of fields within the hash for which to get the TTL.
 
         Returns:
-            None or list: `None` if the key does not exist. Otherwise, a list containing
-            the result for each field, in the same order as requested. The result for
-            each field can be:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
                 - `-2` if the field does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the TTL in milliseconds if the field
@@ -5464,259 +5460,6 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command(
             "HPTTL", key, "FIELDS", len(fields), *fields, keys=[key]
-        )
-
-    def hgetf(
-        self,
-        key: KeyT,
-        *fields: str,
-        nx: bool = False,
-        xx: bool = False,
-        gt: bool = False,
-        lt: bool = False,
-        seconds: Optional[ExpiryT] = None,
-        milliseconds: Optional[ExpiryT] = None,
-        unix_time_seconds: Optional[AbsExpiryT] = None,
-        unix_time_milliseconds: Optional[AbsExpiryT] = None,
-        persist: bool = False,
-    ) -> list:
-        """
-        For each specified field, get its value and optionally set the field's remaining
-        time to live or UNIX expiration timestamp in seconds or milliseconds.
-
-        For fields that already have an expiration time, the behavior of the update can
-        be controlled using the `nx`, `xx`, `gt`, and `lt` parameters.
-
-        The return value provides detailed information about the outcome for each field.
-
-        For more information, see https://redis.io/commands/hexpire
-
-        Args:
-            key: The name of the hash key.
-            fields: List of fields within the hash to retrieve the values from.
-            nx: For each specified field, set the expiration only if the field does not
-                have an expiration time.
-            xx: For each specified field, set the expiration only if the field has an
-                expiration time.
-            gt: For each specified field, set the expiration only if the new expiration
-                time is greater than the field's current one. A field with no expiration
-                is treated as an infinite expiration.
-            lt: For each specified field, set the expiration only if the new expiration
-                time is less than the field's current one. A field with no expiration is
-                treated as an infinite expiration.
-            seconds: For each specified field, set the remaining time to live in
-                     seconds. Can be an integer, or a Python `timedelta` object.
-            milliseconds: For each specified field, set the remaining time to live in
-                          milliseconds. Can be an integer, or a Python `timedelta`
-                          object.
-            unix_time_seconds: For each specified field, set the UNIX expiration time
-                               in seconds. Can be an integer or a Python `datetime`
-                               object.
-            unix_time_milliseconds: For each specified field, set the UNIX expiration
-                                    time in milliseconds. Can be an integer or a Python
-                                    `datetime` object.
-            persist: For each specified field, remove the expiration time.
-
-        Returns:
-            A list containing the values of the fields, with `None` for missing fields,
-            or `None` if the key does not exist.
-        """
-        conditions = [nx, xx, gt, lt]
-        if sum(conditions) > 1:
-            raise ValueError("Only one of 'nx', 'xx', 'gt', 'lt' can be specified.")
-
-        expirations = [
-            seconds is not None,
-            milliseconds is not None,
-            unix_time_seconds is not None,
-            unix_time_milliseconds is not None,
-            persist,
-        ]
-        if sum(expirations) > 1:
-            raise ValueError("Only one expiration setting can be specified.")
-
-        if isinstance(seconds, datetime.timedelta):
-            seconds = int(seconds.total_seconds())
-
-        if isinstance(milliseconds, datetime.timedelta):
-            milliseconds = int(milliseconds.total_seconds() * 1000)
-
-        if isinstance(unix_time_seconds, datetime.datetime):
-            unix_time_seconds = int(unix_time_seconds.timestamp())
-
-        if isinstance(unix_time_milliseconds, datetime.datetime):
-            unix_time_milliseconds = int(unix_time_milliseconds.timestamp() * 1000)
-
-        options = []
-        if nx:
-            options.append("NX")
-        if xx:
-            options.append("XX")
-        if gt:
-            options.append("GT")
-        if lt:
-            options.append("LT")
-
-        if seconds is not None:
-            options.extend(["EX", seconds])
-        elif milliseconds is not None:
-            options.extend(["PX", milliseconds])
-        elif unix_time_seconds is not None:
-            options.extend(["EXAT", unix_time_seconds])
-        elif unix_time_milliseconds is not None:
-            options.extend(["PXAT", unix_time_milliseconds])
-        elif persist:
-            options.append("PERSIST")
-
-        return self.execute_command(
-            "HGETF", key, *options, "FIELDS", len(fields), *fields
-        )
-
-    def hsetf(
-        self,
-        key: KeyT,
-        mapping: Dict[str, str],
-        no_create_key: bool = False,
-        no_create_fields: bool = False,
-        no_overwrite_fields: bool = False,
-        get_new: bool = False,
-        get_old: bool = False,
-        nx: bool = False,
-        xx: bool = False,
-        gt: bool = False,
-        lt: bool = False,
-        seconds: Optional[ExpiryT] = None,
-        milliseconds: Optional[ExpiryT] = None,
-        unix_time_seconds: Optional[AbsExpiryT] = None,
-        unix_time_milliseconds: Optional[AbsExpiryT] = None,
-        keep_ttl: bool = False,
-    ):
-        """
-        For each specified field-value pair in `mapping`, set the field to the value and
-        optionally set the field's remaining time to live or UNIX expiration timestamp
-        in seconds or milliseconds.
-
-        Args:
-            key: The name of the hash key.
-            mapping: Map of fields and their corresponding values.
-            no_create_key: If set to `True`, don't create the key if it does not exist.
-            no_create_fields: If set to `True`, ignore the fields that do not exist.
-            no_overwrite_fields: If set to `True`, ignore the fields that already exist.
-            get_new: Return the new values of the fields.
-            get_old: Return the old values of the fields.
-            nx: For each specified field, set the expiration only if the field does not
-                have an expiration time.
-            xx: For each specified field, set the expiration only if the field has an
-                expiration time.
-            gt: For each specified field, set the expiration only if the new expiration
-                time is greater than the field's current one. A field with no expiration
-                is treated as an infinite expiration.
-            lt: For each specified field, set the expiration only if the new expiration
-                time is less than the field's current one. A field with no expiration is
-                treated as an infinite expiration.
-            seconds: For each specified field, set the remaining time to live in
-                     seconds. Can be an integer, or a Python `timedelta` object.
-            milliseconds: For each specified field, set the remaining time to live in
-                          milliseconds. Can be an integer, or a Python `timedelta`
-                          object.
-            unix_time_seconds: For each specified field, set the UNIX expiration time
-                               in seconds. Can be an integer or a Python `datetime`
-                               object.
-            unix_time_milliseconds: For each specified field, set the UNIX expiration
-                                    time in milliseconds. Can be an integer or a Python
-                                    `datetime` object.
-            keep_ttl: For each specified field, retain the previous expiration time. If
-                      a field is created, it is created with no expiration.
-
-        Returns:
-            If `getold` or `getnew` is specified, returns a list of field values, either
-            the old values, or the new values, as requested. For the fields where the
-            value could not be set due to `dont_create_fields` `None` will be returned.
-            If neither `getold` nor `getnew` is specified, returns a list of numeric
-            status codes, one per field:
-             - 0 if the field was not set due to `dont_create_fields` or
-               `dont_overwrite_fields`.
-             - 1 if the field value was set without updating the TTL.
-             - 3 if the field value was set and the TTL was updated.
-        """
-        field_update_flags = [no_create_fields, no_overwrite_fields]
-        if sum(field_update_flags) > 1:
-            raise ValueError(
-                "Only one of 'no_create_fields', 'no_overwrite_fields'"
-                " can be specified."
-            )
-
-        return_flags = [get_new, get_old]
-        if sum(return_flags) > 1:
-            raise ValueError("Only one of 'get_new', 'get_old' can be specified.")
-
-        conditions = [nx, xx, gt, lt]
-        if sum(conditions) > 1:
-            raise ValueError("Only one of 'nx', 'xx', 'gt', 'lt' can be specified.")
-
-        expirations = [
-            seconds is not None,
-            milliseconds is not None,
-            unix_time_seconds is not None,
-            unix_time_milliseconds is not None,
-            keep_ttl,
-        ]
-        if sum(expirations) > 1:
-            raise ValueError("Only one expiration setting can be specified.")
-
-        if isinstance(seconds, datetime.timedelta):
-            seconds = int(seconds.total_seconds())
-
-        if isinstance(milliseconds, datetime.timedelta):
-            milliseconds = int(milliseconds.total_seconds() * 1000)
-
-        if isinstance(unix_time_seconds, datetime.datetime):
-            unix_time_seconds = int(unix_time_seconds.timestamp())
-
-        if isinstance(unix_time_milliseconds, datetime.datetime):
-            unix_time_milliseconds = int(unix_time_milliseconds.timestamp() * 1000)
-
-        options = []
-
-        if no_create_key:
-            options.append("DC")
-
-        if no_create_fields:
-            options.append("DCF")
-        if no_overwrite_fields:
-            options.append("DOF")
-
-        if get_new:
-            options.append("GETNEW")
-        if get_old:
-            options.append("GETOLD")
-
-        if nx:
-            options.append("NX")
-        if xx:
-            options.append("XX")
-        if gt:
-            options.append("GT")
-        if lt:
-            options.append("LT")
-
-        if seconds is not None:
-            options.extend(["EX", seconds])
-        elif milliseconds is not None:
-            options.extend(["PX", milliseconds])
-        elif unix_time_seconds is not None:
-            options.extend(["EXAT", unix_time_seconds])
-        elif unix_time_milliseconds is not None:
-            options.extend(["PXAT", unix_time_milliseconds])
-        elif keep_ttl:
-            options.append("KEEPTTL")
-
-        fvp_list = []
-        for field, value in mapping.items():
-            fvp_list.extend([field, value])
-
-        return self.execute_command(
-            "HSETF", key, *options, "FVS", len(mapping), *fvp_list
         )
 
 
