@@ -1,11 +1,12 @@
 import itertools
 import time
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from redis.client import Pipeline
 from redis.utils import deprecated_function
 
-from ..helpers import get_protocol_version, parse_to_dict
+from ..._parsers.helpers import pairs_to_dict
+from ..helpers import get_protocol_version
 from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
 from .document import Document
@@ -85,7 +86,9 @@ class SearchCommands:
     def _parse_aggregate(self, res, **kwargs):
         return self._get_aggregate_result(res, kwargs["query"], kwargs["has_cursor"])
 
-    def _parse_profile(self, res, **kwargs):
+    def _parse_profile(
+        self, res, **kwargs
+    ) -> Tuple[Union[AggregateResult, Result], Dict[str, Any]]:
         query = kwargs["query"]
         if isinstance(query, AggregateRequest):
             result = self._get_aggregate_result(res[0], query, query._cursor)
@@ -98,7 +101,22 @@ class SearchCommands:
                 with_scores=query._with_scores,
             )
 
-        return result, parse_to_dict(res[1])
+        details = pairs_to_dict(res[1])
+        details["Coordinator"] = pairs_to_dict(details["Coordinator"])
+        details["Shards"] = [pairs_to_dict(s) for s in details["Shards"]]
+        for shard in details["Shards"]:
+            if "Iterators profile" in shard:
+                shard["Iterators profile"] = pairs_to_dict(shard["Iterators profile"])
+                if "Child iterators" in shard["Iterators profile"]:
+                    shard["Iterators profile"]["Child iterators"] = [
+                        pairs_to_dict(c)
+                        for c in shard["Iterators profile"]["Child iterators"]
+                    ]
+            if "Result processors profile" in shard:
+                shard["Result processors profile"] = [
+                    pairs_to_dict(r) for r in shard["Result processors profile"]
+                ]
+        return result, details
 
     def _parse_spellcheck(self, res, **kwargs):
         corrections = {}
