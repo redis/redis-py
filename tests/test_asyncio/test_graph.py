@@ -1,9 +1,15 @@
 import pytest
+import pytest_asyncio
 import redis.asyncio as redis
 from redis.commands.graph import Edge, Node, Path
 from redis.commands.graph.execution_plan import Operation
 from redis.exceptions import ResponseError
 from tests.conftest import skip_if_redis_enterprise
+
+
+@pytest_asyncio.fixture()
+async def decoded_r(create_redis, stack_url):
+    return await create_redis(decode_responses=True, url=stack_url)
 
 
 async def test_bulk(decoded_r):

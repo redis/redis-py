@@ -1,8 +1,14 @@
 import pytest
+import pytest_asyncio
 import redis.asyncio as redis
 from redis import exceptions
 from redis.commands.json.path import Path
 from tests.conftest import assert_resp_response, skip_ifmodversion_lt
+
+
+@pytest_asyncio.fixture()
+async def decoded_r(create_redis, stack_url):
+    return await create_redis(decode_responses=True, url=stack_url)
 
 
 async def test_json_setbinarykey(decoded_r: redis.Redis):

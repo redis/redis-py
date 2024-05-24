@@ -5,7 +5,20 @@ from time import sleep
 import pytest
 import redis
 
-from .conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
+from .conftest import (
+    _get_client,
+    assert_resp_response,
+    is_resp2_connection,
+    skip_ifmodversion_lt,
+)
+
+
+@pytest.fixture()
+def decoded_r(request, stack_url):
+    with _get_client(
+        redis.Redis, request, decode_responses=True, from_url=stack_url
+    ) as client:
+        yield client
 
 
 @pytest.fixture

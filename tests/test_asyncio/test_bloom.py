@@ -1,6 +1,7 @@
 from math import inf
 
 import pytest
+import pytest_asyncio
 import redis.asyncio as redis
 from redis.exceptions import ModuleError, RedisError
 from redis.utils import HIREDIS_AVAILABLE
@@ -9,6 +10,11 @@ from tests.conftest import (
     is_resp2_connection,
     skip_ifmodversion_lt,
 )
+
+
+@pytest_asyncio.fixture()
+async def decoded_r(create_redis, stack_url):
+    return await create_redis(decode_responses=True, url=stack_url)
 
 
 def intlist(obj):

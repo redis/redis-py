@@ -2,12 +2,18 @@ import time
 from time import sleep
 
 import pytest
+import pytest_asyncio
 import redis.asyncio as redis
 from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
     skip_ifmodversion_lt,
 )
+
+
+@pytest_asyncio.fixture()
+async def decoded_r(create_redis, stack_url):
+    return await create_redis(decode_responses=True, url=stack_url)
 
 
 async def test_create(decoded_r: redis.Redis):
@@ -214,18 +220,20 @@ async def test_del_range(decoded_r: redis.Redis):
     )
 
 
-async def test_range(r: redis.Redis):
+async def test_range(decoded_r: redis.Redis):
     for i in range(100):
-        await r.ts().add(1, i, i % 7)
-    assert 100 == len(await r.ts().range(1, 0, 200))
+        await decoded_r.ts().add(1, i, i % 7)
+    assert 100 == len(await decoded_r.ts().range(1, 0, 200))
     for i in range(100):
-        await r.ts().add(1, i + 200, i % 7)
-    assert 200 == len(await r.ts().range(1, 0, 500))
+        await decoded_r.ts().add(1, i + 200, i % 7)
+    assert 200 == len(await decoded_r.ts().range(1, 0, 500))
     # last sample isn't returned
     assert 20 == len(
-        await r.ts().range(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
+        await decoded_r.ts().range(
+            1, 0, 500, aggregation_type="avg", bucket_size_msec=10
+        )
     )
-    assert 10 == len(await r.ts().range(1, 0, 500, count=10))
+    assert 10 == len(await decoded_r.ts().range(1, 0, 500, count=10))
 
 
 @skip_ifmodversion_lt("99.99.99", "timeseries")

@@ -24,8 +24,8 @@ from tests.conftest import _get_client, skip_if_redis_enterprise
 
 
 @pytest.fixture
-def client(request):
-    r = _get_client(Redis, request, decode_responses=True)
+def client(request, stack_url):
+    r = _get_client(Redis, request, decode_responses=True, from_url=stack_url)
     r.flushdb()
     return r
 
