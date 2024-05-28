@@ -4,7 +4,7 @@ import threading
 import time
 import warnings
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union, Self
 
 from redis._cache import (
     DEFAULT_ALLOW_LIST,
@@ -105,7 +105,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     """
 
     @classmethod
-    def from_url(cls, url: str, **kwargs) -> "Redis":
+    def from_url(cls, url: str, **kwargs: Any) -> Self:
         """
         Return a Redis client object configured from the given URL
 
@@ -156,18 +156,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         return client
 
     @classmethod
-    def from_pool(
-        cls: Type["Redis"],
-        connection_pool: ConnectionPool,
-    ) -> "Redis":
+    def from_pool(cls: Type[Self], connection_pool: ConnectionPool) -> Self:
         """
         Return a Redis client from the given connection pool.
         The Redis client will take ownership of the connection pool and
         close it when the Redis client is closed.
         """
-        client = cls(
-            connection_pool=connection_pool,
-        )
+        client = cls(connection_pool=connection_pool)
         client.auto_close_connection_pool = True
         return client
 
