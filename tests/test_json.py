@@ -4,7 +4,12 @@ from redis import Redis, exceptions
 from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
 
-from .conftest import _get_client, assert_resp_response, skip_ifmodversion_lt
+from .conftest import (
+    _get_client,
+    assert_resp_response,
+    skip_if_redis_enterprise,
+    skip_ifmodversion_lt,
+)
 
 
 @pytest.fixture
@@ -102,6 +107,7 @@ def test_jsonsetexistentialmodifiersshouldsucceed(client):
         client.json().set("obj", Path("foo"), "baz", nx=True, xx=True)
 
 
+@skip_if_redis_enterprise()
 def test_mgetshouldsucceed(client):
     client.json().set("1", Path.root_path(), 1)
     client.json().set("2", Path.root_path(), 2)
@@ -309,6 +315,7 @@ def test_objlen(client):
     assert len(obj) == client.json().objlen("obj")
 
 
+@skip_if_redis_enterprise()
 def test_json_commands_in_pipeline(client):
     p = client.json().pipeline()
     p.set("foo", Path.root_path(), "bar")
@@ -434,6 +441,8 @@ def test_json_forget_with_dollar(client):
     client.json().forget("not_a_document", "..a")
 
 
+@pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 def test_json_mget_dollar(client):
     # Test mget with multi paths
     client.json().set(
@@ -455,10 +464,13 @@ def test_json_mget_dollar(client):
     # Test mget with single path
     client.json().mget("doc1", "$..a") == [1, 3, None]
     # Test mget with multi path
-    client.json().mget(["doc1", "doc2"], "$..a") == [[1, 3, None], [4, 6, [None]]]
+    assert client.json().mget(["doc1", "doc2"], "$..a") == [
+        [1, 3, None],
+        [4, 6, [None]],
+    ]
 
     # Test missing key
-    client.json().mget(["doc1", "missing_doc"], "$..a") == [[1, 3, None], None]
+    assert client.json().mget(["doc1", "missing_doc"], "$..a") == [[1, 3, None], None]
     res = client.json().mget(["missing_doc1", "missing_doc2"], "$..a")
     assert res == [None, None]
 

@@ -5,7 +5,12 @@ from time import sleep
 import pytest
 import redis
 
-from .conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
+from .conftest import (
+    assert_resp_response,
+    is_resp2_connection,
+    skip_if_redis_enterprise,
+    skip_ifmodversion_lt,
+)
 
 
 @pytest.fixture
@@ -171,6 +176,7 @@ def test_incrby_decrby(client):
     assert_resp_response(client, 128, info.get("chunk_size"), info.get("chunkSize"))
 
 
+@skip_if_redis_enterprise()
 def test_create_and_delete_rule(client):
     # test rule creation
     time = 100

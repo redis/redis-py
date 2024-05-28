@@ -556,6 +556,7 @@ class TestConnection:
         with pytest.raises(redis.ReadOnlyError):
             r.execute_command("DEBUG", "ERROR", "READONLY blah blah")
 
+    @skip_if_redis_enterprise()
     def test_oom_error(self, r):
         "OOM errors get turned into OutOfMemoryError exceptions"
         with pytest.raises(redis.OutOfMemoryError):

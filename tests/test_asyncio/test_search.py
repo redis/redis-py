@@ -326,6 +326,7 @@ async def test_client(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 async def test_scores(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("txt"),))
 
@@ -500,6 +501,7 @@ async def test_example(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_if_redis_enterprise()
 async def test_auto_complete(decoded_r: redis.Redis):
     n = 0
     with open(TITLES_CSV) as f:
@@ -1012,6 +1014,7 @@ async def test_phonetic_matcher(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 async def test_scorer(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("description"),))
 
@@ -1108,6 +1111,7 @@ async def test_config(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
 async def test_aggregations_groupby(decoded_r: redis.Redis):
     # Creating the index definition and schema
     await decoded_r.ft().create_index(

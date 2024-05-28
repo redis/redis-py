@@ -9,7 +9,7 @@ from redis import RedisError
 from redis._cache import AbstractCache, EvictionPolicy, _LocalCache
 from redis.typing import KeyT, ResponseT
 from redis.utils import HIREDIS_AVAILABLE
-from tests.conftest import _get_client
+from tests.conftest import _get_client, skip_if_server_version_lt
 
 
 @pytest.fixture()
@@ -35,6 +35,7 @@ def local_cache():
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+@skip_if_server_version_lt("7.4.0")
 class TestLocalCache:
     @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
     @pytest.mark.onlynoncluster
@@ -419,6 +420,7 @@ class TestLocalCache:
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
+@skip_if_server_version_lt("7.4.0")
 class TestClusterLocalCache:
     @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
     def test_get_from_cache(self, r, r2):
