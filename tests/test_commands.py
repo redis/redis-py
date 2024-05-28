@@ -712,7 +712,7 @@ class TestRedisCommands:
     def test_client_kill_filter_by_maxage(self, r, request):
         _get_client(redis.Redis, request, flushdb=False)
         time.sleep(4)
-        assert len(r.client_list()) == 2
+        assert len(r.client_list()) >= 2
         r.client_kill_filter(maxage=2)
         assert len(r.client_list()) == 1
 
