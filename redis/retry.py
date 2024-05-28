@@ -35,7 +35,7 @@ class Retry:
         self._supported_errors = supported_errors
 
     def update_supported_errors(
-        self, specified_errors: Iterable[type[Exception]]
+        self, specified_errors: Iterable[Type[Exception]]
     ) -> None:
         """
         Updates the supported errors with the specified error types
