@@ -1,6 +1,6 @@
 import socket
 from time import sleep
-from typing import TYPE_CHECKING, Any, Iterable, TypeVar, Callable
+from typing import TYPE_CHECKING, Any, Iterable, TypeVar, Callable, Type, Tuple
 
 from redis.exceptions import ConnectionError, TimeoutError
 
@@ -15,9 +15,9 @@ class Retry:
 
     def __init__(
         self,
-        backoff: AbstractBackoff,
+        backoff: "AbstractBackoff",
         retries: int,
-        supported_errors: tuple[type[Exception], ...] = (
+        supported_errors: Tuple[Type[Exception], ...] = (
             ConnectionError,
             TimeoutError,
             socket.timeout,
