@@ -2,12 +2,11 @@ from json import JSONDecoder, JSONEncoder
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .bf import BFBloom, CFBloom, CMSBloom, TDigestBloom, TOPKBloom
+    from .graph import AsyncGraph, Graph
     from .json import JSON
-    from .search import Search
+    from .search import AsyncSearch, Search
     from .timeseries import TimeSeries
-    from .bf import BFBloom, CMSBloom, TOPKBloom, TDigestBloom, CFBloom
-    from .graph import Graph, AsyncGraph
-    from .search import AsyncSearch
 
 
 class RedisModuleCommands:
