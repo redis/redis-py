@@ -85,7 +85,11 @@ def parse_to_dict(response):
 
     res = {}
     for det in response:
-        if isinstance(det[1], list):
+        if not isinstance(det, list) or not det:
+            continue
+        if len(det) == 1:
+            res[det[0]] = True
+        elif isinstance(det[1], list):
             res[det[0]] = parse_list_to_dict(det[1])
         else:
             try:  # try to set the attribute. may be provided without value

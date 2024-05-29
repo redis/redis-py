@@ -58,13 +58,14 @@ def test_uds_connect(uds_address):
 )
 def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     host, port = tcp_address
-    certfile = get_ssl_filename("server-cert.pem")
-    keyfile = get_ssl_filename("server-key.pem")
+    certfile = get_ssl_filename("client-cert.pem")
+    keyfile = get_ssl_filename("client-key.pem")
+    ca_certfile = get_ssl_filename("ca-cert.pem")
     conn = SSLConnection(
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
-        ssl_ca_certs=certfile,
+        ssl_ca_certs=ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl_min_version,
     )
@@ -82,13 +83,14 @@ def test_tcp_ssl_connect(tcp_address, ssl_min_version):
 )
 def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
     host, port = tcp_address
-    certfile = get_ssl_filename("server-cert.pem")
-    keyfile = get_ssl_filename("server-key.pem")
+    certfile = get_ssl_filename("client-cert.pem")
+    keyfile = get_ssl_filename("client-key.pem")
+    ca_certfile = get_ssl_filename("ca-cert.pem")
     conn = SSLConnection(
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
-        ssl_ca_certs=certfile,
+        ssl_ca_certs=ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl.TLSVersion.TLSv1_2,
         ssl_ciphers=ssl_ciphers,

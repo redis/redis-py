@@ -831,7 +831,7 @@ class PubSub:
                 else:
                     raise PubSubError(
                         "A non health check response was cleaned by "
-                        "execute_command: {0}".format(response)
+                        "execute_command: {}".format(response)
                     )
             ttl -= 1
 

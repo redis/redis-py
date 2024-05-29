@@ -4,7 +4,7 @@ from unittest import mock
 try:
     mock.AsyncMock
 except AttributeError:
-    import mock
+    from unittest import mock
 
 try:
     from contextlib import aclosing

@@ -1,7 +1,7 @@
 from ..helpers import nativestr
 
 
-class BFInfo(object):
+class BFInfo:
     capacity = None
     size = None
     filterNum = None
@@ -26,7 +26,7 @@ class BFInfo(object):
         return getattr(self, item)
 
 
-class CFInfo(object):
+class CFInfo:
     size = None
     bucketNum = None
     filterNum = None
@@ -57,7 +57,7 @@ class CFInfo(object):
         return getattr(self, item)
 
 
-class CMSInfo(object):
+class CMSInfo:
     width = None
     depth = None
     count = None
@@ -72,7 +72,7 @@ class CMSInfo(object):
         return getattr(self, item)
 
 
-class TopKInfo(object):
+class TopKInfo:
     k = None
     width = None
     depth = None
@@ -89,7 +89,7 @@ class TopKInfo(object):
         return getattr(self, item)
 
 
-class TDigestInfo(object):
+class TDigestInfo:
     compression = None
     capacity = None
     merged_nodes = None

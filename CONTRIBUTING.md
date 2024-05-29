@@ -81,6 +81,19 @@ using `invoke standalone-tests`; similarly, RedisCluster tests can be run by usi
 Each run of tests starts and stops the various dockers required. Sometimes
 things get stuck, an `invoke clean` can help.
 
+## Documentation
+
+If relevant, update the code documentation, via docstrings, or in `/docs`.
+
+You can check how the documentation looks locally by running `invoke build-docs`
+and loading the generated HTML files in a browser.
+
+Historically there is a mix of styles in the docstrings, but the preferred way
+of documenting code is by applying the
+[Google style](https://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html).
+Type hints should be added according to PEP484, and should not be repeated in
+the docstrings.
+
 ### Docker Tips
 
 Following are a few tips that can help you work with the Docker-based
