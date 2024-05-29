@@ -123,7 +123,10 @@ class _HiredisParser(BaseParser):
             if disable_decoding:
                 response = self._reader.gets(False)
             else:
-                response = self._reader.gets()
+                try:
+                    response = self._reader.gets()
+                except UnicodeDecodeError:
+                    response = self._reader.gets(False)
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad
         # happened

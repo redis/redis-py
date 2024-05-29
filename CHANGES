@@ -1,3 +1,4 @@
+    * Fix #2772, Fix vector type fields should not be encoded as strings
     * Update `ResponseT` type hint
     * Allow to control the minimum SSL version
     * Add an optional lock_name attribute to LockError.
@@ -59,7 +60,7 @@
     * Fix Sentinel.execute_command doesn't execute across the entire sentinel cluster bug (#2458)
     * Added a replacement for the default cluster node in the event of failure (#2463)
     * Fix for Unhandled exception related to self.host with unix socket (#2496)
-    * Improve error output for master discovery 
+    * Improve error output for master discovery
     * Make `ClusterCommandsProtocol` an actual Protocol
     * Add `sum` to DUPLICATE_POLICY documentation of `TS.CREATE`, `TS.ADD` and `TS.ALTER`
     * Prevent async ClusterPipeline instances from becoming "false-y" in case of empty command stack (#3061)

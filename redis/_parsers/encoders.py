@@ -40,5 +40,9 @@ class Encoder:
             if isinstance(value, memoryview):
                 value = value.tobytes()
             if isinstance(value, bytes):
-                value = value.decode(self.encoding, self.encoding_errors)
+                try:
+                    value = value.decode(self.encoding, self.encoding_errors)
+                except UnicodeDecodeError:
+                    # Return the bytes unmodified
+                    return value
         return value

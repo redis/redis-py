@@ -4,6 +4,7 @@ import os
 import time
 from io import TextIOWrapper
 
+import numpy as np
 import pytest
 import redis
 import redis.commands.search
@@ -2282,3 +2283,47 @@ def test_geoshape(client: redis.Redis):
     assert result.docs[0]["id"] == "small"
     result = client.ft().search(q2, query_params=qp2)
     assert len(result.docs) == 2
+
+
+@pytest.mark.redismod
+def test_vector_storage_and_retrieval(client):
+    # Constants
+    INDEX_NAME = "vector_index"
+    DOC_PREFIX = "doc:"
+    VECTOR_DIMENSIONS = 4
+    VECTOR_FIELD_NAME = "my_vector"
+
+    # Create index
+    client.ft(INDEX_NAME).create_index(
+        (
+            VectorField(
+                VECTOR_FIELD_NAME,
+                "FLAT",
+                {
+                    "TYPE": "FLOAT32",
+                    "DIM": VECTOR_DIMENSIONS,
+                    "DISTANCE_METRIC": "COSINE",
+                },
+            ),
+        ),
+        definition=IndexDefinition(prefix=[DOC_PREFIX], index_type=IndexType.HASH),
+    )
+
+    # Add a document with a vector value
+    vector_data = [0.1, 0.2, 0.3, 0.4]
+    client.hset(
+        f"{DOC_PREFIX}1",
+        mapping={VECTOR_FIELD_NAME: np.array(vector_data, dtype=np.float32).tobytes()},
+    )
+
+    # Perform a search to retrieve the document
+    query = Query("*").return_fields(VECTOR_FIELD_NAME).dialect(2)
+    res = client.ft(INDEX_NAME).search(query)
+
+    # Assert that the document is retrieved and the vector matches the original data
+    assert res.total == 1
+    assert res.docs[0].id == f"{DOC_PREFIX}1"
+    retrieved_vector_data = np.frombuffer(
+        res.docs[0].__dict__[VECTOR_FIELD_NAME], dtype=np.float32
+    )
+    assert np.allclose(retrieved_vector_data, vector_data)

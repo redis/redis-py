@@ -39,18 +39,11 @@ class Result:
 
             fields = {}
             if hascontent and res[i + fields_offset] is not None:
-                fields = (
-                    dict(
-                        dict(
-                            zip(
-                                map(to_string, res[i + fields_offset][::2]),
-                                map(to_string, res[i + fields_offset][1::2]),
-                            )
-                        )
-                    )
-                    if hascontent
-                    else {}
-                )
+                for j in range(0, len(res[i + fields_offset]), 2):
+                    key = to_string(res[i + fields_offset][j])
+                    value = res[i + fields_offset][j + 1]
+                    fields[key] = value
+
             try:
                 del fields["id"]
             except KeyError:
