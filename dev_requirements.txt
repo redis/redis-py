@@ -4,7 +4,7 @@ flake8==5.0.4
 flake8-isort==6.0.0
 flynt~=0.69.0
 mock==4.0.3
-numpy>=1.24.4
+numpy>=1.21.0
 packaging>=20.4
 pytest==7.2.0
 pytest-timeout==2.1.0
