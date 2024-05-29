@@ -2306,7 +2306,7 @@ def test_vector_storage_and_retrieval(r: redis.Redis):
 
     vector_data = [0.1, 0.2, 0.3, 0.4]
     r.hset(
-        f"doc:1",
+        "doc:1",
         mapping={"my_vector": np.array(vector_data, dtype=np.float32).tobytes()},
     )
 
@@ -2314,7 +2314,7 @@ def test_vector_storage_and_retrieval(r: redis.Redis):
     res = r.ft("vector_index").search(query, decode_fields=False)
 
     assert res.total == 1
-    assert res.docs[0].id == f"doc:1"
+    assert res.docs[0].id == "doc:1"
     retrieved_vector_data = np.frombuffer(
         res.docs[0].__dict__["my_vector"], dtype=np.float32
     )
