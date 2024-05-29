@@ -9,7 +9,13 @@ class Result:
     """
 
     def __init__(
-        self, res, hascontent, duration=0, has_payload=False, with_scores=False
+        self,
+        res,
+        hascontent,
+        duration=0,
+        has_payload=False,
+        with_scores=False,
+        decode_fields=False,
     ):
         """
         - **snippets**: An optional dictionary of the form
@@ -32,24 +38,26 @@ class Result:
 
         for i in range(1, len(res), step):
             id = to_string(res[i])
-            payload = to_string(res[i + offset]) if has_payload else None
+            if has_payload:
+                payload_data = res[i + offset]
+                payload = to_string(payload_data) if decode_fields else payload_data
+            else:
+                payload = None
             # fields_offset = 2 if has_payload else 1
             fields_offset = offset + 1 if has_payload else offset
             score = float(res[i + 1]) if with_scores else None
 
             fields = {}
             if hascontent and res[i + fields_offset] is not None:
-                fields = (
+                keys = res[i + fields_offset][::2]
+                values = res[i + fields_offset][1::2]
+                fields = dict(
                     dict(
-                        dict(
-                            zip(
-                                map(to_string, res[i + fields_offset][::2]),
-                                map(to_string, res[i + fields_offset][1::2]),
-                            )
+                        zip(
+                            map(to_string, keys),
+                            map(to_string, values) if decode_fields else values,
                         )
                     )
-                    if hascontent
-                    else {}
                 )
             try:
                 del fields["id"]

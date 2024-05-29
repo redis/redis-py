@@ -80,6 +80,7 @@ class SearchCommands:
             duration=kwargs["duration"],
             has_payload=kwargs["query"]._with_payloads,
             with_scores=kwargs["query"]._with_scores,
+            decode_fields=kwargs["decode_fields"],
         )
 
     def _parse_aggregate(self, res, **kwargs):
@@ -484,18 +485,27 @@ class SearchCommands:
         self,
         query: Union[str, Query],
         query_params: Union[Dict[str, Union[str, int, float, bytes]], None] = None,
+        decode_fields: bool = True,
     ):
         """
-        Search the index for a given query, and return a result of documents
+        Search the index for a given query, and return a result of documents.
 
-        ### Parameters
+        Args:
+            query: The search query. This can be a simple text string for basic queries,
+                   or a Query object for more complex queries. Refer to RediSearch's
+                   documentation for details on the query format.
+            query_params: Additional parameters for the query. These parameters are used
+                          to replace placeholders in the query string. This is useful
+                          for safely including user input in a search query.
+            decode_fields: If `True`, which is the default, decodes the fields in the
+                           search results. If `False`, fields are returned in their raw
+                           binary form.
 
-        - **query**: the search query. Either a text for simple queries with
-                     default parameters, or a Query object for complex queries.
-                     See RediSearch's documentation on query format
+        Returns:
+            A result set of documents matching the query.
 
-        For more information see `FT.SEARCH <https://redis.io/commands/ft.search>`_.
-        """  # noqa
+        For more information see https://redis.io/commands/ft.search
+        """
         args, query = self._mk_query_args(query, query_params=query_params)
         st = time.time()
         res = self.execute_command(SEARCH_CMD, *args)
@@ -504,7 +514,11 @@ class SearchCommands:
             return res
 
         return self._parse_results(
-            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+            SEARCH_CMD,
+            res,
+            query=query,
+            duration=(time.time() - st) * 1000.0,
+            decode_fields=decode_fields,
         )
 
     def explain(
@@ -911,18 +925,27 @@ class AsyncSearchCommands(SearchCommands):
         self,
         query: Union[str, Query],
         query_params: Dict[str, Union[str, int, float]] = None,
+        decode_fields: bool = True,
     ):
         """
-        Search the index for a given query, and return a result of documents
+        Search the index for a given query, and return a result of documents.
 
-        ### Parameters
+        Args:
+            query: The search query. This can be a simple text string for basic queries,
+                   or a Query object for more complex queries. Refer to RediSearch's
+                   documentation for details on the query format.
+            query_params: Additional parameters for the query. These parameters are used
+                          to replace placeholders in the query string. This is useful
+                          for safely including user input in a search query.
+            decode_fields: If `True`, which is the default, decodes the fields in the
+                           search results. If `False`, fields are returned in their raw
+                           binary form.
 
-        - **query**: the search query. Either a text for simple queries with
-                     default parameters, or a Query object for complex queries.
-                     See RediSearch's documentation on query format
+        Returns:
+            A result set of documents matching the query.
 
-        For more information see `FT.SEARCH <https://redis.io/commands/ft.search>`_.
-        """  # noqa
+        For more information see https://redis.io/commands/ft.search
+        """
         args, query = self._mk_query_args(query, query_params=query_params)
         st = time.time()
         res = await self.execute_command(SEARCH_CMD, *args)
@@ -931,7 +954,11 @@ class AsyncSearchCommands(SearchCommands):
             return res
 
         return self._parse_results(
-            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+            SEARCH_CMD,
+            res,
+            query=query,
+            duration=(time.time() - st) * 1000.0,
+            decode_fields=decode_fields,
         )
 
     async def aggregate(

@@ -4,6 +4,7 @@ import os
 import time
 from io import TextIOWrapper
 
+import numpy as np
 import pytest
 import redis
 import redis.commands.search
@@ -2284,3 +2285,37 @@ def test_geoshape(client: redis.Redis):
     assert result.docs[0]["id"] == "small"
     result = client.ft().search(q2, query_params=qp2)
     assert len(result.docs) == 2
+
+
+@pytest.mark.redismod
+def test_vector_storage_and_retrieval(r: redis.Redis):
+    r.ft("vector_index").create_index(
+        (
+            VectorField(
+                "my_vector",
+                "FLAT",
+                {
+                    "TYPE": "FLOAT32",
+                    "DIM": 4,
+                    "DISTANCE_METRIC": "COSINE",
+                },
+            ),
+        ),
+        definition=IndexDefinition(prefix=["doc:"], index_type=IndexType.HASH),
+    )
+
+    vector_data = [0.1, 0.2, 0.3, 0.4]
+    r.hset(
+        f"doc:1",
+        mapping={"my_vector": np.array(vector_data, dtype=np.float32).tobytes()},
+    )
+
+    query = Query("*").with_payloads().return_fields("my_vector").dialect(2)
+    res = r.ft("vector_index").search(query, decode_fields=False)
+
+    assert res.total == 1
+    assert res.docs[0].id == f"doc:1"
+    retrieved_vector_data = np.frombuffer(
+        res.docs[0].__dict__["my_vector"], dtype=np.float32
+    )
+    assert np.allclose(retrieved_vector_data, vector_data)
