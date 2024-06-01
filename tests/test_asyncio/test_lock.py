@@ -3,7 +3,12 @@ import asyncio
 import pytest
 import pytest_asyncio
 from redis.asyncio.lock import Lock
-from redis.exceptions import LockError, LockNotOwnedError
+from redis.exceptions import (
+    IndefiniteLockError,
+    LockAquireError,
+    LockNotLockedError,
+    LockNotOwnedError,
+)
 
 
 class TestLock:
@@ -125,7 +130,7 @@ class TestLock:
 
     async def test_context_manager_raises_when_locked_not_acquired(self, r):
         await r.set("foo", "bar")
-        with pytest.raises(LockError):
+        with pytest.raises(LockAquireError):
             async with self.get_lock(r, "foo", blocking_timeout=0.1):
                 pass
 
@@ -144,7 +149,7 @@ class TestLock:
 
     async def test_releasing_unlocked_lock_raises_error(self, r):
         lock = self.get_lock(r, "foo")
-        with pytest.raises(LockError):
+        with pytest.raises(LockNotLockedError):
             await lock.release()
 
     async def test_releasing_lock_no_longer_owned_raises_error(self, r):
@@ -183,13 +188,13 @@ class TestLock:
 
     async def test_extending_unlocked_lock_raises_error(self, r):
         lock = self.get_lock(r, "foo", timeout=10)
-        with pytest.raises(LockError):
+        with pytest.raises(LockNotLockedError):
             await lock.extend(10)
 
     async def test_extending_lock_with_no_timeout_raises_error(self, r):
         lock = self.get_lock(r, "foo")
         assert await lock.acquire(blocking=False)
-        with pytest.raises(LockError):
+        with pytest.raises(IndefiniteLockError):
             await lock.extend(10)
         await lock.release()
 
@@ -211,13 +216,13 @@ class TestLock:
 
     async def test_reacquiring_unlocked_lock_raises_error(self, r):
         lock = self.get_lock(r, "foo", timeout=10)
-        with pytest.raises(LockError):
+        with pytest.raises(LockNotLockedError):
             await lock.reacquire()
 
     async def test_reacquiring_lock_with_no_timeout_raises_error(self, r):
         lock = self.get_lock(r, "foo")
         assert await lock.acquire(blocking=False)
-        with pytest.raises(LockError):
+        with pytest.raises(IndefiniteLockError):
             await lock.reacquire()
         await lock.release()
 

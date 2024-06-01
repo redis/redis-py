@@ -1,3 +1,4 @@
+    * Raise granular exceptions when lock operations fail
     * Update `ResponseT` type hint
     * Allow to control the minimum SSL version
     * Add an optional lock_name attribute to LockError.
