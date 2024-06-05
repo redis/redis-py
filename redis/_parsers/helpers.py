@@ -38,7 +38,7 @@ def parse_info(response):
     response = str_if_bytes(response)
 
     def get_value(value):
-        if "," not in value or "=" not in value:
+        if "," not in value and "=" not in value:
             try:
                 if "." in value:
                     return float(value)
