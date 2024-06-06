@@ -178,6 +178,39 @@ class TestConnection(TestCase):
 
         mock_read_response.side_effect = itertools.repeat("OK")
 
+    @patch.object(Connection, 'send_command')
+    @patch.object(Connection, 'read_response')
+    def test_on_connect_fail_hello(self, mock_read_response, mock_send_command):
+        """Test that on_connect handles connection failure HELLO command"""
+        conn = Connection()
+
+        conn._parser = MagicMock()
+        conn._parser.on_connect.return_value = None
+        conn.credential_provider = None
+        conn.username = "myuser"
+        conn.password = "password"
+        conn.protocol = -1  # invalid protocol
+        conn.client_name = "test-client"
+        conn.lib_name = "test"
+        conn.lib_version = "1234"
+        conn.db = 0
+        conn.client_cache = True
+
+        # simulate a failure in the HELLO command response
+        mock_read_response.side_effect = itertools.cycle([
+            Exception("Invalid RESP version"),  # HELLO (fails)
+            b'QUEUED',                          # MULTI
+        ])
+
+        with self.assertRaises(ConnectionError):
+            conn.on_connect()
+
+        mock_send_command.assert_any_call('HELLO', -1, 'AUTH', 'myuser', 'password'),
+
+        mock_send_command.assert_called()
+        mock_read_response.assert_called()
+
+
 
 @pytest.mark.onlynoncluster
 @pytest.mark.parametrize(
