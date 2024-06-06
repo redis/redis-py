@@ -412,6 +412,29 @@ class AbstractConnection:
             self.read_response()
             self._parser.set_invalidation_push_handler(self._cache_invalidation_process)
 
+        # execute the MULTI block
+        try:
+            self.send_command('EXEC')
+            responses = self._read_exec_responses()
+            # check AUTH response if AUTH command was sent
+            if auth_command_response:
+                # First response should be for AUTH command
+                auth_response = responses[0]
+                if b'ERR' in auth_response:
+                    raise AuthenticationError(
+                        "Authentication failed: %s" % auth_response)
+                responses = responses[1:]  # Remove AUTH response from the list
+
+            self._handle_responses(responses, auth_args)
+        except (TimeoutError, AuthenticationError, ConnectionError) as e:
+            if not self.retry_on_timeout:
+                raise e
+        except Exception as e:
+            if str(e) == "Invalid Username or Password":
+                raise AuthenticationError("Invalid Username or Password") from e
+            else:
+                raise AuthenticationError() from e
+
     def disconnect(self, *args):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
