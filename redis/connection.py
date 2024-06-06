@@ -356,54 +356,41 @@ class AbstractConnection:
             )
             auth_args = cred_provider.get_credentials()
 
-        # if resp version is specified and we have auth args,
-        # we need to send them via HELLO
-        if auth_args and self.protocol not in [2, "2"]:
-            if isinstance(self._parser, _RESP2Parser):
-                self.set_parser(_RESP3Parser)
-                # update cluster exception classes
-                self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
-                self._parser.on_connect(self)
-            if len(auth_args) == 1:
-                auth_args = ["default", auth_args[0]]
-            self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
-            response = self.read_response()
-            # if response.get(b"proto") != self.protocol and response.get(
-            #     "proto"
-            # ) != self.protocol:
-            #     raise ConnectionError("Invalid RESP version")
-        elif auth_args:
+        auth_command_response = False
+
+        # try to send HELLO command (for Redis 6.0 and above)
+        try:
+            # if resp version is specified and we have auth args,
+            # we need to send them via HELLO
+            if auth_args and self.protocol not in [2, "2"]:
+                if isinstance(self._parser, _RESP2Parser):
+                    self.set_parser(_RESP3Parser)
+                    # update cluster exception classes
+                    self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
+                    self._parser.on_connect(self)
+                if len(auth_args) == 1:
+                    auth_args = ["default", auth_args[0]]
+                self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
+            else:
+                self.send_command("HELLO", self.protocol)
+
+            self.read_response()
+
+        except Exception as e:
+            if str(e) == "Invalid RESP version":
+                raise ConnectionError("Invalid RESP version")
+            elif str(e) == "Invalid Username or Password":
+                raise AuthenticationError("Invalid Username or Password")
+            # fall back to AUTH command (for Redis versions less than 6.0)
+            else:
+                self.send_command('MULTI')
+                self.read_response()
+
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
-            self.send_command("AUTH", *auth_args, check_health=False)
-
-            try:
-                auth_response = self.read_response()
-            except AuthenticationWrongNumberOfArgsError:
-                # a username and password were specified but the Redis
-                # server seems to be < 6.0.0 which expects a single password
-                # arg. retry auth with just the password.
-                # https://github.com/andymccurdy/redis-py/issues/1274
-                self.send_command("AUTH", auth_args[-1], check_health=False)
-                auth_response = self.read_response()
-
-            if str_if_bytes(auth_response) != "OK":
-                raise AuthenticationError("Invalid Username or Password")
-
-        # if resp version is specified, switch to it
-        elif self.protocol not in [2, "2"]:
-            if isinstance(self._parser, _RESP2Parser):
-                self.set_parser(_RESP3Parser)
-                # update cluster exception classes
-                self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
-                self._parser.on_connect(self)
-            self.send_command("HELLO", self.protocol)
-            response = self.read_response()
-            if (
-                response.get(b"proto") != self.protocol
-                and response.get("proto") != self.protocol
-            ):
-                raise ConnectionError("Invalid RESP version")
+            if auth_args:
+                self.send_command("AUTH", *auth_args, check_health=False)
+                auth_command_response = True
 
         # if a client_name is given, set it
         if self.client_name:
