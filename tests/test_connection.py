@@ -1,8 +1,9 @@
+import itertools
 import socket
 import types
+from unittest import TestCase
 from unittest import mock
-from unittest.mock import patch
-
+from unittest.mock import patch, MagicMock
 import pytest
 import redis
 from redis import ConnectionPool, Redis
@@ -13,6 +14,8 @@ from redis.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
     parse_url,
+    UsernamePasswordCredentialProvider,
+    AuthenticationError
 )
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.retry import Retry
@@ -55,7 +58,7 @@ def test_loading_external_modules(r):
     # assert mod.get('fookey') == d
 
 
-class TestConnection:
+class TestConnection(TestCase):
     def test_disconnect(self):
         conn = Connection()
         mock_sock = mock.Mock()
@@ -130,6 +133,50 @@ class TestConnection:
         assert conn._connect.call_count == 1
         assert str(e.value) == "Timeout connecting to server"
         self.clear(conn)
+
+    @patch.object(Connection, 'send_command')
+    @patch.object(Connection, 'read_response')
+    def test_on_connect(self, mock_read_response, mock_send_command):
+        """Test that the on_connect function sends the correct commands"""
+        conn = Connection()
+
+        conn._parser = MagicMock()
+        conn._parser.on_connect.return_value = None
+        conn.credential_provider = None
+        conn.username = "myuser"
+        conn.password = "password"
+        conn.protocol = 3
+        conn.client_name = "test-client"
+        conn.lib_name = "test"
+        conn.lib_version = "1234"
+        conn.db = 0
+        conn.client_cache = True
+
+        # command response
+        mock_read_response.side_effect = itertools.cycle([
+            b'QUEUED',  # MULTI
+            b'QUEUED',  # HELLO
+            b'QUEUED',  # AUTH
+            b'QUEUED',  # CLIENT SETNAME
+            b'QUEUED',  # CLIENT SETINFO LIB-NAME
+            b'QUEUED',  # CLIENT SETINFO LIB-VER
+            b'QUEUED',  # SELECT
+            b'QUEUED',  # CLIENT TRACKING ON
+            [           # EXEC response list
+                {"proto": 3, "version": "6"},
+                b'OK',
+                b'OK',
+                b'OK',
+                b'OK',
+                b'OK',
+                b'OK',
+                b'OK'
+            ]
+        ])
+
+        conn.on_connect()
+
+        mock_read_response.side_effect = itertools.repeat("OK")
 
 
 @pytest.mark.onlynoncluster
