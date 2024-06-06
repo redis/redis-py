@@ -123,7 +123,7 @@ print(res20)  # >>> 5
 res21 = r.lrange("bikes:repairs", 0, -1)
 print(
     res21
-)  # >>> ['bike:very_important_bike', 'bike:important_bike', 'bike:1', 'bike:2', 'bike:3']
+)  # >>> ['bike:very_important_bike', 'bike:important_bike', 'bike:1', ...
 # STEP_END
 
 # REMOVE_START
@@ -161,7 +161,7 @@ assert res22 == 3
 assert res23 == "bike:3"
 assert res24 == "bike:1"
 assert res25 == "bike:2"
-assert res26 == None
+assert res26 is None
 # REMOVE_END
 
 # STEP_START ltrim
@@ -177,7 +177,7 @@ print(res29)  # >>> ['bike:5', 'bike:4', 'bike:3']
 
 # REMOVE_START
 assert res27 == 5
-assert res28 == True
+assert res28 is True
 assert res29 == ["bike:5", "bike:4", "bike:3"]
 r.delete("bikes:repairs")
 # REMOVE_END
@@ -195,7 +195,7 @@ print(res29)  # >>> ['bike:3', 'bike:4', 'bike:5']
 
 # REMOVE_START
 assert res27 == 5
-assert res28 == True
+assert res28 is True
 assert res29 == ["bike:3", "bike:4", "bike:5"]
 r.delete("bikes:repairs")
 # REMOVE_END
@@ -218,7 +218,7 @@ print(res34)  # >>> None
 assert res31 == 2
 assert res32 == ("bikes:repairs", "bike:2")
 assert res33 == ("bikes:repairs", "bike:1")
-assert res34 == None
+assert res34 is None
 r.delete("bikes:repairs")
 r.delete("new_bikes")
 # REMOVE_END
@@ -248,12 +248,12 @@ try:
     res39 = r.lpush("new_bikes", "bike:2", "bike:3")
     # >>> redis.exceptions.ResponseError:
     # >>> WRONGTYPE Operation against a key holding the wrong kind of value
-except Exception as e:
+except redis.exceptions.ResponseError as e:
     print(e)
 # STEP_END
 
 # REMOVE_START
-assert res37 == True
+assert res37 is True
 assert res38 == "string"
 r.delete("new_bikes")
 # REMOVE_END
@@ -279,11 +279,11 @@ print(res44)  # >>> False
 # STEP_END
 
 # REMOVE_START
-assert res40 == True
+assert res40 is True
 assert res41 == "bike:3"
 assert res42 == "bike:2"
 assert res43 == "bike:1"
-assert res44 == False
+assert res44 is False
 r.delete("bikes:repairs")
 # REMOVE_END
 
@@ -301,7 +301,7 @@ print(res47)  # >>> None
 # REMOVE_START
 assert res45 == 0
 assert res46 == 0
-assert res47 == None
+assert res47 is None
 # REMOVE_END
 
 # STEP_START ltrim.1
@@ -317,7 +317,7 @@ print(res50)  # >>> ['bike:5', 'bike:4', 'bike:3']
 
 # REMOVE_START
 assert res48 == 5
-assert res49 == True
+assert res49 is True
 assert res50 == ["bike:5", "bike:4", "bike:3"]
 r.delete("bikes:repairs")
 # REMOVE_END

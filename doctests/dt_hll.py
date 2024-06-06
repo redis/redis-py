@@ -32,5 +32,5 @@ print(res5)  # >>> 6
 # STEP_END
 
 # REMOVE_START
-assert res4 == True
+assert res4 is True
 # REMOVE_END
