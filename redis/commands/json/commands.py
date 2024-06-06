@@ -314,7 +314,7 @@ class JSONCommands:
 
         """
 
-        with open(file_name, "r") as fp:
+        with open(file_name) as fp:
             file_content = loads(fp.read())
 
         return self.set(name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys)
