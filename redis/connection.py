@@ -435,6 +435,19 @@ class AbstractConnection:
             else:
                 raise AuthenticationError() from e
 
+    def _read_exec_responses(self):
+        # read the response for EXEC which should be a list
+        response = self.read_response()
+        if response == b'OK' and not self.retry_on_timeout:
+            # EXEC did not execute correctly, likely due to previous error
+            raise ConnectionError("EXEC command did not execute correctly")
+        while response == b'QUEUED':
+            response = self.read_response()
+        if not isinstance(response, list) and not self.retry_on_timeout:
+            raise ConnectionError(f"EXEC command did not return a list: {response}")
+        return response
+
+
     def disconnect(self, *args):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
