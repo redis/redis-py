@@ -409,8 +409,6 @@ class AbstractConnection:
         # if client caching is enabled, start tracking
         if self.client_cache:
             self.send_command("CLIENT", "TRACKING", "ON")
-            self.read_response()
-            self._parser.set_invalidation_push_handler(self._cache_invalidation_process)
 
         # execute the MULTI block
         try:
@@ -447,6 +445,77 @@ class AbstractConnection:
             raise ConnectionError(f"EXEC command did not return a list: {response}")
         return response
 
+    def _handle_responses(self, responses, auth_args):
+        if not isinstance(responses, list):
+            raise ConnectionError(f"EXEC command did not return a list: {responses}")
+
+        response_iter = iter(responses)
+
+        try:
+            # handle HELLO + AUTH
+            if auth_args and self.protocol not in [2, "2"]:
+                response = next(response_iter, None)
+                if isinstance(response, dict) and (
+                        response.get(b"proto") != self.protocol and response.get("proto") != self.protocol):
+                    raise ConnectionError("Invalid RESP version")
+
+                response = next(response_iter, None)
+                if isinstance(response, bytes) and str_if_bytes(response) != "OK":
+                    raise AuthenticationError("Invalid Username or Password")
+            elif auth_args:
+                response = next(response_iter, None)
+                if isinstance(response, bytes) and str_if_bytes(response) != "OK":
+                    try:
+                        # a username and password were specified but the Redis
+                        # server seems to be < 6.0.0 which expects a single password
+                        # arg. retry auth with just the password.
+                        # https://github.com/andymccurdy/redis-py/issues/1274
+                        self.send_command("AUTH", auth_args[-1], check_health=False)
+                        auth_response = self.read_response()
+                        if isinstance(auth_response, bytes) and str_if_bytes(
+                                auth_response) != "OK":
+                            raise AuthenticationError("Invalid Username or Password")
+                        # add the retry response to the responses list for further processing
+                        responses = [auth_response] + list(response_iter)
+                        response_iter = iter(responses)
+                    except AuthenticationWrongNumberOfArgsError:
+                        raise AuthenticationError("Invalid Username or Password")
+
+            # handle CLIENT SETNAME
+            if self.client_name:
+                response = next(response_iter, None)
+                if isinstance(response, bytes) and str_if_bytes(response) != "OK":
+                    raise ConnectionError("Error setting client name")
+
+            # handle CLIENT SETINFO LIB-NAME
+            if self.lib_name:
+                response = next(response_iter, None)
+                if isinstance(response, bytes) and str_if_bytes(response) != "OK":
+                    raise ConnectionError("Error setting client library name")
+
+            # handle CLIENT SETINFO LIB-VER
+            if self.lib_version:
+                response = next(response_iter, None)
+                if isinstance(response, bytes) and str_if_bytes(response) != "OK":
+                    raise ConnectionError("Error setting client library version")
+
+            # handle SELECT
+            if self.db:
+                response = next(response_iter, None)
+                if isinstance(response, bytes) and str_if_bytes(response) != "OK":
+                    raise ConnectionError("Invalid Database")
+
+            # handle CLIENT TRACKING ON
+            if self.client_cache:
+                response = next(response_iter, None)
+                if isinstance(response, bytes) and str_if_bytes(response) != "OK":
+                    raise ConnectionError("Error enabling client tracking")
+                self._parser.set_invalidation_push_handler(
+                    self._cache_invalidation_process)
+        except (AuthenticationError, ConnectionError):
+            raise
+        except Exception as e:
+            raise ConnectionError("Error during response handling") from e
 
     def disconnect(self, *args):
         "Disconnects from the Redis server"
