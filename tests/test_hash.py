@@ -2,7 +2,6 @@ import time
 from datetime import datetime, timedelta
 
 import pytest
-
 from tests.conftest import skip_if_server_version_lt
 
 
