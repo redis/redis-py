@@ -373,6 +373,7 @@ async def test_list_keys(decoded_r: redis.Redis):
     assert result == []
 
 
+@pytest.mark.redismod
 async def test_multi_label(decoded_r: redis.Redis):
     redis_graph = decoded_r.graph("g")
 
