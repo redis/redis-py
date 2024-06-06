@@ -107,8 +107,8 @@ def createIndex(client, num_docs=100, definition=None):
 
 
 @pytest.fixture
-def client(request):
-    r = _get_client(redis.Redis, request, decode_responses=True)
+def client(request, stack_url):
+    r = _get_client(redis.Redis, request, decode_responses=True, from_url=stack_url)
     r.flushdb()
     return r
 
