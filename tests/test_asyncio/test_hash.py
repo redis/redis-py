@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from tests.conftest import skip_if_server_version_lt
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hexpire_basic(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -14,7 +14,7 @@ async def test_hexpire_basic(r):
     assert await r.hexists("test:hash", "field2") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hexpire_with_timedelta(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -24,7 +24,7 @@ async def test_hexpire_with_timedelta(r):
     assert await r.hexists("test:hash", "field2") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hexpire_conditions(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1"})
@@ -42,7 +42,7 @@ async def test_hexpire_conditions(r):
     assert await r.hexists("test:hash", "field1") is False
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hexpire_nonexistent_key_or_field(r):
     await r.delete("test:hash")
     assert await r.hexpire("test:hash", 1, "field1") == []
@@ -50,7 +50,7 @@ async def test_hexpire_nonexistent_key_or_field(r):
     assert await r.hexpire("test:hash", 1, "nonexistent_field") == [-2]
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hexpire_multiple_fields(r):
     await r.delete("test:hash")
     await r.hset(
@@ -64,7 +64,7 @@ async def test_hexpire_multiple_fields(r):
     assert await r.hexists("test:hash", "field3") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpexpire_basic(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -74,7 +74,7 @@ async def test_hpexpire_basic(r):
     assert await r.hexists("test:hash", "field2") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpexpire_with_timedelta(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -84,7 +84,7 @@ async def test_hpexpire_with_timedelta(r):
     assert await r.hexists("test:hash", "field2") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpexpire_conditions(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1"})
@@ -102,7 +102,7 @@ async def test_hpexpire_conditions(r):
     assert await r.hexists("test:hash", "field1") is False
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpexpire_nonexistent_key_or_field(r):
     await r.delete("test:hash")
     assert await r.hpexpire("test:hash", 500, "field1") == []
@@ -110,7 +110,7 @@ async def test_hpexpire_nonexistent_key_or_field(r):
     assert await r.hpexpire("test:hash", 500, "nonexistent_field") == [-2]
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpexpire_multiple_fields(r):
     await r.delete("test:hash")
     await r.hset(
@@ -124,7 +124,7 @@ async def test_hpexpire_multiple_fields(r):
     assert await r.hexists("test:hash", "field3") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hexpireat_basic(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -135,7 +135,7 @@ async def test_hexpireat_basic(r):
     assert await r.hexists("test:hash", "field2") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hexpireat_with_datetime(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -146,7 +146,7 @@ async def test_hexpireat_with_datetime(r):
     assert await r.hexists("test:hash", "field2") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hexpireat_conditions(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1"})
@@ -159,7 +159,7 @@ async def test_hexpireat_conditions(r):
     assert await r.hexists("test:hash", "field1") is False
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hexpireat_nonexistent_key_or_field(r):
     await r.delete("test:hash")
     future_exp_time = int((datetime.now() + timedelta(seconds=1)).timestamp())
@@ -168,7 +168,7 @@ async def test_hexpireat_nonexistent_key_or_field(r):
     assert await r.hexpireat("test:hash", future_exp_time, "nonexistent_field") == [-2]
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hexpireat_multiple_fields(r):
     await r.delete("test:hash")
     await r.hset(
@@ -183,7 +183,7 @@ async def test_hexpireat_multiple_fields(r):
     assert await r.hexists("test:hash", "field3") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpexpireat_basic(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -194,7 +194,7 @@ async def test_hpexpireat_basic(r):
     assert await r.hexists("test:hash", "field2") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpexpireat_with_datetime(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -205,7 +205,7 @@ async def test_hpexpireat_with_datetime(r):
     assert await r.hexists("test:hash", "field2") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpexpireat_conditions(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1"})
@@ -222,7 +222,7 @@ async def test_hpexpireat_conditions(r):
     assert await r.hexists("test:hash", "field1") is False
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpexpireat_nonexistent_key_or_field(r):
     await r.delete("test:hash")
     future_exp_time = int(
@@ -233,7 +233,7 @@ async def test_hpexpireat_nonexistent_key_or_field(r):
     assert await r.hpexpireat("test:hash", future_exp_time, "nonexistent_field") == [-2]
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpexpireat_multiple_fields(r):
     await r.delete("test:hash")
     await r.hset(
@@ -248,7 +248,7 @@ async def test_hpexpireat_multiple_fields(r):
     assert await r.hexists("test:hash", "field3") is True
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpersist_multiple_fields_mixed_conditions(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -256,7 +256,7 @@ async def test_hpersist_multiple_fields_mixed_conditions(r):
     assert await r.hpersist("test:hash", "field1", "field2", "field3") == [1, -1, -2]
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hexpiretime_multiple_fields_mixed_conditions(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -267,7 +267,7 @@ async def test_hexpiretime_multiple_fields_mixed_conditions(r):
     assert result[1:] == [-1, -2]
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_hpexpiretime_multiple_fields_mixed_conditions(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -278,7 +278,7 @@ async def test_hpexpiretime_multiple_fields_mixed_conditions(r):
     assert result[1:] == [-1, -2]
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_ttl_multiple_fields_mixed_conditions(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
@@ -289,7 +289,7 @@ async def test_ttl_multiple_fields_mixed_conditions(r):
     assert result[1:] == [-1, -2]
 
 
-@skip_if_server_version_lt("7.4.0")
+@skip_if_server_version_lt("7.3.240")
 async def test_pttl_multiple_fields_mixed_conditions(r):
     await r.delete("test:hash")
     await r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
