@@ -709,6 +709,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.3.240")
     @skip_if_redis_enterprise()
+    @pytest.mark.onlynoncluster
     def test_client_kill_filter_by_maxage(self, r, request):
         _get_client(redis.Redis, request, flushdb=False)
         time.sleep(4)
