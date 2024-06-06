@@ -395,29 +395,16 @@ class AbstractConnection:
         # if a client_name is given, set it
         if self.client_name:
             self.send_command("CLIENT", "SETNAME", self.client_name)
-            if str_if_bytes(self.read_response()) != "OK":
-                raise ConnectionError("Error setting client name")
 
-        try:
-            # set the library name and version
-            if self.lib_name:
-                self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
-                self.read_response()
-        except ResponseError:
-            pass
-
-        try:
-            if self.lib_version:
-                self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
-                self.read_response()
-        except ResponseError:
-            pass
+        # set the library name and version
+        if self.lib_name:
+            self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
+        if self.lib_version:
+            self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
 
         # if a database is specified, switch to it
         if self.db:
             self.send_command("SELECT", self.db)
-            if str_if_bytes(self.read_response()) != "OK":
-                raise ConnectionError("Invalid Database")
 
         # if client caching is enabled, start tracking
         if self.client_cache:
