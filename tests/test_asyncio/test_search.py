@@ -5,6 +5,7 @@ import time
 from io import TextIOWrapper
 
 import pytest
+import pytest_asyncio
 import redis.asyncio as redis
 import redis.commands.search
 import redis.commands.search.aggregation as aggregations
@@ -29,6 +30,11 @@ WILL_PLAY_TEXT = os.path.abspath(
 TITLES_CSV = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "testdata", "titles.csv")
 )
+
+
+@pytest_asyncio.fixture()
+async def decoded_r(create_redis, stack_url):
+    return await create_redis(decode_responses=True, url=stack_url)
 
 
 async def waitForIndex(env, idx, timeout=None):
