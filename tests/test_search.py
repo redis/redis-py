@@ -2322,10 +2322,9 @@ def test_geoshape(client: redis.Redis):
     q2 = Query("@geom:[CONTAINS $poly]").dialect(3)
     qp2 = {"poly": "POLYGON((2 2, 2 50, 50 50, 50 2, 2 2))"}
     result = client.ft().search(q1, query_params=qp1)
-    assert len(result.docs) == 1
-    assert result.docs[0]["id"] == "small"
+    _assert_geosearch_result(client, result, ["small"])
     result = client.ft().search(q2, query_params=qp2)
-    assert len(result.docs) == 2
+    _assert_geosearch_result(client, result, ["small", "large"])
 
 
 def _assert_geosearch_result(client, result, expected_doc_ids):
