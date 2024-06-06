@@ -2,6 +2,7 @@ import time
 from time import sleep
 
 import pytest
+import pytest_asyncio
 import redis.asyncio as redis
 from tests.conftest import (
     assert_resp_response,
@@ -10,6 +11,12 @@ from tests.conftest import (
 )
 
 
+@pytest_asyncio.fixture()
+async def decoded_r(create_redis, stack_url):
+    return await create_redis(decode_responses=True, url=stack_url)
+
+
+@pytest.mark.redismod
 async def test_create(decoded_r: redis.Redis):
     assert await decoded_r.ts().create(1)
     assert await decoded_r.ts().create(2, retention_msecs=5)
@@ -27,6 +34,7 @@ async def test_create(decoded_r: redis.Redis):
     assert_resp_response(decoded_r, 128, info.get("chunk_size"), info.get("chunkSize"))
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 async def test_create_duplicate_policy(decoded_r: redis.Redis):
     # Test for duplicate policy
@@ -42,6 +50,7 @@ async def test_create_duplicate_policy(decoded_r: redis.Redis):
         )
 
 
+@pytest.mark.redismod
 async def test_alter(decoded_r: redis.Redis):
     assert await decoded_r.ts().create(1)
     res = await decoded_r.ts().info(1)
@@ -64,6 +73,7 @@ async def test_alter(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 async def test_alter_diplicate_policy(decoded_r: redis.Redis):
     assert await decoded_r.ts().create(1)
@@ -78,6 +88,7 @@ async def test_alter_diplicate_policy(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 async def test_add(decoded_r: redis.Redis):
     assert 1 == await decoded_r.ts().add(1, 1, 1)
     assert 2 == await decoded_r.ts().add(2, 2, 3, retention_msecs=10)
@@ -100,6 +111,7 @@ async def test_add(decoded_r: redis.Redis):
     assert_resp_response(decoded_r, 128, info.get("chunk_size"), info.get("chunkSize"))
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 async def test_add_duplicate_policy(r: redis.Redis):
     # Test for duplicate policy BLOCK
@@ -140,6 +152,7 @@ async def test_add_duplicate_policy(r: redis.Redis):
     assert 5.0 == res[1]
 
 
+@pytest.mark.redismod
 async def test_madd(decoded_r: redis.Redis):
     await decoded_r.ts().create("a")
     assert [1, 2, 3] == await decoded_r.ts().madd(
@@ -147,6 +160,7 @@ async def test_madd(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 async def test_incrby_decrby(decoded_r: redis.Redis):
     for _ in range(100):
         assert await decoded_r.ts().incrby(1, 1)
@@ -175,6 +189,7 @@ async def test_incrby_decrby(decoded_r: redis.Redis):
     assert_resp_response(decoded_r, 128, info.get("chunk_size"), info.get("chunkSize"))
 
 
+@pytest.mark.redismod
 async def test_create_and_delete_rule(decoded_r: redis.Redis):
     # test rule creation
     time = 100
@@ -198,6 +213,7 @@ async def test_create_and_delete_rule(decoded_r: redis.Redis):
     assert not info["rules"]
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 async def test_del_range(decoded_r: redis.Redis):
     try:
@@ -214,20 +230,24 @@ async def test_del_range(decoded_r: redis.Redis):
     )
 
 
-async def test_range(r: redis.Redis):
+@pytest.mark.redismod
+async def test_range(decoded_r: redis.Redis):
     for i in range(100):
-        await r.ts().add(1, i, i % 7)
-    assert 100 == len(await r.ts().range(1, 0, 200))
+        await decoded_r.ts().add(1, i, i % 7)
+    assert 100 == len(await decoded_r.ts().range(1, 0, 200))
     for i in range(100):
-        await r.ts().add(1, i + 200, i % 7)
-    assert 200 == len(await r.ts().range(1, 0, 500))
+        await decoded_r.ts().add(1, i + 200, i % 7)
+    assert 200 == len(await decoded_r.ts().range(1, 0, 500))
     # last sample isn't returned
     assert 20 == len(
-        await r.ts().range(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
+        await decoded_r.ts().range(
+            1, 0, 500, aggregation_type="avg", bucket_size_msec=10
+        )
     )
-    assert 10 == len(await r.ts().range(1, 0, 500, count=10))
+    assert 10 == len(await decoded_r.ts().range(1, 0, 500, count=10))
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 async def test_range_advanced(decoded_r: redis.Redis):
     for i in range(100):
@@ -258,6 +278,7 @@ async def test_range_advanced(decoded_r: redis.Redis):
     assert_resp_response(decoded_r, res, [(0, 2.55), (10, 3.0)], [[0, 2.55], [10, 3.0]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 async def test_rev_range(decoded_r: redis.Redis):
     for i in range(100):
@@ -302,6 +323,7 @@ async def test_rev_range(decoded_r: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 async def test_multi_range(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This", "team": "ny"})
     await decoded_r.ts().create(
@@ -356,6 +378,7 @@ async def test_multi_range(decoded_r: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 async def test_multi_range_advanced(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This", "team": "ny"})
@@ -473,6 +496,7 @@ async def test_multi_range_advanced(decoded_r: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 async def test_multi_reverse_range(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This", "team": "ny"})
@@ -635,6 +659,7 @@ async def test_multi_reverse_range(decoded_r: redis.Redis):
         assert [[1, 10.0], [0, 1.0]] == res["1"][2]
 
 
+@pytest.mark.redismod
 async def test_get(decoded_r: redis.Redis):
     name = "test"
     await decoded_r.ts().create(name)
@@ -646,6 +671,7 @@ async def test_get(decoded_r: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 async def test_mget(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This"})
     await decoded_r.ts().create(2, labels={"Test": "This", "Taste": "That"})
@@ -680,6 +706,7 @@ async def test_mget(decoded_r: redis.Redis):
         assert {"Taste": "That", "Test": "This"} == res["2"][0]
 
 
+@pytest.mark.redismod
 async def test_info(decoded_r: redis.Redis):
     await decoded_r.ts().create(
         1, retention_msecs=5, labels={"currentLabel": "currentData"}
@@ -691,8 +718,9 @@ async def test_info(decoded_r: redis.Redis):
     assert info["labels"]["currentLabel"] == "currentData"
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-async def testInfoDuplicatePolicy(decoded_r: redis.Redis):
+async def test_info_duplicate_policy(decoded_r: redis.Redis):
     await decoded_r.ts().create(
         1, retention_msecs=5, labels={"currentLabel": "currentData"}
     )
@@ -709,6 +737,7 @@ async def testInfoDuplicatePolicy(decoded_r: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 async def test_query_index(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This"})
     await decoded_r.ts().create(2, labels={"Test": "This", "Taste": "That"})
@@ -719,19 +748,7 @@ async def test_query_index(decoded_r: redis.Redis):
     )
 
 
-# # async def test_pipeline(r: redis.Redis):
-#     pipeline = await r.ts().pipeline()
-#     pipeline.create("with_pipeline")
-#     for i in range(100):
-#         pipeline.add("with_pipeline", i, 1.1 * i)
-#     pipeline.execute()
-
-#     info = await r.ts().info("with_pipeline")
-#     assert info.lastTimeStamp == 99
-#     assert info.total_samples == 100
-#     assert await r.ts().get("with_pipeline")[1] == 99 * 1.1
-
-
+@pytest.mark.redismod
 async def test_uncompressed(decoded_r: redis.Redis):
     await decoded_r.ts().create("compressed")
     await decoded_r.ts().create("uncompressed", uncompressed=True)
