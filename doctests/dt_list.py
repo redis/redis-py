@@ -263,7 +263,7 @@ r.lpush("bikes:repairs", "bike:1", "bike:2", "bike:3")
 print(res36)  # >>> 3
 
 res40 = r.exists("bikes:repairs")
-print(res40)  # >>> True
+print(res40)  # >>> 1
 
 res41 = r.lpop("bikes:repairs")
 print(res41)  # >>> 'bike:3'
@@ -279,11 +279,11 @@ print(res44)  # >>> False
 # STEP_END
 
 # REMOVE_START
-assert res40 is True
+assert res40 == 1
 assert res41 == "bike:3"
 assert res42 == "bike:2"
 assert res43 == "bike:1"
-assert res44 is False
+assert res44 == 0
 r.delete("bikes:repairs")
 # REMOVE_END
 

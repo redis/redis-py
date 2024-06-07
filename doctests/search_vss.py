@@ -12,8 +12,8 @@ import time
 
 import numpy as np
 import pandas as pd
-import redis
 import requests
+import redis
 from redis.commands.search.field import (
     NumericField,
     TagField,
@@ -27,9 +27,10 @@ from sentence_transformers import SentenceTransformer
 # STEP_END
 
 # STEP_START get_data
-url = "https://raw.githubusercontent.com/bsbodden/redis_vss_getting_started"
-"/main/data/bikes.json"
-response = requests.get(url)
+URL = ("https://raw.githubusercontent.com/bsbodden/redis_vss_getting_started"
+       "/main/data/bikes.json"
+       )
+response = requests.get(URL, timeout=10)
 bikes = response.json()
 # STEP_END
 # REMOVE_START
@@ -256,7 +257,10 @@ assert len(encoded_queries) == 11
 
 
 # STEP_START define_bulk_query
-def create_query_table(query, queries, encoded_queries, extra_params={}):
+def create_query_table(query, queries, encoded_queries, extra_params=None):
+    """
+    Creates a query table.
+    """
     results_list = []
     for i, encoded_query in enumerate(encoded_queries):
         result_docs = (
@@ -264,7 +268,7 @@ def create_query_table(query, queries, encoded_queries, extra_params={}):
             .search(
                 query,
                 {"query_vector": np.array(encoded_query, dtype=np.float32).tobytes()}
-                | extra_params,
+                | (extra_params if extra_params else {}),
             )
             .docs
         )
