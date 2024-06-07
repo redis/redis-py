@@ -1841,7 +1841,14 @@ class TestRedisCommands:
         assert len(functions) == 3
 
         expected_names = [b"lib1", b"lib2", b"lib3"]
-        actual_names = [functions[0][13], functions[1][13], functions[2][13]]
+        if is_resp2_connection(stack_r):
+            actual_names = [functions[0][13], functions[1][13], functions[2][13]]
+        else:
+            actual_names = [
+                functions[0][b"name"],
+                functions[1][b"name"],
+                functions[2][b"name"],
+            ]
 
         assert sorted(expected_names) == sorted(actual_names)
         assert stack_r.tfunction_delete("lib1")

@@ -2278,7 +2278,19 @@ def test_geoshape(client: redis.Redis):
     q2 = Query("@geom:[CONTAINS $poly]").dialect(3)
     qp2 = {"poly": "POLYGON((2 2, 2 50, 50 50, 50 2, 2 2))"}
     result = client.ft().search(q1, query_params=qp1)
-    assert len(result.docs) == 1
-    assert result.docs[0]["id"] == "small"
+    _assert_geosearch_result(client, result, ["small"])
     result = client.ft().search(q2, query_params=qp2)
-    assert len(result.docs) == 2
+    _assert_geosearch_result(client, result, ["small", "large"])
+
+
+def _assert_geosearch_result(client, result, expected_doc_ids):
+    """
+    Make sure the result of a geo search is as expected, taking into account the RESP
+    version being used.
+    """
+    if is_resp2_connection(client):
+        assert set([doc.id for doc in result.docs]) == set(expected_doc_ids)
+        assert result.total == len(expected_doc_ids)
+    else:
+        assert set([doc["id"] for doc in result["results"]]) == set(expected_doc_ids)
+        assert result["total_results"] == len(expected_doc_ids)
