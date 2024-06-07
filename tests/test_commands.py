@@ -707,8 +707,9 @@ class TestRedisCommands:
             assert c["user"] != killuser
         r.acl_deluser(killuser)
 
-    @skip_if_server_version_lt("7.4.0")
+    @skip_if_server_version_lt("7.3.240")
     @skip_if_redis_enterprise()
+    @pytest.mark.onlynoncluster
     def test_client_kill_filter_by_maxage(self, r, request):
         _get_client(redis.Redis, request, flushdb=False)
         time.sleep(4)
@@ -2174,7 +2175,7 @@ class TestRedisCommands:
         _, dic = r.hscan("a_notset")
         assert dic == {}
 
-    @skip_if_server_version_lt("7.4.0")
+    @skip_if_server_version_lt("7.3.240")
     def test_hscan_novalues(self, r):
         r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
         cursor, keys = r.hscan("a", no_values=True)
@@ -2195,7 +2196,7 @@ class TestRedisCommands:
         dic = dict(r.hscan_iter("a_notset"))
         assert dic == {}
 
-    @skip_if_server_version_lt("7.4.0")
+    @skip_if_server_version_lt("7.3.240")
     def test_hscan_iter_novalues(self, r):
         r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
         keys = list(r.hscan_iter("a", no_values=True))
