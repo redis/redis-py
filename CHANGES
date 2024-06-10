@@ -1,3 +1,4 @@
+    * Fixed sentinel execute command response
     * Update `ResponseT` type hint
     * Allow to control the minimum SSL version
     * Add an optional lock_name attribute to LockError.
