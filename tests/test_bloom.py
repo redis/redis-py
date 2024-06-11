@@ -73,6 +73,8 @@ def test_tdigest_create(client):
     assert client.tdigest().create("tDigest", 100)
 
 
+# hiredis-py can't process well boolean responses
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.redismod
 def test_bf_add(client):
     assert client.bf().create("bloom", 0.01, 1000)
@@ -86,6 +88,8 @@ def test_bf_add(client):
     assert [1, 0] == intlist(client.bf().mexists("bloom", "foo", "noexist"))
 
 
+# hiredis-py can't process well boolean responses
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.redismod
 def test_bf_insert(client):
     assert client.bf().create("bloom", 0.01, 1000)
@@ -117,6 +121,8 @@ def test_bf_insert(client):
     )
 
 
+# hiredis-py can't process well boolean responses
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.redismod
 def test_bf_scandump_and_loadchunk(client):
     # Store a filter
@@ -216,6 +222,8 @@ def test_bf_card(client):
         client.bf().card("setKey")
 
 
+# hiredis-py can't process well boolean responses
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.redismod
 def test_cf_add_and_insert(client):
     assert client.cf().create("cuckoo", 1000)
@@ -242,6 +250,8 @@ def test_cf_add_and_insert(client):
     )
 
 
+# hiredis-py can't process well boolean responses
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.redismod
 def test_cf_exists_and_del(client):
     assert client.cf().create("cuckoo", 1000)
