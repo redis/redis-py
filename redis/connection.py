@@ -415,24 +415,21 @@ class AbstractConnection:
             self.send_command('EXEC')
             responses = self._read_exec_responses()
             self._handle_responses(responses, auth_args)
-        except (TimeoutError, AuthenticationError, ConnectionError) as e:
-            if not self.retry_on_timeout:
-                raise e
-        except Exception as e:
+        except AuthenticationError as e:
             if str(e) == "Invalid Username or Password":
                 raise AuthenticationError("Invalid Username or Password") from e
-            else:
-                raise AuthenticationError() from e
+        except Exception:
+            raise ConnectionError("Error during EXEC handling")
 
     def _read_exec_responses(self):
         # read the response for EXEC which should be a list
         response = self.read_response()
-        if response == b'OK' and not self.retry_on_timeout:
+        if response == b'OK':
             # EXEC did not execute correctly, likely due to previous error
             raise ConnectionError("EXEC command did not execute correctly")
         while response == b'QUEUED':
             response = self.read_response()
-        if not isinstance(response, list) and not self.retry_on_timeout:
+        if not isinstance(response, list):
             raise ConnectionError(f"EXEC command did not return a list: {response}")
         return response
 
