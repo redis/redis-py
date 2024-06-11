@@ -356,8 +356,6 @@ class AbstractConnection:
             )
             auth_args = cred_provider.get_credentials()
 
-        auth_command_response = False
-
         # try to send HELLO command (for Redis 6.0 and above)
         try:
             # if resp version is specified and we have auth args,
@@ -379,8 +377,6 @@ class AbstractConnection:
         except Exception as e:
             if str(e) == "Invalid RESP version":
                 raise ConnectionError("Invalid RESP version")
-            elif str(e) == "Invalid Username or Password":
-                raise AuthenticationError("Invalid Username or Password")
             # fall back to AUTH command (for Redis versions less than 6.0)
             else:
                 self.send_command('MULTI')
@@ -391,6 +387,15 @@ class AbstractConnection:
             if auth_args:
                 self.send_command("AUTH", *auth_args, check_health=False)
                 auth_command_response = True
+                # avoid checking health here -- PING will fail if we try
+                # to check the health prior to the AUTH
+                if auth_args:
+                    # check if only password is provided and RESP version < 6
+                    if not self.username and self.password and self.protocol in [2, "2"]:
+                        self.send_command("AUTH", self.password, check_health=False)
+                    else:
+                        self.send_command("AUTH", *auth_args, check_health=False)
+
 
         # if a client_name is given, set it
         if self.client_name:
