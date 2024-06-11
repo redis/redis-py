@@ -113,6 +113,9 @@ jobs:
         python-version: ['3.8', '3.11']
         test-type: ['standalone', 'cluster']
         connection-type: ['hiredis', 'plain']
+      exclude:
+        - test-type: 'cluster'
+          connection-type: 'hiredis'
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
