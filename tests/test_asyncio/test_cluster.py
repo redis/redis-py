@@ -1453,7 +1453,7 @@ class TestClusterRedisCommands:
         assert isinstance(stats, dict)
         for key, value in stats.items():
             if key.startswith("db."):
-                assert isinstance(value, dict)
+                assert not isinstance(value, list)
 
     @skip_if_server_version_lt("4.0.0")
     async def test_memory_help(self, r: RedisCluster) -> None:

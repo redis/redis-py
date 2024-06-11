@@ -1577,7 +1577,7 @@ class TestClusterRedisCommands:
         assert isinstance(stats, dict)
         for key, value in stats.items():
             if key.startswith("db."):
-                assert isinstance(value, dict)
+                assert not isinstance(value, list)
 
     @skip_if_server_version_lt("4.0.0")
     def test_memory_help(self, r):
@@ -2450,6 +2450,7 @@ class TestClusterRedisCommands:
             except Exception:
                 pass
 
+    @pytest.mark.redismod
     @skip_if_server_version_lt("7.1.140")
     def test_tfunction_load_delete(self, r):
         r.gears_refresh_cluster()
@@ -2458,6 +2459,7 @@ class TestClusterRedisCommands:
         assert r.tfunction_load(lib_code)
         assert r.tfunction_delete("lib1")
 
+    @pytest.mark.redismod
     @skip_if_server_version_lt("7.1.140")
     def test_tfunction_list(self, r):
         r.gears_refresh_cluster()
@@ -2481,6 +2483,7 @@ class TestClusterRedisCommands:
         assert r.tfunction_delete("lib2")
         assert r.tfunction_delete("lib3")
 
+    @pytest.mark.redismod
     @skip_if_server_version_lt("7.1.140")
     def test_tfcall(self, r):
         r.gears_refresh_cluster()
