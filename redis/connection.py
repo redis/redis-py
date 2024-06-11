@@ -379,14 +379,6 @@ class AbstractConnection:
                 raise ConnectionError("Invalid RESP version")
             # fall back to AUTH command (for Redis versions less than 6.0)
             else:
-                self.send_command('MULTI')
-                self.read_response()
-
-            # avoid checking health here -- PING will fail if we try
-            # to check the health prior to the AUTH
-            if auth_args:
-                self.send_command("AUTH", *auth_args, check_health=False)
-                auth_command_response = True
                 # avoid checking health here -- PING will fail if we try
                 # to check the health prior to the AUTH
                 if auth_args:
@@ -396,24 +388,28 @@ class AbstractConnection:
                     else:
                         self.send_command("AUTH", *auth_args, check_health=False)
 
+        # start a transaction block with MULTI
+        try:
+            self.send_command('MULTI')
+            self.read_response()
 
-        # if a client_name is given, set it
-        if self.client_name:
-            self.send_command("CLIENT", "SETNAME", self.client_name)
+            # if a client_name is given, set it
+            if self.client_name:
+                self.send_command("CLIENT", "SETNAME", self.client_name)
 
-        # set the library name and version
-        if self.lib_name:
-            self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
-        if self.lib_version:
-            self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
+            # set the library name and version
+            if self.lib_name:
+                self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
+            if self.lib_version:
+                self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
 
-        # if a database is specified, switch to it
-        if self.db:
-            self.send_command("SELECT", self.db)
+            # if a database is specified, switch to it
+            if self.db:
+                self.send_command("SELECT", self.db)
 
-        # if client caching is enabled, start tracking
-        if self.client_cache:
-            self.send_command("CLIENT", "TRACKING", "ON")
+            # if client caching is enabled, start tracking
+            if self.client_cache:
+                self.send_command("CLIENT", "TRACKING", "ON")
 
         # execute the MULTI block
         try:
