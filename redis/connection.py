@@ -411,8 +411,7 @@ class AbstractConnection:
             if self.client_cache:
                 self.send_command("CLIENT", "TRACKING", "ON")
 
-        # execute the MULTI block
-        try:
+            # execute the MULTI block
             self.send_command('EXEC')
             responses = self._read_exec_responses()
             # check AUTH response if AUTH command was sent
