@@ -296,7 +296,7 @@ def create_query_table(query, queries, encoded_queries, extra_params=None):
     queries_table["description"] = queries_table["description"].apply(
         lambda x: (x[:497] + "...") if len(x) > 500 else x
     )
-    queries_table.to_markdown(index=False)
+    return queries_table.to_markdown(index=False)
 
 
 # STEP_END
@@ -309,8 +309,9 @@ query = (
     .dialect(2)
 )
 
-create_query_table(query, queries, encoded_queries)
-# >>> | Best Mountain bikes for kids     |    0.54 | bikes:003... (+ 32 more results)
+table = create_query_table(query, queries, encoded_queries)
+print(table)
+# >>> | Best Mountain bikes for kids     |    0.54 | bikes:003...
 # STEP_END
 
 # STEP_START run_hybrid_query
@@ -320,8 +321,9 @@ hybrid_query = (
     .return_fields("vector_score", "id", "brand", "model", "description")
     .dialect(2)
 )
-create_query_table(hybrid_query, queries, encoded_queries)
-# >>> | Best Mountain bikes for kids     |    0.3  | bikes:008... (+22 more results)
+table = create_query_table(hybrid_query, queries, encoded_queries)
+print(table)
+# >>> | Best Mountain bikes for kids     |    0.3  | bikes:008...
 # STEP_END
 
 # STEP_START run_range_query
@@ -335,6 +337,11 @@ range_query = (
     .paging(0, 4)
     .dialect(2)
 )
-create_query_table(range_query, queries[:1], encoded_queries[:1], {"range": 0.55})
-# >>> | Bike for small kids |    0.52 | bikes:001 | Velorim    |... (+1 more result)
+table = create_query_table(
+    range_query, queries[:1],
+    encoded_queries[:1],
+    {"range": 0.55}
+)
+print(table)
+# >>> | Bike for small kids |    0.52 | bikes:001 | Velorim    |...
 # STEP_END
