@@ -132,7 +132,7 @@ class _RESP3Parser(_RESPBase):
             res = self.invalidation_push_handler_func(response)
         else:
             res = self.pubsub_push_handler_func(response)
-        if not push_request:
+        if push_request:
             return self._read_response(
                 disable_decoding=disable_decoding, push_request=push_request
             )
@@ -276,7 +276,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
             res = self.invalidation_push_handler_func(response)
         else:
             res = self.pubsub_push_handler_func(response)
-        if not push_request:
+        if push_request:
             return await self._read_response(
                 disable_decoding=disable_decoding, push_request=push_request
             )
