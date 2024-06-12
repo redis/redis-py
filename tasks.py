@@ -13,7 +13,7 @@ if not hasattr(inspect, "getargspec"):
 def devenv(c):
     """Brings up the test environment, by wrapping docker compose."""
     clean(c)
-    cmd = "docker-compose --profile all up -d"
+    cmd = "docker-compose --profile all up -d --build"
     run(cmd)
 
 
