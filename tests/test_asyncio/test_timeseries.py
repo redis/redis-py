@@ -113,38 +113,44 @@ async def test_add(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-async def test_add_duplicate_policy(r: redis.Redis):
+async def test_add_duplicate_policy(decoded_r: redis.Redis):
     # Test for duplicate policy BLOCK
-    assert 1 == await r.ts().add("time-serie-add-ooo-block", 1, 5.0)
+    assert 1 == await decoded_r.ts().add("time-serie-add-ooo-block", 1, 5.0)
     with pytest.raises(Exception):
-        await r.ts().add("time-serie-add-ooo-block", 1, 5.0, on_duplicate="block")
+        await decoded_r.ts().add(
+            "time-serie-add-ooo-block", 1, 5.0, on_duplicate="block"
+        )
 
     # Test for duplicate policy LAST
-    assert 1 == await r.ts().add("time-serie-add-ooo-last", 1, 5.0)
-    assert 1 == await r.ts().add(
+    assert 1 == await decoded_r.ts().add("time-serie-add-ooo-last", 1, 5.0)
+    assert 1 == await decoded_r.ts().add(
         "time-serie-add-ooo-last", 1, 10.0, on_duplicate="last"
     )
-    res = await r.ts().get("time-serie-add-ooo-last")
+    res = await decoded_r.ts().get("time-serie-add-ooo-last")
     assert 10.0 == res[1]
 
     # Test for duplicate policy FIRST
-    assert 1 == await r.ts().add("time-serie-add-ooo-first", 1, 5.0)
-    assert 1 == await r.ts().add(
+    assert 1 == await decoded_r.ts().add("time-serie-add-ooo-first", 1, 5.0)
+    assert 1 == await decoded_r.ts().add(
         "time-serie-add-ooo-first", 1, 10.0, on_duplicate="first"
     )
-    res = await r.ts().get("time-serie-add-ooo-first")
+    res = await decoded_r.ts().get("time-serie-add-ooo-first")
     assert 5.0 == res[1]
 
     # Test for duplicate policy MAX
-    assert 1 == await r.ts().add("time-serie-add-ooo-max", 1, 5.0)
-    assert 1 == await r.ts().add("time-serie-add-ooo-max", 1, 10.0, on_duplicate="max")
-    res = await r.ts().get("time-serie-add-ooo-max")
+    assert 1 == await decoded_r.ts().add("time-serie-add-ooo-max", 1, 5.0)
+    assert 1 == await decoded_r.ts().add(
+        "time-serie-add-ooo-max", 1, 10.0, on_duplicate="max"
+    )
+    res = await decoded_r.ts().get("time-serie-add-ooo-max")
     assert 10.0 == res[1]
 
     # Test for duplicate policy MIN
-    assert 1 == await r.ts().add("time-serie-add-ooo-min", 1, 5.0)
-    assert 1 == await r.ts().add("time-serie-add-ooo-min", 1, 10.0, on_duplicate="min")
-    res = await r.ts().get("time-serie-add-ooo-min")
+    assert 1 == await decoded_r.ts().add("time-serie-add-ooo-min", 1, 5.0)
+    assert 1 == await decoded_r.ts().add(
+        "time-serie-add-ooo-min", 1, 10.0, on_duplicate="min"
+    )
+    res = await decoded_r.ts().get("time-serie-add-ooo-min")
     assert 5.0 == res[1]
 
 
