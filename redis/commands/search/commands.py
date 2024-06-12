@@ -173,18 +173,18 @@ class SearchCommands:
             fields: A list of Field objects.
             no_term_offsets: If `true`, term offsets will not be saved in the index.
             no_field_flags: If true, field flags that allow searching in specific fields
-                will not be saved.
+                            will not be saved.
             stopwords: If provided, the index will be created with this custom stopword
-                list. The list can be empty.
+                       list. The list can be empty.
             definition: If provided, the index will be created with this custom index
-                definition.
+                        definition.
             max_text_fields: If true, indexes will be encoded as if there were more than
-                32 text fields, allowing for additional fields beyond 32.
+                             32 text fields, allowing for additional fields beyond 32.
             temporary: Creates a lightweight temporary index which will expire after the
-                specified period of inactivity. The internal idle timer is reset
-                whenever the index is searched or added to.
+                       specified period of inactivity. The internal idle timer is reset
+                       whenever the index is searched or added to.
             no_highlight: If true, disables highlighting support. Also implied by
-                no_term_offsets.
+                          `no_term_offsets`.
             no_term_frequencies: If true, term frequencies will not be saved in the
                                  index.
             skip_initial_scan: If true, the initial scan and indexing will be skipped.
