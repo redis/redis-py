@@ -1,5 +1,4 @@
 import logging
-import sys
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Dict, Mapping, Union
@@ -28,10 +27,7 @@ try:
 except ImportError:
     CRYPTOGRAPHY_AVAILABLE = False
 
-if sys.version_info >= (3, 8):
-    from importlib import metadata
-else:
-    import importlib_metadata as metadata
+from importlib import metadata
 
 
 def from_url(url, **kwargs):

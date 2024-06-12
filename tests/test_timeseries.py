@@ -5,7 +5,20 @@ from time import sleep
 import pytest
 import redis
 
-from .conftest import assert_resp_response, is_resp2_connection, skip_ifmodversion_lt
+from .conftest import (
+    _get_client,
+    assert_resp_response,
+    is_resp2_connection,
+    skip_ifmodversion_lt,
+)
+
+
+@pytest.fixture()
+def decoded_r(request, stack_url):
+    with _get_client(
+        redis.Redis, request, decode_responses=True, from_url=stack_url
+    ) as client:
+        yield client
 
 
 @pytest.fixture
@@ -14,6 +27,7 @@ def client(decoded_r):
     return decoded_r
 
 
+@pytest.mark.redismod
 def test_create(client):
     assert client.ts().create(1)
     assert client.ts().create(2, retention_msecs=5)
@@ -31,6 +45,7 @@ def test_create(client):
     assert_resp_response(client, 128, info.get("chunk_size"), info.get("chunkSize"))
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 def test_create_duplicate_policy(client):
     # Test for duplicate policy
@@ -46,6 +61,7 @@ def test_create_duplicate_policy(client):
         )
 
 
+@pytest.mark.redismod
 def test_alter(client):
     assert client.ts().create(1)
     info = client.ts().info(1)
@@ -66,6 +82,7 @@ def test_alter(client):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 def test_alter_diplicate_policy(client):
     assert client.ts().create(1)
@@ -80,6 +97,7 @@ def test_alter_diplicate_policy(client):
     )
 
 
+@pytest.mark.redismod
 def test_add(client):
     assert 1 == client.ts().add(1, 1, 1)
     assert 2 == client.ts().add(2, 2, 3, retention_msecs=10)
@@ -102,6 +120,7 @@ def test_add(client):
     assert_resp_response(client, 128, info.get("chunk_size"), info.get("chunkSize"))
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
 def test_add_on_duplicate(client):
     # Test for duplicate policy BLOCK
@@ -132,11 +151,13 @@ def test_add_on_duplicate(client):
     assert 5.0 == client.ts().get("time-serie-add-ooo-min")[1]
 
 
+@pytest.mark.redismod
 def test_madd(client):
     client.ts().create("a")
     assert [1, 2, 3] == client.ts().madd([("a", 1, 5), ("a", 2, 10), ("a", 3, 15)])
 
 
+@pytest.mark.redismod
 def test_madd_missing_timeseries(client):
     response = client.ts().madd([("a", 1, 5), ("a", 2, 10)])
     assert isinstance(response, list)
@@ -145,6 +166,7 @@ def test_madd_missing_timeseries(client):
     assert isinstance(response[1], redis.ResponseError)
 
 
+@pytest.mark.redismod
 def test_incrby_decrby(client):
     for _ in range(100):
         assert client.ts().incrby(1, 1)
@@ -173,6 +195,7 @@ def test_incrby_decrby(client):
     assert_resp_response(client, 128, info.get("chunk_size"), info.get("chunkSize"))
 
 
+@pytest.mark.redismod
 def test_create_and_delete_rule(client):
     # test rule creation
     time = 100
@@ -196,6 +219,7 @@ def test_create_and_delete_rule(client):
     assert not info["rules"]
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 def test_del_range(client):
     try:
@@ -210,6 +234,7 @@ def test_del_range(client):
     assert_resp_response(client, client.ts().range(1, 22, 22), [(22, 1.0)], [[22, 1.0]])
 
 
+@pytest.mark.redismod
 def test_range(client):
     for i in range(100):
         client.ts().add(1, i, i % 7)
@@ -224,6 +249,7 @@ def test_range(client):
     assert 10 == len(client.ts().range(1, 0, 500, count=10))
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 def test_range_advanced(client):
     for i in range(100):
@@ -253,6 +279,7 @@ def test_range_advanced(client):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_range_latest(client: redis.Redis):
     timeseries = client.ts()
@@ -277,6 +304,7 @@ def test_range_latest(client: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_range_bucket_timestamp(client: redis.Redis):
     timeseries = client.ts()
@@ -310,6 +338,7 @@ def test_range_bucket_timestamp(client: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_range_empty(client: redis.Redis):
     timeseries = client.ts()
@@ -354,6 +383,7 @@ def test_range_empty(client: redis.Redis):
     assert_resp_response(client, res, resp2_expected, resp3_expected)
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 def test_rev_range(client):
     for i in range(100):
@@ -402,6 +432,7 @@ def test_rev_range(client):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_revrange_latest(client: redis.Redis):
     timeseries = client.ts()
@@ -420,6 +451,7 @@ def test_revrange_latest(client: redis.Redis):
     assert_resp_response(client, res, [(0, 4.0)], [[0, 4.0]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_revrange_bucket_timestamp(client: redis.Redis):
     timeseries = client.ts()
@@ -453,6 +485,7 @@ def test_revrange_bucket_timestamp(client: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_revrange_empty(client: redis.Redis):
     timeseries = client.ts()
@@ -498,6 +531,7 @@ def test_revrange_empty(client: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 def test_mrange(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
@@ -546,6 +580,7 @@ def test_mrange(client):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 def test_multi_range_advanced(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
@@ -659,6 +694,7 @@ def test_multi_range_advanced(client):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_mrange_latest(client: redis.Redis):
     timeseries = client.ts()
@@ -688,6 +724,7 @@ def test_mrange_latest(client: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "timeseries")
 def test_multi_reverse_range(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
@@ -806,6 +843,7 @@ def test_multi_reverse_range(client):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_mrevrange_latest(client: redis.Redis):
     timeseries = client.ts()
@@ -834,6 +872,7 @@ def test_mrevrange_latest(client: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 def test_get(client):
     name = "test"
     client.ts().create(name)
@@ -845,6 +884,7 @@ def test_get(client):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_get_latest(client: redis.Redis):
     timeseries = client.ts()
@@ -862,6 +902,7 @@ def test_get_latest(client: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 def test_mget(client):
     client.ts().create(1, labels={"Test": "This"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That"})
@@ -897,6 +938,7 @@ def test_mget(client):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.8.0", "timeseries")
 def test_mget_latest(client: redis.Redis):
     timeseries = client.ts()
@@ -913,6 +955,7 @@ def test_mget_latest(client: redis.Redis):
     assert_resp_response(client, res, [{"t2": [{}, 10, 8.0]}], {"t2": [{}, [10, 8.0]]})
 
 
+@pytest.mark.redismod
 def test_info(client):
     client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     info = client.ts().info(1)
@@ -922,8 +965,9 @@ def test_info(client):
     assert info["labels"]["currentLabel"] == "currentData"
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-def testInfoDuplicatePolicy(client):
+def test_info_duplicate_policy(client):
     client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     info = client.ts().info(1)
     assert_resp_response(
@@ -937,6 +981,7 @@ def testInfoDuplicatePolicy(client):
     )
 
 
+@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 def test_query_index(client):
     client.ts().create(1, labels={"Test": "This"})
@@ -946,6 +991,7 @@ def test_query_index(client):
     assert_resp_response(client, client.ts().queryindex(["Taste=That"]), [2], {"2"})
 
 
+@pytest.mark.redismod
 def test_pipeline(client):
     pipeline = client.ts().pipeline()
     pipeline.create("with_pipeline")
@@ -963,6 +1009,7 @@ def test_pipeline(client):
     assert client.ts().get("with_pipeline")[1] == 99 * 1.1
 
 
+@pytest.mark.redismod
 def test_uncompressed(client):
     client.ts().create("compressed")
     client.ts().create("uncompressed", uncompressed=True)
