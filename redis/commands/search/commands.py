@@ -4,13 +4,13 @@ from typing import Dict, List, Optional, Union
 
 from redis.client import Pipeline
 from redis.utils import deprecated_function
-from .field import Field
-from .indexDefinition import IndexDefinition
 
 from ..helpers import get_protocol_version, parse_to_dict
 from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
 from .document import Document
+from .field import Field
+from .indexDefinition import IndexDefinition
 from .query import Query
 from .result import Result
 from .suggestion import SuggestionParser
@@ -181,11 +181,12 @@ class SearchCommands:
             max_text_fields: If true, indexes will be encoded as if there were more than
                 32 text fields, allowing for additional fields beyond 32.
             temporary: Creates a lightweight temporary index which will expire after the
-                specified period of inactivity. The internal idle timer is reset whenever
-                the index is searched or added to.
+                specified period of inactivity. The internal idle timer is reset
+                whenever the index is searched or added to.
             no_highlight: If true, disables highlighting support. Also implied by
                 no_term_offsets.
-            no_term_frequencies: If true, term frequencies will not be saved in the index.
+            no_term_frequencies: If true, term frequencies will not be saved in the
+                                 index.
             skip_initial_scan: If true, the initial scan and indexing will be skipped.
 
         """
