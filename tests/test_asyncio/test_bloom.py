@@ -42,8 +42,6 @@ async def test_tdigest_create(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 100)
 
 
-# hiredis-py can't process well boolean responses
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.redismod
 async def test_bf_add(decoded_r: redis.Redis):
     assert await decoded_r.bf().create("bloom", 0.01, 1000)
@@ -57,8 +55,6 @@ async def test_bf_add(decoded_r: redis.Redis):
     assert [1, 0] == intlist(await decoded_r.bf().mexists("bloom", "foo", "noexist"))
 
 
-# hiredis-py can't process well boolean responses
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.redismod
 async def test_bf_insert(decoded_r: redis.Redis):
     assert await decoded_r.bf().create("bloom", 0.01, 1000)
@@ -90,8 +86,6 @@ async def test_bf_insert(decoded_r: redis.Redis):
     )
 
 
-# hiredis-py can't process well boolean responses
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.redismod
 async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
     # Store a filter
@@ -191,8 +185,6 @@ async def test_bf_card(decoded_r: redis.Redis):
         await decoded_r.bf().card("setKey")
 
 
-# hiredis-py can't process well boolean responses
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.redismod
 async def test_cf_add_and_insert(decoded_r: redis.Redis):
     assert await decoded_r.cf().create("cuckoo", 1000)
@@ -219,8 +211,6 @@ async def test_cf_add_and_insert(decoded_r: redis.Redis):
     )
 
 
-# hiredis-py can't process well boolean responses
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.redismod
 async def test_cf_exists_and_del(decoded_r: redis.Redis):
     assert await decoded_r.cf().create("cuckoo", 1000)
