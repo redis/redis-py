@@ -62,6 +62,7 @@ jobs:
          connection-type: ['hiredis', 'plain']
      env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+       REDIS_STACK_IMAGE: redis/redis-stack-server:7.4.0-rc1
      name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
      steps:
        - uses: actions/checkout@v4
@@ -116,6 +117,7 @@ jobs:
         protocol: ['3']
     env:
        ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+       REDIS_STACK_IMAGE: redis/redis-stack-server:7.4.0-rc1
     name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
     steps:
       - uses: actions/checkout@v4

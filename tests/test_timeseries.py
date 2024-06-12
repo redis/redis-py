@@ -84,7 +84,7 @@ def test_alter(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-def test_alter_diplicate_policy(client):
+def test_alter_duplicate_policy(client):
     assert client.ts().create(1)
     info = client.ts().info(1)
     assert_resp_response(
@@ -126,7 +126,7 @@ def test_add_on_duplicate(client):
     # Test for duplicate policy BLOCK
     assert 1 == client.ts().add("time-serie-add-ooo-block", 1, 5.0)
     with pytest.raises(Exception):
-        client.ts().add("time-serie-add-ooo-block", 1, 5.0, duplicate_policy="block")
+        client.ts().add("time-serie-add-ooo-block", 1, 5.0, on_duplicate="block")
 
     # Test for duplicate policy LAST
     assert 1 == client.ts().add("time-serie-add-ooo-last", 1, 5.0)
@@ -220,7 +220,7 @@ def test_create_and_delete_rule(client):
 
 
 @pytest.mark.redismod
-@skip_ifmodversion_lt("99.99.99", "timeseries")
+@skip_ifmodversion_lt("1.10.0", "timeseries")
 def test_del_range(client):
     try:
         client.ts().delete("test", 0, 100)
@@ -250,7 +250,7 @@ def test_range(client):
 
 
 @pytest.mark.redismod
-@skip_ifmodversion_lt("99.99.99", "timeseries")
+@skip_ifmodversion_lt("1.10.0", "timeseries")
 def test_range_advanced(client):
     for i in range(100):
         client.ts().add(1, i, i % 7)
@@ -384,7 +384,7 @@ def test_range_empty(client: redis.Redis):
 
 
 @pytest.mark.redismod
-@skip_ifmodversion_lt("99.99.99", "timeseries")
+@skip_ifmodversion_lt("1.10.0", "timeseries")
 def test_rev_range(client):
     for i in range(100):
         client.ts().add(1, i, i % 7)
@@ -581,7 +581,7 @@ def test_mrange(client):
 
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
-@skip_ifmodversion_lt("99.99.99", "timeseries")
+@skip_ifmodversion_lt("1.10.0", "timeseries")
 def test_multi_range_advanced(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
@@ -725,7 +725,7 @@ def test_mrange_latest(client: redis.Redis):
 
 @pytest.mark.onlynoncluster
 @pytest.mark.redismod
-@skip_ifmodversion_lt("99.99.99", "timeseries")
+@skip_ifmodversion_lt("1.10.0", "timeseries")
 def test_multi_reverse_range(client):
     client.ts().create(1, labels={"Test": "This", "team": "ny"})
     client.ts().create(2, labels={"Test": "This", "Taste": "That", "team": "sf"})
