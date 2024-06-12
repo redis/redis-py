@@ -157,8 +157,12 @@ def pytest_sessionstart(session):
     session.config.REDIS_INFO = REDIS_INFO
 
     # module info
+    stack_url = redis_url
+    if stack_url == default_redis_url:
+        stack_url = default_redismod_url
     try:
-        REDIS_INFO["modules"] = info["modules"]
+        stack_info = _get_info(stack_url)
+        REDIS_INFO["modules"] = stack_info["modules"]
     except (KeyError, redis.exceptions.ConnectionError):
         pass
 
