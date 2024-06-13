@@ -175,6 +175,7 @@ async def test_incrby_decrby(decoded_r: redis.Redis):
     assert_resp_response(decoded_r, 128, info.get("chunk_size"), info.get("chunkSize"))
 
 
+@pytest.mark.onlynoncluster
 async def test_create_and_delete_rule(decoded_r: redis.Redis):
     # test rule creation
     time = 100
