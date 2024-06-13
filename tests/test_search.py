@@ -2481,7 +2481,7 @@ def test_special_characters_in_fields(client):
         mapping={
             "uuid": "123e4567-e89b-12d3-a456-426614174000",
             "tags": "finance|crypto|$btc|blockchain",
-            "description": "An in-depth analysis of blockchain technologies & Bitcoin's potential.",
+            "description": "Analysis of blockchain technologies & Bitcoin's potential.",
             "rating": 5,
         },
     )
@@ -2491,7 +2491,7 @@ def test_special_characters_in_fields(client):
         mapping={
             "uuid": "987e6543-e21c-12d3-a456-426614174999",
             "tags": "health|well-being|fitness|new-year's-resolutions",
-            "description": "Discover the top health trends for the new year, including fitness regimes.",
+            "description": "Health trends for the new year, including fitness regimes.",
             "rating": 4,
         },
     )
@@ -2518,7 +2518,7 @@ def test_special_characters_in_fields(client):
     _assert_search_result(client, res, ["resource:2"])
 
     # some chars still need escaping
-    res = client.ft().search(Query("@tags:{\$btc}").dialect(5))
+    res = client.ft().search(Query(r"@tags:{\$btc}").dialect(5))
     _assert_search_result(client, res, ["resource:1"])
 
 
