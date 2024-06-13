@@ -105,7 +105,7 @@ services:
       - all
 
   redis-stack:
-    image: redis/redis-stack-server:edge
+    image: ${REDIS_STACK_IMAGE:-redis/redis-stack-server:edge}
     container_name: redis-stack
     ports:
       - 6479:6379

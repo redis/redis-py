@@ -9,6 +9,8 @@ from ..helpers import get_protocol_version, parse_to_dict
 from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
 from .document import Document
+from .field import Field
+from .indexDefinition import IndexDefinition
 from .query import Query
 from .result import Result
 from .suggestion import SuggestionParser
@@ -151,44 +153,43 @@ class SearchCommands:
 
     def create_index(
         self,
-        fields,
-        no_term_offsets=False,
-        no_field_flags=False,
-        stopwords=None,
-        definition=None,
+        fields: List[Field],
+        no_term_offsets: bool = False,
+        no_field_flags: bool = False,
+        stopwords: Optional[List[str]] = None,
+        definition: Optional[IndexDefinition] = None,
         max_text_fields=False,
         temporary=None,
-        no_highlight=False,
-        no_term_frequencies=False,
-        skip_initial_scan=False,
+        no_highlight: bool = False,
+        no_term_frequencies: bool = False,
+        skip_initial_scan: bool = False,
     ):
         """
-        Create the search index. The index must not already exist.
+        Creates the search index. The index must not already exist.
 
-        ### Parameters:
+        For more information, see https://redis.io/commands/ft.create/
 
-        - **fields**: a list of TextField or NumericField objects
-        - **no_term_offsets**: If true, we will not save term offsets in
-        the index
-        - **no_field_flags**: If true, we will not save field flags that
-        allow searching in specific fields
-        - **stopwords**: If not None, we create the index with this custom
-        stopword list. The list can be empty
-        - **max_text_fields**: If true, we will encode indexes as if there
-        were more than 32 text fields which allows you to add additional
-        fields (beyond 32).
-        - **temporary**: Create a lightweight temporary index which will
-        expire after the specified period of inactivity (in seconds). The
-        internal idle timer is reset whenever the index is searched or added to.
-        - **no_highlight**: If true, disabling highlighting support.
-        Also implied by no_term_offsets.
-        - **no_term_frequencies**: If true, we avoid saving the term frequencies
-        in the index.
-        - **skip_initial_scan**: If true, we do not scan and index.
+        Args:
+            fields: A list of Field objects.
+            no_term_offsets: If `true`, term offsets will not be saved in the index.
+            no_field_flags: If true, field flags that allow searching in specific fields
+                            will not be saved.
+            stopwords: If provided, the index will be created with this custom stopword
+                       list. The list can be empty.
+            definition: If provided, the index will be created with this custom index
+                        definition.
+            max_text_fields: If true, indexes will be encoded as if there were more than
+                             32 text fields, allowing for additional fields beyond 32.
+            temporary: Creates a lightweight temporary index which will expire after the
+                       specified period of inactivity. The internal idle timer is reset
+                       whenever the index is searched or added to.
+            no_highlight: If true, disables highlighting support. Also implied by
+                          `no_term_offsets`.
+            no_term_frequencies: If true, term frequencies will not be saved in the
+                                 index.
+            skip_initial_scan: If true, the initial scan and indexing will be skipped.
 
-        For more information see `FT.CREATE <https://redis.io/commands/ft.create>`_.
-        """  # noqa
-
+        """
         args = [CREATE_CMD, self.index_name]
         if definition is not None:
             args += definition.args
