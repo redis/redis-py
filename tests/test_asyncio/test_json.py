@@ -95,6 +95,7 @@ async def test_jsonsetexistentialmodifiersshouldsucceed(decoded_r: redis.Redis):
         await decoded_r.json().set("obj", Path("foo"), "baz", nx=True, xx=True)
 
 
+@pytest.mark.onlynoncluster
 async def test_mgetshouldsucceed(decoded_r: redis.Redis):
     await decoded_r.json().set("1", Path.root_path(), 1)
     await decoded_r.json().set("2", Path.root_path(), 2)

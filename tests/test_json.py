@@ -102,6 +102,7 @@ def test_jsonsetexistentialmodifiersshouldsucceed(client):
         client.json().set("obj", Path("foo"), "baz", nx=True, xx=True)
 
 
+@pytest.mark.onlynoncluster
 def test_mgetshouldsucceed(client):
     client.json().set("1", Path.root_path(), 1)
     client.json().set("2", Path.root_path(), 2)

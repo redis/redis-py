@@ -46,11 +46,18 @@ def parse_info(response):
                     return int(value)
             except ValueError:
                 return value
+        elif "=" not in value:
+            return [get_value(v) for v in value.split(",") if v]
         else:
             sub_dict = {}
             for item in value.split(","):
-                k, v = item.rsplit("=", 1)
-                sub_dict[k] = get_value(v)
+                if not item:
+                    continue
+                if "=" in item:
+                    k, v = item.rsplit("=", 1)
+                    sub_dict[k] = get_value(v)
+                else:
+                    sub_dict[item] = True
             return sub_dict
 
     for line in response.splitlines():
@@ -80,7 +87,7 @@ def parse_memory_stats(response, **kwargs):
     """Parse the results of MEMORY STATS"""
     stats = pairs_to_dict(response, decode_keys=True, decode_string_values=True)
     for key, value in stats.items():
-        if key.startswith("db."):
+        if key.startswith("db.") and isinstance(value, list):
             stats[key] = pairs_to_dict(
                 value, decode_keys=True, decode_string_values=True
             )
