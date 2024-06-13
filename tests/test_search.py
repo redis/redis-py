@@ -2463,6 +2463,65 @@ def test_search_empty_fields(client):
     _assert_search_result(client, res, ["property:1", "property:2"])
 
 
+@pytest.mark.redismod
+def test_special_characters_in_fields(client):
+    definition = IndexDefinition(prefix=["resource:"], index_type=IndexType.HASH)
+
+    fields = [
+        TagField("uuid"),
+        TagField("tags", separator="|"),
+        TextField("description"),
+        NumericField("rating"),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+    client.hset(
+        "resource:1",
+        mapping={
+            "uuid": "123e4567-e89b-12d3-a456-426614174000",
+            "tags": "finance|crypto|$btc|blockchain",
+            "description": "Analysis of blockchain technologies & Bitcoin's potential.",
+            "rating": 5,
+        },
+    )
+
+    client.hset(
+        "resource:2",
+        mapping={
+            "uuid": "987e6543-e21c-12d3-a456-426614174999",
+            "tags": "health|well-being|fitness|new-year's-resolutions",
+            "description": "Health trends for the new year, including fitness regimes.",
+            "rating": 4,
+        },
+    )
+
+    # no need to escape - when using params
+    res = client.ft().search(
+        Query("@uuid:{$uuid}").dialect(2),
+        query_params={"uuid": "123e4567-e89b-12d3-a456-426614174000"},
+    )
+    _assert_search_result(client, res, ["resource:1"])
+
+    # with dialect 5 no need to escape the - even without params
+    res = client.ft().search(
+        Query("@uuid:{123e4567-e89b-12d3-a456-426614174000}").dialect(5)
+    )
+    _assert_search_result(client, res, ["resource:1"])
+
+    # also no need to escape ' with dialect 5
+    res = client.ft().search(Query("@tags:{new-year's-resolutions}").dialect(5))
+    _assert_search_result(client, res, ["resource:2"])
+
+    # possible to search numeric fields by single value
+    res = client.ft().search(Query("@rating:[4]").dialect(2))
+    _assert_search_result(client, res, ["resource:2"])
+
+    # some chars still need escaping
+    res = client.ft().search(Query(r"@tags:{\$btc}").dialect(5))
+    _assert_search_result(client, res, ["resource:1"])
+
+
 def _assert_search_result(client, result, expected_doc_ids):
     """
     Make sure the result of a geo search is as expected, taking into account the RESP
