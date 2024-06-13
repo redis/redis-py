@@ -56,6 +56,7 @@ except AttributeError:
     VERSION = tuple([99, 99, 99])
 
 __all__ = [
+    "asyncio",
     "AuthenticationError",
     "AuthenticationWrongNumberOfArgsError",
     "BlockingConnectionPool",

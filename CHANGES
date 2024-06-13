@@ -1,3 +1,4 @@
+    * Mark `redis.asyncio` as public in the top-level __init__.py
     * Update `ResponseT` type hint
     * Allow to control the minimum SSL version
     * Add an optional lock_name attribute to LockError.
