@@ -321,7 +321,10 @@ class AggregateRequest:
         if self._loadall:
             ret.append("LOAD")
             ret.append("*")
-        elif self._loadfields:
+
+        # NOTE(imalinovskyi): Users should be able to use @__key attribute
+        # in wildcard queries
+        if self._loadfields:
             ret.append("LOAD")
             ret.append(str(len(self._loadfields)))
             ret.extend(self._loadfields)
