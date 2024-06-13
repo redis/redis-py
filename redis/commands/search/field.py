@@ -19,6 +19,7 @@ class Field:
     AS = "AS"
     GEOSHAPE = "GEOSHAPE"
     INDEX_MISSING = "INDEXMISSING"
+    INDEX_EMPTY = "INDEXEMPTY"
 
     def __init__(
         self,
@@ -27,6 +28,7 @@ class Field:
         sortable: bool = False,
         no_index: bool = False,
         index_missing: bool = False,
+        index_empty: bool = False,
         as_name: str = None,
     ):
         """
@@ -39,6 +41,8 @@ class Field:
             no_index: If `True`, the field will not be indexed.
             index_missing: If `True`, it will be possible to search for documents that
                            have this field missing.
+            index_empty: If `True`, it will be possible to search for documents that
+                         have this field empty.
             as_name: If provided, this alias will be used for the field.
         """
         if args is None:
@@ -54,6 +58,8 @@ class Field:
             self.args_suffix.append(Field.NOINDEX)
         if index_missing:
             self.args_suffix.append(Field.INDEX_MISSING)
+        if index_empty:
+            self.args_suffix.append(Field.INDEX_EMPTY)
 
         if no_index and not sortable:
             raise ValueError("Non-Sortable non-Indexable fields are ignored")

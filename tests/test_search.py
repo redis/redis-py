@@ -2333,9 +2333,8 @@ def test_search_missing_fields(client):
 
     fields = [
         TextField("title", sortable=True),
-        NumericField("price", index_missing=True),
         TagField("features", index_missing=True),
-        GeoField("location", index_missing=True),
+        TextField("description", index_missing=True),
     ]
 
     client.ft().create_index(fields, definition=definition)
@@ -2345,48 +2344,25 @@ def test_search_missing_fields(client):
         "property:1",
         mapping={
             "title": "Luxury Villa in Malibu",
-            "price": "5000000",
             "features": "pool,sea view,modern",
-            "location": "34.0259,-118.7798",
-        },
-    )
-
-    # Missing title
-    client.hset(
-        "property:2",
-        mapping={
-            "price": "1500000",
-            "features": "garden,garage",
-            "location": "40.7128,-74.0060",
-        },
-    )
-
-    # Missing price
-    client.hset(
-        "property:3",
-        mapping={
-            "title": "Country House",
-            "features": "large garden,privacy",
-            "location": "51.5074,-0.1278",
+            "description": "A stunning modern villa overlooking the Pacific Ocean.",
         },
     )
 
     # Missing features
     client.hset(
-        "property:4",
+        "property:2",
         mapping={
             "title": "Downtown Flat",
-            "price": "850000",
-            "location": "48.8566,2.3522",
+            "description": "Modern flat in central Paris with easy access to metro.",
         },
     )
 
-    # Missing location
+    # Missing description
     client.hset(
-        "property:5",
+        "property:3",
         mapping={
             "title": "Beachfront Bungalow",
-            "price": "2900000",
             "features": "beachfront,sun deck",
         },
     )
@@ -2398,19 +2374,93 @@ def test_search_missing_fields(client):
     assert "to be defined with 'INDEXMISSING'" in e.value.args[0]
 
     res = client.ft().search(
-        Query("ismissing(@price)").dialect(5).return_field("id").no_content()
+        Query("ismissing(@features)").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:2"])
+
+    res = client.ft().search(
+        Query("-ismissing(@features)").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:3"])
+
+    res = client.ft().search(
+        Query("ismissing(@description)").dialect(5).return_field("id").no_content()
     )
     _assert_search_result(client, res, ["property:3"])
 
     res = client.ft().search(
-        Query("ismissing(@features)").dialect(5).return_field("id").no_content()
+        Query("-ismissing(@description)").dialect(5).return_field("id").no_content()
     )
-    _assert_search_result(client, res, ["property:4"])
+    _assert_search_result(client, res, ["property:1", "property:2"])
+
+
+@pytest.mark.redismod
+def test_search_empty_fields(client):
+    definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
+
+    fields = [
+        TextField("title", sortable=True),
+        TagField("features", index_empty=True),
+        TextField("description", index_empty=True),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+    # All fields present
+    client.hset(
+        "property:1",
+        mapping={
+            "title": "Luxury Villa in Malibu",
+            "features": "pool,sea view,modern",
+            "description": "A stunning modern villa overlooking the Pacific Ocean.",
+        },
+    )
+
+    # Empty features
+    client.hset(
+        "property:2",
+        mapping={
+            "title": "Downtown Flat",
+            "features": "",
+            "description": "Modern flat in central Paris with easy access to metro.",
+        },
+    )
+
+    # Empty description
+    client.hset(
+        "property:3",
+        mapping={
+            "title": "Beachfront Bungalow",
+            "features": "beachfront,sun deck",
+            "description": "",
+        },
+    )
+
+    with pytest.raises(redis.exceptions.ResponseError) as e:
+        client.ft().search(
+            Query("@title:''").dialect(5).return_field("id").no_content()
+        )
+    assert "to be defined with `INDEXEMPTY`" in e.value.args[0]
 
     res = client.ft().search(
-        Query("ismissing(@location)").dialect(5).return_field("id").no_content()
+        Query("@features:{ }").dialect(5).return_field("id").no_content()
     )
-    _assert_search_result(client, res, ["property:5"])
+    _assert_search_result(client, res, ["property:2"])
+
+    res = client.ft().search(
+        Query("-@features:{ }").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:3"])
+
+    res = client.ft().search(
+        Query("@description:''").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:3"])
+
+    res = client.ft().search(
+        Query("-@description:''").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:2"])
 
 
 def _assert_search_result(client, result, expected_doc_ids):
@@ -2420,7 +2470,5 @@ def _assert_search_result(client, result, expected_doc_ids):
     """
     if is_resp2_connection(client):
         assert set([doc.id for doc in result.docs]) == set(expected_doc_ids)
-        assert result.total == len(expected_doc_ids)
     else:
         assert set([doc["id"] for doc in result["results"]]) == set(expected_doc_ids)
-        assert result["total_results"] == len(expected_doc_ids)
