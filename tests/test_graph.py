@@ -404,6 +404,8 @@ def test_list_keys(client):
     assert result == []
 
 
+@pytest.mark.redismod
+@pytest.mark.skip(reason="Graph module removed from Redis Stack")
 def test_multi_label(client):
     redis_graph = client.graph("g")
 
@@ -429,6 +431,8 @@ def test_multi_label(client):
         assert True
 
 
+@pytest.mark.redismod
+@pytest.mark.skip(reason="Graph module removed from Redis Stack")
 def test_cache_sync(client):
     pass
     return
@@ -501,6 +505,8 @@ def test_cache_sync(client):
     assert A._relationship_types[1] == "R"
 
 
+@pytest.mark.redismod
+@pytest.mark.skip(reason="Graph module removed from Redis Stack")
 def test_execution_plan(client):
     redis_graph = client.graph("execution_plan")
     create_query = """CREATE
@@ -519,6 +525,8 @@ def test_execution_plan(client):
     redis_graph.delete()
 
 
+@pytest.mark.redismod
+@pytest.mark.skip(reason="Graph module removed from Redis Stack")
 def test_explain(client):
     redis_graph = client.graph("execution_plan")
     # graph creation / population
@@ -607,6 +615,8 @@ Project
     redis_graph.delete()
 
 
+@pytest.mark.redismod
+@pytest.mark.skip(reason="Graph module removed from Redis Stack")
 def test_resultset_statistics(client):
     with patch.object(target=QueryResult, attribute="_get_stat") as mock_get_stats:
         result = client.graph().query("RETURN 1")
