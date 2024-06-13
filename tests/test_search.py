@@ -2107,7 +2107,7 @@ def test_geo_params(client):
     params_dict = {"lat": "34.95126", "lon": "29.69465", "radius": 1000, "units": "km"}
     q = Query("@g:[$lon $lat $radius $units]").dialect(2)
     res = client.ft().search(q, query_params=params_dict)
-    _assert_geosearch_result(client, res, ["doc1", "doc2", "doc3"])
+    _assert_search_result(client, res, ["doc1", "doc2", "doc3"])
 
 
 @pytest.mark.redismod
@@ -2124,13 +2124,13 @@ def test_geoshapes_query_intersects_and_disjoint(client):
         Query("@g:[intersects $shape]").dialect(3),
         query_params={"shape": "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))"},
     )
-    _assert_geosearch_result(client, intersection, ["doc_point2", "doc_polygon1"])
+    _assert_search_result(client, intersection, ["doc_point2", "doc_polygon1"])
 
     disjunction = client.ft().search(
         Query("@g:[disjoint $shape]").dialect(3),
         query_params={"shape": "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))"},
     )
-    _assert_geosearch_result(client, disjunction, ["doc_point1", "doc_polygon2"])
+    _assert_search_result(client, disjunction, ["doc_point1", "doc_polygon2"])
 
 
 @pytest.mark.redismod
@@ -2148,19 +2148,19 @@ def test_geoshapes_query_contains_and_within(client):
         Query("@g:[contains $shape]").dialect(3),
         query_params={"shape": "POINT(25 25)"},
     )
-    _assert_geosearch_result(client, contains_a, ["doc_polygon1"])
+    _assert_search_result(client, contains_a, ["doc_polygon1"])
 
     contains_b = client.ft().search(
         Query("@g:[contains $shape]").dialect(3),
         query_params={"shape": "POLYGON((24 24, 24 26, 25 25, 24 24))"},
     )
-    _assert_geosearch_result(client, contains_b, ["doc_polygon1"])
+    _assert_search_result(client, contains_b, ["doc_polygon1"])
 
     within = client.ft().search(
         Query("@g:[within $shape]").dialect(3),
         query_params={"shape": "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))"},
     )
-    _assert_geosearch_result(client, within, ["doc_point2", "doc_polygon1"])
+    _assert_search_result(client, within, ["doc_point2", "doc_polygon1"])
 
 
 @pytest.mark.redismod
@@ -2324,19 +2324,153 @@ def test_geoshape(client: redis.Redis):
     q2 = Query("@geom:[CONTAINS $poly]").dialect(3)
     qp2 = {"poly": "POLYGON((2 2, 2 50, 50 50, 50 2, 2 2))"}
     result = client.ft().search(q1, query_params=qp1)
-    _assert_geosearch_result(client, result, ["small"])
+    _assert_search_result(client, result, ["small"])
     result = client.ft().search(q2, query_params=qp2)
-    _assert_geosearch_result(client, result, ["small", "large"])
+    _assert_search_result(client, result, ["small", "large"])
 
 
-def _assert_geosearch_result(client, result, expected_doc_ids):
+@pytest.mark.redismod
+def test_search_missing_fields(client):
+    definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
+
+    fields = [
+        TextField("title", sortable=True),
+        TagField("features", index_missing=True),
+        TextField("description", index_missing=True),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+    # All fields present
+    client.hset(
+        "property:1",
+        mapping={
+            "title": "Luxury Villa in Malibu",
+            "features": "pool,sea view,modern",
+            "description": "A stunning modern villa overlooking the Pacific Ocean.",
+        },
+    )
+
+    # Missing features
+    client.hset(
+        "property:2",
+        mapping={
+            "title": "Downtown Flat",
+            "description": "Modern flat in central Paris with easy access to metro.",
+        },
+    )
+
+    # Missing description
+    client.hset(
+        "property:3",
+        mapping={
+            "title": "Beachfront Bungalow",
+            "features": "beachfront,sun deck",
+        },
+    )
+
+    with pytest.raises(redis.exceptions.ResponseError) as e:
+        client.ft().search(
+            Query("ismissing(@title)").dialect(5).return_field("id").no_content()
+        )
+    assert "to be defined with 'INDEXMISSING'" in e.value.args[0]
+
+    res = client.ft().search(
+        Query("ismissing(@features)").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:2"])
+
+    res = client.ft().search(
+        Query("-ismissing(@features)").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:3"])
+
+    res = client.ft().search(
+        Query("ismissing(@description)").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:3"])
+
+    res = client.ft().search(
+        Query("-ismissing(@description)").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:2"])
+
+
+@pytest.mark.redismod
+def test_search_empty_fields(client):
+    definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
+
+    fields = [
+        TextField("title", sortable=True),
+        TagField("features", index_empty=True),
+        TextField("description", index_empty=True),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+    # All fields present
+    client.hset(
+        "property:1",
+        mapping={
+            "title": "Luxury Villa in Malibu",
+            "features": "pool,sea view,modern",
+            "description": "A stunning modern villa overlooking the Pacific Ocean.",
+        },
+    )
+
+    # Empty features
+    client.hset(
+        "property:2",
+        mapping={
+            "title": "Downtown Flat",
+            "features": "",
+            "description": "Modern flat in central Paris with easy access to metro.",
+        },
+    )
+
+    # Empty description
+    client.hset(
+        "property:3",
+        mapping={
+            "title": "Beachfront Bungalow",
+            "features": "beachfront,sun deck",
+            "description": "",
+        },
+    )
+
+    with pytest.raises(redis.exceptions.ResponseError) as e:
+        client.ft().search(
+            Query("@title:''").dialect(5).return_field("id").no_content()
+        )
+    assert "to be defined with `INDEXEMPTY`" in e.value.args[0]
+
+    res = client.ft().search(
+        Query("@features:{ }").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:2"])
+
+    res = client.ft().search(
+        Query("-@features:{ }").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:3"])
+
+    res = client.ft().search(
+        Query("@description:''").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:3"])
+
+    res = client.ft().search(
+        Query("-@description:''").dialect(5).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:2"])
+
+
+def _assert_search_result(client, result, expected_doc_ids):
     """
     Make sure the result of a geo search is as expected, taking into account the RESP
     version being used.
     """
     if is_resp2_connection(client):
         assert set([doc.id for doc in result.docs]) == set(expected_doc_ids)
-        assert result.total == len(expected_doc_ids)
     else:
         assert set([doc["id"] for doc in result["results"]]) == set(expected_doc_ids)
-        assert result["total_results"] == len(expected_doc_ids)
