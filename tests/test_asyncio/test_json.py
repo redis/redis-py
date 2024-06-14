@@ -523,7 +523,9 @@ async def test_numby_commands_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
     )
-    assert await decoded_r.json().numincrby("doc1", ".b[0].a", 3) == [5]
+    assert_resp_response(
+        decoded_r, await decoded_r.json().numincrby("doc1", ".b[0].a", 3), 5, [5]
+    )
 
     # Test legacy NUMMULTBY
     await decoded_r.json().set(
@@ -531,7 +533,9 @@ async def test_numby_commands_dollar(decoded_r: redis.Redis):
     )
 
     with pytest.deprecated_call():
-        assert await decoded_r.json().nummultby("doc1", ".b[0].a", 3) == [6]
+        assert_resp_response(
+            decoded_r, await decoded_r.json().nummultby("doc1", ".b[0].a", 3), 6, [6]
+        )
 
 
 @pytest.mark.redismod

@@ -512,13 +512,15 @@ def test_numby_commands_dollar(client):
 
     # Test legacy NUMINCRBY
     client.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
-    assert client.json().numincrby("doc1", ".b[0].a", 3) == [5]
+    assert_resp_response(client, client.json().numincrby("doc1", ".b[0].a", 3), 5, [5])
 
     # Test legacy NUMMULTBY
     client.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
 
     with pytest.deprecated_call():
-        assert client.json().nummultby("doc1", ".b[0].a", 3) == [6]
+        assert_resp_response(
+            client, client.json().nummultby("doc1", ".b[0].a", 3), 6, [6]
+        )
 
 
 @pytest.mark.redismod
