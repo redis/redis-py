@@ -707,6 +707,16 @@ class TestRedisCommands:
             assert c["user"] != killuser
         r.acl_deluser(killuser)
 
+    @skip_if_server_version_lt("7.3.240")
+    @skip_if_redis_enterprise()
+    @pytest.mark.onlynoncluster
+    def test_client_kill_filter_by_maxage(self, r, request):
+        _get_client(redis.Redis, request, flushdb=False)
+        time.sleep(4)
+        assert len(r.client_list()) >= 2
+        r.client_kill_filter(maxage=2)
+        assert len(r.client_list()) == 1
+
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.9.50")
     @skip_if_redis_enterprise()
@@ -1809,44 +1819,44 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.1.140")
-    def test_tfunction_load_delete(self, r):
-        self.try_delete_libs(r, "lib1")
+    def test_tfunction_load_delete(self, stack_r):
+        self.try_delete_libs(stack_r, "lib1")
         lib_code = self.generate_lib_code("lib1")
-        assert r.tfunction_load(lib_code)
-        assert r.tfunction_delete("lib1")
+        assert stack_r.tfunction_load(lib_code)
+        assert stack_r.tfunction_delete("lib1")
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.1.140")
-    def test_tfunction_list(self, r):
-        self.try_delete_libs(r, "lib1", "lib2", "lib3")
-        assert r.tfunction_load(self.generate_lib_code("lib1"))
-        assert r.tfunction_load(self.generate_lib_code("lib2"))
-        assert r.tfunction_load(self.generate_lib_code("lib3"))
+    def test_tfunction_list(self, stack_r):
+        self.try_delete_libs(stack_r, "lib1", "lib2", "lib3")
+        assert stack_r.tfunction_load(self.generate_lib_code("lib1"))
+        assert stack_r.tfunction_load(self.generate_lib_code("lib2"))
+        assert stack_r.tfunction_load(self.generate_lib_code("lib3"))
 
         # test error thrown when verbose > 4
         with pytest.raises(redis.exceptions.DataError):
-            assert r.tfunction_list(verbose=8)
+            assert stack_r.tfunction_list(verbose=8)
 
-        functions = r.tfunction_list(verbose=1)
+        functions = stack_r.tfunction_list(verbose=1)
         assert len(functions) == 3
 
         expected_names = [b"lib1", b"lib2", b"lib3"]
         actual_names = [functions[0][13], functions[1][13], functions[2][13]]
 
         assert sorted(expected_names) == sorted(actual_names)
-        assert r.tfunction_delete("lib1")
-        assert r.tfunction_delete("lib2")
-        assert r.tfunction_delete("lib3")
+        assert stack_r.tfunction_delete("lib1")
+        assert stack_r.tfunction_delete("lib2")
+        assert stack_r.tfunction_delete("lib3")
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.1.140")
-    def test_tfcall(self, r):
-        self.try_delete_libs(r, "lib1")
-        assert r.tfunction_load(self.generate_lib_code("lib1"))
-        assert r.tfcall("lib1", "foo") == b"bar"
-        assert r.tfcall_async("lib1", "foo") == b"bar"
+    def test_tfcall(self, stack_r):
+        self.try_delete_libs(stack_r, "lib1")
+        assert stack_r.tfunction_load(self.generate_lib_code("lib1"))
+        assert stack_r.tfcall("lib1", "foo") == b"bar"
+        assert stack_r.tfcall_async("lib1", "foo") == b"bar"
 
-        assert r.tfunction_delete("lib1")
+        assert stack_r.tfunction_delete("lib1")
 
     def test_ttl(self, r):
         r["a"] = "1"
@@ -2162,6 +2172,19 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         _, dic = r.hscan("a", match="a")
         assert dic == {b"a": b"1"}
+        _, dic = r.hscan("a_notset")
+        assert dic == {}
+
+    @skip_if_server_version_lt("7.3.240")
+    def test_hscan_novalues(self, r):
+        r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
+        cursor, keys = r.hscan("a", no_values=True)
+        assert cursor == 0
+        assert sorted(keys) == [b"a", b"b", b"c"]
+        _, keys = r.hscan("a", match="a", no_values=True)
+        assert keys == [b"a"]
+        _, keys = r.hscan("a_notset", no_values=True)
+        assert keys == []
 
     @skip_if_server_version_lt("2.8.0")
     def test_hscan_iter(self, r):
@@ -2170,6 +2193,18 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         dic = dict(r.hscan_iter("a", match="a"))
         assert dic == {b"a": b"1"}
+        dic = dict(r.hscan_iter("a_notset"))
+        assert dic == {}
+
+    @skip_if_server_version_lt("7.3.240")
+    def test_hscan_iter_novalues(self, r):
+        r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
+        keys = list(r.hscan_iter("a", no_values=True))
+        assert keys == [b"a", b"b", b"c"]
+        keys = list(r.hscan_iter("a", match="a", no_values=True))
+        assert keys == [b"a"]
+        keys = list(r.hscan_iter("a_notset", no_values=True))
+        assert keys == []
 
     @skip_if_server_version_lt("2.8.0")
     def test_zscan(self, r):
@@ -4880,7 +4915,7 @@ class TestRedisCommands:
         assert isinstance(stats, dict)
         for key, value in stats.items():
             if key.startswith("db."):
-                assert isinstance(value, dict)
+                assert not isinstance(value, list)
 
     @skip_if_server_version_lt("4.0.0")
     def test_memory_usage(self, r):
@@ -4988,25 +5023,27 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
-    def test_module(self, r):
+    def test_module(self, stack_r):
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
-            r.module_load("/some/fake/path")
+            stack_r.module_load("/some/fake/path")
             assert "Error loading the extension." in str(excinfo.value)
 
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
-            r.module_load("/some/fake/path", "arg1", "arg2", "arg3", "arg4")
+            stack_r.module_load("/some/fake/path", "arg1", "arg2", "arg3", "arg4")
             assert "Error loading the extension." in str(excinfo.value)
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
-    def test_module_loadex(self, r: redis.Redis):
+    def test_module_loadex(self, stack_r: redis.Redis):
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
-            r.module_loadex("/some/fake/path")
+            stack_r.module_loadex("/some/fake/path")
             assert "Error loading the extension." in str(excinfo.value)
 
         with pytest.raises(redis.exceptions.ModuleError) as excinfo:
-            r.module_loadex("/some/fake/path", ["name", "value"], ["arg1", "arg2"])
+            stack_r.module_loadex(
+                "/some/fake/path", ["name", "value"], ["arg1", "arg2"]
+            )
             assert "Error loading the extension." in str(excinfo.value)
 
     @skip_if_server_version_lt("2.6.0")

@@ -1,5 +1,6 @@
 click==8.0.4
 black==24.3.0
+cachetools
 flake8==5.0.4
 flake8-isort==6.0.0
 flynt~=0.69.0

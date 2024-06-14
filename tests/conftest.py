@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import pytest
 import redis
 from packaging.version import Version
+from redis import Sentinel
 from redis.backoff import NoBackoff
 from redis.connection import Connection, parse_url
 from redis.exceptions import RedisClusterException
@@ -17,7 +18,7 @@ from redis.retry import Retry
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
 default_protocol = "2"
-default_redismod_url = "redis://localhost:6379"
+default_redismod_url = "redis://localhost:6479"
 
 # default ssl client ignores verification for the purpose of testing
 default_redis_ssl_url = "rediss://localhost:6666"
@@ -105,6 +106,19 @@ def pytest_addoption(parser):
         "--uvloop", action=BooleanOptionalAction, help="Run tests with uvloop"
     )
 
+    parser.addoption(
+        "--sentinels",
+        action="store",
+        default="localhost:26379,localhost:26380,localhost:26381",
+        help="Comma-separated list of sentinel IPs and ports",
+    )
+    parser.addoption(
+        "--master-service",
+        action="store",
+        default="redis-py-test",
+        help="Name of the Redis master service that the sentinels are monitoring",
+    )
+
 
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
@@ -143,8 +157,12 @@ def pytest_sessionstart(session):
     session.config.REDIS_INFO = REDIS_INFO
 
     # module info
+    stack_url = redis_url
+    if stack_url == default_redis_url:
+        stack_url = default_redismod_url
     try:
-        REDIS_INFO["modules"] = info["modules"]
+        stack_info = _get_info(stack_url)
+        REDIS_INFO["modules"] = stack_info["modules"]
     except (KeyError, redis.exceptions.ConnectionError):
         pass
 
@@ -328,6 +346,21 @@ def r(request):
 
 
 @pytest.fixture()
+def stack_url(request):
+    stack_url = request.config.getoption("--redis-url", default=default_redismod_url)
+    if stack_url == default_redis_url:
+        return default_redismod_url
+    else:
+        return stack_url
+
+
+@pytest.fixture()
+def stack_r(request, stack_url):
+    with _get_client(redis.Redis, request, from_url=stack_url) as client:
+        yield client
+
+
+@pytest.fixture()
 def decoded_r(request):
     with _get_client(redis.Redis, request, decode_responses=True) as client:
         yield client
@@ -350,6 +383,34 @@ def r2(request):
 def sslclient(request):
     with _get_client(redis.Redis, request, ssl=True) as client:
         yield client
+
+
+@pytest.fixture()
+def sentinel_setup(local_cache, request):
+    sentinel_ips = request.config.getoption("--sentinels")
+    sentinel_endpoints = [
+        (ip.strip(), int(port.strip()))
+        for ip, port in (endpoint.split(":") for endpoint in sentinel_ips.split(","))
+    ]
+    kwargs = request.param.get("kwargs", {}) if hasattr(request, "param") else {}
+    sentinel = Sentinel(
+        sentinel_endpoints,
+        socket_timeout=0.1,
+        client_cache=local_cache,
+        protocol=3,
+        **kwargs,
+    )
+    yield sentinel
+    for s in sentinel.sentinels:
+        s.close()
+
+
+@pytest.fixture()
+def master(request, sentinel_setup):
+    master_service = request.config.getoption("--master-service")
+    master = sentinel_setup.master_for(master_service)
+    yield master
+    master.close()
 
 
 def _gen_cluster_mock_resp(r, response):

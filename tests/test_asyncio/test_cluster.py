@@ -1,6 +1,7 @@
 import asyncio
 import binascii
 import datetime
+import ssl
 import warnings
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
 from urllib.parse import urlparse
@@ -1452,7 +1453,7 @@ class TestClusterRedisCommands:
         assert isinstance(stats, dict)
         for key, value in stats.items():
             if key.startswith("db."):
-                assert isinstance(value, dict)
+                assert not isinstance(value, list)
 
     @skip_if_server_version_lt("4.0.0")
     async def test_memory_help(self, r: RedisCluster) -> None:
@@ -2894,8 +2895,9 @@ class TestSSL:
     appropriate port.
     """
 
-    SERVER_CERT = get_ssl_filename("server-cert.pem")
-    SERVER_KEY = get_ssl_filename("server-key.pem")
+    CA_CERT = get_ssl_filename("ca-cert.pem")
+    CLIENT_CERT = get_ssl_filename("client-cert.pem")
+    CLIENT_KEY = get_ssl_filename("client-key.pem")
 
     @pytest_asyncio.fixture()
     def create_client(self, request: FixtureRequest) -> Callable[..., RedisCluster]:
@@ -2961,29 +2963,82 @@ class TestSSL:
         async with await create_client(ssl=True, ssl_cert_reqs="none") as rc:
             assert await rc.ping()
 
+    @pytest.mark.parametrize(
+        "ssl_ciphers",
+        [
+            "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
+            "ECDHE-ECDSA-AES256-GCM-SHA384",
+            "ECDHE-RSA-AES128-GCM-SHA256",
+        ],
+    )
+    async def test_ssl_connection_tls12_custom_ciphers(
+        self, ssl_ciphers, create_client: Callable[..., Awaitable[RedisCluster]]
+    ) -> None:
+        async with await create_client(
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_min_version=ssl.TLSVersion.TLSv1_2,
+            ssl_ciphers=ssl_ciphers,
+        ) as rc:
+            assert await rc.ping()
+
+    async def test_ssl_connection_tls12_custom_ciphers_invalid(
+        self, create_client: Callable[..., Awaitable[RedisCluster]]
+    ) -> None:
+        async with await create_client(
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_min_version=ssl.TLSVersion.TLSv1_2,
+            ssl_ciphers="foo:bar",
+        ) as rc:
+            with pytest.raises(RedisClusterException) as e:
+                assert await rc.ping()
+            assert "Redis Cluster cannot be connected" in str(e.value)
+
+    @pytest.mark.parametrize(
+        "ssl_ciphers",
+        [
+            "TLS_CHACHA20_POLY1305_SHA256",
+            "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
+        ],
+    )
+    async def test_ssl_connection_tls13_custom_ciphers(
+        self, ssl_ciphers, create_client: Callable[..., Awaitable[RedisCluster]]
+    ) -> None:
+        # TLSv1.3 does not support changing the ciphers
+        async with await create_client(
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_min_version=ssl.TLSVersion.TLSv1_2,
+            ssl_ciphers=ssl_ciphers,
+        ) as rc:
+            with pytest.raises(RedisClusterException) as e:
+                assert await rc.ping()
+            assert "Redis Cluster cannot be connected" in str(e.value)
+
     async def test_validating_self_signed_certificate(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
         async with await create_client(
             ssl=True,
-            ssl_ca_certs=self.SERVER_CERT,
+            ssl_ca_certs=self.CA_CERT,
             ssl_cert_reqs="required",
-            ssl_certfile=self.SERVER_CERT,
-            ssl_keyfile=self.SERVER_KEY,
+            ssl_certfile=self.CLIENT_CERT,
+            ssl_keyfile=self.CLIENT_KEY,
         ) as rc:
             assert await rc.ping()
 
     async def test_validating_self_signed_string_certificate(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
-        with open(self.SERVER_CERT) as f:
+        with open(self.CA_CERT) as f:
             cert_data = f.read()
 
         async with await create_client(
             ssl=True,
             ssl_ca_data=cert_data,
             ssl_cert_reqs="required",
-            ssl_certfile=self.SERVER_CERT,
-            ssl_keyfile=self.SERVER_KEY,
+            ssl_certfile=self.CLIENT_CERT,
+            ssl_keyfile=self.CLIENT_KEY,
         ) as rc:
             assert await rc.ping()

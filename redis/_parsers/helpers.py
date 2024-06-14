@@ -38,7 +38,7 @@ def parse_info(response):
     response = str_if_bytes(response)
 
     def get_value(value):
-        if "," not in value or "=" not in value:
+        if "," not in value and "=" not in value:
             try:
                 if "." in value:
                     return float(value)
@@ -80,7 +80,7 @@ def parse_memory_stats(response, **kwargs):
     """Parse the results of MEMORY STATS"""
     stats = pairs_to_dict(response, decode_keys=True, decode_string_values=True)
     for key, value in stats.items():
-        if key.startswith("db."):
+        if key.startswith("db.") and isinstance(value, list):
             stats[key] = pairs_to_dict(
                 value, decode_keys=True, decode_string_values=True
             )
@@ -354,7 +354,12 @@ def parse_scan(response, **options):
 
 def parse_hscan(response, **options):
     cursor, r = response
-    return int(cursor), r and pairs_to_dict(r) or {}
+    no_values = options.get("no_values", False)
+    if no_values:
+        payload = r or []
+    else:
+        payload = r and pairs_to_dict(r) or {}
+    return int(cursor), payload
 
 
 def parse_zscan(response, **options):

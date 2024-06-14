@@ -18,8 +18,10 @@ class TestSSL:
     and connecting to the appropriate port.
     """
 
+    CA_CERT = get_ssl_filename("ca-cert.pem")
+    CLIENT_CERT = get_ssl_filename("client-cert.pem")
+    CLIENT_KEY = get_ssl_filename("client-key.pem")
     SERVER_CERT = get_ssl_filename("server-cert.pem")
-    SERVER_KEY = get_ssl_filename("server-key.pem")
 
     def test_ssl_with_invalid_cert(self, request):
         ssl_url = request.config.option.redis_ssl_url
@@ -53,16 +55,16 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.SERVER_CERT,
-            ssl_keyfile=self.SERVER_KEY,
+            ssl_certfile=self.CLIENT_CERT,
+            ssl_keyfile=self.CLIENT_KEY,
             ssl_cert_reqs="required",
-            ssl_ca_certs=self.SERVER_CERT,
+            ssl_ca_certs=self.CA_CERT,
         )
         assert r.ping()
         r.close()
 
     def test_validating_self_signed_string_certificate(self, request):
-        with open(self.SERVER_CERT) as f:
+        with open(self.CA_CERT) as f:
             cert_data = f.read()
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
@@ -70,12 +72,74 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.SERVER_CERT,
-            ssl_keyfile=self.SERVER_KEY,
+            ssl_certfile=self.CLIENT_CERT,
+            ssl_keyfile=self.CLIENT_KEY,
             ssl_cert_reqs="required",
             ssl_ca_data=cert_data,
         )
         assert r.ping()
+        r.close()
+
+    @pytest.mark.parametrize(
+        "ssl_ciphers",
+        [
+            "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
+            "DHE-RSA-AES256-GCM-SHA384",
+            "ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305",
+        ],
+    )
+    def test_ssl_connection_tls12_custom_ciphers(self, request, ssl_ciphers):
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_min_version=ssl.TLSVersion.TLSv1_3,
+            ssl_ciphers=ssl_ciphers,
+        )
+        assert r.ping()
+        r.close()
+
+    def test_ssl_connection_tls12_custom_ciphers_invalid(self, request):
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_min_version=ssl.TLSVersion.TLSv1_2,
+            ssl_ciphers="foo:bar",
+        )
+        with pytest.raises(RedisError) as e:
+            r.ping()
+        assert "No cipher can be selected" in str(e)
+        r.close()
+
+    @pytest.mark.parametrize(
+        "ssl_ciphers",
+        [
+            "TLS_CHACHA20_POLY1305_SHA256",
+            "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
+        ],
+    )
+    def test_ssl_connection_tls13_custom_ciphers(self, request, ssl_ciphers):
+        # TLSv1.3 does not support changing the ciphers
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_min_version=ssl.TLSVersion.TLSv1_2,
+            ssl_ciphers=ssl_ciphers,
+        )
+        with pytest.raises(RedisError) as e:
+            r.ping()
+        assert "No cipher can be selected" in str(e)
         r.close()
 
     def _create_oscp_conn(self, request):
@@ -85,10 +149,10 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.SERVER_CERT,
-            ssl_keyfile=self.SERVER_KEY,
+            ssl_certfile=self.CLIENT_CERT,
+            ssl_keyfile=self.CLIENT_KEY,
             ssl_cert_reqs="required",
-            ssl_ca_certs=self.SERVER_CERT,
+            ssl_ca_certs=self.CA_CERT,
             ssl_validate_ocsp=True,
         )
         return r
@@ -108,14 +172,6 @@ class TestSSL:
             assert r.ping()
         assert "No AIA information present in ssl certificate" in str(e)
         r.close()
-
-        # rediss://, url based
-        ssl_url = request.config.option.redis_ssl_url
-        sslclient = redis.from_url(ssl_url)
-        with pytest.raises(ConnectionError) as e:
-            sslclient.ping()
-        assert "No AIA information present in ssl certificate" in str(e)
-        sslclient.close()
 
     @skip_if_nocryptography()
     def test_valid_ocsp_cert_http(self):
@@ -191,10 +247,10 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.SERVER_CERT,
-            ssl_keyfile=self.SERVER_KEY,
+            ssl_certfile=self.CLIENT_CERT,
+            ssl_keyfile=self.CLIENT_KEY,
             ssl_cert_reqs="required",
-            ssl_ca_certs=self.SERVER_CERT,
+            ssl_ca_certs=self.CA_CERT,
             ssl_validate_ocsp=True,
             ssl_ocsp_context=p,  # just needs to not be none
         )
@@ -204,19 +260,19 @@ class TestSSL:
         r.close()
 
         ctx = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
-        ctx.use_certificate_file(self.SERVER_CERT)
-        ctx.use_privatekey_file(self.SERVER_KEY)
+        ctx.use_certificate_file(self.CLIENT_CERT)
+        ctx.use_privatekey_file(self.CLIENT_KEY)
 
         r = redis.Redis(
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.SERVER_CERT,
-            ssl_keyfile=self.SERVER_KEY,
+            ssl_certfile=self.CLIENT_CERT,
+            ssl_keyfile=self.CLIENT_KEY,
             ssl_cert_reqs="required",
-            ssl_ca_certs=self.SERVER_CERT,
+            ssl_ca_certs=self.CA_CERT,
             ssl_ocsp_context=ctx,
-            ssl_ocsp_expected_cert=open(self.SERVER_KEY, "rb").read(),
+            ssl_ocsp_expected_cert=open(self.SERVER_CERT, "rb").read(),
             ssl_validate_ocsp_stapled=True,
         )
 
@@ -229,10 +285,10 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.SERVER_CERT,
-            ssl_keyfile=self.SERVER_KEY,
+            ssl_certfile=self.CLIENT_CERT,
+            ssl_keyfile=self.CLIENT_KEY,
             ssl_cert_reqs="required",
-            ssl_ca_certs=self.SERVER_CERT,
+            ssl_ca_certs=self.CA_CERT,
             ssl_validate_ocsp_stapled=True,
         )
 
