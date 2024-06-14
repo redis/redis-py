@@ -103,7 +103,7 @@ async def test_jsonsetexistentialmodifiersshouldsucceed(decoded_r: redis.Redis):
     assert await decoded_r.json().set("obj", Path("foo"), "baz", xx=True)
     assert await decoded_r.json().set("obj", Path("qaz"), "baz", nx=True)
 
-    # Test that flags are mutually exlusive
+    # Test that flags are mutually exclusive
     with pytest.raises(Exception):
         await decoded_r.json().set("obj", Path("foo"), "baz", nx=True, xx=True)
 
@@ -483,7 +483,7 @@ async def test_json_mget_dollar(decoded_r: redis.Redis):
     )
 
     # Test mget with single path
-    await decoded_r.json().mget("doc1", "$..a") == [1, 3, None]
+    assert await decoded_r.json().mget(["doc1"], "$..a") == [[1, 3, None]]
     # Test mget with multi path
     res = await decoded_r.json().mget(["doc1", "doc2"], "$..a")
     assert res == [[1, 3, None], [4, 6, [None]]]
@@ -539,7 +539,7 @@ async def test_numby_commands_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
     )
-    await decoded_r.json().numincrby("doc1", ".b[0].a", 3) == 5
+    assert await decoded_r.json().numincrby("doc1", ".b[0].a", 3) == 5
 
     # Test legacy NUMMULTBY
     await decoded_r.json().set(
@@ -547,7 +547,7 @@ async def test_numby_commands_dollar(decoded_r: redis.Redis):
     )
 
     with pytest.deprecated_call():
-        await decoded_r.json().nummultby("doc1", ".b[0].a", 3) == 6
+        assert await decoded_r.json().nummultby("doc1", ".b[0].a", 3) == 6
 
 
 @pytest.mark.redismod
@@ -556,13 +556,13 @@ async def test_strappend_dollar(decoded_r: redis.Redis):
         "doc1", "$", {"a": "foo", "nested1": {"a": "hello"}, "nested2": {"a": 31}}
     )
     # Test multi
-    await decoded_r.json().strappend("doc1", "bar", "$..a") == [6, 8, None]
+    assert await decoded_r.json().strappend("doc1", "bar", "$..a") == [6, 8, None]
 
     res = [{"a": "foobar", "nested1": {"a": "hellobar"}, "nested2": {"a": 31}}]
     assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
 
     # Test single
-    await decoded_r.json().strappend("doc1", "baz", "$.nested1.a") == [11]
+    assert await decoded_r.json().strappend("doc1", "baz", "$.nested1.a") == [11]
 
     res = [{"a": "foobar", "nested1": {"a": "hellobarbaz"}, "nested2": {"a": 31}}]
     assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
@@ -572,7 +572,7 @@ async def test_strappend_dollar(decoded_r: redis.Redis):
         await decoded_r.json().strappend("non_existing_doc", "$..a", "err")
 
     # Test multi
-    await decoded_r.json().strappend("doc1", "bar", ".*.a") == 8
+    assert await decoded_r.json().strappend("doc1", "bar", ".*.a") == 14
     res = [{"a": "foobar", "nested1": {"a": "hellobarbazbar"}, "nested2": {"a": 31}}]
     assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
 
@@ -594,8 +594,8 @@ async def test_strlen_dollar(decoded_r: redis.Redis):
     assert res1 == res2
 
     # Test single
-    await decoded_r.json().strlen("doc1", "$.nested1.a") == [8]
-    await decoded_r.json().strlen("doc1", "$.nested2.a") == [None]
+    assert await decoded_r.json().strlen("doc1", "$.nested1.a") == [8]
+    assert await decoded_r.json().strlen("doc1", "$.nested2.a") == [None]
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -614,7 +614,8 @@ async def test_arrappend_dollar(decoded_r: redis.Redis):
         },
     )
     # Test multi
-    await decoded_r.json().arrappend("doc1", "$..a", "bar", "racuda") == [3, 5, None]
+    res = [3, 5, None]
+    assert await decoded_r.json().arrappend("doc1", "$..a", "bar", "racuda") == res
     res = [
         {
             "a": ["foo", "bar", "racuda"],
@@ -794,7 +795,7 @@ async def test_arrpop_dollar(decoded_r: redis.Redis):
         },
     )
     # Test multi (all paths are updated, but return result of last path)
-    await decoded_r.json().arrpop("doc1", "..a", "1") is None
+    assert await decoded_r.json().arrpop("doc1", "..a", "1") == "null"
     res = [{"a": [], "nested1": {"a": ["hello", "world"]}, "nested2": {"a": 31}}]
     assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
 
