@@ -512,13 +512,13 @@ def test_numby_commands_dollar(client):
 
     # Test legacy NUMINCRBY
     client.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
-    assert client.json().numincrby("doc1", ".b[0].a", 3) == 5
+    assert client.json().numincrby("doc1", ".b[0].a", 3) == [5]
 
     # Test legacy NUMMULTBY
     client.json().set("doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]})
 
     with pytest.deprecated_call():
-        assert client.json().nummultby("doc1", ".b[0].a", 3) == 6
+        assert client.json().nummultby("doc1", ".b[0].a", 3) == [6]
 
 
 @pytest.mark.redismod
@@ -530,13 +530,13 @@ def test_strappend_dollar(client):
     assert client.json().strappend("doc1", "bar", "$..a") == [6, 8, None]
 
     res = [{"a": "foobar", "nested1": {"a": "hellobar"}, "nested2": {"a": 31}}]
-    assert_resp_response(client, client.json().get("doc1", "$"), res, [res])
+    assert_resp_response(client, client.json().get("doc1", "$"), res, res)
 
     # Test single
     assert client.json().strappend("doc1", "baz", "$.nested1.a") == [11]
 
     res = [{"a": "foobar", "nested1": {"a": "hellobarbaz"}, "nested2": {"a": 31}}]
-    assert_resp_response(client, client.json().get("doc1", "$"), res, [res])
+    assert_resp_response(client, client.json().get("doc1", "$"), res, res)
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -545,7 +545,7 @@ def test_strappend_dollar(client):
     # Test multi
     assert client.json().strappend("doc1", "bar", ".*.a") == 14
     res = [{"a": "foobar", "nested1": {"a": "hellobarbazbar"}, "nested2": {"a": 31}}]
-    assert_resp_response(client, client.json().get("doc1", "$"), res, [res])
+    assert_resp_response(client, client.json().get("doc1", "$"), res, res)
 
     # Test missing path
     with pytest.raises(exceptions.ResponseError):
