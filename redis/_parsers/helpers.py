@@ -46,11 +46,18 @@ def parse_info(response):
                     return int(value)
             except ValueError:
                 return value
+        elif "=" not in value:
+            return [get_value(v) for v in value.split(",") if v]
         else:
             sub_dict = {}
             for item in value.split(","):
-                k, v = item.rsplit("=", 1)
-                sub_dict[k] = get_value(v)
+                if not item:
+                    continue
+                if "=" in item:
+                    k, v = item.rsplit("=", 1)
+                    sub_dict[k] = get_value(v)
+                else:
+                    sub_dict[item] = True
             return sub_dict
 
     for line in response.splitlines():
