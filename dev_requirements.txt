@@ -17,3 +17,5 @@ uvloop
 vulture>=2.3.0
 wheel>=0.30.0
 numpy>=1.24.0
+requests>=2.23.0
+aiohttp>=3.0.0
