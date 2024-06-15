@@ -1,0 +1,68 @@
+[tool.poetry]
+name = "redis"
+version = "5.1.0b5"
+description = "Python client for Redis database and key-value store."
+license = "MIT"
+authors = ["Redis Inc. <oss@redis.com>"]
+readme = "README.md"
+repository = "https://github.com/redis/redis-py"
+documentation = "https://redis.readthedocs.io"
+keywords = ["redis", "key-value store", "database"]
+packages = [{ include = "redis" }]
+include = ["redis/py.typed"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+
+[tool.poetry.urls]
+"Changes" = "https://github.com/redis/redis-py/releases"
+"Issue tracker" = "https://github.com/redis/redis-py/issues"
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.12"
+async-timeout = "^4.0.2"
+hiredis = { version = ">=1.0.0", optional = true }
+cryptography = { version = ">=36.0.1", optional = true }
+pyopenssl = { version = "20.0.1", optional = true }
+requests = { version = ">=2.26.0", optional = true }
+
+[tool.poetry.group.dev.dependencies]
+click = "8.0.4"
+black = "24.3.0"
+cachetools = "^5.3.3"
+flake8 = "5.0.4"
+flake8-isort = "6.0.0"
+flynt = ">=0.69.0,<0.70.0"
+mock = "4.0.3"
+packaging = ">=20.4"
+pytest = "7.2.0"
+pytest-timeout = "2.1.0"
+pytest-asyncio = ">=0.20.2"
+invoke = "1.7.3"
+pytest-cov = ">=4.0.0"
+vulture = ">=2.3.0"
+ujson = ">=4.2.0"
+wheel = ">=0.30.0"
+urllib3 = "<2"
+uvloop = "^0.19.0"
+
+[tool.poetry.extras]
+hiredis = ["hiredis"]
+ocds = ["cryptography", "pyopenssl", "requests"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
