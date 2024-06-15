@@ -371,7 +371,6 @@ class TestClusterLocalCache:
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 class TestSentinelLocalCache:
-
     async def test_get_from_cache(self, local_cache, master):
         await master.set("foo", "bar")
         # get key from redis and save in local cache
