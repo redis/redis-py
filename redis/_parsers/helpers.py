@@ -286,6 +286,11 @@ def parse_xinfo_stream(response, **options):
             data["groups"] = [
                 pairs_to_dict(group, decode_keys=True) for group in data["groups"]
             ]
+            for g in data["groups"]:
+                if g["consumers"] and g["consumers"][0] is not None:
+                    g["consumers"] = [
+                        pairs_to_dict(c, decode_keys=True) for c in g["consumers"]
+                    ]
         else:
             data["groups"] = [
                 {str_if_bytes(k): v for k, v in group.items()}
