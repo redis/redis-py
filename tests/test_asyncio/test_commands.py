@@ -2919,6 +2919,12 @@ class TestRedisCommands:
         assert info["first-entry"] == await get_stream_message(r, stream, m1)
         assert info["last-entry"] == await get_stream_message(r, stream, m2)
 
+        await r.xtrim(stream, 0)
+        info = await r.xinfo_stream(stream)
+        assert info["length"] == 0
+        assert info["first-entry"] == None
+        assert info["last-entry"] == None
+
     @skip_if_server_version_lt("6.0.0")
     async def test_xinfo_stream_full(self, r: redis.Redis):
         stream = "stream"
