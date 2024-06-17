@@ -2919,6 +2919,27 @@ class TestRedisCommands:
         assert info["first-entry"] == await get_stream_message(r, stream, m1)
         assert info["last-entry"] == await get_stream_message(r, stream, m2)
 
+    @skip_if_server_version_lt("6.0.0")
+    async def test_xinfo_stream_full(self, r: redis.Redis):
+
+        stream = "stream"
+        group = "group"
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        info = await r.xinfo_stream(stream, full=True)
+        print(info)
+        assert info["length"] == 1
+        assert len(info["groups"]) == 0
+
+        await r.xgroup_create(stream, group, 0)
+        info = await r.xinfo_stream(stream, full=True)
+        assert info["length"] == 1
+
+        await r.xreadgroup(group, "consumer", streams={stream: ">"})
+        info = await r.xinfo_stream(stream, full=True)
+        consumer = info["groups"][0]["consumers"][0]
+        assert isinstance(consumer, dict)
+
+
     @skip_if_server_version_lt("5.0.0")
     async def test_xlen(self, r: redis.Redis):
         stream = "stream"
