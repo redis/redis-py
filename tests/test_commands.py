@@ -4455,8 +4455,8 @@ class TestRedisCommands:
         r.xtrim(stream, 0)
         info = r.xinfo_stream(stream)
         assert info["length"] == 0
-        assert info["first-entry"] == None
-        assert info["last-entry"] == None
+        assert info["first-entry"] is None
+        assert info["last-entry"] is None
 
     @skip_if_server_version_lt("6.0.0")
     def test_xinfo_stream_full(self, r):
