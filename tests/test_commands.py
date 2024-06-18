@@ -4452,14 +4452,23 @@ class TestRedisCommands:
         assert info["entries-added"] == 2
         assert info["recorded-first-entry-id"] == m1
 
+        r.xtrim(stream, 0)
+        info = r.xinfo_stream(stream)
+        assert info["length"] == 0
+        assert info["first-entry"] is None
+        assert info["last-entry"] is None
+
     @skip_if_server_version_lt("6.0.0")
     def test_xinfo_stream_full(self, r):
         stream = "stream"
         group = "group"
         m1 = r.xadd(stream, {"foo": "bar"})
+        info = r.xinfo_stream(stream, full=True)
+        assert info["length"] == 1
+        assert len(info["groups"]) == 0
+
         r.xgroup_create(stream, group, 0)
         info = r.xinfo_stream(stream, full=True)
-
         assert info["length"] == 1
         assert_resp_response_in(
             r,
@@ -4468,6 +4477,11 @@ class TestRedisCommands:
             info["entries"].keys(),
         )
         assert len(info["groups"]) == 1
+
+        r.xreadgroup(group, "consumer", streams={stream: ">"})
+        info = r.xinfo_stream(stream, full=True)
+        consumer = info["groups"][0]["consumers"][0]
+        assert isinstance(consumer, dict)
 
     @skip_if_server_version_lt("5.0.0")
     def test_xlen(self, r):
