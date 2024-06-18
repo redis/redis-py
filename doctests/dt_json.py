@@ -284,7 +284,6 @@ assert res8 == [
 # REMOVE_END
 
 # STEP_START filter2
-#  names of bikes made from an alloy
 res9 = r.json().get("bikes:inventory", "$..[?(@.specs.material == 'alloy')].model")
 print(res9)  # >>> ['Weywot', 'Mimas']
 # STEP_END
