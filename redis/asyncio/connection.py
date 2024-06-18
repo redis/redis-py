@@ -551,7 +551,7 @@ class AbstractConnection:
         timeout: Optional[float] = None,
         *,
         disconnect_on_error: bool = True,
-        push_request: Optional[bool] = False,
+        read_single_push_response: Optional[bool] = False,
     ):
         """Read the response from a previously sent command"""
         read_timeout = timeout if timeout is not None else self.socket_timeout
@@ -564,7 +564,8 @@ class AbstractConnection:
             ):
                 async with async_timeout(read_timeout):
                     response = await self._parser.read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
+                        disable_decoding=disable_decoding,
+                        read_single_push_response=read_single_push_response,
                     )
             elif read_timeout is not None:
                 async with async_timeout(read_timeout):
@@ -573,7 +574,8 @@ class AbstractConnection:
                     )
             elif self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
                 response = await self._parser.read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    read_single_push_response=read_single_push_response,
                 )
             else:
                 response = await self._parser.read_response(
@@ -713,7 +715,7 @@ class AbstractConnection:
         ):
             return None
         while not self._socket_is_empty():
-            await self.read_response(push_request=True)
+            await self.read_response(read_single_push_response=True)
         return self.client_cache.get(command)
 
     def _add_to_local_cache(

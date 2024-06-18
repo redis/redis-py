@@ -966,7 +966,7 @@ class PubSub:
             conn.read_response,
             timeout=read_timeout,
             disconnect_on_error=False,
-            push_request=True,
+            read_single_push_response=True,
         )
 
         if conn.health_check_interval and response in self.health_check_response:

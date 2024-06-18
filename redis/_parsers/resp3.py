@@ -22,11 +22,12 @@ class _RESP3Parser(_RESPBase):
         logger.info("Push response: " + str(response))
         return response
 
-    def read_response(self, disable_decoding=False, push_request=False):
+    def read_response(self, disable_decoding=False, read_single_push_response=False):
         pos = self._buffer.get_pos() if self._buffer else None
         try:
             result = self._read_response(
-                disable_decoding=disable_decoding, push_request=push_request
+                disable_decoding=disable_decoding,
+                read_single_push_response=read_single_push_response,
             )
         except BaseException:
             if self._buffer:
@@ -36,7 +37,7 @@ class _RESP3Parser(_RESPBase):
             self._buffer.purge()
             return result
 
-    def _read_response(self, disable_decoding=False, push_request=False):
+    def _read_response(self, disable_decoding=False, read_single_push_response=False):
         raw = self._buffer.readline()
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -106,19 +107,21 @@ class _RESP3Parser(_RESPBase):
             for _ in range(int(response)):
                 key = self._read_response(disable_decoding=disable_decoding)
                 resp_dict[key] = self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    read_single_push_response=read_single_push_response,
                 )
             response = resp_dict
         # push response
         elif byte == b">":
             response = [
                 self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    read_single_push_response=read_single_push_response,
                 )
                 for _ in range(int(response))
             ]
             response = self.handle_push_response(
-                response, disable_decoding, push_request
+                response, disable_decoding, read_single_push_response
             )
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
@@ -127,17 +130,19 @@ class _RESP3Parser(_RESPBase):
             response = self.encoder.decode(response)
         return response
 
-    def handle_push_response(self, response, disable_decoding, push_request):
+    def handle_push_response(
+        self, response, disable_decoding, read_single_push_response
+    ):
         if response[0] in _INVALIDATION_MESSAGE:
             res = self.invalidation_push_handler_func(response)
         else:
             res = self.pubsub_push_handler_func(response)
-        if push_request:
-            return self._read_response(
-                disable_decoding=disable_decoding, push_request=push_request
-            )
-        else:
+        if read_single_push_response:
             return res
+        return self._read_response(
+            disable_decoding=disable_decoding,
+            read_single_push_response=read_single_push_response,
+        )
 
     def set_pubsub_push_handler(self, pubsub_push_handler_func):
         self.pubsub_push_handler_func = pubsub_push_handler_func
@@ -158,7 +163,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
         return response
 
     async def read_response(
-        self, disable_decoding: bool = False, push_request: bool = False
+        self, disable_decoding: bool = False, read_single_push_response: bool = False
     ):
         if self._chunks:
             # augment parsing buffer with previously read data
@@ -166,14 +171,15 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
             self._chunks.clear()
         self._pos = 0
         response = await self._read_response(
-            disable_decoding=disable_decoding, push_request=push_request
+            disable_decoding=disable_decoding,
+            read_single_push_response=read_single_push_response,
         )
         # Successfully parsing a response allows us to clear our parsing buffer
         self._clear()
         return response
 
     async def _read_response(
-        self, disable_decoding: bool = False, push_request: bool = False
+        self, disable_decoding: bool = False, read_single_push_response: bool = False
     ) -> Union[EncodableT, ResponseError, None]:
         if not self._stream or not self.encoder:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -248,7 +254,8 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
             for _ in range(int(response)):
                 key = await self._read_response(disable_decoding=disable_decoding)
                 resp_dict[key] = await self._read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
+                    disable_decoding=disable_decoding,
+                    read_single_push_response=read_single_push_response,
                 )
             response = resp_dict
         # push response
@@ -256,13 +263,14 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
             response = [
                 (
                     await self._read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
+                        disable_decoding=disable_decoding,
+                        read_single_push_response=read_single_push_response,
                     )
                 )
                 for _ in range(int(response))
             ]
             response = await self.handle_push_response(
-                response, disable_decoding, push_request
+                response, disable_decoding, read_single_push_response
             )
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
@@ -271,17 +279,19 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
             response = self.encoder.decode(response)
         return response
 
-    async def handle_push_response(self, response, disable_decoding, push_request):
+    async def handle_push_response(
+        self, response, disable_decoding, read_single_push_response
+    ):
         if response[0] in _INVALIDATION_MESSAGE:
             res = self.invalidation_push_handler_func(response)
         else:
             res = self.pubsub_push_handler_func(response)
-        if push_request:
-            return await self._read_response(
-                disable_decoding=disable_decoding, push_request=push_request
-            )
-        else:
+        if read_single_push_response:
             return res
+        return await self._read_response(
+            disable_decoding=disable_decoding,
+            read_single_push_response=read_single_push_response,
+        )
 
     def set_pubsub_push_handler(self, pubsub_push_handler_func):
         self.pubsub_push_handler_func = pubsub_push_handler_func
