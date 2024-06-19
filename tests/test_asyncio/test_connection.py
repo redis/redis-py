@@ -491,3 +491,21 @@ async def test_connection_garbage_collection(request):
 
     await client.aclose()
     await pool.aclose()
+
+
+@pytest.mark.parametrize(
+    "error, expected_message",
+    [
+        (OSError(), "Error connecting to localhost:6379. Connection reset by peer"),
+        (OSError(12), "Error connecting to localhost:6379. 12."),
+        (
+            OSError(12, "Some Error"),
+            "Error 12 connecting to localhost:6379. [Errno 12] Some Error.",
+        ),
+    ],
+)
+async def test_connect_error_message(error, expected_message):
+    """Test that the _error_message function formats errors correctly"""
+    conn = Connection()
+    error_message = conn._error_message(error)
+    assert error_message == expected_message
