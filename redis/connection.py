@@ -533,7 +533,7 @@ class AbstractConnection:
         disable_decoding=False,
         *,
         disconnect_on_error=True,
-        read_single_push_response=False,
+        push_request=False,
     ):
         """Read the response from a previously sent command"""
 
@@ -543,7 +543,7 @@ class AbstractConnection:
             if self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
                 response = self._parser.read_response(
                     disable_decoding=disable_decoding,
-                    read_single_push_response=read_single_push_response,
+                    push_request=push_request,
                 )
             else:
                 response = self._parser.read_response(disable_decoding=disable_decoding)
@@ -635,7 +635,7 @@ class AbstractConnection:
         ):
             return None
         while self.can_read():
-            self.read_response(read_single_push_response=True)
+            self.read_response(push_request=True)
         return self.client_cache.get(command)
 
     def _add_to_local_cache(

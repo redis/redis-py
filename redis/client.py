@@ -880,9 +880,7 @@ class PubSub:
                     return None
             else:
                 conn.connect()
-            return conn.read_response(
-                disconnect_on_error=False, read_single_push_response=True
-            )
+            return conn.read_response(disconnect_on_error=False, push_request=True)
 
         response = self._execute(conn, try_read)
 
