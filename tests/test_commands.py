@@ -18,6 +18,7 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis.utils import HIREDIS_AVAILABLE
 
 from .conftest import (
     _get_client,
@@ -1841,7 +1842,14 @@ class TestRedisCommands:
         assert len(functions) == 3
 
         expected_names = [b"lib1", b"lib2", b"lib3"]
-        actual_names = [functions[0][13], functions[1][13], functions[2][13]]
+        if is_resp2_connection(stack_r):
+            actual_names = [functions[0][13], functions[1][13], functions[2][13]]
+        else:
+            actual_names = [
+                functions[0][b"name"],
+                functions[1][b"name"],
+                functions[2][b"name"],
+            ]
 
         assert sorted(expected_names) == sorted(actual_names)
         assert stack_r.tfunction_delete("lib1")
@@ -5009,6 +5017,9 @@ class TestRedisCommands:
             r, res, ["key1", "key2", "key3"], [b"key1", b"key2", b"key3"]
         )
 
+    # The response to COMMAND contains maps inside sets, which are not handled
+    # by the hiredis-py parser (see https://github.com/redis/hiredis-py/issues/188)
+    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
     @skip_if_server_version_lt("2.8.13")
     def test_command(self, r):
         res = r.command()

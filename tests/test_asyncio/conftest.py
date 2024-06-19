@@ -6,13 +6,11 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as redis
 from packaging.version import Version
-from redis._parsers import _AsyncHiredisParser, _AsyncRESP2Parser
 from redis.asyncio import Sentinel
 from redis.asyncio.client import Monitor
 from redis.asyncio.connection import Connection, parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import REDIS_INFO
 
 from .compat import mock
@@ -28,41 +26,21 @@ async def _get_info(redis_url):
 @pytest_asyncio.fixture(
     params=[
         pytest.param(
-            (True, _AsyncRESP2Parser),
+            (True,),
             marks=pytest.mark.skipif(
                 'config.REDIS_INFO["cluster_enabled"]', reason="cluster mode enabled"
             ),
         ),
-        (False, _AsyncRESP2Parser),
-        pytest.param(
-            (True, _AsyncHiredisParser),
-            marks=[
-                pytest.mark.skipif(
-                    'config.REDIS_INFO["cluster_enabled"]',
-                    reason="cluster mode enabled",
-                ),
-                pytest.mark.skipif(
-                    not HIREDIS_AVAILABLE, reason="hiredis is not installed"
-                ),
-            ],
-        ),
-        pytest.param(
-            (False, _AsyncHiredisParser),
-            marks=pytest.mark.skipif(
-                not HIREDIS_AVAILABLE, reason="hiredis is not installed"
-            ),
-        ),
+        (False,),
     ],
     ids=[
-        "single-python-parser",
-        "pool-python-parser",
-        "single-hiredis",
-        "pool-hiredis",
+        "single",
+        "pool",
     ],
 )
 async def create_redis(request):
     """Wrapper around redis.create_redis."""
-    single_connection, parser_cls = request.param
+    (single_connection,) = request.param
 
     teardown_clients = []
 
@@ -78,10 +56,9 @@ async def create_redis(request):
         cluster_mode = REDIS_INFO["cluster_enabled"]
         if not cluster_mode:
             single = kwargs.pop("single_connection_client", False) or single_connection
-            parser_class = kwargs.pop("parser_class", None) or parser_cls
             url_options = parse_url(url)
             url_options.update(kwargs)
-            pool = redis.ConnectionPool(parser_class=parser_class, **url_options)
+            pool = redis.ConnectionPool(**url_options)
             client = cls(connection_pool=pool)
         else:
             client = redis.RedisCluster.from_url(url, **kwargs)
