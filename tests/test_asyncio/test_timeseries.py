@@ -780,8 +780,12 @@ async def test_create_with_insertion_filters(decoded_r: redis.Redis):
     assert 1021 == await decoded_r.ts().add("time-series-1", 1021, 22.0)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, 1.0), (1010, 11.0), (1020, 11.5), (1021, 22.0)]
-    assert expected_points == data_points
+    assert_resp_response(
+        decoded_r,
+        data_points,
+        [(1000, 1.0), (1010, 11.0), (1020, 11.5), (1021, 22.0)],
+        [[1000, 1.0], [1010, 11.0], [1020, 11.5], [1021, 22.0]],
+    )
 
 
 @skip_ifmodversion_lt("1.12.0", "timeseries")
@@ -800,8 +804,12 @@ async def test_alter_with_insertion_filters(decoded_r: redis.Redis):
     assert 1013 == await decoded_r.ts().add("time-series-1", 1015, 11.5)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, 1.0), (1010, 11.0), (1013, 10.0)]
-    assert expected_points == data_points
+    assert_resp_response(
+        decoded_r,
+        data_points,
+        [(1000, 1.0), (1010, 11.0), (1013, 10.0)],
+        [[1000, 1.0], [1010, 11.0], [1013, 10.0]],
+    )
 
 
 @skip_ifmodversion_lt("1.12.0", "timeseries")
@@ -818,8 +826,7 @@ async def test_add_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().add("time-series-1", 1004, 3.0)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, 1.0)]
-    assert expected_points == data_points
+    assert_resp_response(decoded_r, data_points, [(1000, 1.0)], [[1000, 1.0]])
 
 
 @skip_ifmodversion_lt("1.12.0", "timeseries")
@@ -836,14 +843,12 @@ async def test_incrby_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().incrby("time-series-1", 3.0, timestamp=1000)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, 1.0)]
-    assert expected_points == data_points
+    assert_resp_response(decoded_r, data_points, [(1000, 1.0)], [[1000, 1.0]])
 
     assert 1000 == await decoded_r.ts().incrby("time-series-1", 10.1, timestamp=1000)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, 11.1)]
-    assert expected_points == data_points
+    assert_resp_response(decoded_r, data_points, [(1000, 11.1)], [[1000, 11.1]])
 
 
 @skip_ifmodversion_lt("1.12.0", "timeseries")
@@ -860,11 +865,9 @@ async def test_decrby_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().decrby("time-series-1", 3.0, timestamp=1000)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, -1.0)]
-    assert expected_points == data_points
+    assert_resp_response(decoded_r, data_points, [(1000, -1.0)], [[1000, -1.0]])
 
     assert 1000 == await decoded_r.ts().decrby("time-series-1", 10.1, timestamp=1000)
 
     data_points = await decoded_r.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, -11.1)]
-    assert expected_points == data_points
+    assert_resp_response(decoded_r, data_points, [(1000, -11.1)], [[1000, -11.1]])

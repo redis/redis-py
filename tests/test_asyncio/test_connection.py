@@ -68,7 +68,7 @@ async def test_single_connection():
             in_use = False
             return "foo"
 
-    mock_conn = mock.MagicMock()
+    mock_conn = mock.AsyncMock(spec=Connection)
     mock_conn.retry = Retry_()
 
     async def get_conn(_):
