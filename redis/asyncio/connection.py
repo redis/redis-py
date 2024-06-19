@@ -564,8 +564,7 @@ class AbstractConnection:
             ):
                 async with async_timeout(read_timeout):
                     response = await self._parser.read_response(
-                        disable_decoding=disable_decoding,
-                        push_request=push_request,
+                        disable_decoding=disable_decoding, push_request=push_request
                     )
             elif read_timeout is not None:
                 async with async_timeout(read_timeout):
@@ -574,8 +573,7 @@ class AbstractConnection:
                     )
             elif self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
                 response = await self._parser.read_response(
-                    disable_decoding=disable_decoding,
-                    push_request=push_request,
+                    disable_decoding=disable_decoding, push_request=push_request
                 )
             else:
                 response = await self._parser.read_response(

@@ -542,8 +542,7 @@ class AbstractConnection:
         try:
             if self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
                 response = self._parser.read_response(
-                    disable_decoding=disable_decoding,
-                    push_request=push_request,
+                    disable_decoding=disable_decoding, push_request=push_request
                 )
             else:
                 response = self._parser.read_response(disable_decoding=disable_decoding)
