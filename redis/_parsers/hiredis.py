@@ -21,6 +21,11 @@ from .socket import (
     SERVER_CLOSED_CONNECTION_ERROR,
 )
 
+# Used to signal that hiredis-py does not have enough data to parse.
+# Using `False` or `None` is not reliable, given that the parser can
+# return `False` or `None` for legitimate reasons from RESP payloads.
+NOT_ENOUGH_DATA = object()
+
 
 class _HiredisReaderArgs(TypedDict, total=False):
     protocolError: Callable[[str], Exception]
@@ -53,25 +58,26 @@ class _HiredisParser(BaseParser):
             "protocolError": InvalidResponse,
             "replyError": self.parse_error,
             "errors": connection.encoder.encoding_errors,
+            "notEnoughData": NOT_ENOUGH_DATA,
         }
 
         if connection.encoder.decode_responses:
             kwargs["encoding"] = connection.encoder.encoding
         self._reader = hiredis.Reader(**kwargs)
-        self._next_response = False
+        self._next_response = NOT_ENOUGH_DATA
 
     def on_disconnect(self):
         self._sock = None
         self._reader = None
-        self._next_response = False
+        self._next_response = NOT_ENOUGH_DATA
 
     def can_read(self, timeout):
         if not self._reader:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
-        if self._next_response is False:
+        if self._next_response is NOT_ENOUGH_DATA:
             self._next_response = self._reader.gets()
-            if self._next_response is False:
+            if self._next_response is NOT_ENOUGH_DATA:
                 return self.read_from_socket(timeout=timeout, raise_on_timeout=False)
         return True
 
@@ -110,9 +116,9 @@ class _HiredisParser(BaseParser):
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
 
         # _next_response might be cached from a can_read() call
-        if self._next_response is not False:
+        if self._next_response is not NOT_ENOUGH_DATA:
             response = self._next_response
-            self._next_response = False
+            self._next_response = NOT_ENOUGH_DATA
             return response
 
         if disable_decoding:
@@ -120,7 +126,7 @@ class _HiredisParser(BaseParser):
         else:
             response = self._reader.gets()
 
-        while response is False:
+        while response is NOT_ENOUGH_DATA:
             self.read_from_socket()
             if disable_decoding:
                 response = self._reader.gets(False)
@@ -158,6 +164,7 @@ class _AsyncHiredisParser(AsyncBaseParser):
         kwargs: _HiredisReaderArgs = {
             "protocolError": InvalidResponse,
             "replyError": self.parse_error,
+            "notEnoughData": NOT_ENOUGH_DATA,
         }
         if connection.encoder.decode_responses:
             kwargs["encoding"] = connection.encoder.encoding
@@ -172,7 +179,7 @@ class _AsyncHiredisParser(AsyncBaseParser):
     async def can_read_destructive(self):
         if not self._connected:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        if self._reader.gets():
+        if self._reader.gets() is not NOT_ENOUGH_DATA:
             return True
         try:
             async with async_timeout(0):
@@ -202,7 +209,7 @@ class _AsyncHiredisParser(AsyncBaseParser):
             response = self._reader.gets(False)
         else:
             response = self._reader.gets()
-        while response is False:
+        while response is NOT_ENOUGH_DATA:
             await self.read_from_socket()
             if disable_decoding:
                 response = self._reader.gets(False)
