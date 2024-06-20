@@ -135,6 +135,8 @@ def _get_info(redis_url):
 def pytest_sessionstart(session):
     # during test discovery, e.g. with VS Code, we may not
     # have a server running.
+    protocol = session.config.getoption("--protocol")
+    REDIS_INFO["resp_version"] = int(protocol) if protocol else None
     redis_url = session.config.getoption("--redis-url")
     try:
         info = _get_info(redis_url)
@@ -277,6 +279,11 @@ def skip_if_cryptography() -> _TestDecorator:
         return pytest.mark.skipif(True, reason="Cryptography dependency found")
     except ImportError:
         return pytest.mark.skipif(False, reason="No cryptography dependency")
+
+
+def skip_if_resp_version(resp_version) -> _TestDecorator:
+    check = REDIS_INFO.get("resp_version", None) == resp_version
+    return pytest.mark.skipif(check, reason=f"RESP version required != {resp_version}")
 
 
 def _get_client(

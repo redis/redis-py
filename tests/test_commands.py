@@ -712,11 +712,15 @@ class TestRedisCommands:
     @skip_if_redis_enterprise()
     @pytest.mark.onlynoncluster
     def test_client_kill_filter_by_maxage(self, r, request):
-        _get_client(redis.Redis, request, flushdb=False)
+        r2 = _get_client(redis.Redis, request, flushdb=False)
+        name = "target-foobar"
+        r2.client_setname(name)
         time.sleep(4)
-        assert len(r.client_list()) >= 2
+        initial_clients = [c["name"] for c in r.client_list()]
+        assert name in initial_clients
         r.client_kill_filter(maxage=2)
-        assert len(r.client_list()) == 1
+        final_clients = [c["name"] for c in r.client_list()]
+        assert name not in final_clients
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.9.50")
