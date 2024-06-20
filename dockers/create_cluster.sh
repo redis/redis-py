@@ -31,7 +31,7 @@ dir /nodes/$PORT
 EOF
 
   set -x
-  /usr/local/bin/redis-server /nodes/$PORT/redis.conf
+  redis-server /nodes/$PORT/redis.conf
   sleep 1
   if [ $? -ne 0 ]; then
     echo "Redis failed to start, exiting."
@@ -40,8 +40,8 @@ EOF
   echo 127.0.0.1:$PORT >> /nodes/nodemap
 done
 if [ -z "${REDIS_PASSWORD}" ]; then
-    echo yes | /usr/local/bin/redis-cli --cluster create `seq -f 127.0.0.1:%g ${START_PORT} ${END_PORT}` --cluster-replicas 1
+    echo yes | redis-cli --cluster create `seq -f 127.0.0.1:%g ${START_PORT} ${END_PORT}` --cluster-replicas 1
 else
-    echo yes | /usr/local/bin/redis-cli -a ${REDIS_PASSWORD} --cluster create `seq -f 127.0.0.1:%g ${START_PORT} ${END_PORT}` --cluster-replicas 1
+    echo yes | redis-cli -a ${REDIS_PASSWORD} --cluster create `seq -f 127.0.0.1:%g ${START_PORT} ${END_PORT}` --cluster-replicas 1
 fi
 tail -f /redis.log
