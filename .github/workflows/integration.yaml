@@ -24,8 +24,9 @@ permissions:
   contents: read  #  to fetch code (actions/checkout)
 
 env:
-  REDIS_STACK_IMAGE: redis/redis-stack-server:7.4.0-rc1
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  REDIS_IMAGE: redis/redis-stack-server:7.4.0-rc1
+  REDIS_STACK_IMAGE: redis/redis-stack-server:7.4.0-rc1
 
 jobs:
   dependency-audit:

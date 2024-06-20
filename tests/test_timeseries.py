@@ -1024,6 +1024,7 @@ def test_uncompressed(client):
         assert compressed_info["memoryUsage"] < uncompressed_info["memoryUsage"]
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_create_with_insertion_filters(client):
     client.ts().create(
@@ -1047,6 +1048,7 @@ def test_create_with_insertion_filters(client):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_create_with_insertion_filters_other_duplicate_policy(client):
     client.ts().create(
@@ -1068,6 +1070,7 @@ def test_create_with_insertion_filters_other_duplicate_policy(client):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_alter_with_insertion_filters(client):
     assert 1000 == client.ts().add("time-series-1", 1000, 1.0)
@@ -1092,6 +1095,7 @@ def test_alter_with_insertion_filters(client):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_add_with_insertion_filters(client):
     assert 1000 == client.ts().add(
@@ -1109,6 +1113,7 @@ def test_add_with_insertion_filters(client):
     assert_resp_response(client, data_points, [(1000, 1.0)], [[1000, 1.0]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_incrby_with_insertion_filters(client):
     assert 1000 == client.ts().incrby(
@@ -1131,6 +1136,7 @@ def test_incrby_with_insertion_filters(client):
     assert_resp_response(client, data_points, [(1000, 11.1)], [[1000, 11.1]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_decrby_with_insertion_filters(client):
     assert 1000 == client.ts().decrby(
@@ -1153,6 +1159,7 @@ def test_decrby_with_insertion_filters(client):
     assert_resp_response(client, data_points, [(1000, -11.1)], [[1000, -11.1]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_madd_with_insertion_filters(client):
     client.ts().create(
