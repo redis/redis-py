@@ -7,7 +7,7 @@ services:
   redis:
     image: ${REDIS_IMAGE:-redis:latest}
     container_name: redis-standalone
-    command: redis-server --enable-debug-command yes
+    command: redis-server --enable-debug-command yes --protected-mode no
     ports:
       - 6379:6379
     profiles:
@@ -21,7 +21,7 @@ services:
     container_name: redis-replica
     depends_on:
       - redis
-    command: redis-server --replicaof redis 6379
+    command: redis-server --replicaof redis 6379 --protected-mode no
     ports:
       - 6380:6379
     profiles:
@@ -67,7 +67,7 @@ services:
     container_name: redis-sentinel
     depends_on:
       - redis
-    entrypoint: "/usr/local/bin/redis-sentinel /redis.conf --port 26379"
+    entrypoint: "redis-sentinel /redis.conf --port 26379"
     ports:
       - 26379:26379
     volumes:
@@ -81,7 +81,7 @@ services:
     container_name: redis-sentinel2
     depends_on:
       - redis
-    entrypoint: "/usr/local/bin/redis-sentinel /redis.conf --port 26380"
+    entrypoint: "redis-sentinel /redis.conf --port 26380"
     ports:
       - 26380:26380
     volumes:
@@ -95,7 +95,7 @@ services:
     container_name: redis-sentinel3
     depends_on:
       - redis
-    entrypoint: "/usr/local/bin/redis-sentinel /redis.conf --port 26381"
+    entrypoint: "redis-sentinel /redis.conf --port 26381"
     ports:
       - 26381:26381
     volumes:
@@ -111,6 +111,15 @@ services:
       - 6479:6379
     environment:
       - "REDIS_ARGS=--enable-debug-command yes --enable-module-command yes"
+    profiles:
+      - standalone
+      - all
+
+  redis-stack-graph:
+    image: redis/redis-stack-server:6.2.6-v15
+    container_name: redis-stack-graph
+    ports:
+      - 6480:6379
     profiles:
       - standalone
       - all
