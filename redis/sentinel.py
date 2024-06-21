@@ -5,7 +5,7 @@ from redis.client import Redis
 from redis.connection import ConnectionPool, Connection
 from redis.exceptions import (ConnectionError, ResponseError, ReadOnlyError,
                               TimeoutError)
-from redis._compat import iteritems, nativestr, xrange
+from redis.utils import str_if_bytes
 
 
 class MasterNotFoundError(ConnectionError):
@@ -19,7 +19,7 @@ class SlaveNotFoundError(ConnectionError):
 class SentinelManagedConnection(Connection):
     def __init__(self, **kwargs):
         self.connection_pool = kwargs.pop('connection_pool')
-        super(SentinelManagedConnection, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     def __repr__(self):
         pool = self.connection_pool
@@ -31,10 +31,10 @@ class SentinelManagedConnection(Connection):
 
     def connect_to(self, address):
         self.host, self.port = address
-        super(SentinelManagedConnection, self).connect()
+        super().connect()
         if self.connection_pool.check_connection:
             self.send_command('PING')
-            if nativestr(self.read_response()) != 'PONG':
+            if str_if_bytes(self.read_response()) != 'PONG':
                 raise ConnectionError('PING failed')
 
     def connect(self):
@@ -52,7 +52,7 @@ class SentinelManagedConnection(Connection):
 
     def read_response(self):
         try:
-            return super(SentinelManagedConnection, self).read_response()
+            return super().read_response()
         except ReadOnlyError:
             if self.connection_pool.is_master:
                 # When talking to a master, a ReadOnlyError when likely
@@ -78,7 +78,7 @@ class SentinelConnectionPool(ConnectionPool):
             'connection_class', SentinelManagedConnection)
         self.is_master = kwargs.pop('is_master', True)
         self.check_connection = kwargs.pop('check_connection', False)
-        super(SentinelConnectionPool, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.connection_kwargs['connection_pool'] = weakref.proxy(self)
         self.service_name = service_name
         self.sentinel_manager = sentinel_manager
@@ -91,7 +91,7 @@ class SentinelConnectionPool(ConnectionPool):
         )
 
     def reset(self):
-        super(SentinelConnectionPool, self).reset()
+        super().reset()
         self.master_address = None
         self.slave_rr_counter = None
 
@@ -119,7 +119,7 @@ class SentinelConnectionPool(ConnectionPool):
         if slaves:
             if self.slave_rr_counter is None:
                 self.slave_rr_counter = random.randint(0, len(slaves) - 1)
-            for _ in xrange(len(slaves)):
+            for _ in range(len(slaves)):
                 self.slave_rr_counter = (
                     self.slave_rr_counter + 1) % len(slaves)
                 slave = slaves[self.slave_rr_counter]
@@ -132,7 +132,7 @@ class SentinelConnectionPool(ConnectionPool):
         raise SlaveNotFoundError('No slave found for %r' % (self.service_name))
 
 
-class Sentinel(object):
+class Sentinel:
     """
     Redis Sentinel cluster client
 
@@ -168,7 +168,7 @@ class Sentinel(object):
         if sentinel_kwargs is None:
             sentinel_kwargs = {
                 k: v
-                for k, v in iteritems(connection_kwargs)
+                for k, v in connection_kwargs.items()
                 if k.startswith('socket_')
             }
         self.sentinel_kwargs = sentinel_kwargs
@@ -244,18 +244,20 @@ class Sentinel(object):
         """
         Returns a redis client instance for the ``service_name`` master.
 
-        A SentinelConnectionPool class is used to retrive the master's
-        address before establishing a new connection.
+        A :py:class:`~redis.sentinel.SentinelConnectionPool` class is
+        used to retrive the master's address before establishing a new
+        connection.
 
         NOTE: If the master's address has changed, any cached connections to
         the old master are closed.
 
-        By default clients will be a redis.Redis instance. Specify a
-        different class to the ``redis_class`` argument if you desire
-        something different.
+        By default clients will be a :py:class:`~redis.Redis` instance.
+        Specify a different class to the ``redis_class`` argument if you
+        desire something different.
 
-        The ``connection_pool_class`` specifies the connection pool to use.
-        The SentinelConnectionPool will be used by default.
+        The ``connection_pool_class`` specifies the connection pool to
+        use.  The :py:class:`~redis.sentinel.SentinelConnectionPool`
+        will be used by default.
 
         All other keyword arguments are merged with any connection_kwargs
         passed to this class and passed to the connection pool as keyword
@@ -275,9 +277,9 @@ class Sentinel(object):
         A SentinelConnectionPool class is used to retrive the slave's
         address before establishing a new connection.
 
-        By default clients will be a redis.Redis instance. Specify a
-        different class to the ``redis_class`` argument if you desire
-        something different.
+        By default clients will be a :py:class:`~redis.Redis` instance.
+        Specify a different class to the ``redis_class`` argument if you
+        desire something different.
 
         The ``connection_pool_class`` specifies the connection pool to use.
         The SentinelConnectionPool will be used by default.

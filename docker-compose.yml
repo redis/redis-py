@@ -1,0 +1,66 @@
+version: "3.8"
+
+services:
+  master:
+    build: docker/master
+    ports:
+      - "6379:6379"
+
+  slave:
+    build: docker/slave
+    depends_on:
+      - "master"
+    ports:
+      - "6380:6380"
+
+  sentinel_1:
+    build: docker/sentinel_1
+    depends_on:
+      - "slave"
+    ports:
+      - "26379:26379"
+
+  sentinel_2:
+    build: docker/sentinel_2
+    depends_on:
+      - "slave"
+    ports:
+      - "26380:26380"
+
+  sentinel_3:
+    build: docker/sentinel_3
+    depends_on:
+      - "slave"
+    ports:
+      - "26381:26381"
+
+  test:
+    build: .
+    depends_on:
+      - "sentinel_3"
+    environment:
+      REDIS_MASTER_HOST: master
+      REDIS_MASTER_PORT: 6379
+      CI:
+      CI_BUILD_ID:
+      CI_BUILD_URL:
+      CI_JOB_ID:
+      CODECOV_ENV:
+      CODECOV_SLUG:
+      CODECOV_TOKEN:
+      CODECOV_URL:
+      SHIPPABLE:
+      TRAVIS:
+      TRAVIS_BRANCH:
+      TRAVIS_COMMIT:
+      TRAVIS_JOB_ID:
+      TRAVIS_JOB_NUMBER:
+      TRAVIS_OS_NAME:
+      TRAVIS_PULL_REQUEST:
+      TRAVIS_REPO_SLUG:
+      TRAVIS_TAG:
+      VCS_BRANCH_NAME:
+      VCS_COMMIT_ID:
+      VCS_PULL_REQUEST:
+      VCS_SLUG:
+      VCS_TAG:

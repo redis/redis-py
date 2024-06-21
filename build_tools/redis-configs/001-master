@@ -1,8 +1,0 @@
-pidfile /var/run/redis-master.pid
-bind *
-port 6379
-daemonize yes
-unixsocket /tmp/redis_master.sock
-unixsocketperm 777
-dbfilename master.rdb
-dir /var/lib/redis/backups

@@ -1,11 +1,11 @@
 import threading
 import time as mod_time
 import uuid
+from types import SimpleNamespace
 from redis.exceptions import LockError, LockNotOwnedError
-from redis.utils import dummy
 
 
-class Lock(object):
+class Lock:
     """
     A shared, distributed Lock. Using Redis for locking allows the Lock
     to be shared across processes and/or machines.
@@ -129,7 +129,11 @@ class Lock(object):
         self.blocking = blocking
         self.blocking_timeout = blocking_timeout
         self.thread_local = bool(thread_local)
-        self.local = threading.local() if self.thread_local else dummy()
+        self.local = (
+            threading.local()
+            if self.thread_local
+            else SimpleNamespace()
+        )
         self.local.token = None
         self.register_scripts()
 
@@ -145,9 +149,7 @@ class Lock(object):
                 client.register_script(cls.LUA_REACQUIRE_SCRIPT)
 
     def __enter__(self):
-        # force blocking, as otherwise the user would have to check whether
-        # the lock was actually acquired or not.
-        if self.acquire(blocking=True):
+        if self.acquire():
             return self
         raise LockError("Unable to acquire lock within the time specified")
 
@@ -182,14 +184,14 @@ class Lock(object):
             blocking_timeout = self.blocking_timeout
         stop_trying_at = None
         if blocking_timeout is not None:
-            stop_trying_at = mod_time.time() + blocking_timeout
+            stop_trying_at = mod_time.monotonic() + blocking_timeout
         while True:
             if self.do_acquire(token):
                 self.local.token = token
                 return True
             if not blocking:
                 return False
-            next_try_at = mod_time.time() + sleep
+            next_try_at = mod_time.monotonic() + sleep
             if stop_trying_at is not None and next_try_at > stop_trying_at:
                 return False
             mod_time.sleep(sleep)

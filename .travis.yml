@@ -1,42 +1,14 @@
-language: python
-cache: pip
-matrix:
-  include:
-    - env: TOXENV=flake8
-    - python: 2.7
-      env: TOXENV=py27-plain
-    - python: 2.7
-      env: TOXENV=py27-hiredis
-    - python: 3.5
-      env: TOXENV=py35-plain
-    - python: 3.5
-      env: TOXENV=py35-hiredis
-    - python: 3.6
-      env: TOXENV=py36-plain
-    - python: 3.6
-      env: TOXENV=py36-hiredis
-    - python: 3.7
-      env: TOXENV=py37-plain
-    - python: 3.7
-      env: TOXENV=py37-hiredis
-    - python: 3.8
-      env: TOXENV=py38-plain
-    - python: 3.8
-      env: TOXENV=py38-hiredis
-    - python: pypy
-      env: TOXENV=pypy-plain
-    - python: pypy
-      env: TOXENV=pypy-hiredis
-    - python: pypy3
-      env: TOXENV=pypy3-plain
-    - python: pypy3
-      env: TOXENV=pypy3-hiredis
+env:
+  - DOCKER_COMPOSE_VERSION=1.26.2
+
 before_install:
-  - wget https://github.com/antirez/redis/archive/6.0-rc1.tar.gz && mkdir redis_install && tar -xvzf 6.0-rc1.tar.gz -C redis_install && cd redis_install/redis-6.0-rc1 && make && src/redis-server --daemonize yes && cd ../..
-  - redis-cli info
-install:
-  - pip install codecov tox
+  - sudo rm /usr/local/bin/docker-compose
+  - curl -L https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-`uname -s`-`uname -m` > docker-compose
+  - chmod +x docker-compose
+  - sudo mv docker-compose /usr/local/bin
+
+services:
+  - docker
+
 script:
-  - tox
-after_success:
-  - "if [[ $TOXENV != 'flake8' ]]; then codecov; fi"
+  - make test

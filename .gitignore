@@ -11,3 +11,6 @@ vagrant/.vagrant
 .eggs
 .idea
 .coverage
+env
+venv
+coverage.xml

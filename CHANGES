@@ -1,4 +1,18 @@
 * (in development)
+    * BACKWARDS INCOMPATIBLE: Removed support for end of life Python 2.7. #1318
+    * BACKWARDS INCOMPATIBLE: All values within Redis URLs are unquoted via
+      urllib.parse.unquote. Prior versions of redis-py supported this by
+      specifying the ``decode_components`` flag to the ``from_url`` functions.
+      This is now done by default and cannot be disabled. #589
+    * Provide a development and testing environment via docker. Thanks
+      @abrookins. #1365
+    * Added support for the LPOS command available in Redis 6.0.6. Thanks
+      @aparcar #1353/#1354
+    * Added support for the ACL LOG command available in Redis 6. Thanks
+      @2014BDuck. #1307
+    * Added support for ABSTTL option of the RESTORE command available in
+      Redis 5.0. Thanks @charettes. #1423
+* 3.5.3 (June 1, 2020)
     * Restore try/except clauses to __del__ methods. These will be removed
       in 4.0 when more explicit resource management if enforced. #1339
     * Update the master_address when Sentinels promote a new master. #847
@@ -459,7 +473,7 @@
     * Fixed a bug where some encodings (like utf-16) were unusable on Python 3
       as command names and literals would get encoded.
     * Added an SSLConnection class that allows for secure connections through
-      stunnel or other means. Construct and SSL connection with the sll=True
+      stunnel or other means. Construct an SSL connection with the ssl=True
       option on client classes, using the rediss:// scheme from an URL, or
       by passing the SSLConnection class to a connection pool's
       connection_class argument. Thanks https://github.com/oranagra.

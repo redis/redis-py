@@ -1,13 +1,19 @@
+import socket
+
 import pytest
 
 from redis import exceptions
 from redis.sentinel import (Sentinel, SentinelConnectionPool,
                             MasterNotFoundError, SlaveNotFoundError)
-from redis._compat import next
 import redis.sentinel
 
 
-class SentinelTestClient(object):
+@pytest.fixture(scope="module")
+def master_ip(master_host):
+    yield socket.gethostbyname(master_host)
+
+
+class SentinelTestClient:
     def __init__(self, cluster, id):
         self.cluster = cluster
         self.id = id
@@ -25,7 +31,7 @@ class SentinelTestClient(object):
         return self.cluster.slaves
 
 
-class SentinelTestCluster(object):
+class SentinelTestCluster:
     def __init__(self, service_name='mymaster', ip='127.0.0.1', port=6379):
         self.clients = {}
         self.master = {
@@ -54,10 +60,10 @@ class SentinelTestCluster(object):
 
 
 @pytest.fixture()
-def cluster(request):
+def cluster(request, master_ip):
     def teardown():
         redis.sentinel.Redis = saved_Redis
-    cluster = SentinelTestCluster()
+    cluster = SentinelTestCluster(ip=master_ip)
     saved_Redis = redis.sentinel.Redis
     redis.sentinel.Redis = cluster.client
     request.addfinalizer(teardown)
@@ -69,9 +75,9 @@ def sentinel(request, cluster):
     return Sentinel([('foo', 26379), ('bar', 26379)])
 
 
-def test_discover_master(sentinel):
+def test_discover_master(sentinel, master_ip):
     address = sentinel.discover_master('mymaster')
-    assert address == ('127.0.0.1', 6379)
+    assert address == (master_ip, 6379)
 
 
 def test_discover_master_error(sentinel):
@@ -79,32 +85,32 @@ def test_discover_master_error(sentinel):
         sentinel.discover_master('xxx')
 
 
-def test_discover_master_sentinel_down(cluster, sentinel):
+def test_discover_master_sentinel_down(cluster, sentinel, master_ip):
     # Put first sentinel 'foo' down
     cluster.nodes_down.add(('foo', 26379))
     address = sentinel.discover_master('mymaster')
-    assert address == ('127.0.0.1', 6379)
+    assert address == (master_ip, 6379)
     # 'bar' is now first sentinel
     assert sentinel.sentinels[0].id == ('bar', 26379)
 
 
-def test_discover_master_sentinel_timeout(cluster, sentinel):
+def test_discover_master_sentinel_timeout(cluster, sentinel, master_ip):
     # Put first sentinel 'foo' down
     cluster.nodes_timeout.add(('foo', 26379))
     address = sentinel.discover_master('mymaster')
-    assert address == ('127.0.0.1', 6379)
+    assert address == (master_ip, 6379)
     # 'bar' is now first sentinel
     assert sentinel.sentinels[0].id == ('bar', 26379)
 
 
-def test_master_min_other_sentinels(cluster):
+def test_master_min_other_sentinels(cluster, master_ip):
     sentinel = Sentinel([('foo', 26379)], min_other_sentinels=1)
     # min_other_sentinels
     with pytest.raises(MasterNotFoundError):
         sentinel.discover_master('mymaster')
     cluster.master['num-other-sentinels'] = 2
     address = sentinel.discover_master('mymaster')
-    assert address == ('127.0.0.1', 6379)
+    assert address == (master_ip, 6379)
 
 
 def test_master_odown(cluster, sentinel):
@@ -153,10 +159,10 @@ def test_discover_slaves(cluster, sentinel):
         ('slave0', 1234), ('slave1', 1234)]
 
 
-def test_master_for(cluster, sentinel):
+def test_master_for(cluster, sentinel, master_ip):
     master = sentinel.master_for('mymaster', db=9)
     assert master.ping()
-    assert master.connection_pool.master_address == ('127.0.0.1', 6379)
+    assert master.connection_pool.master_address == (master_ip, 6379)
 
     # Use internal connection check
     master = sentinel.master_for('mymaster', db=9, check_connection=True)
@@ -179,7 +185,7 @@ def test_slave_for_slave_not_found_error(cluster, sentinel):
         slave.ping()
 
 
-def test_slave_round_robin(cluster, sentinel):
+def test_slave_round_robin(cluster, sentinel, master_ip):
     cluster.slaves = [
         {'ip': 'slave0', 'port': 6379, 'is_odown': False, 'is_sdown': False},
         {'ip': 'slave1', 'port': 6379, 'is_odown': False, 'is_sdown': False},
@@ -189,6 +195,6 @@ def test_slave_round_robin(cluster, sentinel):
     assert next(rotator) in (('slave0', 6379), ('slave1', 6379))
     assert next(rotator) in (('slave0', 6379), ('slave1', 6379))
     # Fallback to master
-    assert next(rotator) == ('127.0.0.1', 6379)
+    assert next(rotator) == (master_ip, 6379)
     with pytest.raises(SlaveNotFoundError):
         next(rotator)

@@ -17,7 +17,7 @@ def exit_callback(callback, *args):
         callback(*args)
 
 
-class TestMultiprocessing(object):
+class TestMultiprocessing:
     # Test connection sharing between forks.
     # See issue #1085 for details.
 
@@ -30,12 +30,12 @@ class TestMultiprocessing(object):
             request=request,
             single_connection_client=False)
 
-    def test_close_connection_in_child(self):
+    def test_close_connection_in_child(self, master_host):
         """
         A connection owned by a parent and closed by a child doesn't
         destroy the file descriptors so a parent can still use it.
         """
-        conn = Connection()
+        conn = Connection(host=master_host)
         conn.send_command('ping')
         assert conn.read_response() == b'PONG'
 
@@ -56,12 +56,12 @@ class TestMultiprocessing(object):
         conn.send_command('ping')
         assert conn.read_response() == b'PONG'
 
-    def test_close_connection_in_parent(self):
+    def test_close_connection_in_parent(self, master_host):
         """
         A connection owned by a parent is unusable by a child if the parent
         (the owning process) closes the connection.
         """
-        conn = Connection()
+        conn = Connection(host=master_host)
         conn.send_command('ping')
         assert conn.read_response() == b'PONG'
 
@@ -84,12 +84,12 @@ class TestMultiprocessing(object):
         assert proc.exitcode == 0
 
     @pytest.mark.parametrize('max_connections', [1, 2, None])
-    def test_pool(self, max_connections):
+    def test_pool(self, max_connections, master_host):
         """
         A child will create its own connections when using a pool created
         by a parent.
         """
-        pool = ConnectionPool.from_url('redis://localhost',
+        pool = ConnectionPool.from_url('redis://{}'.format(master_host),
                                        max_connections=max_connections)
 
         conn = pool.get_connection('ping')
@@ -119,12 +119,12 @@ class TestMultiprocessing(object):
             assert conn.read_response() == b'PONG'
 
     @pytest.mark.parametrize('max_connections', [1, 2, None])
-    def test_close_pool_in_main(self, max_connections):
+    def test_close_pool_in_main(self, max_connections, master_host):
         """
         A child process that uses the same pool as its parent isn't affected
         when the parent disconnects all connections within the pool.
         """
-        pool = ConnectionPool.from_url('redis://localhost',
+        pool = ConnectionPool.from_url('redis://{}'.format(master_host),
                                        max_connections=max_connections)
 
         conn = pool.get_connection('ping')

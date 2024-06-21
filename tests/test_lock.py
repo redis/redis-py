@@ -7,7 +7,7 @@ from redis.lock import Lock
 from .conftest import _get_client
 
 
-class TestLock(object):
+class TestLock:
     @pytest.fixture()
     def r_decoded(self, request):
         return _get_client(Redis, request=request, decode_responses=True)
@@ -101,10 +101,10 @@ class TestLock(object):
         bt = 0.2
         sleep = 0.05
         lock2 = self.get_lock(r, 'foo', sleep=sleep, blocking_timeout=bt)
-        start = time.time()
+        start = time.monotonic()
         assert not lock2.acquire()
         # The elapsed duration should be less than the total blocking_timeout
-        assert bt > (time.time() - start) > bt - sleep
+        assert bt > (time.monotonic() - start) > bt - sleep
         lock1.release()
 
     def test_context_manager(self, r):
@@ -126,11 +126,11 @@ class TestLock(object):
         sleep = 60
         bt = 1
         lock2 = self.get_lock(r, 'foo', sleep=sleep, blocking_timeout=bt)
-        start = time.time()
+        start = time.monotonic()
         assert not lock2.acquire()
         # the elapsed timed is less than the blocking_timeout as the lock is
         # unattainable given the sleep/blocking_timeout configuration
-        assert bt > (time.time() - start)
+        assert bt > (time.monotonic() - start)
         lock1.release()
 
     def test_releasing_unlocked_lock_raises_error(self, r):
@@ -220,9 +220,9 @@ class TestLock(object):
             lock.reacquire()
 
 
-class TestLockClassSelection(object):
+class TestLockClassSelection:
     def test_lock_class_argument(self, r):
-        class MyLock(object):
+        class MyLock:
             def __init__(self, *args, **kwargs):
 
                 pass

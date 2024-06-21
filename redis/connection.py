@@ -1,7 +1,8 @@
-from __future__ import unicode_literals
 from distutils.version import StrictVersion
 from itertools import chain
 from time import time
+from queue import LifoQueue, Empty, Full
+from urllib.parse import parse_qs, unquote, urlparse
 import errno
 import io
 import os
@@ -9,11 +10,6 @@ import socket
 import threading
 import warnings
 
-from redis._compat import (xrange, imap, unicode, long,
-                           nativestr, basestring, iteritems,
-                           LifoQueue, Empty, Full, urlparse, parse_qs,
-                           recv, recv_into, unquote, BlockingIOError,
-                           sendall, shutdown, ssl_wrap_socket)
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -29,8 +25,9 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
     TimeoutError,
+    ModuleError,
 )
-from redis.utils import HIREDIS_AVAILABLE
+from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
 try:
     import ssl
@@ -48,16 +45,6 @@ if ssl_available:
         NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantWriteError] = 2
     else:
         NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLError] = 2
-
-# In Python 2.7 a socket.error is raised for a nonblocking read.
-# The _compat module aliases BlockingIOError to socket.error to be
-# Python 2/3 compatible.
-# However this means that all socket.error exceptions need to be handled
-# properly within these exception handlers.
-# We need to make sure socket.error is included in these handlers and
-# provide a dummy error number that will never match a real exception.
-if socket.error not in NONBLOCKING_EXCEPTION_ERROR_NUMBERS:
-    NONBLOCKING_EXCEPTION_ERROR_NUMBERS[socket.error] = -999999
 
 NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
 
@@ -90,9 +77,17 @@ SYM_EMPTY = b''
 SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
 
 SENTINEL = object()
+MODULE_LOAD_ERROR = 'Error loading the extension. ' \
+                    'Please check the server logs.'
+NO_SUCH_MODULE_ERROR = 'Error unloading module: no such module with that name'
+MODULE_UNLOAD_NOT_POSSIBLE_ERROR = 'Error unloading module: operation not ' \
+                                   'possible.'
+MODULE_EXPORTS_DATA_TYPES_ERROR = "Error unloading module: the module " \
+                                  "exports one or more module-side data " \
+                                  "types, can't unload"
 
 
-class Encoder(object):
+class Encoder:
     "Encode strings to bytes-like and decode bytes-like to strings"
 
     def __init__(self, encoding, encoding_errors, decode_responses):
@@ -108,17 +103,14 @@ class Encoder(object):
             # special case bool since it is a subclass of int
             raise DataError("Invalid input of type: 'bool'. Convert to a "
                             "bytes, string, int or float first.")
-        elif isinstance(value, float):
+        elif isinstance(value, (int, float)):
             value = repr(value).encode()
-        elif isinstance(value, (int, long)):
-            # python 2 repr() on longs is '123L', so use str() instead
-            value = str(value).encode()
-        elif not isinstance(value, basestring):
+        elif not isinstance(value, str):
             # a value we don't know how to deal with. throw an error
             typename = type(value).__name__
             raise DataError("Invalid input of type: '%s'. Convert to a "
                             "bytes, string, int or float first." % typename)
-        if isinstance(value, unicode):
+        if isinstance(value, str):
             value = value.encode(self.encoding, self.encoding_errors)
         return value
 
@@ -132,7 +124,7 @@ class Encoder(object):
         return value
 
 
-class BaseParser(object):
+class BaseParser:
     EXCEPTION_CLASSES = {
         'ERR': {
             'max number of clients reached': ConnectionError,
@@ -146,6 +138,10 @@ class BaseParser(object):
             # in uppercase
             'wrong number of arguments for \'AUTH\' command':
                 AuthenticationWrongNumberOfArgsError,
+            MODULE_LOAD_ERROR: ModuleError,
+            MODULE_EXPORTS_DATA_TYPES_ERROR: ModuleError,
+            NO_SUCH_MODULE_ERROR: ModuleError,
+            MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError,
         },
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,
@@ -167,7 +163,7 @@ class BaseParser(object):
         return ResponseError(response)
 
 
-class SocketBuffer(object):
+class SocketBuffer:
     def __init__(self, socket, socket_read_size, socket_timeout):
         self._sock = socket
         self.socket_read_size = socket_read_size
@@ -195,7 +191,7 @@ class SocketBuffer(object):
             if custom_timeout:
                 sock.settimeout(timeout)
             while True:
-                data = recv(self._sock, socket_read_size)
+                data = self._sock.recv(socket_read_size)
                 # an empty string indicates the server shutdown the socket
                 if isinstance(data, bytes) and len(data) == 0:
                     raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -332,7 +328,7 @@ class PythonParser(BaseParser):
 
         # server returned an error
         if byte == b'-':
-            response = nativestr(response)
+            response = response.decode('utf-8', errors='replace')
             error = self.parse_error(response)
             # if the error is a ConnectionError, raise immediately so the user
             # is notified
@@ -348,7 +344,7 @@ class PythonParser(BaseParser):
             pass
         # int value
         elif byte == b':':
-            response = long(response)
+            response = int(response)
         # bulk response
         elif byte == b'$':
             length = int(response)
@@ -360,7 +356,7 @@ class PythonParser(BaseParser):
             length = int(response)
             if length == -1:
                 return None
-            response = [self.read_response() for i in xrange(length)]
+            response = [self.read_response() for i in range(length)]
         if isinstance(response, bytes):
             response = self.encoder.decode(response)
         return response
@@ -424,12 +420,12 @@ class HiredisParser(BaseParser):
             if custom_timeout:
                 sock.settimeout(timeout)
             if HIREDIS_USE_BYTE_BUFFER:
-                bufflen = recv_into(self._sock, self._buffer)
+                bufflen = self._sock.recv_into(self._buffer)
                 if bufflen == 0:
                     raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
                 self._reader.feed(self._buffer, 0, bufflen)
             else:
-                buffer = recv(self._sock, self.socket_read_size)
+                buffer = self._sock.recv(self.socket_read_size)
                 # an empty string indicates the server shutdown the socket
                 if not isinstance(buffer, bytes) or len(buffer) == 0:
                     raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -494,7 +490,7 @@ else:
     DefaultParser = PythonParser
 
 
-class Connection(object):
+class Connection:
     "Manages TCP communication to and from a Redis server"
 
     def __init__(self, host='localhost', port=6379, db=0, password=None,
@@ -593,7 +589,7 @@ class Connection(object):
                 # TCP_KEEPALIVE
                 if self.socket_keepalive:
                     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                    for k, v in iteritems(self.socket_keepalive_options):
+                    for k, v in self.socket_keepalive_options.items():
                         sock.setsockopt(socket.IPPROTO_TCP, k, v)
 
                 # set the socket_connect_timeout before we connect
@@ -606,14 +602,14 @@ class Connection(object):
                 sock.settimeout(self.socket_timeout)
                 return sock
 
-            except socket.error as _:
+            except OSError as _:
                 err = _
                 if sock is not None:
                     sock.close()
 
         if err is not None:
             raise err
-        raise socket.error("socket.getaddrinfo returned an empty list")
+        raise OSError("socket.getaddrinfo returned an empty list")
 
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
@@ -649,19 +645,19 @@ class Connection(object):
                 self.send_command('AUTH', self.password, check_health=False)
                 auth_response = self.read_response()
 
-            if nativestr(auth_response) != 'OK':
+            if str_if_bytes(auth_response) != 'OK':
                 raise AuthenticationError('Invalid Username or Password')
 
         # if a client_name is given, set it
         if self.client_name:
             self.send_command('CLIENT', 'SETNAME', self.client_name)
-            if nativestr(self.read_response()) != 'OK':
+            if str_if_bytes(self.read_response()) != 'OK':
                 raise ConnectionError('Error setting client name')
 
         # if a database is specified, switch to it
         if self.db:
             self.send_command('SELECT', self.db)
-            if nativestr(self.read_response()) != 'OK':
+            if str_if_bytes(self.read_response()) != 'OK':
                 raise ConnectionError('Invalid Database')
 
     def disconnect(self):
@@ -671,9 +667,9 @@ class Connection(object):
             return
         try:
             if os.getpid() == self.pid:
-                shutdown(self._sock, socket.SHUT_RDWR)
+                self._sock.shutdown(socket.SHUT_RDWR)
             self._sock.close()
-        except socket.error:
+        except OSError:
             pass
         self._sock = None
 
@@ -682,13 +678,13 @@ class Connection(object):
         if self.health_check_interval and time() > self.next_health_check:
             try:
                 self.send_command('PING', check_health=False)
-                if nativestr(self.read_response()) != 'PONG':
+                if str_if_bytes(self.read_response()) != 'PONG':
                     raise ConnectionError(
                         'Bad response from PING health check')
             except (ConnectionError, TimeoutError):
                 self.disconnect()
                 self.send_command('PING', check_health=False)
-                if nativestr(self.read_response()) != 'PONG':
+                if str_if_bytes(self.read_response()) != 'PONG':
                     raise ConnectionError(
                         'Bad response from PING health check')
 
@@ -703,7 +699,7 @@ class Connection(object):
             if isinstance(command, str):
                 command = [command]
             for item in command:
-                sendall(self._sock, item)
+                self._sock.sendall(item)
         except socket.timeout:
             self.disconnect()
             raise TimeoutError("Timeout writing to socket")
@@ -764,7 +760,7 @@ class Connection(object):
         # arguments to be sent separately, so split the first argument
         # manually. These arguments should be bytestrings so that they are
         # not encoded.
-        if isinstance(args[0], unicode):
+        if isinstance(args[0], str):
             args = tuple(args[0].encode().split()) + args[1:]
         elif b' ' in args[0]:
             args = tuple(args[0].split()) + args[1:]
@@ -772,7 +768,7 @@ class Connection(object):
         buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
 
         buffer_cutoff = self._buffer_cutoff
-        for arg in imap(self.encoder.encode, args):
+        for arg in map(self.encoder.encode, args):
             # to avoid large string mallocs, chunk the command into the
             # output list if we're sending large values or memoryviews
             arg_length = len(arg)
@@ -825,13 +821,13 @@ class SSLConnection(Connection):
         if not ssl_available:
             raise RedisError("Python wasn't built with SSL support")
 
-        super(SSLConnection, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         self.keyfile = ssl_keyfile
         self.certfile = ssl_certfile
         if ssl_cert_reqs is None:
             ssl_cert_reqs = ssl.CERT_NONE
-        elif isinstance(ssl_cert_reqs, basestring):
+        elif isinstance(ssl_cert_reqs, str):
             CERT_REQS = {
                 'none': ssl.CERT_NONE,
                 'optional': ssl.CERT_OPTIONAL,
@@ -848,27 +844,16 @@ class SSLConnection(Connection):
 
     def _connect(self):
         "Wrap the socket with SSL support"
-        sock = super(SSLConnection, self)._connect()
-        if hasattr(ssl, "create_default_context"):
-            context = ssl.create_default_context()
-            context.check_hostname = self.check_hostname
-            context.verify_mode = self.cert_reqs
-            if self.certfile and self.keyfile:
-                context.load_cert_chain(certfile=self.certfile,
-                                        keyfile=self.keyfile)
-            if self.ca_certs:
-                context.load_verify_locations(self.ca_certs)
-            sock = ssl_wrap_socket(context, sock, server_hostname=self.host)
-        else:
-            # In case this code runs in a version which is older than 2.7.9,
-            # we want to fall back to old code
-            sock = ssl_wrap_socket(ssl,
-                                   sock,
-                                   cert_reqs=self.cert_reqs,
-                                   keyfile=self.keyfile,
-                                   certfile=self.certfile,
-                                   ca_certs=self.ca_certs)
-        return sock
+        sock = super()._connect()
+        context = ssl.create_default_context()
+        context.check_hostname = self.check_hostname
+        context.verify_mode = self.cert_reqs
+        if self.certfile and self.keyfile:
+            context.load_cert_chain(certfile=self.certfile,
+                                    keyfile=self.keyfile)
+        if self.ca_certs:
+            context.load_verify_locations(self.ca_certs)
+        return context.wrap_socket(sock, server_hostname=self.host)
 
 
 class UnixDomainSocketConnection(Connection):
@@ -928,12 +913,13 @@ FALSE_STRINGS = ('0', 'F', 'FALSE', 'N', 'NO')
 def to_bool(value):
     if value is None or value == '':
         return None
-    if isinstance(value, basestring) and value.upper() in FALSE_STRINGS:
+    if isinstance(value, str) and value.upper() in FALSE_STRINGS:
         return False
     return bool(value)
 
 
 URL_QUERY_ARGUMENT_PARSERS = {
+    'db': int,
     'socket_timeout': float,
     'socket_connect_timeout': float,
     'socket_keepalive': to_bool,
@@ -944,10 +930,74 @@ URL_QUERY_ARGUMENT_PARSERS = {
 }
 
 
-class ConnectionPool(object):
-    "Generic connection pool"
+def parse_url(url):
+    url = urlparse(url)
+    kwargs = {}
+
+    for name, value in parse_qs(url.query).items():
+        if value and len(value) > 0:
+            value = unquote(value[0])
+            parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
+            if parser:
+                try:
+                    kwargs[name] = parser(value)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        "Invalid value for `%s` in connection URL." % name
+                    )
+            else:
+                kwargs[name] = value
+
+    if url.username:
+        kwargs['username'] = unquote(url.username)
+    if url.password:
+        kwargs['password'] = unquote(url.password)
+
+    # We only support redis://, rediss:// and unix:// schemes.
+    if url.scheme == 'unix':
+        if url.path:
+            kwargs['path'] = unquote(url.path)
+        kwargs['connection_class'] = UnixDomainSocketConnection
+
+    elif url.scheme in ('redis', 'rediss'):
+        if url.hostname:
+            kwargs['host'] = unquote(url.hostname)
+        if url.port:
+            kwargs['port'] = int(url.port)
+
+        # If there's a path argument, use it as the db argument if a
+        # querystring value wasn't specified
+        if url.path and 'db' not in kwargs:
+            try:
+                kwargs['db'] = int(unquote(url.path).replace('/', ''))
+            except (AttributeError, ValueError):
+                pass
+
+        if url.scheme == 'rediss':
+            kwargs['connection_class'] = SSLConnection
+    else:
+        valid_schemes = 'redis://, rediss://, unix://'
+        raise ValueError('Redis URL must specify one of the following '
+                         'schemes (%s)' % valid_schemes)
+
+    return kwargs
+
+
+class ConnectionPool:
+    """
+    Create a connection pool. ``If max_connections`` is set, then this
+    object raises :py:class:`~redis.ConnectionError` when the pool's
+    limit is reached.
+
+    By default, TCP connections are created unless ``connection_class``
+    is specified. Use :py:class:`~redis.UnixDomainSocketConnection` for
+    unix sockets.
+
+    Any additional keyword arguments are passed to the constructor of
+    ``connection_class``.
+    """
     @classmethod
-    def from_url(cls, url, db=None, decode_components=False, **kwargs):
+    def from_url(cls, url, **kwargs):
         """
         Return a connection pool configured from the given URL.
 
@@ -959,130 +1009,41 @@ class ConnectionPool(object):
 
         Three URL schemes are supported:
 
-        - ```redis://``
-          <https://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
-          normal TCP socket connection
-        - ```rediss://``
-          <https://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates
-          a SSL wrapped TCP socket connection
-        - ``unix://`` creates a Unix Domain Socket connection
+        - `redis://` creates a TCP socket connection. See more at:
+          <https://www.iana.org/assignments/uri-schemes/prov/redis>
+        - `rediss://` creates a SSL wrapped TCP socket connection. See more at:
+          <https://www.iana.org/assignments/uri-schemes/prov/rediss>
+        - ``unix://``: creates a Unix Domain Socket connection.
 
-        There are several ways to specify a database number. The parse function
-        will return the first specified option:
+        The username, password, hostname, path and all querystring values
+        are passed through urllib.parse.unquote in order to replace any
+        percent-encoded values with their corresponding characters.
+
+        There are several ways to specify a database number. The first value
+        found will be used:
             1. A ``db`` querystring option, e.g. redis://localhost?db=0
-            2. If using the redis:// scheme, the path argument of the url, e.g.
-               redis://localhost/0
-            3. The ``db`` argument to this function.
+            2. If using the redis:// or rediss:// schemes, the path argument
+               of the url, e.g. redis://localhost/0
+            3. A ``db`` keyword argument to this function.
 
-        If none of these options are specified, db=0 is used.
+        If none of these options are specified, the default db=0 is used.
 
-        The ``decode_components`` argument allows this function to work with
-        percent-encoded URLs. If this argument is set to ``True`` all ``%xx``
-        escapes will be replaced by their single-character equivalents after
-        the URL has been parsed. This only applies to the ``hostname``,
-        ``path``, ``username`` and ``password`` components.
-
-        Any additional querystring arguments and keyword arguments will be
-        passed along to the ConnectionPool class's initializer. The querystring
-        arguments ``socket_connect_timeout`` and ``socket_timeout`` if supplied
-        are parsed as float values. The arguments ``socket_keepalive`` and
-        ``retry_on_timeout`` are parsed to boolean values that accept
-        True/False, Yes/No values to indicate state. Invalid types cause a
-        ``UserWarning`` to be raised. In the case of conflicting arguments,
-        querystring arguments always win.
-
+        All querystring options are cast to their appropriate Python types.
+        Boolean arguments can be specified with string values "True"/"False"
+        or "Yes"/"No". Values that cannot be properly cast cause a
+        ``ValueError`` to be raised. Once parsed, the querystring arguments
+        and keyword arguments are passed to the ``ConnectionPool``'s
+        class initializer. In the case of conflicting arguments, querystring
+        arguments always win.
         """
-        url = urlparse(url)
-        url_options = {}
-
-        for name, value in iteritems(parse_qs(url.query)):
-            if value and len(value) > 0:
-                parser = URL_QUERY_ARGUMENT_PARSERS.get(name)
-                if parser:
-                    try:
-                        url_options[name] = parser(value[0])
-                    except (TypeError, ValueError):
-                        warnings.warn(UserWarning(
-                            "Invalid value for `%s` in connection URL." % name
-                        ))
-                else:
-                    url_options[name] = value[0]
-
-        if decode_components:
-            username = unquote(url.username) if url.username else None
-            password = unquote(url.password) if url.password else None
-            path = unquote(url.path) if url.path else None
-            hostname = unquote(url.hostname) if url.hostname else None
-        else:
-            username = url.username or None
-            password = url.password or None
-            path = url.path
-            hostname = url.hostname
-
-        # We only support redis://, rediss:// and unix:// schemes.
-        if url.scheme == 'unix':
-            url_options.update({
-                'username': username,
-                'password': password,
-                'path': path,
-                'connection_class': UnixDomainSocketConnection,
-            })
-
-        elif url.scheme in ('redis', 'rediss'):
-            url_options.update({
-                'host': hostname,
-                'port': int(url.port or 6379),
-                'username': username,
-                'password': password,
-            })
-
-            # If there's a path argument, use it as the db argument if a
-            # querystring value wasn't specified
-            if 'db' not in url_options and path:
-                try:
-                    url_options['db'] = int(path.replace('/', ''))
-                except (AttributeError, ValueError):
-                    pass
-
-            if url.scheme == 'rediss':
-                url_options['connection_class'] = SSLConnection
-        else:
-            valid_schemes = ', '.join(('redis://', 'rediss://', 'unix://'))
-            raise ValueError('Redis URL must specify one of the following '
-                             'schemes (%s)' % valid_schemes)
-
-        # last shot at the db value
-        url_options['db'] = int(url_options.get('db', db or 0))
-
-        # update the arguments from the URL values
+        url_options = parse_url(url)
         kwargs.update(url_options)
-
-        # backwards compatability
-        if 'charset' in kwargs:
-            warnings.warn(DeprecationWarning(
-                '"charset" is deprecated. Use "encoding" instead'))
-            kwargs['encoding'] = kwargs.pop('charset')
-        if 'errors' in kwargs:
-            warnings.warn(DeprecationWarning(
-                '"errors" is deprecated. Use "encoding_errors" instead'))
-            kwargs['encoding_errors'] = kwargs.pop('errors')
-
         return cls(**kwargs)
 
     def __init__(self, connection_class=Connection, max_connections=None,
                  **connection_kwargs):
-        """
-        Create a connection pool. If max_connections is set, then this
-        object raises redis.ConnectionError when the pool's limit is reached.
-
-        By default, TCP connections are created unless connection_class is
-        specified. Use redis.UnixDomainSocketConnection for unix sockets.
-
-        Any additional keyword arguments are passed to the constructor of
-        connection_class.
-        """
         max_connections = max_connections or 2 ** 31
-        if not isinstance(max_connections, (int, long)) or max_connections < 0:
+        if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
         self.connection_class = connection_class
@@ -1159,14 +1120,7 @@ class ConnectionPool(object):
         # that time it is assumed that the child is deadlocked and a
         # redis.ChildDeadlockedError error is raised.
         if self.pid != os.getpid():
-            # python 2.7 doesn't support a timeout option to lock.acquire()
-            # we have to mimic lock timeouts ourselves.
-            timeout_at = time() + 5
-            acquired = False
-            while time() < timeout_at:
-                acquired = self._fork_lock.acquire(False)
-                if acquired:
-                    break
+            acquired = self._fork_lock.acquire(timeout=5)
             if not acquired:
                 raise ChildDeadlockedError
             # reset() the instance for the new process if another thread
@@ -1278,14 +1232,14 @@ class BlockingConnectionPool(ConnectionPool):
         >>> client = Redis(connection_pool=BlockingConnectionPool())
 
     It performs the same function as the default
-    ``:py:class: ~redis.connection.ConnectionPool`` implementation, in that,
+    :py:class:`~redis.ConnectionPool` implementation, in that,
     it maintains a pool of reusable connections that can be shared by
     multiple redis clients (safely across threads if required).
 
     The difference is that, in the event that a client tries to get a
     connection from the pool when all of connections are in use, rather than
-    raising a ``:py:class: ~redis.exceptions.ConnectionError`` (as the default
-    ``:py:class: ~redis.connection.ConnectionPool`` implementation does), it
+    raising a :py:class:`~redis.ConnectionError` (as the default
+    :py:class:`~redis.ConnectionPool` implementation does), it
     makes the client wait ("blocks") for a specified number of seconds until
     a connection becomes available.
 
@@ -1296,11 +1250,11 @@ class BlockingConnectionPool(ConnectionPool):
     Use ``timeout`` to tell it either how many seconds to wait for a connection
     to become available, or to block forever:
 
-        # Block forever.
+        >>> # Block forever.
         >>> pool = BlockingConnectionPool(timeout=None)
 
-        # Raise a ``ConnectionError`` after five seconds if a connection is
-        # not available.
+        >>> # Raise a ``ConnectionError`` after five seconds if a connection is
+        >>> # not available.
         >>> pool = BlockingConnectionPool(timeout=5)
     """
     def __init__(self, max_connections=50, timeout=20,
@@ -1309,7 +1263,7 @@ class BlockingConnectionPool(ConnectionPool):
 
         self.queue_class = queue_class
         self.timeout = timeout
-        super(BlockingConnectionPool, self).__init__(
+        super().__init__(
             connection_class=connection_class,
             max_connections=max_connections,
             **connection_kwargs)

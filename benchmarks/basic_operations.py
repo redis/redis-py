@@ -1,12 +1,7 @@
-from __future__ import print_function
 import redis
 import time
-import sys
 from functools import wraps
 from argparse import ArgumentParser
-
-if sys.version_info[0] == 3:
-    long = int
 
 
 def parse_args():
@@ -47,9 +42,9 @@ def run():
 def timer(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        start = time.clock()
+        start = time.monotonic()
         ret = func(*args, **kwargs)
-        duration = time.clock() - start
+        duration = time.monotonic() - start
         if 'num' in kwargs:
             count = kwargs['num']
         else:
@@ -57,7 +52,7 @@ def timer(func):
         print('{} - {} Requests'.format(func.__name__, count))
         print('Duration  = {}'.format(duration))
         print('Rate = {}'.format(count/duration))
-        print('')
+        print()
         return ret
     return wrapper
 
@@ -185,7 +180,6 @@ def hmset(conn, num, pipeline_size, data_size):
 
     set_data = {'str_value': 'string',
                 'int_value': 123456,
-                'long_value': long(123456),
                 'float_value': 123456.0}
     for i in range(num):
         conn.hmset('hmset_key', set_data)

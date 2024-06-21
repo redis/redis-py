@@ -1,0 +1,9 @@
+codecov:
+  require_ci_to_pass: yes
+
+coverage:
+  precision: 2
+  round: down
+  range: "80...100"
+  status:
+    patch: off  # off for now as it yells about everything

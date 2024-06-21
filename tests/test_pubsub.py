@@ -1,10 +1,11 @@
-from __future__ import unicode_literals
 import pytest
+import threading
 import time
+
+from unittest import mock
 
 import redis
 from redis.exceptions import ConnectionError
-from redis._compat import basestring, unichr
 
 from .conftest import _get_client
 from .conftest import skip_if_server_version_lt
@@ -28,7 +29,7 @@ def make_message(type, channel, data, pattern=None):
         'type': type,
         'pattern': pattern and pattern.encode('utf-8') or None,
         'channel': channel and channel.encode('utf-8') or None,
-        'data': data.encode('utf-8') if isinstance(data, basestring) else data
+        'data': data.encode('utf-8') if isinstance(data, str) else data
     }
 
 
@@ -40,7 +41,7 @@ def make_subscribe_test_data(pubsub, type):
             'unsub_type': 'unsubscribe',
             'sub_func': pubsub.subscribe,
             'unsub_func': pubsub.unsubscribe,
-            'keys': ['foo', 'bar', 'uni' + unichr(4456) + 'code']
+            'keys': ['foo', 'bar', 'uni' + chr(4456) + 'code']
         }
     elif type == 'pattern':
         return {
@@ -49,12 +50,12 @@ def make_subscribe_test_data(pubsub, type):
             'unsub_type': 'punsubscribe',
             'sub_func': pubsub.psubscribe,
             'unsub_func': pubsub.punsubscribe,
-            'keys': ['f*', 'b*', 'uni' + unichr(4456) + '*']
+            'keys': ['f*', 'b*', 'uni' + chr(4456) + '*']
         }
     assert False, 'invalid subscribe type: %s' % type
 
 
-class TestPubSubSubscribeUnsubscribe(object):
+class TestPubSubSubscribeUnsubscribe:
 
     def _test_subscribe_unsubscribe(self, p, sub_type, unsub_type, sub_func,
                                     unsub_func, keys):
@@ -255,7 +256,7 @@ class TestPubSubSubscribeUnsubscribe(object):
         assert p.subscribed is True
 
 
-class TestPubSubMessages(object):
+class TestPubSubMessages:
     def setup_method(self, method):
         self.message = None
 
@@ -314,7 +315,7 @@ class TestPubSubMessages(object):
 
     def test_unicode_channel_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
-        channel = 'uni' + unichr(4456) + 'code'
+        channel = 'uni' + chr(4456) + 'code'
         channels = {channel: self.message_handler}
         p.subscribe(**channels)
         assert wait_for_message(p) is None
@@ -324,8 +325,8 @@ class TestPubSubMessages(object):
 
     def test_unicode_pattern_message_handler(self, r):
         p = r.pubsub(ignore_subscribe_messages=True)
-        pattern = 'uni' + unichr(4456) + '*'
-        channel = 'uni' + unichr(4456) + 'code'
+        pattern = 'uni' + chr(4456) + '*'
+        channel = 'uni' + chr(4456) + 'code'
         p.psubscribe(**{pattern: self.message_handler})
         assert wait_for_message(p) is None
         assert r.publish(channel, 'test message') == 1
@@ -342,12 +343,12 @@ class TestPubSubMessages(object):
         assert expect in info.exconly()
 
 
-class TestPubSubAutoDecoding(object):
+class TestPubSubAutoDecoding:
     "These tests only validate that we get unicode values back"
 
-    channel = 'uni' + unichr(4456) + 'code'
-    pattern = 'uni' + unichr(4456) + '*'
-    data = 'abc' + unichr(4458) + '123'
+    channel = 'uni' + chr(4456) + 'code'
+    pattern = 'uni' + chr(4456) + '*'
+    data = 'abc' + chr(4458) + '123'
 
     def make_message(self, type, channel, data, pattern=None):
         return {
@@ -458,7 +459,7 @@ class TestPubSubAutoDecoding(object):
         assert pubsub.patterns == {}
 
 
-class TestPubSubRedisDown(object):
+class TestPubSubRedisDown:
 
     def test_channel_subscribe(self, r):
         r = redis.Redis(host='localhost', port=6390)
@@ -467,7 +468,7 @@ class TestPubSubRedisDown(object):
             p.subscribe('foo')
 
 
-class TestPubSubSubcommands(object):
+class TestPubSubSubcommands:
 
     @skip_if_server_version_lt('2.8.0')
     def test_pubsub_channels(self, r):
@@ -475,11 +476,8 @@ class TestPubSubSubcommands(object):
         p.subscribe('foo', 'bar', 'baz', 'quux')
         for i in range(4):
             assert wait_for_message(p)['type'] == 'subscribe'
-        channels = sorted(r.pubsub_channels())
-        # assert channels == [b'bar', b'baz', b'foo', b'quux']
-        if channels != [b'bar', b'baz', b'foo', b'quux']:
-            import pdb
-            pdb.set_trace()
+        expected = [b'bar', b'baz', b'foo', b'quux']
+        assert all([channel in r.pubsub_channels() for channel in expected])
 
     @skip_if_server_version_lt('2.8.0')
     def test_pubsub_numsub(self, r):
@@ -507,7 +505,7 @@ class TestPubSubSubcommands(object):
         assert r.pubsub_numpat() == 3
 
 
-class TestPubSubPings(object):
+class TestPubSubPings:
 
     @skip_if_server_version_lt('3.0.0')
     def test_send_pubsub_ping(self, r):
@@ -528,7 +526,7 @@ class TestPubSubPings(object):
                                                    pattern=None)
 
 
-class TestPubSubConnectionKilled(object):
+class TestPubSubConnectionKilled:
 
     @skip_if_server_version_lt('3.0.0')
     def test_connection_error_raised_when_connection_dies(self, r):
@@ -542,9 +540,30 @@ class TestPubSubConnectionKilled(object):
             wait_for_message(p)
 
 
-class TestPubSubTimeouts(object):
+class TestPubSubTimeouts:
     def test_get_message_with_timeout_returns_none(self, r):
         p = r.pubsub()
         p.subscribe('foo')
         assert wait_for_message(p) == make_message('subscribe', 'foo', 1)
         assert p.get_message(timeout=0.01) is None
+
+
+class TestPubSubWorkerThread:
+    def test_pubsub_worker_thread_exception_handler(self, r):
+        event = threading.Event()
+
+        def exception_handler(ex, pubsub, thread):
+            thread.stop()
+            event.set()
+
+        p = r.pubsub()
+        p.subscribe(**{'foo': lambda m: m})
+        with mock.patch.object(p, 'get_message',
+                               side_effect=Exception('error')):
+            pubsub_thread = p.run_in_thread(
+                exception_handler=exception_handler
+            )
+
+        assert event.wait(timeout=1.0)
+        pubsub_thread.join(timeout=1.0)
+        assert not pubsub_thread.is_alive()

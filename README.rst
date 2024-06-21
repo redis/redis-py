@@ -47,6 +47,12 @@ or from source:
 
     $ python setup.py install
 
+Contributing
+------------
+
+Want to contribute a feature, bug report, or report an issue? Check out our `guide to
+contributing <https://github.com/andymccurdy/redis-py/blob/master/CONTRIBUTING.rst>`_.
+
 
 Getting Started
 ---------------
@@ -69,6 +75,12 @@ specify `decode_responses=True` to `Redis.__init__`. In this case, any
 Redis command that returns a string type will be decoded with the `encoding`
 specified.
 
+The default encoding is "utf-8", but this can be customized with the `encoding`
+argument to the `redis.Redis` class. The `encoding` will be used to
+automatically encode any strings passed to commands, such as key names and
+values. When `decode_responses=True`, string data returned from commands
+will be decoded with the same `encoding`.
+
 
 Upgrading from redis-py 2.X to 3.0
 ----------------------------------
@@ -81,7 +93,7 @@ provide an upgrade path for users migrating from 2.X to 3.0.
 Python Version Support
 ^^^^^^^^^^^^^^^^^^^^^^
 
-redis-py 3.0 supports Python 2.7 and Python 3.5+.
+redis-py supports Python 3.5+.
 
 
 Client Classes: Redis and StrictRedis
@@ -123,8 +135,43 @@ this will cause redis-py 3.0 to raise a ConnectionError.
 This check can be disabled by setting `ssl_cert_reqs` to `None`. Note that
 doing so removes the security check. Do so at your own risk.
 
-It has been reported that SSL certs received from AWS ElastiCache do not have
-proper hostnames and turning off hostname verification is currently required.
+Example with hostname verification using a local certificate bundle (linux):
+
+.. code-block:: pycon
+
+    >>> import redis
+    >>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                        ssl=True,
+                        ssl_ca_certs='/etc/ssl/certs/ca-certificates.crt')
+    >>> r.set('foo', 'bar')
+    True
+    >>> r.get('foo')
+    b'bar'
+
+Example with hostname verification using
+`certifi <https://pypi.org/project/certifi/>`_:
+
+.. code-block:: pycon
+
+    >>> import redis, certifi
+    >>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                        ssl=True, ssl_ca_certs=certifi.where())
+    >>> r.set('foo', 'bar')
+    True
+    >>> r.get('foo')
+    b'bar'
+
+Example turning off hostname verification (not recommended):
+
+.. code-block:: pycon
+
+    >>> import redis
+    >>> r = redis.Redis(host='xxxxxx.cache.amazonaws.com', port=6379, db=0,
+                        ssl=True, ssl_cert_reqs=None)
+    >>> r.set('foo', 'bar')
+    True
+    >>> r.get('foo')
+    b'bar'
 
 
 MSET, MSETNX and ZADD
@@ -144,7 +191,7 @@ dict is a mapping of element-names -> score.
 
 MSET, MSETNX and ZADD now look like:
 
-.. code-block:: python
+.. code-block:: pycon
 
     def mset(self, mapping):
     def msetnx(self, mapping):
@@ -691,6 +738,20 @@ subscribed to patterns or channels that don't have message handlers attached.
     # when it's time to shut it down...
     >>> thread.stop()
 
+`run_in_thread` also supports an optional exception handler, which lets you
+catch exceptions that occur within the worker thread and handle them
+appropriately. The exception handler will take as arguments the exception
+itself, the pubsub object, and the worker thread returned by `run_in_thread`.
+
+.. code-block:: pycon
+    >>> p.subscribe(**{'my-channel': my_handler})
+    >>> def exception_handler(ex, pubsub, thread):
+    >>>     print(ex)
+    >>>     thread.stop()
+    >>>     thread.join(timeout=1.0)
+    >>>     pubsub.close()
+    >>> thread = p.run_in_thread(exception_handler=exception_handler)
+
 A PubSub object adheres to the same encoding semantics as the client instance
 it was created from. Any channel or pattern that's unicode will be encoded
 using the `charset` specified on the client before being sent to Redis. If the
@@ -880,6 +941,12 @@ that return Python iterators for convenience: `scan_iter`, `hscan_iter`,
     B 2
     C 3
 
+Cluster Mode
+^^^^^^^^^^^^
+
+redis-py does not currently support `Cluster Mode
+<https://redis.io/topics/cluster-tutorial>`_.
+
 Author
 ^^^^^^
 
@@ -892,3 +959,11 @@ Special thanks to:
   which some of the socket code is still used.
 * Alexander Solovyov for ideas on the generic response callback system.
 * Paul Hubbard for initial packaging support.
+
+
+Sponsored by
+^^^^^^^^^^^^
+
+.. image:: ./docs/logo-redislabs.png
+   :alt: RedisLabs
+   :target: https://www.redislabs.com

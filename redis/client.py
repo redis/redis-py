@@ -1,4 +1,3 @@
-from __future__ import unicode_literals
 from itertools import chain
 import datetime
 import warnings
@@ -7,8 +6,6 @@ import threading
 import time as mod_time
 import re
 import hashlib
-from redis._compat import (basestring, imap, iteritems, iterkeys,
-                           itervalues, izip, long, nativestr, safe_unicode)
 from redis.connection import (ConnectionPool, UnixDomainSocketConnection,
                               SSLConnection)
 from redis.lock import Lock
@@ -22,7 +19,9 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
     WatchError,
+    ModuleError,
 )
+from redis.utils import safe_str, str_if_bytes
 
 SYM_EMPTY = b''
 EMPTY_RESPONSE = 'EMPTY_RESPONSE'
@@ -34,7 +33,7 @@ def list_or_args(keys, args):
         iter(keys)
         # a string or bytes instance can be iterated, but indicates
         # keys wasn't passed as a list
-        if isinstance(keys, (basestring, bytes)):
+        if isinstance(keys, (bytes, str)):
             keys = [keys]
         else:
             keys = list(keys)
@@ -60,45 +59,38 @@ def string_keys_to_dict(key_string, callback):
     return dict.fromkeys(key_string.split(), callback)
 
 
-def dict_merge(*dicts):
-    merged = {}
-    for d in dicts:
-        merged.update(d)
-    return merged
-
-
 class CaseInsensitiveDict(dict):
     "Case insensitive dict implementation. Assumes string keys only."
 
     def __init__(self, data):
-        for k, v in iteritems(data):
+        for k, v in data.items():
             self[k.upper()] = v
 
     def __contains__(self, k):
-        return super(CaseInsensitiveDict, self).__contains__(k.upper())
+        return super().__contains__(k.upper())
 
     def __delitem__(self, k):
-        super(CaseInsensitiveDict, self).__delitem__(k.upper())
+        super().__delitem__(k.upper())
 
     def __getitem__(self, k):
-        return super(CaseInsensitiveDict, self).__getitem__(k.upper())
+        return super().__getitem__(k.upper())
 
     def get(self, k, default=None):
-        return super(CaseInsensitiveDict, self).get(k.upper(), default)
+        return super().get(k.upper(), default)
 
     def __setitem__(self, k, v):
-        super(CaseInsensitiveDict, self).__setitem__(k.upper(), v)
+        super().__setitem__(k.upper(), v)
 
     def update(self, data):
         data = CaseInsensitiveDict(data)
-        super(CaseInsensitiveDict, self).update(data)
+        super().update(data)
 
 
 def parse_debug_object(response):
     "Parse the results of Redis's DEBUG OBJECT command into a Python dict"
     # The 'type' of the object is the first item in the response, but isn't
     # prefixed with a name
-    response = nativestr(response)
+    response = str_if_bytes(response)
     response = 'type:' + response
     response = dict(kv.split(':') for kv in response.split())
 
@@ -122,7 +114,7 @@ def parse_object(response, infotype):
 def parse_info(response):
     "Parse the result of Redis's INFO command into a Python dict"
     info = {}
-    response = nativestr(response)
+    response = str_if_bytes(response)
 
     def get_value(value):
         if ',' not in value or '=' not in value:
@@ -149,7 +141,13 @@ def parse_info(response):
                 key, value = line.split(':', 1)
                 if key == 'cmdstat_host':
                     key, value = line.rsplit(':', 1)
-                info[key] = get_value(value)
+
+                if key == 'module':
+                    # Hardcode a list for key 'modules' since there could be
+                    # multiple lines that started with 'module'
+                    info.setdefault('modules', []).append(get_value(value))
+                else:
+                    info[key] = get_value(value)
             else:
                 # if the line isn't splittable, append it to the "__raw__" key
                 info.setdefault('__raw__', []).append(line)
@@ -162,7 +160,7 @@ def parse_memory_stats(response, **kwargs):
     stats = pairs_to_dict(response,
                           decode_keys=True,
                           decode_string_values=True)
-    for key, value in iteritems(stats):
+    for key, value in stats.items():
         if key.startswith('db.'):
             stats[key] = pairs_to_dict(value,
                                        decode_keys=True,
@@ -210,27 +208,23 @@ def parse_sentinel_state(item):
 
 
 def parse_sentinel_master(response):
-    return parse_sentinel_state(imap(nativestr, response))
+    return parse_sentinel_state(map(str_if_bytes, response))
 
 
 def parse_sentinel_masters(response):
     result = {}
     for item in response:
-        state = parse_sentinel_state(imap(nativestr, item))
+        state = parse_sentinel_state(map(str_if_bytes, item))
         result[state['name']] = state
     return result
 
 
 def parse_sentinel_slaves_and_sentinels(response):
-    return [parse_sentinel_state(imap(nativestr, item)) for item in response]
+    return [parse_sentinel_state(map(str_if_bytes, item)) for item in response]
 
 
 def parse_sentinel_get_master(response):
     return response and (response[0], int(response[1])) or None
-
-
-def nativestr_if_bytes(value):
-    return nativestr(value) if isinstance(value, bytes) else value
 
 
 def pairs_to_dict(response, decode_keys=False, decode_string_values=False):
@@ -239,23 +233,23 @@ def pairs_to_dict(response, decode_keys=False, decode_string_values=False):
         return {}
     if decode_keys or decode_string_values:
         # the iter form is faster, but I don't know how to make that work
-        # with a nativestr() map
+        # with a str_if_bytes() map
         keys = response[::2]
         if decode_keys:
-            keys = imap(nativestr, keys)
+            keys = map(str_if_bytes, keys)
         values = response[1::2]
         if decode_string_values:
-            values = imap(nativestr_if_bytes, values)
-        return dict(izip(keys, values))
+            values = map(str_if_bytes, values)
+        return dict(zip(keys, values))
     else:
         it = iter(response)
-        return dict(izip(it, it))
+        return dict(zip(it, it))
 
 
 def pairs_to_dict_typed(response, type_info):
     it = iter(response)
     result = {}
-    for key, value in izip(it, it):
+    for key, value in zip(it, it):
         if key in type_info:
             try:
                 value = type_info[key](value)
@@ -276,7 +270,7 @@ def zset_score_pairs(response, **options):
         return response
     score_cast_func = options.get('score_cast_func', float)
     it = iter(response)
-    return list(izip(it, imap(score_cast_func, it)))
+    return list(zip(it, map(score_cast_func, it)))
 
 
 def sort_return_tuples(response, **options):
@@ -287,19 +281,13 @@ def sort_return_tuples(response, **options):
     if not response or not options.get('groups'):
         return response
     n = options['groups']
-    return list(izip(*[response[i::n] for i in range(n)]))
+    return list(zip(*[response[i::n] for i in range(n)]))
 
 
 def int_or_none(response):
     if response is None:
         return None
     return int(response)
-
-
-def nativestr_or_none(response):
-    if response is None:
-        return None
-    return nativestr(response)
 
 
 def parse_stream_list(response):
@@ -314,12 +302,12 @@ def parse_stream_list(response):
     return data
 
 
-def pairs_to_dict_with_nativestr_keys(response):
+def pairs_to_dict_with_str_keys(response):
     return pairs_to_dict(response, decode_keys=True)
 
 
 def parse_list_of_dicts(response):
-    return list(imap(pairs_to_dict_with_nativestr_keys, response))
+    return list(map(pairs_to_dict_with_str_keys, response))
 
 
 def parse_xclaim(response, **options):
@@ -348,7 +336,7 @@ def parse_xread(response):
 def parse_xpending(response, **options):
     if options.get('parse_detail', False):
         return parse_xpending_range(response)
-    consumers = [{'name': n, 'pending': long(p)} for n, p in response[3] or []]
+    consumers = [{'name': n, 'pending': int(p)} for n, p in response[3] or []]
     return {
         'pending': response[0],
         'min': response[1],
@@ -359,7 +347,7 @@ def parse_xpending(response, **options):
 
 def parse_xpending_range(response):
     k = ('message_id', 'consumer', 'time_since_delivered', 'times_delivered')
-    return [dict(izip(k, r)) for r in response]
+    return [dict(zip(k, r)) for r in response]
 
 
 def float_or_none(response):
@@ -369,7 +357,7 @@ def float_or_none(response):
 
 
 def bool_ok(response):
-    return nativestr(response) == 'OK'
+    return str_if_bytes(response) == 'OK'
 
 
 def parse_zadd(response, **options):
@@ -382,32 +370,32 @@ def parse_zadd(response, **options):
 
 def parse_client_list(response, **options):
     clients = []
-    for c in nativestr(response).splitlines():
+    for c in str_if_bytes(response).splitlines():
         # Values might contain '='
         clients.append(dict(pair.split('=', 1) for pair in c.split(' ')))
     return clients
 
 
 def parse_config_get(response, **options):
-    response = [nativestr(i) if i is not None else None for i in response]
+    response = [str_if_bytes(i) if i is not None else None for i in response]
     return response and pairs_to_dict(response) or {}
 
 
 def parse_scan(response, **options):
     cursor, r = response
-    return long(cursor), r
+    return int(cursor), r
 
 
 def parse_hscan(response, **options):
     cursor, r = response
-    return long(cursor), r and pairs_to_dict(r) or {}
+    return int(cursor), r and pairs_to_dict(r) or {}
 
 
 def parse_zscan(response, **options):
     score_cast_func = options.get('score_cast_func', float)
     cursor, r = response
     it = iter(r)
-    return long(cursor), list(izip(it, imap(score_cast_func, it)))
+    return int(cursor), list(zip(it, map(score_cast_func, it)))
 
 
 def parse_slowlog_get(response, **options):
@@ -416,12 +404,17 @@ def parse_slowlog_get(response, **options):
         'id': item[0],
         'start_time': int(item[1]),
         'duration': int(item[2]),
-        'command': space.join(item[3])
+        'command':
+            # Redis Enterprise injects another entry at index [3], which has
+            # the complexity info (i.e. the value N in case the command has
+            # an O(N) complexity) instead of the command.
+            space.join(item[3]) if isinstance(item[3], list) else
+            space.join(item[4])
     } for item in response]
 
 
 def parse_cluster_info(response, **options):
-    response = nativestr(response)
+    response = str_if_bytes(response)
     return dict(line.split(':') for line in response.splitlines() if line)
 
 
@@ -444,10 +437,7 @@ def _parse_node_line(line):
 
 
 def parse_cluster_nodes(response, **options):
-    response = nativestr(response)
-    raw_lines = response
-    if isinstance(response, basestring):
-        raw_lines = response.splitlines()
+    raw_lines = str_if_bytes(response).splitlines()
     return dict(_parse_node_line(line) for line in raw_lines)
 
 
@@ -487,9 +477,9 @@ def parse_pubsub_numsub(response, **options):
 
 
 def parse_client_kill(response, **options):
-    if isinstance(response, (long, int)):
-        return int(response)
-    return nativestr(response) == 'OK'
+    if isinstance(response, int):
+        return response
+    return str_if_bytes(response) == 'OK'
 
 
 def parse_acl_getuser(response, **options):
@@ -498,9 +488,9 @@ def parse_acl_getuser(response, **options):
     data = pairs_to_dict(response, decode_keys=True)
 
     # convert everything but user-defined data in 'keys' to native strings
-    data['flags'] = list(map(nativestr, data['flags']))
-    data['passwords'] = list(map(nativestr, data['passwords']))
-    data['commands'] = nativestr(data['commands'])
+    data['flags'] = list(map(str_if_bytes, data['flags']))
+    data['passwords'] = list(map(str_if_bytes, data['passwords']))
+    data['commands'] = str_if_bytes(data['commands'])
 
     # split 'commands' into separate 'categories' and 'commands' lists
     commands, categories = [], []
@@ -516,7 +506,50 @@ def parse_acl_getuser(response, **options):
     return data
 
 
-class Redis(object):
+def parse_acl_log(response, **options):
+    if response is None:
+        return None
+    if isinstance(response, list):
+        data = []
+        for log in response:
+            log_data = pairs_to_dict(log, True, True)
+            client_info = log_data.get('client-info', '')
+            log_data["client-info"] = parse_client_info(client_info)
+
+            # float() is lossy comparing to the "double" in C
+            log_data["age-seconds"] = float(log_data["age-seconds"])
+            data.append(log_data)
+    else:
+        data = bool_ok(response)
+    return data
+
+
+def parse_client_info(value):
+    """
+    Parsing client-info in ACL Log in following format.
+    "key1=value1 key2=value2 key3=value3"
+    """
+    client_info = {}
+    infos = value.split(" ")
+    for info in infos:
+        key, value = info.split("=")
+        client_info[key] = value
+
+    # Those fields are definded as int in networking.c
+    for int_key in {"id", "age", "idle", "db", "sub", "psub",
+                    "multi", "qbuf", "qbuf-free", "obl",
+                    "oll", "omem"}:
+        client_info[int_key] = int(client_info[int_key])
+    return client_info
+
+
+def parse_module_result(response):
+    if isinstance(response, ModuleError):
+        raise response
+    return True
+
+
+class Redis:
     """
     Implementation of the Redis protocol.
 
@@ -526,13 +559,13 @@ class Redis(object):
     Connection and Pipeline derive from this, implementing how
     the commands are sent and received to the Redis server
     """
-    RESPONSE_CALLBACKS = dict_merge(
-        string_keys_to_dict(
+    RESPONSE_CALLBACKS = {
+        **string_keys_to_dict(
             'AUTH EXPIRE EXPIREAT HEXISTS HMSET MOVE MSETNX PERSIST '
             'PSETEX RENAMENX SISMEMBER SMOVE SETEX SETNX',
             bool
         ),
-        string_keys_to_dict(
+        **string_keys_to_dict(
             'BITCOUNT BITPOS DECRBY DEL EXISTS GEOADD GETBIT HDEL HLEN '
             'HSTRLEN INCRBY LINSERT LLEN LPUSHX PFADD PFCOUNT RPUSHX SADD '
             'SCARD SDIFFSTORE SETBIT SETRANGE SINTERSTORE SREM STRLEN '
@@ -540,127 +573,130 @@ class Redis(object):
             'ZREMRANGEBYLEX ZREMRANGEBYRANK ZREMRANGEBYSCORE',
             int
         ),
-        string_keys_to_dict(
+        **string_keys_to_dict(
             'INCRBYFLOAT HINCRBYFLOAT',
             float
         ),
-        string_keys_to_dict(
+        **string_keys_to_dict(
             # these return OK, or int if redis-server is >=1.3.4
             'LPUSH RPUSH',
-            lambda r: isinstance(r, (long, int)) and r or nativestr(r) == 'OK'
+            lambda r: isinstance(r, int) and r or str_if_bytes(r) == 'OK'
         ),
-        string_keys_to_dict('SORT', sort_return_tuples),
-        string_keys_to_dict('ZSCORE ZINCRBY GEODIST', float_or_none),
-        string_keys_to_dict(
+        **string_keys_to_dict('SORT', sort_return_tuples),
+        **string_keys_to_dict('ZSCORE ZINCRBY GEODIST', float_or_none),
+        **string_keys_to_dict(
             'FLUSHALL FLUSHDB LSET LTRIM MSET PFMERGE READONLY READWRITE '
             'RENAME SAVE SELECT SHUTDOWN SLAVEOF SWAPDB WATCH UNWATCH ',
             bool_ok
         ),
-        string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
-        string_keys_to_dict(
+        **string_keys_to_dict('BLPOP BRPOP', lambda r: r and tuple(r) or None),
+        **string_keys_to_dict(
             'SDIFF SINTER SMEMBERS SUNION',
             lambda r: r and set(r) or set()
         ),
-        string_keys_to_dict(
+        **string_keys_to_dict(
             'ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
             zset_score_pairs
         ),
-        string_keys_to_dict('BZPOPMIN BZPOPMAX', \
-                            lambda r: r and (r[0], r[1], float(r[2])) or None),
-        string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
-        string_keys_to_dict('XREVRANGE XRANGE', parse_stream_list),
-        string_keys_to_dict('XREAD XREADGROUP', parse_xread),
-        string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
-        {
-            'ACL CAT': lambda r: list(map(nativestr, r)),
-            'ACL DELUSER': int,
-            'ACL GENPASS': nativestr,
-            'ACL GETUSER': parse_acl_getuser,
-            'ACL LIST': lambda r: list(map(nativestr, r)),
-            'ACL LOAD': bool_ok,
-            'ACL SAVE': bool_ok,
-            'ACL SETUSER': bool_ok,
-            'ACL USERS': lambda r: list(map(nativestr, r)),
-            'ACL WHOAMI': nativestr,
-            'CLIENT GETNAME': lambda r: r and nativestr(r),
-            'CLIENT ID': int,
-            'CLIENT KILL': parse_client_kill,
-            'CLIENT LIST': parse_client_list,
-            'CLIENT SETNAME': bool_ok,
-            'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
-            'CLIENT PAUSE': bool_ok,
-            'CLUSTER ADDSLOTS': bool_ok,
-            'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
-            'CLUSTER COUNTKEYSINSLOT': lambda x: int(x),
-            'CLUSTER DELSLOTS': bool_ok,
-            'CLUSTER FAILOVER': bool_ok,
-            'CLUSTER FORGET': bool_ok,
-            'CLUSTER INFO': parse_cluster_info,
-            'CLUSTER KEYSLOT': lambda x: int(x),
-            'CLUSTER MEET': bool_ok,
-            'CLUSTER NODES': parse_cluster_nodes,
-            'CLUSTER REPLICATE': bool_ok,
-            'CLUSTER RESET': bool_ok,
-            'CLUSTER SAVECONFIG': bool_ok,
-            'CLUSTER SET-CONFIG-EPOCH': bool_ok,
-            'CLUSTER SETSLOT': bool_ok,
-            'CLUSTER SLAVES': parse_cluster_nodes,
-            'CONFIG GET': parse_config_get,
-            'CONFIG RESETSTAT': bool_ok,
-            'CONFIG SET': bool_ok,
-            'DEBUG OBJECT': parse_debug_object,
-            'GEOHASH': lambda r: list(map(nativestr_or_none, r)),
-            'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
-                                         float(ll[1]))
-                                         if ll is not None else None, r)),
-            'GEORADIUS': parse_georadius_generic,
-            'GEORADIUSBYMEMBER': parse_georadius_generic,
-            'HGETALL': lambda r: r and pairs_to_dict(r) or {},
-            'HSCAN': parse_hscan,
-            'INFO': parse_info,
-            'LASTSAVE': timestamp_to_datetime,
-            'MEMORY PURGE': bool_ok,
-            'MEMORY STATS': parse_memory_stats,
-            'MEMORY USAGE': int_or_none,
-            'OBJECT': parse_object,
-            'PING': lambda r: nativestr(r) == 'PONG',
-            'PUBSUB NUMSUB': parse_pubsub_numsub,
-            'RANDOMKEY': lambda r: r and r or None,
-            'SCAN': parse_scan,
-            'SCRIPT EXISTS': lambda r: list(imap(bool, r)),
-            'SCRIPT FLUSH': bool_ok,
-            'SCRIPT KILL': bool_ok,
-            'SCRIPT LOAD': nativestr,
-            'SENTINEL GET-MASTER-ADDR-BY-NAME': parse_sentinel_get_master,
-            'SENTINEL MASTER': parse_sentinel_master,
-            'SENTINEL MASTERS': parse_sentinel_masters,
-            'SENTINEL MONITOR': bool_ok,
-            'SENTINEL REMOVE': bool_ok,
-            'SENTINEL SENTINELS': parse_sentinel_slaves_and_sentinels,
-            'SENTINEL SET': bool_ok,
-            'SENTINEL SLAVES': parse_sentinel_slaves_and_sentinels,
-            'SET': lambda r: r and nativestr(r) == 'OK',
-            'SLOWLOG GET': parse_slowlog_get,
-            'SLOWLOG LEN': int,
-            'SLOWLOG RESET': bool_ok,
-            'SSCAN': parse_scan,
-            'TIME': lambda x: (int(x[0]), int(x[1])),
-            'XCLAIM': parse_xclaim,
-            'XGROUP CREATE': bool_ok,
-            'XGROUP DELCONSUMER': int,
-            'XGROUP DESTROY': bool,
-            'XGROUP SETID': bool_ok,
-            'XINFO CONSUMERS': parse_list_of_dicts,
-            'XINFO GROUPS': parse_list_of_dicts,
-            'XINFO STREAM': parse_xinfo_stream,
-            'XPENDING': parse_xpending,
-            'ZADD': parse_zadd,
-            'ZSCAN': parse_zscan,
-        }
-    )
+        **string_keys_to_dict('BZPOPMIN BZPOPMAX', \
+                              lambda r:
+                              r and (r[0], r[1], float(r[2])) or None),
+        **string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
+        **string_keys_to_dict('XREVRANGE XRANGE', parse_stream_list),
+        **string_keys_to_dict('XREAD XREADGROUP', parse_xread),
+        **string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
+        'ACL CAT': lambda r: list(map(str_if_bytes, r)),
+        'ACL DELUSER': int,
+        'ACL GENPASS': str_if_bytes,
+        'ACL GETUSER': parse_acl_getuser,
+        'ACL LIST': lambda r: list(map(str_if_bytes, r)),
+        'ACL LOAD': bool_ok,
+        'ACL LOG': parse_acl_log,
+        'ACL SAVE': bool_ok,
+        'ACL SETUSER': bool_ok,
+        'ACL USERS': lambda r: list(map(str_if_bytes, r)),
+        'ACL WHOAMI': str_if_bytes,
+        'CLIENT GETNAME': str_if_bytes,
+        'CLIENT ID': int,
+        'CLIENT KILL': parse_client_kill,
+        'CLIENT LIST': parse_client_list,
+        'CLIENT SETNAME': bool_ok,
+        'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
+        'CLIENT PAUSE': bool_ok,
+        'CLUSTER ADDSLOTS': bool_ok,
+        'CLUSTER COUNT-FAILURE-REPORTS': lambda x: int(x),
+        'CLUSTER COUNTKEYSINSLOT': lambda x: int(x),
+        'CLUSTER DELSLOTS': bool_ok,
+        'CLUSTER FAILOVER': bool_ok,
+        'CLUSTER FORGET': bool_ok,
+        'CLUSTER INFO': parse_cluster_info,
+        'CLUSTER KEYSLOT': lambda x: int(x),
+        'CLUSTER MEET': bool_ok,
+        'CLUSTER NODES': parse_cluster_nodes,
+        'CLUSTER REPLICATE': bool_ok,
+        'CLUSTER RESET': bool_ok,
+        'CLUSTER SAVECONFIG': bool_ok,
+        'CLUSTER SET-CONFIG-EPOCH': bool_ok,
+        'CLUSTER SETSLOT': bool_ok,
+        'CLUSTER SLAVES': parse_cluster_nodes,
+        'CONFIG GET': parse_config_get,
+        'CONFIG RESETSTAT': bool_ok,
+        'CONFIG SET': bool_ok,
+        'DEBUG OBJECT': parse_debug_object,
+        'GEOHASH': lambda r: list(map(str_if_bytes, r)),
+        'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
+                                     float(ll[1]))
+                                     if ll is not None else None, r)),
+        'GEORADIUS': parse_georadius_generic,
+        'GEORADIUSBYMEMBER': parse_georadius_generic,
+        'HGETALL': lambda r: r and pairs_to_dict(r) or {},
+        'HSCAN': parse_hscan,
+        'INFO': parse_info,
+        'LASTSAVE': timestamp_to_datetime,
+        'MEMORY PURGE': bool_ok,
+        'MEMORY STATS': parse_memory_stats,
+        'MEMORY USAGE': int_or_none,
+        'MODULE LOAD': parse_module_result,
+        'MODULE UNLOAD': parse_module_result,
+        'MODULE LIST': lambda r: [pairs_to_dict(m) for m in r],
+        'OBJECT': parse_object,
+        'PING': lambda r: str_if_bytes(r) == 'PONG',
+        'PUBSUB NUMSUB': parse_pubsub_numsub,
+        'RANDOMKEY': lambda r: r and r or None,
+        'SCAN': parse_scan,
+        'SCRIPT EXISTS': lambda r: list(map(bool, r)),
+        'SCRIPT FLUSH': bool_ok,
+        'SCRIPT KILL': bool_ok,
+        'SCRIPT LOAD': str_if_bytes,
+        'SENTINEL GET-MASTER-ADDR-BY-NAME': parse_sentinel_get_master,
+        'SENTINEL MASTER': parse_sentinel_master,
+        'SENTINEL MASTERS': parse_sentinel_masters,
+        'SENTINEL MONITOR': bool_ok,
+        'SENTINEL REMOVE': bool_ok,
+        'SENTINEL SENTINELS': parse_sentinel_slaves_and_sentinels,
+        'SENTINEL SET': bool_ok,
+        'SENTINEL SLAVES': parse_sentinel_slaves_and_sentinels,
+        'SET': lambda r: r and str_if_bytes(r) == 'OK',
+        'SLOWLOG GET': parse_slowlog_get,
+        'SLOWLOG LEN': int,
+        'SLOWLOG RESET': bool_ok,
+        'SSCAN': parse_scan,
+        'TIME': lambda x: (int(x[0]), int(x[1])),
+        'XCLAIM': parse_xclaim,
+        'XGROUP CREATE': bool_ok,
+        'XGROUP DELCONSUMER': int,
+        'XGROUP DESTROY': bool,
+        'XGROUP SETID': bool_ok,
+        'XINFO CONSUMERS': parse_list_of_dicts,
+        'XINFO GROUPS': parse_list_of_dicts,
+        'XINFO STREAM': parse_xinfo_stream,
+        'XPENDING': parse_xpending,
+        'ZADD': parse_zadd,
+        'ZSCAN': parse_zscan,
+    }
 
     @classmethod
-    def from_url(cls, url, db=None, **kwargs):
+    def from_url(cls, url, **kwargs):
         """
         Return a Redis client object configured from the given URL
 
@@ -672,28 +708,35 @@ class Redis(object):
 
         Three URL schemes are supported:
 
-        - ```redis://``
-          <http://www.iana.org/assignments/uri-schemes/prov/redis>`_ creates a
-          normal TCP socket connection
-        - ```rediss://``
-          <http://www.iana.org/assignments/uri-schemes/prov/rediss>`_ creates a
-          SSL wrapped TCP socket connection
-        - ``unix://`` creates a Unix Domain Socket connection
+        - `redis://` creates a TCP socket connection. See more at:
+          <https://www.iana.org/assignments/uri-schemes/prov/redis>
+        - `rediss://` creates a SSL wrapped TCP socket connection. See more at:
+          <https://www.iana.org/assignments/uri-schemes/prov/rediss>
+        - ``unix://``: creates a Unix Domain Socket connection.
 
-        There are several ways to specify a database number. The parse function
-        will return the first specified option:
+        The username, password, hostname, path and all querystring values
+        are passed through urllib.parse.unquote in order to replace any
+        percent-encoded values with their corresponding characters.
+
+        There are several ways to specify a database number. The first value
+        found will be used:
             1. A ``db`` querystring option, e.g. redis://localhost?db=0
-            2. If using the redis:// scheme, the path argument of the url, e.g.
-               redis://localhost/0
-            3. The ``db`` argument to this function.
+            2. If using the redis:// or rediss:// schemes, the path argument
+               of the url, e.g. redis://localhost/0
+            3. A ``db`` keyword argument to this function.
 
-        If none of these options are specified, db=0 is used.
+        If none of these options are specified, the default db=0 is used.
 
-        Any additional querystring arguments and keyword arguments will be
-        passed along to the ConnectionPool class's initializer. In the case
-        of conflicting arguments, querystring arguments always win.
+        All querystring options are cast to their appropriate Python types.
+        Boolean arguments can be specified with string values "True"/"False"
+        or "Yes"/"No". Values that cannot be properly cast cause a
+        ``ValueError`` to be raised. Once parsed, the querystring arguments
+        and keyword arguments are passed to the ``ConnectionPool``'s
+        class initializer. In the case of conflicting arguments, querystring
+        arguments always win.
+
         """
-        connection_pool = ConnectionPool.from_url(url, db=db, **kwargs)
+        connection_pool = ConnectionPool.from_url(url, **kwargs)
         return cls(connection_pool=connection_pool)
 
     def __init__(self, host='localhost', port=6379,
@@ -955,6 +998,29 @@ class Redis(object):
         "Return a list of all ACLs on the server"
         return self.execute_command('ACL LIST')
 
+    def acl_log(self, count=None):
+        """
+        Get ACL logs as a list.
+        :param int count: Get logs[0:count].
+        :rtype: List.
+        """
+        args = []
+        if count is not None:
+            if not isinstance(count, int):
+                raise DataError('ACL LOG count must be an '
+                                'integer')
+            args.append(count)
+
+        return self.execute_command('ACL LOG', *args)
+
+    def acl_log_reset(self):
+        """
+        Reset ACL logs.
+        :rtype: Boolean.
+        """
+        args = [b'RESET']
+        return self.execute_command('ACL LOG', *args)
+
     def acl_load(self):
         """
         Load ACL rules from the configured ``aclfile``.
@@ -993,7 +1059,7 @@ class Redis(object):
         ``passwords`` if specified is a list of plain text passwords
         to add to or remove from the user. Each password must be prefixed with
         a '+' to add or a '-' to remove. For convenience, the value of
-        ``add_passwords`` can be a simple prefixed string when adding or
+        ``passwords`` can be a simple prefixed string when adding or
         removing a single password.
 
         ``hashed_passwords`` if specified is a list of SHA-256 hashed passwords
@@ -1222,7 +1288,7 @@ class Redis(object):
         Suspend all the Redis clients for the specified amount of time
         :param timeout: milliseconds to pause clients
         """
-        if not isinstance(timeout, (int, long)):
+        if not isinstance(timeout, int):
             raise DataError("CLIENT PAUSE timeout must be an integer")
         return self.execute_command('CLIENT PAUSE', str(timeout))
 
@@ -1677,7 +1743,7 @@ class Redis(object):
         can be cast to a string via str().
         """
         items = []
-        for pair in iteritems(mapping):
+        for pair in mapping.items():
             items.extend(pair)
         return self.execute_command('MSET', *items)
 
@@ -1689,7 +1755,7 @@ class Redis(object):
         Returns a boolean indicating if the operation was successful.
         """
         items = []
-        for pair in iteritems(mapping):
+        for pair in mapping.items():
             items.extend(pair)
         return self.execute_command('MSETNX', *items)
 
@@ -1750,14 +1816,23 @@ class Redis(object):
         "Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist"
         return self.execute_command('RENAMENX', src, dst)
 
-    def restore(self, name, ttl, value, replace=False):
+    def restore(self, name, ttl, value, replace=False, absttl=False):
         """
         Create a key using the provided serialized value, previously obtained
         using DUMP.
+
+        ``replace`` allows an existing key on ``name`` to be overridden. If
+        it's not specified an error is raised on collision.
+
+        ``absttl`` if True, specified ``ttl`` should represent an absolute Unix
+        timestamp in milliseconds in which the key will expire. (Redis 5.0 or
+        greater).
         """
         params = [name, ttl, value]
         if replace:
             params.append('REPLACE')
+        if absttl:
+            params.append('ABSTTL')
         return self.execute_command('RESTORE', *params)
 
     def set(self, name, value,
@@ -2019,6 +2094,42 @@ class Redis(object):
         "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
         return self.execute_command('RPUSHX', name, value)
 
+    def lpos(self, name, value, rank=None, count=None, maxlen=None):
+        """
+        Get position of ``value`` within the list ``name``
+
+         If specified, ``rank`` indicates the "rank" of the first element to
+         return in case there are multiple copies of ``value`` in the list.
+         By default, LPOS returns the position of the first occurrence of
+         ``value`` in the list. When ``rank`` 2, LPOS returns the position of
+         the second ``value`` in the list. If ``rank`` is negative, LPOS
+         searches the list in reverse. For example, -1 would return the
+         position of the last occurrence of ``value`` and -2 would return the
+         position of the next to last occurrence of ``value``.
+
+         If specified, ``count`` indicates that LPOS should return a list of
+         up to ``count`` positions. A ``count`` of 2 would return a list of
+         up to 2 positions. A ``count`` of 0 returns a list of all positions
+         matching ``value``. When ``count`` is specified and but ``value``
+         does not exist in the list, an empty list is returned.
+
+         If specified, ``maxlen`` indicates the maximum number of list
+         elements to scan. A ``maxlen`` of 1000 will only return the
+         position(s) of items within the first 1000 entries in the list.
+         A ``maxlen`` of 0 (the default) will scan the entire list.
+        """
+        pieces = [name, value]
+        if rank is not None:
+            pieces.extend(['RANK', rank])
+
+        if count is not None:
+            pieces.extend(['COUNT', count])
+
+        if maxlen is not None:
+            pieces.extend(['MAXLEN', maxlen])
+
+        return self.execute_command('LPOS', *pieces)
+
     def sort(self, name, start=None, num=None, by=None, get=None,
              desc=False, alpha=False, store=None, groups=False):
         """
@@ -2062,7 +2173,7 @@ class Redis(object):
             # Otherwise assume it's an interable and we want to get multiple
             # values. We can't just iterate blindly because strings are
             # iterable.
-            if isinstance(get, (bytes, basestring)):
+            if isinstance(get, (bytes, str)):
                 pieces.append(b'GET')
                 pieces.append(get)
             else:
@@ -2078,7 +2189,7 @@ class Redis(object):
             pieces.append(store)
 
         if groups:
-            if not get or isinstance(get, (bytes, basestring)) or len(get) < 2:
+            if not get or isinstance(get, (bytes, str)) or len(get) < 2:
                 raise DataError('when using "groups" the "get" argument '
                                 'must be specified and contain at least '
                                 'two keys')
@@ -2130,8 +2241,7 @@ class Redis(object):
         while cursor != 0:
             cursor, data = self.scan(cursor=cursor, match=match,
                                      count=count, _type=_type)
-            for item in data:
-                yield item
+            yield from data
 
     def sscan(self, name, cursor=0, match=None, count=None):
         """
@@ -2162,8 +2272,7 @@ class Redis(object):
         while cursor != 0:
             cursor, data = self.sscan(name, cursor=cursor,
                                       match=match, count=count)
-            for item in data:
-                yield item
+            yield from data
 
     def hscan(self, name, cursor=0, match=None, count=None):
         """
@@ -2194,8 +2303,7 @@ class Redis(object):
         while cursor != 0:
             cursor, data = self.hscan(name, cursor=cursor,
                                       match=match, count=count)
-            for item in data.items():
-                yield item
+            yield from data.items()
 
     def zscan(self, name, cursor=0, match=None, count=None,
               score_cast_func=float):
@@ -2234,8 +2342,7 @@ class Redis(object):
             cursor, data = self.zscan(name, cursor=cursor, match=match,
                                       count=count,
                                       score_cast_func=score_cast_func)
-            for item in data:
-                yield item
+            yield from data
 
     # SET COMMANDS
     def sadd(self, name, *values):
@@ -2339,7 +2446,7 @@ class Redis(object):
         """
         pieces = []
         if maxlen is not None:
-            if not isinstance(maxlen, (int, long)) or maxlen < 1:
+            if not isinstance(maxlen, int) or maxlen < 1:
                 raise DataError('XADD maxlen must be a positive integer')
             pieces.append(b'MAXLEN')
             if approximate:
@@ -2348,7 +2455,7 @@ class Redis(object):
         pieces.append(id)
         if not isinstance(fields, dict) or len(fields) == 0:
             raise DataError('XADD fields must be a non-empty dict')
-        for pair in iteritems(fields):
+        for pair in fields.items():
             pieces.extend(pair)
         return self.execute_command('XADD', name, *pieces)
 
@@ -2377,7 +2484,7 @@ class Redis(object):
         justid: optional boolean, false by default. Return just an array of IDs
          of messages successfully claimed, without returning the actual message
         """
-        if not isinstance(min_idle_time, (int, long)) or min_idle_time < 0:
+        if not isinstance(min_idle_time, int) or min_idle_time < 0:
             raise DataError("XCLAIM min_idle_time must be a non negative "
                             "integer")
         if not isinstance(message_ids, (list, tuple)) or not message_ids:
@@ -2389,15 +2496,15 @@ class Redis(object):
         pieces.extend(list(message_ids))
 
         if idle is not None:
-            if not isinstance(idle, (int, long)):
+            if not isinstance(idle, int):
                 raise DataError("XCLAIM idle must be an integer")
             pieces.extend((b'IDLE', str(idle)))
         if time is not None:
-            if not isinstance(time, (int, long)):
+            if not isinstance(time, int):
                 raise DataError("XCLAIM time must be an integer")
             pieces.extend((b'TIME', str(time)))
         if retrycount is not None:
-            if not isinstance(retrycount, (int, long)):
+            if not isinstance(retrycount, int):
                 raise DataError("XCLAIM retrycount must be an integer")
             pieces.extend((b'RETRYCOUNT', str(retrycount)))
 
@@ -2513,7 +2620,7 @@ class Redis(object):
             if min is None or max is None or count is None:
                 raise DataError("XPENDING must be provided with min, max "
                                 "and count parameters, or none of them. ")
-            if not isinstance(count, (int, long)) or count < -1:
+            if not isinstance(count, int) or count < -1:
                 raise DataError("XPENDING count must be a integer >= -1")
             pieces.extend((min, max, str(count)))
         if consumername is not None:
@@ -2537,7 +2644,7 @@ class Redis(object):
         """
         pieces = [min, max]
         if count is not None:
-            if not isinstance(count, (int, long)) or count < 1:
+            if not isinstance(count, int) or count < 1:
                 raise DataError('XRANGE count must be a positive integer')
             pieces.append(b'COUNT')
             pieces.append(str(count))
@@ -2555,19 +2662,19 @@ class Redis(object):
         """
         pieces = []
         if block is not None:
-            if not isinstance(block, (int, long)) or block < 0:
+            if not isinstance(block, int) or block < 0:
                 raise DataError('XREAD block must be a non-negative integer')
             pieces.append(b'BLOCK')
             pieces.append(str(block))
         if count is not None:
-            if not isinstance(count, (int, long)) or count < 1:
+            if not isinstance(count, int) or count < 1:
                 raise DataError('XREAD count must be a positive integer')
             pieces.append(b'COUNT')
             pieces.append(str(count))
         if not isinstance(streams, dict) or len(streams) == 0:
             raise DataError('XREAD streams must be a non empty dict')
         pieces.append(b'STREAMS')
-        keys, values = izip(*iteritems(streams))
+        keys, values = zip(*streams.items())
         pieces.extend(keys)
         pieces.extend(values)
         return self.execute_command('XREAD', *pieces)
@@ -2587,12 +2694,12 @@ class Redis(object):
         """
         pieces = [b'GROUP', groupname, consumername]
         if count is not None:
-            if not isinstance(count, (int, long)) or count < 1:
+            if not isinstance(count, int) or count < 1:
                 raise DataError("XREADGROUP count must be a positive integer")
             pieces.append(b'COUNT')
             pieces.append(str(count))
         if block is not None:
-            if not isinstance(block, (int, long)) or block < 0:
+            if not isinstance(block, int) or block < 0:
                 raise DataError("XREADGROUP block must be a non-negative "
                                 "integer")
             pieces.append(b'BLOCK')
@@ -2619,7 +2726,7 @@ class Redis(object):
         """
         pieces = [max, min]
         if count is not None:
-            if not isinstance(count, (int, long)) or count < 1:
+            if not isinstance(count, int) or count < 1:
                 raise DataError('XREVRANGE count must be a positive integer')
             pieces.append(b'COUNT')
             pieces.append(str(count))
@@ -2682,7 +2789,7 @@ class Redis(object):
         if incr:
             pieces.append(b'INCR')
             options['as_score'] = True
-        for pair in iteritems(mapping):
+        for pair in mapping.items():
             pieces.append(pair[1])
             pieces.append(pair[0])
         return self.execute_command('ZADD', name, *pieces, **options)
@@ -2968,7 +3075,7 @@ class Redis(object):
     def _zaggregate(self, command, dest, keys, aggregate=None):
         pieces = [command, dest, len(keys)]
         if isinstance(keys, dict):
-            keys, weights = iterkeys(keys), itervalues(keys)
+            keys, weights = keys.keys(), keys.values()
         else:
             weights = None
         pieces.extend(keys)
@@ -3070,7 +3177,7 @@ class Redis(object):
         if not mapping:
             raise DataError("'hmset' with 'mapping' of length 0")
         items = []
-        for pair in iteritems(mapping):
+        for pair in mapping.items():
             items.extend(pair)
         return self.execute_command('HMSET', name, *items)
 
@@ -3306,11 +3413,33 @@ class Redis(object):
 
         return self.execute_command(command, *pieces, **kwargs)
 
+    # MODULE COMMANDS
+    def module_load(self, path):
+        """
+        Loads the module from ``path``.
+        Raises ``ModuleError`` if a module is not found at ``path``.
+        """
+        return self.execute_command('MODULE LOAD', path)
+
+    def module_unload(self, name):
+        """
+        Unloads the module ``name``.
+        Raises ``ModuleError`` if ``name`` is not in loaded modules.
+        """
+        return self.execute_command('MODULE UNLOAD', name)
+
+    def module_list(self):
+        """
+        Returns a list of dictionaries containing the name and version of
+        all loaded modules.
+        """
+        return self.execute_command('MODULE LIST')
+
 
 StrictRedis = Redis
 
 
-class Monitor(object):
+class Monitor:
     """
     Monitor is useful for handling the MONITOR command to the redis server.
     next_command() method returns one command from monitor
@@ -3344,7 +3473,10 @@ class Monitor(object):
         m = self.monitor_re.match(command_data)
         db_id, client_info, command = m.groups()
         command = ' '.join(self.command_re.findall(command))
-        command = command.replace('\\"', '"').replace('\\\\', '\\')
+        # Redis escapes double quotes because each piece of the command
+        # string is surrounded by double quotes. We don't have that
+        # requirement so remove the escaping and leave the quote.
+        command = command.replace('\\"', '"')
 
         if client_info == 'lua':
             client_address = 'lua'
@@ -3373,7 +3505,7 @@ class Monitor(object):
             yield self.next_command()
 
 
-class PubSub(object):
+class PubSub:
     """
     PubSub provides publish, subscribe and listen support to Redis channels.
 
@@ -3441,12 +3573,12 @@ class PubSub(object):
         self.pending_unsubscribe_patterns.clear()
         if self.channels:
             channels = {}
-            for k, v in iteritems(self.channels):
+            for k, v in self.channels.items():
                 channels[self.encoder.decode(k, force=True)] = v
             self.subscribe(**channels)
         if self.patterns:
             patterns = {}
-            for k, v in iteritems(self.patterns):
+            for k, v in self.patterns.items():
                 patterns[self.encoder.decode(k, force=True)] = v
             self.psubscribe(**patterns)
 
@@ -3529,7 +3661,7 @@ class PubSub(object):
         """
         encode = self.encoder.encode
         decode = self.encoder.decode
-        return {decode(encode(k)): v for k, v in iteritems(data)}
+        return {decode(encode(k)): v for k, v in data.items()}
 
     def psubscribe(self, *args, **kwargs):
         """
@@ -3543,7 +3675,7 @@ class PubSub(object):
             args = list_or_args(args[0], args[1:])
         new_patterns = dict.fromkeys(args)
         new_patterns.update(kwargs)
-        ret_val = self.execute_command('PSUBSCRIBE', *iterkeys(new_patterns))
+        ret_val = self.execute_command('PSUBSCRIBE', *new_patterns.keys())
         # update the patterns dict AFTER we send the command. we don't want to
         # subscribe twice to these patterns, once for the command and again
         # for the reconnection.
@@ -3577,7 +3709,7 @@ class PubSub(object):
             args = list_or_args(args[0], args[1:])
         new_channels = dict.fromkeys(args)
         new_channels.update(kwargs)
-        ret_val = self.execute_command('SUBSCRIBE', *iterkeys(new_channels))
+        ret_val = self.execute_command('SUBSCRIBE', *new_channels.keys())
         # update the channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again
         # for the reconnection.
@@ -3632,7 +3764,7 @@ class PubSub(object):
         with a message handler, the handler is invoked instead of a parsed
         message being returned.
         """
-        message_type = nativestr(response[0])
+        message_type = str_if_bytes(response[0])
         if message_type == 'pmessage':
             message = {
                 'type': message_type,
@@ -3685,27 +3817,35 @@ class PubSub(object):
 
         return message
 
-    def run_in_thread(self, sleep_time=0, daemon=False):
-        for channel, handler in iteritems(self.channels):
+    def run_in_thread(self, sleep_time=0, daemon=False,
+                      exception_handler=None):
+        for channel, handler in self.channels.items():
             if handler is None:
                 raise PubSubError("Channel: '%s' has no handler registered" %
                                   channel)
-        for pattern, handler in iteritems(self.patterns):
+        for pattern, handler in self.patterns.items():
             if handler is None:
                 raise PubSubError("Pattern: '%s' has no handler registered" %
                                   pattern)
 
-        thread = PubSubWorkerThread(self, sleep_time, daemon=daemon)
+        thread = PubSubWorkerThread(
+            self,
+            sleep_time,
+            daemon=daemon,
+            exception_handler=exception_handler
+        )
         thread.start()
         return thread
 
 
 class PubSubWorkerThread(threading.Thread):
-    def __init__(self, pubsub, sleep_time, daemon=False):
-        super(PubSubWorkerThread, self).__init__()
+    def __init__(self, pubsub, sleep_time, daemon=False,
+                 exception_handler=None):
+        super().__init__()
         self.daemon = daemon
         self.pubsub = pubsub
         self.sleep_time = sleep_time
+        self.exception_handler = exception_handler
         self._running = threading.Event()
 
     def run(self):
@@ -3715,8 +3855,13 @@ class PubSubWorkerThread(threading.Thread):
         pubsub = self.pubsub
         sleep_time = self.sleep_time
         while self._running.is_set():
-            pubsub.get_message(ignore_subscribe_messages=True,
-                               timeout=sleep_time)
+            try:
+                pubsub.get_message(ignore_subscribe_messages=True,
+                                   timeout=sleep_time)
+            except BaseException as e:
+                if self.exception_handler is None:
+                    raise
+                self.exception_handler(e, pubsub, self)
         pubsub.close()
 
     def stop(self):
@@ -3773,12 +3918,8 @@ class Pipeline(Redis):
     def __len__(self):
         return len(self.command_stack)
 
-    def __nonzero__(self):
-        "Pipeline instances should  always evaluate to True on Python 2.7"
-        return True
-
     def __bool__(self):
-        "Pipeline instances should  always evaluate to True on Python 3+"
+        "Pipeline instances should always evaluate to True"
         return True
 
     def reset(self):
@@ -3935,7 +4076,7 @@ class Pipeline(Redis):
 
         # We have to run response callbacks manually
         data = []
-        for r, cmd in izip(response, commands):
+        for r, cmd in zip(response, commands):
             if not isinstance(r, Exception):
                 args, options = cmd
                 command_name = args[0]
@@ -3968,9 +4109,9 @@ class Pipeline(Redis):
                 raise r
 
     def annotate_exception(self, exception, number, command):
-        cmd = ' '.join(imap(safe_unicode, command))
+        cmd = ' '.join(map(safe_str, command))
         msg = 'Command # %d (%s) of pipeline caused error: %s' % (
-            number, cmd, safe_unicode(exception.args[0]))
+            number, cmd, exception.args[0])
         exception.args = (msg,) + exception.args[1:]
 
     def parse_response(self, connection, command_name, **options):
@@ -3991,7 +4132,7 @@ class Pipeline(Redis):
         # get buffered in the pipeline.
         exists = immediate('SCRIPT EXISTS', *shas)
         if not all(exists):
-            for s, exist in izip(scripts, exists):
+            for s, exist in zip(scripts, exists):
                 if not exist:
                     s.sha = immediate('SCRIPT LOAD', s.script)
 
@@ -4045,7 +4186,7 @@ class Pipeline(Redis):
         return self.watching and self.execute_command('UNWATCH') or True
 
 
-class Script(object):
+class Script:
     "An executable Lua script object returned by ``register_script``"
 
     def __init__(self, registered_client, script):
@@ -4053,7 +4194,7 @@ class Script(object):
         self.script = script
         # Precalculate and store the SHA1 hex digest of the script.
 
-        if isinstance(script, basestring):
+        if isinstance(script, str):
             # We need the encoding from the client in order to generate an
             # accurate byte representation of the script
             encoder = registered_client.connection_pool.get_encoder()
@@ -4079,7 +4220,7 @@ class Script(object):
             return client.evalsha(self.sha, len(keys), *args)
 
 
-class BitFieldOperation(object):
+class BitFieldOperation:
     """
     Command builder for BITFIELD commands.
     """
