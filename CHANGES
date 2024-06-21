@@ -1,3 +1,4 @@
+    * Fix get_node_from_slot for cluster and asyncio cluster during reshard (#2988)
     * Move doctests (doc code examples) to main branch
     * Update `ResponseT` type hint
     * Allow to control the minimum SSL version

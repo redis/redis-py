@@ -43,7 +43,6 @@ from redis.cluster import (
     REPLICA,
     SLOT_ID,
     AbstractRedisCluster,
-    LoadBalancer,
     block_pipeline_command,
     get_node_name,
     parse_cluster_slots,
@@ -68,6 +67,7 @@ from redis.exceptions import (
     TimeoutError,
     TryAgainError,
 )
+from redis.load_balancer import LoadBalancer
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
     deprecated_function,
@@ -1244,23 +1244,19 @@ class NodesManager:
     def get_node_from_slot(
         self, slot: int, read_from_replicas: bool = False
     ) -> "ClusterNode":
+        """
+        Gets a node that serves this hash slot
+        """
         if self._moved_exception:
             self._update_moved_slots()
 
-        try:
-            if read_from_replicas:
-                # get the server index in a Round-Robin manner
-                primary_name = self.slots_cache[slot][0].name
-                node_idx = self.read_load_balancer.get_server_index(
-                    primary_name, len(self.slots_cache[slot])
-                )
-                return self.slots_cache[slot][node_idx]
-            return self.slots_cache[slot][0]
-        except (IndexError, TypeError):
-            raise SlotNotCoveredError(
-                f'Slot "{slot}" not covered by the cluster. '
-                f'"require_full_coverage={self.require_full_coverage}"'
-            )
+        slot_nodes = self.slots_cache.get(slot, None)
+        if slot_nodes is None or len(slot_nodes) == 0:
+            raise SlotNotCoveredError(f'Slot "{slot}" not covered by the cluster.')
+        return self.read_load_balancer.get_node_from_slot(
+            slot_nodes,
+            read_from_replicas,
+        )
 
     def get_nodes_by_server_type(self, server_type: str) -> List["ClusterNode"]:
         return [

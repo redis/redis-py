@@ -2566,10 +2566,7 @@ class TestNodesManager:
         # adjust lb-size. This can happen during resharding,
         # see https://github.com/redis/redis-py/issues/2988
         n_manager.slots_cache[slot_1].pop()
-        with pytest.raises(IndexError) as ex:
-            _ = n_manager.get_node_from_slot(slot_1, read_from_replicas=True)
-
-        assert isinstance(ex.value, IndexError)
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_1
 
     def test_init_slots_cache_not_all_slots_covered(self):
         """

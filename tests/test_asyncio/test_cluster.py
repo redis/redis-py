@@ -27,7 +27,6 @@ from redis.exceptions import (
     RedisClusterException,
     RedisError,
     ResponseError,
-    SlotNotCoveredError,
 )
 from redis.utils import str_if_bytes
 from tests.conftest import (
@@ -2415,10 +2414,7 @@ class TestNodesManager:
 
         # adjust lb-size
         n_manager.slots_cache[slot_1].pop()
-        with pytest.raises(SlotNotCoveredError) as ex:
-            _ = n_manager.get_node_from_slot(slot_1, read_from_replicas=True)
-
-        assert str(ex.value).startswith(f'Slot "{slot_1}"')
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_1
 
     async def test_init_slots_cache_not_all_slots_covered(self) -> None:
         """
