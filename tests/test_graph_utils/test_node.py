@@ -1,5 +1,4 @@
 import pytest
-
 from redis.commands.graph import node
 
 
@@ -34,7 +33,7 @@ def test_stringify(fixture):
 
 
 @pytest.mark.redismod
-def test_comparision(fixture):
+def test_comparison(fixture):
     no_args, no_props, props_only, no_label, multi_label = fixture
 
     assert node.Node() == node.Node()

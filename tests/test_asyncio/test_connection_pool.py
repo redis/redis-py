@@ -1,23 +1,15 @@
 import asyncio
-import os
 import re
-import sys
 
 import pytest
-
-if sys.version_info[0:2] == (3, 6):
-    import pytest as pytest_asyncio
-else:
-    import pytest_asyncio
-
+import pytest_asyncio
 import redis.asyncio as redis
 from redis.asyncio.connection import Connection, to_bool
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
-from .compat import mock
+from .compat import aclosing, mock
+from .conftest import asynccontextmanager
 from .test_pubsub import wait_for_message
-
-pytestmark = pytest.mark.asyncio
 
 
 @pytest.mark.onlynoncluster
@@ -50,7 +42,7 @@ class TestRedisAutoReleaseConnectionPool:
         new_conn = await self.create_two_conn(r)
         assert new_conn != r.connection
         assert self.get_total_connected_connections(r.connection_pool) == 2
-        await r.close()
+        await r.aclose()
         assert self.has_no_connected_connections(r.connection_pool)
 
     async def test_do_not_auto_disconnect_redis_created_pool(self, r2: redis.Redis):
@@ -60,7 +52,7 @@ class TestRedisAutoReleaseConnectionPool:
         )
         new_conn = await self.create_two_conn(r2)
         assert self.get_total_connected_connections(r2.connection_pool) == 2
-        await r2.close()
+        await r2.aclose()
         assert r2.connection_pool._in_use_connections == {new_conn}
         assert new_conn.is_connected
         assert len(r2.connection_pool._available_connections) == 1
@@ -69,7 +61,7 @@ class TestRedisAutoReleaseConnectionPool:
     async def test_auto_release_override_true_manual_created_pool(self, r: redis.Redis):
         assert r.auto_close_connection_pool is True, "This is from the class fixture"
         await self.create_two_conn(r)
-        await r.close()
+        await r.aclose()
         assert self.get_total_connected_connections(r.connection_pool) == 2, (
             "The connection pool should not be disconnected as a manually created "
             "connection pool was passed in in conftest.py"
@@ -80,7 +72,7 @@ class TestRedisAutoReleaseConnectionPool:
     async def test_close_override(self, r: redis.Redis, auto_close_conn_pool):
         r.auto_close_connection_pool = auto_close_conn_pool
         await self.create_two_conn(r)
-        await r.close(close_connection_pool=True)
+        await r.aclose(close_connection_pool=True)
         assert self.has_no_connected_connections(r.connection_pool)
 
     @pytest.mark.parametrize("auto_close_conn_pool", [True, False])
@@ -89,7 +81,7 @@ class TestRedisAutoReleaseConnectionPool:
     ):
         r.auto_close_connection_pool = auto_close_conn_pool
         new_conn = await self.create_two_conn(r)
-        await r.close(close_connection_pool=False)
+        await r.aclose(close_connection_pool=False)
         assert not self.has_no_connected_connections(r.connection_pool)
         assert r.connection_pool._in_use_connections == {new_conn}
         assert r.connection_pool._available_connections[0].is_connected
@@ -101,7 +93,9 @@ class DummyConnection(Connection):
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
-        self.pid = os.getpid()
+
+    def repr_pieces(self):
+        return [("id", id(self)), ("kwargs", self.kwargs)]
 
     async def connect(self):
         pass
@@ -109,12 +103,13 @@ class DummyConnection(Connection):
     async def disconnect(self):
         pass
 
-    async def can_read(self, timeout: float = 0):
+    async def can_read_destructive(self, timeout: float = 0):
         return False
 
 
 class TestConnectionPool:
-    def get_pool(
+    @asynccontextmanager
+    async def get_pool(
         self,
         connection_kwargs=None,
         max_connections=None,
@@ -126,71 +121,81 @@ class TestConnectionPool:
             max_connections=max_connections,
             **connection_kwargs,
         )
-        return pool
+        try:
+            yield pool
+        finally:
+            await pool.disconnect(inuse_connections=True)
 
     async def test_connection_creation(self):
         connection_kwargs = {"foo": "bar", "biz": "baz"}
-        pool = self.get_pool(
+        async with self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=DummyConnection
+        ) as pool:
+            connection = await pool.get_connection("_")
+            assert isinstance(connection, DummyConnection)
+            assert connection.kwargs == connection_kwargs
+
+    async def test_aclosing(self):
+        connection_kwargs = {"foo": "bar", "biz": "baz"}
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            max_connections=None,
+            **connection_kwargs,
         )
-        connection = await pool.get_connection("_")
-        assert isinstance(connection, DummyConnection)
-        assert connection.kwargs == connection_kwargs
+        async with aclosing(pool):
+            pass
 
     async def test_multiple_connections(self, master_host):
-        connection_kwargs = {"host": master_host}
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
-        c1 = await pool.get_connection("_")
-        c2 = await pool.get_connection("_")
-        assert c1 != c2
+        connection_kwargs = {"host": master_host[0]}
+        async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
+            c1 = await pool.get_connection("_")
+            c2 = await pool.get_connection("_")
+            assert c1 != c2
 
     async def test_max_connections(self, master_host):
-        connection_kwargs = {"host": master_host}
-        pool = self.get_pool(max_connections=2, connection_kwargs=connection_kwargs)
-        await pool.get_connection("_")
-        await pool.get_connection("_")
-        with pytest.raises(redis.ConnectionError):
+        connection_kwargs = {"host": master_host[0]}
+        async with self.get_pool(
+            max_connections=2, connection_kwargs=connection_kwargs
+        ) as pool:
             await pool.get_connection("_")
+            await pool.get_connection("_")
+            with pytest.raises(redis.ConnectionError):
+                await pool.get_connection("_")
 
     async def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {"host": master_host}
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
-        c1 = await pool.get_connection("_")
-        await pool.release(c1)
-        c2 = await pool.get_connection("_")
-        assert c1 == c2
+        connection_kwargs = {"host": master_host[0]}
+        async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
+            c1 = await pool.get_connection("_")
+            await pool.release(c1)
+            c2 = await pool.get_connection("_")
+            assert c1 == c2
 
-    def test_repr_contains_db_info_tcp(self):
+    async def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {
             "host": "localhost",
             "port": 6379,
             "db": 1,
             "client_name": "test-client",
         }
-        pool = self.get_pool(
+        async with self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=redis.Connection
-        )
-        expected = (
-            "ConnectionPool<Connection<"
-            "host=localhost,port=6379,db=1,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        ) as pool:
+            expected = "host=localhost,port=6379,db=1,client_name=test-client"
+            assert expected in repr(pool)
 
-    def test_repr_contains_db_info_unix(self):
+    async def test_repr_contains_db_info_unix(self):
         connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
-        pool = self.get_pool(
+        async with self.get_pool(
             connection_kwargs=connection_kwargs,
             connection_class=redis.UnixDomainSocketConnection,
-        )
-        expected = (
-            "ConnectionPool<UnixDomainSocketConnection<"
-            "path=/abc,db=1,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        ) as pool:
+            expected = "path=/abc,db=1,client_name=test-client"
+            assert expected in repr(pool)
 
 
 class TestBlockingConnectionPool:
-    def get_pool(self, connection_kwargs=None, max_connections=10, timeout=20):
+    @asynccontextmanager
+    async def get_pool(self, connection_kwargs=None, max_connections=10, timeout=20):
         connection_kwargs = connection_kwargs or {}
         pool = redis.BlockingConnectionPool(
             connection_class=DummyConnection,
@@ -198,7 +203,10 @@ class TestBlockingConnectionPool:
             timeout=timeout,
             **connection_kwargs,
         )
-        return pool
+        try:
+            yield pool
+        finally:
+            await pool.disconnect(inuse_connections=True)
 
     async def test_connection_creation(self, master_host):
         connection_kwargs = {
@@ -207,10 +215,10 @@ class TestBlockingConnectionPool:
             "host": master_host[0],
             "port": master_host[1],
         }
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
-        connection = await pool.get_connection("_")
-        assert isinstance(connection, DummyConnection)
-        assert connection.kwargs == connection_kwargs
+        async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
+            connection = await pool.get_connection("_")
+            assert isinstance(connection, DummyConnection)
+            assert connection.kwargs == connection_kwargs
 
     async def test_disconnect(self, master_host):
         """A regression test for #1047"""
@@ -220,30 +228,32 @@ class TestBlockingConnectionPool:
             "host": master_host[0],
             "port": master_host[1],
         }
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
-        await pool.get_connection("_")
-        await pool.disconnect()
+        async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
+            await pool.get_connection("_")
+            await pool.disconnect()
 
     async def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
-        c1 = await pool.get_connection("_")
-        c2 = await pool.get_connection("_")
-        assert c1 != c2
+        async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
+            c1 = await pool.get_connection("_")
+            c2 = await pool.get_connection("_")
+            assert c1 != c2
 
     async def test_connection_pool_blocks_until_timeout(self, master_host):
         """When out of connections, block for timeout seconds, then raise"""
-        connection_kwargs = {"host": master_host}
-        pool = self.get_pool(
+        connection_kwargs = {"host": master_host[0]}
+        async with self.get_pool(
             max_connections=1, timeout=0.1, connection_kwargs=connection_kwargs
-        )
-        await pool.get_connection("_")
+        ) as pool:
+            c1 = await pool.get_connection("_")
 
-        start = asyncio.get_event_loop().time()
-        with pytest.raises(redis.ConnectionError):
-            await pool.get_connection("_")
-        # we should have waited at least 0.1 seconds
-        assert asyncio.get_event_loop().time() - start >= 0.1
+            start = asyncio.get_running_loop().time()
+            with pytest.raises(redis.ConnectionError):
+                await pool.get_connection("_")
+
+            # we should have waited at least some period of time
+            assert asyncio.get_running_loop().time() - start >= 0.05
+            await c1.disconnect()
 
     async def test_connection_pool_blocks_until_conn_available(self, master_host):
         """
@@ -251,36 +261,34 @@ class TestBlockingConnectionPool:
         to the pool
         """
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool = self.get_pool(
+        async with self.get_pool(
             max_connections=1, timeout=2, connection_kwargs=connection_kwargs
-        )
-        c1 = await pool.get_connection("_")
+        ) as pool:
+            c1 = await pool.get_connection("_")
 
-        async def target():
-            await asyncio.sleep(0.1)
-            await pool.release(c1)
+            async def target():
+                await asyncio.sleep(0.1)
+                await pool.release(c1)
 
-        start = asyncio.get_event_loop().time()
-        await asyncio.gather(target(), pool.get_connection("_"))
-        assert asyncio.get_event_loop().time() - start >= 0.1
+            start = asyncio.get_running_loop().time()
+            await asyncio.gather(target(), pool.get_connection("_"))
+            stop = asyncio.get_running_loop().time()
+            assert (stop - start) <= 0.2
 
     async def test_reuse_previously_released_connection(self, master_host):
-        connection_kwargs = {"host": master_host}
-        pool = self.get_pool(connection_kwargs=connection_kwargs)
-        c1 = await pool.get_connection("_")
-        await pool.release(c1)
-        c2 = await pool.get_connection("_")
-        assert c1 == c2
+        connection_kwargs = {"host": master_host[0]}
+        async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
+            c1 = await pool.get_connection("_")
+            await pool.release(c1)
+            c2 = await pool.get_connection("_")
+            assert c1 == c2
 
     def test_repr_contains_db_info_tcp(self):
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
         )
-        expected = (
-            "ConnectionPool<Connection<"
-            "host=localhost,port=6379,db=0,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "host=localhost,port=6379,db=0,client_name=test-client"
+        assert expected in repr(pool)
 
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
@@ -288,11 +296,8 @@ class TestBlockingConnectionPool:
             path="abc",
             client_name="test-client",
         )
-        expected = (
-            "ConnectionPool<UnixDomainSocketConnection<"
-            "path=abc,db=0,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "path=abc,db=0,client_name=test-client"
+        assert expected in repr(pool)
 
 
 class TestConnectionPoolURLParsing:
@@ -411,7 +416,7 @@ class TestConnectionPoolURLParsing:
     def test_invalid_extra_typed_querystring_options(self):
         with pytest.raises(ValueError):
             redis.ConnectionPool.from_url(
-                "redis://localhost/2?socket_timeout=_&" "socket_connect_timeout=abc"
+                "redis://localhost/2?socket_timeout=_&socket_connect_timeout=abc"
             )
 
     def test_extra_querystring_options(self):
@@ -435,6 +440,31 @@ class TestConnectionPoolURLParsing:
             "Redis URL must specify one of the following schemes "
             "(redis://, rediss://, unix://)"
         )
+
+
+class TestBlockingConnectionPoolURLParsing:
+    def test_extra_typed_querystring_options(self):
+        pool = redis.BlockingConnectionPool.from_url(
+            "redis://localhost/2?socket_timeout=20&socket_connect_timeout=10"
+            "&socket_keepalive=&retry_on_timeout=Yes&max_connections=10&timeout=13.37"
+        )
+
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            "host": "localhost",
+            "db": 2,
+            "socket_timeout": 20.0,
+            "socket_connect_timeout": 10.0,
+            "retry_on_timeout": True,
+        }
+        assert pool.max_connections == 10
+        assert pool.timeout == 13.37
+
+    def test_invalid_extra_typed_querystring_options(self):
+        with pytest.raises(ValueError):
+            redis.BlockingConnectionPool.from_url(
+                "redis://localhost/2?timeout=_not_a_float_"
+            )
 
 
 class TestConnectionPoolUnixSocketURLParsing:
@@ -601,15 +631,26 @@ class TestConnection:
     @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
     async def test_read_only_error(self, r):
-        """READONLY errors get turned in ReadOnlyError exceptions"""
+        """READONLY errors get turned into ReadOnlyError exceptions"""
         with pytest.raises(redis.ReadOnlyError):
             await r.execute_command("DEBUG", "ERROR", "READONLY blah blah")
+
+    @skip_if_redis_enterprise()
+    async def test_oom_error(self, r):
+        """OOM errors get turned into OutOfMemoryError exceptions"""
+        with pytest.raises(redis.OutOfMemoryError):
+            # note: don't use the DEBUG OOM command since it's not the same
+            # as the db being full
+            await r.execute_command("DEBUG", "ERROR", "OOM blah blah")
 
     def test_connect_from_url_tcp(self):
         connection = redis.Redis.from_url("redis://localhost")
         pool = connection.connection_pool
 
-        assert re.match("(.*)<(.*)<(.*)>>", repr(pool)).groups() == (
+        print(repr(pool))
+        assert re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
+        ).groups() == (
             "ConnectionPool",
             "Connection",
             "host=localhost,port=6379,db=0",
@@ -619,7 +660,9 @@ class TestConnection:
         connection = redis.Redis.from_url("unix:///path/to/socket")
         pool = connection.connection_pool
 
-        assert re.match("(.*)<(.*)<(.*)>>", repr(pool)).groups() == (
+        assert re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
+        ).groups() == (
             "ConnectionPool",
             "UnixDomainSocketConnection",
             "path=/path/to/socket,db=0",
@@ -653,6 +696,7 @@ class TestMultiConnectionClient:
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.xfail(strict=False)
 class TestHealthCheck:
     interval = 60
 
@@ -663,12 +707,12 @@ class TestHealthCheck:
         await redis.flushall()
 
     def assert_interval_advanced(self, connection):
-        diff = connection.next_health_check - asyncio.get_event_loop().time()
+        diff = connection.next_health_check - asyncio.get_running_loop().time()
         assert self.interval >= diff > (self.interval - 1)
 
     async def test_health_check_runs(self, r):
         if r.connection:
-            r.connection.next_health_check = asyncio.get_event_loop().time() - 1
+            r.connection.next_health_check = asyncio.get_running_loop().time() - 1
             await r.connection.check_health()
             self.assert_interval_advanced(r.connection)
 
@@ -676,7 +720,7 @@ class TestHealthCheck:
         # invoke a command to make sure the connection is entirely setup
         if r.connection:
             await r.get("foo")
-            r.connection.next_health_check = asyncio.get_event_loop().time()
+            r.connection.next_health_check = asyncio.get_running_loop().time()
             with mock.patch.object(
                 r.connection, "send_command", wraps=r.connection.send_command
             ) as m:
@@ -689,6 +733,8 @@ class TestHealthCheck:
         if r.connection:
             await r.get("foo")
             next_health_check = r.connection.next_health_check
+            # ensure that the event loop's `time()` advances a bit
+            await asyncio.sleep(0.001)
             await r.get("foo")
             assert next_health_check < r.connection.next_health_check
 

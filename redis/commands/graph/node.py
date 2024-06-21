@@ -32,7 +32,7 @@ class Node:
             self.labels = label
         else:
             raise AssertionError(
-                "label should be either None, " "string or a list of strings"
+                "label should be either None, string or a list of strings"
             )
 
         self.properties = properties or {}
@@ -65,6 +65,10 @@ class Node:
         return res
 
     def __eq__(self, rhs):
+        # Type checking
+        if not isinstance(rhs, Node):
+            return False
+
         # Quick positive check, if both IDs are set.
         if self.id is not None and rhs.id is not None and self.id != rhs.id:
             return False

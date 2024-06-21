@@ -7,7 +7,6 @@ from redis.asyncio.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
-from redis.asyncio.parser import CommandsParser
 from redis.asyncio.sentinel import (
     Sentinel,
     SentinelConnectionPool,
@@ -15,6 +14,7 @@ from redis.asyncio.sentinel import (
     SentinelManagedSSLConnection,
 )
 from redis.asyncio.utils import from_url
+from redis.backoff import default_backoff
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -23,6 +23,7 @@ from redis.exceptions import (
     ConnectionError,
     DataError,
     InvalidResponse,
+    OutOfMemoryError,
     PubSubError,
     ReadOnlyError,
     RedisError,
@@ -37,14 +38,15 @@ __all__ = [
     "BlockingConnectionPool",
     "BusyLoadingError",
     "ChildDeadlockedError",
-    "CommandsParser",
     "Connection",
     "ConnectionError",
     "ConnectionPool",
     "DataError",
     "from_url",
+    "default_backoff",
     "InvalidResponse",
     "PubSubError",
+    "OutOfMemoryError",
     "ReadOnlyError",
     "Redis",
     "RedisCluster",

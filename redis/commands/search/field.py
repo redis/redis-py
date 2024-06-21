@@ -4,6 +4,9 @@ from redis import DataError
 
 
 class Field:
+    """
+    A class representing a field in a document.
+    """
 
     NUMERIC = "NUMERIC"
     TEXT = "TEXT"
@@ -14,6 +17,9 @@ class Field:
     SORTABLE = "SORTABLE"
     NOINDEX = "NOINDEX"
     AS = "AS"
+    GEOSHAPE = "GEOSHAPE"
+    INDEX_MISSING = "INDEXMISSING"
+    INDEX_EMPTY = "INDEXEMPTY"
 
     def __init__(
         self,
@@ -21,8 +27,24 @@ class Field:
         args: List[str] = None,
         sortable: bool = False,
         no_index: bool = False,
+        index_missing: bool = False,
+        index_empty: bool = False,
         as_name: str = None,
     ):
+        """
+        Create a new field object.
+
+        Args:
+            name: The name of the field.
+            args:
+            sortable: If `True`, the field will be sortable.
+            no_index: If `True`, the field will not be indexed.
+            index_missing: If `True`, it will be possible to search for documents that
+                           have this field missing.
+            index_empty: If `True`, it will be possible to search for documents that
+                         have this field empty.
+            as_name: If provided, this alias will be used for the field.
+        """
         if args is None:
             args = []
         self.name = name
@@ -34,6 +56,10 @@ class Field:
             self.args_suffix.append(Field.SORTABLE)
         if no_index:
             self.args_suffix.append(Field.NOINDEX)
+        if index_missing:
+            self.args_suffix.append(Field.INDEX_MISSING)
+        if index_empty:
+            self.args_suffix.append(Field.INDEX_EMPTY)
 
         if no_index and not sortable:
             raise ValueError("Non-Sortable non-Indexable fields are ignored")
@@ -64,6 +90,7 @@ class TextField(Field):
         weight: float = 1.0,
         no_stem: bool = False,
         phonetic_matcher: str = None,
+        withsuffixtrie: bool = False,
         **kwargs,
     ):
         Field.__init__(self, name, args=[Field.TEXT, Field.WEIGHT, weight], **kwargs)
@@ -78,6 +105,8 @@ class TextField(Field):
         ]:
             Field.append_arg(self, self.PHONETIC)
             Field.append_arg(self, phonetic_matcher)
+        if withsuffixtrie:
+            Field.append_arg(self, "WITHSUFFIXTRIE")
 
 
 class NumericField(Field):
@@ -87,6 +116,21 @@ class NumericField(Field):
 
     def __init__(self, name: str, **kwargs):
         Field.__init__(self, name, args=[Field.NUMERIC], **kwargs)
+
+
+class GeoShapeField(Field):
+    """
+    GeoShapeField is used to enable within/contain indexing/searching
+    """
+
+    SPHERICAL = "SPHERICAL"
+    FLAT = "FLAT"
+
+    def __init__(self, name: str, coord_system=None, **kwargs):
+        args = [Field.GEOSHAPE]
+        if coord_system:
+            args.append(coord_system)
+        Field.__init__(self, name, args=args, **kwargs)
 
 
 class GeoField(Field):
@@ -112,11 +156,14 @@ class TagField(Field):
         name: str,
         separator: str = ",",
         case_sensitive: bool = False,
+        withsuffixtrie: bool = False,
         **kwargs,
     ):
         args = [Field.TAG, self.SEPARATOR, separator]
         if case_sensitive:
             args.append(self.CASESENSITIVE)
+        if withsuffixtrie:
+            args.append("WITHSUFFIXTRIE")
 
         Field.__init__(self, name, args=args, **kwargs)
 
@@ -159,8 +206,5 @@ class VectorField(Field):
             attr_li.extend([key, value])
 
         Field.__init__(
-            self,
-            name,
-            args=[Field.VECTOR, algorithm, len(attr_li), *attr_li],
-            **kwargs,
+            self, name, args=[Field.VECTOR, algorithm, len(attr_li), *attr_li], **kwargs
         )

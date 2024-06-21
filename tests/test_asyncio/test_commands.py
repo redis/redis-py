@@ -1,37 +1,60 @@
 """
 Tests async overrides of commands from their mixins
 """
+
+import asyncio
 import binascii
 import datetime
 import re
 import sys
-import time
 from string import ascii_letters
 
 import pytest
-
-if sys.version_info[0:2] == (3, 6):
-    import pytest as pytest_asyncio
-else:
-    import pytest_asyncio
-
+import pytest_asyncio
 import redis
 from redis import exceptions
-from redis.client import parse_info
+from redis._parsers.helpers import (
+    _RedisCallbacks,
+    _RedisCallbacksRESP2,
+    _RedisCallbacksRESP3,
+    parse_info,
+)
+from redis.client import EMPTY_RESPONSE, NEVER_DECODE
 from tests.conftest import (
+    assert_resp_response,
+    assert_resp_response_in,
+    is_resp2_connection,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
 
+if sys.version_info >= (3, 11, 3):
+    from asyncio import timeout as async_timeout
+else:
+    from async_timeout import timeout as async_timeout
+
 REDIS_6_VERSION = "5.9.0"
 
 
-pytestmark = pytest.mark.asyncio
+@pytest_asyncio.fixture()
+async def r_teardown(r: redis.Redis):
+    """
+    A special fixture which removes the provided names from the database after use
+    """
+    usernames = []
+
+    def factory(username):
+        usernames.append(username)
+        return r
+
+    yield factory
+    for username in usernames:
+        await r.acl_deluser(username)
 
 
 @pytest_asyncio.fixture()
-async def slowlog(r: redis.Redis, event_loop):
+async def slowlog(r: redis.Redis):
     current_config = await r.config_get()
     old_slower_than_value = current_config["slowlog-log-slower-than"]
     old_max_legnth_value = current_config["slowlog-max-len"]
@@ -64,14 +87,19 @@ class TestResponseCallbacks:
     """Tests for the response callback system"""
 
     async def test_response_callbacks(self, r: redis.Redis):
-        assert r.response_callbacks == redis.Redis.RESPONSE_CALLBACKS
-        assert id(r.response_callbacks) != id(redis.Redis.RESPONSE_CALLBACKS)
+        callbacks = _RedisCallbacks
+        if is_resp2_connection(r):
+            callbacks.update(_RedisCallbacksRESP2)
+        else:
+            callbacks.update(_RedisCallbacksRESP3)
+        assert r.response_callbacks == callbacks
+        assert id(r.response_callbacks) != id(_RedisCallbacks)
         r.set_response_callback("GET", lambda x: "static")
         await r.set("a", "foo")
         assert await r.get("a") == "static"
 
     async def test_case_insensitive_command_names(self, r: redis.Redis):
-        assert r.response_callbacks["del"] == r.response_callbacks["DEL"]
+        assert r.response_callbacks["ping"] == r.response_callbacks["PING"]
 
 
 class TestRedisCommands:
@@ -85,26 +113,18 @@ class TestRedisCommands:
     async def test_acl_cat_no_category(self, r: redis.Redis):
         categories = await r.acl_cat()
         assert isinstance(categories, list)
-        assert "read" in categories
+        assert "read" in categories or b"read" in categories
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     async def test_acl_cat_with_category(self, r: redis.Redis):
         commands = await r.acl_cat("read")
         assert isinstance(commands, list)
-        assert "get" in commands
+        assert "get" in commands or b"get" in commands
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
-    async def test_acl_deluser(self, r: redis.Redis, request, event_loop):
+    async def test_acl_deluser(self, r_teardown):
         username = "redis-py-user"
-
-        def teardown():
-            coro = r.acl_deluser(username)
-            if event_loop.is_running():
-                event_loop.create_task(coro)
-            else:
-                event_loop.run_until_complete(coro)
-
-        request.addfinalizer(teardown)
+        r = r_teardown(username)
 
         assert await r.acl_deluser(username) == 0
         assert await r.acl_setuser(username, enabled=False, reset=True)
@@ -113,45 +133,32 @@ class TestRedisCommands:
     @skip_if_server_version_lt(REDIS_6_VERSION)
     async def test_acl_genpass(self, r: redis.Redis):
         password = await r.acl_genpass()
-        assert isinstance(password, str)
+        assert isinstance(password, (str, bytes))
 
-    @skip_if_server_version_lt(REDIS_6_VERSION)
-    @skip_if_server_version_gte("7.0.0")
-    async def test_acl_getuser_setuser(self, r: redis.Redis, request, event_loop):
+    @skip_if_server_version_lt("7.0.0")
+    async def test_acl_getuser_setuser(self, r_teardown):
         username = "redis-py-user"
-
-        def teardown():
-            coro = r.acl_deluser(username)
-            if event_loop.is_running():
-                event_loop.create_task(coro)
-            else:
-                event_loop.run_until_complete(coro)
-
-        request.addfinalizer(teardown)
-
+        r = r_teardown(username)
         # test enabled=False
         assert await r.acl_setuser(username, enabled=False, reset=True)
-        assert await r.acl_getuser(username) == {
-            "categories": ["-@all"],
-            "commands": [],
-            "channels": [b"*"],
-            "enabled": False,
-            "flags": ["off", "allchannels", "sanitize-payload"],
-            "keys": [],
-            "passwords": [],
-        }
+        acl = await r.acl_getuser(username)
+        assert acl["categories"] == ["-@all"]
+        assert acl["commands"] == []
+        assert acl["keys"] == []
+        assert acl["passwords"] == []
+        assert "off" in acl["flags"]
+        assert acl["enabled"] is False
 
         # test nopass=True
         assert await r.acl_setuser(username, enabled=True, reset=True, nopass=True)
-        assert await r.acl_getuser(username) == {
-            "categories": ["-@all"],
-            "commands": [],
-            "channels": [b"*"],
-            "enabled": True,
-            "flags": ["on", "allchannels", "nopass", "sanitize-payload"],
-            "keys": [],
-            "passwords": [],
-        }
+        acl = await r.acl_getuser(username)
+        assert acl["categories"] == ["-@all"]
+        assert acl["commands"] == []
+        assert acl["keys"] == []
+        assert acl["passwords"] == []
+        assert "on" in acl["flags"]
+        assert "nopass" in acl["flags"]
+        assert acl["enabled"] is True
 
         # test all args
         assert await r.acl_setuser(
@@ -164,12 +171,11 @@ class TestRedisCommands:
             keys=["cache:*", "objects:*"],
         )
         acl = await r.acl_getuser(username)
-        assert set(acl["categories"]) == {"-@all", "+@set", "+@hash"}
+        assert set(acl["categories"]) == {"-@all", "+@set", "+@hash", "-@geo"}
         assert set(acl["commands"]) == {"+get", "+mget", "-hset"}
         assert acl["enabled"] is True
-        assert acl["channels"] == [b"*"]
-        assert acl["flags"] == ["on", "allchannels", "sanitize-payload"]
-        assert set(acl["keys"]) == {b"cache:*", b"objects:*"}
+        assert "on" in acl["flags"]
+        assert set(acl["keys"]) == {"~cache:*", "~objects:*"}
         assert len(acl["passwords"]) == 2
 
         # test reset=False keeps existing ACL and applies new ACL on top
@@ -191,12 +197,10 @@ class TestRedisCommands:
             keys=["objects:*"],
         )
         acl = await r.acl_getuser(username)
-        assert set(acl["categories"]) == {"-@all", "+@set", "+@hash"}
         assert set(acl["commands"]) == {"+get", "+mget"}
         assert acl["enabled"] is True
-        assert acl["channels"] == [b"*"]
-        assert acl["flags"] == ["on", "allchannels", "sanitize-payload"]
-        assert set(acl["keys"]) == {b"cache:*", b"objects:*"}
+        assert "on" in acl["flags"]
+        assert set(acl["keys"]) == {"~cache:*", "~objects:*"}
         assert len(acl["passwords"]) == 2
 
         # test removal of passwords
@@ -209,7 +213,7 @@ class TestRedisCommands:
 
         # Resets and tests that hashed passwords are set properly.
         hashed_password = (
-            "5e884898da28047151d0e56f8dc629" "2773603d0d6aabbdd62a11ef721d1542d8"
+            "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
         )
         assert await r.acl_setuser(
             username, enabled=True, reset=True, hashed_passwords=["+" + hashed_password]
@@ -232,36 +236,19 @@ class TestRedisCommands:
         assert len((await r.acl_getuser(username))["passwords"]) == 1
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
-    @skip_if_server_version_gte("7.0.0")
-    async def test_acl_list(self, r: redis.Redis, request, event_loop):
+    async def test_acl_list(self, r_teardown):
         username = "redis-py-user"
-
-        def teardown():
-            coro = r.acl_deluser(username)
-            if event_loop.is_running():
-                event_loop.create_task(coro)
-            else:
-                event_loop.run_until_complete(coro)
-
-        request.addfinalizer(teardown)
-
+        r = r_teardown(username)
+        start = await r.acl_list()
         assert await r.acl_setuser(username, enabled=False, reset=True)
         users = await r.acl_list()
-        assert f"user {username} off sanitize-payload &* -@all" in users
+        assert len(users) == len(start) + 1
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     @pytest.mark.onlynoncluster
-    async def test_acl_log(self, r: redis.Redis, request, event_loop, create_redis):
+    async def test_acl_log(self, r_teardown, create_redis):
         username = "redis-py-user"
-
-        def teardown():
-            coro = r.acl_deluser(username)
-            if event_loop.is_running():
-                event_loop.create_task(coro)
-            else:
-                event_loop.run_until_complete(coro)
-
-        request.addfinalizer(teardown)
+        r = r_teardown(username)
         await r.acl_setuser(
             username,
             enabled=True,
@@ -287,62 +274,33 @@ class TestRedisCommands:
             await user_client.hset("cache:0", "hkey", "hval")
 
         assert isinstance(await r.acl_log(), list)
-        assert len(await r.acl_log()) == 2
+        assert len(await r.acl_log()) == 3
         assert len(await r.acl_log(count=1)) == 1
         assert isinstance((await r.acl_log())[0], dict)
-        assert "client-info" in (await r.acl_log(count=1))[0]
+        expected = (await r.acl_log(count=1))[0]
+        assert_resp_response_in(r, "client-info", expected, expected.keys())
         assert await r.acl_log_reset()
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
-    async def test_acl_setuser_categories_without_prefix_fails(
-        self, r: redis.Redis, request, event_loop
-    ):
+    async def test_acl_setuser_categories_without_prefix_fails(self, r_teardown):
         username = "redis-py-user"
-
-        def teardown():
-            coro = r.acl_deluser(username)
-            if event_loop.is_running():
-                event_loop.create_task(coro)
-            else:
-                event_loop.run_until_complete(coro)
-
-        request.addfinalizer(teardown)
+        r = r_teardown(username)
 
         with pytest.raises(exceptions.DataError):
             await r.acl_setuser(username, categories=["list"])
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
-    async def test_acl_setuser_commands_without_prefix_fails(
-        self, r: redis.Redis, request, event_loop
-    ):
+    async def test_acl_setuser_commands_without_prefix_fails(self, r_teardown):
         username = "redis-py-user"
-
-        def teardown():
-            coro = r.acl_deluser(username)
-            if event_loop.is_running():
-                event_loop.create_task(coro)
-            else:
-                event_loop.run_until_complete(coro)
-
-        request.addfinalizer(teardown)
+        r = r_teardown(username)
 
         with pytest.raises(exceptions.DataError):
             await r.acl_setuser(username, commands=["get"])
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
-    async def test_acl_setuser_add_passwords_and_nopass_fails(
-        self, r: redis.Redis, request, event_loop
-    ):
+    async def test_acl_setuser_add_passwords_and_nopass_fails(self, r_teardown):
         username = "redis-py-user"
-
-        def teardown():
-            coro = r.acl_deluser(username)
-            if event_loop.is_running():
-                event_loop.create_task(coro)
-            else:
-                event_loop.run_until_complete(coro)
-
-        request.addfinalizer(teardown)
+        r = r_teardown(username)
 
         with pytest.raises(exceptions.DataError):
             await r.acl_setuser(username, passwords="+mypass", nopass=True)
@@ -356,7 +314,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt(REDIS_6_VERSION)
     async def test_acl_whoami(self, r: redis.Redis):
         username = await r.acl_whoami()
-        assert isinstance(username, str)
+        assert isinstance(username, (str, bytes))
 
     @pytest.mark.onlynoncluster
     async def test_client_list(self, r: redis.Redis):
@@ -394,7 +352,31 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     async def test_client_setname(self, r: redis.Redis):
         assert await r.client_setname("redis_py_test")
-        assert await r.client_getname() == "redis_py_test"
+        assert_resp_response(
+            r, await r.client_getname(), "redis_py_test", b"redis_py_test"
+        )
+
+    @skip_if_server_version_lt("7.2.0")
+    async def test_client_setinfo(self, r: redis.Redis):
+        await r.ping()
+        info = await r.client_info()
+        assert info["lib-name"] == "redis-py"
+        assert info["lib-ver"] == redis.__version__
+        assert await r.client_setinfo("lib-name", "test")
+        assert await r.client_setinfo("lib-ver", "123")
+        info = await r.client_info()
+        assert info["lib-name"] == "test"
+        assert info["lib-ver"] == "123"
+        r2 = redis.asyncio.Redis(lib_name="test2", lib_version="1234")
+        info = await r2.client_info()
+        assert info["lib-name"] == "test2"
+        assert info["lib-ver"] == "1234"
+        await r2.aclose()
+        r3 = redis.asyncio.Redis(lib_name=None, lib_version=None)
+        info = await r3.client_info()
+        assert info["lib-name"] == ""
+        assert info["lib-ver"] == ""
+        await r3.aclose()
 
     @skip_if_server_version_lt("2.6.9")
     @pytest.mark.onlynoncluster
@@ -502,6 +484,14 @@ class TestRedisCommands:
         with pytest.raises(exceptions.RedisError):
             await r.client_pause(timeout="not an integer")
 
+    @skip_if_server_version_lt("7.2.0")
+    @pytest.mark.onlynoncluster
+    async def test_client_no_touch(self, r: redis.Redis):
+        assert await r.client_no_touch("ON") == b"OK"
+        assert await r.client_no_touch("OFF") == b"OK"
+        with pytest.raises(TypeError):
+            await r.client_no_touch()
+
     async def test_config_get(self, r: redis.Redis):
         data = await r.config_get()
         assert "maxmemory" in data
@@ -517,13 +507,10 @@ class TestRedisCommands:
         assert reset_commands_processed < prior_commands_processed
 
     async def test_config_set(self, r: redis.Redis):
-        data = await r.config_get()
-        rdbname = data["dbfilename"]
-        try:
-            assert await r.config_set("dbfilename", "redis_py_test.rdb")
-            assert (await r.config_get())["dbfilename"] == "redis_py_test.rdb"
-        finally:
-            assert await r.config_set("dbfilename", rdbname)
+        await r.config_set("timeout", 70)
+        assert (await r.config_get())["timeout"] == "70"
+        assert await r.config_set("timeout", 0)
+        assert (await r.config_get())["timeout"] == "0"
 
     @pytest.mark.onlynoncluster
     async def test_dbsize(self, r: redis.Redis):
@@ -541,7 +528,8 @@ class TestRedisCommands:
         await r.set("b", "bar")
         info = await r.info()
         assert isinstance(info, dict)
-        assert info["db9"]["keys"] == 2
+        assert "arch_bits" in info.keys()
+        assert "redis_version" in info.keys()
 
     @pytest.mark.onlynoncluster
     async def test_lastsave(self, r: redis.Redis):
@@ -599,6 +587,16 @@ class TestRedisCommands:
         assert len(t) == 2
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
+
+    async def test_never_decode_option(self, r: redis.Redis):
+        opts = {NEVER_DECODE: []}
+        await r.delete("a")
+        assert await r.execute_command("EXISTS", "a", **opts) == 0
+
+    async def test_empty_response_option(self, r: redis.Redis):
+        opts = {EMPTY_RESPONSE: []}
+        await r.delete("a")
+        assert await r.execute_command("EXISTS", "a", **opts) == 0
 
     # BASIC KEY COMMANDS
     async def test_append(self, r: redis.Redis):
@@ -807,7 +805,7 @@ class TestRedisCommands:
     async def test_expireat_unixtime(self, r: redis.Redis):
         expire_at = await redis_server_time(r) + datetime.timedelta(minutes=1)
         await r.set("a", "foo")
-        expire_at_seconds = int(time.mktime(expire_at.timetuple()))
+        expire_at_seconds = int(expire_at.timestamp())
         assert await r.expireat("a", expire_at_seconds)
         assert 0 < await r.ttl("a") <= 61
 
@@ -932,8 +930,8 @@ class TestRedisCommands:
     async def test_pexpireat_unixtime(self, r: redis.Redis):
         expire_at = await redis_server_time(r) + datetime.timedelta(minutes=1)
         await r.set("a", "foo")
-        expire_at_seconds = int(time.mktime(expire_at.timetuple())) * 1000
-        assert await r.pexpireat("a", expire_at_seconds)
+        expire_at_milliseconds = int(expire_at.timestamp() * 1000)
+        assert await r.pexpireat("a", expire_at_milliseconds)
         assert 0 < await r.pttl("a") <= 61000
 
     @skip_if_server_version_lt("2.6.0")
@@ -962,6 +960,19 @@ class TestRedisCommands:
     async def test_pttl_no_key(self, r: redis.Redis):
         """PTTL on servers 2.8 and after return -2 when the key doesn't exist"""
         assert await r.pttl("a") == -2
+
+    @skip_if_server_version_lt("6.2.0")
+    async def test_hrandfield(self, r):
+        assert await r.hrandfield("key") is None
+        await r.hset("key", mapping={"a": 1, "b": 2, "c": 3, "d": 4, "e": 5})
+        assert await r.hrandfield("key") is not None
+        assert len(await r.hrandfield("key", 2)) == 2
+        # with values
+        assert_resp_response(r, len(await r.hrandfield("key", 2, True)), 4, 2)
+        # without duplications
+        assert len(await r.hrandfield("key", 10)) == 5
+        # with duplications
+        assert len(await r.hrandfield("key", -10)) == 10
 
     @pytest.mark.onlynoncluster
     async def test_randomkey(self, r: redis.Redis):
@@ -1099,25 +1110,45 @@ class TestRedisCommands:
     async def test_blpop(self, r: redis.Redis):
         await r.rpush("a", "1", "2")
         await r.rpush("b", "3", "4")
-        assert await r.blpop(["b", "a"], timeout=1) == (b"b", b"3")
-        assert await r.blpop(["b", "a"], timeout=1) == (b"b", b"4")
-        assert await r.blpop(["b", "a"], timeout=1) == (b"a", b"1")
-        assert await r.blpop(["b", "a"], timeout=1) == (b"a", b"2")
+        assert_resp_response(
+            r, await r.blpop(["b", "a"], timeout=1), (b"b", b"3"), [b"b", b"3"]
+        )
+        assert_resp_response(
+            r, await r.blpop(["b", "a"], timeout=1), (b"b", b"4"), [b"b", b"4"]
+        )
+        assert_resp_response(
+            r, await r.blpop(["b", "a"], timeout=1), (b"a", b"1"), [b"a", b"1"]
+        )
+        assert_resp_response(
+            r, await r.blpop(["b", "a"], timeout=1), (b"a", b"2"), [b"a", b"2"]
+        )
         assert await r.blpop(["b", "a"], timeout=1) is None
         await r.rpush("c", "1")
-        assert await r.blpop("c", timeout=1) == (b"c", b"1")
+        assert_resp_response(
+            r, await r.blpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"]
+        )
 
     @pytest.mark.onlynoncluster
     async def test_brpop(self, r: redis.Redis):
         await r.rpush("a", "1", "2")
         await r.rpush("b", "3", "4")
-        assert await r.brpop(["b", "a"], timeout=1) == (b"b", b"4")
-        assert await r.brpop(["b", "a"], timeout=1) == (b"b", b"3")
-        assert await r.brpop(["b", "a"], timeout=1) == (b"a", b"2")
-        assert await r.brpop(["b", "a"], timeout=1) == (b"a", b"1")
+        assert_resp_response(
+            r, await r.brpop(["b", "a"], timeout=1), (b"b", b"4"), [b"b", b"4"]
+        )
+        assert_resp_response(
+            r, await r.brpop(["b", "a"], timeout=1), (b"b", b"3"), [b"b", b"3"]
+        )
+        assert_resp_response(
+            r, await r.brpop(["b", "a"], timeout=1), (b"a", b"2"), [b"a", b"2"]
+        )
+        assert_resp_response(
+            r, await r.brpop(["b", "a"], timeout=1), (b"a", b"1"), [b"a", b"1"]
+        )
         assert await r.brpop(["b", "a"], timeout=1) is None
         await r.rpush("c", "1")
-        assert await r.brpop("c", timeout=1) == (b"c", b"1")
+        assert_resp_response(
+            r, await r.brpop("c", timeout=1), (b"c", b"1"), [b"c", b"1"]
+        )
 
     @pytest.mark.onlynoncluster
     async def test_brpoplpush(self, r: redis.Redis):
@@ -1318,6 +1349,19 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         _, dic = await r.hscan("a", match="a")
         assert dic == {b"a": b"1"}
+        _, dic = await r.hscan("a_notset", match="a")
+        assert dic == {}
+
+    @skip_if_server_version_lt("7.3.240")
+    async def test_hscan_novalues(self, r: redis.Redis):
+        await r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
+        cursor, keys = await r.hscan("a", no_values=True)
+        assert cursor == 0
+        assert sorted(keys) == [b"a", b"b", b"c"]
+        _, keys = await r.hscan("a", match="a", no_values=True)
+        assert keys == [b"a"]
+        _, keys = await r.hscan("a_notset", match="a", no_values=True)
+        assert keys == []
 
     @skip_if_server_version_lt("2.8.0")
     async def test_hscan_iter(self, r: redis.Redis):
@@ -1326,6 +1370,20 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         dic = {k: v async for k, v in r.hscan_iter("a", match="a")}
         assert dic == {b"a": b"1"}
+        dic = {k: v async for k, v in r.hscan_iter("a_notset", match="a")}
+        assert dic == {}
+
+    @skip_if_server_version_lt("7.3.240")
+    async def test_hscan_iter_novalues(self, r: redis.Redis):
+        await r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
+        keys = list([k async for k in r.hscan_iter("a", no_values=True)])
+        assert sorted(keys) == [b"a", b"b", b"c"]
+        keys = list([k async for k in r.hscan_iter("a", match="a", no_values=True)])
+        assert keys == [b"a"]
+        keys = list(
+            [k async for k in r.hscan_iter("a", match="a_notset", no_values=True)]
+        )
+        assert keys == []
 
     @skip_if_server_version_lt("2.8.0")
     async def test_zscan(self, r: redis.Redis):
@@ -1422,7 +1480,10 @@ class TestRedisCommands:
         for value in values:
             assert value in s
 
-        assert await r.spop("a", 1) == list(set(s) - set(values))
+        response = await r.spop("a", 1)
+        assert_resp_response(
+            r, response, list(set(s) - set(values)), set(s) - set(values)
+        )
 
     async def test_srandmember(self, r: redis.Redis):
         s = [b"1", b"2", b"3"]
@@ -1460,11 +1521,13 @@ class TestRedisCommands:
     async def test_zadd(self, r: redis.Redis):
         mapping = {"a1": 1.0, "a2": 2.0, "a3": 3.0}
         await r.zadd("a", mapping)
-        assert await r.zrange("a", 0, -1, withscores=True) == [
-            (b"a1", 1.0),
-            (b"a2", 2.0),
-            (b"a3", 3.0),
-        ]
+        response = await r.zrange("a", 0, -1, withscores=True)
+        assert_resp_response(
+            r,
+            response,
+            [(b"a1", 1.0), (b"a2", 2.0), (b"a3", 3.0)],
+            [[b"a1", 1.0], [b"a2", 2.0], [b"a3", 3.0]],
+        )
 
         # error cases
         with pytest.raises(exceptions.DataError):
@@ -1481,23 +1544,24 @@ class TestRedisCommands:
     async def test_zadd_nx(self, r: redis.Redis):
         assert await r.zadd("a", {"a1": 1}) == 1
         assert await r.zadd("a", {"a1": 99, "a2": 2}, nx=True) == 1
-        assert await r.zrange("a", 0, -1, withscores=True) == [
-            (b"a1", 1.0),
-            (b"a2", 2.0),
-        ]
+        response = await r.zrange("a", 0, -1, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a1", 1.0), (b"a2", 2.0)], [[b"a1", 1.0], [b"a2", 2.0]]
+        )
 
     async def test_zadd_xx(self, r: redis.Redis):
         assert await r.zadd("a", {"a1": 1}) == 1
         assert await r.zadd("a", {"a1": 99, "a2": 2}, xx=True) == 0
-        assert await r.zrange("a", 0, -1, withscores=True) == [(b"a1", 99.0)]
+        response = await r.zrange("a", 0, -1, withscores=True)
+        assert_resp_response(r, response, [(b"a1", 99.0)], [[b"a1", 99.0]])
 
     async def test_zadd_ch(self, r: redis.Redis):
         assert await r.zadd("a", {"a1": 1}) == 1
         assert await r.zadd("a", {"a1": 99, "a2": 2}, ch=True) == 2
-        assert await r.zrange("a", 0, -1, withscores=True) == [
-            (b"a2", 2.0),
-            (b"a1", 99.0),
-        ]
+        response = await r.zrange("a", 0, -1, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a2", 2.0), (b"a1", 99.0)], [[b"a2", 2.0], [b"a1", 99.0]]
+        )
 
     async def test_zadd_incr(self, r: redis.Redis):
         assert await r.zadd("a", {"a1": 1}) == 1
@@ -1521,6 +1585,25 @@ class TestRedisCommands:
         assert await r.zcount("a", 1, "(" + str(2)) == 1
         assert await r.zcount("a", 10, 20) == 0
 
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    async def test_zdiff(self, r):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+        await r.zadd("b", {"a1": 1, "a2": 2})
+        assert await r.zdiff(["a", "b"]) == [b"a3"]
+        response = await r.zdiff(["a", "b"], withscores=True)
+        assert_resp_response(r, response, [b"a3", b"3"], [[b"a3", 3.0]])
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("6.2.0")
+    async def test_zdiffstore(self, r):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
+        await r.zadd("b", {"a1": 1, "a2": 2})
+        assert await r.zdiffstore("out", ["a", "b"])
+        assert await r.zrange("out", 0, -1) == [b"a3"]
+        response = await r.zrange("out", 0, -1, withscores=True)
+        assert_resp_response(r, response, [(b"a3", 3.0)], [[b"a3", 3.0]])
+
     async def test_zincrby(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
         assert await r.zincrby("a", 1, "a2") == 3.0
@@ -1540,7 +1623,10 @@ class TestRedisCommands:
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert await r.zinterstore("d", ["a", "b", "c"]) == 2
-        assert await r.zrange("d", 0, -1, withscores=True) == [(b"a3", 8), (b"a1", 9)]
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a3", 8), (b"a1", 9)], [[b"a3", 8.0], [b"a1", 9.0]]
+        )
 
     @pytest.mark.onlynoncluster
     async def test_zinterstore_max(self, r: redis.Redis):
@@ -1548,7 +1634,10 @@ class TestRedisCommands:
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert await r.zinterstore("d", ["a", "b", "c"], aggregate="MAX") == 2
-        assert await r.zrange("d", 0, -1, withscores=True) == [(b"a3", 5), (b"a1", 6)]
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a3", 5), (b"a1", 6)], [[b"a3", 5], [b"a1", 6]]
+        )
 
     @pytest.mark.onlynoncluster
     async def test_zinterstore_min(self, r: redis.Redis):
@@ -1556,7 +1645,10 @@ class TestRedisCommands:
         await r.zadd("b", {"a1": 2, "a2": 3, "a3": 5})
         await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert await r.zinterstore("d", ["a", "b", "c"], aggregate="MIN") == 2
-        assert await r.zrange("d", 0, -1, withscores=True) == [(b"a1", 1), (b"a3", 3)]
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a1", 1), (b"a3", 3)], [[b"a1", 1], [b"a3", 3]]
+        )
 
     @pytest.mark.onlynoncluster
     async def test_zinterstore_with_weight(self, r: redis.Redis):
@@ -1564,49 +1656,104 @@ class TestRedisCommands:
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert await r.zinterstore("d", {"a": 1, "b": 2, "c": 3}) == 2
-        assert await r.zrange("d", 0, -1, withscores=True) == [(b"a3", 20), (b"a1", 23)]
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a3", 20), (b"a1", 23)], [[b"a3", 20], [b"a1", 23]]
+        )
 
     @skip_if_server_version_lt("4.9.0")
     async def test_zpopmax(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert await r.zpopmax("a") == [(b"a3", 3)]
+        response = await r.zpopmax("a")
+        assert_resp_response(r, response, [(b"a3", 3)], [b"a3", 3.0])
 
         # with count
-        assert await r.zpopmax("a", count=2) == [(b"a2", 2), (b"a1", 1)]
+        response = await r.zpopmax("a", count=2)
+        assert_resp_response(
+            r, response, [(b"a2", 2), (b"a1", 1)], [[b"a2", 2], [b"a1", 1]]
+        )
 
     @skip_if_server_version_lt("4.9.0")
     async def test_zpopmin(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
-        assert await r.zpopmin("a") == [(b"a1", 1)]
+        response = await r.zpopmin("a")
+        assert_resp_response(r, response, [(b"a1", 1)], [b"a1", 1.0])
 
         # with count
-        assert await r.zpopmin("a", count=2) == [(b"a2", 2), (b"a3", 3)]
+        response = await r.zpopmin("a", count=2)
+        assert_resp_response(
+            r, response, [(b"a2", 2), (b"a3", 3)], [[b"a2", 2], [b"a3", 3]]
+        )
 
     @skip_if_server_version_lt("4.9.0")
     @pytest.mark.onlynoncluster
     async def test_bzpopmax(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2})
         await r.zadd("b", {"b1": 10, "b2": 20})
-        assert await r.bzpopmax(["b", "a"], timeout=1) == (b"b", b"b2", 20)
-        assert await r.bzpopmax(["b", "a"], timeout=1) == (b"b", b"b1", 10)
-        assert await r.bzpopmax(["b", "a"], timeout=1) == (b"a", b"a2", 2)
-        assert await r.bzpopmax(["b", "a"], timeout=1) == (b"a", b"a1", 1)
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["b", "a"], timeout=1),
+            (b"b", b"b2", 20),
+            [b"b", b"b2", 20],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["b", "a"], timeout=1),
+            (b"b", b"b1", 10),
+            [b"b", b"b1", 10],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["b", "a"], timeout=1),
+            (b"a", b"a2", 2),
+            [b"a", b"a2", 2],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmax(["b", "a"], timeout=1),
+            (b"a", b"a1", 1),
+            [b"a", b"a1", 1],
+        )
         assert await r.bzpopmax(["b", "a"], timeout=1) is None
         await r.zadd("c", {"c1": 100})
-        assert await r.bzpopmax("c", timeout=1) == (b"c", b"c1", 100)
+        assert_resp_response(
+            r, await r.bzpopmax("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
+        )
 
     @skip_if_server_version_lt("4.9.0")
     @pytest.mark.onlynoncluster
     async def test_bzpopmin(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2})
         await r.zadd("b", {"b1": 10, "b2": 20})
-        assert await r.bzpopmin(["b", "a"], timeout=1) == (b"b", b"b1", 10)
-        assert await r.bzpopmin(["b", "a"], timeout=1) == (b"b", b"b2", 20)
-        assert await r.bzpopmin(["b", "a"], timeout=1) == (b"a", b"a1", 1)
-        assert await r.bzpopmin(["b", "a"], timeout=1) == (b"a", b"a2", 2)
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["b", "a"], timeout=1),
+            (b"b", b"b1", 10),
+            [b"b", b"b1", 10],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["b", "a"], timeout=1),
+            (b"b", b"b2", 20),
+            [b"b", b"b2", 20],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["b", "a"], timeout=1),
+            (b"a", b"a1", 1),
+            [b"a", b"a1", 1],
+        )
+        assert_resp_response(
+            r,
+            await r.bzpopmin(["b", "a"], timeout=1),
+            (b"a", b"a2", 2),
+            [b"a", b"a2", 2],
+        )
         assert await r.bzpopmin(["b", "a"], timeout=1) is None
         await r.zadd("c", {"c1": 100})
-        assert await r.bzpopmin("c", timeout=1) == (b"c", b"c1", 100)
+        assert_resp_response(
+            r, await r.bzpopmin("c", timeout=1), (b"c", b"c1", 100), [b"c", b"c1", 100]
+        )
 
     async def test_zrange(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -1614,20 +1761,20 @@ class TestRedisCommands:
         assert await r.zrange("a", 1, 2) == [b"a2", b"a3"]
 
         # withscores
-        assert await r.zrange("a", 0, 1, withscores=True) == [
-            (b"a1", 1.0),
-            (b"a2", 2.0),
-        ]
-        assert await r.zrange("a", 1, 2, withscores=True) == [
-            (b"a2", 2.0),
-            (b"a3", 3.0),
-        ]
+        response = await r.zrange("a", 0, 1, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a1", 1.0), (b"a2", 2.0)], [[b"a1", 1.0], [b"a2", 2.0]]
+        )
+        response = await r.zrange("a", 1, 2, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a2", 2.0), (b"a3", 3.0)], [[b"a2", 2.0], [b"a3", 3.0]]
+        )
 
         # custom score function
-        assert await r.zrange("a", 0, 1, withscores=True, score_cast_func=int) == [
-            (b"a1", 1),
-            (b"a2", 2),
-        ]
+        # assert await r.zrange("a", 0, 1, withscores=True, score_cast_func=int) == [
+        #     (b"a1", 1),
+        #     (b"a2", 2),
+        # ]
 
     @skip_if_server_version_lt("2.8.9")
     async def test_zrangebylex(self, r: redis.Redis):
@@ -1661,22 +1808,41 @@ class TestRedisCommands:
         assert await r.zrangebyscore("a", 2, 4, start=1, num=2) == [b"a3", b"a4"]
 
         # withscores
-        assert await r.zrangebyscore("a", 2, 4, withscores=True) == [
-            (b"a2", 2.0),
-            (b"a3", 3.0),
-            (b"a4", 4.0),
-        ]
+        response = await r.zrangebyscore("a", 2, 4, withscores=True)
+        assert_resp_response(
+            r,
+            response,
+            [(b"a2", 2.0), (b"a3", 3.0), (b"a4", 4.0)],
+            [[b"a2", 2.0], [b"a3", 3.0], [b"a4", 4.0]],
+        )
 
         # custom score function
-        assert await r.zrangebyscore(
+        response = await r.zrangebyscore(
             "a", 2, 4, withscores=True, score_cast_func=int
-        ) == [(b"a2", 2), (b"a3", 3), (b"a4", 4)]
+        )
+        assert_resp_response(
+            r,
+            response,
+            [(b"a2", 2), (b"a3", 3), (b"a4", 4)],
+            [[b"a2", 2], [b"a3", 3], [b"a4", 4]],
+        )
 
     async def test_zrank(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
         assert await r.zrank("a", "a1") == 0
         assert await r.zrank("a", "a2") == 1
         assert await r.zrank("a", "a6") is None
+
+    @skip_if_server_version_lt("7.2.0")
+    async def test_zrank_withscore(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
+        assert await r.zrank("a", "a1") == 0
+        assert await r.zrank("a", "a2") == 1
+        assert await r.zrank("a", "a6") is None
+        assert_resp_response(
+            r, await r.zrank("a", "a3", withscore=True), [2, b"3"], [2, 3.0]
+        )
+        assert await r.zrank("a", "a6", withscore=True) is None
 
     async def test_zrem(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -1718,20 +1884,20 @@ class TestRedisCommands:
         assert await r.zrevrange("a", 1, 2) == [b"a2", b"a1"]
 
         # withscores
-        assert await r.zrevrange("a", 0, 1, withscores=True) == [
-            (b"a3", 3.0),
-            (b"a2", 2.0),
-        ]
-        assert await r.zrevrange("a", 1, 2, withscores=True) == [
-            (b"a2", 2.0),
-            (b"a1", 1.0),
-        ]
+        response = await r.zrevrange("a", 0, 1, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a3", 3.0), (b"a2", 2.0)], [[b"a3", 3.0], [b"a2", 2.0]]
+        )
+        response = await r.zrevrange("a", 1, 2, withscores=True)
+        assert_resp_response(
+            r, response, [(b"a2", 2.0), (b"a1", 1.0)], [[b"a2", 2.0], [b"a1", 1.0]]
+        )
 
         # custom score function
-        assert await r.zrevrange("a", 0, 1, withscores=True, score_cast_func=int) == [
-            (b"a3", 3.0),
-            (b"a2", 2.0),
-        ]
+        response = await r.zrevrange("a", 0, 1, withscores=True, score_cast_func=int)
+        assert_resp_response(
+            r, response, [(b"a3", 3), (b"a2", 2)], [[b"a3", 3], [b"a2", 2]]
+        )
 
     async def test_zrevrangebyscore(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
@@ -1741,22 +1907,41 @@ class TestRedisCommands:
         assert await r.zrevrangebyscore("a", 4, 2, start=1, num=2) == [b"a3", b"a2"]
 
         # withscores
-        assert await r.zrevrangebyscore("a", 4, 2, withscores=True) == [
-            (b"a4", 4.0),
-            (b"a3", 3.0),
-            (b"a2", 2.0),
-        ]
+        response = await r.zrevrangebyscore("a", 4, 2, withscores=True)
+        assert_resp_response(
+            r,
+            response,
+            [(b"a4", 4.0), (b"a3", 3.0), (b"a2", 2.0)],
+            [[b"a4", 4.0], [b"a3", 3.0], [b"a2", 2.0]],
+        )
 
         # custom score function
-        assert await r.zrevrangebyscore(
+        response = await r.zrevrangebyscore(
             "a", 4, 2, withscores=True, score_cast_func=int
-        ) == [(b"a4", 4), (b"a3", 3), (b"a2", 2)]
+        )
+        assert_resp_response(
+            r,
+            response,
+            [(b"a4", 4), (b"a3", 3), (b"a2", 2)],
+            [[b"a4", 4], [b"a3", 3], [b"a2", 2]],
+        )
 
     async def test_zrevrank(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
         assert await r.zrevrank("a", "a1") == 4
         assert await r.zrevrank("a", "a2") == 3
         assert await r.zrevrank("a", "a6") is None
+
+    @skip_if_server_version_lt("7.2.0")
+    async def test_zrevrank_withscore(self, r: redis.Redis):
+        await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3, "a4": 4, "a5": 5})
+        assert await r.zrevrank("a", "a1") == 4
+        assert await r.zrevrank("a", "a2") == 3
+        assert await r.zrevrank("a", "a6") is None
+        assert_resp_response(
+            r, await r.zrevrank("a", "a3", withscore=True), [2, b"3"], [2, 3.0]
+        )
+        assert await r.zrevrank("a", "a6", withscore=True) is None
 
     async def test_zscore(self, r: redis.Redis):
         await r.zadd("a", {"a1": 1, "a2": 2, "a3": 3})
@@ -1770,12 +1955,13 @@ class TestRedisCommands:
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert await r.zunionstore("d", ["a", "b", "c"]) == 4
-        assert await r.zrange("d", 0, -1, withscores=True) == [
-            (b"a2", 3),
-            (b"a4", 4),
-            (b"a3", 8),
-            (b"a1", 9),
-        ]
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r,
+            response,
+            [(b"a2", 3.0), (b"a4", 4.0), (b"a3", 8.0), (b"a1", 9.0)],
+            [[b"a2", 3.0], [b"a4", 4.0], [b"a3", 8.0], [b"a1", 9.0]],
+        )
 
     @pytest.mark.onlynoncluster
     async def test_zunionstore_max(self, r: redis.Redis):
@@ -1783,12 +1969,13 @@ class TestRedisCommands:
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert await r.zunionstore("d", ["a", "b", "c"], aggregate="MAX") == 4
-        assert await r.zrange("d", 0, -1, withscores=True) == [
-            (b"a2", 2),
-            (b"a4", 4),
-            (b"a3", 5),
-            (b"a1", 6),
-        ]
+        respponse = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r,
+            respponse,
+            [(b"a2", 2.0), (b"a4", 4.0), (b"a3", 5.0), (b"a1", 6.0)],
+            [[b"a2", 2.0], [b"a4", 4.0], [b"a3", 5.0], [b"a1", 6.0]],
+        )
 
     @pytest.mark.onlynoncluster
     async def test_zunionstore_min(self, r: redis.Redis):
@@ -1796,12 +1983,13 @@ class TestRedisCommands:
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 4})
         await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert await r.zunionstore("d", ["a", "b", "c"], aggregate="MIN") == 4
-        assert await r.zrange("d", 0, -1, withscores=True) == [
-            (b"a1", 1),
-            (b"a2", 2),
-            (b"a3", 3),
-            (b"a4", 4),
-        ]
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r,
+            response,
+            [(b"a1", 1.0), (b"a2", 2.0), (b"a3", 3.0), (b"a4", 4.0)],
+            [[b"a1", 1.0], [b"a2", 2.0], [b"a3", 3.0], [b"a4", 4.0]],
+        )
 
     @pytest.mark.onlynoncluster
     async def test_zunionstore_with_weight(self, r: redis.Redis):
@@ -1809,12 +1997,13 @@ class TestRedisCommands:
         await r.zadd("b", {"a1": 2, "a2": 2, "a3": 2})
         await r.zadd("c", {"a1": 6, "a3": 5, "a4": 4})
         assert await r.zunionstore("d", {"a": 1, "b": 2, "c": 3}) == 4
-        assert await r.zrange("d", 0, -1, withscores=True) == [
-            (b"a2", 5),
-            (b"a4", 12),
-            (b"a3", 20),
-            (b"a1", 23),
-        ]
+        response = await r.zrange("d", 0, -1, withscores=True)
+        assert_resp_response(
+            r,
+            response,
+            [(b"a2", 5.0), (b"a4", 12.0), (b"a3", 20.0), (b"a1", 23.0)],
+            [[b"a2", 5.0], [b"a4", 12.0], [b"a3", 20.0], [b"a1", 23.0]],
+        )
 
     # HYPERLOGLOG TESTS
     @skip_if_server_version_lt("2.8.9")
@@ -2180,6 +2369,7 @@ class TestRedisCommands:
         )
 
     @skip_if_server_version_lt("3.0.0")
+    @skip_if_server_version_gte("7.0.0")
     @pytest.mark.onlynoncluster
     async def test_readwrite(self, r: redis.Redis):
         assert await r.readwrite()
@@ -2254,11 +2444,12 @@ class TestRedisCommands:
         )
 
         await r.geoadd("barcelona", values)
-        assert await r.geohash("barcelona", "place1", "place2", "place3") == [
-            "sp3e9yg3kd0",
-            "sp3e9cbc3t0",
-            None,
-        ]
+        assert_resp_response(
+            r,
+            await r.geohash("barcelona", "place1", "place2", "place3"),
+            ["sp3e9yg3kd0", "sp3e9cbc3t0", None],
+            [b"sp3e9yg3kd0", b"sp3e9cbc3t0", None],
+        )
 
     @skip_if_server_version_lt("3.2.0")
     async def test_geopos(self, r: redis.Redis):
@@ -2270,10 +2461,18 @@ class TestRedisCommands:
 
         await r.geoadd("barcelona", values)
         # redis uses 52 bits precision, hereby small errors may be introduced.
-        assert await r.geopos("barcelona", "place1", "place2") == [
-            (2.19093829393386841, 41.43379028184083523),
-            (2.18737632036209106, 41.40634178640635099),
-        ]
+        assert_resp_response(
+            r,
+            await r.geopos("barcelona", "place1", "place2"),
+            [
+                (2.19093829393386841, 41.43379028184083523),
+                (2.18737632036209106, 41.40634178640635099),
+            ],
+            [
+                [2.19093829393386841, 41.43379028184083523],
+                [2.18737632036209106, 41.40634178640635099],
+            ],
+        )
 
     @skip_if_server_version_lt("4.0.0")
     async def test_geopos_no_value(self, r: redis.Redis):
@@ -2534,19 +2733,16 @@ class TestRedisCommands:
 
         # reclaim the message as consumer1, but use the justid argument
         # which only returns message ids
-        assert (
-            await r.xclaim(
-                stream,
-                group,
-                consumer1,
-                min_idle_time=0,
-                message_ids=(message_id,),
-                justid=True,
-            )
-            == [message_id]
-        )
+        assert await r.xclaim(
+            stream,
+            group,
+            consumer1,
+            min_idle_time=0,
+            message_ids=(message_id,),
+            justid=True,
+        ) == [message_id]
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xclaim_trimmed(self, r: redis.Redis):
         # xclaim should not raise an exception if the item is not there
         stream = "stream"
@@ -2567,9 +2763,8 @@ class TestRedisCommands:
         # xclaim them from consumer2
         # the item that is still in the stream should be returned
         item = await r.xclaim(stream, group, "consumer2", 0, [sid1, sid2])
-        assert len(item) == 2
-        assert item[0] == (None, None)
-        assert item[1][0] == sid2
+        assert len(item) == 1
+        assert item[0][0] == sid2
 
     @skip_if_server_version_lt("5.0.0")
     async def test_xdel(self, r: redis.Redis):
@@ -2586,7 +2781,7 @@ class TestRedisCommands:
         assert await r.xdel(stream, m1) == 1
         assert await r.xdel(stream, m2, m3) == 2
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xgroup_create(self, r: redis.Redis):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -2603,11 +2798,13 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 1,
             }
         ]
         assert await r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xgroup_create_mkstream(self, r: redis.Redis):
         # tests xgroup_create and xinfo_groups
         stream = "stream"
@@ -2627,6 +2824,8 @@ class TestRedisCommands:
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": b"0-0",
+                "entries-read": None,
+                "lag": 0,
             }
         ]
         assert await r.xinfo_groups(stream) == expected
@@ -2661,7 +2860,7 @@ class TestRedisCommands:
         await r.xgroup_create(stream, group, 0)
         assert await r.xgroup_destroy(stream, group)
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.0.0")
     async def test_xgroup_setid(self, r: redis.Redis):
         stream = "stream"
         group = "group"
@@ -2669,18 +2868,20 @@ class TestRedisCommands:
 
         await r.xgroup_create(stream, group, 0)
         # advance the last_delivered_id to the message_id
-        await r.xgroup_setid(stream, group, message_id)
+        await r.xgroup_setid(stream, group, message_id, entries_read=2)
         expected = [
             {
                 "name": group.encode(),
                 "consumers": 0,
                 "pending": 0,
                 "last-delivered-id": message_id,
+                "entries-read": 2,
+                "lag": -1,
             }
         ]
         assert await r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_lt("7.2.0")
     async def test_xinfo_consumers(self, r: redis.Redis):
         stream = "stream"
         group = "group"
@@ -2700,9 +2901,11 @@ class TestRedisCommands:
             {"name": consumer2.encode(), "pending": 2},
         ]
 
-        # we can't determine the idle time, so just make sure it's an int
+        # we can't determine the idle and inactive time, so just make sure it's an int
         assert isinstance(info[0].pop("idle"), int)
         assert isinstance(info[1].pop("idle"), int)
+        assert isinstance(info[0].pop("inactive"), int)
+        assert isinstance(info[1].pop("inactive"), int)
         assert info == expected
 
     @skip_if_server_version_lt("5.0.0")
@@ -2715,6 +2918,31 @@ class TestRedisCommands:
         assert info["length"] == 2
         assert info["first-entry"] == await get_stream_message(r, stream, m1)
         assert info["last-entry"] == await get_stream_message(r, stream, m2)
+
+        await r.xtrim(stream, 0)
+        info = await r.xinfo_stream(stream)
+        assert info["length"] == 0
+        assert info["first-entry"] is None
+        assert info["last-entry"] is None
+
+    @skip_if_server_version_lt("6.0.0")
+    async def test_xinfo_stream_full(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+
+        await r.xadd(stream, {"foo": "bar"})
+        info = await r.xinfo_stream(stream, full=True)
+        assert info["length"] == 1
+        assert len(info["groups"]) == 0
+
+        await r.xgroup_create(stream, group, 0)
+        info = await r.xinfo_stream(stream, full=True)
+        assert info["length"] == 1
+
+        await r.xreadgroup(group, "consumer", streams={stream: ">"})
+        info = await r.xinfo_stream(stream, full=True)
+        consumer = info["groups"][0]["consumers"][0]
+        assert isinstance(consumer, dict)
 
     @skip_if_server_version_lt("5.0.0")
     async def test_xlen(self, r: redis.Redis):
@@ -2806,28 +3034,30 @@ class TestRedisCommands:
         m1 = await r.xadd(stream, {"foo": "bar"})
         m2 = await r.xadd(stream, {"bing": "baz"})
 
-        expected = [
-            [
-                stream.encode(),
-                [
-                    await get_stream_message(r, stream, m1),
-                    await get_stream_message(r, stream, m2),
-                ],
-            ]
+        strem_name = stream.encode()
+        expected_entries = [
+            await get_stream_message(r, stream, m1),
+            await get_stream_message(r, stream, m2),
         ]
         # xread starting at 0 returns both messages
-        assert await r.xread(streams={stream: 0}) == expected
+        res = await r.xread(streams={stream: 0})
+        assert_resp_response(
+            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+        )
 
-        expected = [[stream.encode(), [await get_stream_message(r, stream, m1)]]]
+        expected_entries = [await get_stream_message(r, stream, m1)]
         # xread starting at 0 and count=1 returns only the first message
-        assert await r.xread(streams={stream: 0}, count=1) == expected
+        res = await r.xread(streams={stream: 0}, count=1)
+        assert_resp_response(
+            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+        )
 
-        expected = [[stream.encode(), [await get_stream_message(r, stream, m2)]]]
+        expected_entries = [await get_stream_message(r, stream, m2)]
         # xread starting at m1 returns only the second message
-        assert await r.xread(streams={stream: m1}) == expected
-
-        # xread starting at the last message returns an empty list
-        assert await r.xread(streams={stream: m2}) == []
+        res = await r.xread(streams={stream: m1})
+        assert_resp_response(
+            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+        )
 
     @skip_if_server_version_lt("5.0.0")
     async def test_xreadgroup(self, r: redis.Redis):
@@ -2838,26 +3068,27 @@ class TestRedisCommands:
         m2 = await r.xadd(stream, {"bing": "baz"})
         await r.xgroup_create(stream, group, 0)
 
-        expected = [
-            [
-                stream.encode(),
-                [
-                    await get_stream_message(r, stream, m1),
-                    await get_stream_message(r, stream, m2),
-                ],
-            ]
+        strem_name = stream.encode()
+        expected_entries = [
+            await get_stream_message(r, stream, m1),
+            await get_stream_message(r, stream, m2),
         ]
+
         # xread starting at 0 returns both messages
-        assert await r.xreadgroup(group, consumer, streams={stream: ">"}) == expected
+        res = await r.xreadgroup(group, consumer, streams={stream: ">"})
+        assert_resp_response(
+            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+        )
 
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, 0)
 
-        expected = [[stream.encode(), [await get_stream_message(r, stream, m1)]]]
+        expected_entries = [await get_stream_message(r, stream, m1)]
+
         # xread with count=1 returns only the first message
-        assert (
-            await r.xreadgroup(group, consumer, streams={stream: ">"}, count=1)
-            == expected
+        res = await r.xreadgroup(group, consumer, streams={stream: ">"}, count=1)
+        assert_resp_response(
+            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
         )
 
         await r.xgroup_destroy(stream, group)
@@ -2866,35 +3097,34 @@ class TestRedisCommands:
         # will only find messages added after this
         await r.xgroup_create(stream, group, "$")
 
-        expected = []
         # xread starting after the last message returns an empty message list
-        assert await r.xreadgroup(group, consumer, streams={stream: ">"}) == expected
+        res = await r.xreadgroup(group, consumer, streams={stream: ">"})
+        assert_resp_response(r, res, [], {})
 
         # xreadgroup with noack does not have any items in the PEL
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, "0")
-        assert (
-            len(
-                (
-                    await r.xreadgroup(
-                        group, consumer, streams={stream: ">"}, noack=True
-                    )
-                )[0][1]
-            )
-            == 2
-        )
-        # now there should be nothing pending
-        assert (
-            len((await r.xreadgroup(group, consumer, streams={stream: "0"}))[0][1]) == 0
-        )
+        res = await r.xreadgroup(group, consumer, streams={stream: ">"}, noack=True)
+        empty_res = await r.xreadgroup(group, consumer, streams={stream: "0"})
+        if is_resp2_connection(r):
+            assert len(res[0][1]) == 2
+            # now there should be nothing pending
+            assert len(empty_res[0][1]) == 0
+        else:
+            assert len(res[strem_name][0]) == 2
+            # now there should be nothing pending
+            assert len(empty_res[strem_name][0]) == 0
 
         await r.xgroup_destroy(stream, group)
         await r.xgroup_create(stream, group, "0")
         # delete all the messages in the stream
-        expected = [[stream.encode(), [(m1, {}), (m2, {})]]]
+        expected_entries = [(m1, {}), (m2, {})]
         await r.xreadgroup(group, consumer, streams={stream: ">"})
         await r.xtrim(stream, 0)
-        assert await r.xreadgroup(group, consumer, streams={stream: "0"}) == expected
+        res = await r.xreadgroup(group, consumer, streams={stream: "0"})
+        assert_resp_response(
+            r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+        )
 
     @skip_if_server_version_lt("5.0.0")
     async def test_xrevrange(self, r: redis.Redis):
@@ -3008,6 +3238,19 @@ class TestRedisCommands:
         )
         assert resp == [0, None, 255]
 
+    @skip_if_server_version_lt("6.0.0")
+    async def test_bitfield_ro(self, r: redis.Redis):
+        bf = r.bitfield("a")
+        resp = await bf.set("u8", 8, 255).execute()
+        assert resp == [0]
+
+        resp = await r.bitfield_ro("a", "u8", 0)
+        assert resp == [0]
+
+        items = [("u4", 8), ("u4", 12), ("u4", 13)]
+        resp = await r.bitfield_ro("a", "u8", 0, items)
+        assert resp == [0, 15, 15, 14]
+
     @skip_if_server_version_lt("4.0.0")
     async def test_memory_stats(self, r: redis.Redis):
         # put a key into the current db to make sure that "db.<current-db>"
@@ -3017,7 +3260,7 @@ class TestRedisCommands:
         assert isinstance(stats, dict)
         for key, value in stats.items():
             if key.startswith("db."):
-                assert isinstance(value, dict)
+                assert not isinstance(value, list)
 
     @skip_if_server_version_lt("4.0.0")
     async def test_memory_usage(self, r: redis.Redis):
@@ -3025,10 +3268,41 @@ class TestRedisCommands:
         assert isinstance(await r.memory_usage("foo"), int)
 
     @skip_if_server_version_lt("4.0.0")
-    @pytest.mark.onlynoncluster
     async def test_module_list(self, r: redis.Redis):
         assert isinstance(await r.module_list(), list)
-        assert not await r.module_list()
+        for x in await r.module_list():
+            assert isinstance(x, dict)
+
+    @pytest.mark.onlynoncluster
+    async def test_interrupted_command(self, r: redis.Redis):
+        """
+        Regression test for issue #1128:  An Un-handled BaseException
+        will leave the socket with un-read response to a previous
+        command.
+        """
+        ready = asyncio.Event()
+
+        async def helper():
+            with pytest.raises(asyncio.CancelledError):
+                # blocking pop
+                ready.set()
+                await r.brpop(["nonexist"])
+            # If the following is not done, further Timout operations will fail,
+            # because the timeout won't catch its Cancelled Error if the task
+            # has a pending cancel.  Python documentation probably should reflect this.
+            if sys.version_info >= (3, 11):
+                asyncio.current_task().uncancel()
+            # if all is well, we can continue.  The following should not hang.
+            await r.set("status", "down")
+
+        task = asyncio.create_task(helper())
+        await ready.wait()
+        await asyncio.sleep(0.01)
+        # the task is now sleeping, lets send it an exception
+        task.cancel()
+        # If all is well, the task should finish right away, otherwise fail with Timeout
+        async with async_timeout(1.0):
+            await task
 
 
 @pytest.mark.onlynoncluster

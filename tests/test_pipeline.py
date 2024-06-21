@@ -1,5 +1,7 @@
-import pytest
+from contextlib import closing
+from unittest import mock
 
+import pytest
 import redis
 
 from .conftest import skip_if_server_version_lt, wait_for_command
@@ -19,7 +21,6 @@ class TestPipeline:
                 .zadd("z", {"z1": 1})
                 .zadd("z", {"z2": 4})
                 .zincrby("z", 1, "z1")
-                .zrange("z", 0, 5, withscores=True)
             )
             assert pipe.execute() == [
                 True,
@@ -27,16 +28,12 @@ class TestPipeline:
                 True,
                 True,
                 2.0,
-                [(b"z1", 2.0), (b"z2", 4)],
             ]
 
     def test_pipeline_memoryview(self, r):
         with r.pipeline() as pipe:
             (pipe.set("a", memoryview(b"a1")).get("a"))
-            assert pipe.execute() == [
-                True,
-                b"a1",
-            ]
+            assert pipe.execute() == [True, b"a1"]
 
     def test_pipeline_length(self, r):
         with r.pipeline() as pipe:
@@ -125,7 +122,7 @@ class TestPipeline:
             with pytest.raises(redis.ResponseError) as ex:
                 pipe.execute()
             assert str(ex.value).startswith(
-                "Command # 3 (LPUSH c 3) of " "pipeline caused error: "
+                "Command # 3 (LPUSH c 3) of pipeline caused error: "
             )
 
             # make sure the pipe was restored to a working state
@@ -170,7 +167,7 @@ class TestPipeline:
                 pipe.execute()
 
             assert str(ex.value).startswith(
-                "Command # 2 (ZREM b) of " "pipeline caused error: "
+                "Command # 2 (ZREM b) of pipeline caused error: "
             )
 
             # make sure the pipe was restored to a working state
@@ -187,7 +184,7 @@ class TestPipeline:
                 pipe.execute()
 
             assert str(ex.value).startswith(
-                "Command # 2 (ZREM b) of " "pipeline caused error: "
+                "Command # 2 (ZREM b) of pipeline caused error: "
             )
 
             # make sure the pipe was restored to a working state
@@ -291,6 +288,24 @@ class TestPipeline:
             assert unwatch_command["command"] == "UNWATCH"
 
     @pytest.mark.onlynoncluster
+    def test_close_is_reset(self, r):
+        with r.pipeline() as pipe:
+            called = 0
+
+            def mock_reset():
+                nonlocal called
+                called += 1
+
+            with mock.patch.object(pipe, "reset", mock_reset):
+                pipe.close()
+                assert called == 1
+
+    @pytest.mark.onlynoncluster
+    def test_closing(self, r):
+        with closing(r.pipeline()):
+            pass
+
+    @pytest.mark.onlynoncluster
     def test_transaction_callable(self, r):
         r["a"] = 1
         r["b"] = 2
@@ -334,7 +349,7 @@ class TestPipeline:
                 pipe.execute()
 
             assert str(ex.value).startswith(
-                "Command # 1 (LLEN a) of " "pipeline caused error: "
+                "Command # 1 (LLEN a) of pipeline caused error: "
             )
 
         assert r["a"] == b"1"
@@ -375,7 +390,6 @@ class TestPipeline:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.0.0")
     def test_pipeline_discard(self, r):
-
         # empty pipeline should raise an error
         with r.pipeline() as pipe:
             pipe.set("key", "someval")

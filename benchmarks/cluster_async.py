@@ -206,8 +206,8 @@ async def main(loop, gather=None):
         host=host,
         port=port,
         password=password,
-        max_connections=2 ** 31,
-        max_connections_per_node=2 ** 31,
+        max_connections=2**31,
+        max_connections_per_node=2**31,
         readonly=False,
         reinitialize_steps=count,
         skip_full_coverage_check=True,
@@ -224,7 +224,7 @@ async def main(loop, gather=None):
         password=password,
         state_reload_interval=count,
         idle_connection_timeout=count,
-        pool_maxsize=2 ** 31,
+        pool_maxsize=2**31,
     )
     print(f"{loop} {gather} {await warmup(aiorc)} aioredis-cluster")
     print(await run(aiorc, gather=gather))
@@ -238,7 +238,7 @@ async def main(loop, gather=None):
         reinitialize_steps=count,
         read_from_replicas=False,
         decode_responses=False,
-        max_connections=2 ** 31,
+        max_connections=2**31,
     ) as rca:
         print(f"{loop} {gather} {await warmup(rca)} redispy")
         print(await run(rca, gather=gather))
@@ -249,8 +249,8 @@ if __name__ == "__main__":
     port = 16379
     password = None
 
-    count = 1000
-    size = 16
+    count = 10000
+    size = 256
 
     asyncio.run(main("asyncio"))
     asyncio.run(main("asyncio", gather=False))

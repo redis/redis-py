@@ -2,15 +2,15 @@
 
 ## Introduction
 
-First off, thank you for considering contributing to redis-py. We value
-community contributions!
+We appreciate your interest in considering contributing to redis-py.
+Community contributions mean a lot to us.
 
-## Contributions We Need
+## Contributions we need
 
-You may already know what you want to contribute \-- a fix for a bug you
+You may already know how you'd like to contribute, whether it's a fix for a bug you
 encountered, or a new feature your team wants to use.
 
-If you don't know what to contribute, keep an open mind! Improving
+If you don't know where to start, consider improving
 documentation, bug triaging, and writing tutorials are all examples of
 helpful contributions that mean less work for you.
 
@@ -38,8 +38,9 @@ Here's how to get started with your code contribution:
         a.  python -m venv .venv
         b.  source .venv/bin/activate
         c.  pip install -r dev_requirements.txt
+        c.  pip install -r requirements.txt
 
-4.  If you need a development environment, run `invoke devenv`
+4.  If you need a development environment, run `invoke devenv`. Note: this relies on docker-compose to build environments, and assumes that you have a version supporting [docker profiles](https://docs.docker.com/compose/profiles/).
 5.  While developing, make sure the tests pass by running `invoke tests`
 6.  If you like the change and think the project could use it, send a
     pull request
@@ -59,7 +60,6 @@ can execute docker and its various commands.
 -   Three sentinel Redis nodes
 -   A redis cluster
 -   An stunnel docker, fronting the master Redis node
--   A Redis node, running unstable - the latest redis
 
 The replica node, is a replica of the master node, using the
 [leader-follower replication](https://redis.io/topics/replication)
@@ -78,15 +78,21 @@ It is possible to run only Redis client tests (with cluster mode disabled) by
 using `invoke standalone-tests`; similarly, RedisCluster tests can be run by using
 `invoke cluster-tests`.
 
-Each run of tox starts and stops the various dockers required. Sometimes
+Each run of tests starts and stops the various dockers required. Sometimes
 things get stuck, an `invoke clean` can help.
 
-Continuous Integration uses these same wrappers to run all of these
-tests against multiple versions of python. Feel free to test your
-changes against all the python versions supported, as declared by the
-tox.ini file (eg: tox -e py39). If you have the various python versions
-on your desktop, you can run *tox* by itself, to test all supported
-versions.
+## Documentation
+
+If relevant, update the code documentation, via docstrings, or in `/docs`.
+
+You can check how the documentation looks locally by running `invoke build-docs`
+and loading the generated HTML files in a browser.
+
+Historically there is a mix of styles in the docstrings, but the preferred way
+of documenting code is by applying the
+[Google style](https://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html).
+Type hints should be added according to PEP484, and should not be repeated in
+the docstrings.
 
 ### Docker Tips
 
@@ -97,10 +103,6 @@ To get a bash shell inside of a container:
 
 `$ docker run -it <service> /bin/bash`
 
-**Note**: The term \"service\" refers to the \"services\" defined in the
-`tox.ini` file at the top of the repo: \"master\", \"replicaof\",
-\"sentinel_1\", \"sentinel_2\", \"sentinel_3\".
-
 Containers run a minimal Debian image that probably lacks tools you want
 to use. To install packages, first get a bash session (see previous tip)
 and then run:
@@ -110,23 +112,6 @@ and then run:
 You can see the logging output of a containers like this:
 
 `$ docker logs -f <service>`
-
-The command make test runs all tests in all tested Python
-environments. To run the tests in a single environment, like Python 3.9,
-use a command like this:
-
-`$ docker-compose run test tox -e py39 -- --redis-url=redis://master:6379/9`
-
-Here, the flag `-e py39` runs tests against the Python 3.9 tox
-environment. And note from the example that whenever you run tests like
-this, instead of using make test, you need to pass
-`-- --redis-url=redis://master:6379/9`. This points the tests at the
-\"master\" container.
-
-Our test suite uses `pytest`. You can run a specific test suite against
-a specific Python version like this:
-
-`$ docker-compose run test tox -e py36 -- --redis-url=redis://master:6379/9 tests/test_commands.py`
 
 ### Troubleshooting
 
@@ -166,19 +151,19 @@ When filing an issue, make sure to answer these five questions:
 4.  What did you expect to see?
 5.  What did you see instead?
 
-## How to Suggest a Feature or Enhancement
+## Suggest a feature or enhancement
 
 If you'd like to contribute a new feature, make sure you check our
 issue list to see if someone has already proposed it. Work may already
-be under way on the feature you want -- or we may have rejected a
+be underway on the feature you want or we may have rejected a
 feature like it already.
 
 If you don't see anything, open a new issue that describes the feature
 you would like and how it should work.
 
-## Code Review Process
+## Code review process
 
-The core team looks at Pull Requests on a regular basis. We will give
-feedback as as soon as possible. After feedback, we expect a response
+The core team regularly looks at pull requests. We will provide
+feedback as soon as possible. After receiving our feedback, please respond
 within two weeks. After that time, we may close your PR if it isn't
 showing any activity.

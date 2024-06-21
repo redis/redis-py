@@ -4,14 +4,17 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read  #  to fetch code (actions/checkout)
+
 jobs:
 
   build_and_package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: install python
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@v5
         with:
           python-version: 3.9
       - name: Install dev tools
@@ -23,6 +26,10 @@ jobs:
         run: |
           python setup.py build
           python setup.py sdist bdist_wheel
+
+      - name: Basic package test prior to upload
+        run: |
+          twine check dist/*
 
       - name: Publish to Pypi
         uses: pypa/gh-action-pypi-publish@release/v1

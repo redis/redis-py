@@ -3,7 +3,7 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to redis-py's documentation!
+redis-py - Python Client for Redis
 ====================================
 
 Getting Started
@@ -64,11 +64,16 @@ Module Documentation
 .. toctree::
    :maxdepth: 1
 
-   backoff
    connections
+   clustering
    exceptions
+   backoff
    lock
    retry
+   lua_scripting
+   opentelemetry
+   resp3_features
+   advanced_features
    examples
 
 Contributing
@@ -82,4 +87,4 @@ Contributing
 License
 *******
 
-This projectis licensed under the `MIT license <https://github.com/redis/redis-py/blob/master/LICENSE>`_.
+This project is licensed under the `MIT license <https://github.com/redis/redis-py/blob/master/LICENSE>`_.

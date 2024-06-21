@@ -1,5 +1,6 @@
 import random
 import weakref
+from typing import Optional
 
 from redis.client import Redis
 from redis.commands import SentinelCommands
@@ -23,7 +24,10 @@ class SentinelManagedConnection(Connection):
 
     def __repr__(self):
         pool = self.connection_pool
-        s = f"{type(self).__name__}<service={pool.service_name}%s>"
+        s = (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"(service={pool.service_name}%s)>"
+        )
         if self.host:
             host_info = f",host={self.host},port={self.port}"
             s = s % host_info
@@ -51,14 +55,21 @@ class SentinelManagedConnection(Connection):
             raise SlaveNotFoundError  # Never be here
 
     def connect(self):
-        return self.retry.call_with_retry(
-            self._connect_retry,
-            lambda error: None,
-        )
+        return self.retry.call_with_retry(self._connect_retry, lambda error: None)
 
-    def read_response(self, disable_decoding=False):
+    def read_response(
+        self,
+        disable_decoding=False,
+        *,
+        disconnect_on_error: Optional[bool] = False,
+        push_request: Optional[bool] = False,
+    ):
         try:
-            return super().read_response(disable_decoding=disable_decoding)
+            return super().read_response(
+                disable_decoding=disable_decoding,
+                disconnect_on_error=disconnect_on_error,
+                push_request=push_request,
+            )
         except ReadOnlyError:
             if self.connection_pool.is_master:
                 # When talking to a master, a ReadOnlyError when likely
@@ -75,56 +86,38 @@ class SentinelManagedSSLConnection(SentinelManagedConnection, SSLConnection):
     pass
 
 
-class SentinelConnectionPool(ConnectionPool):
-    """
-    Sentinel backed connection pool.
-
-    If ``check_connection`` flag is set to True, SentinelManagedConnection
-    sends a PING command right after establishing the connection.
-    """
-
-    def __init__(self, service_name, sentinel_manager, **kwargs):
-        kwargs["connection_class"] = kwargs.get(
-            "connection_class",
-            SentinelManagedSSLConnection
-            if kwargs.pop("ssl", False)
-            else SentinelManagedConnection,
-        )
-        self.is_master = kwargs.pop("is_master", True)
-        self.check_connection = kwargs.pop("check_connection", False)
-        super().__init__(**kwargs)
-        self.connection_kwargs["connection_pool"] = weakref.proxy(self)
+class SentinelConnectionPoolProxy:
+    def __init__(
+        self,
+        connection_pool,
+        is_master,
+        check_connection,
+        service_name,
+        sentinel_manager,
+    ):
+        self.connection_pool_ref = weakref.ref(connection_pool)
+        self.is_master = is_master
+        self.check_connection = check_connection
         self.service_name = service_name
         self.sentinel_manager = sentinel_manager
-
-    def __repr__(self):
-        role = "master" if self.is_master else "slave"
-        return f"{type(self).__name__}<service={self.service_name}({role})"
+        self.reset()
 
     def reset(self):
-        super().reset()
         self.master_address = None
         self.slave_rr_counter = None
 
-    def owns_connection(self, connection):
-        check = not self.is_master or (
-            self.is_master and self.master_address == (connection.host, connection.port)
-        )
-        parent = super()
-        return check and parent.owns_connection(connection)
-
     def get_master_address(self):
         master_address = self.sentinel_manager.discover_master(self.service_name)
-        if self.is_master:
-            if self.master_address != master_address:
-                self.master_address = master_address
-                # disconnect any idle connections so that they reconnect
-                # to the new master the next time that they are used.
-                self.disconnect(inuse_connections=False)
+        if self.is_master and self.master_address != master_address:
+            self.master_address = master_address
+            # disconnect any idle connections so that they reconnect
+            # to the new master the next time that they are used.
+            connection_pool = self.connection_pool_ref()
+            if connection_pool is not None:
+                connection_pool.disconnect(inuse_connections=False)
         return master_address
 
     def rotate_slaves(self):
-        "Round-robin slave balancer"
         slaves = self.sentinel_manager.discover_slaves(self.service_name)
         if slaves:
             if self.slave_rr_counter is None:
@@ -139,6 +132,67 @@ class SentinelConnectionPool(ConnectionPool):
         except MasterNotFoundError:
             pass
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
+
+
+class SentinelConnectionPool(ConnectionPool):
+    """
+    Sentinel backed connection pool.
+
+    If ``check_connection`` flag is set to True, SentinelManagedConnection
+    sends a PING command right after establishing the connection.
+    """
+
+    def __init__(self, service_name, sentinel_manager, **kwargs):
+        kwargs["connection_class"] = kwargs.get(
+            "connection_class",
+            (
+                SentinelManagedSSLConnection
+                if kwargs.pop("ssl", False)
+                else SentinelManagedConnection
+            ),
+        )
+        self.is_master = kwargs.pop("is_master", True)
+        self.check_connection = kwargs.pop("check_connection", False)
+        self.proxy = SentinelConnectionPoolProxy(
+            connection_pool=self,
+            is_master=self.is_master,
+            check_connection=self.check_connection,
+            service_name=service_name,
+            sentinel_manager=sentinel_manager,
+        )
+        super().__init__(**kwargs)
+        self.connection_kwargs["connection_pool"] = self.proxy
+        self.service_name = service_name
+        self.sentinel_manager = sentinel_manager
+
+    def __repr__(self):
+        role = "master" if self.is_master else "slave"
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"(service={self.service_name}({role}))>"
+        )
+
+    def reset(self):
+        super().reset()
+        self.proxy.reset()
+
+    @property
+    def master_address(self):
+        return self.proxy.master_address
+
+    def owns_connection(self, connection):
+        check = not self.is_master or (
+            self.is_master and self.master_address == (connection.host, connection.port)
+        )
+        parent = super()
+        return check and parent.owns_connection(connection)
+
+    def get_master_address(self):
+        return self.proxy.get_master_address()
+
+    def rotate_slaves(self):
+        "Round-robin slave balancer"
+        return self.proxy.rotate_slaves()
 
 
 class Sentinel(SentinelCommands):
@@ -198,26 +252,28 @@ class Sentinel(SentinelCommands):
         once - If set to True, then execute the resulting command on a single
         node at random, rather than across the entire sentinel cluster.
         """
+        kwargs.pop("keys", None)  # the keys are used only for client side caching
         once = bool(kwargs.get("once", False))
         if "once" in kwargs.keys():
             kwargs.pop("once")
 
         if once:
+            random.choice(self.sentinels).execute_command(*args, **kwargs)
+        else:
             for sentinel in self.sentinels:
                 sentinel.execute_command(*args, **kwargs)
-        else:
-            random.choice(self.sentinels).execute_command(*args, **kwargs)
         return True
 
     def __repr__(self):
         sentinel_addresses = []
         for sentinel in self.sentinels:
             sentinel_addresses.append(
-                "{host}:{port}".format_map(
-                    sentinel.connection_pool.connection_kwargs,
-                )
+                "{host}:{port}".format_map(sentinel.connection_pool.connection_kwargs)
             )
-        return f'{type(self).__name__}<sentinels=[{",".join(sentinel_addresses)}]>'
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f'(sentinels=[{",".join(sentinel_addresses)}])>'
+        )
 
     def check_master_state(self, state, service_name):
         if not state["is_master"] or state["is_sdown"] or state["is_odown"]:
@@ -235,10 +291,12 @@ class Sentinel(SentinelCommands):
         Returns a pair (address, port) or raises MasterNotFoundError if no
         master is found.
         """
+        collected_errors = list()
         for sentinel_no, sentinel in enumerate(self.sentinels):
             try:
                 masters = sentinel.sentinel_masters()
-            except (ConnectionError, TimeoutError):
+            except (ConnectionError, TimeoutError) as e:
+                collected_errors.append(f"{sentinel} - {e!r}")
                 continue
             state = masters.get(service_name)
             if state and self.check_master_state(state, service_name):
@@ -248,7 +306,11 @@ class Sentinel(SentinelCommands):
                     self.sentinels[0],
                 )
                 return state["ip"], state["port"]
-        raise MasterNotFoundError(f"No master found for {service_name!r}")
+
+        error_info = ""
+        if len(collected_errors) > 0:
+            error_info = f" : {', '.join(collected_errors)}"
+        raise MasterNotFoundError(f"No master found for {service_name!r}{error_info}")
 
     def filter_slaves(self, slaves):
         "Remove slaves that are in an ODOWN or SDOWN state"
@@ -303,10 +365,8 @@ class Sentinel(SentinelCommands):
         kwargs["is_master"] = True
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
+        return redis_class.from_pool(
+            connection_pool_class(service_name, self, **connection_kwargs)
         )
 
     def slave_for(
@@ -336,8 +396,6 @@ class Sentinel(SentinelCommands):
         kwargs["is_master"] = False
         connection_kwargs = dict(self.connection_kwargs)
         connection_kwargs.update(kwargs)
-        return redis_class(
-            connection_pool=connection_pool_class(
-                service_name, self, **connection_kwargs
-            )
+        return redis_class.from_pool(
+            connection_pool_class(service_name, self, **connection_kwargs)
         )

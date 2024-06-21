@@ -1,11 +1,24 @@
+import logging
 from contextlib import contextmanager
+from functools import wraps
+from typing import Any, Dict, Mapping, Union
 
 try:
     import hiredis  # noqa
 
-    HIREDIS_AVAILABLE = True
+    # Only support Hiredis >= 1.0:
+    HIREDIS_AVAILABLE = not hiredis.__version__.startswith("0.")
+    HIREDIS_PACK_AVAILABLE = hasattr(hiredis, "pack_command")
 except ImportError:
     HIREDIS_AVAILABLE = False
+    HIREDIS_PACK_AVAILABLE = False
+
+try:
+    import ssl  # noqa
+
+    SSL_AVAILABLE = True
+except ImportError:
+    SSL_AVAILABLE = False
 
 try:
     import cryptography  # noqa
@@ -13,6 +26,8 @@ try:
     CRYPTOGRAPHY_AVAILABLE = True
 except ImportError:
     CRYPTOGRAPHY_AVAILABLE = False
+
+from importlib import metadata
 
 
 def from_url(url, **kwargs):
@@ -34,7 +49,7 @@ def pipeline(redis_obj):
     p.execute()
 
 
-def str_if_bytes(value):
+def str_if_bytes(value: Union[str, bytes]) -> str:
     return (
         value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
     )
@@ -44,7 +59,7 @@ def safe_str(value):
     return str(str_if_bytes(value))
 
 
-def dict_merge(*dicts):
+def dict_merge(*dicts: Mapping[str, Any]) -> Dict[str, Any]:
     """
     Merge all provided dicts into 1 dict.
     *dicts : `dict`
@@ -78,3 +93,51 @@ def merge_result(command, res):
             result.add(value)
 
     return list(result)
+
+
+def warn_deprecated(name, reason="", version="", stacklevel=2):
+    import warnings
+
+    msg = f"Call to deprecated {name}."
+    if reason:
+        msg += f" ({reason})"
+    if version:
+        msg += f" -- Deprecated since version {version}."
+    warnings.warn(msg, category=DeprecationWarning, stacklevel=stacklevel)
+
+
+def deprecated_function(reason="", version="", name=None):
+    """
+    Decorator to mark a function as deprecated.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            warn_deprecated(name or func.__name__, reason, version, stacklevel=3)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def _set_info_logger():
+    """
+    Set up a logger that log info logs to stdout.
+    (This is used by the default push response handler)
+    """
+    if "push_response" not in logging.root.manager.loggerDict.keys():
+        logger = logging.getLogger("push_response")
+        logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
+        logger.addHandler(handler)
+
+
+def get_lib_version():
+    try:
+        libver = metadata.version("redis")
+    except metadata.PackageNotFoundError:
+        libver = "99.99.99"
+    return libver

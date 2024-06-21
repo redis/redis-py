@@ -1,5 +1,4 @@
 import asyncio
-import sys
 import threading
 import uuid
 from types import SimpleNamespace
@@ -8,7 +7,7 @@ from typing import TYPE_CHECKING, Awaitable, Optional, Union
 from redis.exceptions import LockError, LockNotOwnedError
 
 if TYPE_CHECKING:
-    from redis.asyncio import Redis
+    from redis.asyncio import Redis, RedisCluster
 
 
 class Lock:
@@ -78,7 +77,7 @@ class Lock:
 
     def __init__(
         self,
-        redis: "Redis",
+        redis: Union["Redis", "RedisCluster"],
         name: Union[str, bytes, memoryview],
         timeout: Optional[float] = None,
         sleep: float = 0.1,
@@ -186,16 +185,15 @@ class Lock:
         object with the default encoding. If a token isn't specified, a UUID
         will be generated.
         """
-        if sys.version_info[0:2] != (3, 6):
-            loop = asyncio.get_running_loop()
-        else:
-            loop = asyncio.get_event_loop()
-
         sleep = self.sleep
         if token is None:
             token = uuid.uuid1().hex.encode()
         else:
-            encoder = self.redis.connection_pool.get_encoder()
+            try:
+                encoder = self.redis.connection_pool.get_encoder()
+            except AttributeError:
+                # Cluster
+                encoder = self.redis.get_encoder()
             token = encoder.encode(token)
         if blocking is None:
             blocking = self.blocking
@@ -203,14 +201,14 @@ class Lock:
             blocking_timeout = self.blocking_timeout
         stop_trying_at = None
         if blocking_timeout is not None:
-            stop_trying_at = loop.time() + blocking_timeout
+            stop_trying_at = asyncio.get_running_loop().time() + blocking_timeout
         while True:
             if await self.do_acquire(token):
                 self.local.token = token
                 return True
             if not blocking:
                 return False
-            next_try_at = loop.time() + sleep
+            next_try_at = asyncio.get_running_loop().time() + sleep
             if stop_trying_at is not None and next_try_at > stop_trying_at:
                 return False
             await asyncio.sleep(sleep)
@@ -239,7 +237,11 @@ class Lock:
         # need to always compare bytes to bytes
         # TODO: this can be simplified when the context manager is finished
         if stored_token and not isinstance(stored_token, bytes):
-            encoder = self.redis.connection_pool.get_encoder()
+            try:
+                encoder = self.redis.connection_pool.get_encoder()
+            except AttributeError:
+                # Cluster
+                encoder = self.redis.get_encoder()
             stored_token = encoder.encode(stored_token)
         return self.local.token is not None and stored_token == self.local.token
 
@@ -257,7 +259,7 @@ class Lock:
                 keys=[self.name], args=[expected_token], client=self.redis
             )
         ):
-            raise LockNotOwnedError("Cannot release a lock" " that's no longer owned")
+            raise LockNotOwnedError("Cannot release a lock that's no longer owned")
 
     def extend(
         self, additional_time: float, replace_ttl: bool = False
@@ -287,7 +289,7 @@ class Lock:
                 client=self.redis,
             )
         ):
-            raise LockNotOwnedError("Cannot extend a lock that's" " no longer owned")
+            raise LockNotOwnedError("Cannot extend a lock that's no longer owned")
         return True
 
     def reacquire(self) -> Awaitable[bool]:
@@ -307,5 +309,5 @@ class Lock:
                 keys=[self.name], args=[self.local.token, timeout], client=self.redis
             )
         ):
-            raise LockNotOwnedError("Cannot reacquire a lock that's" " no longer owned")
+            raise LockNotOwnedError("Cannot reacquire a lock that's no longer owned")
         return True

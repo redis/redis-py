@@ -1,7 +1,7 @@
 import pytest
-
 import redis
 from redis.connection import Connection
+from redis.utils import HIREDIS_PACK_AVAILABLE
 
 from .conftest import _get_client
 
@@ -13,11 +13,7 @@ class TestEncoding:
 
     @pytest.fixture()
     def r_no_decode(self, request):
-        return _get_client(
-            redis.Redis,
-            request=request,
-            decode_responses=False,
-        )
+        return _get_client(redis.Redis, request=request, decode_responses=False)
 
     def test_simple_encoding(self, r_no_decode):
         unicode_string = chr(3456) + "abcd" + chr(3421)
@@ -79,6 +75,10 @@ class TestEncodingErrors:
         assert r.get("a") == "foo\ufffd"
 
 
+@pytest.mark.skipif(
+    HIREDIS_PACK_AVAILABLE,
+    reason="Packing via hiredis does not preserve memoryviews",
+)
 class TestMemoryviewsAreNotPacked:
     def test_memoryviews_are_not_packed(self):
         c = Connection()
@@ -94,7 +94,7 @@ class TestMemoryviewsAreNotPacked:
 class TestCommandsAreNotEncoded:
     @pytest.fixture()
     def r(self, request):
-        return _get_client(redis.Redis, request=request, encoding="utf-16")
+        return _get_client(redis.Redis, request=request, encoding="utf-8")
 
     def test_basic_command(self, r):
         r.set("hello", "world")

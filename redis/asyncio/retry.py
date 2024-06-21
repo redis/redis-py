@@ -35,6 +35,14 @@ class Retry:
         self._retries = retries
         self._supported_errors = supported_errors
 
+    def update_supported_errors(self, specified_errors: list):
+        """
+        Updates the supported errors with the specified error types
+        """
+        self._supported_errors = tuple(
+            set(self._supported_errors + tuple(specified_errors))
+        )
+
     async def call_with_retry(
         self, do: Callable[[], Awaitable[T]], fail: Callable[[RedisError], Any]
     ) -> T:

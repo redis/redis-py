@@ -14,23 +14,26 @@ These are the commands for interacting with the `RedisBloom module <https://redi
 .. code-block:: python
 
     import redis
-    filter = redis.bf().create("bloom", 0.01, 1000)
-    filter.add("bloom", "foo")
+    r = redis.Redis()
+    r.bf().create("bloom", 0.01, 1000)
+    r.bf().add("bloom", "foo")
 
 **Create and add to a cuckoo filter**
 
 .. code-block:: python
 
     import redis
-    filter = redis.cf().create("cuckoo", 1000)
-    filter.add("cuckoo", "filter")
+    r = redis.Redis()
+    r.cf().create("cuckoo", 1000)
+    r.cf().add("cuckoo", "filter")
 
 **Create Count-Min Sketch and get information**
 
 .. code-block:: python
 
     import redis
-    r = redis.cms().initbydim("dim", 1000, 5)
+    r = redis.Redis()
+    r.cms().initbydim("dim", 1000, 5)
     r.cms().incrby("dim", ["foo"], [5])
     r.cms().info("dim")
 
@@ -39,8 +42,9 @@ These are the commands for interacting with the `RedisBloom module <https://redi
 .. code-block:: python
 
     import redis
-    r = redis.topk().reserve("mytopk", 3, 50, 4, 0.9)
-    info = r.topk().info("mytopk)
+    r = redis.Redis()
+    r.topk().reserve("mytopk", 3, 50, 4, 0.9)
+    r.topk().info("mytopk")
 
 .. automodule:: redis.commands.bf.commands
     :members: BFCommands, CFCommands, CMSCommands, TOPKCommands
@@ -91,7 +95,7 @@ These are the commands for interacting with the `RedisJSON module <https://redis
 
     import redis
     r = redis.Redis()
-    r.json().set("mykey", ".", {"hello": "world", "i am": ["a", "json", "object!"]}
+    r.json().set("mykey", ".", {"hello": "world", "i am": ["a", "json", "object!"]})
 
 Examples of how to combine search and json can be found `here <examples/search_json_examples.html>`_.
 
@@ -103,7 +107,8 @@ Examples of how to combine search and json can be found `here <examples/search_j
 RediSearch Commands
 *******************
 
-These are the commands for interacting with the `RediSearch module <https://redisearch.io>`_. Below is a brief example, as well as documentation on the commands themselves.
+These are the commands for interacting with the `RediSearch module <https://redisearch.io>`_. Below is a brief example, as well as documentation on the commands themselves. In the example
+below, an index named *my_index* is being created. When an index name is not specified, an index named *idx* is created.
 
 **Create a search index, and display its information**
 
@@ -113,8 +118,13 @@ These are the commands for interacting with the `RediSearch module <https://redi
     from redis.commands.search.field import TextField
 
     r = redis.Redis()
-    r.ft().create_index(TextField("play", weight=5.0), TextField("ball"))
-    print(r.ft().info())
+    index_name = "my_index"
+    schema = (
+        TextField("play", weight=5.0),
+        TextField("ball"),
+    )
+    r.ft(index_name).create_index(schema)
+    print(r.ft(index_name).info())
 
 
 .. automodule:: redis.commands.search.commands
@@ -134,7 +144,7 @@ These are the commands for interacting with the `RedisTimeSeries module <https:/
 
     import redis
     r = redis.Redis()
-    r.ts().create(2, retension_msecs=5)
+    r.ts().create(2, retention_msecs=5000)
 
 .. automodule:: redis.commands.timeseries.commands
     :members: TimeSeriesCommands

@@ -10,6 +10,7 @@
 # All configuration values have a default; values that are commented out
 # serve to show the default.
 
+import datetime
 import os
 import sys
 
@@ -30,11 +31,14 @@ extensions = [
     "nbsphinx",
     "sphinx_gallery.load_style",
     "sphinx.ext.autodoc",
-    "sphinx_autodoc_typehints",
-    "sphinx.ext.doctest",
     "sphinx.ext.viewcode",
     "sphinx.ext.autosectionlabel",
+    "sphinx.ext.napoleon",
 ]
+
+# Napoleon settings. We only accept Google-style docstrings.
+napoleon_google_docstring = True
+napoleon_numpy_docstring = False
 
 # AutosectionLabel settings.
 # Uses a <page>:<label> schema which doesn't work for duplicate sub-section
@@ -43,6 +47,7 @@ autosectionlabel_prefix_document = True
 autosectionlabel_maxdepth = 2
 
 # AutodocTypehints settings.
+autodoc_typehints = 'description'
 always_document_param_types = True
 typehints_defaults = "comma"
 
@@ -60,7 +65,8 @@ master_doc = "index"
 
 # General information about the project.
 project = "redis-py"
-copyright = "2021, Redis Inc"
+current_year = datetime.datetime.now().year
+copyright = f"{current_year}, Redis Inc"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -86,7 +92,7 @@ if version == "99.99.99":
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = ["_build", "**.ipynb_checkponts"]
+exclude_patterns = ["_build", "**.ipynb_checkpoints"]
 
 # The reST default role (used for this markup: `text`) to use for all
 # documents.
@@ -104,7 +110,7 @@ exclude_patterns = ["_build", "**.ipynb_checkponts"]
 # show_authors = False
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = "sphinx"
+pygments_style = "tango"
 
 # A list of ignored prefixes for module index sorting.
 # modindex_common_prefix = []
@@ -116,19 +122,28 @@ nitpicky = True
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-html_theme = "sphinx_rtd_theme"
+html_theme = "furo"
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
 html_theme_options = {
     "display_version": True,
-    "prev_next_buttons_location": "bottom",
-    "style_external_links": False,
-    # Toc options
-    "collapse_navigation": True,
-    "sticky_navigation": True,
-    "navigation_depth": 4,
+    "footer_icons": [
+        {
+            "name": "GitHub",
+            "url": "https://github.com/redis/redis-py",
+            "html": """
+            <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 16 16">
+                <path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path>
+            </svg>
+        """,
+            "class": "",
+        },
+    ],
+    "source_repository": "https://github.com/redis/redis-py/",
+    "source_branch": "master",
+    "source_directory": "docs/",
 }
 
 # Add any paths that contain custom themes here, relative to this directory.
@@ -143,7 +158,7 @@ html_theme_options = {
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
-# html_logo = None
+html_logo = "_static/logo-redis.svg"
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
@@ -153,7 +168,7 @@ html_theme_options = {
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ["_static"]
+html_static_path = ["_static", "images"]
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
@@ -278,4 +293,4 @@ texinfo_documents = [
 epub_title = "redis-py"
 epub_author = "Redis Inc"
 epub_publisher = "Redis Inc"
-epub_copyright = "2021, Redis Inc"
+epub_copyright = "2023, Redis Inc"

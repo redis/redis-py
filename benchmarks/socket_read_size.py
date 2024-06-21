@@ -1,12 +1,12 @@
 from base import Benchmark
 
-from redis.connection import HiredisParser, PythonParser
+from redis.connection import PythonParser, _HiredisParser
 
 
 class SocketReadBenchmark(Benchmark):
 
     ARGUMENTS = (
-        {"name": "parser", "values": [PythonParser, HiredisParser]},
+        {"name": "parser", "values": [PythonParser, _HiredisParser]},
         {
             "name": "value_size",
             "values": [10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000],

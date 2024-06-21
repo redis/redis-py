@@ -6,7 +6,7 @@ class TSInfo:
     """
     Hold information and statistics on the time-series.
     Can be created using ``tsinfo`` command
-    https://oss.redis.com/redistimeseries/commands/#tsinfo.
+    https://redis.io/docs/latest/commands/ts.info/
     """
 
     rules = []
@@ -57,18 +57,18 @@ class TSInfo:
             Policy that will define handling of duplicate samples.
 
         Can read more about on
-        https://oss.redis.com/redistimeseries/configuration/#duplicate_policy
+        https://redis.io/docs/latest/develop/data-types/timeseries/configuration/#duplicate_policy
         """
         response = dict(zip(map(nativestr, args[::2]), args[1::2]))
-        self.rules = response["rules"]
-        self.source_key = response["sourceKey"]
-        self.chunk_count = response["chunkCount"]
-        self.memory_usage = response["memoryUsage"]
-        self.total_samples = response["totalSamples"]
-        self.labels = list_to_dict(response["labels"])
-        self.retention_msecs = response["retentionTime"]
-        self.lastTimeStamp = response["lastTimestamp"]
-        self.first_time_stamp = response["firstTimestamp"]
+        self.rules = response.get("rules")
+        self.source_key = response.get("sourceKey")
+        self.chunk_count = response.get("chunkCount")
+        self.memory_usage = response.get("memoryUsage")
+        self.total_samples = response.get("totalSamples")
+        self.labels = list_to_dict(response.get("labels"))
+        self.retention_msecs = response.get("retentionTime")
+        self.last_timestamp = response.get("lastTimestamp")
+        self.first_timestamp = response.get("firstTimestamp")
         if "maxSamplesPerChunk" in response:
             self.max_samples_per_chunk = response["maxSamplesPerChunk"]
             self.chunk_size = (
@@ -80,3 +80,12 @@ class TSInfo:
             self.duplicate_policy = response["duplicatePolicy"]
             if type(self.duplicate_policy) == bytes:
                 self.duplicate_policy = self.duplicate_policy.decode()
+
+    def get(self, item):
+        try:
+            return self.__getitem__(item)
+        except AttributeError:
+            return None
+
+    def __getitem__(self, item):
+        return getattr(self, item)

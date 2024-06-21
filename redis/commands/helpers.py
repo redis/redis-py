@@ -1,9 +1,13 @@
 import copy
 import random
 import string
+from typing import List, Tuple
+
+import redis
+from redis.typing import KeysT, KeyT
 
 
-def list_or_args(keys, args):
+def list_or_args(keys: KeysT, args: Tuple[KeyT, ...]) -> List[KeyT]:
     # returns a single new list combining keys and args
     try:
         iter(keys)
@@ -60,6 +64,11 @@ def parse_list_to_dict(response):
     for i in range(0, len(response), 2):
         if isinstance(response[i], list):
             res["Child iterators"].append(parse_list_to_dict(response[i]))
+            try:
+                if isinstance(response[i + 1], list):
+                    res["Child iterators"].append(parse_list_to_dict(response[i + 1]))
+            except IndexError:
+                pass
         elif isinstance(response[i + 1], list):
             res["Child iterators"] = [parse_list_to_dict(response[i + 1])]
         else:
@@ -76,7 +85,11 @@ def parse_to_dict(response):
 
     res = {}
     for det in response:
-        if isinstance(det[1], list):
+        if not isinstance(det, list) or not det:
+            continue
+        if len(det) == 1:
+            res[det[0]] = True
+        elif isinstance(det[1], list):
             res[det[0]] = parse_list_to_dict(det[1])
         else:
             try:  # try to set the attribute. may be provided without value
@@ -112,6 +125,7 @@ def quote_string(v):
     if len(v) == 0:
         return '""'
 
+    v = v.replace("\\", "\\\\")
     v = v.replace('"', '\\"')
 
     return f'"{v}"'
@@ -152,3 +166,10 @@ def stringify_param_value(value):
         return f'{{{",".join(f"{k}:{stringify_param_value(v)}" for k, v in value.items())}}}'  # noqa
     else:
         return str(value)
+
+
+def get_protocol_version(client):
+    if isinstance(client, redis.Redis) or isinstance(client, redis.asyncio.Redis):
+        return client.connection_pool.connection_kwargs.get("protocol")
+    elif isinstance(client, redis.cluster.AbstractRedisCluster):
+        return client.nodes_manager.connection_kwargs.get("protocol")

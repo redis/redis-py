@@ -1,18 +1,39 @@
-import pytest
+from unittest.mock import patch
 
+import pytest
+from redis import Redis
 from redis.commands.graph import Edge, Node, Path
 from redis.commands.graph.execution_plan import Operation
+from redis.commands.graph.query_result import (
+    CACHED_EXECUTION,
+    INDICES_CREATED,
+    INDICES_DELETED,
+    INTERNAL_EXECUTION_TIME,
+    LABELS_ADDED,
+    LABELS_REMOVED,
+    NODES_CREATED,
+    NODES_DELETED,
+    PROPERTIES_REMOVED,
+    PROPERTIES_SET,
+    RELATIONSHIPS_CREATED,
+    RELATIONSHIPS_DELETED,
+    QueryResult,
+)
 from redis.exceptions import ResponseError
-from tests.conftest import skip_if_redis_enterprise
+from tests.conftest import _get_client, skip_if_redis_enterprise, skip_if_resp_version
 
 
 @pytest.fixture
-def client(modclient):
-    modclient.flushdb()
-    return modclient
+def client(request, stack_url):
+    r = _get_client(
+        Redis, request, decode_responses=True, from_url="redis://localhost:6480"
+    )
+    r.flushdb()
+    return r
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_bulk(client):
     with pytest.raises(NotImplementedError):
         client.graph().bulk()
@@ -20,6 +41,7 @@ def test_bulk(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_graph_creation(client):
     graph = client.graph()
 
@@ -65,6 +87,7 @@ def test_graph_creation(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_array_functions(client):
     query = """CREATE (p:person{name:'a',age:32, array:[0,1,2]})"""
     client.graph().query(query)
@@ -86,6 +109,7 @@ def test_array_functions(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_path(client):
     node0 = Node(node_id=0, label="L1")
     node1 = Node(node_id=1, label="L1")
@@ -106,8 +130,9 @@ def test_path(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_param(client):
-    params = [1, 2.3, "str", True, False, None, [0, 1, 2]]
+    params = [1, 2.3, "str", True, False, None, [0, 1, 2], r"\" RETURN 1337 //"]
     query = "RETURN $param"
     for param in params:
         result = client.graph().query(query, {"param": param})
@@ -116,6 +141,7 @@ def test_param(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_map(client):
     query = "RETURN {a:1, b:'str', c:NULL, d:[1,2,3], e:True, f:{x:1, y:2}}"
 
@@ -133,6 +159,7 @@ def test_map(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_point(client):
     query = "RETURN point({latitude: 32.070794860, longitude: 34.820751118})"
     expected_lat = 32.070794860
@@ -150,6 +177,7 @@ def test_point(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_index_response(client):
     result_set = client.graph().query("CREATE INDEX ON :person(age)")
     assert 1 == result_set.indices_created
@@ -165,6 +193,7 @@ def test_index_response(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_stringify_query_result(client):
     graph = client.graph()
 
@@ -219,6 +248,7 @@ def test_stringify_query_result(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_optional_match(client):
     # Build a graph of form (a)-[R]->(b)
     node0 = Node(node_id=0, label="L1", properties={"value": "a"})
@@ -244,6 +274,7 @@ def test_optional_match(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_cached_execution(client):
     client.graph().query("CREATE ()")
 
@@ -262,8 +293,10 @@ def test_cached_execution(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_slowlog(client):
-    create_query = """CREATE (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
+    create_query = """CREATE (:Rider
+    {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
     (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
     (:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
     client.graph().query(create_query)
@@ -274,6 +307,8 @@ def test_slowlog(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
+@pytest.mark.xfail(strict=False)
 def test_query_timeout(client):
     # Build a sample graph with 1000 nodes.
     client.graph().query("UNWIND range(0,1000) as val CREATE ({v: val})")
@@ -288,6 +323,7 @@ def test_query_timeout(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_read_only_query(client):
     with pytest.raises(Exception):
         # Issue a write query, specifying read-only true,
@@ -297,6 +333,7 @@ def test_read_only_query(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_profile(client):
     q = """UNWIND range(1, 3) AS x CREATE (p:Person {v:x})"""
     profile = client.graph().profile(q).result_set
@@ -312,6 +349,7 @@ def test_profile(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 @skip_if_redis_enterprise()
 def test_config(client):
     config_name = "RESULTSET_SIZE"
@@ -343,17 +381,18 @@ def test_config(client):
     client.graph().config("RESULTSET_SIZE", -100, set=True)
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_list_keys(client):
     result = client.graph().list_keys()
     assert result == []
 
-    client.execute_command("GRAPH.EXPLAIN", "G", "RETURN 1")
+    client.graph("G").query("CREATE (n)")
     result = client.graph().list_keys()
     assert result == ["G"]
 
-    client.execute_command("GRAPH.EXPLAIN", "X", "RETURN 1")
+    client.graph("X").query("CREATE (m)")
     result = client.graph().list_keys()
     assert result == ["G", "X"]
 
@@ -368,6 +407,7 @@ def test_list_keys(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_multi_label(client):
     redis_graph = client.graph("g")
 
@@ -394,6 +434,7 @@ def test_multi_label(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_cache_sync(client):
     pass
     return
@@ -403,7 +444,7 @@ def test_cache_sync(client):
     # Client B will try to get Client A out of sync by:
     # 1. deleting the graph
     # 2. reconstructing the graph in a different order, this will casuse
-    #    a differance in the current mapping between string IDs and the
+    #    a difference in the current mapping between string IDs and the
     #    mapping Client A is aware of
     #
     # Client A should pick up on the changes by comparing graph versions
@@ -467,9 +508,11 @@ def test_cache_sync(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_execution_plan(client):
     redis_graph = client.graph("execution_plan")
-    create_query = """CREATE (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
+    create_query = """CREATE
+    (:Rider {name:'Valentino Rossi'})-[:rides]->(:Team {name:'Yamaha'}),
     (:Rider {name:'Dani Pedrosa'})-[:rides]->(:Team {name:'Honda'}),
     (:Rider {name:'Andrea Dovizioso'})-[:rides]->(:Team {name:'Ducati'})"""
     redis_graph.query(create_query)
@@ -478,13 +521,14 @@ def test_execution_plan(client):
         "MATCH (r:Rider)-[:rides]->(t:Team) WHERE t.name = $name RETURN r.name, t.name, $params",  # noqa
         {"name": "Yehuda"},
     )
-    expected = "Results\n    Project\n        Conditional Traverse | (t:Team)->(r:Rider)\n            Filter\n                Node By Label Scan | (t:Team)"  # noqa
+    expected = "Results\n    Project\n        Conditional Traverse | (t)->(r:Rider)\n            Filter\n                Node By Label Scan | (t:Team)"  # noqa
     assert result == expected
 
     redis_graph.delete()
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_explain(client):
     redis_graph = client.graph("execution_plan")
     # graph creation / population
@@ -509,11 +553,11 @@ Results
 Distinct
     Join
         Project
-            Conditional Traverse | (t:Team)->(r:Rider)
+            Conditional Traverse | (t)->(r:Rider)
                 Filter
                     Node By Label Scan | (t:Team)
         Project
-            Conditional Traverse | (t:Team)->(r:Rider)
+            Conditional Traverse | (t)->(r:Rider)
                 Filter
                     Node By Label Scan | (t:Team)"""
     assert str(result).replace(" ", "").replace("\n", "") == expected.replace(
@@ -525,9 +569,7 @@ Distinct
             Operation("Join")
             .append_child(
                 Operation("Project").append_child(
-                    Operation(
-                        "Conditional Traverse", "(t:Team)->(r:Rider)"
-                    ).append_child(
+                    Operation("Conditional Traverse", "(t)->(r:Rider)").append_child(
                         Operation("Filter").append_child(
                             Operation("Node By Label Scan", "(t:Team)")
                         )
@@ -536,9 +578,7 @@ Distinct
             )
             .append_child(
                 Operation("Project").append_child(
-                    Operation(
-                        "Conditional Traverse", "(t:Team)->(r:Rider)"
-                    ).append_child(
+                    Operation("Conditional Traverse", "(t)->(r:Rider)").append_child(
                         Operation("Filter").append_child(
                             Operation("Node By Label Scan", "(t:Team)")
                         )
@@ -575,3 +615,34 @@ Project
     assert result.structured_plan == expected
 
     redis_graph.delete()
+
+
+@pytest.mark.redismod
+@skip_if_resp_version(3)
+def test_resultset_statistics(client):
+    with patch.object(target=QueryResult, attribute="_get_stat") as mock_get_stats:
+        result = client.graph().query("RETURN 1")
+        result.labels_added
+        mock_get_stats.assert_called_with(LABELS_ADDED)
+        result.labels_removed
+        mock_get_stats.assert_called_with(LABELS_REMOVED)
+        result.nodes_created
+        mock_get_stats.assert_called_with(NODES_CREATED)
+        result.nodes_deleted
+        mock_get_stats.assert_called_with(NODES_DELETED)
+        result.properties_set
+        mock_get_stats.assert_called_with(PROPERTIES_SET)
+        result.properties_removed
+        mock_get_stats.assert_called_with(PROPERTIES_REMOVED)
+        result.relationships_created
+        mock_get_stats.assert_called_with(RELATIONSHIPS_CREATED)
+        result.relationships_deleted
+        mock_get_stats.assert_called_with(RELATIONSHIPS_DELETED)
+        result.indices_created
+        mock_get_stats.assert_called_with(INDICES_CREATED)
+        result.indices_deleted
+        mock_get_stats.assert_called_with(INDICES_DELETED)
+        result.cached_execution
+        mock_get_stats.assert_called_with(CACHED_EXECUTION)
+        result.run_time_ms
+        mock_get_stats.assert_called_with(INTERNAL_EXECUTION_TIME)

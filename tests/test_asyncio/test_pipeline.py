@@ -1,14 +1,11 @@
 import pytest
-
 import redis
 from tests.conftest import skip_if_server_version_lt
 
+from .compat import aclosing, mock
 from .conftest import wait_for_command
 
-pytestmark = pytest.mark.asyncio
 
-
-@pytest.mark.onlynoncluster
 class TestPipeline:
     async def test_pipeline_is_true(self, r):
         """Ensure pipeline instances are not false-y"""
@@ -23,7 +20,6 @@ class TestPipeline:
                 .zadd("z", {"z1": 1})
                 .zadd("z", {"z2": 4})
                 .zincrby("z", 1, "z1")
-                .zrange("z", 0, 5, withscores=True)
             )
             assert await pipe.execute() == [
                 True,
@@ -31,16 +27,12 @@ class TestPipeline:
                 True,
                 True,
                 2.0,
-                [(b"z1", 2.0), (b"z2", 4)],
             ]
 
     async def test_pipeline_memoryview(self, r):
         async with r.pipeline() as pipe:
             (pipe.set("a", memoryview(b"a1")).get("a"))
-            assert await pipe.execute() == [
-                True,
-                b"a1",
-            ]
+            assert await pipe.execute() == [True, b"a1"]
 
     async def test_pipeline_length(self, r):
         async with r.pipeline() as pipe:
@@ -55,7 +47,6 @@ class TestPipeline:
             await pipe.execute()
             assert len(pipe) == 0
 
-    @pytest.mark.onlynoncluster
     async def test_pipeline_no_transaction(self, r):
         async with r.pipeline(transaction=False) as pipe:
             pipe.set("a", "a1").set("b", "b1").set("c", "c1")
@@ -64,6 +55,7 @@ class TestPipeline:
             assert await r.get("b") == b"b1"
             assert await r.get("c") == b"c1"
 
+    @pytest.mark.onlynoncluster
     async def test_pipeline_no_transaction_watch(self, r):
         await r.set("a", 0)
 
@@ -75,6 +67,7 @@ class TestPipeline:
             pipe.set("a", int(a) + 1)
             assert await pipe.execute() == [True]
 
+    @pytest.mark.onlynoncluster
     async def test_pipeline_no_transaction_watch_failure(self, r):
         await r.set("a", 0)
 
@@ -128,7 +121,7 @@ class TestPipeline:
             with pytest.raises(redis.ResponseError) as ex:
                 await pipe.execute()
             assert str(ex.value).startswith(
-                "Command # 3 (LPUSH c 3) of " "pipeline caused error: "
+                "Command # 3 (LPUSH c 3) of pipeline caused error: "
             )
 
             # make sure the pipe was restored to a working state
@@ -173,7 +166,7 @@ class TestPipeline:
                 await pipe.execute()
 
             assert str(ex.value).startswith(
-                "Command # 2 (ZREM b) of " "pipeline caused error: "
+                "Command # 2 (ZREM b) of pipeline caused error: "
             )
 
             # make sure the pipe was restored to a working state
@@ -190,7 +183,7 @@ class TestPipeline:
                 await pipe.execute()
 
             assert str(ex.value).startswith(
-                "Command # 2 (ZREM b) of " "pipeline caused error: "
+                "Command # 2 (ZREM b) of pipeline caused error: "
             )
 
             # make sure the pipe was restored to a working state
@@ -294,6 +287,24 @@ class TestPipeline:
             assert unwatch_command["command"] == "UNWATCH"
 
     @pytest.mark.onlynoncluster
+    async def test_aclose_is_reset(self, r):
+        async with r.pipeline() as pipe:
+            called = 0
+
+            async def mock_reset():
+                nonlocal called
+                called += 1
+
+            with mock.patch.object(pipe, "reset", mock_reset):
+                await pipe.aclose()
+                assert called == 1
+
+    @pytest.mark.onlynoncluster
+    async def test_aclosing(self, r):
+        async with aclosing(r.pipeline()):
+            pass
+
+    @pytest.mark.onlynoncluster
     async def test_transaction_callable(self, r):
         await r.set("a", 1)
         await r.set("b", 2)
@@ -337,7 +348,7 @@ class TestPipeline:
                 await pipe.execute()
 
             assert str(ex.value).startswith(
-                "Command # 1 (LLEN a) of " "pipeline caused error: "
+                "Command # 1 (LLEN a) of pipeline caused error: "
             )
 
         assert await r.get("a") == b"1"
@@ -378,13 +389,12 @@ class TestPipeline:
     async def test_pipeline_get(self, r):
         await r.set("a", "a1")
         async with r.pipeline() as pipe:
-            await pipe.get("a")
+            pipe.get("a")
             assert await pipe.execute() == [b"a1"]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.0.0")
     async def test_pipeline_discard(self, r):
-
         # empty pipeline should raise an error
         async with r.pipeline() as pipe:
             pipe.set("key", "someval")

@@ -1,13 +1,14 @@
 import os
 import re
 import time
+from contextlib import closing
 from threading import Thread
 from unittest import mock
 
 import pytest
-
 import redis
-from redis.connection import ssl_available, to_bool
+from redis.connection import to_bool
+from redis.utils import SSL_AVAILABLE
 
 from .conftest import _get_client, skip_if_redis_enterprise, skip_if_server_version_lt
 from .test_pubsub import wait_for_message
@@ -51,6 +52,16 @@ class TestConnectionPool:
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
 
+    def test_closing(self):
+        connection_kwargs = {"foo": "bar", "biz": "baz"}
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            max_connections=None,
+            **connection_kwargs,
+        )
+        with closing(pool):
+            pass
+
     def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
@@ -84,11 +95,8 @@ class TestConnectionPool:
         pool = self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=redis.Connection
         )
-        expected = (
-            "ConnectionPool<Connection<"
-            "host=localhost,port=6379,db=1,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "host=localhost,port=6379,db=1,client_name=test-client"
+        assert expected in repr(pool)
 
     def test_repr_contains_db_info_unix(self):
         connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
@@ -96,11 +104,8 @@ class TestConnectionPool:
             connection_kwargs=connection_kwargs,
             connection_class=redis.UnixDomainSocketConnection,
         )
-        expected = (
-            "ConnectionPool<UnixDomainSocketConnection<"
-            "path=/abc,db=1,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "path=/abc,db=1,client_name=test-client"
+        assert expected in repr(pool)
 
 
 class TestBlockingConnectionPool:
@@ -179,11 +184,8 @@ class TestBlockingConnectionPool:
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
         )
-        expected = (
-            "ConnectionPool<Connection<"
-            "host=localhost,port=6379,db=0,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "host=localhost,port=6379,db=0,client_name=test-client"
+        assert expected in repr(pool)
 
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
@@ -191,44 +193,31 @@ class TestBlockingConnectionPool:
             path="abc",
             client_name="test-client",
         )
-        expected = (
-            "ConnectionPool<UnixDomainSocketConnection<"
-            "path=abc,db=0,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "path=abc,db=0,client_name=test-client"
+        assert expected in repr(pool)
 
 
 class TestConnectionPoolURLParsing:
     def test_hostname(self):
         pool = redis.ConnectionPool.from_url("redis://my.host")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "my.host",
-        }
+        assert pool.connection_kwargs == {"host": "my.host"}
 
     def test_quoted_hostname(self):
         pool = redis.ConnectionPool.from_url("redis://my %2F host %2B%3D+")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "my / host +=+",
-        }
+        assert pool.connection_kwargs == {"host": "my / host +=+"}
 
     def test_port(self):
         pool = redis.ConnectionPool.from_url("redis://localhost:6380")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "port": 6380,
-        }
+        assert pool.connection_kwargs == {"host": "localhost", "port": 6380}
 
     @skip_if_server_version_lt("6.0.0")
     def test_username(self):
         pool = redis.ConnectionPool.from_url("redis://myuser:@localhost")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "username": "myuser",
-        }
+        assert pool.connection_kwargs == {"host": "localhost", "username": "myuser"}
 
     @skip_if_server_version_lt("6.0.0")
     def test_quoted_username(self):
@@ -244,10 +233,7 @@ class TestConnectionPoolURLParsing:
     def test_password(self):
         pool = redis.ConnectionPool.from_url("redis://:mypassword@localhost")
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "password": "mypassword",
-        }
+        assert pool.connection_kwargs == {"host": "localhost", "password": "mypassword"}
 
     def test_quoted_password(self):
         pool = redis.ConnectionPool.from_url(
@@ -272,26 +258,17 @@ class TestConnectionPoolURLParsing:
     def test_db_as_argument(self):
         pool = redis.ConnectionPool.from_url("redis://localhost", db=1)
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "db": 1,
-        }
+        assert pool.connection_kwargs == {"host": "localhost", "db": 1}
 
     def test_db_in_path(self):
         pool = redis.ConnectionPool.from_url("redis://localhost/2", db=1)
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "db": 2,
-        }
+        assert pool.connection_kwargs == {"host": "localhost", "db": 2}
 
     def test_db_in_querystring(self):
         pool = redis.ConnectionPool.from_url("redis://localhost/2?db=3", db=1)
         assert pool.connection_class == redis.Connection
-        assert pool.connection_kwargs == {
-            "host": "localhost",
-            "db": 3,
-        }
+        assert pool.connection_kwargs == {"host": "localhost", "db": 3}
 
     def test_extra_typed_querystring_options(self):
         pool = redis.ConnectionPool.from_url(
@@ -336,7 +313,7 @@ class TestConnectionPoolURLParsing:
     def test_invalid_extra_typed_querystring_options(self):
         with pytest.raises(ValueError):
             redis.ConnectionPool.from_url(
-                "redis://localhost/2?socket_timeout=_&" "socket_connect_timeout=abc"
+                "redis://localhost/2?socket_timeout=_&socket_connect_timeout=abc"
             )
 
     def test_extra_querystring_options(self):
@@ -351,9 +328,7 @@ class TestConnectionPoolURLParsing:
     def test_client_creates_connection_pool(self):
         r = redis.Redis.from_url("redis://myhost")
         assert r.connection_pool.connection_class == redis.Connection
-        assert r.connection_pool.connection_kwargs == {
-            "host": "myhost",
-        }
+        assert r.connection_pool.connection_kwargs == {"host": "myhost"}
 
     def test_invalid_scheme_raises_error(self):
         with pytest.raises(ValueError) as cm:
@@ -363,23 +338,51 @@ class TestConnectionPoolURLParsing:
             "(redis://, rediss://, unix://)"
         )
 
+    def test_invalid_scheme_raises_error_when_double_slash_missing(self):
+        with pytest.raises(ValueError) as cm:
+            redis.ConnectionPool.from_url("redis:foo.bar.com:12345")
+        assert str(cm.value) == (
+            "Redis URL must specify one of the following schemes "
+            "(redis://, rediss://, unix://)"
+        )
+
+
+class TestBlockingConnectionPoolURLParsing:
+    def test_extra_typed_querystring_options(self):
+        pool = redis.BlockingConnectionPool.from_url(
+            "redis://localhost/2?socket_timeout=20&socket_connect_timeout=10"
+            "&socket_keepalive=&retry_on_timeout=Yes&max_connections=10&timeout=42"
+        )
+
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {
+            "host": "localhost",
+            "db": 2,
+            "socket_timeout": 20.0,
+            "socket_connect_timeout": 10.0,
+            "retry_on_timeout": True,
+        }
+        assert pool.max_connections == 10
+        assert pool.timeout == 42.0
+
+    def test_invalid_extra_typed_querystring_options(self):
+        with pytest.raises(ValueError):
+            redis.BlockingConnectionPool.from_url(
+                "redis://localhost/2?timeout=_not_a_float_"
+            )
+
 
 class TestConnectionPoolUnixSocketURLParsing:
     def test_defaults(self):
         pool = redis.ConnectionPool.from_url("unix:///socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-        }
+        assert pool.connection_kwargs == {"path": "/socket"}
 
     @skip_if_server_version_lt("6.0.0")
     def test_username(self):
         pool = redis.ConnectionPool.from_url("unix://myuser:@/socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "username": "myuser",
-        }
+        assert pool.connection_kwargs == {"path": "/socket", "username": "myuser"}
 
     @skip_if_server_version_lt("6.0.0")
     def test_quoted_username(self):
@@ -395,10 +398,7 @@ class TestConnectionPoolUnixSocketURLParsing:
     def test_password(self):
         pool = redis.ConnectionPool.from_url("unix://:mypassword@/socket")
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "password": "mypassword",
-        }
+        assert pool.connection_kwargs == {"path": "/socket", "password": "mypassword"}
 
     def test_quoted_password(self):
         pool = redis.ConnectionPool.from_url(
@@ -423,18 +423,12 @@ class TestConnectionPoolUnixSocketURLParsing:
     def test_db_as_argument(self):
         pool = redis.ConnectionPool.from_url("unix:///socket", db=1)
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "db": 1,
-        }
+        assert pool.connection_kwargs == {"path": "/socket", "db": 1}
 
     def test_db_in_querystring(self):
         pool = redis.ConnectionPool.from_url("unix:///socket?db=2", db=1)
         assert pool.connection_class == redis.UnixDomainSocketConnection
-        assert pool.connection_kwargs == {
-            "path": "/socket",
-            "db": 2,
-        }
+        assert pool.connection_kwargs == {"path": "/socket", "db": 2}
 
     def test_client_name_in_querystring(self):
         pool = redis.ConnectionPool.from_url("redis://location?client_name=test-client")
@@ -455,14 +449,12 @@ class TestConnectionPoolUnixSocketURLParsing:
         assert pool.connection_class == MyConnection
 
 
-@pytest.mark.skipif(not ssl_available, reason="SSL not installed")
+@pytest.mark.skipif(not SSL_AVAILABLE, reason="SSL not installed")
 class TestSSLConnectionURLParsing:
     def test_host(self):
         pool = redis.ConnectionPool.from_url("rediss://my.host")
         assert pool.connection_class == redis.SSLConnection
-        assert pool.connection_kwargs == {
-            "host": "my.host",
-        }
+        assert pool.connection_kwargs == {"host": "my.host"}
 
     def test_connection_class_override(self):
         class MyConnection(redis.SSLConnection):
@@ -560,15 +552,24 @@ class TestConnection:
     @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
     def test_read_only_error(self, r):
-        "READONLY errors get turned in ReadOnlyError exceptions"
+        "READONLY errors get turned into ReadOnlyError exceptions"
         with pytest.raises(redis.ReadOnlyError):
             r.execute_command("DEBUG", "ERROR", "READONLY blah blah")
+
+    def test_oom_error(self, r):
+        "OOM errors get turned into OutOfMemoryError exceptions"
+        with pytest.raises(redis.OutOfMemoryError):
+            # note: don't use the DEBUG OOM command since it's not the same
+            # as the db being full
+            r.execute_command("DEBUG", "ERROR", "OOM blah blah")
 
     def test_connect_from_url_tcp(self):
         connection = redis.Redis.from_url("redis://localhost")
         pool = connection.connection_pool
 
-        assert re.match("(.*)<(.*)<(.*)>>", repr(pool)).groups() == (
+        assert re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
+        ).groups() == (
             "ConnectionPool",
             "Connection",
             "host=localhost,port=6379,db=0",
@@ -578,28 +579,48 @@ class TestConnection:
         connection = redis.Redis.from_url("unix:///path/to/socket")
         pool = connection.connection_pool
 
-        assert re.match("(.*)<(.*)<(.*)>>", repr(pool)).groups() == (
+        assert re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
+        ).groups() == (
             "ConnectionPool",
             "UnixDomainSocketConnection",
             "path=/path/to/socket,db=0",
         )
 
     @skip_if_redis_enterprise()
-    def test_connect_no_auth_supplied_when_required(self, r):
+    def test_connect_no_auth_configured(self, r):
         """
-        AuthenticationError should be raised when the server requires a
-        password but one isn't supplied.
+        AuthenticationError should be raised when the server is not configured with auth
+        but credentials are supplied by the user.
         """
+        # Redis < 6
         with pytest.raises(redis.AuthenticationError):
             r.execute_command(
                 "DEBUG", "ERROR", "ERR Client sent AUTH, but no password is set"
             )
 
+        # Redis >= 6
+        with pytest.raises(redis.AuthenticationError):
+            r.execute_command(
+                "DEBUG",
+                "ERROR",
+                "ERR AUTH <password> called without any password "
+                "configured for the default user. Are you sure "
+                "your configuration is correct?",
+            )
+
     @skip_if_redis_enterprise()
-    def test_connect_invalid_password_supplied(self, r):
-        "AuthenticationError should be raised when sending the wrong password"
+    def test_connect_invalid_auth_credentials_supplied(self, r):
+        """
+        AuthenticationError should be raised when sending invalid username/password
+        """
+        # Redis < 6
         with pytest.raises(redis.AuthenticationError):
             r.execute_command("DEBUG", "ERROR", "ERR invalid password")
+
+        # Redis >= 6
+        with pytest.raises(redis.AuthenticationError):
+            r.execute_command("DEBUG", "ERROR", "WRONGPASS")
 
 
 @pytest.mark.onlynoncluster

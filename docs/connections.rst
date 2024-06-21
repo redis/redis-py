@@ -70,11 +70,19 @@ RedisCluster (Async)
 ====================
 .. autoclass:: redis.asyncio.cluster.RedisCluster
     :members:
+    :member-order: bysource
 
 ClusterNode (Async)
 ===================
 .. autoclass:: redis.asyncio.cluster.ClusterNode
     :members:
+    :member-order: bysource
+
+ClusterPipeline (Async)
+=======================
+.. autoclass:: redis.asyncio.cluster.ClusterPipeline
+    :members: execute_command, execute
+    :member-order: bysource
 
 
 Connection

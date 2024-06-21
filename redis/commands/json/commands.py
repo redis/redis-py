@@ -1,10 +1,9 @@
 import os
 from json import JSONDecodeError, loads
-from typing import Dict, List, Optional, Union
-
-from deprecated import deprecated
+from typing import Dict, List, Optional, Tuple, Union
 
 from redis.exceptions import DataError
+from redis.utils import deprecated_function
 
 from ._util import JsonType
 from .decoders import decode_dict_keys
@@ -32,8 +31,8 @@ class JSONCommands:
         name: str,
         path: str,
         scalar: int,
-        start: Optional[int] = 0,
-        stop: Optional[int] = -1,
+        start: Optional[int] = None,
+        stop: Optional[int] = None,
     ) -> List[Union[int, None]]:
         """
         Return the index of ``scalar`` in the JSON array under ``path`` at key
@@ -44,9 +43,13 @@ class JSONCommands:
 
         For more information see `JSON.ARRINDEX <https://redis.io/commands/json.arrindex>`_.
         """  # noqa
-        return self.execute_command(
-            "JSON.ARRINDEX", name, str(path), self._encode(scalar), start, stop
-        )
+        pieces = [name, str(path), self._encode(scalar)]
+        if start is not None:
+            pieces.append(start)
+            if stop is not None:
+                pieces.append(stop)
+
+        return self.execute_command("JSON.ARRINDEX", *pieces, keys=[name])
 
     def arrinsert(
         self, name: str, path: str, index: int, *args: List[JsonType]
@@ -69,7 +72,7 @@ class JSONCommands:
 
         For more information see `JSON.ARRLEN <https://redis.io/commands/json.arrlen>`_.
         """  # noqa
-        return self.execute_command("JSON.ARRLEN", name, str(path))
+        return self.execute_command("JSON.ARRLEN", name, str(path), keys=[name])
 
     def arrpop(
         self,
@@ -77,7 +80,6 @@ class JSONCommands:
         path: Optional[str] = Path.root_path(),
         index: Optional[int] = -1,
     ) -> List[Union[str, None]]:
-
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
 
@@ -100,14 +102,14 @@ class JSONCommands:
 
         For more information see `JSON.TYPE <https://redis.io/commands/json.type>`_.
         """  # noqa
-        return self.execute_command("JSON.TYPE", name, str(path))
+        return self.execute_command("JSON.TYPE", name, str(path), keys=[name])
 
     def resp(self, name: str, path: Optional[str] = Path.root_path()) -> List:
         """Return the JSON value under ``path`` at key ``name``.
 
         For more information see `JSON.RESP <https://redis.io/commands/json.resp>`_.
         """  # noqa
-        return self.execute_command("JSON.RESP", name, str(path))
+        return self.execute_command("JSON.RESP", name, str(path), keys=[name])
 
     def objkeys(
         self, name: str, path: Optional[str] = Path.root_path()
@@ -117,15 +119,17 @@ class JSONCommands:
 
         For more information see `JSON.OBJKEYS <https://redis.io/commands/json.objkeys>`_.
         """  # noqa
-        return self.execute_command("JSON.OBJKEYS", name, str(path))
+        return self.execute_command("JSON.OBJKEYS", name, str(path), keys=[name])
 
-    def objlen(self, name: str, path: Optional[str] = Path.root_path()) -> int:
+    def objlen(
+        self, name: str, path: Optional[str] = Path.root_path()
+    ) -> List[Optional[int]]:
         """Return the length of the dictionary JSON value under ``path`` at key
         ``name``.
 
         For more information see `JSON.OBJLEN <https://redis.io/commands/json.objlen>`_.
         """  # noqa
-        return self.execute_command("JSON.OBJLEN", name, str(path))
+        return self.execute_command("JSON.OBJLEN", name, str(path), keys=[name])
 
     def numincrby(self, name: str, path: str, number: int) -> str:
         """Increment the numeric (integer or floating point) JSON value under
@@ -137,7 +141,7 @@ class JSONCommands:
             "JSON.NUMINCRBY", name, str(path), self._encode(number)
         )
 
-    @deprecated(version="4.0.0", reason="deprecated since redisjson 1.0.0")
+    @deprecated_function(version="4.0.0", reason="deprecated since redisjson 1.0.0")
     def nummultby(self, name: str, path: str, number: int) -> str:
         """Multiply the numeric (integer or floating point) JSON value under
         ``path`` at key ``name`` with the provided ``number``.
@@ -171,7 +175,7 @@ class JSONCommands:
 
     def get(
         self, name: str, *args, no_escape: Optional[bool] = False
-    ) -> List[JsonType]:
+    ) -> Optional[List[JsonType]]:
         """
         Get the object stored as a JSON value at key ``name``.
 
@@ -195,7 +199,7 @@ class JSONCommands:
         # Handle case where key doesn't exist. The JSONDecoder would raise a
         # TypeError exception since it can't decode None
         try:
-            return self.execute_command("JSON.GET", *pieces)
+            return self.execute_command("JSON.GET", *pieces, keys=[name])
         except TypeError:
             return None
 
@@ -209,7 +213,7 @@ class JSONCommands:
         pieces = []
         pieces += keys
         pieces.append(str(path))
-        return self.execute_command("JSON.MGET", *pieces)
+        return self.execute_command("JSON.MGET", *pieces, keys=keys)
 
     def set(
         self,
@@ -250,6 +254,46 @@ class JSONCommands:
             pieces.append("XX")
         return self.execute_command("JSON.SET", *pieces)
 
+    def mset(self, triplets: List[Tuple[str, str, JsonType]]) -> Optional[str]:
+        """
+        Set the JSON value at key ``name`` under the ``path`` to ``obj``
+        for one or more keys.
+
+        ``triplets`` is a list of one or more triplets of key, path, value.
+
+        For the purpose of using this within a pipeline, this command is also
+        aliased to JSON.MSET.
+
+        For more information see `JSON.MSET <https://redis.io/commands/json.mset>`_.
+        """
+        pieces = []
+        for triplet in triplets:
+            pieces.extend([triplet[0], str(triplet[1]), self._encode(triplet[2])])
+        return self.execute_command("JSON.MSET", *pieces)
+
+    def merge(
+        self,
+        name: str,
+        path: str,
+        obj: JsonType,
+        decode_keys: Optional[bool] = False,
+    ) -> Optional[str]:
+        """
+        Merges a given JSON value into matching paths. Consequently, JSON values
+        at matching paths are updated, deleted, or expanded with new children
+
+        ``decode_keys`` If set to True, the keys of ``obj`` will be decoded
+        with utf-8.
+
+        For more information see `JSON.MERGE <https://redis.io/commands/json.merge>`_.
+        """
+        if decode_keys:
+            obj = decode_dict_keys(obj)
+
+        pieces = [name, str(path), self._encode(obj)]
+
+        return self.execute_command("JSON.MERGE", *pieces)
+
     def set_file(
         self,
         name: str,
@@ -270,7 +314,7 @@ class JSONCommands:
 
         """
 
-        with open(file_name, "r") as fp:
+        with open(file_name) as fp:
             file_content = loads(fp.read())
 
         return self.set(name, path, file_content, nx=nx, xx=xx, decode_keys=decode_keys)
@@ -282,7 +326,7 @@ class JSONCommands:
         nx: Optional[bool] = False,
         xx: Optional[bool] = False,
         decode_keys: Optional[bool] = False,
-    ) -> List[Dict[str, bool]]:
+    ) -> Dict[str, bool]:
         """
         Iterate over ``root_folder`` and set each JSON file to a value
         under ``json_path`` with the file name as the key.
@@ -322,7 +366,7 @@ class JSONCommands:
         pieces = [name]
         if path is not None:
             pieces.append(str(path))
-        return self.execute_command("JSON.STRLEN", *pieces)
+        return self.execute_command("JSON.STRLEN", *pieces, keys=[name])
 
     def toggle(
         self, name: str, path: Optional[str] = Path.root_path()
@@ -335,7 +379,7 @@ class JSONCommands:
         return self.execute_command("JSON.TOGGLE", name, str(path))
 
     def strappend(
-        self, name: str, value: str, path: Optional[int] = Path.root_path()
+        self, name: str, value: str, path: Optional[str] = Path.root_path()
     ) -> Union[int, List[Optional[int]]]:
         """Append to the string JSON value. If two options are specified after
         the key name, the path is determined to be the first. If a single
@@ -368,19 +412,19 @@ class JSONCommands:
             pieces.append(str(path))
         return self.execute_command("JSON.DEBUG", *pieces)
 
-    @deprecated(
+    @deprecated_function(
         version="4.0.0", reason="redisjson-py supported this, call get directly."
     )
     def jsonget(self, *args, **kwargs):
         return self.get(*args, **kwargs)
 
-    @deprecated(
+    @deprecated_function(
         version="4.0.0", reason="redisjson-py supported this, call get directly."
     )
     def jsonmget(self, *args, **kwargs):
         return self.mget(*args, **kwargs)
 
-    @deprecated(
+    @deprecated_function(
         version="4.0.0", reason="redisjson-py supported this, call get directly."
     )
     def jsonset(self, *args, **kwargs):
