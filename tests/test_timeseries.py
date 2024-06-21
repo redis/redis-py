@@ -1024,6 +1024,7 @@ def test_uncompressed(client):
         assert compressed_info["memoryUsage"] < uncompressed_info["memoryUsage"]
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_create_with_insertion_filters(client):
     client.ts().create(
@@ -1039,10 +1040,15 @@ def test_create_with_insertion_filters(client):
     assert 1021 == client.ts().add("time-series-1", 1021, 22.0)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, 1.0), (1010, 11.0), (1020, 11.5), (1021, 22.0)]
-    assert expected_points == data_points
+    assert_resp_response(
+        client,
+        data_points,
+        [(1000, 1.0), (1010, 11.0), (1020, 11.5), (1021, 22.0)],
+        [[1000, 1.0], [1010, 11.0], [1020, 11.5], [1021, 22.0]],
+    )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_create_with_insertion_filters_other_duplicate_policy(client):
     client.ts().create(
@@ -1056,10 +1062,15 @@ def test_create_with_insertion_filters_other_duplicate_policy(client):
     assert 1013 == client.ts().add("time-series-1", 1013, 10.0)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, 1.0), (1010, 11.0), (1013, 10)]
-    assert expected_points == data_points
+    assert_resp_response(
+        client,
+        data_points,
+        [(1000, 1.0), (1010, 11.0), (1013, 10)],
+        [[1000, 1.0], [1010, 11.0], [1013, 10]],
+    )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_alter_with_insertion_filters(client):
     assert 1000 == client.ts().add("time-series-1", 1000, 1.0)
@@ -1076,10 +1087,15 @@ def test_alter_with_insertion_filters(client):
     assert 1013 == client.ts().add("time-series-1", 1015, 11.5)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, 1.0), (1010, 11.0), (1013, 10.0)]
-    assert expected_points == data_points
+    assert_resp_response(
+        client,
+        data_points,
+        [(1000, 1.0), (1010, 11.0), (1013, 10.0)],
+        [[1000, 1.0], [1010, 11.0], [1013, 10.0]],
+    )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_add_with_insertion_filters(client):
     assert 1000 == client.ts().add(
@@ -1094,10 +1110,10 @@ def test_add_with_insertion_filters(client):
     assert 1000 == client.ts().add("time-series-1", 1004, 3.0)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, 1.0)]
-    assert expected_points == data_points
+    assert_resp_response(client, data_points, [(1000, 1.0)], [[1000, 1.0]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_incrby_with_insertion_filters(client):
     assert 1000 == client.ts().incrby(
@@ -1112,16 +1128,15 @@ def test_incrby_with_insertion_filters(client):
     assert 1000 == client.ts().incrby("time-series-1", 3.0, timestamp=1000)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, 1.0)]
-    assert expected_points == data_points
+    assert_resp_response(client, data_points, [(1000, 1.0)], [[1000, 1.0]])
 
     assert 1000 == client.ts().incrby("time-series-1", 10.1, timestamp=1000)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, 11.1)]
-    assert expected_points == data_points
+    assert_resp_response(client, data_points, [(1000, 11.1)], [[1000, 11.1]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_decrby_with_insertion_filters(client):
     assert 1000 == client.ts().decrby(
@@ -1136,16 +1151,15 @@ def test_decrby_with_insertion_filters(client):
     assert 1000 == client.ts().decrby("time-series-1", 3.0, timestamp=1000)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, -1.0)]
-    assert expected_points == data_points
+    assert_resp_response(client, data_points, [(1000, -1.0)], [[1000, -1.0]])
 
     assert 1000 == client.ts().decrby("time-series-1", 10.1, timestamp=1000)
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    expected_points = [(1000, -11.1)]
-    assert expected_points == data_points
+    assert_resp_response(client, data_points, [(1000, -11.1)], [[1000, -11.1]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 def test_madd_with_insertion_filters(client):
     client.ts().create(
@@ -1165,5 +1179,9 @@ def test_madd_with_insertion_filters(client):
     )
 
     data_points = client.ts().range("time-series-1", "-", "+")
-    expected_points = [(1010, 1.0), (1020, 2.0), (1021, 22.0)]
-    assert expected_points == data_points
+    assert_resp_response(
+        client,
+        data_points,
+        [(1010, 1.0), (1020, 2.0), (1021, 22.0)],
+        [[1010, 1.0], [1020, 2.0], [1021, 22.0]],
+    )

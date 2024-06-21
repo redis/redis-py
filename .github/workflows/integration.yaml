@@ -24,6 +24,8 @@ permissions:
   contents: read  #  to fetch code (actions/checkout)
 
 env:
+  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  REDIS_IMAGE: redis/redis-stack-server:7.4.0-rc1
   REDIS_STACK_IMAGE: redis/redis-stack-server:7.4.0-rc1
 
 jobs:
@@ -115,7 +117,9 @@ jobs:
         python-version: ['3.8', '3.11']
         test-type: ['standalone', 'cluster']
         connection-type: ['hiredis', 'plain']
-        protocol: ['3']
+        exclude:
+          - test-type: 'cluster'
+            connection-type: 'hiredis'
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
@@ -134,9 +138,33 @@ jobs:
             pip install hiredis
           fi
           invoke devenv
-          sleep 5 # time to settle
-          invoke ${{matrix.test-type}}-tests
-          invoke ${{matrix.test-type}}-tests --uvloop
+          sleep 10 # time to settle
+          invoke ${{matrix.test-type}}-tests --protocol=3
+          invoke ${{matrix.test-type}}-tests --uvloop --protocol=3
+
+      - uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}-resp3
+          path: '${{matrix.test-type}}*results.xml'
+
+      - name: Upload codecov coverage
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: false
+
+      - name: View Test Results
+        uses: dorny/test-reporter@v1
+        if: success() || failure()
+        continue-on-error: true
+        with:
+          name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}-resp3
+          path: '*.xml'
+          reporter: java-junit
+          list-suites: all
+          list-tests: all
+          max-annotations: 10
+          fail-on-error: 'false'
 
   build_and_test_package:
     name: Validate building and installing the package

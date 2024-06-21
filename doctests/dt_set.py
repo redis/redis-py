@@ -44,7 +44,7 @@ res5 = r.sismember("bikes:racing:usa", "bike:1")
 print(res5)  # >>> 1
 
 res6 = r.sismember("bikes:racing:usa", "bike:2")
-print(res6)  # >>> 1
+print(res6)  # >>> 0
 # STEP_END
 
 # REMOVE_START

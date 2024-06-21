@@ -18,6 +18,7 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis.utils import HIREDIS_AVAILABLE
 
 from .conftest import (
     _get_client,
@@ -711,11 +712,15 @@ class TestRedisCommands:
     @skip_if_redis_enterprise()
     @pytest.mark.onlynoncluster
     def test_client_kill_filter_by_maxage(self, r, request):
-        _get_client(redis.Redis, request, flushdb=False)
+        r2 = _get_client(redis.Redis, request, flushdb=False)
+        name = "target-foobar"
+        r2.client_setname(name)
         time.sleep(4)
-        assert len(r.client_list()) >= 2
+        initial_clients = [c["name"] for c in r.client_list()]
+        assert name in initial_clients
         r.client_kill_filter(maxage=2)
-        assert len(r.client_list()) == 1
+        final_clients = [c["name"] for c in r.client_list()]
+        assert name not in final_clients
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.9.50")
@@ -1841,7 +1846,14 @@ class TestRedisCommands:
         assert len(functions) == 3
 
         expected_names = [b"lib1", b"lib2", b"lib3"]
-        actual_names = [functions[0][13], functions[1][13], functions[2][13]]
+        if is_resp2_connection(stack_r):
+            actual_names = [functions[0][13], functions[1][13], functions[2][13]]
+        else:
+            actual_names = [
+                functions[0][b"name"],
+                functions[1][b"name"],
+                functions[2][b"name"],
+            ]
 
         assert sorted(expected_names) == sorted(actual_names)
         assert stack_r.tfunction_delete("lib1")
@@ -4452,14 +4464,23 @@ class TestRedisCommands:
         assert info["entries-added"] == 2
         assert info["recorded-first-entry-id"] == m1
 
+        r.xtrim(stream, 0)
+        info = r.xinfo_stream(stream)
+        assert info["length"] == 0
+        assert info["first-entry"] is None
+        assert info["last-entry"] is None
+
     @skip_if_server_version_lt("6.0.0")
     def test_xinfo_stream_full(self, r):
         stream = "stream"
         group = "group"
         m1 = r.xadd(stream, {"foo": "bar"})
+        info = r.xinfo_stream(stream, full=True)
+        assert info["length"] == 1
+        assert len(info["groups"]) == 0
+
         r.xgroup_create(stream, group, 0)
         info = r.xinfo_stream(stream, full=True)
-
         assert info["length"] == 1
         assert_resp_response_in(
             r,
@@ -4468,6 +4489,11 @@ class TestRedisCommands:
             info["entries"].keys(),
         )
         assert len(info["groups"]) == 1
+
+        r.xreadgroup(group, "consumer", streams={stream: ">"})
+        info = r.xinfo_stream(stream, full=True)
+        consumer = info["groups"][0]["consumers"][0]
+        assert isinstance(consumer, dict)
 
     @skip_if_server_version_lt("5.0.0")
     def test_xlen(self, r):
@@ -4995,6 +5021,9 @@ class TestRedisCommands:
             r, res, ["key1", "key2", "key3"], [b"key1", b"key2", b"key3"]
         )
 
+    # The response to COMMAND contains maps inside sets, which are not handled
+    # by the hiredis-py parser (see https://github.com/redis/hiredis-py/issues/188)
+    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
     @skip_if_server_version_lt("2.8.13")
     def test_command(self, r):
         res = r.command()
