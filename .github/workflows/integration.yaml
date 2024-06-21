@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.rst'
+      - '**/*.md'
+    branches:
+      - master
+      - '[0-9].[0-9]'
+  pull_request:
+    branches:
+      - master
+      - '[0-9].[0-9]'
+
+jobs:
+
+   lint:
+     name: Code linters
+     runs-on: ubuntu-latest
+     steps:
+       - uses: actions/checkout@v2
+       - name: install python
+         uses: actions/setup-python@v3
+         with:
+           python-version: 3.9
+           cache: 'pip'
+       - name: run code linters
+         run: |
+           pip install -r dev_requirements.txt
+           invoke linters
+
+   run-tests:
+     runs-on: ubuntu-latest
+     timeout-minutes: 30
+     strategy:
+       max-parallel: 15
+       matrix:
+         python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
+         test-type: ['standalone', 'cluster']
+         connection-type: ['hiredis', 'plain']
+     env:
+       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+     name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
+     steps:
+       - uses: actions/checkout@v2
+       - name: install python
+         uses: actions/setup-python@v3
+         with:
+           python-version: ${{ matrix.python-version }}
+           cache: 'pip'
+       - name: run tests
+         run: |
+           pip install -U setuptools wheel
+           pip install -r dev_requirements.txt
+           tox -e ${{matrix.test-type}}-${{matrix.connection-type}}
+       - name: Upload codecov coverage
+         uses: codecov/codecov-action@v2
+         with:
+           fail_ci_if_error: false
+           token: ${{ secrets.CODECOV_TOKEN }}
+
+   build_and_test_package:
+    name: Validate building and installing the package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        extension: ['tar.gz', 'whl']
+    steps:
+      - uses: actions/checkout@v2
+      - name: install python
+        uses: actions/setup-python@v3
+        with:
+          python-version: 3.9
+      - name: Run installed unit tests
+        run: |
+          bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
+
+   install_package_from_commit:
+    name: Install package from commit hash
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.6', '3.7', '3.8', '3.9', '3.10', 'pypy-3.7']
+    steps:
+      - uses: actions/checkout@v2
+      - name: install python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      - name: install from pip
+        run: |
+          pip install --quiet git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git@${GITHUB_SHA}

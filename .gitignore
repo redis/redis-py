@@ -14,3 +14,7 @@ vagrant/.vagrant
 env
 venv
 coverage.xml
+.venv*
+*.xml
+.coverage*
+docker/stunnel/keys

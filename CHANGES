@@ -1,9 +1,274 @@
-* (in development)
+
+    * Allow negative `retries` for `Retry` class to retry forever
+    * Add `items` parameter to `hset` signature
+    * Create codeql-analysis.yml (#1988). Thanks @chayim
+    * Add limited support for Lua scripting with RedisCluster
+    * Implement `.lock()` method on RedisCluster
+    * Fix cursor returned by SCAN for RedisCluster & change default target to PRIMARIES
+    * Fix scan_iter for RedisCluster
+    * Remove verbose logging when initializing ClusterPubSub, ClusterPipeline or RedisCluster
+    * Fix broken connection writer lock-up for asyncio (#2065)
+    * Fix auth bug when provided with no username (#2086)
+
+* 4.1.3 (Feb 8, 2022)
+    * Fix flushdb and flushall (#1926)
+    * Add redis5 and redis4 dockers (#1871)
+    * Change json.clear test multi to be up to date with redisjson (#1922)
+    * Fixing volume for unstable_cluster docker (#1914)
+    * Update changes file with changes since 4.0.0-beta2 (#1915)
+* 4.1.2 (Jan 27, 2022)
+    * Invalid OCSP certificates should raise ConnectionError on failed validation (#1907)
+    * Added retry mechanism on socket timeouts when connecting to the server (#1895)
+    * LMOVE, BLMOVE return incorrect responses (#1906)
+    * Fixing AttributeError in UnixDomainSocketConnection (#1903)
+    * Fixing TypeError in GraphCommands.explain (#1901)
+    * For tests, increasing wait time for the cluster (#1908)
+    * Increased pubsub's wait_for_messages timeout to prevent flaky tests (#1893)
+    * README code snippets formatted to highlight properly (#1888)
+    * Fix link in the main page (#1897)
+    * Documentation fixes: JSON Example, SSL Connection Examples, RTD version (#1887)
+    * Direct link to readthedocs (#1885)
+* 4.1.1 (Jan 17, 2022)
+    * Add retries to connections in Sentinel Pools (#1879)
+    * OCSP Stapling Support (#1873)
+    * Define incr/decr as aliases of incrby/decrby (#1874)
+    * FT.CREATE - support MAXTEXTFIELDS, TEMPORARY, NOHL, NOFREQS, SKIPINITIALSCAN (#1847)
+    * Timeseries docs fix (#1877)
+    * get_connection: catch OSError too (#1832)
+    * Set keys var otherwise variable not created (#1853)
+    * Clusters should optionally require full slot coverage (#1845)
+    * Triple quote docstrings in client.py PEP 257 (#1876)
+    * syncing requirements (#1870)
+    * Typo and typing in GraphCommands documentation (#1855)
+    * Allowing poetry and redis-py to install together (#1854)
+    * setup.py: Add project_urls for PyPI (#1867)
+    * Support test with redis unstable docker (#1850)
+    * Connection examples (#1835)
+    * Documentation cleanup (#1841)
+* 4.1.0 (Dec 26, 2021)
+    * OCSP stapling support (#1820)
+    * Support for SELECT (#1825)
+    * Support for specifying error types with retry (#1817)
+    * Support for RESET command since Redis 6.2.0 (#1824)
+    * Support CLIENT TRACKING (#1612)
+    * Support WRITE in CLIENT PAUSE (#1549)
+    * JSON set_file and set_path support (#1818)
+    * Allow ssl_ca_path with rediss:// urls (#1814)
+    * Support for password-encrypted SSL private keys (#1782)
+    * Support SYNC and PSYNC (#1741)
+    * Retry on error exception and timeout fixes (#1821)
+    * Fixing read race condition during pubsub (#1737)
+    * Fixing exception in listen (#1823)
+    * Fixed MovedError, and stopped iterating through startup nodes when slots are fully covered (#1819)
+    * Socket not closing after server disconnect (#1797)
+    * Single sourcing the package version (#1791)
+    * Ensure redis_connect_func is set on uds connection (#1794)
+    * SRTALGO - Skip for redis versions greater than 7.0.0 (#1831)
+    * Documentation updates (#1822)
+    * Add CI action to install package from repository commit hash (#1781) (#1790)
+    * Fix link in lmove docstring (#1793)
+    * Disabling JSON.DEBUG tests (#1787)
+    * Migrated targeted nodes to kwargs in Cluster Mode (#1762)
+    * Added support for MONITOR in clusters (#1756)
+    * Adding ROLE Command (#1610)
+    * Integrate RedisBloom support (#1683)
+    * Adding RedisGraph support (#1556)
+    * Allow overriding connection class via keyword arguments (#1752)
+    * Aggregation LOAD * support for RediSearch (#1735)
+    * Adding cluster, bloom, and graph docs (#1779)
+    * Add packaging to setup_requires, and use >= to play nice to setup.py (fixes #1625) (#1780)
+    * Fixing the license link in the readme (#1778)
+    * Removing distutils from tests (#1773)
+    * Fix cluster ACL tests (#1774)
+    * Improved RedisCluster's reinitialize_steps and documentation (#1765)
+    * Added black and isort (#1734)
+    * Link Documents for all module commands (#1711)
+    * Pyupgrade + flynt + f-strings (#1759)
+    * Remove unused aggregation subclasses in RediSearch (#1754)
+    * Adding RedisCluster client to support Redis Cluster Mode (#1660)
+    * Support RediSearch FT.PROFILE command (#1727)
+    * Adding support for non-decodable commands (#1731)
+    * COMMAND GETKEYS support (#1738)
+    * RedisJSON 2.0.4 behaviour support (#1747)
+    * Removing deprecating distutils (PEP 632) (#1730)
+    * Updating PR template (#1745)
+    * Removing duplication of Script class (#1751)
+    * Splitting documentation for read the docs (#1743)
+    * Improve code coverage for aggregation tests (#1713)
+    * Fixing COMMAND GETKEYS tests (#1750)
+    * GitHub release improvements (#1684)
+* 4.0.2 (Nov 22, 2021)
+    * Restoring Sentinel commands to redis client (#1723)
+    * Better removal of hiredis warning (#1726)
+    * Adding links to redis documents in function calls (#1719)
+* 4.0.1 (Nov 17, 2021)
+    * Removing command on initial connections (#1722)
+    * Removing hiredis warning when not installed (#1721)
+* 4.0.0 (Nov 15, 2021)
+    * FT.EXPLAINCLI intentionally raising NotImplementedError
+    * Restoring ZRANGE desc for Redis < 6.2.0 (#1697)
+    * Response parsing occasionally fails to parse floats (#1692)
+    * Re-enabling read-the-docs (#1707)
+    * Call HSET after FT.CREATE to avoid keyspace scan (#1706)
+    * Unit tests fixes for compatibility (#1703)
+    * Improve documentation about Locks (#1701)
+    * Fixes to allow --redis-url to pass through all tests (#1700)
+    * Fix unit tests running against Redis 4.0.0 (#1699)
+    * Search alias test fix (#1695)
+    * Adding RediSearch/RedisJSON tests (#1691)
+    * Updating codecov rules (#1689)
+    * Tests to validate custom JSON decoders (#1681)
+    * Added breaking icon to release drafter (#1702)
+    * Removing dependency on six (#1676)
+    * Re-enable pipeline support for JSON and TimeSeries (#1674)
+    * Export Sentinel, and SSL like other classes (#1671)
+    * Restore zrange functionality for older versions of Redis (#1670)
+    * Fixed garbage collection deadlock (#1578)
+    * Tests to validate built python packages (#1678)
+    * Sleep for flaky search test (#1680)
+    * Test function renames, to match standards (#1679)
+    * Docstring improvements for Redis class (#1675)
+    * Fix georadius tests (#1672)
+    * Improvements to JSON coverage (#1666)
+    * Add python_requires setuptools check for python > 3.6 (#1656)
+    * SMISMEMBER support (#1667)
+    * Exposing the module version in loaded_modules (#1648)
+    * RedisTimeSeries support (#1652)
+    * Support for json multipath ($) (#1663)
+    * Added boolean parsing to PEXPIRE and PEXPIREAT (#1665)
+    * Add python_requires setuptools check for python > 3.6 (#1656)
+    * Adding vulture for static analysis (#1655)
+    * Starting to clean the docs (#1657)
+    * Update README.md (#1654)
+    * Adding description format for package (#1651)
+    * Publish to pypi as releases are generated with the release drafter (#1647)
+    * Restore actions to prs (#1653)
+    * Fixing the package to include commands (#1649)
+    * Re-enabling codecov as part of CI process (#1646)
+    * Adding support for redisearch (#1640) Thanks @chayim
+    * redisjson support (#1636) Thanks @chayim
+    * Sentinel: Add SentinelManagedSSLConnection (#1419) Thanks @AbdealiJK
+    * Enable floating parameters in SET (ex and px) (#1635) Thanks @AvitalFineRedis
+    * Add warning when hiredis not installed. Recommend installation. (#1621) Thanks @adiamzn
+    * Raising NotImplementedError for SCRIPT DEBUG and DEBUG SEGFAULT (#1624) Thanks @chayim
+    * CLIENT REDIR command support (#1623) Thanks @chayim
+    * REPLICAOF command implementation (#1622) Thanks @chayim
+    * Add support to NX XX and CH to GEOADD (#1605) Thanks @AvitalFineRedis
+    * Add support to ZRANGE and ZRANGESTORE parameters (#1603) Thanks @AvitalFineRedis
+    * Pre 6.2 redis should default to None for script flush (#1641) Thanks @chayim
+    * Add FULL option to XINFO SUMMARY (#1638) Thanks @agusdmb
+    * Geosearch test should use any=True (#1594) Thanks @Andrew-Chen-Wang
+    * Removing packaging dependency (#1626) Thanks @chayim
+    * Fix client_kill_filter docs for skimpy (#1596) Thanks @Andrew-Chen-Wang
+    * Normalize minid and maxlen docs (#1593) Thanks @Andrew-Chen-Wang
+    * Update docs for multiple usernames for ACL DELUSER (#1595) Thanks @Andrew-Chen-Wang
+    * Fix grammar of get param in set command (#1588) Thanks @Andrew-Chen-Wang
+    * Fix docs for client_kill_filter (#1584) Thanks @Andrew-Chen-Wang
+    * Convert README & CONTRIBUTING from rst to md (#1633) Thanks @davidylee
+    * Test BYLEX param in zrangestore (#1634) Thanks @AvitalFineRedis
+    * Tox integrations with invoke and docker (#1632) Thanks @chayim
+    * Adding the release drafter to help simplify release notes (#1618). Thanks @chayim
     * BACKWARDS INCOMPATIBLE: Removed support for end of life Python 2.7. #1318
     * BACKWARDS INCOMPATIBLE: All values within Redis URLs are unquoted via
       urllib.parse.unquote. Prior versions of redis-py supported this by
       specifying the ``decode_components`` flag to the ``from_url`` functions.
       This is now done by default and cannot be disabled. #589
+    * POTENTIALLY INCOMPATIBLE: Redis commands were moved into a mixin
+      (see commands.py). Anyone importing ``redis.client`` to access commands
+      directly should import ``redis.commands``. #1534, #1550
+    * Removed technical debt on REDIS_6_VERSION placeholder. Thanks @chayim #1582.
+    * Various docus fixes. Thanks @Andrew-Chen-Wang #1585, #1586.
+    * Support for LOLWUT command, available since Redis 5.0.0.
+      Thanks @brainix #1568.
+    * Added support for CLIENT REPLY, available in Redis 3.2.0.
+      Thanks @chayim #1581.
+    * Support for Auto-reconnect PubSub on get_message. Thanks @luhn #1574.
+    * Fix RST syntax error in README/ Thanks @JanCBrammer #1451.
+    * IDLETIME and FREQ support for RESTORE. Thanks @chayim #1580.
+    * Supporting args with MODULE LOAD. Thanks @chayim #1579.
+    * Updating RedisLabs with Redis. Thanks @gkorland #1575.
+    * Added support for ASYNC to SCRIPT FLUSH available in Redis 6.2.0.
+      Thanks @chayim. #1567
+    * Added CLIENT LIST fix to support multiple client ids available in
+      Redis 2.8.12. Thanks @chayim #1563.
+    * Added DISCARD support for pipelines available in Redis 2.0.0.
+      Thanks @chayim #1565.
+    * Added ACL DELUSER support for deleting lists of users available in
+      Redis 6.2.0. Thanks @chayim. #1562
+    * Added CLIENT TRACKINFO support available in Redis 6.2.0.
+      Thanks @chayim. #1560
+    * Added GEOSEARCH and GEOSEARCHSTORE support available in Redis 6.2.0.
+      Thanks @AvitalFine Redis. #1526
+    * Added LPUSHX support for lists available in Redis 4.0.0.
+      Thanks @chayim. #1559
+    * Added support for QUIT available in Redis 1.0.0.
+      Thanks @chayim. #1558
+    * Added support for COMMAND COUNT available in Redis 2.8.13.
+      Thanks @chayim. #1554.
+    * Added CREATECONSUMER support for XGROUP available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1553
+    * Including slowly complexity in INFO if available.
+      Thanks @ian28223 #1489.
+    * Added support for STRALGO available in Redis 6.0.0.
+      Thanks @AvitalFineRedis. #1528
+    * Addes support for ZMSCORE available in Redis 6.2.0.
+      Thanks @2014BDuck and @jiekun.zhu. #1437
+    * Support MINID and LIMIT on XADD available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1548
+    * Added sentinel commands FLUSHCONFIG, CKQUORUM, FAILOVER, and RESET
+      available in Redis 2.8.12.
+      Thanks @otherpirate. #834
+    * Migrated Version instead of StrictVersion for Python 3.10.
+      Thanks @tirkarthi. #1552
+    * Added retry mechanism with backoff. Thanks @nbraun-amazon. #1494
+    * Migrated commands to a mixin. Thanks @chayim. #1534
+    * Added support for ZUNION, available in Redis 6.2.0. Thanks
+      @AvitalFineRedis. #1522
+    * Added support for CLIENT LIST with ID, available in Redis 6.2.0.
+      Thanks @chayim. #1505
+    * Added support for MINID and LIMIT with xtrim, available in Reds 6.2.0.
+      Thanks @chayim. #1508
+    * Implemented LMOVE and BLMOVE commands, available in Redis 6.2.0.
+      Thanks @chayim. #1504
+    * Added GET argument to SET command, available in Redis 6.2.0.
+      Thanks @2014BDuck. #1412
+    * Documentation fixes. Thanks @enjoy-binbin @jonher937. #1496 #1532
+    * Added support for XAUTOCLAIM, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1529
+    * Added IDLE support for XPENDING, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1523
+    * Add a count parameter to lpop/rpop, available in Redis 6.2.0.
+      Thanks @wavenator. #1487
+    * Added a (pypy) trove classifier for Python 3.9.
+      Thanks @D3X. #1535
+    * Added ZINTER support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1520
+    * Added ZINTER support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1520
+    * Added ZDIFF and ZDIFFSTORE support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1518
+    * Added ZRANGESTORE support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1521
+    * Added LT and GT support for ZADD, available in Redis 6.2.0.
+      Thanks @chayim. #1509
+    * Added ZRANDMEMBER support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1519
+    * Added GETDEL support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1514
+    * Added CLIENT KILL laddr filter, available in Redis 6.2.0.
+      Thanks @chayim. #1506
+    * Added CLIENT UNPAUSE, available in Redis 6.2.0.
+      Thanks @chayim. #1512
+    * Added NOMKSTREAM support for XADD, available in Redis 6.2.0.
+      Thanks @chayim. #1507
+    * Added HRANDFIELD support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1513
+    * Added CLIENT INFO support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1517
+    * Added GETEX support, available in Redis 6.2.0.
+      Thanks @AvitalFineRedis. #1515
+    * Added support for COPY command, available in Redis 6.2.0.
+      Thanks @malinaa96. #1492
     * Provide a development and testing environment via docker. Thanks
       @abrookins. #1365
     * Added support for the LPOS command available in Redis 6.0.6. Thanks
@@ -400,7 +665,7 @@
 * 2.10.2
     * Added support for Hiredis's new bytearray support. Thanks
       https://github.com/tzickel
-    * POSSIBLE BACKWARDS INCOMPATBLE CHANGE: Fixed a possible race condition
+    * POSSIBLE BACKWARDS INCOMPATIBLE CHANGE: Fixed a possible race condition
       when multiple threads share the same Lock instance with a timeout. Lock
       tokens are now stored in thread local storage by default. If you have
       code that acquires a lock in one thread and passes that lock instance to
@@ -455,12 +720,12 @@
     * Fixed Sentinel state parsing on Python 3.
     * Added support for SENTINEL MONITOR, SENTINEL REMOVE, and SENTINEL SET
       commands. Thanks Greg Murphy.
-    * INFO ouput that doesn't follow the "key:value" format will now be
+    * INFO output that doesn't follow the "key:value" format will now be
       appended to a key named "__raw__" in the INFO dictionary. Thanks Pedro
       Larroy.
     * The "vagrant" directory contains a complete vagrant environment for
       redis-py developers. The environment runs a Redis master, a Redis slave,
-      and 3 Sentinels. Future iterations of the test sutie will incorporate
+      and 3 Sentinels. Future iterations of the test suite will incorporate
       more integration style tests, ensuring things like failover happen
       correctly.
     * It's now possible to create connection pool instances from a URL.
