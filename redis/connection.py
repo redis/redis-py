@@ -913,7 +913,6 @@ class UnixDomainSocketConnection(AbstractConnection):
         self.path = path
         self.socket_timeout = socket_timeout
 
-
     def repr_pieces(self):
         pieces = [("path", self.path), ("db", self.db)]
         if self.client_name:
