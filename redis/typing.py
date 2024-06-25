@@ -1,11 +1,11 @@
-# from __future__ import annotations
-
 from datetime import datetime, timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
     Awaitable,
     Iterable,
+    List,
+    Literal,
     Mapping,
     Protocol,
     Type,
@@ -32,7 +32,14 @@ KeyT = _StringLikeT  # Main redis key space
 PatternT = _StringLikeT  # Patterns matched against keys, fields etc
 FieldT = EncodableT  # Fields within hash tables, streams and geo commands
 KeysT = Union[KeyT, Iterable[KeyT]]
-ResponseT = Union[Awaitable[Any], Any]
+OldResponseT = Union[Awaitable[Any], Any]  # Deprecated
+AnyResponseT = TypeVar("AnyResponseT", bound=Any)
+ResponseT = Union[AnyResponseT, Awaitable[AnyResponseT]]
+OKT = Literal[True]
+ArrayResponseT = List
+IntegerResponseT = int
+NullResponseT = type(None)
+BulkStringResponseT = str
 ChannelT = _StringLikeT
 GroupT = _StringLikeT  # Consumer group
 ConsumerT = _StringLikeT  # Consumer name
@@ -54,10 +61,10 @@ ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Except
 class CommandsProtocol(Protocol):
     connection_pool: Union["AsyncConnectionPool", "ConnectionPool"]
 
-    def execute_command(self, *args, **options): ...
+    def execute_command(self, *args, **options) -> ResponseT[Any]: ...
 
 
 class ClusterCommandsProtocol(CommandsProtocol, Protocol):
     encoder: "Encoder"
 
-    def execute_command(self, *args, **options) -> Union[Any, Awaitable]: ...
+    def execute_command(self, *args, **options) -> ResponseT[Any]: ...
