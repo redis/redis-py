@@ -818,9 +818,9 @@ class UnixDomainSocketConnection(AbstractConnection):
     "Manages UDS communication to and from a Redis server"
 
     def __init__(self, path="", socket_timeout=None, **kwargs):
+        super().__init__(**kwargs)
         self.path = path
         self.socket_timeout = socket_timeout
-        super().__init__(**kwargs)
 
     def repr_pieces(self):
         pieces = [("path", self.path), ("db", self.db)]
