@@ -1,8 +1,9 @@
+import itertools
 import socket
 import types
+from unittest import TestCase
 from unittest import mock
-from unittest.mock import patch
-
+from unittest.mock import patch, MagicMock
 import pytest
 import redis
 from redis import ConnectionPool, Redis
@@ -13,6 +14,8 @@ from redis.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
     parse_url,
+    UsernamePasswordCredentialProvider,
+    AuthenticationError
 )
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.retry import Retry
@@ -55,7 +58,7 @@ def test_loading_external_modules(r):
     # assert mod.get('fookey') == d
 
 
-class TestConnection:
+class TestConnection(TestCase):
     def test_disconnect(self):
         conn = Connection()
         mock_sock = mock.Mock()
@@ -130,6 +133,189 @@ class TestConnection:
         assert conn._connect.call_count == 1
         assert str(e.value) == "Timeout connecting to server"
         self.clear(conn)
+
+    @patch.object(Connection, 'send_command')
+    @patch.object(Connection, 'read_response')
+    def test_on_connect(self, mock_read_response, mock_send_command):
+        """Test that the on_connect function sends the correct commands"""
+        conn = Connection()
+
+        conn._parser = MagicMock()
+        conn._parser.on_connect.return_value = None
+        conn.credential_provider = None
+        conn.username = "myuser"
+        conn.password = "password"
+        conn.protocol = 3
+        conn.client_name = "test-client"
+        conn.lib_name = "test"
+        conn.lib_version = "1234"
+        conn.db = 0
+        conn.client_cache = True
+
+        # command response
+        mock_read_response.side_effect = itertools.cycle([
+            b'QUEUED',  # MULTI
+            b'QUEUED',  # HELLO
+            b'QUEUED',  # AUTH
+            b'QUEUED',  # CLIENT SETNAME
+            b'QUEUED',  # CLIENT SETINFO LIB-NAME
+            b'QUEUED',  # CLIENT SETINFO LIB-VER
+            b'QUEUED',  # SELECT
+            b'QUEUED',  # CLIENT TRACKING ON
+            [           # EXEC response list
+                {"proto": 3, "version": "6"},
+                b'OK',
+                b'OK',
+                b'OK',
+                b'OK',
+                b'OK',
+                b'OK',
+                b'OK'
+            ]
+        ])
+
+        conn.on_connect()
+
+        mock_read_response.side_effect = itertools.repeat("OK")
+
+    @patch.object(Connection, 'send_command')
+    @patch.object(Connection, 'read_response')
+    def test_on_connect_fail_hello(self, mock_read_response, mock_send_command):
+        """Test that on_connect handles connection failure HELLO command"""
+        conn = Connection()
+
+        conn._parser = MagicMock()
+        conn._parser.on_connect.return_value = None
+        conn.credential_provider = None
+        conn.username = "myuser"
+        conn.password = "password"
+        conn.protocol = -1  # invalid protocol
+        conn.client_name = "test-client"
+        conn.lib_name = "test"
+        conn.lib_version = "1234"
+        conn.db = 0
+        conn.client_cache = True
+
+        # simulate a failure in the HELLO command response
+        mock_read_response.side_effect = itertools.cycle([
+            Exception("Invalid RESP version"),  # HELLO (fails)
+            b'QUEUED',                          # MULTI
+        ])
+
+        with self.assertRaises(ConnectionError):
+            conn.on_connect()
+
+        mock_send_command.assert_any_call('HELLO', -1, 'AUTH', 'myuser', 'password'),
+
+        mock_send_command.assert_called()
+        mock_read_response.assert_called()
+
+    @patch.object(Connection, 'send_command')
+    @patch.object(Connection, 'read_response')
+    def test_on_connect_fail_auth(self, mock_read_response, mock_send_command):
+        """Test that on_connect handles connection failure AUTH command"""
+        conn = Connection()
+
+        conn._parser = MagicMock()
+        conn._parser.on_connect.return_value = None
+        conn.credential_provider = None
+        conn.username = "myuser"
+        conn.password = "wrong-password"
+        conn.protocol = 3
+        conn.client_name = "test-client"
+        conn.lib_name = "test"
+        conn.lib_version = "1234"
+        conn.db = 1
+        conn.client_cache = True
+
+        # simulate a failure in the HELLO command response
+        mock_read_response.side_effect = itertools.cycle([
+            {"proto": 3, "version": "6"},   # HELLO
+            b'QUEUED',  # MULTI
+            b'QUEUED',  # AUTH
+            b'QUEUED',  # CLIENT SETNAME
+            b'QUEUED',  # CLIENT SETINFO LIB-NAME
+            b'QUEUED',  # CLIENT SETINFO LIB-VER
+            b'QUEUED',  # SELECT
+            b'QUEUED',  # CLIENT TRACKING ON
+            [
+                {"proto": 3, "version": "6"},  # HELLO response
+                b'ERR invalid password',  # AUTH response
+                b'OK',  # CLIENT SETNAME response
+                b'OK',  # CLIENT SETINFO LIB-NAME response
+                b'OK',  # CLIENT SETINFO LIB-VER response
+                b'OK',  # SELECT response
+                b'OK'   # CLIENT TRACKING ON response
+            ]
+        ])
+
+        with self.assertRaises(AuthenticationError):
+            conn.on_connect()
+
+        mock_send_command.assert_any_call(
+            'HELLO', 3, 'AUTH', 'myuser', 'wrong-password'),
+        mock_send_command.assert_any_call('CLIENT', 'SETNAME', 'test-client'),
+        mock_send_command.assert_any_call('CLIENT', 'SETINFO', 'LIB-NAME', 'test'),
+        mock_send_command.assert_any_call('CLIENT', 'SETINFO', 'LIB-VER', '1234'),
+        mock_send_command.assert_any_call('SELECT', 1),
+        mock_send_command.assert_any_call('CLIENT', 'TRACKING', 'ON'),
+        mock_send_command.assert_any_call('EXEC')
+
+        mock_send_command.assert_called()
+        mock_read_response.assert_called()
+
+    @patch.object(Connection, 'send_command')
+    @patch.object(Connection, 'read_response')
+    def test_on_connect_auth_with_password_only(
+            self, mock_read_response, mock_send_command):
+        """Test on_connect handling of password-only AUTH for Redis versions below 6.0.0 without HELLO command"""
+        conn = Connection()
+
+        conn._parser = MagicMock()
+        conn._parser.on_connect.return_value = None
+        conn.credential_provider = None
+        conn.username = None
+        conn.password = "password"
+        conn.protocol = 1
+        conn.client_name = "test-client"
+        conn.lib_name = "test"
+        conn.lib_version = "1234"
+        conn.db = 1
+        conn.client_cache = True
+
+        # command response to simulate Redis < 6.0.0 behavior
+        mock_read_response.side_effect = itertools.cycle([
+            Exception("ERR HELLO"),  # HELLO (fails)
+            b'QUEUED',  # MULTI
+            b'QUEUED',  # AUTH
+            b'QUEUED',  # CLIENT SETNAME
+            b'QUEUED',  # CLIENT SETINFO LIB-NAME
+            b'QUEUED',  # CLIENT SETINFO LIB-VER
+            b'QUEUED',  # SELECT
+            b'QUEUED',  # CLIENT TRACKING ON
+            [
+                b'OK',                           # AUTH response
+                b'OK',                           # CLIENT SETNAME response
+                b'OK',                           # CLIENT SETINFO LIB-NAME response
+                b'OK',                           # CLIENT SETINFO LIB-VER response
+                b'OK',                           # SELECT response
+                b'OK'                            # CLIENT TRACKING ON response
+            ]
+        ])
+
+        conn.on_connect()
+
+        mock_send_command.assert_any_call('HELLO', 1, 'AUTH', 'default', 'password'),
+        mock_send_command.assert_any_call('MULTI'),
+        mock_send_command.assert_any_call(
+            'AUTH', 'default', 'password', check_health=False)
+        mock_send_command.assert_any_call('CLIENT', 'SETNAME', 'test-client')
+        mock_send_command.assert_any_call('CLIENT', 'SETINFO', 'LIB-NAME', 'test')
+        mock_send_command.assert_any_call('CLIENT', 'SETINFO', 'LIB-VER', '1234')
+        mock_send_command.assert_any_call('SELECT', 1)
+        mock_send_command.assert_any_call('CLIENT', 'TRACKING', 'ON')
+        mock_send_command.assert_any_call('EXEC')
+        mock_read_response.assert_called()
 
 
 @pytest.mark.onlynoncluster
