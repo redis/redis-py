@@ -102,6 +102,8 @@ def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
 Addresses bug CAE-333 which uncovered that the init method of the base
 class did override the initialization of the socket_timeout parameter.
 '''
+
+
 def test_unix_socket_with_timeout():
     conn = UnixDomainSocketConnection(socket_timeout=1000)
 
@@ -111,6 +113,7 @@ def test_unix_socket_with_timeout():
     # Verify if the timeout and the path is set correctly.
     assert conn.socket_timeout == 1000
     assert conn.path == ""
+
 
 @pytest.mark.ssl
 @pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3")
