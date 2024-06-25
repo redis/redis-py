@@ -1,4 +1,12 @@
 from json import JSONDecoder, JSONEncoder
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .bf import BFBloom, CFBloom, CMSBloom, TDigestBloom, TOPKBloom
+    from .graph import AsyncGraph, Graph
+    from .json import JSON
+    from .search import AsyncSearch, Search
+    from .timeseries import TimeSeries
 
 
 class RedisModuleCommands:
@@ -6,7 +14,11 @@ class RedisModuleCommands:
     modules into the command namespace.
     """
 
-    def json(self, encoder=JSONEncoder(), decoder=JSONDecoder()):
+    def json(
+        self,
+        encoder: JSONEncoder = JSONEncoder(),
+        decoder: JSONDecoder = JSONDecoder(),
+    ) -> "JSON":
         """Access the json namespace, providing support for redis json."""
 
         from .json import JSON
@@ -14,7 +26,7 @@ class RedisModuleCommands:
         jj = JSON(client=self, encoder=encoder, decoder=decoder)
         return jj
 
-    def ft(self, index_name="idx"):
+    def ft(self, index_name: str = "idx") -> "Search":
         """Access the search namespace, providing support for redis search."""
 
         from .search import Search
@@ -22,7 +34,7 @@ class RedisModuleCommands:
         s = Search(client=self, index_name=index_name)
         return s
 
-    def ts(self):
+    def ts(self) -> "TimeSeries":
         """Access the timeseries namespace, providing support for
         redis timeseries data.
         """
@@ -32,7 +44,7 @@ class RedisModuleCommands:
         s = TimeSeries(client=self)
         return s
 
-    def bf(self):
+    def bf(self) -> "BFBloom":
         """Access the bloom namespace."""
 
         from .bf import BFBloom
@@ -40,7 +52,7 @@ class RedisModuleCommands:
         bf = BFBloom(client=self)
         return bf
 
-    def cf(self):
+    def cf(self) -> "CFBloom":
         """Access the bloom namespace."""
 
         from .bf import CFBloom
@@ -48,7 +60,7 @@ class RedisModuleCommands:
         cf = CFBloom(client=self)
         return cf
 
-    def cms(self):
+    def cms(self) -> "CMSBloom":
         """Access the bloom namespace."""
 
         from .bf import CMSBloom
@@ -56,7 +68,7 @@ class RedisModuleCommands:
         cms = CMSBloom(client=self)
         return cms
 
-    def topk(self):
+    def topk(self) -> "TOPKBloom":
         """Access the bloom namespace."""
 
         from .bf import TOPKBloom
@@ -64,7 +76,7 @@ class RedisModuleCommands:
         topk = TOPKBloom(client=self)
         return topk
 
-    def tdigest(self):
+    def tdigest(self) -> "TDigestBloom":
         """Access the bloom namespace."""
 
         from .bf import TDigestBloom
@@ -72,7 +84,7 @@ class RedisModuleCommands:
         tdigest = TDigestBloom(client=self)
         return tdigest
 
-    def graph(self, index_name="idx"):
+    def graph(self, index_name: str = "idx") -> "Graph":
         """Access the graph namespace, providing support for
         redis graph data.
         """
@@ -84,7 +96,7 @@ class RedisModuleCommands:
 
 
 class AsyncRedisModuleCommands(RedisModuleCommands):
-    def ft(self, index_name="idx"):
+    def ft(self, index_name: str = "idx") -> "AsyncSearch":
         """Access the search namespace, providing support for redis search."""
 
         from .search import AsyncSearch
@@ -92,7 +104,7 @@ class AsyncRedisModuleCommands(RedisModuleCommands):
         s = AsyncSearch(client=self, index_name=index_name)
         return s
 
-    def graph(self, index_name="idx"):
+    def graph(self, index_name: str = "idx") -> "AsyncGraph":
         """Access the graph namespace, providing support for
         redis graph data.
         """
