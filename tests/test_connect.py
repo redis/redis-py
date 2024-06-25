@@ -98,10 +98,10 @@ def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
     _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
 
 
-'''
+"""
 Addresses bug CAE-333 which uncovered that the init method of the base
 class did override the initialization of the socket_timeout parameter.
-'''
+"""
 
 
 def test_unix_socket_with_timeout():
