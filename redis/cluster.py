@@ -31,6 +31,7 @@ from redis.exceptions import (
     TimeoutError,
     TryAgainError,
 )
+from redis.load_balancer import LoadBalancer
 from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import (
@@ -1319,25 +1320,6 @@ class ClusterNode:
             self.redis_connection.invalidate_key_from_cache(key)
 
 
-class LoadBalancer:
-    """
-    Round-Robin Load Balancing
-    """
-
-    def __init__(self, start_index: int = 0) -> None:
-        self.primary_to_idx = {}
-        self.start_index = start_index
-
-    def get_server_index(self, primary: str, list_size: int) -> int:
-        server_index = self.primary_to_idx.setdefault(primary, self.start_index)
-        # Update the index
-        self.primary_to_idx[primary] = (server_index + 1) % list_size
-        return server_index
-
-    def reset(self) -> None:
-        self.primary_to_idx.clear()
-
-
 class NodesManager:
     def __init__(
         self,
@@ -1426,40 +1408,24 @@ class NodesManager:
         # Reset moved_exception
         self._moved_exception = None
 
-    def get_node_from_slot(self, slot, read_from_replicas=False, server_type=None):
+    def get_node_from_slot(
+        self, slot: int, read_from_replicas: bool = False
+    ) -> "ClusterNode":
         """
-        Gets a node that servers this hash slot
+        Gets a node that serves this hash slot
         """
         if self._moved_exception:
             with self._lock:
                 if self._moved_exception:
                     self._update_moved_slots()
 
-        if self.slots_cache.get(slot) is None or len(self.slots_cache[slot]) == 0:
-            raise SlotNotCoveredError(
-                f'Slot "{slot}" not covered by the cluster. '
-                f'"require_full_coverage={self._require_full_coverage}"'
-            )
-
-        if read_from_replicas is True:
-            # get the server index in a Round-Robin manner
-            primary_name = self.slots_cache[slot][0].name
-            node_idx = self.read_load_balancer.get_server_index(
-                primary_name, len(self.slots_cache[slot])
-            )
-        elif (
-            server_type is None
-            or server_type == PRIMARY
-            or len(self.slots_cache[slot]) == 1
-        ):
-            # return a primary
-            node_idx = 0
-        else:
-            # return a replica
-            # randomly choose one of the replicas
-            node_idx = random.randint(1, len(self.slots_cache[slot]) - 1)
-
-        return self.slots_cache[slot][node_idx]
+        slot_nodes = self.slots_cache.get(slot, None)
+        if slot_nodes is None or len(slot_nodes) == 0:
+            raise SlotNotCoveredError(f'Slot "{slot}" not covered by the cluster.')
+        return self.read_load_balancer.get_node_from_slot(
+            slot_nodes,
+            read_from_replicas,
+        )
 
     def get_nodes_by_server_type(self, server_type):
         """
