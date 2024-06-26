@@ -5,7 +5,7 @@ version: "3.8"
 services:
 
   redis:
-    image: redis/redis-stack-server:edge
+    image: redis/redis-stack-server:latest
     container_name: redis-standalone
     ports:
       - 6379:6379
@@ -18,7 +18,7 @@ services:
       - all
 
   replica:
-    image: redis/redis-stack-server:edge
+    image: redis/redis-stack-server:latest
     container_name: redis-replica
     depends_on:
       - redis
@@ -63,7 +63,7 @@ services:
       - "./dockers/stunnel/keys:/etc/stunnel/keys:ro"
 
   sentinel:
-    image: redis/redis-stack-server:edge
+    image: redis/redis-stack-server:latest
     container_name: redis-sentinel
     depends_on:
       - redis
@@ -79,7 +79,7 @@ services:
       - all
 
   sentinel2:
-    image: redis/redis-stack-server:edge
+    image: redis/redis-stack-server:latest
     container_name: redis-sentinel2
     depends_on:
       - redis
@@ -95,7 +95,7 @@ services:
       - all
 
   sentinel3:
-    image: redis/redis-stack-server:edge
+    image: redis/redis-stack-server:latest
     container_name: redis-sentinel3
     depends_on:
       - redis
