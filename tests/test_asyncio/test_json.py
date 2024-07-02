@@ -131,7 +131,7 @@ async def test_mset(decoded_r: redis.Redis):
 async def test_clear(decoded_r: redis.Redis):
     await decoded_r.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 1 == await decoded_r.json().clear("arr", Path.root_path())
-    assert_resp_response(decoded_r, await decoded_r.json().get("arr"), [], [[[]]])
+    assert_resp_response(decoded_r, await decoded_r.json().get("arr"), [], [])
 
 
 @pytest.mark.redismod

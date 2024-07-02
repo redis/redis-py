@@ -130,7 +130,7 @@ def test_mset(client):
 def test_clear(client):
     client.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 1 == client.json().clear("arr", Path.root_path())
-    assert_resp_response(client, client.json().get("arr"), [], [[[]]])
+    assert_resp_response(client, client.json().get("arr"), [], [])
 
 
 @pytest.mark.redismod
