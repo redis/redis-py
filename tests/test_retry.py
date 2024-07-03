@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 import pytest
-from redis.backoff import ExponentialBackoff, NoBackoff
+from redis.backoff import AbstractBackoff, ExponentialBackoff, NoBackoff
 from redis.client import Redis
 from redis.connection import Connection, UnixDomainSocketConnection
 from redis.exceptions import (
@@ -15,7 +15,7 @@ from redis.retry import Retry
 from .conftest import _get_client
 
 
-class BackoffMock:
+class BackoffMock(AbstractBackoff):
     def __init__(self):
         self.reset_calls = 0
         self.calls = 0
