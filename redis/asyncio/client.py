@@ -2,6 +2,7 @@ import asyncio
 import copy
 import inspect
 import re
+import ssl
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -26,10 +27,10 @@ from typing import (
 )
 
 from redis._cache import (
-    DEFAULT_BLACKLIST,
+    DEFAULT_ALLOW_LIST,
+    DEFAULT_DENY_LIST,
     DEFAULT_EVICTION_POLICY,
-    DEFAULT_WHITELIST,
-    _LocalCache,
+    AbstractCache,
 )
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -87,13 +88,11 @@ if TYPE_CHECKING:
 
 
 class ResponseCallbackProtocol(Protocol):
-    def __call__(self, response: Any, **kwargs):
-        ...
+    def __call__(self, response: Any, **kwargs): ...
 
 
 class AsyncResponseCallbackProtocol(Protocol):
-    async def __call__(self, response: Any, **kwargs):
-        ...
+    async def __call__(self, response: Any, **kwargs): ...
 
 
 ResponseCallbackT = Union[ResponseCallbackProtocol, AsyncResponseCallbackProtocol]
@@ -226,6 +225,8 @@ class Redis(
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
+        ssl_min_version: Optional[ssl.TLSVersion] = None,
+        ssl_ciphers: Optional[str] = None,
         max_connections: Optional[int] = None,
         single_connection_client: bool = False,
         health_check_interval: int = 0,
@@ -238,13 +239,13 @@ class Redis(
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        cache_enable: bool = False,
-        client_cache: Optional[_LocalCache] = None,
+        cache_enabled: bool = False,
+        client_cache: Optional[AbstractCache] = None,
         cache_max_size: int = 100,
         cache_ttl: int = 0,
-        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
-        cache_whitelist: List[str] = DEFAULT_WHITELIST,
+        cache_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
+        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ):
         """
         Initialize a new Redis client.
@@ -294,13 +295,13 @@ class Redis(
                 "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
-                "cache_enable": cache_enable,
+                "cache_enabled": cache_enabled,
                 "client_cache": client_cache,
                 "cache_max_size": cache_max_size,
                 "cache_ttl": cache_ttl,
-                "cache_eviction_policy": cache_eviction_policy,
-                "cache_blacklist": cache_blacklist,
-                "cache_whitelist": cache_whitelist,
+                "cache_policy": cache_policy,
+                "cache_deny_list": cache_deny_list,
+                "cache_allow_list": cache_allow_list,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -332,6 +333,8 @@ class Redis(
                             "ssl_ca_certs": ssl_ca_certs,
                             "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,
+                            "ssl_min_version": ssl_min_version,
+                            "ssl_ciphers": ssl_ciphers,
                         }
                     )
             # This arg only used if no pool is passed in
@@ -626,25 +629,28 @@ class Redis(
         pool = self.connection_pool
         conn = self.connection or await pool.get_connection(command_name, **options)
         response_from_cache = await conn._get_from_local_cache(args)
-        if response_from_cache is not None:
-            return response_from_cache
-        else:
-            if self.single_connection_client:
-                await self._single_conn_lock.acquire()
-            try:
-                response = await conn.retry.call_with_retry(
-                    lambda: self._send_command_parse_response(
-                        conn, command_name, *args, **options
-                    ),
-                    lambda error: self._disconnect_raise(conn, error),
-                )
-                conn._add_to_local_cache(args, response, keys)
-                return response
-            finally:
-                if self.single_connection_client:
-                    self._single_conn_lock.release()
-                if not self.connection:
-                    await pool.release(conn)
+        try:
+            if response_from_cache is not None:
+                return response_from_cache
+            else:
+                try:
+                    if self.single_connection_client:
+                        await self._single_conn_lock.acquire()
+                    response = await conn.retry.call_with_retry(
+                        lambda: self._send_command_parse_response(
+                            conn, command_name, *args, **options
+                        ),
+                        lambda error: self._disconnect_raise(conn, error),
+                    )
+                    if keys:
+                        conn._add_to_local_cache(args, response, keys)
+                    return response
+                finally:
+                    if self.single_connection_client:
+                        self._single_conn_lock.release()
+        finally:
+            if not self.connection:
+                await pool.release(conn)
 
     async def parse_response(
         self, connection: Connection, command_name: Union[str, bytes], **options
@@ -670,6 +676,24 @@ class Redis(
             retval = self.response_callbacks[command_name](response, **options)
             return await retval if inspect.isawaitable(retval) else retval
         return response
+
+    def flush_cache(self):
+        if self.connection:
+            self.connection.flush_cache()
+        else:
+            self.connection_pool.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        if self.connection:
+            self.connection.delete_command_from_cache(command)
+        else:
+            self.connection_pool.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        if self.connection:
+            self.connection.invalidate_key_from_cache(key)
+        else:
+            self.connection_pool.invalidate_key_from_cache(key)
 
 
 StrictRedis = Redis
@@ -897,11 +921,15 @@ class PubSub:
     async def _disconnect_raise_connect(self, conn, error):
         """
         Close the connection and raise an exception
-        if retry_on_timeout is not set or the error
-        is not a TimeoutError. Otherwise, try to reconnect
+        if retry_on_error is not set or the error is not one
+        of the specified error types. Otherwise, try to
+        reconnect
         """
         await conn.disconnect()
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             raise error
         await conn.connect()
 
@@ -1184,13 +1212,11 @@ class PubSub:
 
 
 class PubsubWorkerExceptionHandler(Protocol):
-    def __call__(self, e: BaseException, pubsub: PubSub):
-        ...
+    def __call__(self, e: BaseException, pubsub: PubSub): ...
 
 
 class AsyncPubsubWorkerExceptionHandler(Protocol):
-    async def __call__(self, e: BaseException, pubsub: PubSub):
-        ...
+    async def __call__(self, e: BaseException, pubsub: PubSub): ...
 
 
 PSWorkerThreadExcHandlerT = Union[
@@ -1314,8 +1340,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         """
         Close the connection, reset watching state and
         raise an exception if we were watching,
-        retry_on_timeout is not set,
-        or the error is not a TimeoutError
+        if retry_on_error is not set or the error is not one
+        of the specified error types.
         """
         await conn.disconnect()
         # if we were already watching a variable, the watch is no longer
@@ -1326,9 +1352,12 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
-        # if retry_on_timeout is not set, or the error is not
-        # a TimeoutError, raise it
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        # if retry_on_error is not set or the error is not one
+        # of the specified error types, raise it
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             await self.aclose()
             raise
 
@@ -1503,8 +1532,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     async def _disconnect_raise_reset(self, conn: Connection, error: Exception):
         """
         Close the connection, raise an exception if we were watching,
-        and raise an exception if retry_on_timeout is not set,
-        or the error is not a TimeoutError
+        and raise an exception if retry_on_error is not set or the
+        error is not one of the specified error types.
         """
         await conn.disconnect()
         # if we were watching a variable, the watch is no longer valid
@@ -1514,9 +1543,12 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             raise WatchError(
                 "A ConnectionError occurred on while watching one or more keys"
             )
-        # if retry_on_timeout is not set, or the error is not
-        # a TimeoutError, raise it
-        if not (conn.retry_on_timeout and isinstance(error, TimeoutError)):
+        # if retry_on_error is not set or the error is not one
+        # of the specified error types, raise it
+        if (
+            conn.retry_on_error is None
+            or isinstance(error, tuple(conn.retry_on_error)) is False
+        ):
             await self.reset()
             raise
 

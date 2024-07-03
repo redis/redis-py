@@ -7,6 +7,7 @@ import threading
 
 import pytest
 from redis.connection import Connection, SSLConnection, UnixDomainSocketConnection
+from redis.exceptions import ConnectionError
 
 from .ssl_utils import get_ssl_filename
 
@@ -45,7 +46,78 @@ def test_uds_connect(uds_address):
 
 
 @pytest.mark.ssl
-def test_tcp_ssl_connect(tcp_address):
+@pytest.mark.parametrize(
+    "ssl_min_version",
+    [
+        ssl.TLSVersion.TLSv1_2,
+        pytest.param(
+            ssl.TLSVersion.TLSv1_3,
+            marks=pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3"),
+        ),
+    ],
+)
+def test_tcp_ssl_connect(tcp_address, ssl_min_version):
+    host, port = tcp_address
+    certfile = get_ssl_filename("client-cert.pem")
+    keyfile = get_ssl_filename("client-key.pem")
+    ca_certfile = get_ssl_filename("ca-cert.pem")
+    conn = SSLConnection(
+        host=host,
+        port=port,
+        client_name=_CLIENT_NAME,
+        ssl_ca_certs=ca_certfile,
+        socket_timeout=10,
+        ssl_min_version=ssl_min_version,
+    )
+    _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+
+
+@pytest.mark.ssl
+@pytest.mark.parametrize(
+    "ssl_ciphers",
+    [
+        "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "ECDHE-RSA-AES128-GCM-SHA256",
+    ],
+)
+def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
+    host, port = tcp_address
+    certfile = get_ssl_filename("client-cert.pem")
+    keyfile = get_ssl_filename("client-key.pem")
+    ca_certfile = get_ssl_filename("ca-cert.pem")
+    conn = SSLConnection(
+        host=host,
+        port=port,
+        client_name=_CLIENT_NAME,
+        ssl_ca_certs=ca_certfile,
+        socket_timeout=10,
+        ssl_min_version=ssl.TLSVersion.TLSv1_2,
+        ssl_ciphers=ssl_ciphers,
+    )
+    _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+
+
+"""
+Addresses bug CAE-333 which uncovered that the init method of the base
+class did override the initialization of the socket_timeout parameter.
+"""
+
+
+def test_unix_socket_with_timeout():
+    conn = UnixDomainSocketConnection(socket_timeout=1000)
+
+    # Check if the base class defaults were taken over.
+    assert conn.db == 0
+
+    # Verify if the timeout and the path is set correctly.
+    assert conn.socket_timeout == 1000
+    assert conn.path == ""
+
+
+@pytest.mark.ssl
+@pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3")
+def test_tcp_ssl_version_mismatch(tcp_address):
     host, port = tcp_address
     certfile = get_ssl_filename("server-cert.pem")
     keyfile = get_ssl_filename("server-key.pem")
@@ -55,19 +127,25 @@ def test_tcp_ssl_connect(tcp_address):
         client_name=_CLIENT_NAME,
         ssl_ca_certs=certfile,
         socket_timeout=10,
+        ssl_min_version=ssl.TLSVersion.TLSv1_3,
     )
-    _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    with pytest.raises(ConnectionError):
+        _assert_connect(
+            conn,
+            tcp_address,
+            certfile=certfile,
+            keyfile=keyfile,
+            ssl_version=ssl.PROTOCOL_TLSv1_2,
+        )
 
 
-def _assert_connect(conn, server_address, certfile=None, keyfile=None):
+def _assert_connect(conn, server_address, **tcp_kw):
     if isinstance(server_address, str):
         if not _RedisUDSServer:
             pytest.skip("Unix domain sockets are not supported on this platform")
         server = _RedisUDSServer(server_address, _RedisRequestHandler)
     else:
-        server = _RedisTCPServer(
-            server_address, _RedisRequestHandler, certfile=certfile, keyfile=keyfile
-        )
+        server = _RedisTCPServer(server_address, _RedisRequestHandler, **tcp_kw)
     with server as aserver:
         t = threading.Thread(target=aserver.serve_forever)
         t.start()
@@ -81,11 +159,19 @@ def _assert_connect(conn, server_address, certfile=None, keyfile=None):
 
 
 class _RedisTCPServer(socketserver.TCPServer):
-    def __init__(self, *args, certfile=None, keyfile=None, **kw) -> None:
+    def __init__(
+        self,
+        *args,
+        certfile=None,
+        keyfile=None,
+        ssl_version=ssl.PROTOCOL_TLS,
+        **kw,
+    ) -> None:
         self._ready_event = threading.Event()
         self._stop_requested = False
         self._certfile = certfile
         self._keyfile = keyfile
+        self._ssl_version = ssl_version
         super().__init__(*args, **kw)
 
     def service_actions(self):
@@ -112,6 +198,9 @@ class _RedisTCPServer(socketserver.TCPServer):
         connstream = context.wrap_socket(
             newsocket,
             server_side=True,
+            certfile=self._certfile,
+            keyfile=self._keyfile,
+            ssl_version=self._ssl_version,
         )
         return connstream, fromaddr
 

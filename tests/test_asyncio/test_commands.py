@@ -1,6 +1,7 @@
 """
 Tests async overrides of commands from their mixins
 """
+
 import asyncio
 import binascii
 import datetime
@@ -1348,6 +1349,19 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         _, dic = await r.hscan("a", match="a")
         assert dic == {b"a": b"1"}
+        _, dic = await r.hscan("a_notset", match="a")
+        assert dic == {}
+
+    @skip_if_server_version_lt("7.3.240")
+    async def test_hscan_novalues(self, r: redis.Redis):
+        await r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
+        cursor, keys = await r.hscan("a", no_values=True)
+        assert cursor == 0
+        assert sorted(keys) == [b"a", b"b", b"c"]
+        _, keys = await r.hscan("a", match="a", no_values=True)
+        assert keys == [b"a"]
+        _, keys = await r.hscan("a_notset", match="a", no_values=True)
+        assert keys == []
 
     @skip_if_server_version_lt("2.8.0")
     async def test_hscan_iter(self, r: redis.Redis):
@@ -1356,6 +1370,20 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         dic = {k: v async for k, v in r.hscan_iter("a", match="a")}
         assert dic == {b"a": b"1"}
+        dic = {k: v async for k, v in r.hscan_iter("a_notset", match="a")}
+        assert dic == {}
+
+    @skip_if_server_version_lt("7.3.240")
+    async def test_hscan_iter_novalues(self, r: redis.Redis):
+        await r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
+        keys = list([k async for k in r.hscan_iter("a", no_values=True)])
+        assert sorted(keys) == [b"a", b"b", b"c"]
+        keys = list([k async for k in r.hscan_iter("a", match="a", no_values=True)])
+        assert keys == [b"a"]
+        keys = list(
+            [k async for k in r.hscan_iter("a", match="a_notset", no_values=True)]
+        )
+        assert keys == []
 
     @skip_if_server_version_lt("2.8.0")
     async def test_zscan(self, r: redis.Redis):
@@ -2891,6 +2919,31 @@ class TestRedisCommands:
         assert info["first-entry"] == await get_stream_message(r, stream, m1)
         assert info["last-entry"] == await get_stream_message(r, stream, m2)
 
+        await r.xtrim(stream, 0)
+        info = await r.xinfo_stream(stream)
+        assert info["length"] == 0
+        assert info["first-entry"] is None
+        assert info["last-entry"] is None
+
+    @skip_if_server_version_lt("6.0.0")
+    async def test_xinfo_stream_full(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+
+        await r.xadd(stream, {"foo": "bar"})
+        info = await r.xinfo_stream(stream, full=True)
+        assert info["length"] == 1
+        assert len(info["groups"]) == 0
+
+        await r.xgroup_create(stream, group, 0)
+        info = await r.xinfo_stream(stream, full=True)
+        assert info["length"] == 1
+
+        await r.xreadgroup(group, "consumer", streams={stream: ">"})
+        info = await r.xinfo_stream(stream, full=True)
+        consumer = info["groups"][0]["consumers"][0]
+        assert isinstance(consumer, dict)
+
     @skip_if_server_version_lt("5.0.0")
     async def test_xlen(self, r: redis.Redis):
         stream = "stream"
@@ -3207,7 +3260,7 @@ class TestRedisCommands:
         assert isinstance(stats, dict)
         for key, value in stats.items():
             if key.startswith("db."):
-                assert isinstance(value, dict)
+                assert not isinstance(value, list)
 
     @skip_if_server_version_lt("4.0.0")
     async def test_memory_usage(self, r: redis.Redis):

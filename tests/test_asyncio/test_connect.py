@@ -10,6 +10,7 @@ from redis.asyncio.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
+from redis.exceptions import ConnectionError
 
 from ..ssl_utils import get_ssl_filename
 
@@ -50,7 +51,63 @@ async def test_uds_connect(uds_address):
 
 
 @pytest.mark.ssl
-async def test_tcp_ssl_connect(tcp_address):
+@pytest.mark.parametrize(
+    "ssl_ciphers",
+    [
+        "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "ECDHE-RSA-AES128-GCM-SHA256",
+    ],
+)
+async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
+    host, port = tcp_address
+    certfile = get_ssl_filename("client-cert.pem")
+    keyfile = get_ssl_filename("client-key.pem")
+    ca_certfile = get_ssl_filename("ca-cert.pem")
+    conn = SSLConnection(
+        host=host,
+        port=port,
+        client_name=_CLIENT_NAME,
+        ssl_ca_certs=ca_certfile,
+        socket_timeout=10,
+        ssl_min_version=ssl.TLSVersion.TLSv1_2,
+        ssl_ciphers=ssl_ciphers,
+    )
+    await _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    await conn.disconnect()
+
+
+@pytest.mark.ssl
+@pytest.mark.parametrize(
+    "ssl_min_version",
+    [
+        ssl.TLSVersion.TLSv1_2,
+        pytest.param(
+            ssl.TLSVersion.TLSv1_3,
+            marks=pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3"),
+        ),
+    ],
+)
+async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
+    host, port = tcp_address
+    certfile = get_ssl_filename("client-cert.pem")
+    keyfile = get_ssl_filename("client-key.pem")
+    ca_certfile = get_ssl_filename("ca-cert.pem")
+    conn = SSLConnection(
+        host=host,
+        port=port,
+        client_name=_CLIENT_NAME,
+        ssl_ca_certs=ca_certfile,
+        socket_timeout=10,
+        ssl_min_version=ssl_min_version,
+    )
+    await _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    await conn.disconnect()
+
+
+@pytest.mark.ssl
+@pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3")
+async def test_tcp_ssl_version_mismatch(tcp_address):
     host, port = tcp_address
     certfile = get_ssl_filename("server-cert.pem")
     keyfile = get_ssl_filename("server-key.pem")
@@ -59,13 +116,27 @@ async def test_tcp_ssl_connect(tcp_address):
         port=port,
         client_name=_CLIENT_NAME,
         ssl_ca_certs=certfile,
-        socket_timeout=10,
+        socket_timeout=1,
+        ssl_min_version=ssl.TLSVersion.TLSv1_3,
     )
-    await _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    with pytest.raises(ConnectionError):
+        await _assert_connect(
+            conn,
+            tcp_address,
+            certfile=certfile,
+            keyfile=keyfile,
+            ssl_version=ssl.TLSVersion.TLSv1_2,
+        )
     await conn.disconnect()
 
 
-async def _assert_connect(conn, server_address, certfile=None, keyfile=None):
+async def _assert_connect(
+    conn,
+    server_address,
+    certfile=None,
+    keyfile=None,
+    ssl_version=None,
+):
     stop_event = asyncio.Event()
     finished = asyncio.Event()
 
@@ -82,7 +153,9 @@ async def _assert_connect(conn, server_address, certfile=None, keyfile=None):
     elif certfile:
         host, port = server_address
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        if ssl_version is not None:
+            context.minimum_version = ssl_version
+            context.maximum_version = ssl_version
         context.load_cert_chain(certfile=certfile, keyfile=keyfile)
         server = await asyncio.start_server(_handler, host=host, port=port, ssl=context)
     else:
@@ -94,6 +167,9 @@ async def _assert_connect(conn, server_address, certfile=None, keyfile=None):
         try:
             await conn.connect()
             await conn.disconnect()
+        except ConnectionError:
+            finished.set()
+            raise
         finally:
             stop_event.set()
             aserver.close()

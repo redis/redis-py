@@ -199,69 +199,58 @@ class ACLCommands(CommandsProtocol):
         """
         Create or update an ACL user.
 
-        Create or update the ACL for ``username``. If the user already exists,
+        Create or update the ACL for `username`. If the user already exists,
         the existing ACL is completely overwritten and replaced with the
         specified values.
 
-        ``enabled`` is a boolean indicating whether the user should be allowed
-        to authenticate or not. Defaults to ``False``.
+        For more information, see https://redis.io/commands/acl-setuser
 
-        ``nopass`` is a boolean indicating whether the can authenticate without
-        a password. This cannot be True if ``passwords`` are also specified.
-
-        ``passwords`` if specified is a list of plain text passwords
-        to add to or remove from the user. Each password must be prefixed with
-        a '+' to add or a '-' to remove. For convenience, the value of
-        ``passwords`` can be a simple prefixed string when adding or
-        removing a single password.
-
-        ``hashed_passwords`` if specified is a list of SHA-256 hashed passwords
-        to add to or remove from the user. Each hashed password must be
-        prefixed with a '+' to add or a '-' to remove. For convenience,
-        the value of ``hashed_passwords`` can be a simple prefixed string when
-        adding or removing a single password.
-
-        ``categories`` if specified is a list of strings representing category
-        permissions. Each string must be prefixed with either a '+' to add the
-        category permission or a '-' to remove the category permission.
-
-        ``commands`` if specified is a list of strings representing command
-        permissions. Each string must be prefixed with either a '+' to add the
-        command permission or a '-' to remove the command permission.
-
-        ``keys`` if specified is a list of key patterns to grant the user
-        access to. Keys patterns allow '*' to support wildcard matching. For
-        example, '*' grants access to all keys while 'cache:*' grants access
-        to all keys that are prefixed with 'cache:'. ``keys`` should not be
-        prefixed with a '~'.
-
-        ``reset`` is a boolean indicating whether the user should be fully
-        reset prior to applying the new ACL. Setting this to True will
-        remove all existing passwords, flags and privileges from the user and
-        then apply the specified rules. If this is False, the user's existing
-        passwords, flags and privileges will be kept and any new specified
-        rules will be applied on top.
-
-        ``reset_keys`` is a boolean indicating whether the user's key
-        permissions should be reset prior to applying any new key permissions
-        specified in ``keys``. If this is False, the user's existing
-        key permissions will be kept and any new specified key permissions
-        will be applied on top.
-
-        ``reset_channels`` is a boolean indicating whether the user's channel
-        permissions should be reset prior to applying any new channel permissions
-        specified in ``channels``.If this is False, the user's existing
-        channel permissions will be kept and any new specified channel permissions
-        will be applied on top.
-
-        ``reset_passwords`` is a boolean indicating whether to remove all
-        existing passwords and the 'nopass' flag from the user prior to
-        applying any new passwords specified in 'passwords' or
-        'hashed_passwords'. If this is False, the user's existing passwords
-        and 'nopass' status will be kept and any new specified passwords
-        or hashed_passwords will be applied on top.
-
-        For more information see https://redis.io/commands/acl-setuser
+        Args:
+            username: The name of the user whose ACL is to be created or updated.
+            enabled: Indicates whether the user should be allowed to authenticate.
+                     Defaults to `False`.
+            nopass: Indicates whether the user can authenticate without a password.
+                    This cannot be `True` if `passwords` are also specified.
+            passwords: A list of plain text passwords to add to or remove from the user.
+                       Each password must be prefixed with a '+' to add or a '-' to
+                       remove. For convenience, a single prefixed string can be used
+                       when adding or removing a single password.
+            hashed_passwords: A list of SHA-256 hashed passwords to add to or remove
+                              from the user. Each hashed password must be prefixed with
+                              a '+' to add or a '-' to remove. For convenience, a single
+                              prefixed string can be used when adding or removing a
+                              single password.
+            categories: A list of strings representing category permissions. Each string
+                        must be prefixed with either a '+' to add the category
+                        permission or a '-' to remove the category permission.
+            commands: A list of strings representing command permissions. Each string
+                      must be prefixed with either a '+' to add the command permission
+                      or a '-' to remove the command permission.
+            keys: A list of key patterns to grant the user access to. Key patterns allow
+                  '*' to support wildcard matching. For example, '*' grants access to
+                  all keys while 'cache:*' grants access to all keys that are prefixed
+                  with 'cache:'. `keys` should not be prefixed with a '~'.
+            reset: Indicates whether the user should be fully reset prior to applying
+                   the new ACL. Setting this to `True` will remove all existing
+                   passwords, flags, and privileges from the user and then apply the
+                   specified rules. If `False`, the user's existing passwords, flags,
+                   and privileges will be kept and any new specified rules will be
+                   applied on top.
+            reset_keys: Indicates whether the user's key permissions should be reset
+                        prior to applying any new key permissions specified in `keys`.
+                        If `False`, the user's existing key permissions will be kept and
+                        any new specified key permissions will be applied on top.
+            reset_channels: Indicates whether the user's channel permissions should be
+                            reset prior to applying any new channel permissions
+                            specified in `channels`. If `False`, the user's existing
+                            channel permissions will be kept and any new specified
+                            channel permissions will be applied on top.
+            reset_passwords: Indicates whether to remove all existing passwords and the
+                             `nopass` flag from the user prior to applying any new
+                             passwords specified in `passwords` or `hashed_passwords`.
+                             If `False`, the user's existing passwords and `nopass`
+                             status will be kept and any new specified passwords or
+                             hashed passwords will be applied on top.
         """
         encoder = self.get_encoder()
         pieces: List[EncodableT] = [username]
@@ -459,6 +448,7 @@ class ManagementCommands(CommandsProtocol):
         skipme: Union[bool, None] = None,
         laddr: Union[bool, None] = None,
         user: str = None,
+        maxage: Union[int, None] = None,
         **kwargs,
     ) -> ResponseT:
         """
@@ -472,6 +462,7 @@ class ManagementCommands(CommandsProtocol):
         options. If skipme is not provided, the server defaults to skipme=True
         :param laddr: Kills a client by its 'local (bind) address:port'
         :param user: Kills a client for a specific user name
+        :param maxage: Kills clients that are older than the specified age in seconds
         """
         args = []
         if _type is not None:
@@ -494,6 +485,8 @@ class ManagementCommands(CommandsProtocol):
             args.extend((b"LADDR", laddr))
         if user is not None:
             args.extend((b"USER", user))
+        if maxage is not None:
+            args.extend((b"MAXAGE", maxage))
         if not args:
             raise DataError(
                 "CLIENT KILL <filter> <value> ... ... <filter> "
@@ -2011,7 +2004,7 @@ class BasicKeyCommands(CommandsProtocol):
         options = {}
         if not args:
             options[EMPTY_RESPONSE] = []
-        options["keys"] = keys
+        options["keys"] = args
         return self.execute_command("MGET", *args, **options)
 
     def mset(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
@@ -3102,6 +3095,7 @@ class ScanCommands(CommandsProtocol):
         cursor: int = 0,
         match: Union[PatternT, None] = None,
         count: Union[int, None] = None,
+        no_values: Union[bool, None] = None,
     ) -> ResponseT:
         """
         Incrementally return key/value slices in a hash. Also return a cursor
@@ -3111,6 +3105,8 @@ class ScanCommands(CommandsProtocol):
 
         ``count`` allows for hint the minimum number of returns
 
+        ``no_values`` indicates to return only the keys, without values.
+
         For more information see https://redis.io/commands/hscan
         """
         pieces: list[EncodableT] = [name, cursor]
@@ -3118,13 +3114,16 @@ class ScanCommands(CommandsProtocol):
             pieces.extend([b"MATCH", match])
         if count is not None:
             pieces.extend([b"COUNT", count])
-        return self.execute_command("HSCAN", *pieces)
+        if no_values is not None:
+            pieces.extend([b"NOVALUES"])
+        return self.execute_command("HSCAN", *pieces, no_values=no_values)
 
     def hscan_iter(
         self,
         name: str,
         match: Union[PatternT, None] = None,
         count: Union[int, None] = None,
+        no_values: Union[bool, None] = None,
     ) -> Iterator:
         """
         Make an iterator using the HSCAN command so that the client doesn't
@@ -3133,11 +3132,18 @@ class ScanCommands(CommandsProtocol):
         ``match`` allows for filtering the keys by pattern
 
         ``count`` allows for hint the minimum number of returns
+
+        ``no_values`` indicates to return only the keys, without values
         """
         cursor = "0"
         while cursor != 0:
-            cursor, data = self.hscan(name, cursor=cursor, match=match, count=count)
-            yield from data.items()
+            cursor, data = self.hscan(
+                name, cursor=cursor, match=match, count=count, no_values=no_values
+            )
+            if no_values:
+                yield from data
+            else:
+                yield from data.items()
 
     def zscan(
         self,
@@ -3253,6 +3259,7 @@ class AsyncScanCommands(ScanCommands):
         name: str,
         match: Union[PatternT, None] = None,
         count: Union[int, None] = None,
+        no_values: Union[bool, None] = None,
     ) -> AsyncIterator:
         """
         Make an iterator using the HSCAN command so that the client doesn't
@@ -3261,14 +3268,20 @@ class AsyncScanCommands(ScanCommands):
         ``match`` allows for filtering the keys by pattern
 
         ``count`` allows for hint the minimum number of returns
+
+        ``no_values`` indicates to return only the keys, without values
         """
         cursor = "0"
         while cursor != 0:
             cursor, data = await self.hscan(
-                name, cursor=cursor, match=match, count=count
+                name, cursor=cursor, match=match, count=count, no_values=no_values
             )
-            for it in data.items():
-                yield it
+            if no_values:
+                for it in data:
+                    yield it
+            else:
+                for it in data.items():
+                    yield it
 
     async def zscan_iter(
         self,
@@ -3399,9 +3412,7 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMEMBERS", name, keys=[name])
 
-    def smismember(
-        self, name: str, values: List, *args: List
-    ) -> Union[
+    def smismember(self, name: str, values: List, *args: List) -> Union[
         Awaitable[List[Union[Literal[0], Literal[1]]]],
         List[Union[Literal[0], Literal[1]]],
     ]:
@@ -5017,14 +5028,16 @@ class HashCommands(CommandsProtocol):
         """
         if key is None and not mapping and not items:
             raise DataError("'hset' with no key value pairs")
-        items = items or []
+        pieces = []
+        if items:
+            pieces.extend(items)
         if key is not None:
-            items.extend((key, value))
+            pieces.extend((key, value))
         if mapping:
             for pair in mapping.items():
-                items.extend(pair)
+                pieces.extend(pair)
 
-        return self.execute_command("HSET", name, *items)
+        return self.execute_command("HSET", name, *pieces)
 
     def hsetnx(self, name: str, key: str, value: str) -> Union[Awaitable[bool], bool]:
         """
@@ -5080,6 +5093,374 @@ class HashCommands(CommandsProtocol):
         For more information see https://redis.io/commands/hstrlen
         """
         return self.execute_command("HSTRLEN", name, key, keys=[name])
+
+    def hexpire(
+        self,
+        name: KeyT,
+        seconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
+        """
+        Sets or updates the expiration time for fields within a hash key, using relative
+        time in seconds.
+
+        If a field already has an expiration time, the behavior of the update can be
+        controlled using the `nx`, `xx`, `gt`, and `lt` parameters.
+
+        The return value provides detailed information about the outcome for each field.
+
+        For more information, see https://redis.io/commands/hexpire
+
+        Args:
+            name: The name of the hash key.
+            seconds: Expiration time in seconds, relative. Can be an integer, or a
+                     Python `timedelta` object.
+            fields: List of fields within the hash to apply the expiration time to.
+            nx: Set expiry only when the field has no expiry.
+            xx: Set expiry only when the field has an existing expiry.
+            gt: Set expiry only when the new expiry is greater than the current one.
+            lt: Set expiry only when the new expiry is less than the current one.
+
+        Returns:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
+                - `-2` if the field does not exist.
+                - `0` if the specified NX | XX | GT | LT condition was not met.
+                - `1` if the expiration time was set or updated.
+                - `2` if the field was deleted because the specified expiration time is
+                  in the past.
+        """
+        conditions = [nx, xx, gt, lt]
+        if sum(conditions) > 1:
+            raise ValueError("Only one of 'nx', 'xx', 'gt', 'lt' can be specified.")
+
+        if isinstance(seconds, datetime.timedelta):
+            seconds = int(seconds.total_seconds())
+
+        options = []
+        if nx:
+            options.append("NX")
+        if xx:
+            options.append("XX")
+        if gt:
+            options.append("GT")
+        if lt:
+            options.append("LT")
+
+        return self.execute_command(
+            "HEXPIRE", name, seconds, *options, "FIELDS", len(fields), *fields
+        )
+
+    def hpexpire(
+        self,
+        name: KeyT,
+        milliseconds: ExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
+        """
+        Sets or updates the expiration time for fields within a hash key, using relative
+        time in milliseconds.
+
+        If a field already has an expiration time, the behavior of the update can be
+        controlled using the `nx`, `xx`, `gt`, and `lt` parameters.
+
+        The return value provides detailed information about the outcome for each field.
+
+        For more information, see https://redis.io/commands/hpexpire
+
+        Args:
+            name: The name of the hash key.
+            milliseconds: Expiration time in milliseconds, relative. Can be an integer,
+                          or a Python `timedelta` object.
+            fields: List of fields within the hash to apply the expiration time to.
+            nx: Set expiry only when the field has no expiry.
+            xx: Set expiry only when the field has an existing expiry.
+            gt: Set expiry only when the new expiry is greater than the current one.
+            lt: Set expiry only when the new expiry is less than the current one.
+
+        Returns:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
+                - `-2` if the field does not exist.
+                - `0` if the specified NX | XX | GT | LT condition was not met.
+                - `1` if the expiration time was set or updated.
+                - `2` if the field was deleted because the specified expiration time is
+                  in the past.
+        """
+        conditions = [nx, xx, gt, lt]
+        if sum(conditions) > 1:
+            raise ValueError("Only one of 'nx', 'xx', 'gt', 'lt' can be specified.")
+
+        if isinstance(milliseconds, datetime.timedelta):
+            milliseconds = int(milliseconds.total_seconds() * 1000)
+
+        options = []
+        if nx:
+            options.append("NX")
+        if xx:
+            options.append("XX")
+        if gt:
+            options.append("GT")
+        if lt:
+            options.append("LT")
+
+        return self.execute_command(
+            "HPEXPIRE", name, milliseconds, *options, "FIELDS", len(fields), *fields
+        )
+
+    def hexpireat(
+        self,
+        name: KeyT,
+        unix_time_seconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
+        """
+        Sets or updates the expiration time for fields within a hash key, using an
+        absolute Unix timestamp in seconds.
+
+        If a field already has an expiration time, the behavior of the update can be
+        controlled using the `nx`, `xx`, `gt`, and `lt` parameters.
+
+        The return value provides detailed information about the outcome for each field.
+
+        For more information, see https://redis.io/commands/hexpireat
+
+        Args:
+            name: The name of the hash key.
+            unix_time_seconds: Expiration time as Unix timestamp in seconds. Can be an
+                               integer or a Python `datetime` object.
+            fields: List of fields within the hash to apply the expiration time to.
+            nx: Set expiry only when the field has no expiry.
+            xx: Set expiry only when the field has an existing expiration time.
+            gt: Set expiry only when the new expiry is greater than the current one.
+            lt: Set expiry only when the new expiry is less than the current one.
+
+        Returns:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
+                - `-2` if the field does not exist.
+                - `0` if the specified NX | XX | GT | LT condition was not met.
+                - `1` if the expiration time was set or updated.
+                - `2` if the field was deleted because the specified expiration time is
+                  in the past.
+        """
+        conditions = [nx, xx, gt, lt]
+        if sum(conditions) > 1:
+            raise ValueError("Only one of 'nx', 'xx', 'gt', 'lt' can be specified.")
+
+        if isinstance(unix_time_seconds, datetime.datetime):
+            unix_time_seconds = int(unix_time_seconds.timestamp())
+
+        options = []
+        if nx:
+            options.append("NX")
+        if xx:
+            options.append("XX")
+        if gt:
+            options.append("GT")
+        if lt:
+            options.append("LT")
+
+        return self.execute_command(
+            "HEXPIREAT",
+            name,
+            unix_time_seconds,
+            *options,
+            "FIELDS",
+            len(fields),
+            *fields,
+        )
+
+    def hpexpireat(
+        self,
+        name: KeyT,
+        unix_time_milliseconds: AbsExpiryT,
+        *fields: str,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+    ) -> ResponseT:
+        """
+        Sets or updates the expiration time for fields within a hash key, using an
+        absolute Unix timestamp in milliseconds.
+
+        If a field already has an expiration time, the behavior of the update can be
+        controlled using the `nx`, `xx`, `gt`, and `lt` parameters.
+
+        The return value provides detailed information about the outcome for each field.
+
+        For more information, see https://redis.io/commands/hpexpireat
+
+        Args:
+            name: The name of the hash key.
+            unix_time_milliseconds: Expiration time as Unix timestamp in milliseconds.
+                                    Can be an integer or a Python `datetime` object.
+            fields: List of fields within the hash to apply the expiry.
+            nx: Set expiry only when the field has no expiry.
+            xx: Set expiry only when the field has an existing expiry.
+            gt: Set expiry only when the new expiry is greater than the current one.
+            lt: Set expiry only when the new expiry is less than the current one.
+
+        Returns:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
+                - `-2` if the field does not exist.
+                - `0` if the specified NX | XX | GT | LT condition was not met.
+                - `1` if the expiration time was set or updated.
+                - `2` if the field was deleted because the specified expiration time is
+                  in the past.
+        """
+        conditions = [nx, xx, gt, lt]
+        if sum(conditions) > 1:
+            raise ValueError("Only one of 'nx', 'xx', 'gt', 'lt' can be specified.")
+
+        if isinstance(unix_time_milliseconds, datetime.datetime):
+            unix_time_milliseconds = int(unix_time_milliseconds.timestamp() * 1000)
+
+        options = []
+        if nx:
+            options.append("NX")
+        if xx:
+            options.append("XX")
+        if gt:
+            options.append("GT")
+        if lt:
+            options.append("LT")
+
+        return self.execute_command(
+            "HPEXPIREAT",
+            name,
+            unix_time_milliseconds,
+            *options,
+            "FIELDS",
+            len(fields),
+            *fields,
+        )
+
+    def hpersist(self, name: KeyT, *fields: str) -> ResponseT:
+        """
+        Removes the expiration time for each specified field in a hash.
+
+        For more information, see https://redis.io/commands/hpersist
+
+        Args:
+            name: The name of the hash key.
+            fields: A list of fields within the hash from which to remove the
+                    expiration time.
+
+        Returns:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
+                - `-2` if the field does not exist.
+                - `-1` if the field exists but has no associated expiration time.
+                - `1` if the expiration time was successfully removed from the field.
+        """
+        return self.execute_command("HPERSIST", name, "FIELDS", len(fields), *fields)
+
+    def hexpiretime(self, key: KeyT, *fields: str) -> ResponseT:
+        """
+        Returns the expiration times of hash fields as Unix timestamps in seconds.
+
+        For more information, see https://redis.io/commands/hexpiretime
+
+        Args:
+            key: The hash key.
+            fields: A list of fields within the hash for which to get the expiration
+                    time.
+
+        Returns:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
+                - `-2` if the field does not exist.
+                - `-1` if the field exists but has no associated expire time.
+                - A positive integer representing the expiration Unix timestamp in
+                  seconds, if the field has an associated expiration time.
+        """
+        return self.execute_command(
+            "HEXPIRETIME", key, "FIELDS", len(fields), *fields, keys=[key]
+        )
+
+    def hpexpiretime(self, key: KeyT, *fields: str) -> ResponseT:
+        """
+        Returns the expiration times of hash fields as Unix timestamps in milliseconds.
+
+        For more information, see https://redis.io/commands/hpexpiretime
+
+        Args:
+            key: The hash key.
+            fields: A list of fields within the hash for which to get the expiration
+                    time.
+
+        Returns:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
+                - `-2` if the field does not exist.
+                - `-1` if the field exists but has no associated expire time.
+                - A positive integer representing the expiration Unix timestamp in
+                  milliseconds, if the field has an associated expiration time.
+        """
+        return self.execute_command(
+            "HPEXPIRETIME", key, "FIELDS", len(fields), *fields, keys=[key]
+        )
+
+    def httl(self, key: KeyT, *fields: str) -> ResponseT:
+        """
+        Returns the TTL (Time To Live) in seconds for each specified field within a hash
+        key.
+
+        For more information, see https://redis.io/commands/httl
+
+        Args:
+            key: The hash key.
+            fields: A list of fields within the hash for which to get the TTL.
+
+        Returns:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
+                - `-2` if the field does not exist.
+                - `-1` if the field exists but has no associated expire time.
+                - A positive integer representing the TTL in seconds if the field has
+                  an associated expiration time.
+        """
+        return self.execute_command(
+            "HTTL", key, "FIELDS", len(fields), *fields, keys=[key]
+        )
+
+    def hpttl(self, key: KeyT, *fields: str) -> ResponseT:
+        """
+        Returns the TTL (Time To Live) in milliseconds for each specified field within a
+        hash key.
+
+        For more information, see https://redis.io/commands/hpttl
+
+        Args:
+            key: The hash key.
+            fields: A list of fields within the hash for which to get the TTL.
+
+        Returns:
+            If the key does not exist, returns an empty list. If the key exists, returns
+            a list which contains for each field in the request:
+                - `-2` if the field does not exist.
+                - `-1` if the field exists but has no associated expire time.
+                - A positive integer representing the TTL in milliseconds if the field
+                  has an associated expiration time.
+        """
+        return self.execute_command(
+            "HPTTL", key, "FIELDS", len(fields), *fields, keys=[key]
+        )
 
 
 AsyncHashCommands = HashCommands
@@ -5256,7 +5637,7 @@ AsyncPubSubCommands = PubSubCommands
 class ScriptCommands(CommandsProtocol):
     """
     Redis Lua script commands. see:
-    https://redis.com/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
+    https://redis.io/ebook/part-3-next-steps/chapter-11-scripting-redis-with-lua/
     """
 
     def _eval(

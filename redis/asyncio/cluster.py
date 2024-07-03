@@ -2,6 +2,7 @@ import asyncio
 import collections
 import random
 import socket
+import ssl
 import warnings
 from typing import (
     Any,
@@ -19,10 +20,10 @@ from typing import (
 )
 
 from redis._cache import (
-    DEFAULT_BLACKLIST,
+    DEFAULT_ALLOW_LIST,
+    DEFAULT_DENY_LIST,
     DEFAULT_EVICTION_POLICY,
-    DEFAULT_WHITELIST,
-    _LocalCache,
+    AbstractCache,
 )
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.helpers import (
@@ -271,15 +272,17 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = False,
         ssl_keyfile: Optional[str] = None,
+        ssl_min_version: Optional[ssl.TLSVersion] = None,
+        ssl_ciphers: Optional[str] = None,
         protocol: Optional[int] = 2,
-        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
-        cache_enable: bool = False,
-        client_cache: Optional[_LocalCache] = None,
+        address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
+        cache_enabled: bool = False,
+        client_cache: Optional[AbstractCache] = None,
         cache_max_size: int = 100,
         cache_ttl: int = 0,
-        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
-        cache_whitelist: List[str] = DEFAULT_WHITELIST,
+        cache_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
+        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -324,13 +327,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "retry": retry,
             "protocol": protocol,
             # Client cache related kwargs
-            "cache_enable": cache_enable,
+            "cache_enabled": cache_enabled,
             "client_cache": client_cache,
             "cache_max_size": cache_max_size,
             "cache_ttl": cache_ttl,
-            "cache_eviction_policy": cache_eviction_policy,
-            "cache_blacklist": cache_blacklist,
-            "cache_whitelist": cache_whitelist,
+            "cache_policy": cache_policy,
+            "cache_deny_list": cache_deny_list,
+            "cache_allow_list": cache_allow_list,
         }
 
         if ssl:
@@ -344,6 +347,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     "ssl_certfile": ssl_certfile,
                     "ssl_check_hostname": ssl_check_hostname,
                     "ssl_keyfile": ssl_keyfile,
+                    "ssl_min_version": ssl_min_version,
+                    "ssl_ciphers": ssl_ciphers,
                 }
             )
 
@@ -399,10 +404,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.response_callbacks = kwargs["response_callbacks"]
         self.result_callbacks = self.__class__.RESULT_CALLBACKS.copy()
-        self.result_callbacks[
-            "CLUSTER SLOTS"
-        ] = lambda cmd, res, **kwargs: parse_cluster_slots(
-            list(res.values())[0], **kwargs
+        self.result_callbacks["CLUSTER SLOTS"] = (
+            lambda cmd, res, **kwargs: parse_cluster_slots(
+                list(res.values())[0], **kwargs
+            )
         )
 
         self._initialize = True
@@ -933,6 +938,18 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             thread_local=thread_local,
         )
 
+    def flush_cache(self):
+        if self.nodes_manager:
+            self.nodes_manager.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        if self.nodes_manager:
+            self.nodes_manager.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        if self.nodes_manager:
+            self.nodes_manager.invalidate_key_from_cache(key)
+
 
 class ClusterNode:
     """
@@ -1072,7 +1089,8 @@ class ClusterNode:
             # Read response
             try:
                 response = await self.parse_response(connection, args[0], **kwargs)
-                connection._add_to_local_cache(args, response, keys)
+                if keys:
+                    connection._add_to_local_cache(args, response, keys)
                 return response
             finally:
                 # Release connection
@@ -1103,6 +1121,18 @@ class ClusterNode:
 
         return ret
 
+    def flush_cache(self):
+        for connection in self._connections:
+            connection.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        for connection in self._connections:
+            connection.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        for connection in self._connections:
+            connection.invalidate_key_from_cache(key)
+
 
 class NodesManager:
     __slots__ = (
@@ -1122,7 +1152,7 @@ class NodesManager:
         startup_nodes: List["ClusterNode"],
         require_full_coverage: bool,
         connection_kwargs: Dict[str, Any],
-        address_remap: Optional[Callable[[str, int], Tuple[str, int]]] = None,
+        address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
     ) -> None:
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.require_full_coverage = require_full_coverage
@@ -1250,13 +1280,12 @@ class NodesManager:
         for startup_node in self.startup_nodes.values():
             try:
                 # Make sure cluster mode is enabled on this node
-                if not (await startup_node.execute_command("INFO")).get(
-                    "cluster_enabled"
-                ):
+                try:
+                    cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
+                except ResponseError:
                     raise RedisClusterException(
                         "Cluster mode is not enabled on this node"
                     )
-                cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
                 startup_nodes_reachable = True
             except Exception as e:
                 # Try the next startup node.
@@ -1316,9 +1345,9 @@ class NodesManager:
                                 )
                             tmp_slots[i].append(target_replica_node)
                             # add this node to the nodes cache
-                            tmp_nodes_cache[
-                                target_replica_node.name
-                            ] = target_replica_node
+                            tmp_nodes_cache[target_replica_node.name] = (
+                                target_replica_node
+                            )
                     else:
                         # Validate that 2 nodes want to use the same slot cache
                         # setup
@@ -1388,6 +1417,18 @@ class NodesManager:
         if self.address_remap:
             return self.address_remap((host, port))
         return host, port
+
+    def flush_cache(self):
+        for node in self.nodes_cache.values():
+            node.flush_cache()
+
+    def delete_command_from_cache(self, command):
+        for node in self.nodes_cache.values():
+            node.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key):
+        for node in self.nodes_cache.values():
+            node.invalidate_key_from_cache(key)
 
 
 class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands):

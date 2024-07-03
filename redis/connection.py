@@ -1,6 +1,5 @@
 import copy
 import os
-import select
 import socket
 import ssl
 import sys
@@ -10,13 +9,14 @@ from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Any, Callable, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, List, Optional, Sequence, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ._cache import (
-    DEFAULT_BLACKLIST,
+    DEFAULT_ALLOW_LIST,
+    DEFAULT_DENY_LIST,
     DEFAULT_EVICTION_POLICY,
-    DEFAULT_WHITELIST,
+    AbstractCache,
     _LocalCache,
 )
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
@@ -157,13 +157,13 @@ class AbstractConnection:
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         command_packer: Optional[Callable[[], None]] = None,
-        cache_enable: bool = False,
-        client_cache: Optional[_LocalCache] = None,
-        cache_max_size: int = 100,
+        cache_enabled: bool = False,
+        client_cache: Optional[AbstractCache] = None,
+        cache_max_size: int = 10000,
         cache_ttl: int = 0,
-        cache_eviction_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_blacklist: List[str] = DEFAULT_BLACKLIST,
-        cache_whitelist: List[str] = DEFAULT_WHITELIST,
+        cache_policy: str = DEFAULT_EVICTION_POLICY,
+        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
+        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ):
         """
         Initialize a new Connection.
@@ -229,8 +229,8 @@ class AbstractConnection:
                 # p = DEFAULT_RESP_VERSION
             self.protocol = p
         self._command_packer = self._construct_command_packer(command_packer)
-        if cache_enable:
-            _cache = _LocalCache(cache_max_size, cache_ttl, cache_eviction_policy)
+        if cache_enabled:
+            _cache = _LocalCache(cache_max_size, cache_ttl, cache_policy)
         else:
             _cache = None
         self.client_cache = client_cache if client_cache is not None else _cache
@@ -239,8 +239,8 @@ class AbstractConnection:
                 raise RedisError(
                     "client caching is only supported with protocol version 3 or higher"
                 )
-            self.cache_blacklist = cache_blacklist
-            self.cache_whitelist = cache_whitelist
+            self.cache_deny_list = cache_deny_list
+            self.cache_allow_list = cache_allow_list
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -450,7 +450,7 @@ class AbstractConnection:
         if os.getpid() == self.pid:
             try:
                 conn_sock.shutdown(socket.SHUT_RDWR)
-            except OSError:
+            except (OSError, TypeError):
                 pass
 
         try:
@@ -608,11 +608,6 @@ class AbstractConnection:
             output.append(SYM_EMPTY.join(pieces))
         return output
 
-    def _socket_is_empty(self):
-        """Check if the socket is empty"""
-        r, _, _ = select.select([self._sock], [], [], 0)
-        return not bool(r)
-
     def _cache_invalidation_process(
         self, data: List[Union[str, Optional[List[str]]]]
     ) -> None:
@@ -626,24 +621,24 @@ class AbstractConnection:
             self.client_cache.flush()
         else:
             for key in data[1]:
-                self.client_cache.invalidate(str_if_bytes(key))
+                self.client_cache.invalidate_key(str_if_bytes(key))
 
-    def _get_from_local_cache(self, command: str):
+    def _get_from_local_cache(self, command: Sequence[str]):
         """
         If the command is in the local cache, return the response
         """
         if (
             self.client_cache is None
-            or command[0] in self.cache_blacklist
-            or command[0] not in self.cache_whitelist
+            or command[0] in self.cache_deny_list
+            or command[0] not in self.cache_allow_list
         ):
             return None
-        while not self._socket_is_empty():
+        while self.can_read():
             self.read_response(push_request=True)
         return self.client_cache.get(command)
 
     def _add_to_local_cache(
-        self, command: Tuple[str], response: ResponseT, keys: List[KeysT]
+        self, command: Sequence[str], response: ResponseT, keys: List[KeysT]
     ):
         """
         Add the command and response to the local cache if the command
@@ -651,19 +646,22 @@ class AbstractConnection:
         """
         if (
             self.client_cache is not None
-            and (self.cache_blacklist == [] or command[0] not in self.cache_blacklist)
-            and (self.cache_whitelist == [] or command[0] in self.cache_whitelist)
+            and (self.cache_deny_list == [] or command[0] not in self.cache_deny_list)
+            and (self.cache_allow_list == [] or command[0] in self.cache_allow_list)
         ):
             self.client_cache.set(command, response, keys)
 
-    def delete_from_local_cache(self, command: str):
-        """
-        Delete the command from the local cache
-        """
-        try:
-            self.client_cache.delete(command)
-        except AttributeError:
-            pass
+    def flush_cache(self):
+        if self.client_cache:
+            self.client_cache.flush()
+
+    def delete_command_from_cache(self, command: Union[str, Sequence[str]]):
+        if self.client_cache:
+            self.client_cache.delete_command(command)
+
+    def invalidate_key_from_cache(self, key: KeysT):
+        if self.client_cache:
+            self.client_cache.invalidate_key(key)
 
 
 class Connection(AbstractConnection):
@@ -777,6 +775,8 @@ class SSLConnection(Connection):
         ssl_validate_ocsp_stapled=False,
         ssl_ocsp_context=None,
         ssl_ocsp_expected_cert=None,
+        ssl_min_version=None,
+        ssl_ciphers=None,
         **kwargs,
     ):
         """Constructor
@@ -795,6 +795,8 @@ class SSLConnection(Connection):
             ssl_validate_ocsp_stapled: If set, perform a validation on a stapled ocsp response
             ssl_ocsp_context: A fully initialized OpenSSL.SSL.Context object to be used in verifying the ssl_ocsp_expected_cert
             ssl_ocsp_expected_cert: A PEM armoured string containing the expected certificate to be returned from the ocsp verification service.
+            ssl_min_version: The lowest supported SSL version. It affects the supported SSL versions of the SSLContext. None leaves the default provided by ssl module.
+            ssl_ciphers: A string listing the ciphers that are allowed to be used. Defaults to None, which means that the default ciphers are used. See https://docs.python.org/3/library/ssl.html#ssl.SSLContext.set_ciphers for more information.
 
         Raises:
             RedisError
@@ -827,6 +829,8 @@ class SSLConnection(Connection):
         self.ssl_validate_ocsp_stapled = ssl_validate_ocsp_stapled
         self.ssl_ocsp_context = ssl_ocsp_context
         self.ssl_ocsp_expected_cert = ssl_ocsp_expected_cert
+        self.ssl_min_version = ssl_min_version
+        self.ssl_ciphers = ssl_ciphers
         super().__init__(**kwargs)
 
     def _connect(self):
@@ -849,6 +853,10 @@ class SSLConnection(Connection):
             context.load_verify_locations(
                 cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
             )
+        if self.ssl_min_version is not None:
+            context.minimum_version = self.ssl_min_version
+        if self.ssl_ciphers:
+            context.set_ciphers(self.ssl_ciphers)
         sslsock = context.wrap_socket(sock, server_hostname=self.host)
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
@@ -901,9 +909,9 @@ class UnixDomainSocketConnection(AbstractConnection):
     "Manages UDS communication to and from a Redis server"
 
     def __init__(self, path="", socket_timeout=None, **kwargs):
+        super().__init__(**kwargs)
         self.path = path
         self.socket_timeout = socket_timeout
-        super().__init__(**kwargs)
 
     def repr_pieces(self):
         pieces = [("path", self.path), ("db", self.db)]
@@ -1190,12 +1198,15 @@ class ConnectionPool:
         try:
             # ensure this connection is connected to Redis
             connection.connect()
-            # connections that the pool provides should be ready to send
-            # a command. if not, the connection was either returned to the
+            # if client caching is not enabled connections that the pool
+            # provides should be ready to send a command.
+            # if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
+            # (if caching enabled the connection will not always be ready
+            # to send a command because it may contain invalidation messages)
             try:
-                if connection.can_read():
+                if connection.can_read() and connection.client_cache is None:
                     raise ConnectionError("Connection has data")
             except (ConnectionError, OSError):
                 connection.disconnect()
@@ -1280,6 +1291,27 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
+
+    def flush_cache(self):
+        self._checkpid()
+        with self._lock:
+            connections = chain(self._available_connections, self._in_use_connections)
+            for connection in connections:
+                connection.flush_cache()
+
+    def delete_command_from_cache(self, command: str):
+        self._checkpid()
+        with self._lock:
+            connections = chain(self._available_connections, self._in_use_connections)
+            for connection in connections:
+                connection.delete_command_from_cache(command)
+
+    def invalidate_key_from_cache(self, key: str):
+        self._checkpid()
+        with self._lock:
+            connections = chain(self._available_connections, self._in_use_connections)
+            for connection in connections:
+                connection.invalidate_key_from_cache(key)
 
 
 class BlockingConnectionPool(ConnectionPool):
