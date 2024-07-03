@@ -817,7 +817,7 @@ class Connection(AbstractConnection):
         else:
             return (
                 f"Error {exception.args[0]} connecting to {host_error}. "
-                f"{exception.args[0]}."
+                f"{exception}."
             )
 
 
