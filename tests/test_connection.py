@@ -296,3 +296,53 @@ def test_redis_from_pool(request, from_url):
 
     assert called == 1
     pool.disconnect()
+
+
+@pytest.mark.parametrize(
+    "conn, error, expected_message",
+    [
+        (SSLConnection(), OSError(), "Error connecting to localhost:6379."),
+        (SSLConnection(), OSError(12), "Error 12 connecting to localhost:6379."),
+        (
+            SSLConnection(),
+            OSError(12, "Some Error"),
+            "Error 12 connecting to localhost:6379. Some Error.",
+        ),
+        (
+            UnixDomainSocketConnection(path="unix:///tmp/redis.sock"),
+            OSError(),
+            "Error connecting to unix:///tmp/redis.sock.",
+        ),
+        (
+            UnixDomainSocketConnection(path="unix:///tmp/redis.sock"),
+            OSError(12),
+            "Error 12 connecting to unix:///tmp/redis.sock.",
+        ),
+        (
+            UnixDomainSocketConnection(path="unix:///tmp/redis.sock"),
+            OSError(12, "Some Error"),
+            "Error 12 connecting to unix:///tmp/redis.sock. Some Error.",
+        ),
+    ],
+)
+def test_format_error_message(conn, error, expected_message):
+    """Test that the _error_message function formats errors correctly"""
+    error_message = conn._error_message(error)
+    assert error_message == expected_message
+
+
+def test_network_connection_failure():
+    with pytest.raises(ConnectionError) as e:
+        redis = Redis(port=9999)
+        redis.set("a", "b")
+    assert str(e.value) == "Error 111 connecting to localhost:9999. Connection refused."
+
+
+def test_unix_socket_connection_failure():
+    with pytest.raises(ConnectionError) as e:
+        redis = Redis(unix_socket_path="unix:///tmp/a.sock")
+        redis.set("a", "b")
+    assert (
+        str(e.value)
+        == "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
+    )
