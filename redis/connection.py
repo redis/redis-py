@@ -834,8 +834,26 @@ class SSLConnection(Connection):
         super().__init__(**kwargs)
 
     def _connect(self):
-        "Wrap the socket with SSL support"
+        """
+        Wrap the socket with SSL support, handling potential errors.
+        """
         sock = super()._connect()
+        try:
+            return self._wrap_socket_with_ssl(sock)
+        except OSError:
+            sock.close()
+            raise
+
+    def _wrap_socket_with_ssl(self, sock):
+        """
+        Wraps the socket with SSL support.
+
+        Args:
+            sock: The plain socket to wrap with SSL.
+
+        Returns:
+            An SSL wrapped socket.
+        """
         context = ssl.create_default_context()
         context.check_hostname = self.check_hostname
         context.verify_mode = self.cert_reqs
