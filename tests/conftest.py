@@ -1,7 +1,6 @@
 import argparse
 import random
 import time
-import tracemalloc
 from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
@@ -78,9 +77,14 @@ def enable_tracemalloc():
     """
     Enable tracemalloc while tests are being executed.
     """
-    tracemalloc.start()
-    yield
-    tracemalloc.stop()
+    try:
+        import tracemalloc
+
+        tracemalloc.start()
+        yield
+        tracemalloc.stop()
+    except ImportError:
+        yield
 
 
 def pytest_addoption(parser):
