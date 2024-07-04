@@ -46,7 +46,7 @@ def test_hexpire_conditions(r):
 @skip_if_server_version_lt("7.3.240")
 def test_hexpire_nonexistent_key_or_field(r):
     r.delete("test:hash")
-    assert r.hexpire("test:hash", 1, "field1") == []
+    assert r.hexpire("test:hash", 1, "field1") == [-2]
     r.hset("test:hash", "field1", "value1")
     assert r.hexpire("test:hash", 1, "nonexistent_field") == [-2]
 
@@ -115,7 +115,7 @@ def test_hpexpire_conditions(r):
 @skip_if_server_version_lt("7.3.240")
 def test_hpexpire_nonexistent_key_or_field(r):
     r.delete("test:hash")
-    assert r.hpexpire("test:hash", 500, "field1") == []
+    assert r.hpexpire("test:hash", 500, "field1") == [-2]
     r.hset("test:hash", "field1", "value1")
     assert r.hpexpire("test:hash", 500, "nonexistent_field") == [-2]
 
@@ -182,7 +182,7 @@ def test_hexpireat_conditions(r):
 def test_hexpireat_nonexistent_key_or_field(r):
     r.delete("test:hash")
     future_exp_time = int((datetime.now() + timedelta(seconds=1)).timestamp())
-    assert r.hexpireat("test:hash", future_exp_time, "field1") == []
+    assert r.hexpireat("test:hash", future_exp_time, "field1") == [-2]
     r.hset("test:hash", "field1", "value1")
     assert r.hexpireat("test:hash", future_exp_time, "nonexistent_field") == [-2]
 
@@ -257,7 +257,7 @@ def test_hpexpireat_nonexistent_key_or_field(r):
     future_exp_time = int(
         (datetime.now() + timedelta(milliseconds=500)).timestamp() * 1000
     )
-    assert r.hpexpireat("test:hash", future_exp_time, "field1") == []
+    assert r.hpexpireat("test:hash", future_exp_time, "field1") == [-2]
     r.hset("test:hash", "field1", "value1")
     assert r.hpexpireat("test:hash", future_exp_time, "nonexistent_field") == [-2]
 
@@ -298,7 +298,7 @@ def test_hpersist_multiple_fields(r):
 @skip_if_server_version_lt("7.3.240")
 def test_hpersist_nonexistent_key(r):
     r.delete("test:hash")
-    assert r.hpersist("test:hash", "field1", "field2", "field3") == []
+    assert r.hpersist("test:hash", "field1", "field2", "field3") == [-2, -2, -2]
 
 
 @skip_if_server_version_lt("7.3.240")
@@ -315,7 +315,7 @@ def test_hexpiretime_multiple_fields_mixed_conditions(r):
 @skip_if_server_version_lt("7.3.240")
 def test_hexpiretime_nonexistent_key(r):
     r.delete("test:hash")
-    assert r.hexpiretime("test:hash", "field1", "field2", "field3") == []
+    assert r.hexpiretime("test:hash", "field1", "field2", "field3") == [-2, -2, -2]
 
 
 @skip_if_server_version_lt("7.3.240")
@@ -332,7 +332,7 @@ def test_hpexpiretime_multiple_fields_mixed_conditions(r):
 @skip_if_server_version_lt("7.3.240")
 def test_hpexpiretime_nonexistent_key(r):
     r.delete("test:hash")
-    assert r.hpexpiretime("test:hash", "field1", "field2", "field3") == []
+    assert r.hpexpiretime("test:hash", "field1", "field2", "field3") == [-2, -2, -2]
 
 
 @skip_if_server_version_lt("7.3.240")
@@ -349,7 +349,7 @@ def test_httl_multiple_fields_mixed_conditions(r):
 @skip_if_server_version_lt("7.3.240")
 def test_httl_nonexistent_key(r):
     r.delete("test:hash")
-    assert r.httl("test:hash", "field1", "field2", "field3") == []
+    assert r.httl("test:hash", "field1", "field2", "field3") == [-2, -2, -2]
 
 
 @skip_if_server_version_lt("7.3.240")
@@ -366,4 +366,4 @@ def test_hpttl_multiple_fields_mixed_conditions(r):
 @skip_if_server_version_lt("7.3.240")
 def test_hpttl_nonexistent_key(r):
     r.delete("test:hash")
-    assert r.hpttl("test:hash", "field1", "field2", "field3") == []
+    assert r.hpttl("test:hash", "field1", "field2", "field3") == [-2, -2, -2]

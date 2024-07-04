@@ -5126,9 +5126,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
                 - `2` if the field was deleted because the specified expiration time is
@@ -5187,9 +5186,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
                 - `2` if the field was deleted because the specified expiration time is
@@ -5248,9 +5246,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
                 - `2` if the field was deleted because the specified expiration time is
@@ -5315,9 +5312,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
                 - `2` if the field was deleted because the specified expiration time is
@@ -5362,9 +5358,8 @@ class HashCommands(CommandsProtocol):
                     expiration time.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `-1` if the field exists but has no associated expiration time.
                 - `1` if the expiration time was successfully removed from the field.
         """
@@ -5382,9 +5377,8 @@ class HashCommands(CommandsProtocol):
                     time.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the expiration Unix timestamp in
                   seconds, if the field has an associated expiration time.
@@ -5405,9 +5399,8 @@ class HashCommands(CommandsProtocol):
                     time.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the expiration Unix timestamp in
                   milliseconds, if the field has an associated expiration time.
@@ -5428,9 +5421,8 @@ class HashCommands(CommandsProtocol):
             fields: A list of fields within the hash for which to get the TTL.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the TTL in seconds if the field has
                   an associated expiration time.
@@ -5451,9 +5443,8 @@ class HashCommands(CommandsProtocol):
             fields: A list of fields within the hash for which to get the TTL.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the TTL in milliseconds if the field
                   has an associated expiration time.
