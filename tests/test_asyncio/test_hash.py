@@ -45,7 +45,7 @@ async def test_hexpire_conditions(r):
 @skip_if_server_version_lt("7.3.240")
 async def test_hexpire_nonexistent_key_or_field(r):
     await r.delete("test:hash")
-    assert await r.hexpire("test:hash", 1, "field1") == []
+    assert await r.hexpire("test:hash", 1, "field1") == [-2]
     await r.hset("test:hash", "field1", "value1")
     assert await r.hexpire("test:hash", 1, "nonexistent_field") == [-2]
 
@@ -105,7 +105,7 @@ async def test_hpexpire_conditions(r):
 @skip_if_server_version_lt("7.3.240")
 async def test_hpexpire_nonexistent_key_or_field(r):
     await r.delete("test:hash")
-    assert await r.hpexpire("test:hash", 500, "field1") == []
+    assert await r.hpexpire("test:hash", 500, "field1") == [-2]
     await r.hset("test:hash", "field1", "value1")
     assert await r.hpexpire("test:hash", 500, "nonexistent_field") == [-2]
 
@@ -163,7 +163,7 @@ async def test_hexpireat_conditions(r):
 async def test_hexpireat_nonexistent_key_or_field(r):
     await r.delete("test:hash")
     future_exp_time = int((datetime.now() + timedelta(seconds=1)).timestamp())
-    assert await r.hexpireat("test:hash", future_exp_time, "field1") == []
+    assert await r.hexpireat("test:hash", future_exp_time, "field1") == [-2]
     await r.hset("test:hash", "field1", "value1")
     assert await r.hexpireat("test:hash", future_exp_time, "nonexistent_field") == [-2]
 
@@ -228,7 +228,7 @@ async def test_hpexpireat_nonexistent_key_or_field(r):
     future_exp_time = int(
         (datetime.now() + timedelta(milliseconds=500)).timestamp() * 1000
     )
-    assert await r.hpexpireat("test:hash", future_exp_time, "field1") == []
+    assert await r.hpexpireat("test:hash", future_exp_time, "field1") == [-2]
     await r.hset("test:hash", "field1", "value1")
     assert await r.hpexpireat("test:hash", future_exp_time, "nonexistent_field") == [-2]
 
