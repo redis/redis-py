@@ -533,10 +533,10 @@ async def test_format_error_message(conn, error, expected_message):
 
 async def test_network_connection_failure():
     with pytest.raises(ConnectionError) as e:
-        redis = Redis(port=9999)
+        redis = Redis(host='127.0.0.1', port=9999)
         await redis.set("a", "b")
     assert (
-        str(e.value) == "Error 111 connecting to localhost:9999. "
+        str(e.value) == "Error 111 connecting to 127.0.0.1:9999. "
         "Connect call failed ('127.0.0.1', 9999)."
     )
 
