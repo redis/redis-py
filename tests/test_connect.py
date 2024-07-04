@@ -135,7 +135,7 @@ def test_tcp_ssl_version_mismatch(tcp_address):
             tcp_address,
             certfile=certfile,
             keyfile=keyfile,
-            maximum_ssl_version=ssl.PROTOCOL_TLSv1_2,
+            maximum_ssl_version=ssl.TLSVersion.TLSv1_2,
         )
 
 

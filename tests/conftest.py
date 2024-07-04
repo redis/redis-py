@@ -1,6 +1,7 @@
 import argparse
 import random
 import time
+import tracemalloc
 from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
@@ -70,6 +71,16 @@ class BooleanOptionalAction(argparse.Action):
 
     def format_usage(self):
         return " | ".join(self.option_strings)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def enable_tracemalloc():
+    """
+    Enable tracemalloc while tests are being executed.
+    """
+    tracemalloc.start()
+    yield
+    tracemalloc.stop()
 
 
 def pytest_addoption(parser):
