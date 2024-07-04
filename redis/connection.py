@@ -39,6 +39,7 @@ from .utils import (
     HIREDIS_AVAILABLE,
     HIREDIS_PACK_AVAILABLE,
     SSL_AVAILABLE,
+    format_error_message,
     get_lib_version,
     str_if_bytes,
 )
@@ -338,9 +339,8 @@ class AbstractConnection:
     def _host_error(self):
         pass
 
-    @abstractmethod
     def _error_message(self, exception):
-        pass
+        return format_error_message(self._host_error(), exception)
 
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
@@ -733,27 +733,6 @@ class Connection(AbstractConnection):
     def _host_error(self):
         return f"{self.host}:{self.port}"
 
-    def _error_message(self, exception):
-        # args for socket.error can either be (errno, "message")
-        # or just "message"
-
-        host_error = self._host_error()
-
-        if len(exception.args) == 1:
-            try:
-                return f"Error connecting to {host_error}. \
-                        {exception.args[0]}."
-            except AttributeError:
-                return f"Connection Error: {exception.args[0]}"
-        else:
-            try:
-                return (
-                    f"Error {exception.args[0]} connecting to "
-                    f"{host_error}. {exception.args[1]}."
-                )
-            except AttributeError:
-                return f"Connection Error: {exception.args[0]}"
-
 
 class SSLConnection(Connection):
     """Manages SSL connections to and from the Redis server(s).
@@ -929,20 +908,6 @@ class UnixDomainSocketConnection(AbstractConnection):
 
     def _host_error(self):
         return self.path
-
-    def _error_message(self, exception):
-        # args for socket.error can either be (errno, "message")
-        # or just "message"
-        host_error = self._host_error()
-        if len(exception.args) == 1:
-            return (
-                f"Error connecting to unix socket: {host_error}. {exception.args[0]}."
-            )
-        else:
-            return (
-                f"Error {exception.args[0]} connecting to unix socket: "
-                f"{host_error}. {exception.args[1]}."
-            )
 
 
 FALSE_STRINGS = ("0", "F", "FALSE", "N", "NO")
