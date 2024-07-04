@@ -7,7 +7,7 @@ import threading
 
 import pytest
 from redis.connection import Connection, SSLConnection, UnixDomainSocketConnection
-from redis.exceptions import ConnectionError
+from redis.exceptions import RedisError
 
 from .ssl_utils import get_ssl_filename
 
@@ -126,16 +126,16 @@ def test_tcp_ssl_version_mismatch(tcp_address):
         port=port,
         client_name=_CLIENT_NAME,
         ssl_ca_certs=certfile,
-        socket_timeout=10,
+        socket_timeout=3,
         ssl_min_version=ssl.TLSVersion.TLSv1_3,
     )
-    with pytest.raises(ConnectionError):
+    with pytest.raises(RedisError):
         _assert_connect(
             conn,
             tcp_address,
             certfile=certfile,
             keyfile=keyfile,
-            ssl_version=ssl.PROTOCOL_TLSv1_2,
+            maximum_ssl_version=ssl.PROTOCOL_TLSv1_2,
         )
 
 
@@ -164,14 +164,16 @@ class _RedisTCPServer(socketserver.TCPServer):
         *args,
         certfile=None,
         keyfile=None,
-        ssl_version=ssl.PROTOCOL_TLS,
+        minimum_ssl_version=ssl.TLSVersion.TLSv1_2,
+        maximum_ssl_version=ssl.TLSVersion.TLSv1_3,
         **kw,
     ) -> None:
         self._ready_event = threading.Event()
         self._stop_requested = False
         self._certfile = certfile
         self._keyfile = keyfile
-        self._ssl_version = ssl_version
+        self._minimum_ssl_version = minimum_ssl_version
+        self._maximum_ssl_version = maximum_ssl_version
         super().__init__(*args, **kw)
 
     def service_actions(self):
@@ -193,15 +195,9 @@ class _RedisTCPServer(socketserver.TCPServer):
         newsocket, fromaddr = self.socket.accept()
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         context.load_cert_chain(certfile=self._certfile, keyfile=self._keyfile)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.maximum_version = ssl.TLSVersion.TLSv1_3
-        connstream = context.wrap_socket(
-            newsocket,
-            server_side=True,
-            certfile=self._certfile,
-            keyfile=self._keyfile,
-            ssl_version=self._ssl_version,
-        )
+        context.minimum_version = self._minimum_ssl_version
+        context.maximum_version = self._maximum_ssl_version
+        connstream = context.wrap_socket(newsocket, server_side=True)
         return connstream, fromaddr
 
 
