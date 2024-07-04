@@ -27,6 +27,8 @@ from typing import (
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
+from ..utils import format_error_message
+
 # the functionality is available in 3.11.x but has a major issue before
 # 3.11.3. See https://github.com/redis/redis-py/issues/2633
 if sys.version_info >= (3, 11, 3):
@@ -345,9 +347,8 @@ class AbstractConnection:
     def _host_error(self) -> str:
         pass
 
-    @abstractmethod
     def _error_message(self, exception: BaseException) -> str:
-        pass
+        return format_error_message(self._host_error(), exception)
 
     async def on_connect(self) -> None:
         """Initialize the connection, authenticate and select a database"""
@@ -799,27 +800,6 @@ class Connection(AbstractConnection):
     def _host_error(self) -> str:
         return f"{self.host}:{self.port}"
 
-    def _error_message(self, exception: BaseException) -> str:
-        # args for socket.error can either be (errno, "message")
-        # or just "message"
-
-        host_error = self._host_error()
-
-        if not exception.args:
-            # asyncio has a bug where on Connection reset by peer, the
-            # exception is not instanciated, so args is empty. This is the
-            # workaround.
-            # See: https://github.com/redis/redis-py/issues/2237
-            # See: https://github.com/python/cpython/issues/94061
-            return f"Error connecting to {host_error}. Connection reset by peer"
-        elif len(exception.args) == 1:
-            return f"Error connecting to {host_error}. {exception.args[0]}."
-        else:
-            return (
-                f"Error {exception.args[0]} connecting to {host_error}. "
-                f"{exception}."
-            )
-
 
 class SSLConnection(Connection):
     """Manages SSL connections to and from the Redis server(s).
@@ -970,20 +950,6 @@ class UnixDomainSocketConnection(AbstractConnection):
 
     def _host_error(self) -> str:
         return self.path
-
-    def _error_message(self, exception: BaseException) -> str:
-        # args for socket.error can either be (errno, "message")
-        # or just "message"
-        host_error = self._host_error()
-        if len(exception.args) == 1:
-            return (
-                f"Error connecting to unix socket: {host_error}. {exception.args[0]}."
-            )
-        else:
-            return (
-                f"Error {exception.args[0]} connecting to unix socket: "
-                f"{host_error}. {exception.args[1]}."
-            )
 
 
 FALSE_STRINGS = ("0", "F", "FALSE", "N", "NO")
