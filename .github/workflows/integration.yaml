@@ -129,7 +129,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
-      - name: run tests
+      - name: Run tests
         run: |
           pip install -U setuptools wheel
           pip install -r requirements.txt
