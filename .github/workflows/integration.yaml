@@ -85,11 +85,15 @@ jobs:
           sleep 10 # time to settle
           invoke ${{matrix.test-type}}-tests
 
-      - uses: actions/upload-artifact@v4
-        if: success() || failure()
+      - name: Upload test results and profiling data
+        uses: actions/upload-artifact@v4
         with:
           name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}
-          path: '${{matrix.test-type}}*results.xml'
+          path: |
+            '${{matrix.test-type}}*-results.xml'
+            '${{matrix.test-type}}-profile.out'
+          if-no-files-found: error
+          retention-days: 10
 
       - name: Upload codecov coverage
         uses: codecov/codecov-action@v4
@@ -149,6 +153,8 @@ jobs:
           path: |
             '${{matrix.test-type}}*-results.xml'
             '${{matrix.test-type}}-profile.out'
+          if-no-files-found: error
+          retention-days: 10
 
       - name: Upload codecov coverage
         uses: codecov/codecov-action@v4
