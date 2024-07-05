@@ -2369,27 +2369,27 @@ def test_search_missing_fields(client):
 
     with pytest.raises(redis.exceptions.ResponseError) as e:
         client.ft().search(
-            Query("ismissing(@title)").dialect(5).return_field("id").no_content()
+            Query("ismissing(@title)").dialect(2).return_field("id").no_content()
         )
     assert "to be defined with 'INDEXMISSING'" in e.value.args[0]
 
     res = client.ft().search(
-        Query("ismissing(@features)").dialect(5).return_field("id").no_content()
+        Query("ismissing(@features)").dialect(2).return_field("id").no_content()
     )
     _assert_search_result(client, res, ["property:2"])
 
     res = client.ft().search(
-        Query("-ismissing(@features)").dialect(5).return_field("id").no_content()
+        Query("-ismissing(@features)").dialect(2).return_field("id").no_content()
     )
     _assert_search_result(client, res, ["property:1", "property:3"])
 
     res = client.ft().search(
-        Query("ismissing(@description)").dialect(5).return_field("id").no_content()
+        Query("ismissing(@description)").dialect(2).return_field("id").no_content()
     )
     _assert_search_result(client, res, ["property:3"])
 
     res = client.ft().search(
-        Query("-ismissing(@description)").dialect(5).return_field("id").no_content()
+        Query("-ismissing(@description)").dialect(2).return_field("id").no_content()
     )
     _assert_search_result(client, res, ["property:1", "property:2"])
 
@@ -2438,27 +2438,29 @@ def test_search_empty_fields(client):
 
     with pytest.raises(redis.exceptions.ResponseError) as e:
         client.ft().search(
-            Query("@title:''").dialect(5).return_field("id").no_content()
+            Query("@title:''").dialect(2).return_field("id").no_content()
         )
-    assert "to be defined with `INDEXEMPTY`" in e.value.args[0]
+    assert "Use `INDEXEMPTY` in field creation" in e.value.args[0]
 
     res = client.ft().search(
-        Query("@features:{ }").dialect(5).return_field("id").no_content()
+        Query("@features:{$empty}").dialect(2).return_field("id").no_content(),
+        query_params={"empty": ""},
     )
     _assert_search_result(client, res, ["property:2"])
 
     res = client.ft().search(
-        Query("-@features:{ }").dialect(5).return_field("id").no_content()
+        Query("-@features:{$empty}").dialect(2).return_field("id").no_content(),
+        query_params={"empty": ""},
     )
     _assert_search_result(client, res, ["property:1", "property:3"])
 
     res = client.ft().search(
-        Query("@description:''").dialect(5).return_field("id").no_content()
+        Query("@description:''").dialect(2).return_field("id").no_content()
     )
     _assert_search_result(client, res, ["property:3"])
 
     res = client.ft().search(
-        Query("-@description:''").dialect(5).return_field("id").no_content()
+        Query("-@description:''").dialect(2).return_field("id").no_content()
     )
     _assert_search_result(client, res, ["property:1", "property:2"])
 
@@ -2503,14 +2505,13 @@ def test_special_characters_in_fields(client):
     )
     _assert_search_result(client, res, ["resource:1"])
 
-    # with dialect 5 no need to escape the - even without params
+    # with double quotes exact match no need to escape the - even without params
     res = client.ft().search(
-        Query("@uuid:{123e4567-e89b-12d3-a456-426614174000}").dialect(5)
+        Query('@uuid:{"123e4567-e89b-12d3-a456-426614174000"}').dialect(2)
     )
     _assert_search_result(client, res, ["resource:1"])
 
-    # also no need to escape ' with dialect 5
-    res = client.ft().search(Query("@tags:{new-year's-resolutions}").dialect(5))
+    res = client.ft().search(Query('@tags:{"new-year\'s-resolutions"}').dialect(2))
     _assert_search_result(client, res, ["resource:2"])
 
     # possible to search numeric fields by single value
@@ -2518,7 +2519,7 @@ def test_special_characters_in_fields(client):
     _assert_search_result(client, res, ["resource:2"])
 
     # some chars still need escaping
-    res = client.ft().search(Query(r"@tags:{\$btc}").dialect(5))
+    res = client.ft().search(Query(r"@tags:{\$btc}").dialect(2))
     _assert_search_result(client, res, ["resource:1"])
 
 
