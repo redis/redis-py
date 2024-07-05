@@ -143,10 +143,14 @@ jobs:
           invoke ${{matrix.test-type}}-tests --uvloop --protocol=3
 
       - uses: actions/upload-artifact@v4
-        if: success() || failure()
         with:
           name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}-resp3
-          path: '${{matrix.test-type}}*results.xml'
+          path: '${{matrix.test-type}}*-results.xml'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pytest-profile-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}-resp3
+          path: '${{matrix.test-type}}-profile.out'
 
       - name: Upload codecov coverage
         uses: codecov/codecov-action@v4
