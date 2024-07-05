@@ -261,7 +261,9 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
     for j in modules:
         if module_name == j.get("name"):
             version = j.get("ver")
-            mv = int(min_version.replace(".", ""))
+            mv = int(
+                "".join(["%02d" % int(segment) for segment in min_version.split(".")])
+            )
             check = version < mv
             return pytest.mark.skipif(check, reason="Redis module version")
 

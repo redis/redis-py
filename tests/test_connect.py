@@ -1,4 +1,3 @@
-import logging
 import re
 import socket
 import socketserver
@@ -10,9 +9,6 @@ from redis.connection import Connection, SSLConnection, UnixDomainSocketConnecti
 from redis.exceptions import RedisError
 
 from .ssl_utils import get_ssl_filename
-
-_logger = logging.getLogger(__name__)
-
 
 _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"
@@ -228,10 +224,10 @@ else:
 
 class _RedisRequestHandler(socketserver.StreamRequestHandler):
     def setup(self):
-        _logger.info("%s connected", self.client_address)
+        pass
 
     def finish(self):
-        _logger.info("%s disconnected", self.client_address)
+        pass
 
     def handle(self):
         buffer = b""
@@ -249,7 +245,6 @@ class _RedisRequestHandler(socketserver.StreamRequestHandler):
             buffer = parts[-1]
             for fragment in parts[:-1]:
                 fragment = fragment.decode()
-                _logger.info("Command fragment: %s", fragment)
 
                 if fragment.startswith("*") and command is None:
                     command = [None for _ in range(int(fragment[1:]))]
@@ -269,9 +264,6 @@ class _RedisRequestHandler(socketserver.StreamRequestHandler):
                     continue
 
                 command = " ".join(command)
-                _logger.info("Command %s", command)
                 resp = _SUPPORTED_CMDS.get(command, _ERROR_RESP)
-                _logger.info("Response %s", resp)
                 self.request.sendall(resp)
                 command = None
-        _logger.info("Exit handler")
