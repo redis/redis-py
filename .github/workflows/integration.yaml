@@ -93,8 +93,8 @@ jobs:
         with:
           name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}
           path: |
-            '${{matrix.test-type}}*-results.xml'
-            '${{matrix.test-type}}-profile.out'
+            ${{matrix.test-type}}*-results.xml
+            ${{matrix.test-type}}-profile.out
           if-no-files-found: error
           retention-days: 10
 
@@ -109,7 +109,7 @@ jobs:
         continue-on-error: true
         with:
           name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}
-          path: '*.xml'
+          path: ${{matrix.test-type}}*-results.xml
           reporter: java-junit
           list-suites: all
           list-tests: all
@@ -132,10 +132,12 @@ jobs:
     name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
+
       - name: Run tests
         run: |
           pip install -U setuptools wheel
@@ -154,8 +156,8 @@ jobs:
         with:
           name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}-resp3
           path: |
-            '${{matrix.test-type}}*-results.xml'
-            '${{matrix.test-type}}-profile.out'
+            ${{matrix.test-type}}*-results.xml
+            ${{matrix.test-type}}-profile.out
           if-no-files-found: error
           retention-days: 10
 
@@ -170,7 +172,7 @@ jobs:
         continue-on-error: true
         with:
           name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}-resp3
-          path: '*-results.xml'
+          path: ${{matrix.test-type}}*-results.xml
           reporter: java-junit
           list-suites: all
           list-tests: all
