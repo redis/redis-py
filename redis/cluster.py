@@ -1594,7 +1594,7 @@ class NodesManager:
                 )
                 nodes_for_slot.append(target_node)
 
-                replica_nodes = [slot[j] for j in range(3, len(slot))]
+                replica_nodes = slot[3:]
                 for replica_node in replica_nodes:
                     host = str_if_bytes(replica_node[0])
                     port = int(replica_node[1])

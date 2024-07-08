@@ -112,12 +112,13 @@ jobs:
         python-version: ['3.8', '3.12']
         test-type: ['standalone', 'cluster']
         connection-type: ['hiredis', 'plain']
+        event-loop: ['asyncio', 'uvloop']
         exclude:
           - test-type: 'cluster'
             connection-type: 'hiredis'
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
+    name: RESP3 ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.event-loop}}
     steps:
       - uses: actions/checkout@v4
 
@@ -136,13 +137,16 @@ jobs:
           fi
           invoke devenv
           sleep 10 # time to settle
-          invoke ${{matrix.test-type}}-tests --protocol=3
-          invoke ${{matrix.test-type}}-tests --uvloop --protocol=3
+          if [ "${{matrix.event-loop}}" == "uvloop" ]; then
+            invoke ${{matrix.test-type}}-tests --uvloop --protocol=3
+          else
+            invoke ${{matrix.test-type}}-tests --protocol=3
+          fi
 
       - name: Upload test results and profiling data
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}-resp3
+          name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}-${{matrix.event-loop}}-resp3
           path: |
             ${{matrix.test-type}}*-results.xml
             prof/**

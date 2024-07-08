@@ -1328,7 +1328,7 @@ class NodesManager:
                 tmp_nodes_cache[target_node.name] = target_node
                 nodes_for_slot.append(target_node)
 
-                replica_nodes = [slot[j] for j in range(3, len(slot))]
+                replica_nodes = slot[3:]
                 for replica_node in replica_nodes:
                     host = replica_node[0]
                     port = replica_node[1]
@@ -1339,9 +1339,9 @@ class NodesManager:
                         target_replica_node = ClusterNode(
                             host, port, REPLICA, **self.connection_kwargs
                         )
-                    nodes_for_slot.append(target_replica_node)
                     # add this node to the nodes cache
                     tmp_nodes_cache[target_replica_node.name] = target_replica_node
+                    nodes_for_slot.append(target_replica_node)
 
                 for i in range(int(slot[0]), int(slot[1]) + 1):
                     if i not in tmp_slots:
