@@ -56,11 +56,11 @@ def standalone_tests(c, uvloop=False, protocol=2):
     """Run tests against a standalone redis instance"""
     if uvloop:
         run(
-            f"python -m cProfile -o standalone-profile.out -m pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --uvloop --junit-xml=standalone-uvloop-results.xml"
+            f"pytest --profile --profile-svg --line-profile --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --uvloop --junit-xml=standalone-uvloop-results.xml"
         )
     else:
         run(
-            f"python -m cProfile -o standalone-profile.out -m pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --junit-xml=standalone-results.xml"
+            f"pytest --profile --profile-svg --line-profile --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --junit-xml=standalone-results.xml"
         )
 
 
@@ -70,11 +70,11 @@ def cluster_tests(c, uvloop=False, protocol=2):
     cluster_url = "redis://localhost:16379/0"
     if uvloop:
         run(
-            f"python -m cProfile -o cluster-profile.out -m pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-uvloop-results.xml --uvloop"
+            f"pytest --profile --profile-svg --line-profile --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-uvloop-results.xml --uvloop"
         )
     else:
         run(
-            f"python -m cProfile -o cluster-profile.out -m pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_clusteclient.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-results.xml"
+            f"pytest --profile --profile-svg --line-profile --protocol={protocol} --cov=./ --cov-report=xml:coverage_clusteclient.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-results.xml"
         )
 
 

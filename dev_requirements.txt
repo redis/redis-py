@@ -10,6 +10,8 @@ packaging>=20.4
 pytest
 pytest-asyncio
 pytest-cov
+pytest-line-profiler
+pytest-profiling
 pytest-timeout
 ujson>=4.2.0
 urllib3<2
