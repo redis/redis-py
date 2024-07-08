@@ -103,19 +103,6 @@ jobs:
         with:
           fail_ci_if_error: false
 
-      - name: View Test Results
-        uses: dorny/test-reporter@v1
-        if: success() || failure()
-        continue-on-error: true
-        with:
-          name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}
-          path: ${{matrix.test-type}}*-results.xml
-          reporter: java-junit
-          list-suites: all
-          list-tests: all
-          max-annotations: 10
-          fail-on-error: 'false'
-
   resp3_tests:
     runs-on: ubuntu-latest
     strategy:
@@ -165,19 +152,6 @@ jobs:
         uses: codecov/codecov-action@v4
         with:
           fail_ci_if_error: false
-
-      - name: View Test Results
-        uses: dorny/test-reporter@v1
-        if: success() || failure()
-        continue-on-error: true
-        with:
-          name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}-resp3
-          path: ${{matrix.test-type}}*-results.xml
-          reporter: java-junit
-          list-suites: all
-          list-tests: all
-          max-annotations: 10
-          fail-on-error: 'false'
 
   build_and_test_package:
     name: Validate building and installing the package
