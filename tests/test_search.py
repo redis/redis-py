@@ -31,6 +31,7 @@ from .conftest import (
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_ifmodversion_lt,
+    skip_if_resp_version,
 )
 
 WILL_PLAY_TEXT = os.path.abspath(
@@ -116,7 +117,9 @@ def client(request, stack_url):
 
 @pytest.fixture
 def binary_client(request, stack_url):
-    r = _get_client(redis.Redis, request, decode_responses=False, from_url=stack_url)
+    r = _get_client(
+        redis.Redis, request, decode_responses=False, from_url=stack_url, protocol=3
+    )
     r.flushdb()
     return r
 
@@ -1714,6 +1717,7 @@ def test_search_return_fields(client):
 
 
 @pytest.mark.redismod
+@skip_if_resp_version(3)
 def test_binary_and_text_fields(binary_client):
     assert (
         binary_client.get_connection_kwargs()["decode_responses"] is False
