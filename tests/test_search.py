@@ -30,8 +30,8 @@ from .conftest import (
     assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
-    skip_ifmodversion_lt,
     skip_if_resp_version,
+    skip_ifmodversion_lt,
 )
 
 WILL_PLAY_TEXT = os.path.abspath(
