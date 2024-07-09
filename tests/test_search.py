@@ -4,6 +4,7 @@ import os
 import time
 from io import TextIOWrapper
 
+import numpy as np
 import pytest
 import redis
 import redis.commands.search
@@ -109,6 +110,13 @@ def createIndex(client, num_docs=100, definition=None):
 @pytest.fixture
 def client(request, stack_url):
     r = _get_client(redis.Redis, request, decode_responses=True, from_url=stack_url)
+    r.flushdb()
+    return r
+
+
+@pytest.fixture
+def binary_client(request, stack_url):
+    r = _get_client(redis.Redis, request, decode_responses=False, from_url=stack_url)
     r.flushdb()
     return r
 
@@ -1703,6 +1711,61 @@ def test_search_return_fields(client):
         assert 1 == len(total["results"])
         assert "doc:1" == total["results"][0]["id"]
         assert "telmatosaurus" == total["results"][0]["extra_attributes"]["txt"]
+
+
+@pytest.mark.redismod
+def test_binary_and_text_fields(binary_client):
+    assert (
+        binary_client.get_connection_kwargs()["decode_responses"] is False
+    ), "This feature is only available when decode_responses is False"
+
+    fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+
+    index_name = "mixed_index"
+    mixed_data = {"first_name": "🐍python", "vector_emb": fake_vec.tobytes()}
+    binary_client.hset(f"{index_name}:1", mapping=mixed_data)
+
+    schema = (
+        TagField("first_name"),
+        VectorField(
+            "embeddings_bio",
+            algorithm="HNSW",
+            attributes={
+                "TYPE": "FLOAT32",
+                "DIM": 4,
+                "DISTANCE_METRIC": "COSINE",
+            },
+        ),
+    )
+
+    binary_client.ft(index_name).create_index(
+        fields=schema,
+        definition=IndexDefinition(
+            prefix=[f"{index_name}:"], index_type=IndexType.HASH
+        ),
+    )
+
+    bytes_person_1 = binary_client.hget(f"{index_name}:1", "vector_emb")
+    decoded_vec_from_hash = np.frombuffer(bytes_person_1, dtype=np.float32)
+    assert np.array_equal(decoded_vec_from_hash, fake_vec), "The vectors are not equal"
+
+    query = (
+        Query("*")
+        .return_field("vector_emb", decode_field=False)
+        .return_field("first_name", decode_field=True)
+    )
+    docs = binary_client.ft(index_name).search(query=query, query_params={}).docs
+    decoded_vec_from_search_results = np.frombuffer(
+        docs[0]["vector_emb"], dtype=np.float32
+    )
+
+    assert np.array_equal(
+        decoded_vec_from_search_results, fake_vec
+    ), "The vectors are not equal"
+
+    assert (
+        docs[0]["first_name"] == mixed_data["first_name"]
+    ), "The first is not decoded correctly"
 
 
 @pytest.mark.redismod

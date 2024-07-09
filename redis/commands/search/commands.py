@@ -82,6 +82,7 @@ class SearchCommands:
             duration=kwargs["duration"],
             has_payload=kwargs["query"]._with_payloads,
             with_scores=kwargs["query"]._with_scores,
+            field_encodings=kwargs["query"]._return_fields_decode_as,
         )
 
     def _parse_aggregate(self, res, **kwargs):
