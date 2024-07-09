@@ -1,6 +1,6 @@
 import random
 import weakref
-from typing import Optional
+from typing import Any, Optional
 
 from redis.client import Redis
 from redis.commands import SentinelCommands
@@ -164,6 +164,7 @@ class SentinelConnectionPool(ConnectionPool):
         self.connection_kwargs["connection_pool"] = self.proxy
         self.service_name = service_name
         self.sentinel_manager = sentinel_manager
+        self._iter_req_id_to_replica_address = {}
 
     def __repr__(self):
         role = "master" if self.is_master else "slave"
@@ -193,6 +194,83 @@ class SentinelConnectionPool(ConnectionPool):
     def rotate_slaves(self):
         "Round-robin slave balancer"
         return self.proxy.rotate_slaves()
+
+    def cleanup_scan(self, **options):
+        """
+        Remove the SCAN ITER family command's request id from the dictionary
+        """
+        self._iter_req_id_to_replica_address.pop(
+            options.get("_iter_req_id", None), None
+        )
+
+    def get_connection(
+        self, command_name: str, *keys: Any, **options: Any
+    ) -> SentinelManagedConnection:
+        """
+        Get a connection from the pool.
+        'xxxscan_iter' ('scan_iter', 'hscan_iter', 'sscan_iter', 'zscan_iter')
+        commands needs to be handled specially.
+        If the client is created using a connection pool, in replica mode,
+        all 'scan' command-equivalent of the 'xxx_scan_iter' commands needs
+        to be issued to the same Redis replica.
+
+        The way each server positions each key is different with one another,
+        and the cursor acts as the offset of the scan.
+        Hence, all scans coming from a single 'xxx_scan_iter_channel' command
+        should go to the same replica.
+        """
+        # If not an iter command or in master mode, call superclass' implementation
+        if not (iter_req_id := options.get("_iter_req_id", None)) or self.is_master:
+            return super().get_connection(command_name, *keys, **options)
+
+        # Check if this iter request has already been directed to a particular server
+        (
+            server_host,
+            server_port,
+        ) = self._iter_req_id_to_replica_address.get(iter_req_id, (None, None))
+        connection = None
+        # If this is the first scan request of the iter command,
+        # get a connection from the pool
+        if server_host is None or server_port is None:
+            try:
+                connection = self._available_connections.pop()
+            except IndexError:
+                connection = self.make_connection()
+        # If this is not the first scan request of the iter command
+        else:
+            # Get the connection that has the same host and port
+            connection = self._available_connections.get_connection(
+                host=server_host, port=server_port
+            )
+            # If not, make a new dummy connection object, and set its host and port
+            # to the one that we want later in the call to ``connect_to_address``
+            if not connection:
+                connection = self.make_connection()
+        assert connection
+        self._in_use_connections.add(connection)
+        try:
+            # Ensure this connection is connected to Redis
+            # If this is the first scan request, it will
+            # call rotate_slaves and connect to a random replica
+            if server_port is None or server_port is None:
+                connection.connect()
+            # If this is not the first scan request,
+            # connect to the previous replica.
+            # This will connect to the host and port of the replica
+            else:
+                connection.connect_to_address(server_host, server_port)
+            self.ensure_connection(connection)
+        except BaseException:
+            # Release the connection back to the pool so that we don't
+            # leak it
+            self.release(connection)
+            raise
+        # Store the connection to the dictionary
+        self._iter_req_id_to_replica_address[iter_req_id] = (
+            connection.host,
+            connection.port,
+        )
+        return connection
 
 
 class Sentinel(SentinelCommands):

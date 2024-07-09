@@ -6,10 +6,11 @@ import sys
 import threading
 import weakref
 from abc import abstractmethod
+from collections import defaultdict
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Any, Callable, List, Optional, Sequence, Type, Union
+from typing import Any, Callable, Iterable, List, Optional, Sequence, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ._cache import (
@@ -734,6 +735,43 @@ class Connection(AbstractConnection):
         return f"{self.host}:{self.port}"
 
 
+class ConnectionsIndexer(Iterable):
+    """
+    Data structure that manages a list of available connections which
+    is also indexed based on the address (ip and port) of the connection
+    """
+
+    def __init__(self):
+        self._connections = []
+        # Map the address to a dictionary of connections
+        # The inner dictionary is a map between the object id to the object itself
+        # This is to support O(1) operations on all of the class' methods
+        self._address_to_connections = defaultdict(dict)
+
+    def pop(self):
+        connection = self._connections.pop()
+        del self._address_to_connections[(connection.host, connection.port)][
+            id(connection)
+        ]
+        return connection
+
+    def append(self, connection: Connection):
+        self._connections.append(connection)
+        self._address_to_connections[(connection.host, connection.port)][
+            id(connection)
+        ] = connection
+
+    def get_connection(self, host: str, port: int):
+        try:
+            connection = self._address_to_connections[(host, port)].popitem()
+        except KeyError:
+            return None
+        return connection
+
+    def __iter__(self):
+        return iter(self._connections)
+
+
 class SSLConnection(Connection):
     """Manages SSL connections to and from the Redis server(s).
     This class extends the Connection class, adding SSL functionality, and making
@@ -1113,7 +1151,7 @@ class ConnectionPool:
     def reset(self) -> None:
         self._lock = threading.Lock()
         self._created_connections = 0
-        self._available_connections = []
+        self._available_connections = ConnectionsIndexer()
         self._in_use_connections = set()
 
         # this must be the last operation in this method. while reset() is
@@ -1174,6 +1212,25 @@ class ConnectionPool:
             finally:
                 self._fork_lock.release()
 
+    def ensure_connection(self, connection: AbstractConnection):
+        # ensure this connection is connected to Redis
+        connection.connect()
+        # if client caching is not enabled connections that the pool
+        # provides should be ready to send a command.
+        # if not, the connection was either returned to the
+        # pool before all data has been read or the socket has been
+        # closed. either way, reconnect and verify everything is good.
+        # (if caching enabled the connection will not always be ready
+        # to send a command because it may contain invalidation messages)
+        try:
+            if connection.can_read() and connection.client_cache is None:
+                raise ConnectionError("Connection has data")
+        except (ConnectionError, OSError):
+            connection.disconnect()
+            connection.connect()
+            if connection.can_read():
+                raise ConnectionError("Connection not ready")
+
     def get_connection(self, command_name: str, *keys, **options) -> "Connection":
         "Get a connection from the pool"
         self._checkpid()
@@ -1185,23 +1242,7 @@ class ConnectionPool:
             self._in_use_connections.add(connection)
 
         try:
-            # ensure this connection is connected to Redis
-            connection.connect()
-            # if client caching is not enabled connections that the pool
-            # provides should be ready to send a command.
-            # if not, the connection was either returned to the
-            # pool before all data has been read or the socket has been
-            # closed. either way, reconnect and verify everything is good.
-            # (if caching enabled the connection will not always be ready
-            # to send a command because it may contain invalidation messages)
-            try:
-                if connection.can_read() and connection.client_cache is None:
-                    raise ConnectionError("Connection has data")
-            except (ConnectionError, OSError):
-                connection.disconnect()
-                connection.connect()
-                if connection.can_read():
-                    raise ConnectionError("Connection not ready")
+            self.ensure_connection(connection)
         except BaseException:
             # release the connection back to the pool so that we don't
             # leak it
@@ -1414,20 +1455,7 @@ class BlockingConnectionPool(ConnectionPool):
             connection = self.make_connection()
 
         try:
-            # ensure this connection is connected to Redis
-            connection.connect()
-            # connections that the pool provides should be ready to send
-            # a command. if not, the connection was either returned to the
-            # pool before all data has been read or the socket has been
-            # closed. either way, reconnect and verify everything is good.
-            try:
-                if connection.can_read():
-                    raise ConnectionError("Connection has data")
-            except (ConnectionError, OSError):
-                connection.disconnect()
-                connection.connect()
-                if connection.can_read():
-                    raise ConnectionError("Connection not ready")
+            self.ensure_connection(connection)
         except BaseException:
             # release the connection back to the pool so that we don't leak it
             self.release(connection)

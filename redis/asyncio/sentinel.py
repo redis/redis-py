@@ -147,7 +147,7 @@ class SentinelConnectionPool(ConnectionPool):
         self.sentinel_manager = sentinel_manager
         self.master_address = None
         self.slave_rr_counter = None
-        self._request_id_to_replica_address = {}
+        self._iter_req_id_to_replica_address = {}
 
     def __repr__(self):
         return (
@@ -193,6 +193,14 @@ class SentinelConnectionPool(ConnectionPool):
             pass
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
 
+    def cleanup_scan(self, **options):
+        """
+        Remove the SCAN ITER family command's request id from the dictionary
+        """
+        self._iter_req_id_to_replica_address.pop(
+            options.get("_iter_req_id", None), None
+        )
+
     async def get_connection(
         self, command_name: str, *keys: Any, **options: Any
     ) -> SentinelManagedConnection:
@@ -217,7 +225,7 @@ class SentinelConnectionPool(ConnectionPool):
         (
             server_host,
             server_port,
-        ) = self._request_id_to_replica_address.get(iter_req_id, (None, None))
+        ) = self._iter_req_id_to_replica_address.get(iter_req_id, (None, None))
         connection = None
         # If this is the first scan request of the iter command,
         # get a connection from the pool
@@ -228,18 +236,12 @@ class SentinelConnectionPool(ConnectionPool):
                 connection = self.make_connection()
         # If this is not the first scan request of the iter command
         else:
-            # Check from the available connections, if any of the connection
-            # is connected to the host and port that we want
-            for available_connection in self._available_connections.copy():
-                # if yes, use that connection
-                if (
-                    available_connection.host == server_host
-                    and available_connection.port == server_port
-                ):
-                    self._available_connections.remove(available_connection)
-                    connection = available_connection
-            # If not, make a new dummy connection object, and set its host and port
-            # to the one that we want later in the call to ``connect_to_address``
+            # Get the connection that has the same host and port
+            connection = self._available_connections.get_connection(
+                host=server_host, port=server_port
+            )
+            # If not, make a new dummy connection object, and set its host and
+            # port to the one that we want later in the call to ``connect_to_address``
             if not connection:
                 connection = self.make_connection()
         assert connection
@@ -255,25 +257,14 @@ class SentinelConnectionPool(ConnectionPool):
             # This will connect to the host and port of the replica
             else:
                 await connection.connect_to_address(server_host, server_port)
-            # Connections that the pool provides should be ready to send
-            # a command. If not, the connection was either returned to the
-            # pool before all data has been read or the socket has been
-            # closed. Either way, reconnect and verify everything is good.
-            try:
-                if await connection.can_read_destructive():
-                    raise ConnectionError("Connection has data") from None
-            except (ConnectionError, OSError):
-                await connection.disconnect()
-                await connection.connect()
-                if await connection.can_read_destructive():
-                    raise ConnectionError("Connection not ready") from None
+            self.ensure_connection(connection)
         except BaseException:
             # Release the connection back to the pool so that we don't
             # leak it
             await self.release(connection)
             raise
         # Store the connection to the dictionary
-        self._request_id_to_replica_address[iter_req_id] = (
+        self._iter_req_id_to_replica_address[iter_req_id] = (
             connection.host,
             connection.port,
         )

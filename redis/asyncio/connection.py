@@ -38,7 +38,7 @@ else:
 
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.connection import DEFAULT_RESP_VERSION
+from redis.connection import DEFAULT_RESP_VERSION, ConnectionsIndexer
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
@@ -1057,6 +1057,13 @@ class ConnectionPool:
     ``connection_class``.
     """
 
+    @abstractmethod
+    def cleanup_scan(self, **options):
+        """
+        Additional cleanup operations that the connection pool might
+        need to do after a SCAN ITER family command is executed
+        """
+
     @classmethod
     def from_url(cls: Type[_CP], url: str, **kwargs) -> _CP:
         """
@@ -1118,7 +1125,7 @@ class ConnectionPool:
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
-        self._available_connections: List[AbstractConnection] = []
+        self._available_connections: ConnectionsIndexer = ConnectionsIndexer()
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
 
@@ -1324,3 +1331,6 @@ class BlockingConnectionPool(ConnectionPool):
         async with self._condition:
             await super().release(connection)
             self._condition.notify()
+
+    def cleanup_scan(self, **options):
+        pass

@@ -2235,6 +2235,37 @@ class TestRedisCommands:
         pairs = list(r.zscan_iter("a", match="a"))
         assert set(pairs) == {(b"a", 1)}
 
+    def test_scan_iter_family_executes_commands_with_same_iter_req_id():
+        """Assert that all calls to execute_command receives the _iter_req_id kwarg"""
+        import uuid
+
+        from redis.commands.core import ScanCommands
+
+        with mock.patch.object(
+            ScanCommands, "execute_command", mock.Mock(return_value=(0, []))
+        ) as mock_execute_command, mock.patch.object(
+            uuid, "uuid4", return_value="uuid"
+        ):
+            [a for a in ScanCommands().scan_iter()]
+            mock_execute_command.assert_called_with("SCAN", "0", _iter_req_id="uuid")
+            [a for a in ScanCommands().sscan_iter("")]
+            mock_execute_command.assert_called_with(
+                "SSCAN", "", "0", _iter_req_id="uuid"
+            )
+        with mock.patch.object(
+            ScanCommands, "execute_command", mock.Mock(return_value=(0, {}))
+        ) as mock_execute_command, mock.patch.object(
+            uuid, "uuid4", return_value="uuid"
+        ):
+            [a for a in ScanCommands().hscan_iter("")]
+            mock_execute_command.assert_called_with(
+                "HSCAN", "", "0", no_values=None, _iter_req_id="uuid"
+            )
+            [a for a in ScanCommands().zscan_iter("")]
+            mock_execute_command.assert_called_with(
+                "ZSCAN", "", "0", score_cast_func=mock.ANY, _iter_req_id="uuid"
+            )
+
     # SET COMMANDS
     def test_sadd(self, r):
         members = {b"1", b"2", b"3"}

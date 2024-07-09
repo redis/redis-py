@@ -3039,9 +3039,15 @@ class ScanCommands(CommandsProtocol):
             Additionally, Redis modules can expose other types as well.
         """
         cursor = "0"
+        iter_req_id = uuid.uuid4()
         while cursor != 0:
             cursor, data = self.scan(
-                cursor=cursor, match=match, count=count, _type=_type, **kwargs
+                cursor=cursor,
+                match=match,
+                count=count,
+                _type=_type,
+                _iter_req_id=iter_req_id,
+                **kwargs,
             )
             yield from data
 
@@ -3085,8 +3091,11 @@ class ScanCommands(CommandsProtocol):
         ``count`` allows for hint the minimum number of returns
         """
         cursor = "0"
+        iter_req_id = uuid.uuid4()
         while cursor != 0:
-            cursor, data = self.sscan(name, cursor=cursor, match=match, count=count)
+            cursor, data = self.sscan(
+                name, cursor=cursor, match=match, count=count, _iter_req_id=iter_req_id
+            )
             yield from data
 
     def hscan(
@@ -3137,9 +3146,15 @@ class ScanCommands(CommandsProtocol):
         ``no_values`` indicates to return only the keys, without values
         """
         cursor = "0"
+        iter_req_id = uuid.uuid4()
         while cursor != 0:
             cursor, data = self.hscan(
-                name, cursor=cursor, match=match, count=count, no_values=no_values
+                name,
+                cursor=cursor,
+                match=match,
+                count=count,
+                no_values=no_values,
+                _iter_req_id=iter_req_id,
             )
             if no_values:
                 yield from data
@@ -3193,6 +3208,7 @@ class ScanCommands(CommandsProtocol):
         ``score_cast_func`` a callable used to cast the score return value
         """
         cursor = "0"
+        iter_req_id = uuid.uuid4()
         while cursor != 0:
             cursor, data = self.zscan(
                 name,
@@ -3200,6 +3216,7 @@ class ScanCommands(CommandsProtocol):
                 match=match,
                 count=count,
                 score_cast_func=score_cast_func,
+                _iter_req_id=iter_req_id,
             )
             yield from data
 
