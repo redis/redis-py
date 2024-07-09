@@ -117,9 +117,7 @@ def client(request, stack_url):
 
 @pytest.fixture
 def binary_client(request, stack_url):
-    r = _get_client(
-        redis.Redis, request, decode_responses=False, from_url=stack_url, protocol=3
-    )
+    r = _get_client(redis.Redis, request, decode_responses=False, from_url=stack_url)
     r.flushdb()
     return r
 
