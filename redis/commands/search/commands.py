@@ -928,7 +928,8 @@ class AsyncSearchCommands(SearchCommands):
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
         st = time.time()
-        res = await self.execute_command(SEARCH_CMD, *args)
+        options = {NEVER_DECODE: True}
+        res = await self.execute_command(SEARCH_CMD, *args, **options)
 
         if isinstance(res, Pipeline):
             return res

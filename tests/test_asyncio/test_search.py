@@ -1572,12 +1572,12 @@ async def test_query_timeout(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_if_resp_version(3)
-async def test_binary_and_text_fields(client):
+async def test_binary_and_text_fields(decoded_r: redis.Redis):
     fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
 
     index_name = "mixed_index"
     mixed_data = {"first_name": "🐍python", "vector_emb": fake_vec.tobytes()}
-    await client.hset(f"{index_name}:1", mapping=mixed_data)
+    await decoded_r.hset(f"{index_name}:1", mapping=mixed_data)
 
     schema = (
         TagField("first_name"),
@@ -1592,7 +1592,7 @@ async def test_binary_and_text_fields(client):
         ),
     )
 
-    await client.ft(index_name).create_index(
+    await decoded_r.ft(index_name).create_index(
         fields=schema,
         definition=IndexDefinition(
             prefix=[f"{index_name}:"], index_type=IndexType.HASH
@@ -1604,7 +1604,7 @@ async def test_binary_and_text_fields(client):
         .return_field("vector_emb", decode_field=False)
         .return_field("first_name")
     )
-    result = await client.ft(index_name).search(query=query, query_params={})
+    result = await decoded_r.ft(index_name).search(query=query, query_params={})
     docs = result.docs
 
     decoded_vec_from_search_results = np.frombuffer(
