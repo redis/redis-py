@@ -16,3 +16,4 @@ urllib3<2
 uvloop
 vulture>=2.3.0
 wheel>=0.30.0
+numpy>=1.24.0
