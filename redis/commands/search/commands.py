@@ -2,7 +2,7 @@ import itertools
 import time
 from typing import Dict, List, Optional, Union
 
-from redis.client import Pipeline
+from redis.client import NEVER_DECODE, Pipeline
 from redis.utils import deprecated_function
 
 from ..helpers import get_protocol_version, parse_to_dict
@@ -500,7 +500,8 @@ class SearchCommands:
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
         st = time.time()
-        res = self.execute_command(SEARCH_CMD, *args)
+        options = {NEVER_DECODE: True}
+        res = self.execute_command(SEARCH_CMD, *args, **options)
 
         if isinstance(res, Pipeline):
             return res

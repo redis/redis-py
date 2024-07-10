@@ -45,11 +45,6 @@ async def decoded_r(create_redis, stack_url):
     return await create_redis(decode_responses=True, url=stack_url)
 
 
-@pytest_asyncio.fixture()
-async def binary_client(create_redis, stack_url):
-    return await create_redis(decode_responses=False, url=stack_url)
-
-
 async def waitForIndex(env, idx, timeout=None):
     delay = 0.1
     while True:
@@ -1577,16 +1572,12 @@ async def test_query_timeout(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_if_resp_version(3)
-async def test_binary_and_text_fields(binary_client):
-    assert (
-        binary_client.get_connection_kwargs()["decode_responses"] is False
-    ), "This feature is only available when decode_responses is False"
-
+async def test_binary_and_text_fields(client):
     fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
 
     index_name = "mixed_index"
     mixed_data = {"first_name": "🐍python", "vector_emb": fake_vec.tobytes()}
-    await binary_client.hset(f"{index_name}:1", mapping=mixed_data)
+    await client.hset(f"{index_name}:1", mapping=mixed_data)
 
     schema = (
         TagField("first_name"),
@@ -1601,23 +1592,19 @@ async def test_binary_and_text_fields(binary_client):
         ),
     )
 
-    await binary_client.ft(index_name).create_index(
+    await client.ft(index_name).create_index(
         fields=schema,
         definition=IndexDefinition(
             prefix=[f"{index_name}:"], index_type=IndexType.HASH
         ),
     )
 
-    bytes_person_1 = await binary_client.hget(f"{index_name}:1", "vector_emb")
-    decoded_vec_from_hash = np.frombuffer(bytes_person_1, dtype=np.float32)
-    assert np.array_equal(decoded_vec_from_hash, fake_vec), "The vectors are not equal"
-
     query = (
         Query("*")
         .return_field("vector_emb", decode_field=False)
-        .return_field("first_name", decode_field=True)
+        .return_field("first_name")
     )
-    result = await binary_client.ft(index_name).search(query=query, query_params={})
+    result = await client.ft(index_name).search(query=query, query_params={})
     docs = result.docs
 
     decoded_vec_from_search_results = np.frombuffer(
@@ -1630,4 +1617,4 @@ async def test_binary_and_text_fields(binary_client):
 
     assert (
         docs[0]["first_name"] == mixed_data["first_name"]
-    ), "The first is not decoded correctly"
+    ), "The text field is not decoded correctly"

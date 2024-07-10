@@ -115,13 +115,6 @@ def client(request, stack_url):
     return r
 
 
-@pytest.fixture
-def binary_client(request, stack_url):
-    r = _get_client(redis.Redis, request, decode_responses=False, from_url=stack_url)
-    r.flushdb()
-    return r
-
-
 @pytest.mark.redismod
 def test_client(client):
     num_docs = 500
@@ -1716,16 +1709,12 @@ def test_search_return_fields(client):
 
 @pytest.mark.redismod
 @skip_if_resp_version(3)
-def test_binary_and_text_fields(binary_client):
-    assert (
-        binary_client.get_connection_kwargs()["decode_responses"] is False
-    ), "This feature is only available when decode_responses is False"
-
+def test_binary_and_text_fields(client):
     fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
 
     index_name = "mixed_index"
     mixed_data = {"first_name": "🐍python", "vector_emb": fake_vec.tobytes()}
-    binary_client.hset(f"{index_name}:1", mapping=mixed_data)
+    client.hset(f"{index_name}:1", mapping=mixed_data)
 
     schema = (
         TagField("first_name"),
@@ -1740,23 +1729,19 @@ def test_binary_and_text_fields(binary_client):
         ),
     )
 
-    binary_client.ft(index_name).create_index(
+    client.ft(index_name).create_index(
         fields=schema,
         definition=IndexDefinition(
             prefix=[f"{index_name}:"], index_type=IndexType.HASH
         ),
     )
 
-    bytes_person_1 = binary_client.hget(f"{index_name}:1", "vector_emb")
-    decoded_vec_from_hash = np.frombuffer(bytes_person_1, dtype=np.float32)
-    assert np.array_equal(decoded_vec_from_hash, fake_vec), "The vectors are not equal"
-
     query = (
         Query("*")
         .return_field("vector_emb", decode_field=False)
-        .return_field("first_name", decode_field=True)
+        .return_field("first_name")
     )
-    docs = binary_client.ft(index_name).search(query=query, query_params={}).docs
+    docs = client.ft(index_name).search(query=query, query_params={}).docs
     decoded_vec_from_search_results = np.frombuffer(
         docs[0]["vector_emb"], dtype=np.float32
     )
@@ -1767,7 +1752,7 @@ def test_binary_and_text_fields(binary_client):
 
     assert (
         docs[0]["first_name"] == mixed_data["first_name"]
-    ), "The first is not decoded correctly"
+    ), "The text field is not decoded correctly"
 
 
 @pytest.mark.redismod
