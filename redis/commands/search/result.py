@@ -1,3 +1,5 @@
+from typing import Optional
+
 from ._util import to_string
 from .document import Document
 
@@ -9,11 +11,19 @@ class Result:
     """
 
     def __init__(
-        self, res, hascontent, duration=0, has_payload=False, with_scores=False
+        self,
+        res,
+        hascontent,
+        duration=0,
+        has_payload=False,
+        with_scores=False,
+        field_encodings: Optional[dict] = None,
     ):
         """
-        - **snippets**: An optional dictionary of the form
-        {field: snippet_size} for snippet formatting
+        - duration: the execution time of the query
+        - has_payload: whether the query has payloads
+        - with_scores: whether the query has scores
+        - field_encodings: a dictionary of field encodings if any is provided
         """
 
         self.total = res[0]
@@ -39,18 +49,22 @@ class Result:
 
             fields = {}
             if hascontent and res[i + fields_offset] is not None:
-                fields = (
-                    dict(
-                        dict(
-                            zip(
-                                map(to_string, res[i + fields_offset][::2]),
-                                map(to_string, res[i + fields_offset][1::2]),
-                            )
-                        )
-                    )
-                    if hascontent
-                    else {}
-                )
+                keys = map(to_string, res[i + fields_offset][::2])
+                values = res[i + fields_offset][1::2]
+
+                for key, value in zip(keys, values):
+                    if field_encodings is None or key not in field_encodings:
+                        fields[key] = to_string(value)
+                        continue
+
+                    encoding = field_encodings[key]
+
+                    # If the encoding is None, we don't need to decode the value
+                    if encoding is None:
+                        fields[key] = value
+                    else:
+                        fields[key] = to_string(value, encoding=encoding)
+
             try:
                 del fields["id"]
             except KeyError:

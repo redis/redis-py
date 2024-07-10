@@ -2,7 +2,7 @@ import itertools
 import time
 from typing import Dict, List, Optional, Union
 
-from redis.client import Pipeline
+from redis.client import NEVER_DECODE, Pipeline
 from redis.utils import deprecated_function
 
 from ..helpers import get_protocol_version, parse_to_dict
@@ -82,6 +82,7 @@ class SearchCommands:
             duration=kwargs["duration"],
             has_payload=kwargs["query"]._with_payloads,
             with_scores=kwargs["query"]._with_scores,
+            field_encodings=kwargs["query"]._return_fields_decode_as,
         )
 
     def _parse_aggregate(self, res, **kwargs):
@@ -499,7 +500,12 @@ class SearchCommands:
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
         st = time.time()
-        res = self.execute_command(SEARCH_CMD, *args)
+
+        options = {}
+        if get_protocol_version(self.client) not in ["3", 3]:
+            options[NEVER_DECODE] = True
+
+        res = self.execute_command(SEARCH_CMD, *args, **options)
 
         if isinstance(res, Pipeline):
             return res
@@ -926,7 +932,12 @@ class AsyncSearchCommands(SearchCommands):
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
         st = time.time()
-        res = await self.execute_command(SEARCH_CMD, *args)
+
+        options = {}
+        if get_protocol_version(self.client) not in ["3", 3]:
+            options[NEVER_DECODE] = True
+
+        res = await self.execute_command(SEARCH_CMD, *args, **options)
 
         if isinstance(res, Pipeline):
             return res
