@@ -500,7 +500,11 @@ class SearchCommands:
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
         st = time.time()
-        options = {NEVER_DECODE: True}
+
+        options = {}
+        if get_protocol_version(self.client) not in ["3", 3]:
+            options[NEVER_DECODE] = True
+
         res = self.execute_command(SEARCH_CMD, *args, **options)
 
         if isinstance(res, Pipeline):
@@ -928,7 +932,11 @@ class AsyncSearchCommands(SearchCommands):
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
         st = time.time()
-        options = {NEVER_DECODE: True}
+
+        options = {}
+        if get_protocol_version(self.client) not in ["3", 3]:
+            options[NEVER_DECODE] = True
+
         res = await self.execute_command(SEARCH_CMD, *args, **options)
 
         if isinstance(res, Pipeline):
