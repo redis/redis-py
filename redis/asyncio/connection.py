@@ -1000,7 +1000,7 @@ def parse_url(url: str) -> ConnectKwargs:
                 try:
                     kwargs[name] = parser(value)
                 except (TypeError, ValueError):
-                    raise ValueError(f"Invalid value for `{name}` in connection URL.")
+                    raise ValueError(f"Invalid value for '{name}' in connection URL.")
             else:
                 kwargs[name] = value
 

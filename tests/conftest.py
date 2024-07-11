@@ -72,6 +72,21 @@ class BooleanOptionalAction(argparse.Action):
         return " | ".join(self.option_strings)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def enable_tracemalloc():
+    """
+    Enable tracemalloc while tests are being executed.
+    """
+    try:
+        import tracemalloc
+
+        tracemalloc.start()
+        yield
+        tracemalloc.stop()
+    except ImportError:
+        yield
+
+
 def pytest_addoption(parser):
     parser.addoption(
         "--redis-url",
@@ -246,7 +261,9 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
     for j in modules:
         if module_name == j.get("name"):
             version = j.get("ver")
-            mv = int(min_version.replace(".", ""))
+            mv = int(
+                "".join(["%02d" % int(segment) for segment in min_version.split(".")])
+            )
             check = version < mv
             return pytest.mark.skipif(check, reason="Redis module version")
 
