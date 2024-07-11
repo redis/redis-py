@@ -1522,6 +1522,8 @@ class NodesManager:
                 target_node = ClusterNode(host, port, role)
             if target_node.server_type != role:
                 target_node.server_type = role
+            # add this node to the nodes cache
+            tmp_nodes_cache[target_node.name] = target_node
 
         return target_node
 
@@ -1585,31 +1587,26 @@ class NodesManager:
                 port = int(primary_node[1])
                 host, port = self.remap_host_port(host, port)
 
+                nodes_for_slot = []
+
                 target_node = self._get_or_create_cluster_node(
                     host, port, PRIMARY, tmp_nodes_cache
                 )
-                # add this node to the nodes cache
-                tmp_nodes_cache[target_node.name] = target_node
+                nodes_for_slot.append(target_node)
+
+                replica_nodes = slot[3:]
+                for replica_node in replica_nodes:
+                    host = str_if_bytes(replica_node[0])
+                    port = int(replica_node[1])
+                    host, port = self.remap_host_port(host, port)
+                    target_replica_node = self._get_or_create_cluster_node(
+                        host, port, REPLICA, tmp_nodes_cache
+                    )
+                    nodes_for_slot.append(target_replica_node)
 
                 for i in range(int(slot[0]), int(slot[1]) + 1):
                     if i not in tmp_slots:
-                        tmp_slots[i] = []
-                        tmp_slots[i].append(target_node)
-                        replica_nodes = [slot[j] for j in range(3, len(slot))]
-
-                        for replica_node in replica_nodes:
-                            host = str_if_bytes(replica_node[0])
-                            port = replica_node[1]
-                            host, port = self.remap_host_port(host, port)
-
-                            target_replica_node = self._get_or_create_cluster_node(
-                                host, port, REPLICA, tmp_nodes_cache
-                            )
-                            tmp_slots[i].append(target_replica_node)
-                            # add this node to the nodes cache
-                            tmp_nodes_cache[target_replica_node.name] = (
-                                target_replica_node
-                            )
+                        tmp_slots[i] = nodes_for_slot
                     else:
                         # Validate that 2 nodes want to use the same slot cache
                         # setup

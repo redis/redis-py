@@ -42,39 +42,39 @@ def all_tests(c):
 
 
 @task
-def tests(c, uvloop=False, protocol=2):
-    """Run the redis-py test suite against the current python,
-    with and without hiredis.
-    """
+def tests(c, uvloop=False, protocol=2, profile=False):
+    """Run the redis-py test suite against the current python."""
     print("Starting Redis tests")
-    standalone_tests(c, uvloop=uvloop, protocol=protocol)
-    cluster_tests(c, uvloop=uvloop, protocol=protocol)
+    standalone_tests(c, uvloop=uvloop, protocol=protocol, profile=profile)
+    cluster_tests(c, uvloop=uvloop, protocol=protocol, profile=profile)
 
 
 @task
-def standalone_tests(c, uvloop=False, protocol=2):
+def standalone_tests(c, uvloop=False, protocol=2, profile=False):
     """Run tests against a standalone redis instance"""
+    profile_arg = "--profile" if profile else ""
     if uvloop:
         run(
-            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --uvloop --junit-xml=standalone-uvloop-results.xml"
+            f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --uvloop --junit-xml=standalone-uvloop-results.xml"
         )
     else:
         run(
-            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --junit-xml=standalone-results.xml"
+            f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --junit-xml=standalone-results.xml"
         )
 
 
 @task
-def cluster_tests(c, uvloop=False, protocol=2):
+def cluster_tests(c, uvloop=False, protocol=2, profile=False):
     """Run tests against a redis cluster"""
+    profile_arg = "--profile" if profile else ""
     cluster_url = "redis://localhost:16379/0"
     if uvloop:
         run(
-            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-uvloop-results.xml --uvloop"
+            f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-uvloop-results.xml --uvloop"
         )
     else:
         run(
-            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_clusteclient.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-results.xml"
+            f"pytest  {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_clusteclient.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-results.xml"
         )
 
 
