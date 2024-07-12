@@ -920,7 +920,12 @@ class UnixDomainSocketConnection(AbstractConnection):
         "Create a Unix domain socket connection"
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(self.socket_connect_timeout)
-        sock.connect(self.path)
+        try:
+            sock.connect(self.path)
+        except OSError:
+            # Prevent ResourceWarnings for unclosed sockets.
+            sock.close()
+            raise
         sock.settimeout(self.socket_timeout)
         return sock
 
