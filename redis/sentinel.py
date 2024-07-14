@@ -41,15 +41,15 @@ class SentinelManagedConnection(Connection):
             if str_if_bytes(self.read_response()) != "PONG":
                 raise ConnectionError("PING failed")
 
-    def _connect_retry(self, same_server: bool = False):
+    def _connect_retry(self, same_address: bool = False):
         if self._sock:
             return  # already connected
         # If same_server is True, it means that the connection
         # is not rotating to the next slave (if the connection pool is not master)
-        if same_server:
+        if same_address:
             self.connect_to(self.host, self.port)
             return
-        # If same_server is False, connnect to master in master mode 
+        # If same_server is False, connnect to master in master mode  
         # and rotate to the next slave in slave mode
         if self.connection_pool.is_master:
             self.connect_to(self.connection_pool.get_master_address())
@@ -61,11 +61,32 @@ class SentinelManagedConnection(Connection):
                     continue
             raise SlaveNotFoundError  # Never be here
 
-    def connect(self, same_server: bool = False):
+    def connect(self):
+        return self.retry.call_with_retry(lambda: self._connect_retry(), lambda error: None)
+
+    def connect_to_same_address(self):
+        """
+        Similar to connect, but instead of rotating to the next slave (if not in master mode),
+        it just connects to the same address of the connection object.
+        """
         return self.retry.call_with_retry(
-                lambda: self._connect_retry(same_server), 
-                lambda error: None
+            lambda: self._connect_retry(same_address=True),
+            lambda error: None
         )
+
+    def can_read_same_address(self, timeout=0):
+        """Similar to can_read_same_address, but calls connect_to_same_address instead of connect"""
+        sock = self._sock
+        if not sock:
+            self.connect_to_same_address()
+
+        host_error = self._host_error()
+
+        try:
+            return self._parser.can_read(timeout)
+        except OSError as e:
+            self.disconnect()
+            raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
 
     def read_response(
         self,
@@ -218,17 +239,17 @@ class SentinelConnectionPool(ConnectionPool):
         Here, we just try to make sure that the connection is already connected
         to the replica we wanted it to.
         """
-        connection.connect(same_address=True)
+        connection.connect_to_same_address()
         try:
-            if connection.can_read(same_address=True) and connection.client_cache is None:
+            if connection.can_read_same_address() and connection.client_cache is None:
                 raise ConnectionError("Connection has data")
         except (ConnectionError, OSError):
             connection.disconnect()
-            connection.connect(same_address=True)
+            connection.connect_to_same_address()
             if connection.can_read():
                 raise ConnectionError("Connection has data")
 
-    def cleanup_scan(self, **options):
+    def cleanup(self, **options):
         """
         Remove the SCAN ITER family command's request id from the dictionary
         """
@@ -281,7 +302,6 @@ class SentinelConnectionPool(ConnectionPool):
                 connection = self.make_connection()
         assert connection
         self._in_use_connections.add(connection)
-        breakpoint()
         try:
             # Ensure this connection is connected to Redis
             # If this is the first scan request, it will
@@ -293,9 +313,7 @@ class SentinelConnectionPool(ConnectionPool):
             # This will connect to the host and port of the replica
             else:
                 connection.connect_to_address(server_host, server_port)
-            breakpoint()
             self.ensure_connection_connected_to_address(connection)
-            breakpoint()
         except BaseException:
             # Release the connection back to the pool so that we don't
             # leak it
@@ -306,7 +324,6 @@ class SentinelConnectionPool(ConnectionPool):
             connection.host,
             connection.port,
         )
-        breakpoint()
         return connection
 
 

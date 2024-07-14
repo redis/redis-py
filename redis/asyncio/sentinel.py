@@ -91,6 +91,16 @@ class SentinelManagedConnection(Connection):
             lambda error: asyncio.sleep(0),
         )
 
+    async def connect_to_same_address(self):
+        """
+        Similar to connect, but instead of rotating to the next slave (if not in master mode),
+        it just connects to the same address of the connection object.
+        """
+        return await self.retry.call_with_retry(
+            lambda: self._connect_retry(same_address=True),
+            lambda error: asyncio.sleep(0),
+        )
+
     async def read_response(
         self,
         disable_decoding: bool = False,
@@ -193,7 +203,30 @@ class SentinelConnectionPool(ConnectionPool):
             pass
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
 
-    def cleanup_scan(self, **options):
+    async def ensure_connection_connected_to_address(self, connection: SentinelManagedConnection):
+        """
+        Ensure the connection is already connected to the server that this connection
+        object wants to connect to
+
+        Similar to self.ensure_connection, but calling connection.connect()
+        in SentinelManagedConnection (replica mode) will cause the 
+        connection object to connect to the next replica in rotation,
+        and we don't wnat behavior. Look at get_connection inline docs for details.
+
+        Here, we just try to make sure that the connection is already connected
+        to the replica we wanted it to.
+        """
+        await connection.connect_to_same_address()
+        try:
+            if await connection.can_read_destructive() and connection.client_cache is None:
+                raise ConnectionError("Connection has data")
+        except (ConnectionError, OSError):
+            await connection.disconnect()
+            await connection.connect_to_same_address()
+            if await connection.can_read_destructive():
+                raise ConnectionError("Connection has data")
+
+    def cleanup(self, **options):
         """
         Remove the SCAN ITER family command's request id from the dictionary
         """
@@ -257,7 +290,7 @@ class SentinelConnectionPool(ConnectionPool):
             # This will connect to the host and port of the replica
             else:
                 await connection.connect_to_address(server_host, server_port)
-            await self.ensure_connection(connection)
+            self.ensure_connection_connected_to_address(connection)
         except BaseException:
             # Release the connection back to the pool so that we don't
             # leak it

@@ -1058,7 +1058,7 @@ class ConnectionPool:
     """
 
     @abstractmethod
-    def cleanup_scan(self, **options):
+    def cleanup(self, **options):
         """
         Additional cleanup operations that the connection pool might
         need to do after a SCAN ITER family command is executed
@@ -1332,5 +1332,5 @@ class BlockingConnectionPool(ConnectionPool):
             await super().release(connection)
             self._condition.notify()
 
-    def cleanup_scan(self, **options):
+    def cleanup(self, **options):
         pass
