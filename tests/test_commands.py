@@ -2235,7 +2235,7 @@ class TestRedisCommands:
         pairs = list(r.zscan_iter("a", match="a"))
         assert set(pairs) == {(b"a", 1)}
 
-    def test_scan_iter_family_executes_commands_with_same_iter_req_id():
+    def test_scan_iter_family_executes_commands_with_same_iter_req_id(self):
         """Assert that all calls to execute_command receives the _iter_req_id kwarg"""
         import uuid
 
