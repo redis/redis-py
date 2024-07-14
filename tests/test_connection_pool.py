@@ -502,7 +502,7 @@ class TestConnection:
             bad_connection.info()
         pool = bad_connection.connection_pool
         assert len(pool._available_connections) == 1
-        assert not pool._available_connections[0]._sock
+        assert not list(pool._available_connections)[0]._sock
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")

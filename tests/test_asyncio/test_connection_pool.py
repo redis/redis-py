@@ -1,5 +1,6 @@
 import asyncio
 import re
+from itertools import chain
 
 import pytest
 import pytest_asyncio
@@ -35,7 +36,7 @@ class TestRedisAutoReleaseConnectionPool:
     def has_no_connected_connections(pool: redis.ConnectionPool):
         return not any(
             x.is_connected
-            for x in pool._available_connections + list(pool._in_use_connections)
+            for x in chain(pool._available_connections, pool._in_use_connections)
         )
 
     async def test_auto_disconnect_redis_created_pool(self, r: redis.Redis):
