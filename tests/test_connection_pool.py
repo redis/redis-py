@@ -20,6 +20,8 @@ class DummyConnection:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.pid = os.getpid()
+        self.host = kwargs.get("host", None)
+        self.port = kwargs.get("port", None)
 
     def connect(self):
         pass

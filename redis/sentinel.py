@@ -74,6 +74,14 @@ class SentinelManagedConnection(Connection):
             lambda error: None
         )
 
+    def connect_to_address(self, address):
+        """
+        Similar to connect, but instead of rotating to the next slave (if not in master mode),
+        it just connects to the address supplied.
+        """
+        self.host, self.port = address
+        return self.connect_to_same_address()
+
     def can_read_same_address(self, timeout=0):
         """Similar to can_read_same_address, but calls connect_to_same_address instead of connect"""
         sock = self._sock
@@ -312,7 +320,7 @@ class SentinelConnectionPool(ConnectionPool):
             # connect to the previous replica.
             # This will connect to the host and port of the replica
             else:
-                connection.connect_to_same_address()
+                connection.connect_to_address((server_host, server_port))
             self.ensure_connection_connected_to_address(connection)
         except BaseException:
             # Release the connection back to the pool so that we don't

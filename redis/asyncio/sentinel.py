@@ -92,6 +92,14 @@ class SentinelManagedConnection(Connection):
             lambda error: asyncio.sleep(0),
         )
 
+    async def connect_to_address(self, address):
+        """
+        Similar to connect, but instead of rotating to the next slave (if not in master mode),
+        it just connects to the same address of the connection object.
+        """
+        self.host, self.port = address
+        return await self.connect_to_same_address()
+
     async def read_response(
         self,
         disable_decoding: bool = False,
@@ -280,8 +288,8 @@ class SentinelConnectionPool(ConnectionPool):
             # connect to the previous replica.
             # This will connect to the host and port of the replica
             else:
-                await connection.connect_to_same_address()
-            self.ensure_connection_connected_to_address(connection)
+                await connection.connect_to_address((server_host, server_port))
+            await self.ensure_connection_connected_to_address(connection)
         except BaseException:
             # Release the connection back to the pool so that we don't
             # leak it
