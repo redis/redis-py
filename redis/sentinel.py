@@ -41,9 +41,16 @@ class SentinelManagedConnection(Connection):
             if str_if_bytes(self.read_response()) != "PONG":
                 raise ConnectionError("PING failed")
 
-    def _connect_retry(self):
+    def _connect_retry(self, same_server: bool = False):
         if self._sock:
             return  # already connected
+        # If same_server is True, it means that the connection
+        # is not rotating to the next slave (if the connection pool is not master)
+        if same_server:
+            self.connect_to(self.host, self.port)
+            return
+        # If same_server is False, connnect to master in master mode 
+        # and rotate to the next slave in slave mode
         if self.connection_pool.is_master:
             self.connect_to(self.connection_pool.get_master_address())
         else:
@@ -54,8 +61,11 @@ class SentinelManagedConnection(Connection):
                     continue
             raise SlaveNotFoundError  # Never be here
 
-    def connect(self):
-        return self.retry.call_with_retry(self._connect_retry, lambda error: None)
+    def connect(self, same_server: bool = False):
+        return self.retry.call_with_retry(
+                lambda: self._connect_retry(same_server), 
+                lambda error: None
+        )
 
     def read_response(
         self,
@@ -195,6 +205,29 @@ class SentinelConnectionPool(ConnectionPool):
         "Round-robin slave balancer"
         return self.proxy.rotate_slaves()
 
+    def ensure_connection_connected_to_address(self, connection: SentinelManagedConnection):
+        """
+        Ensure the connection is already connected to the server that this connection
+        object wants to connect to
+
+        Similar to self.ensure_connection, but calling connection.connect()
+        in SentinelManagedConnection (replica mode) will cause the 
+        connection object to connect to the next replica in rotation,
+        and we don't wnat behavior. Look at get_connection inline docs for details.
+
+        Here, we just try to make sure that the connection is already connected
+        to the replica we wanted it to.
+        """
+        connection.connect(same_address=True)
+        try:
+            if connection.can_read(same_address=True) and connection.client_cache is None:
+                raise ConnectionError("Connection has data")
+        except (ConnectionError, OSError):
+            connection.disconnect()
+            connection.connect(same_address=True)
+            if connection.can_read():
+                raise ConnectionError("Connection has data")
+
     def cleanup_scan(self, **options):
         """
         Remove the SCAN ITER family command's request id from the dictionary
@@ -248,6 +281,7 @@ class SentinelConnectionPool(ConnectionPool):
                 connection = self.make_connection()
         assert connection
         self._in_use_connections.add(connection)
+        breakpoint()
         try:
             # Ensure this connection is connected to Redis
             # If this is the first scan request, it will
@@ -259,7 +293,9 @@ class SentinelConnectionPool(ConnectionPool):
             # This will connect to the host and port of the replica
             else:
                 connection.connect_to_address(server_host, server_port)
-            self.ensure_connection(connection)
+            breakpoint()
+            self.ensure_connection_connected_to_address(connection)
+            breakpoint()
         except BaseException:
             # Release the connection back to the pool so that we don't
             # leak it
@@ -270,6 +306,7 @@ class SentinelConnectionPool(ConnectionPool):
             connection.host,
             connection.port,
         )
+        breakpoint()
         return connection
 
 

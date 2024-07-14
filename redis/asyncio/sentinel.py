@@ -257,7 +257,7 @@ class SentinelConnectionPool(ConnectionPool):
             # This will connect to the host and port of the replica
             else:
                 await connection.connect_to_address(server_host, server_port)
-            self.ensure_connection(connection)
+            await self.ensure_connection(connection)
         except BaseException:
             # Release the connection back to the pool so that we don't
             # leak it

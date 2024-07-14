@@ -737,39 +737,53 @@ class Connection(AbstractConnection):
 
 class ConnectionsIndexer(Iterable):
     """
-    Data structure that manages a list of available connections which
-    is also indexed based on the address (ip and port) of the connection
+    Data structure that simulates a list of available connections. 
+    Instead of list, we keep 2 additional DS to support O(1) operations
+    on all of the class' methods.
+    The first DS is indexed on the connection object's ID. 
+    The second DS is indexed on the address (ip and port) of the connection.
     """
 
     def __init__(self):
-        self._connections = []
+        # Map the id to the connection object
+        self._id_to_connection = {}
         # Map the address to a dictionary of connections
         # The inner dictionary is a map between the object id to the object itself
-        # This is to support O(1) operations on all of the class' methods
+        # Both of these DS support O(1) operations on all of the class' methods
         self._address_to_connections = defaultdict(dict)
 
     def pop(self):
-        connection = self._connections.pop()
-        del self._address_to_connections[(connection.host, connection.port)][
-            id(connection)
-        ]
+        try:
+            _, connection = self._id_to_connection.popitem()
+            del self._address_to_connections[(connection.host, connection.port)][
+                id(connection)
+            ]
+        except KeyError:
+            # We are simulating a list, hence we raise IndexError
+            # when there's no item in the dictionary
+            raise IndexError()
         return connection
 
     def append(self, connection: Connection):
-        self._connections.append(connection)
+        self._id_to_connection[id(connection)] = connection
         self._address_to_connections[(connection.host, connection.port)][
             id(connection)
         ] = connection
 
     def get_connection(self, host: str, port: int):
         try:
-            connection = self._address_to_connections[(host, port)].popitem()
+            _, connection = self._address_to_connections[(host, port)].popitem()
+            del self._id_to_connection[id(connection)]
         except KeyError:
             return None
         return connection
 
     def __iter__(self):
-        return iter(self._connections)
+        # This is an O(1) operation in python3.7 and later
+        return iter(self._id_to_connection.values())
+
+    def __len__(self):
+        return len(self._id_to_connection)
 
 
 class SSLConnection(Connection):
