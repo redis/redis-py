@@ -530,7 +530,7 @@ class TestConnection:
         pool = r.connection_pool
         assert not pipe.connection
         assert len(pool._available_connections) == 1
-        assert not pool.list(available_connections)[0]._sock
+        assert not list(pool._available_connections)[0]._sock
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
@@ -547,7 +547,7 @@ class TestConnection:
         pool = r.connection_pool
         assert not pipe.connection
         assert len(pool._available_connections) == 1
-        assert not pool.list(available_connections)[0]._sock
+        assert not list(pool._available_connections)[0]._sock
 
     @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()

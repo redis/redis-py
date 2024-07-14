@@ -57,7 +57,7 @@ class TestRedisAutoReleaseConnectionPool:
         assert r2.connection_pool._in_use_connections == {new_conn}
         assert new_conn.is_connected
         assert len(r2.connection_pool._available_connections) == 1
-        assert r2.connection_pool.list(available_connections)[0].is_connected
+        assert r2.connection_list(pool._available_connections)[0].is_connected
 
     async def test_auto_release_override_true_manual_created_pool(self, r: redis.Redis):
         assert r.auto_close_connection_pool is True, "This is from the class fixture"
@@ -85,7 +85,7 @@ class TestRedisAutoReleaseConnectionPool:
         await r.aclose(close_connection_pool=False)
         assert not self.has_no_connected_connections(r.connection_pool)
         assert r.connection_pool._in_use_connections == {new_conn}
-        assert r.connection_pool.list(available_connections)[0].is_connected
+        assert r.connection_list(pool._available_connections)[0].is_connected
         assert self.get_total_connected_connections(r.connection_pool) == 2
 
 
@@ -579,7 +579,7 @@ class TestConnection:
             await bad_connection.info()
         pool = bad_connection.connection_pool
         assert len(pool._available_connections) == 1
-        assert not pool.list(available_connections)[0]._reader
+        assert not list(pool._available_connections)[0]._reader
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
@@ -610,7 +610,7 @@ class TestConnection:
         pool = r.connection_pool
         assert not pipe.connection
         assert len(pool._available_connections) == 1
-        assert not pool.list(available_connections)[0]._reader
+        assert not list(pool._available_connections)[0]._reader
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
@@ -627,7 +627,7 @@ class TestConnection:
         pool = r.connection_pool
         assert not pipe.connection
         assert len(pool._available_connections) == 1
-        assert not pool.list(available_connections)[0]._reader
+        assert not list(pool._available_connections)[0]._reader
 
     @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
