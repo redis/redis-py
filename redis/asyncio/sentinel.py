@@ -56,9 +56,16 @@ class SentinelManagedConnection(Connection):
             if str_if_bytes(await self.read_response()) != "PONG":
                 raise ConnectionError("PING failed")
 
-    async def _connect_retry(self):
+    async def _connect_retry(self, same_address: bool = False):
         if self._reader:
             return  # already connected
+        # If same_server is True, it means that the connection
+        # is not rotating to the next slave (if the connection pool is not master)
+        if same_address:
+            self.connect_to(self.host, self.port)
+            return
+        # If same_server is False, connnect to master in master mode  
+        # and rotate to the next slave in slave mode
         if self.connection_pool.is_master:
             await self.connect_to(await self.connection_pool.get_master_address())
         else:
@@ -72,22 +79,6 @@ class SentinelManagedConnection(Connection):
     async def connect(self):
         return await self.retry.call_with_retry(
             self._connect_retry,
-            lambda error: asyncio.sleep(0),
-        )
-
-    async def _connect_to_address_retry(self, host: str, port: int) -> None:
-        if self._reader:
-            return  # already connected
-        try:
-            return await self.connect_to((host, port))
-        except ConnectionError:
-            raise SlaveNotFoundError
-
-    async def connect_to_address(self, host: str, port: int) -> None:
-        # Connect to the specified host and port
-        # instead of connecting to the master / rotated slaves
-        return await self.retry.call_with_retry(
-            lambda: self._connect_to_address_retry(host, port),
             lambda error: asyncio.sleep(0),
         )
 
@@ -274,7 +265,7 @@ class SentinelConnectionPool(ConnectionPool):
                 host=server_host, port=server_port
             )
             # If not, make a new dummy connection object, and set its host and
-            # port to the one that we want later in the call to ``connect_to_address``
+            # port to the one that we want later in the call to ``connect_to_same_address``
             if not connection:
                 connection = self.make_connection()
         assert connection
@@ -289,7 +280,7 @@ class SentinelConnectionPool(ConnectionPool):
             # connect to the previous replica.
             # This will connect to the host and port of the replica
             else:
-                await connection.connect_to_address(server_host, server_port)
+                await connection.connect_to_same_address()
             self.ensure_connection_connected_to_address(connection)
         except BaseException:
             # Release the connection back to the pool so that we don't

@@ -43,9 +43,8 @@ async def test_connect_retry_on_timeout_error(connect_args):
 
 
 class SentinelManagedConnectionMock(SentinelManagedConnection):
-    async def connect_to_address(self, host: str, port: int) -> None:
-        self.host = host
-        self.port = port
+    async def connect_to_same_address(self) -> None:
+        pass
 
     async def can_read_destructive(self) -> bool:
         # Mock this function to always return False.
