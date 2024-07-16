@@ -251,5 +251,6 @@ async def test_scan_iter_family_cleans_up(
 
     r = Redis(connection_pool=connection_pool_replica_mock)
 
-    [k async for k in r.scan_iter("a")]
-    assert not connection_pool_replica_mock.iter_req_id_to_replica_address
+    with mock.patch.object(r, "_send_command_parse_response", return_value=(0, [])):
+        [k async for k in r.scan_iter("a")]
+    assert not connection_pool_replica_mock._iter_req_id_to_replica_address

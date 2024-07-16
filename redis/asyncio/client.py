@@ -651,7 +651,9 @@ class Redis(
         finally:
             if not self.connection:
                 await pool.release(conn)
-                if "ITER" in command_name.upper():
+                # Do additional cleanup if this is part of a SCAN ITER family command.
+                # It's possible that this is just a pure SCAN family command though.
+                if "SCAN" in command_name.upper():
                     pool.cleanup(iter_req_id=options.get("iter_req_id", None))
 
     async def parse_response(
