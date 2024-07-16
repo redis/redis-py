@@ -1057,12 +1057,15 @@ class ConnectionPool:
     ``connection_class``.
     """
 
-    @abstractmethod
     def cleanup(self, **options):
         """
         Additional cleanup operations that the connection pool might
-        need to do after a SCAN ITER family command is executed
+        need to do after a SCAN ITER family command is executed.
+
+        See SentinelManagedConnection for an example cleanup operation that
+        might need to be done.
         """
+        pass
 
     @classmethod
     def from_url(cls: Type[_CP], url: str, **kwargs) -> _CP:

@@ -1162,6 +1162,16 @@ class ConnectionPool:
             f"({repr(self.connection_class(**self.connection_kwargs))})>"
         )
 
+    def cleanup(self, **options):
+        """
+        Additional cleanup operations that the connection pool might
+        need to do after a SCAN ITER family command is executed.
+
+        See SentinelManagedConnection for an example cleanup operation that
+        might need to be done.
+        """
+        pass
+
     def reset(self) -> None:
         self._lock = threading.Lock()
         self._created_connections = 0
