@@ -261,6 +261,7 @@ class SentinelConnectionPool(ConnectionPool):
         """
         Remove the SCAN ITER family command's request id from the dictionary
         """
+        breakpoint()
         self._iter_req_id_to_replica_address.pop(
             options.get("_iter_req_id", None), None
         )

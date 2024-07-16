@@ -213,7 +213,10 @@ def test_scan_iter_family_cleans_up(
     """Test that connection pool is correctly cleaned up"""
     from redis import Redis
 
-    r = Redis(connection_pool=connection_pool_replica_mock)
+    from redis.commands.core import ScanCommands
 
-    [k for k in r.scan_iter("a")]
+    r = Redis(connection_pool=connection_pool_replica_mock)
+    with mock.patch.object(r, "_send_command_parse_response", return_value=(0, [])):
+        [k for k in r.scan_iter("a")]
     assert not connection_pool_replica_mock._iter_req_id_to_replica_address
+

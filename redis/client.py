@@ -581,6 +581,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         finally:
             if not self.connection:
                 pool.release(conn)
+            if "SCAN" in command_name.upper():
+                breakpoint()
+                pool.cleanup(iter_req_id=options.get("_iter_req_id", None))
 
     def parse_response(self, connection, command_name, **options):
         """Parses a response from the Redis server"""
