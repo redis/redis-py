@@ -582,7 +582,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if not self.connection:
                 pool.release(conn)
             if "SCAN" in command_name.upper():
-                breakpoint()
                 pool.cleanup(iter_req_id=options.get("_iter_req_id", None))
 
     def parse_response(self, connection, command_name, **options):
@@ -764,6 +763,7 @@ class PubSub:
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
         self.subscribed_event.clear()
+        self.connection_pool.cleanup(iter_req_id=options.get("_iter_req_id", None))
 
     def close(self) -> None:
         self.reset()
