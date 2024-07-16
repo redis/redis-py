@@ -63,8 +63,7 @@ class SentinelManagedConnection(Connection):
 
     def connect(self):
         return self.retry.call_with_retry(
-            lambda: self._connect_retry(),
-            lambda error: None
+            lambda: self._connect_retry(), lambda error: None
         )
 
     def connect_to_same_address(self):
@@ -73,8 +72,7 @@ class SentinelManagedConnection(Connection):
         it just connects to the same address of the connection object.
         """
         return self.retry.call_with_retry(
-            lambda: self._connect_retry(same_address=True),
-            lambda error: None
+            lambda: self._connect_retry(same_address=True), lambda error: None
         )
 
     def connect_to_address(self, address):
@@ -269,9 +267,7 @@ class SentinelConnectionPool(ConnectionPool):
         """
         Remove the SCAN ITER family command's request id from the dictionary
         """
-        self._iter_req_id_to_replica_address.pop(
-            options.get("iter_req_id", None), None
-        )
+        self._iter_req_id_to_replica_address.pop(options.get("iter_req_id", None), None)
 
     def get_connection(
         self, command_name: str, *keys: Any, **options: Any
