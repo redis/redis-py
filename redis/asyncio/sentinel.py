@@ -230,7 +230,7 @@ class SentinelConnectionPool(ConnectionPool):
         Remove the SCAN ITER family command's request id from the dictionary
         """
         self._iter_req_id_to_replica_address.pop(
-            options.get("_iter_req_id", None), None
+            options.get("iter_req_id", None), None
         )
 
     async def get_connection(
@@ -250,7 +250,7 @@ class SentinelConnectionPool(ConnectionPool):
         should go to the same replica.
         """
         # If not an iter command or in master mode, call superclass' implementation
-        if not (iter_req_id := options.get("_iter_req_id", None)) or self.is_master:
+        if not (iter_req_id := options.get("iter_req_id", None)) or self.is_master:
             return await super().get_connection(command_name, *keys, **options)
 
         # Check if this iter request has already been directed to a particular server

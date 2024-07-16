@@ -124,15 +124,15 @@ async def test_connects_to_same_address_if_same_id_replica(
     connection_pool_replica_mock: SentinelConnectionPool,
 ) -> None:
     """
-    Assert that the connection address is the same if the ``_iter_req_id`` is the same
+    Assert that the connection address is the same if the ``iter_req_id`` is the same
     when we are in replica mode using a
     :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`.
     """
     connection_for_req_1 = await connection_pool_replica_mock.get_connection(
-        "ANY", _iter_req_id=1
+        "ANY", iter_req_id=1
     )
     assert same_address(
-        await connection_pool_replica_mock.get_connection("ANY", _iter_req_id=1),
+        await connection_pool_replica_mock.get_connection("ANY", iter_req_id=1),
         connection_for_req_1,
     )
 
@@ -141,32 +141,32 @@ async def test_connects_to_same_conn_object_if_same_id_and_conn_released_replica
     connection_pool_replica_mock: SentinelConnectionPool,
 ) -> None:
     """
-    Assert that the connection object is the same if the ``_iter_req_id`` is the same
+    Assert that the connection object is the same if the ``iter_req_id`` is the same
     when we are in replica mode using a
     :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`
     and if we release the connection back to the connection pool before
     trying to connect again.
     """
     connection_for_req_1 = await connection_pool_replica_mock.get_connection(
-        "ANY", _iter_req_id=1
+        "ANY", iter_req_id=1
     )
     await connection_pool_replica_mock.release(connection_for_req_1)
     assert (
-        await connection_pool_replica_mock.get_connection("ANY", _iter_req_id=1)
+        await connection_pool_replica_mock.get_connection("ANY", iter_req_id=1)
         == connection_for_req_1
     )
 
 
-async def test_connects_to_diff_address_if_no_iter_req_id_replica(
+async def test_connects_to_diff_address_if_noiter_req_id_replica(
     connection_pool_replica_mock: SentinelConnectionPool,
 ) -> None:
     """
-    Assert that the connection object is different if no _iter_req_id is supplied.
+    Assert that the connection object is different if no iter_req_id is supplied.
     In reality, they can be the same, but in this case, we're not
     releasing the connection to the pool so they should always be different.
     """
     connection_for_req_1 = await connection_pool_replica_mock.get_connection(
-        "ANY", _iter_req_id=1
+        "ANY", iter_req_id=1
     )
     connection_for_random_req = await connection_pool_replica_mock.get_connection(
         "ANYY"
@@ -182,43 +182,43 @@ async def test_connects_to_diff_address_if_no_iter_req_id_replica(
     )
 
 
-async def test_connects_to_same_address_if_same_iter_req_id_master(
+async def test_connects_to_same_address_if_sameiter_req_id_master(
     connection_pool_master_mock: SentinelConnectionPool,
 ) -> None:
     """
-    Assert that the connection address is the same if the ``_iter_req_id`` is the same
+    Assert that the connection address is the same if the ``iter_req_id`` is the same
     when we are in master mode using a
     :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`.
     """
     connection_for_req_1 = await connection_pool_master_mock.get_connection(
-        "ANY", _iter_req_id=1
+        "ANY", iter_req_id=1
     )
     assert same_address(
-        await connection_pool_master_mock.get_connection("ANY", _iter_req_id=1),
+        await connection_pool_master_mock.get_connection("ANY", iter_req_id=1),
         connection_for_req_1,
     )
 
 
-async def test_connects_to_same_conn_object_if_same_iter_req_id_and_released_master(
+async def test_connects_to_same_conn_object_if_sameiter_req_id_and_released_master(
     connection_pool_master_mock: SentinelConnectionPool,
 ) -> None:
     """
-    Assert that the connection address is the same if the ``_iter_req_id`` is the same
+    Assert that the connection address is the same if the ``iter_req_id`` is the same
     when we are in master mode using a
     :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`
     and if we release the connection back to the connection pool before
     trying to connect again.
     """
     connection_for_req_1 = await connection_pool_master_mock.get_connection(
-        "ANY", _iter_req_id=1
+        "ANY", iter_req_id=1
     )
     assert same_address(
-        await connection_pool_master_mock.get_connection("ANY", _iter_req_id=1),
+        await connection_pool_master_mock.get_connection("ANY", iter_req_id=1),
         connection_for_req_1,
     )
 
 
-async def test_connects_to_same_address_if_no_iter_req_id_master(
+async def test_connects_to_same_address_if_noiter_req_id_master(
     connection_pool_master_mock: SentinelConnectionPool,
 ) -> None:
     """
@@ -228,7 +228,7 @@ async def test_connects_to_same_address_if_no_iter_req_id_master(
     :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`.
     """
     connection_for_req_1 = await connection_pool_master_mock.get_connection(
-        "ANY", _iter_req_id=1
+        "ANY", iter_req_id=1
     )
     connection_for_random_req = await connection_pool_master_mock.get_connection("ANYY")
     assert same_address(connection_for_random_req, connection_for_req_1)
@@ -252,4 +252,4 @@ async def test_scan_iter_family_cleans_up(
     r = Redis(connection_pool=connection_pool_replica_mock)
 
     [k async for k in r.scan_iter("a")]
-    assert not connection_pool_replica_mock._iter_req_id_to_replica_address
+    assert not connection_pool_replica_mock.iter_req_id_to_replica_address

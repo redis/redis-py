@@ -652,7 +652,7 @@ class Redis(
             if not self.connection:
                 await pool.release(conn)
                 if "ITER" in command_name.upper():
-                    pool.cleanup(iter_req_id=options.get("_iter_req_id", None))
+                    pool.cleanup(iter_req_id=options.get("iter_req_id", None))
 
     async def parse_response(
         self, connection: Connection, command_name: Union[str, bytes], **options
