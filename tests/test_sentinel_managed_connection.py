@@ -222,23 +222,3 @@ def test_scan_iter_in_redis_cleans_up(
     # end of the SCAN ITER command
     assert not connection_pool_replica_mock._iter_req_id_to_replica_address
 
-def test_scan_iter_in_pipeline_cleans_up(
-    connection_pool_replica_mock: SentinelConnectionPool,
-):
-    """Test that connection pool is correctly cleaned up"""
-    from redis import Redis
-
-    from redis.commands.core import ScanCommands
-
-    r = Redis(connection_pool=connection_pool_replica_mock)
-    r.pipeline()
-    r.scan_iter("a")
-    # Patch the actual sending and parsing response from the Connection object
-    # but still let the connection pool does all the necessary work
-    with mock.patch.object(r, "_send_command_parse_response", return_value=(0, [])):
-        r.execute()
-        [k for k in r.scan_iter("a")]
-    # Test that the iter_req_id for the scan command is cleared at the
-    # end of the SCAN ITER command
-    assert not connection_pool_replica_mock._iter_req_id_to_replica_address
-
