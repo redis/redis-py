@@ -157,7 +157,7 @@ async def test_connects_to_same_conn_object_if_same_id_and_conn_released_replica
     )
 
 
-async def test_connects_to_diff_address_if_noiter_req_id_replica(
+async def test_connects_to_diff_address_if_no_iter_req_id_replica(
     connection_pool_replica_mock: SentinelConnectionPool,
 ) -> None:
     """
@@ -182,7 +182,7 @@ async def test_connects_to_diff_address_if_noiter_req_id_replica(
     )
 
 
-async def test_connects_to_same_address_if_sameiter_req_id_master(
+async def test_connects_to_same_address_if_same_iter_req_id_master(
     connection_pool_master_mock: SentinelConnectionPool,
 ) -> None:
     """
@@ -199,7 +199,7 @@ async def test_connects_to_same_address_if_sameiter_req_id_master(
     )
 
 
-async def test_connects_to_same_conn_object_if_sameiter_req_id_and_released_master(
+async def test_connects_to_same_conn_object_if_same_iter_req_id_and_released_master(
     connection_pool_master_mock: SentinelConnectionPool,
 ) -> None:
     """
@@ -218,7 +218,7 @@ async def test_connects_to_same_conn_object_if_sameiter_req_id_and_released_mast
     )
 
 
-async def test_connects_to_same_address_if_noiter_req_id_master(
+async def test_connects_to_same_address_if_no_iter_req_id_master(
     connection_pool_master_mock: SentinelConnectionPool,
 ) -> None:
     """
