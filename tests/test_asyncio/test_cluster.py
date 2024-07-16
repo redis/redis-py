@@ -58,7 +58,6 @@ class NodeProxy:
     def __init__(self, addr, redis_addr):
         self.addr = addr
         self.redis_addr = redis_addr
-        self.send_event = asyncio.Event()
         self.server = None
         self.task = None
         self.n_connections = 0
@@ -83,14 +82,20 @@ class NodeProxy:
             await asyncio.gather(pipe1, pipe2)
         finally:
             redis_writer.close()
+            await self.redis_writer.wait_closed()
+            writer.close()
+            await writer.wait_closed()
 
     async def aclose(self):
-        self.task.cancel()
         try:
-            await self.task
+            self.task.cancel()
+            await asyncio.wait_for(self.task, timeout=1)
+            self.server.close()
+            await self.server.wait_closed()
+        except asyncio.TimeoutError:
+            pass
         except asyncio.CancelledError:
             pass
-        await self.server.wait_closed()
 
     async def pipe(
         self,

@@ -39,6 +39,7 @@ from .utils import (
     HIREDIS_AVAILABLE,
     HIREDIS_PACK_AVAILABLE,
     SSL_AVAILABLE,
+    format_error_message,
     get_lib_version,
     str_if_bytes,
 )
@@ -338,9 +339,8 @@ class AbstractConnection:
     def _host_error(self):
         pass
 
-    @abstractmethod
     def _error_message(self, exception):
-        pass
+        return format_error_message(self._host_error(), exception)
 
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
@@ -733,27 +733,6 @@ class Connection(AbstractConnection):
     def _host_error(self):
         return f"{self.host}:{self.port}"
 
-    def _error_message(self, exception):
-        # args for socket.error can either be (errno, "message")
-        # or just "message"
-
-        host_error = self._host_error()
-
-        if len(exception.args) == 1:
-            try:
-                return f"Error connecting to {host_error}. \
-                        {exception.args[0]}."
-            except AttributeError:
-                return f"Connection Error: {exception.args[0]}"
-        else:
-            try:
-                return (
-                    f"Error {exception.args[0]} connecting to "
-                    f"{host_error}. {exception.args[1]}."
-                )
-            except AttributeError:
-                return f"Connection Error: {exception.args[0]}"
-
 
 class SSLConnection(Connection):
     """Manages SSL connections to and from the Redis server(s).
@@ -834,8 +813,26 @@ class SSLConnection(Connection):
         super().__init__(**kwargs)
 
     def _connect(self):
-        "Wrap the socket with SSL support"
+        """
+        Wrap the socket with SSL support, handling potential errors.
+        """
         sock = super()._connect()
+        try:
+            return self._wrap_socket_with_ssl(sock)
+        except OSError:
+            sock.close()
+            raise
+
+    def _wrap_socket_with_ssl(self, sock):
+        """
+        Wraps the socket with SSL support.
+
+        Args:
+            sock: The plain socket to wrap with SSL.
+
+        Returns:
+            An SSL wrapped socket.
+        """
         context = ssl.create_default_context()
         context.check_hostname = self.check_hostname
         context.verify_mode = self.cert_reqs
@@ -909,9 +906,9 @@ class UnixDomainSocketConnection(AbstractConnection):
     "Manages UDS communication to and from a Redis server"
 
     def __init__(self, path="", socket_timeout=None, **kwargs):
+        super().__init__(**kwargs)
         self.path = path
         self.socket_timeout = socket_timeout
-        super().__init__(**kwargs)
 
     def repr_pieces(self):
         pieces = [("path", self.path), ("db", self.db)]
@@ -929,20 +926,6 @@ class UnixDomainSocketConnection(AbstractConnection):
 
     def _host_error(self):
         return self.path
-
-    def _error_message(self, exception):
-        # args for socket.error can either be (errno, "message")
-        # or just "message"
-        host_error = self._host_error()
-        if len(exception.args) == 1:
-            return (
-                f"Error connecting to unix socket: {host_error}. {exception.args[0]}."
-            )
-        else:
-            return (
-                f"Error {exception.args[0]} connecting to unix socket: "
-                f"{host_error}. {exception.args[1]}."
-            )
 
 
 FALSE_STRINGS = ("0", "F", "FALSE", "N", "NO")
@@ -992,7 +975,7 @@ def parse_url(url):
                 try:
                     kwargs[name] = parser(value)
                 except (TypeError, ValueError):
-                    raise ValueError(f"Invalid value for `{name}` in connection URL.")
+                    raise ValueError(f"Invalid value for '{name}' in connection URL.")
             else:
                 kwargs[name] = value
 
