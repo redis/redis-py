@@ -49,7 +49,7 @@ class SentinelManagedConnection(Connection):
         if same_address:
             self.connect_to((self.host, self.port))
             return
-        # If same_server is False, connnect to master in master mode  
+        # If same_server is False, connnect to master in master mode
         # and rotate to the next slave in slave mode
         if self.connection_pool.is_master:
             self.connect_to(self.connection_pool.get_master_address())
@@ -62,11 +62,14 @@ class SentinelManagedConnection(Connection):
             raise SlaveNotFoundError  # Never be here
 
     def connect(self):
-        return self.retry.call_with_retry(lambda: self._connect_retry(), lambda error: None)
+        return self.retry.call_with_retry(
+            lambda: self._connect_retry(),
+            lambda error: None
+        )
 
     def connect_to_same_address(self):
         """
-        Similar to connect, but instead of rotating to the next slave (if not in master mode),
+        Similar to connect, but instead of rotating to the next slave (in replica mode),
         it just connects to the same address of the connection object.
         """
         return self.retry.call_with_retry(
@@ -76,14 +79,17 @@ class SentinelManagedConnection(Connection):
 
     def connect_to_address(self, address):
         """
-        Similar to connect, but instead of rotating to the next slave (if not in master mode),
+        Similar to connect, but instead of rotating to the next slave (in replica mode),
         it just connects to the address supplied.
         """
         self.host, self.port = address
         return self.connect_to_same_address()
 
     def can_read_same_address(self, timeout=0):
-        """Similar to can_read_same_address, but calls connect_to_same_address instead of connect"""
+        """
+        Similar to can_read_same_address, but calls
+        connect_to_same_address instead of connect
+        """
         sock = self._sock
         if not sock:
             self.connect_to_same_address()
@@ -234,13 +240,15 @@ class SentinelConnectionPool(ConnectionPool):
         "Round-robin slave balancer"
         return self.proxy.rotate_slaves()
 
-    def ensure_connection_connected_to_address(self, connection: SentinelManagedConnection):
+    def ensure_connection_connected_to_address(
+        self, connection: SentinelManagedConnection
+    ):
         """
         Ensure the connection is already connected to the server that this connection
-        object wants to connect to
+        object wants to connect to.
 
         Similar to self.ensure_connection, but calling connection.connect()
-        in SentinelManagedConnection (replica mode) will cause the 
+        in SentinelManagedConnection (replica mode) will cause the
         connection object to connect to the next replica in rotation,
         and we don't wnat behavior. Look at get_connection inline docs for details.
 

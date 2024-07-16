@@ -60,11 +60,11 @@ class SentinelManagedConnection(Connection):
         if self._reader:
             return  # already connected
         # If same_server is True, it means that the connection
-        # is not rotating to the next slave (if the connection pool is not master)
+        # is not rotating to the next slave (if the connection pool is in replica mode)
         if same_address:
             self.connect_to(self.host, self.port)
             return
-        # If same_server is False, connnect to master in master mode  
+        # If same_server is False, connnect to master in master mode
         # and rotate to the next slave in slave mode
         if self.connection_pool.is_master:
             await self.connect_to(await self.connection_pool.get_master_address())
@@ -84,7 +84,7 @@ class SentinelManagedConnection(Connection):
 
     async def connect_to_same_address(self):
         """
-        Similar to connect, but instead of rotating to the next slave (if not in master mode),
+        Similar to connect, but instead of rotating to the next slave (in replica mode),
         it just connects to the same address of the connection object.
         """
         return await self.retry.call_with_retry(
@@ -94,7 +94,7 @@ class SentinelManagedConnection(Connection):
 
     async def connect_to_address(self, address):
         """
-        Similar to connect, but instead of rotating to the next slave (if not in master mode),
+        Similar to connect, but instead of rotating to the next slave (in replica mode),
         it just connects to the same address of the connection object.
         """
         self.host, self.port = address
@@ -202,13 +202,15 @@ class SentinelConnectionPool(ConnectionPool):
             pass
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
 
-    async def ensure_connection_connected_to_address(self, connection: SentinelManagedConnection):
+    async def ensure_connection_connected_to_address(
+        self, connection: SentinelManagedConnection
+    ):
         """
         Ensure the connection is already connected to the server that this connection
         object wants to connect to
 
         Similar to self.ensure_connection, but calling connection.connect()
-        in SentinelManagedConnection (replica mode) will cause the 
+        in SentinelManagedConnection (replica mode) will cause the
         connection object to connect to the next replica in rotation,
         and we don't wnat behavior. Look at get_connection inline docs for details.
 
@@ -217,7 +219,10 @@ class SentinelConnectionPool(ConnectionPool):
         """
         await connection.connect_to_same_address()
         try:
-            if await connection.can_read_destructive() and connection.client_cache is None:
+            if (
+                await connection.can_read_destructive()
+                and connection.client_cache is None
+            ):
                 raise ConnectionError("Connection has data")
         except (ConnectionError, OSError):
             await connection.disconnect()
@@ -273,7 +278,7 @@ class SentinelConnectionPool(ConnectionPool):
                 host=server_host, port=server_port
             )
             # If not, make a new dummy connection object, and set its host and
-            # port to the one that we want later in the call to ``connect_to_same_address``
+            # port to the one that we want later in the call to ``connect_to_address``
             if not connection:
                 connection = self.make_connection()
         assert connection

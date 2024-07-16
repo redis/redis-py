@@ -2,11 +2,9 @@ from typing import Tuple
 from unittest import mock
 
 import pytest
-from redis.sentinel import (
-    Sentinel,
-    SentinelConnectionPool,
-    SentinelManagedConnection,
-)
+from redis import Redis
+from redis.sentinel import Sentinel, SentinelConnectionPool, SentinelManagedConnection
+
 
 class SentinelManagedConnectionMock(SentinelManagedConnection):
     def connect_to_same_address(self) -> None:
@@ -211,8 +209,6 @@ def test_scan_iter_in_redis_cleans_up(
     connection_pool_replica_mock: SentinelConnectionPool,
 ):
     """Test that connection pool is correctly cleaned up"""
-    from redis import Redis
-
     r = Redis(connection_pool=connection_pool_replica_mock)
     # Patch the actual sending and parsing response from the Connection object
     # but still let the connection pool does all the necessary work
@@ -221,4 +217,3 @@ def test_scan_iter_in_redis_cleans_up(
     # Test that the iter_req_id for the scan command is cleared at the
     # end of the SCAN ITER command
     assert not connection_pool_replica_mock._iter_req_id_to_replica_address
-

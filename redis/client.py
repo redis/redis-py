@@ -763,7 +763,6 @@ class PubSub:
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
         self.subscribed_event.clear()
-        self.connection_pool.cleanup(iter_req_id=options.get("_iter_req_id", None))
 
     def close(self) -> None:
         self.reset()

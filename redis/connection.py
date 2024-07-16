@@ -737,10 +737,10 @@ class Connection(AbstractConnection):
 
 class ConnectionsIndexer(Iterable):
     """
-    Data structure that simulates a list of available connections. 
+    Data structure that simulates a list of available connections.
     Instead of list, we keep 2 additional DS to support O(1) operations
     on all of the class' methods.
-    The first DS is indexed on the connection object's ID. 
+    The first DS is indexed on the connection object's ID.
     The second DS is indexed on the address (ip and port) of the connection.
     """
 
