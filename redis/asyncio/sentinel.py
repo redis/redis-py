@@ -253,7 +253,6 @@ class SentinelConnectionPool(ConnectionPool):
         should go to the same replica.
         """
         # If not an iter command or in master mode, call superclass' implementation
-        breakpoint()
         if not (iter_req_id := options.get("iter_req_id", None)) or self.is_master:
             return await super().get_connection(command_name, *keys, **options)
 
@@ -293,9 +292,7 @@ class SentinelConnectionPool(ConnectionPool):
             # This will connect to the host and port of the replica
             else:
                 await connection.connect_to_address((server_host, server_port))
-            breakpoint()
             await self.ensure_connection_connected_to_address(connection)
-            breakpoint()
         except BaseException:
             # Release the connection back to the pool so that we don't
             # leak it

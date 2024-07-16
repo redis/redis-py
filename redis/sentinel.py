@@ -54,7 +54,6 @@ class SentinelManagedConnection(Connection):
         if self.connection_pool.is_master:
             self.connect_to(self.connection_pool.get_master_address())
         else:
-            breakpoint()
             for slave in self.connection_pool.rotate_slaves():
                 try:
                     return self.connect_to(slave)
