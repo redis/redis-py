@@ -125,7 +125,7 @@ Alerting and notifications
 
 Uptrace also allows you to monitor `OpenTelemetry metrics <https://uptrace.dev/opentelemetry/metrics.html>`_ using alerting rules. For example, the following monitor uses the group by node expression to create an alert whenever an individual Redis shard is down:
 
-.. code-block:: python
+.. code-block:: yaml
 
    monitors:
      - name: Redis shard is down
@@ -142,7 +142,7 @@ Uptrace also allows you to monitor `OpenTelemetry metrics <https://uptrace.dev/o
 
 You can also create queries with more complex expressions. For example, the following rule creates an alert when the keyspace hit rate is lower than 75%:
 
-.. code-block:: python
+.. code-block:: yaml
 
    monitors:
      - name: Redis read hit rate < 75%
