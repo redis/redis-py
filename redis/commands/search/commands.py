@@ -627,13 +627,13 @@ class SearchCommands:
         """
         Issue a spellcheck query
 
-        ### Parameters
+        Args:
 
-        **query**: search query.
-        **distance***: the maximal Levenshtein distance for spelling
+            query: search query.
+            distance: the maximal Levenshtein distance for spelling
                        suggestions (default: 1, max: 4).
-        **include**: specifies an inclusion custom dictionary.
-        **exclude**: specifies an exclusion custom dictionary.
+            include: specifies an inclusion custom dictionary.
+            exclude: specifies an exclusion custom dictionary.
 
         For more information see `FT.SPELLCHECK <https://redis.io/commands/ft.spellcheck>`_.
         """  # noqa
