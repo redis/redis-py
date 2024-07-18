@@ -446,7 +446,6 @@ def test_json_forget_with_dollar(client):
     client.json().forget("not_a_document", "..a")
 
 
-@pytest.mark.onlynoncluster
 @pytest.mark.redismod
 def test_json_mget_dollar(client):
     # Test mget with multi paths

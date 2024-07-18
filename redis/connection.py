@@ -819,7 +819,7 @@ class SSLConnection(Connection):
         sock = super()._connect()
         try:
             return self._wrap_socket_with_ssl(sock)
-        except OSError:
+        except (OSError, RedisError):
             sock.close()
             raise
 
@@ -854,7 +854,6 @@ class SSLConnection(Connection):
             context.minimum_version = self.ssl_min_version
         if self.ssl_ciphers:
             context.set_ciphers(self.ssl_ciphers)
-        sslsock = context.wrap_socket(sock, server_hostname=self.host)
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
 
@@ -863,6 +862,8 @@ class SSLConnection(Connection):
                 "Either an OCSP staple or pure OCSP connection must be validated "
                 "- not both."
             )
+
+        sslsock = context.wrap_socket(sock, server_hostname=self.host)
 
         # validation for the stapled case
         if self.ssl_validate_ocsp_stapled:
