@@ -55,7 +55,7 @@ ClusterNode
 Async Client
 ************
 
-See complete example: `here <examples/asyncio_examples.html>`_
+See complete example: `here <examples/asyncio_examples.html>`__
 
 This client is used for communicating with Redis, asynchronously.
 
@@ -88,7 +88,7 @@ ClusterPipeline (Async)
 Connection
 **********
 
-See complete example: `here <examples/connection_examples.html>`_
+See complete example: `here <examples/connection_examples.html>`__
 
 Connection
 ==========
@@ -104,7 +104,7 @@ Connection (Async)
 Connection Pools
 ****************
 
-See complete example: `here <examples/connection_examples.html>`_
+See complete example: `here <examples/connection_examples.html>`__
 
 ConnectionPool
 ==============
