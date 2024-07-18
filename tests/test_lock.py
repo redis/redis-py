@@ -257,4 +257,4 @@ class TestLockClassSelection:
                 pass
 
         lock = r.lock("foo", lock_class=MyLock)
-        assert type(lock) == MyLock
+        assert isinstance(lock, MyLock)
