@@ -67,7 +67,7 @@ Async Sentinel Client
 *********************
 
 Sentinel (Async)
-========
+================
 .. autoclass:: redis.asyncio.sentinel.Sentinel
     :members:
 
