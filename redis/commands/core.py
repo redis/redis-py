@@ -1380,9 +1380,6 @@ class ManagementCommands(CommandsProtocol):
         )
 
 
-AsyncManagementCommands = ManagementCommands
-
-
 class AsyncManagementCommands(ManagementCommands):
     async def command_info(self, **kwargs) -> None:
         return super().command_info(**kwargs)

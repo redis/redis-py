@@ -507,7 +507,7 @@ def parse_geosearch_generic(response, **options):
     except KeyError:  # it means the command was sent via execute_command
         return response
 
-    if type(response) != list:
+    if not isinstance(response, list):
         response_list = [response]
     else:
         response_list = response
