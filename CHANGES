@@ -1,3 +1,4 @@
+    * Add redis.asyncio.SentinelBlockingConnectionPool
     * Use SentinelConnectionPoolProxy in asyncio.sentinel module
     * Move doctests (doc code examples) to main branch
     * Update `ResponseT` type hint

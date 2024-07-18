@@ -63,6 +63,24 @@ This client is used for communicating with Redis, asynchronously.
     :members:
 
 
+Async Sentinel Client
+*********************
+
+Sentinel (Async)
+========
+.. autoclass:: redis.asyncio.sentinel.Sentinel
+    :members:
+
+SentinelConnectionPool (Async)
+==============================
+.. autoclass:: redis.asyncio.sentinel.SentinelConnectionPool
+    :members:
+
+SentinelBlockingConnectionPool (Async)
+======================================
+.. autoclass:: redis.asyncio.sentinel.SentinelBlockingConnectionPool
+    :members:
+
 Async Cluster Client
 ********************
 

@@ -1,10 +1,20 @@
 import asyncio
 import random
 import weakref
-from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type
+from typing import (
+    AsyncIterator,
+    Iterable,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+)
 
 from redis.asyncio.client import Redis
 from redis.asyncio.connection import (
+    BlockingConnectionPool,
     Connection,
     ConnectionPool,
     EncodableT,
@@ -203,12 +213,38 @@ class SentinelConnectionPool(ConnectionPool):
     def rotate_slaves(self) -> AsyncIterator:
         """Round-robin slave balancer"""
         return self.proxy.rotate_slaves()
+
+
+class SentinelBlockingConnectionPool(BlockingConnectionPool):
+    """
+    Sentinel blocking connection pool.
+
+    If ``check_connection`` flag is set to True, SentinelManagedConnection
+    sends a PING command right after establishing the connection.
+    """
+
+    def __init__(self, service_name, sentinel_manager, **kwargs):
+        kwargs["connection_class"] = kwargs.get(
+            "connection_class",
+            (
+                SentinelManagedSSLConnection
+                if kwargs.pop("ssl", False)
+                else SentinelManagedConnection
+            ),
+        )
+        self.is_master = kwargs.pop("is_master", True)
+        self.check_connection = kwargs.pop("check_connection", False)
+        self.proxy = SentinelConnectionPoolProxy(
+            connection_pool=self,
+            is_master=self.is_master,
+            check_connection=self.check_connection,
+            service_name=service_name,
+            sentinel_manager=sentinel_manager,
+        )
         super().__init__(**kwargs)
-        self.connection_kwargs["connection_pool"] = weakref.proxy(self)
+        self.connection_kwargs["connection_pool"] = self.proxy
         self.service_name = service_name
         self.sentinel_manager = sentinel_manager
-        self.master_address = None
-        self.slave_rr_counter = None
 
     def __repr__(self):
         return (
@@ -218,8 +254,11 @@ class SentinelConnectionPool(ConnectionPool):
 
     def reset(self):
         super().reset()
-        self.master_address = None
-        self.slave_rr_counter = None
+        self.proxy.reset()
+
+    @property
+    def master_address(self):
+        return self.proxy.master_address
 
     def owns_connection(self, connection: Connection):
         check = not self.is_master or (
@@ -228,31 +267,11 @@ class SentinelConnectionPool(ConnectionPool):
         return check and super().owns_connection(connection)
 
     async def get_master_address(self):
-        master_address = await self.sentinel_manager.discover_master(self.service_name)
-        if self.is_master:
-            if self.master_address != master_address:
-                self.master_address = master_address
-                # disconnect any idle connections so that they reconnect
-                # to the new master the next time that they are used.
-                await self.disconnect(inuse_connections=False)
-        return master_address
+        return await self.proxy.get_master_address()
 
-    async def rotate_slaves(self) -> AsyncIterator:
+    def rotate_slaves(self) -> AsyncIterator:
         """Round-robin slave balancer"""
-        slaves = await self.sentinel_manager.discover_slaves(self.service_name)
-        if slaves:
-            if self.slave_rr_counter is None:
-                self.slave_rr_counter = random.randint(0, len(slaves) - 1)
-            for _ in range(len(slaves)):
-                self.slave_rr_counter = (self.slave_rr_counter + 1) % len(slaves)
-                slave = slaves[self.slave_rr_counter]
-                yield slave
-        # Fallback to the master connection
-        try:
-            yield await self.get_master_address()
-        except MasterNotFoundError:
-            pass
-        raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
+        return self.proxy.rotate_slaves()
 
 
 class Sentinel(AsyncSentinelCommands):
@@ -405,7 +424,10 @@ class Sentinel(AsyncSentinelCommands):
         self,
         service_name: str,
         redis_class: Type[Redis] = Redis,
-        connection_pool_class: Type[SentinelConnectionPool] = SentinelConnectionPool,
+        connection_pool_class: Union[
+            Type[SentinelConnectionPool],
+            Type[SentinelBlockingConnectionPool],
+        ] = SentinelConnectionPool,
         **kwargs,
     ):
         """
@@ -442,7 +464,10 @@ class Sentinel(AsyncSentinelCommands):
         self,
         service_name: str,
         redis_class: Type[Redis] = Redis,
-        connection_pool_class: Type[SentinelConnectionPool] = SentinelConnectionPool,
+        connection_pool_class: Union[
+            Type[SentinelConnectionPool],
+            Type[SentinelBlockingConnectionPool],
+        ] = SentinelConnectionPool,
         **kwargs,
     ):
         """

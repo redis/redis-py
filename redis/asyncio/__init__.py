@@ -9,6 +9,7 @@ from redis.asyncio.connection import (
 )
 from redis.asyncio.sentinel import (
     Sentinel,
+    SentinelBlockingConnectionPool,
     SentinelConnectionPool,
     SentinelManagedConnection,
     SentinelManagedSSLConnection,
@@ -53,6 +54,7 @@ __all__ = [
     "RedisError",
     "ResponseError",
     "Sentinel",
+    "SentinelBlockingConnectionPool",
     "SentinelConnectionPool",
     "SentinelManagedConnection",
     "SentinelManagedSSLConnection",
