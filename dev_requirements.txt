@@ -1,8 +1,8 @@
 black==24.3.0
 cachetools
 click==8.0.4
-flake8-isort==6.0.0
-flake8==5.0.4
+flake8-isort
+flake8
 flynt~=0.69.0
 invoke==2.2.0
 mock

@@ -79,7 +79,7 @@ class ACLCommands(CommandsProtocol):
 
     def acl_deluser(self, *username: str, **kwargs) -> ResponseT:
         """
-        Delete the ACL for the specified ``username``s
+        Delete the ACL for the specified ``username``\\s
 
         For more information see https://redis.io/commands/acl-deluser
         """
@@ -227,9 +227,10 @@ class ACLCommands(CommandsProtocol):
                       must be prefixed with either a '+' to add the command permission
                       or a '-' to remove the command permission.
             keys: A list of key patterns to grant the user access to. Key patterns allow
-                  '*' to support wildcard matching. For example, '*' grants access to
-                  all keys while 'cache:*' grants access to all keys that are prefixed
-                  with 'cache:'. `keys` should not be prefixed with a '~'.
+                  ``'*'`` to support wildcard matching. For example, ``'*'`` grants
+                  access to all keys while ``'cache:*'`` grants access to all keys that
+                  are prefixed with ``cache:``.
+                  `keys` should not be prefixed with a ``'~'``.
             reset: Indicates whether the user should be fully reset prior to applying
                    the new ACL. Setting this to `True` will remove all existing
                    passwords, flags, and privileges from the user and then apply the
@@ -1378,9 +1379,6 @@ class ManagementCommands(CommandsProtocol):
         raise NotImplementedError(
             "FAILOVER is intentionally not implemented in the client."
         )
-
-
-AsyncManagementCommands = ManagementCommands
 
 
 class AsyncManagementCommands(ManagementCommands):
@@ -3369,7 +3367,7 @@ class SetCommands(CommandsProtocol):
         self, numkeys: int, keys: List[str], limit: int = 0
     ) -> Union[Awaitable[int], int]:
         """
-        Return the cardinality of the intersect of multiple sets specified by ``keys`.
+        Return the cardinality of the intersect of multiple sets specified by ``keys``.
 
         When LIMIT provided (defaults to 0 and means unlimited), if the intersection
         cardinality reaches limit partway through the computation, the algorithm will
@@ -3501,9 +3499,11 @@ class StreamCommands(CommandsProtocol):
     def xack(self, name: KeyT, groupname: GroupT, *ids: StreamIdT) -> ResponseT:
         """
         Acknowledges the successful processing of one or more messages.
-        name: name of the stream.
-        groupname: name of the consumer group.
-        *ids: message ids to acknowledge.
+
+        Args:
+            name: name of the stream.
+            groupname: name of the consumer group.
+            *ids: message ids to acknowledge.
 
         For more information see https://redis.io/commands/xack
         """
@@ -3699,8 +3699,10 @@ class StreamCommands(CommandsProtocol):
     def xdel(self, name: KeyT, *ids: StreamIdT) -> ResponseT:
         """
         Deletes one or more messages from a stream.
-        name: name of the stream.
-        *ids: message ids to delete.
+
+        Args:
+            name: name of the stream.
+            *ids: message ids to delete.
 
         For more information see https://redis.io/commands/xdel
         """
@@ -4268,7 +4270,7 @@ class SortedSetCommands(CommandsProtocol):
     ) -> Union[Awaitable[int], int]:
         """
         Return the cardinality of the intersect of multiple sorted sets
-        specified by ``keys`.
+        specified by ``keys``.
         When LIMIT provided (defaults to 0 and means unlimited), if the intersection
         cardinality reaches limit partway through the computation, the algorithm will
         exit and yield limit as the cardinality

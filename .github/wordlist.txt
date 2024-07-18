@@ -142,3 +142,4 @@ unicode
 url
 virtualenv
 www
+yaml

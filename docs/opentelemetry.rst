@@ -4,7 +4,7 @@ Integrating OpenTelemetry
 What is OpenTelemetry?
 ----------------------
 
-`OpenTelemetry <https://opentelemetry.io>`_ is an open-source observability framework for traces, metrics, and logs. It is a merger of OpenCensus and OpenTracing projects hosted by Cloud Native Computing Foundation.
+`OpenTelemetry <https://opentelemetry.io>`__ is an open-source observability framework for traces, metrics, and logs. It is a merger of OpenCensus and OpenTracing projects hosted by Cloud Native Computing Foundation.
 
 OpenTelemetry allows developers to collect and export telemetry data in a vendor agnostic way. With OpenTelemetry, you can instrument your application once and then add or change vendors without changing the instrumentation, for example, here is a list of `popular DataDog competitors <https://uptrace.dev/get/compare/datadog-competitors.html>`_ that support OpenTelemetry.
 
@@ -61,7 +61,7 @@ Once the code is patched, you can use redis-py as usually:
 OpenTelemetry API
 -----------------
 
-`OpenTelemetry <https://uptrace.dev/opentelemetry/>`_ API is a programming interface that you can use to instrument code and collect telemetry data such as traces, metrics, and logs.
+`OpenTelemetry API <https://uptrace.dev/opentelemetry/>`__ is a programming interface that you can use to instrument code and collect telemetry data such as traces, metrics, and logs.
 
 You can use OpenTelemetry API to measure important operations:
 
@@ -125,7 +125,7 @@ Alerting and notifications
 
 Uptrace also allows you to monitor `OpenTelemetry metrics <https://uptrace.dev/opentelemetry/metrics.html>`_ using alerting rules. For example, the following monitor uses the group by node expression to create an alert whenever an individual Redis shard is down:
 
-.. code-block:: python
+.. code-block:: yaml
 
    monitors:
      - name: Redis shard is down
@@ -142,7 +142,7 @@ Uptrace also allows you to monitor `OpenTelemetry metrics <https://uptrace.dev/o
 
 You can also create queries with more complex expressions. For example, the following rule creates an alert when the keyspace hit rate is lower than 75%:
 
-.. code-block:: python
+.. code-block:: yaml
 
    monitors:
      - name: Redis read hit rate < 75%
