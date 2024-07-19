@@ -6415,9 +6415,12 @@ class FunctionCommands:
     ) -> Union[Awaitable[List], List]:
         """
         Return information about the functions and libraries.
-        :param library: pecify a pattern for matching library names
-        :param withcode: cause the server to include the libraries source
-         implementation in the reply
+
+        Args:
+
+            library: specify a pattern for matching library names
+            withcode: cause the server to include the libraries source implementation
+                in the reply
         """
         args = ["LIBRARYNAME", library]
         if withcode:
