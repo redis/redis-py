@@ -136,10 +136,6 @@ def test_bf_scandump_and_loadchunk(client):
 
     do_verify()
     cmds = []
-    if HIREDIS_AVAILABLE:
-        with pytest.raises(ModuleError):
-            cur = client.bf().scandump("myBloom", 0)
-        return
 
     cur = client.bf().scandump("myBloom", 0)
     first = cur[0]

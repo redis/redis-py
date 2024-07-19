@@ -105,10 +105,6 @@ async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
 
     await do_verify()
     cmds = []
-    if HIREDIS_AVAILABLE:
-        with pytest.raises(ModuleError):
-            cur = await decoded_r.bf().scandump("myBloom", 0)
-        return
 
     cur = await decoded_r.bf().scandump("myBloom", 0)
     first = cur[0]

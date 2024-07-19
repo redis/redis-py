@@ -745,9 +745,7 @@ async def test_query_index(decoded_r: redis.Redis):
     await decoded_r.ts().create(2, labels={"Test": "This", "Taste": "That"})
     assert 2 == len(await decoded_r.ts().queryindex(["Test=This"]))
     assert 1 == len(await decoded_r.ts().queryindex(["Taste=That"]))
-    assert_resp_response(
-        decoded_r, await decoded_r.ts().queryindex(["Taste=That"]), [2], {"2"}
-    )
+    assert ["2"] == await decoded_r.ts().queryindex(["Taste=That"])
 
 
 @pytest.mark.redismod
