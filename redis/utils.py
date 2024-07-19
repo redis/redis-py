@@ -7,7 +7,7 @@ try:
     import hiredis  # noqa
 
     # Only support Hiredis >= 3.0:
-    HIREDIS_AVAILABLE = int(hiredis.__version__.split('.')[0]) >= 3
+    HIREDIS_AVAILABLE = int(hiredis.__version__.split(".")[0]) >= 3
     HIREDIS_PACK_AVAILABLE = hasattr(hiredis, "pack_command")
 except ImportError:
     HIREDIS_AVAILABLE = False

@@ -27,7 +27,6 @@ from redis.commands.search.suggestion import Suggestion
 
 from .conftest import (
     _get_client,
-    assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,

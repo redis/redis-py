@@ -3,8 +3,7 @@ from math import inf
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
-from redis.exceptions import ModuleError, RedisError
-from redis.utils import HIREDIS_AVAILABLE
+from redis.exceptions import RedisError
 from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,

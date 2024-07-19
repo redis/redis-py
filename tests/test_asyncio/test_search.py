@@ -24,7 +24,6 @@ from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
 from tests.conftest import (
-    assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,

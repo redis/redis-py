@@ -2,8 +2,7 @@ from math import inf
 
 import pytest
 import redis.commands.bf
-from redis.exceptions import ModuleError, RedisError
-from redis.utils import HIREDIS_AVAILABLE
+from redis.exceptions import RedisError
 
 from .conftest import (
     _get_client,
