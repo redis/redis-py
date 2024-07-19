@@ -9,16 +9,9 @@ from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Any, Callable, List, Optional, Sequence, Type, Union
+from typing import Any, Callable, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
-from ._cache import (
-    DEFAULT_ALLOW_LIST,
-    DEFAULT_DENY_LIST,
-    DEFAULT_EVICTION_POLICY,
-    AbstractCache,
-    _LocalCache,
-)
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -33,7 +26,6 @@ from .exceptions import (
     TimeoutError,
 )
 from .retry import Retry
-from .typing import KeysT, ResponseT
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
     HIREDIS_AVAILABLE,
@@ -158,13 +150,6 @@ class AbstractConnection:
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         command_packer: Optional[Callable[[], None]] = None,
-        cache_enabled: bool = False,
-        client_cache: Optional[AbstractCache] = None,
-        cache_max_size: int = 10000,
-        cache_ttl: int = 0,
-        cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
-        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ):
         """
         Initialize a new Connection.
@@ -230,18 +215,6 @@ class AbstractConnection:
                 # p = DEFAULT_RESP_VERSION
             self.protocol = p
         self._command_packer = self._construct_command_packer(command_packer)
-        if cache_enabled:
-            _cache = _LocalCache(cache_max_size, cache_ttl, cache_policy)
-        else:
-            _cache = None
-        self.client_cache = client_cache if client_cache is not None else _cache
-        if self.client_cache is not None:
-            if self.protocol not in [3, "3"]:
-                raise RedisError(
-                    "client caching is only supported with protocol version 3 or higher"
-                )
-            self.cache_deny_list = cache_deny_list
-            self.cache_allow_list = cache_allow_list
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -432,12 +405,6 @@ class AbstractConnection:
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-        # if client caching is enabled, start tracking
-        if self.client_cache:
-            self.send_command("CLIENT", "TRACKING", "ON")
-            self.read_response()
-            self._parser.set_invalidation_push_handler(self._cache_invalidation_process)
-
     def disconnect(self, *args):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
@@ -457,9 +424,6 @@ class AbstractConnection:
             conn_sock.close()
         except OSError:
             pass
-
-        if self.client_cache:
-            self.client_cache.flush()
 
     def _send_ping(self):
         """Send PING, expect PONG in return"""
@@ -608,60 +572,10 @@ class AbstractConnection:
             output.append(SYM_EMPTY.join(pieces))
         return output
 
-    def _cache_invalidation_process(
-        self, data: List[Union[str, Optional[List[str]]]]
-    ) -> None:
-        """
-        Invalidate (delete) all redis commands associated with a specific key.
-        `data` is a list of strings, where the first string is the invalidation message
-        and the second string is the list of keys to invalidate.
-        (if the list of keys is None, then all keys are invalidated)
-        """
-        if data[1] is None:
-            self.client_cache.flush()
-        else:
-            for key in data[1]:
-                self.client_cache.invalidate_key(str_if_bytes(key))
-
-    def _get_from_local_cache(self, command: Sequence[str]):
-        """
-        If the command is in the local cache, return the response
-        """
-        if (
-            self.client_cache is None
-            or command[0] in self.cache_deny_list
-            or command[0] not in self.cache_allow_list
-        ):
-            return None
+    def process_invalidation_messages(self):
+        print(f'connection {self} {id(self)} process invalidations')
         while self.can_read():
             self.read_response(push_request=True)
-        return self.client_cache.get(command)
-
-    def _add_to_local_cache(
-        self, command: Sequence[str], response: ResponseT, keys: List[KeysT]
-    ):
-        """
-        Add the command and response to the local cache if the command
-        is allowed to be cached
-        """
-        if (
-            self.client_cache is not None
-            and (self.cache_deny_list == [] or command[0] not in self.cache_deny_list)
-            and (self.cache_allow_list == [] or command[0] in self.cache_allow_list)
-        ):
-            self.client_cache.set(command, response, keys)
-
-    def flush_cache(self):
-        if self.client_cache:
-            self.client_cache.flush()
-
-    def delete_command_from_cache(self, command: Union[str, Sequence[str]]):
-        if self.client_cache:
-            self.client_cache.delete_command(command)
-
-    def invalidate_key_from_cache(self, key: KeysT):
-        if self.client_cache:
-            self.client_cache.invalidate_key(key)
 
 
 class Connection(AbstractConnection):
@@ -1110,6 +1024,14 @@ class ConnectionPool:
             f"({repr(self.connection_class(**self.connection_kwargs))})>"
         )
 
+    def get_protocol(self):
+        """
+        Returns:
+            The RESP protocol version, or ``None`` if the protocol is not specified,
+            in which case the server default will be used.
+        """
+        return self.connection_kwargs.get("protocol", None)
+
     def reset(self) -> None:
         self._lock = threading.Lock()
         self._created_connections = 0
@@ -1187,15 +1109,12 @@ class ConnectionPool:
         try:
             # ensure this connection is connected to Redis
             connection.connect()
-            # if client caching is not enabled connections that the pool
-            # provides should be ready to send a command.
-            # if not, the connection was either returned to the
+            # connections that the pool provides should be ready to send
+            # a command. if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
-            # (if caching enabled the connection will not always be ready
-            # to send a command because it may contain invalidation messages)
             try:
-                if connection.can_read() and connection.client_cache is None:
+                if connection.can_read():
                     raise ConnectionError("Connection has data")
             except (ConnectionError, OSError):
                 connection.disconnect()
@@ -1280,27 +1199,6 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
-
-    def flush_cache(self):
-        self._checkpid()
-        with self._lock:
-            connections = chain(self._available_connections, self._in_use_connections)
-            for connection in connections:
-                connection.flush_cache()
-
-    def delete_command_from_cache(self, command: str):
-        self._checkpid()
-        with self._lock:
-            connections = chain(self._available_connections, self._in_use_connections)
-            for connection in connections:
-                connection.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key: str):
-        self._checkpid()
-        with self._lock:
-            connections = chain(self._available_connections, self._in_use_connections)
-            for connection in connections:
-                connection.invalidate_key_from_cache(key)
 
 
 class BlockingConnectionPool(ConnectionPool):

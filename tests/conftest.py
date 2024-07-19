@@ -441,7 +441,6 @@ def _gen_cluster_mock_resp(r, response):
     connection = Mock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
-    connection._get_from_local_cache.return_value = None
     with mock.patch.object(r, "connection", connection):
         yield r
 
