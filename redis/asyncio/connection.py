@@ -1118,6 +1118,7 @@ class ConnectionPool:
         self,
         connection_class: Type[AbstractConnection] = Connection,
         max_connections: Optional[int] = None,
+        index_available_connections: bool = False,
         **connection_kwargs,
     ):
         max_connections = max_connections or 2**31
@@ -1130,6 +1131,7 @@ class ConnectionPool:
 
         self._available_connections: ConnectionsIndexer = ConnectionsIndexer()
         self._in_use_connections: Set[AbstractConnection] = set()
+        self._index_available_connections= index_available_connections
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
 
     def __repr__(self):
@@ -1139,7 +1141,9 @@ class ConnectionPool:
         )
 
     def reset(self):
-        self._available_connections = []
+        self._available_connections: ConnectionsIndexer | list = (
+            ConnectionsIndexer() if self._index_available_connections else []
+        )
         self._in_use_connections = weakref.WeakSet()
 
     def can_get_connection(self) -> bool:

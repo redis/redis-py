@@ -1135,6 +1135,7 @@ class ConnectionPool:
         self,
         connection_class=Connection,
         max_connections: Optional[int] = None,
+        index_available_connections: bool = False,
         **connection_kwargs,
     ):
         max_connections = max_connections or 2**31
@@ -1154,6 +1155,7 @@ class ConnectionPool:
         # will notice the first thread already did the work and simply
         # release the lock.
         self._fork_lock = threading.Lock()
+        self._index_available_connections= index_available_connections
         self.reset()
 
     def __repr__(self) -> (str, str):
@@ -1175,7 +1177,9 @@ class ConnectionPool:
     def reset(self) -> None:
         self._lock = threading.Lock()
         self._created_connections = 0
-        self._available_connections = ConnectionsIndexer()
+        self._available_connections: ConnectionsIndexer | list = (
+            ConnectionsIndexer() if self._index_available_connections else []
+        )
         self._in_use_connections = set()
 
         # this must be the last operation in this method. while reset() is

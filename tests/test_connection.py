@@ -298,6 +298,7 @@ def test_redis_from_pool(request, from_url):
     assert called == 1
     pool.disconnect()
 
+
 @pytest.mark.parametrize(
     "conn, error, expected_message",
     [
@@ -346,6 +347,7 @@ def test_unix_socket_connection_failure():
         str(e.value)
         == "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     )
+
 
 def test_connections_indexer_operations():
     ci = ConnectionsIndexer()
