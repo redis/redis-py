@@ -1128,13 +1128,7 @@ class ConnectionPool:
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
-<<<<<<< HEAD
-        self._available_connections: ConnectionsIndexer = (
-            ConnectionsIndexer() if index_available_connections else []
-        )
-=======
         self._available_connections = self.reset_available_connections()
->>>>>>> bafbc03 (polymorphism for reset available connections instead)
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
 
