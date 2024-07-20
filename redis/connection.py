@@ -1483,7 +1483,20 @@ class BlockingConnectionPool(ConnectionPool):
             connection = self.make_connection()
 
         try:
-            self.ensure_connection(connection)
+            # ensure this connection is connected to Redis
+            connection.connect()
+            # connections that the pool provides should be ready to send
+            # a command. if not, the connection was either returned to the
+            # pool before all data has been read or the socket has been
+            # closed. either way, reconnect and verify everything is good.
+            try:
+                if connection.can_read():
+                    raise ConnectionError("Connection has data")
+            except (ConnectionError, OSError):
+                connection.disconnect()
+                connection.connect()
+                if connection.can_read():
+                    raise ConnectionError("Connection not ready")
         except BaseException:
             # release the connection back to the pool so that we don't leak it
             self.release(connection)
