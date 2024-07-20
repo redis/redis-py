@@ -43,41 +43,21 @@ async def test_connect_retry_on_timeout_error(connect_args):
 
 
 class SentinelManagedConnectionMock(SentinelManagedConnection):
-    async def connect_to_same_address(self) -> None:
-        pass
-
-    async def can_read_destructive(self) -> bool:
-        # Mock this function to always return False.
-        # Trrue means there's still data to be read and hence we can't reconnect
-        # to this connection yet
-        return False
-
-
-class SentinelManagedConnectionMockForReplicaMode(SentinelManagedConnectionMock):
-    async def connect(self) -> None:
+    async def _connect_to_sentinel(self) -> None:
         """
-        This simulates the behavior of connect when
+        This simulates the behavior of _connect_to_sentinel when
         :py:class:`~redis.SentinelConnectionPool`
         is in replica mode.
         It'll call rotate_slaves and connect to the next replica.
         """
-        import random
-        import time
+        if self.connection_pool.is_master:
+            self.host, self.port = ("master", 1)
+        else:
+            import random
+            import time
 
-        self.host = f"host-{random.randint(0, 10)}"
-        self.port = time.time()
-
-
-class SentinelManagedConnectionMockForMasterMode(SentinelManagedConnectionMock):
-    async def connect_to(self, address: Tuple[str, int]) -> None:
-        """
-        This simulates the behavior of connect_to when
-        :py:class:`~redis.SentinelConnectionPool`
-        is in master mode.
-        It'll try to connect to master. In this mock class,
-        it'll just set the host and port without actually connecting.
-        """
-        self.host, self.port = address
+            self.host = f"host-{random.randint(0, 10)}"
+            self.port = time.time()
 
 
 @pytest.fixture()
@@ -90,7 +70,7 @@ def connection_pool_replica_mock() -> SentinelConnectionPool:
         "usasm",
         sentinel_manager,
         is_master=False,
-        connection_class=SentinelManagedConnectionMockForReplicaMode,
+        connection_class=SentinelManagedConnectionMock,
     )
     return connection_pool
 
@@ -105,7 +85,7 @@ def connection_pool_master_mock() -> SentinelConnectionPool:
         "usasm",
         sentinel_manager,
         is_master=True,
-        connection_class=SentinelManagedConnectionMockForMasterMode,
+        connection_class=SentinelManagedConnectionMock,
     )
     return connection_pool
 
