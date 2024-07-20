@@ -47,9 +47,9 @@ class SentinelManagedConnectionMock(SentinelManagedConnection):
     async def _connect_to_sentinel(self) -> None:
         """
         This simulates the behavior of _connect_to_sentinel when
-        :py:class:`~redis.SentinelConnectionPool`
-        is in replica mode.
-        It'll call rotate_slaves and connect to the next replica.
+        :py:class:`~redis.asyncio.sentinel.SentinelConnectionPool`.
+        In master mode, it'll connect to the master. 
+        In non-master mode, it'll call rotate_slaves and connect to the next replica.
         """
         if self.connection_pool.is_master:
             self.host, self.port = ("master", 1)
@@ -62,7 +62,8 @@ class SentinelManagedConnectionMock(SentinelManagedConnection):
 
     async def connect_to(self, address: Tuple[str, int]) -> None:
         """
-        Do nothing, just mock.
+        Do nothing, just mock so it won't try to make a connection to the
+        dummy address.
         """
 
 

@@ -1059,9 +1059,7 @@ class ConnectionPool:
 
     def cleanup(self, **options):
         """
-        Additional cleanup operations that the connection pool might
-        need to do after a SCAN ITER family command is executed.
-
+        Additional cleanup operations that the connection pool might need to do.
         See SentinelManagedConnection for an example cleanup operation that
         might need to be done.
         """

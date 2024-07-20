@@ -25,7 +25,7 @@ class SentinelManagedConnection(Connection):
         # the sentinel managed connection to connect
         # to the most relevant sentinel in the pool and just
         # connect to the current self.host and self.port
-        self._is_address_fixed = False
+        self._is_address_set = False
         super().__init__(**kwargs)
 
     def __repr__(self):
@@ -39,9 +39,13 @@ class SentinelManagedConnection(Connection):
             s = s % host_info
         return s
 
-    def fix_address(self, address):
+    def set_address(self, address):
+        """
+        By setting the address, the connection will just connect
+        to the current host and port the next time connect is called.
+        """
         self.host, self.port = address
-        self._is_address_fixed = True
+        self._is_address_set = True
 
     def connect_to(self, address):
         self.host, self.port = address
@@ -54,16 +58,14 @@ class SentinelManagedConnection(Connection):
     def _connect_retry(self):
         if self._sock:
             return  # already connected
-        # If address is fixed, it means that the connection
-        # is not rotating to the next slave (if the connection pool is not master)
-        if self._is_address_fixed:
+        # If address is set, it means that the connection
+        # will just connect to the current host and port.
+        if self._is_address_set:
             self.connect_to((self.host, self.port))
             return
         self._connect_to_sentinel()
 
     def _connect_to_sentinel(self):
-        # If same_server is False, connnect to master in master mode
-        # and rotate to the next slave in slave mode
         if self.connection_pool.is_master:
             self.connect_to(self.connection_pool.get_master_address())
         else:
@@ -317,7 +319,7 @@ class SentinelConnectionPool(ConnectionPool):
                 host=server_host, port=server_port
             )
             # If not, make a new dummy connection object, and set its host and port
-            # to the one that we want later in the call to ``fix_address``
+            # to the one that we want later in the call to ``set_address``
             if not connection:
                 connection = self.make_connection()
         assert connection
@@ -332,7 +334,7 @@ class SentinelConnectionPool(ConnectionPool):
             # connect to the previous replica.
             # This will connect to the host and port of the replica
             else:
-                connection.fix_address((server_host, server_port))
+                connection.set_address((server_host, server_port))
             self.ensure_connection(connection)
         except BaseException:
             # Release the connection back to the pool so that we don't
