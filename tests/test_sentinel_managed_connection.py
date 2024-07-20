@@ -14,7 +14,7 @@ class SentinelManagedConnectionMock(SentinelManagedConnection):
         """
         This simulates the behavior of _connect_to_sentinel when
         :py:class:`~redis.SentinelConnectionPool`.
-        In master mode, it'll connect to the master. 
+        In master mode, it'll connect to the master.
         In non-master mode, it'll call rotate_slaves and connect to the next replica.
         """
         if self.connection_pool.is_master:
