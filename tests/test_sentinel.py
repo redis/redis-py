@@ -4,6 +4,7 @@ from unittest import mock
 import pytest
 import redis.sentinel
 from redis import exceptions
+from redis.connection import Connection
 from redis.sentinel import (
     ConnectionsIndexer,
     MasterNotFoundError,

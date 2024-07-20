@@ -1,7 +1,7 @@
 import random
 import weakref
-from typing import Any, Iterable, Optional
 from collections import defaultdict
+from typing import Any, Iterable, Optional
 
 from redis.client import Redis
 from redis.commands import SentinelCommands

@@ -346,4 +346,3 @@ def test_unix_socket_connection_failure():
         str(e.value)
         == "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     )
-
