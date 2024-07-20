@@ -1131,7 +1131,7 @@ class ConnectionPool:
 
         self._available_connections: ConnectionsIndexer = ConnectionsIndexer()
         self._in_use_connections: Set[AbstractConnection] = set()
-        self._index_available_connections= index_available_connections
+        self._index_available_connections = index_available_connections
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
 
     def __repr__(self):

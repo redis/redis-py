@@ -1155,7 +1155,7 @@ class ConnectionPool:
         # will notice the first thread already did the work and simply
         # release the lock.
         self._fork_lock = threading.Lock()
-        self._index_available_connections= index_available_connections
+        self._index_available_connections = index_available_connections
         self.reset()
 
     def __repr__(self) -> (str, str):
