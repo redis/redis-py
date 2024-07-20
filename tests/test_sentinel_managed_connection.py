@@ -5,6 +5,8 @@ import pytest
 from redis import Redis
 from redis.sentinel import Sentinel, SentinelConnectionPool, SentinelManagedConnection
 
+pytestmark = pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+
 
 class SentinelManagedConnectionMock(SentinelManagedConnection):
     def _connect_to_sentinel(self) -> None:

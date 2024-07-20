@@ -1129,7 +1129,9 @@ class ConnectionPool:
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
-        self._available_connections: ConnectionsIndexer = ConnectionsIndexer()
+        self._available_connections: ConnectionsIndexer = (
+            ConnectionsIndexer() if index_available_connections else []
+        )
         self._in_use_connections: Set[AbstractConnection] = set()
         self._index_available_connections = index_available_connections
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)

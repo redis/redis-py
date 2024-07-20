@@ -111,6 +111,7 @@ def same_address(
     )
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 async def test_connects_to_same_address_if_same_id_replica(
     connection_pool_replica_mock: SentinelConnectionPool,
 ) -> None:
@@ -128,6 +129,7 @@ async def test_connects_to_same_address_if_same_id_replica(
     )
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 async def test_connects_to_same_conn_object_if_same_id_and_conn_released_replica(
     connection_pool_replica_mock: SentinelConnectionPool,
 ) -> None:
@@ -148,6 +150,7 @@ async def test_connects_to_same_conn_object_if_same_id_and_conn_released_replica
     )
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 async def test_connects_to_diff_address_if_no_iter_req_id_replica(
     connection_pool_replica_mock: SentinelConnectionPool,
 ) -> None:
@@ -173,6 +176,7 @@ async def test_connects_to_diff_address_if_no_iter_req_id_replica(
     )
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 async def test_connects_to_same_address_if_same_iter_req_id_master(
     connection_pool_master_mock: SentinelConnectionPool,
 ) -> None:
@@ -190,6 +194,7 @@ async def test_connects_to_same_address_if_same_iter_req_id_master(
     )
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 async def test_connects_to_same_conn_object_if_same_iter_req_id_and_released_master(
     connection_pool_master_mock: SentinelConnectionPool,
 ) -> None:
@@ -209,6 +214,7 @@ async def test_connects_to_same_conn_object_if_same_iter_req_id_and_released_mas
     )
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 async def test_connects_to_same_address_if_no_iter_req_id_master(
     connection_pool_master_mock: SentinelConnectionPool,
 ) -> None:
@@ -234,6 +240,7 @@ async def test_connects_to_same_address_if_no_iter_req_id_master(
     )
 
 
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 async def test_scan_iter_family_cleans_up(
     connection_pool_replica_mock: SentinelConnectionPool,
 ):
