@@ -71,10 +71,10 @@ class SentinelManagedConnection(Connection):
         # If address is fixed, it means that the connection
         # is not rotating to the next slave (if the connection pool is in replica mode)
         if self._is_address_fixed:
-            self.connect_to(self.host, self.port)
+            await self.connect_to((self.host, self.port))
             return
         await self._connect_to_sentinel()
-    
+
     async def _connect_to_sentinel(self):
         # If same_server is False, connnect to master in master mode
         # and rotate to the next slave in slave mode

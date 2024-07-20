@@ -23,16 +23,11 @@ class SentinelManagedConnectionMock(SentinelManagedConnection):
             self.host = f"host-{random.randint(0, 10)}"
             self.port = time.time()
 
-
-class SentinelManagedConnectionMock(SentinelManagedConnectionMock):
     def connect_to(self, address: Tuple[str, int]) -> None:
         """
-        This simulates the behavior of connect_to when
-        :py:class:`~redis.SentinelConnectionPool`
-        is in master mode.
-        It'll try to connect to master. In this mock class,
-        it'll just set the host and port without actually connecting.
+        Do nothing, this is just to mock.
         """
+        pass
 
 
 @pytest.fixture()

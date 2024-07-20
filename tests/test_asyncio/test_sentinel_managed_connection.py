@@ -1,5 +1,5 @@
 import socket
-from typing import Tuple
+from typing import Iterator, Tuple
 
 import pytest
 from redis.asyncio.retry import Retry
@@ -59,35 +59,46 @@ class SentinelManagedConnectionMock(SentinelManagedConnection):
             self.host = f"host-{random.randint(0, 10)}"
             self.port = time.time()
 
+    async def connect_to(self, address: Tuple[str, int]) -> None:
+        """
+        Do nothing, just mock.
+        """
+
 
 @pytest.fixture()
-def connection_pool_replica_mock() -> SentinelConnectionPool:
+def connection_pool_replica_mock() -> Iterator[SentinelConnectionPool]:
     sentinel_manager = Sentinel([["master", 400]])
     # Give a random slave
     sentinel_manager.discover_slaves = mock.AsyncMock(return_value=["replica", 5000])
-    # Create connection pool with our mock connection object
-    connection_pool = SentinelConnectionPool(
-        "usasm",
-        sentinel_manager,
-        is_master=False,
-        connection_class=SentinelManagedConnectionMock,
-    )
-    return connection_pool
+    with mock.patch(
+        "redis._parsers._AsyncRESP2Parser.can_read_destructive", return_value=False
+    ):
+        # Create connection pool with our mock connection object
+        connection_pool = SentinelConnectionPool(
+            "usasm",
+            sentinel_manager,
+            is_master=False,
+            connection_class=SentinelManagedConnectionMock,
+        )
+        yield connection_pool
 
 
 @pytest.fixture()
-def connection_pool_master_mock() -> SentinelConnectionPool:
+def connection_pool_master_mock() -> Iterator[SentinelConnectionPool]:
     sentinel_manager = Sentinel([["master", 400]])
     # Give a random slave
     sentinel_manager.discover_master = mock.AsyncMock(return_value=["replica", 5000])
-    # Create connection pool with our mock connection object
-    connection_pool = SentinelConnectionPool(
-        "usasm",
-        sentinel_manager,
-        is_master=True,
-        connection_class=SentinelManagedConnectionMock,
-    )
-    return connection_pool
+    with mock.patch(
+        "redis._parsers._AsyncRESP2Parser.can_read_destructive", return_value=False
+    ):
+        # Create connection pool with our mock connection object
+        connection_pool = SentinelConnectionPool(
+            "usasm",
+            sentinel_manager,
+            is_master=True,
+            connection_class=SentinelManagedConnectionMock,
+        )
+        yield connection_pool
 
 
 def same_address(

@@ -59,7 +59,7 @@ class SentinelManagedConnection(Connection):
             self.connect_to((self.host, self.port))
             return
         self._connect_to_sentinel()
-    
+
     def _connect_to_sentinel(self):
         # If same_server is False, connnect to master in master mode
         # and rotate to the next slave in slave mode
