@@ -1,6 +1,7 @@
 import random
 import weakref
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
+from collections import defaultdict
 
 from redis.client import Redis
 from redis.commands import SentinelCommands
@@ -155,6 +156,57 @@ class SentinelConnectionPoolProxy:
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
 
 
+class ConnectionsIndexer(Iterable):
+    """
+    Data structure that stores available connections in a pool.
+    Instead of list, we keep 2 additional DS to support O(1) operations
+    on all of the class' methods.
+    The first DS is indexed on the connection object's ID.
+    The second DS is indexed on the address (ip and port) of the connection.
+    """
+
+    def __init__(self):
+        # Map the id to the connection object
+        self._id_to_connection = {}
+        # Map the address to a dictionary of connections
+        # The inner dictionary is a map between the object id to the object itself
+        # Both of these DS support O(1) operations on all of the class' methods
+        self._address_to_connections = defaultdict(dict)
+
+    def pop(self):
+        try:
+            _, connection = self._id_to_connection.popitem()
+            del self._address_to_connections[(connection.host, connection.port)][
+                id(connection)
+            ]
+        except KeyError:
+            # We are simulating a list, hence we raise IndexError
+            # when there's no item in the dictionary
+            raise IndexError()
+        return connection
+
+    def append(self, connection: Connection):
+        self._id_to_connection[id(connection)] = connection
+        self._address_to_connections[(connection.host, connection.port)][
+            id(connection)
+        ] = connection
+
+    def get_connection(self, host: str, port: int):
+        try:
+            _, connection = self._address_to_connections[(host, port)].popitem()
+            del self._id_to_connection[id(connection)]
+        except KeyError:
+            return None
+        return connection
+
+    def __iter__(self):
+        # This is an O(1) operation in python3.7 and later
+        return iter(self._id_to_connection.values())
+
+    def __len__(self):
+        return len(self._id_to_connection)
+
+
 class SentinelConnectionPool(ConnectionPool):
     """
     Sentinel backed connection pool.
@@ -181,7 +233,7 @@ class SentinelConnectionPool(ConnectionPool):
             service_name=service_name,
             sentinel_manager=sentinel_manager,
         )
-        super().__init__(index_available_connections=True, **kwargs)
+        super().__init__(**kwargs)
         self.connection_kwargs["connection_pool"] = self.proxy
         self.service_name = service_name
         self.sentinel_manager = sentinel_manager
@@ -197,6 +249,9 @@ class SentinelConnectionPool(ConnectionPool):
     def reset(self):
         super().reset()
         self.proxy.reset()
+
+    def reset_available_connections(self):
+        return ConnectionsIndexer()
 
     @property
     def master_address(self):

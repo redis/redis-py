@@ -10,7 +10,6 @@ from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis.backoff import NoBackoff
 from redis.connection import (
     Connection,
-    ConnectionsIndexer,
     SSLConnection,
     UnixDomainSocketConnection,
     parse_url,
@@ -348,17 +347,3 @@ def test_unix_socket_connection_failure():
         == "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     )
 
-
-def test_connections_indexer_operations():
-    ci = ConnectionsIndexer()
-    c1 = Connection(host="1", port=2)
-    ci.append(c1)
-    assert list(ci) == [c1]
-    assert ci.pop() == c1
-
-    c2 = Connection(host="3", port=4)
-    ci.append(c1)
-    ci.append(c2)
-    assert ci.get_connection("3", 4) == c2
-    assert not ci.get_connection("5", 6)
-    assert list(ci) == [c1]

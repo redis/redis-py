@@ -5,6 +5,7 @@ import pytest
 import redis.sentinel
 from redis import exceptions
 from redis.sentinel import (
+    ConnectionsIndexer,
     MasterNotFoundError,
     Sentinel,
     SentinelConnectionPool,
@@ -266,3 +267,18 @@ def test_auto_close_pool(cluster, sentinel, method_name):
 
     assert calls == 1
     pool.disconnect()
+
+
+def test_connections_indexer_operations():
+    ci = ConnectionsIndexer()
+    c1 = Connection(host="1", port=2)
+    ci.append(c1)
+    assert list(ci) == [c1]
+    assert ci.pop() == c1
+
+    c2 = Connection(host="3", port=4)
+    ci.append(c1)
+    ci.append(c2)
+    assert ci.get_connection("3", 4) == c2
+    assert not ci.get_connection("5", 6)
+    assert list(ci) == [c1]

@@ -6,11 +6,10 @@ import sys
 import threading
 import weakref
 from abc import abstractmethod
-from collections import defaultdict
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Any, Callable, Iterable, List, Optional, Sequence, Type, Union
+from typing import Any, Callable, List, Optional, Sequence, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ._cache import (
@@ -735,57 +734,6 @@ class Connection(AbstractConnection):
         return f"{self.host}:{self.port}"
 
 
-class ConnectionsIndexer(Iterable):
-    """
-    Data structure that simulates a list of available connections.
-    Instead of list, we keep 2 additional DS to support O(1) operations
-    on all of the class' methods.
-    The first DS is indexed on the connection object's ID.
-    The second DS is indexed on the address (ip and port) of the connection.
-    """
-
-    def __init__(self):
-        # Map the id to the connection object
-        self._id_to_connection = {}
-        # Map the address to a dictionary of connections
-        # The inner dictionary is a map between the object id to the object itself
-        # Both of these DS support O(1) operations on all of the class' methods
-        self._address_to_connections = defaultdict(dict)
-
-    def pop(self):
-        try:
-            _, connection = self._id_to_connection.popitem()
-            del self._address_to_connections[(connection.host, connection.port)][
-                id(connection)
-            ]
-        except KeyError:
-            # We are simulating a list, hence we raise IndexError
-            # when there's no item in the dictionary
-            raise IndexError()
-        return connection
-
-    def append(self, connection: Connection):
-        self._id_to_connection[id(connection)] = connection
-        self._address_to_connections[(connection.host, connection.port)][
-            id(connection)
-        ] = connection
-
-    def get_connection(self, host: str, port: int):
-        try:
-            _, connection = self._address_to_connections[(host, port)].popitem()
-            del self._id_to_connection[id(connection)]
-        except KeyError:
-            return None
-        return connection
-
-    def __iter__(self):
-        # This is an O(1) operation in python3.7 and later
-        return iter(self._id_to_connection.values())
-
-    def __len__(self):
-        return len(self._id_to_connection)
-
-
 class SSLConnection(Connection):
     """Manages SSL connections to and from the Redis server(s).
     This class extends the Connection class, adding SSL functionality, and making
@@ -1135,7 +1083,6 @@ class ConnectionPool:
         self,
         connection_class=Connection,
         max_connections: Optional[int] = None,
-        index_available_connections: bool = False,
         **connection_kwargs,
     ):
         max_connections = max_connections or 2**31
@@ -1155,7 +1102,6 @@ class ConnectionPool:
         # will notice the first thread already did the work and simply
         # release the lock.
         self._fork_lock = threading.Lock()
-        self._index_available_connections = index_available_connections
         self.reset()
 
     def __repr__(self) -> (str, str):
@@ -1177,9 +1123,7 @@ class ConnectionPool:
     def reset(self) -> None:
         self._lock = threading.Lock()
         self._created_connections = 0
-        self._available_connections: ConnectionsIndexer | list = (
-            ConnectionsIndexer() if self._index_available_connections else []
-        )
+        self._available_connections = self.reset_available_connections()
         self._in_use_connections = set()
 
         # this must be the last operation in this method. while reset() is
@@ -1192,6 +1136,9 @@ class ConnectionPool:
         # _fork_lock, they will notice that another thread already called
         # reset() and they will immediately release _fork_lock and continue on.
         self.pid = os.getpid()
+
+    def reset_available_connections(self):
+        return []
 
     def _checkpid(self) -> None:
         # _checkpid() attempts to keep ConnectionPool fork-safe on modern

@@ -21,6 +21,7 @@ from redis.asyncio.connection import (
 )
 from redis.commands import AsyncSentinelCommands
 from redis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
+from redis.sentinel import ConnectionsIndexer
 from redis.utils import str_if_bytes
 
 
@@ -162,6 +163,9 @@ class SentinelConnectionPool(ConnectionPool):
         super().reset()
         self.master_address = None
         self.slave_rr_counter = None
+
+    def reset_available_connections(self):
+        return ConnectionsIndexer()
 
     def owns_connection(self, connection: Connection):
         check = not self.is_master or (

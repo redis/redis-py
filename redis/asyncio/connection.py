@@ -38,7 +38,7 @@ else:
 
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.connection import DEFAULT_RESP_VERSION, ConnectionsIndexer
+from redis.connection import DEFAULT_RESP_VERSION
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
@@ -1118,7 +1118,6 @@ class ConnectionPool:
         self,
         connection_class: Type[AbstractConnection] = Connection,
         max_connections: Optional[int] = None,
-        index_available_connections: bool = False,
         **connection_kwargs,
     ):
         max_connections = max_connections or 2**31
@@ -1129,11 +1128,14 @@ class ConnectionPool:
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
+<<<<<<< HEAD
         self._available_connections: ConnectionsIndexer = (
             ConnectionsIndexer() if index_available_connections else []
         )
+=======
+        self._available_connections = self.reset_available_connections()
+>>>>>>> bafbc03 (polymorphism for reset available connections instead)
         self._in_use_connections: Set[AbstractConnection] = set()
-        self._index_available_connections = index_available_connections
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
 
     def __repr__(self):
@@ -1143,10 +1145,11 @@ class ConnectionPool:
         )
 
     def reset(self):
-        self._available_connections: ConnectionsIndexer | list = (
-            ConnectionsIndexer() if self._index_available_connections else []
-        )
+        self._available_connections = self.reset_available_connections()
         self._in_use_connections = weakref.WeakSet()
+
+    def reset_available_connections(self):
+        return []
 
     def can_get_connection(self) -> bool:
         """Return True if a connection can be retrieved from the pool."""
