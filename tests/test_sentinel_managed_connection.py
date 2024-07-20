@@ -4,6 +4,7 @@ from unittest import mock
 import pytest
 from redis import Redis
 from redis.sentinel import Sentinel, SentinelConnectionPool, SentinelManagedConnection
+from redis.utils import HIREDIS_AVAILABLE
 
 pytestmark = pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 

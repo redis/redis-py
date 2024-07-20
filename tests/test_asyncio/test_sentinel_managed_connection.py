@@ -9,6 +9,7 @@ from redis.asyncio.sentinel import (
     SentinelManagedConnection,
 )
 from redis.backoff import NoBackoff
+from redis.utils import HIREDIS_AVAILABLE
 
 from .compat import mock
 
