@@ -1536,7 +1536,7 @@ async def test_aggregations_add_scores(decoded_r: redis.Redis):
     assert await decoded_r.ft().create_index(
         (
             TextField("name", sortable=True, weight=5.0),
-            NumericField("age", sortable=True)
+            NumericField("age", sortable=True),
         )
     )
 
@@ -1547,7 +1547,7 @@ async def test_aggregations_add_scores(decoded_r: redis.Redis):
         "doc2", mapping={"name": "foo", "age": "19"}
     )
 
-    req = (aggregations.AggregateRequest("*").add_scores())
+    req = aggregations.AggregateRequest("*").add_scores()
     res = await decoded_r.ft().aggregate(req)
     assert len(res.rows) == 2
     assert res.rows[0] == ["__score", "0.2"]
