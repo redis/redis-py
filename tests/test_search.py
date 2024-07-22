@@ -1444,7 +1444,10 @@ def test_aggregations_filter(client):
 @skip_ifmodversion_lt("2.10.05", "search")
 def test_aggregations_add_scores(client):
     client.ft().create_index(
-        (TextField("name", sortable=True, weight=5.0), NumericField("age", sortable=True))
+        (
+            TextField("name", sortable=True, weight=5.0),
+            NumericField("age", sortable=True)
+        )
     )
 
     client.ft().client.hset("doc1", mapping={"name": "bar", "age": "25"})
