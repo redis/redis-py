@@ -24,7 +24,6 @@ from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
 from tests.conftest import (
-    assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,
@@ -862,7 +861,7 @@ async def test_tags(decoded_r: redis.Redis):
         assert 1 == res["total_results"]
 
         q2 = await decoded_r.ft().tagvals("tags")
-        assert set(tags.split(",") + tags2.split(",")) == q2
+        assert set(tags.split(",") + tags2.split(",")) == set(q2)
 
 
 @pytest.mark.redismod
@@ -986,7 +985,7 @@ async def test_dict_operations(decoded_r: redis.Redis):
 
     # Dump dict and inspect content
     res = await decoded_r.ft().dict_dump("custom_dict")
-    assert_resp_response(decoded_r, res, ["item1", "item3"], {"item1", "item3"})
+    assert res == ["item1", "item3"]
 
     # Remove rest of the items before reload
     await decoded_r.ft().dict_del("custom_dict", *res)

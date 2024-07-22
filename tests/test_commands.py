@@ -18,7 +18,6 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
-from redis.utils import HIREDIS_AVAILABLE
 
 from .conftest import (
     _get_client,
@@ -2239,7 +2238,7 @@ class TestRedisCommands:
     def test_sadd(self, r):
         members = {b"1", b"2", b"3"}
         r.sadd("a", *members)
-        assert r.smembers("a") == members
+        assert set(r.smembers("a")) == members
 
     def test_scard(self, r):
         r.sadd("a", "1", "2", "3")
@@ -2248,25 +2247,25 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     def test_sdiff(self, r):
         r.sadd("a", "1", "2", "3")
-        assert r.sdiff("a", "b") == {b"1", b"2", b"3"}
+        assert set(r.sdiff("a", "b")) == {b"1", b"2", b"3"}
         r.sadd("b", "2", "3")
-        assert r.sdiff("a", "b") == {b"1"}
+        assert r.sdiff("a", "b") == [b"1"]
 
     @pytest.mark.onlynoncluster
     def test_sdiffstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sdiffstore("c", "a", "b") == 3
-        assert r.smembers("c") == {b"1", b"2", b"3"}
+        assert set(r.smembers("c")) == {b"1", b"2", b"3"}
         r.sadd("b", "2", "3")
         assert r.sdiffstore("c", "a", "b") == 1
-        assert r.smembers("c") == {b"1"}
+        assert r.smembers("c") == [b"1"]
 
     @pytest.mark.onlynoncluster
     def test_sinter(self, r):
         r.sadd("a", "1", "2", "3")
-        assert r.sinter("a", "b") == set()
+        assert r.sinter("a", "b") == []
         r.sadd("b", "2", "3")
-        assert r.sinter("a", "b") == {b"2", b"3"}
+        assert set(r.sinter("a", "b")) == {b"2", b"3"}
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
@@ -2281,10 +2280,10 @@ class TestRedisCommands:
     def test_sinterstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sinterstore("c", "a", "b") == 0
-        assert r.smembers("c") == set()
+        assert r.smembers("c") == []
         r.sadd("b", "2", "3")
         assert r.sinterstore("c", "a", "b") == 2
-        assert r.smembers("c") == {b"2", b"3"}
+        assert set(r.smembers("c")) == {b"2", b"3"}
 
     def test_sismember(self, r):
         r.sadd("a", "1", "2", "3")
@@ -2295,7 +2294,7 @@ class TestRedisCommands:
 
     def test_smembers(self, r):
         r.sadd("a", "1", "2", "3")
-        assert r.smembers("a") == {b"1", b"2", b"3"}
+        assert set(r.smembers("a")) == {b"1", b"2", b"3"}
 
     @skip_if_server_version_lt("6.2.0")
     def test_smismember(self, r):
@@ -2309,15 +2308,15 @@ class TestRedisCommands:
         r.sadd("a", "a1", "a2")
         r.sadd("b", "b1", "b2")
         assert r.smove("a", "b", "a1")
-        assert r.smembers("a") == {b"a2"}
-        assert r.smembers("b") == {b"b1", b"b2", b"a1"}
+        assert r.smembers("a") == [b"a2"]
+        assert set(r.smembers("b")) == {b"b1", b"b2", b"a1"}
 
     def test_spop(self, r):
         s = [b"1", b"2", b"3"]
         r.sadd("a", *s)
         value = r.spop("a")
         assert value in s
-        assert r.smembers("a") == set(s) - {value}
+        assert set(r.smembers("a")) == set(s) - {value}
 
     @skip_if_server_version_lt("3.2.0")
     def test_spop_multi_value(self, r):
@@ -2328,12 +2327,7 @@ class TestRedisCommands:
 
         for value in values:
             assert value in s
-        assert_resp_response(
-            r,
-            r.spop("a", 1),
-            list(set(s) - set(values)),
-            set(s) - set(values),
-        )
+        assert set(r.spop("a", 1)) == set(s) - set(values)
 
     def test_srandmember(self, r):
         s = [b"1", b"2", b"3"]
@@ -2352,20 +2346,20 @@ class TestRedisCommands:
         r.sadd("a", "1", "2", "3", "4")
         assert r.srem("a", "5") == 0
         assert r.srem("a", "2", "4") == 2
-        assert r.smembers("a") == {b"1", b"3"}
+        assert set(r.smembers("a")) == {b"1", b"3"}
 
     @pytest.mark.onlynoncluster
     def test_sunion(self, r):
         r.sadd("a", "1", "2")
         r.sadd("b", "2", "3")
-        assert r.sunion("a", "b") == {b"1", b"2", b"3"}
+        assert set(r.sunion("a", "b")) == {b"1", b"2", b"3"}
 
     @pytest.mark.onlynoncluster
     def test_sunionstore(self, r):
         r.sadd("a", "1", "2")
         r.sadd("b", "2", "3")
         assert r.sunionstore("c", "a", "b") == 3
-        assert r.smembers("c") == {b"1", b"2", b"3"}
+        assert set(r.smembers("c")) == {b"1", b"2", b"3"}
 
     @skip_if_server_version_lt("1.0.0")
     @skip_if_redis_enterprise()
@@ -5021,9 +5015,6 @@ class TestRedisCommands:
             r, res, ["key1", "key2", "key3"], [b"key1", b"key2", b"key3"]
         )
 
-    # The response to COMMAND contains maps inside sets, which are not handled
-    # by the hiredis-py parser (see https://github.com/redis/hiredis-py/issues/188)
-    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
     @skip_if_server_version_lt("2.8.13")
     def test_command(self, r):
         res = r.command()
@@ -5036,18 +5027,11 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
     def test_command_getkeysandflags(self, r: redis.Redis):
-        assert_resp_response(
-            r,
-            r.command_getkeysandflags("LMOVE", "mylist1", "mylist2", "left", "left"),
-            [
-                [b"mylist1", [b"RW", b"access", b"delete"]],
-                [b"mylist2", [b"RW", b"insert"]],
-            ],
-            [
-                [b"mylist1", {b"RW", b"access", b"delete"}],
-                [b"mylist2", {b"RW", b"insert"}],
-            ],
-        )
+        res = r.command_getkeysandflags("LMOVE", "mylist1", "mylist2", "left", "left")
+        assert res == [
+            [b"mylist1", [b"RW", b"access", b"delete"]],
+            [b"mylist2", [b"RW", b"insert"]],
+        ]
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
