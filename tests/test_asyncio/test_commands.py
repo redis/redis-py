@@ -1406,7 +1406,7 @@ class TestRedisCommands:
     async def test_sadd(self, r: redis.Redis):
         members = {b"1", b"2", b"3"}
         await r.sadd("a", *members)
-        assert await r.smembers("a") == members
+        assert set(await r.smembers("a")) == members
 
     async def test_scard(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
@@ -1415,34 +1415,34 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     async def test_sdiff(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
-        assert await r.sdiff("a", "b") == {b"1", b"2", b"3"}
+        assert set(await r.sdiff("a", "b")) == {b"1", b"2", b"3"}
         await r.sadd("b", "2", "3")
-        assert await r.sdiff("a", "b") == {b"1"}
+        assert await r.sdiff("a", "b") == [b"1"]
 
     @pytest.mark.onlynoncluster
     async def test_sdiffstore(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
         assert await r.sdiffstore("c", "a", "b") == 3
-        assert await r.smembers("c") == {b"1", b"2", b"3"}
+        assert set(await r.smembers("c")) == {b"1", b"2", b"3"}
         await r.sadd("b", "2", "3")
         assert await r.sdiffstore("c", "a", "b") == 1
-        assert await r.smembers("c") == {b"1"}
+        assert await r.smembers("c") == [b"1"]
 
     @pytest.mark.onlynoncluster
     async def test_sinter(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
-        assert await r.sinter("a", "b") == set()
+        assert await r.sinter("a", "b") == []
         await r.sadd("b", "2", "3")
-        assert await r.sinter("a", "b") == {b"2", b"3"}
+        assert set(await r.sinter("a", "b")) == {b"2", b"3"}
 
     @pytest.mark.onlynoncluster
     async def test_sinterstore(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
         assert await r.sinterstore("c", "a", "b") == 0
-        assert await r.smembers("c") == set()
+        assert await r.smembers("c") == []
         await r.sadd("b", "2", "3")
         assert await r.sinterstore("c", "a", "b") == 2
-        assert await r.smembers("c") == {b"2", b"3"}
+        assert set(await r.smembers("c")) == {b"2", b"3"}
 
     async def test_sismember(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
@@ -1453,22 +1453,22 @@ class TestRedisCommands:
 
     async def test_smembers(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
-        assert await r.smembers("a") == {b"1", b"2", b"3"}
+        assert set(await r.smembers("a")) == {b"1", b"2", b"3"}
 
     @pytest.mark.onlynoncluster
     async def test_smove(self, r: redis.Redis):
         await r.sadd("a", "a1", "a2")
         await r.sadd("b", "b1", "b2")
         assert await r.smove("a", "b", "a1")
-        assert await r.smembers("a") == {b"a2"}
-        assert await r.smembers("b") == {b"b1", b"b2", b"a1"}
+        assert await r.smembers("a") == [b"a2"]
+        assert set(await r.smembers("b")) == {b"b1", b"b2", b"a1"}
 
     async def test_spop(self, r: redis.Redis):
         s = [b"1", b"2", b"3"]
         await r.sadd("a", *s)
         value = await r.spop("a")
         assert value in s
-        assert await r.smembers("a") == set(s) - {value}
+        assert set(await r.smembers("a")) == set(s) - {value}
 
     @skip_if_server_version_lt("3.2.0")
     async def test_spop_multi_value(self, r: redis.Redis):
@@ -1481,9 +1481,7 @@ class TestRedisCommands:
             assert value in s
 
         response = await r.spop("a", 1)
-        assert_resp_response(
-            r, response, list(set(s) - set(values)), set(s) - set(values)
-        )
+        assert set(response) == set(s) - set(values)
 
     async def test_srandmember(self, r: redis.Redis):
         s = [b"1", b"2", b"3"]
@@ -1502,20 +1500,20 @@ class TestRedisCommands:
         await r.sadd("a", "1", "2", "3", "4")
         assert await r.srem("a", "5") == 0
         assert await r.srem("a", "2", "4") == 2
-        assert await r.smembers("a") == {b"1", b"3"}
+        assert set(await r.smembers("a")) == {b"1", b"3"}
 
     @pytest.mark.onlynoncluster
     async def test_sunion(self, r: redis.Redis):
         await r.sadd("a", "1", "2")
         await r.sadd("b", "2", "3")
-        assert await r.sunion("a", "b") == {b"1", b"2", b"3"}
+        assert set(await r.sunion("a", "b")) == {b"1", b"2", b"3"}
 
     @pytest.mark.onlynoncluster
     async def test_sunionstore(self, r: redis.Redis):
         await r.sadd("a", "1", "2")
         await r.sadd("b", "2", "3")
         assert await r.sunionstore("c", "a", "b") == 3
-        assert await r.smembers("c") == {b"1", b"2", b"3"}
+        assert set(await r.smembers("c")) == {b"1", b"2", b"3"}
 
     # SORTED SET COMMANDS
     async def test_zadd(self, r: redis.Redis):
