@@ -2,6 +2,7 @@ import dataclasses
 import json
 import os.path
 from urllib.parse import urlparse
+from typing import List
 
 import pytest
 
@@ -12,7 +13,7 @@ class Endpoint:
     username: str
     password: str
     tls: bool
-    endpoints: list[str]
+    endpoints: List[str]
 
     @property
     def url(self):
