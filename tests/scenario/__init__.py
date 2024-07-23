@@ -1,9 +1,9 @@
+import dataclasses
 import json
 import os.path
-import dataclasses
+from urllib.parse import urlparse
 
 import pytest
-from urllib.parse import urlparse
 
 
 @dataclasses.dataclass
@@ -38,7 +38,9 @@ def get_endpoint(request: pytest.FixtureRequest, endpoint_name: str) -> Endpoint
     endpoints_config_path = request.config.getoption("--endpoints-config")
 
     if not (endpoints_config_path and os.path.exists(endpoints_config_path)):
-        raise ValueError(f"Endpoints config file not found: {endpoints_config_path}")
+        raise FileNotFoundError(
+            f"Endpoints config file not found: {endpoints_config_path}"
+        )
 
     try:
         with open(endpoints_config_path, "r") as f:

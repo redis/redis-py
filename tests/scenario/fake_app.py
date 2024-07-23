@@ -1,8 +1,8 @@
 import multiprocessing
 import typing
-
-from threading import Thread, Event
-from multiprocessing import Process, Event as PEvent
+from multiprocessing import Event as PEvent
+from multiprocessing import Process
+from threading import Event, Thread
 from unittest.mock import patch
 
 from redis import Redis

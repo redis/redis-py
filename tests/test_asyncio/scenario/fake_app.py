@@ -1,6 +1,5 @@
 import typing
-
-from asyncio import create_task, Event, Task
+from asyncio import Event, Task, create_task
 from unittest.mock import patch
 
 from redis.asyncio import Redis

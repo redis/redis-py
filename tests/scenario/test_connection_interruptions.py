@@ -1,23 +1,17 @@
 import multiprocessing
-
-import socket
 import time
 
 import pytest
-
-
-from redis import Redis, BusyLoadingError
+from redis import BusyLoadingError, Redis
 from redis.backoff import ExponentialBackoff
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from redis.retry import Retry
-from redis.exceptions import (
-    ConnectionError as RedisConnectionError,
-    TimeoutError as RedisTimeoutError,
-)
 
 from ..conftest import _get_client
-from . import get_endpoint, Endpoint
+from . import Endpoint, get_endpoint
 from .fake_app import FakeApp, FakeSubscriber
-from .fault_injection_client import FaultInjectionClient, TriggeredAction
+from .fault_injection_client import FaultInjectionClient
 
 
 @pytest.fixture
@@ -27,7 +21,12 @@ def endpoint_name():
 
 @pytest.fixture
 def endpoint(request: pytest.FixtureRequest, endpoint_name: str):
-    return get_endpoint(request, endpoint_name)
+    try:
+        return get_endpoint(request, endpoint_name)
+    except FileNotFoundError as e:
+        pytest.skip(
+            f"Skipping scenario test because endpoints file is missing: {str(e)}"
+        )
 
 
 @pytest.fixture

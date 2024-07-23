@@ -1,13 +1,13 @@
 import asyncio
+
 import pytest
-
-from redis.asyncio import Redis, BusyLoadingError
-from redis.backoff import ExponentialBackoff
+from redis.asyncio import BusyLoadingError, Redis
 from redis.asyncio.retry import Retry
-from redis.exceptions import ConnectionError as RedisConnectionError, TimeoutError
+from redis.backoff import ExponentialBackoff
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError
+from tests.scenario import Endpoint, get_endpoint
 
-from ..conftest import create_redis
-from tests.scenario import get_endpoint, Endpoint
 from .fake_app import AsyncFakeApp, AsyncFakeSubscriber
 from .fault_injection_client import AsyncFaultInjectionClient
 
@@ -19,7 +19,12 @@ async def endpoint_name():
 
 @pytest.fixture
 async def endpoint(request: pytest.FixtureRequest, endpoint_name: str):
-    return get_endpoint(request, endpoint_name)
+    try:
+        return get_endpoint(request, endpoint_name)
+    except FileNotFoundError as e:
+        pytest.skip(
+            f"Skipping scenario test because endpoints file is missing: {str(e)}"
+        )
 
 
 @pytest.fixture
