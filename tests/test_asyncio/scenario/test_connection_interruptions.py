@@ -1,4 +1,5 @@
 import asyncio
+from typing import List
 
 import pytest
 from redis.asyncio import BusyLoadingError, Redis
@@ -65,7 +66,7 @@ async def fault_injection_client(request: pytest.FixtureRequest):
 
 @pytest.mark.parametrize("action", ("dmc_restart", "network_failure"))
 async def test_connection_interruptions(
-    clients: list[Redis],
+    clients: List[Redis],
     endpoint: Endpoint,
     fault_injection_client: AsyncFaultInjectionClient,
     action: str,
@@ -92,7 +93,7 @@ async def test_connection_interruptions(
 
 @pytest.mark.parametrize("action", ("dmc_restart",))  # "network_failure"))
 async def test_pubsub_with_connection_interruptions(
-    clients: list[Redis],
+    clients: List[Redis],
     endpoint: Endpoint,
     fault_injection_client: AsyncFaultInjectionClient,
     action: str,

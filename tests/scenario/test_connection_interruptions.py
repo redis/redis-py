@@ -1,5 +1,6 @@
 import multiprocessing
 import time
+from typing import List
 
 import pytest
 from redis import BusyLoadingError, Redis
@@ -65,7 +66,7 @@ def fault_injection_client(request: pytest.FixtureRequest):
 
 @pytest.mark.parametrize("action", ("dmc_restart", "network_failure"))
 def test_connection_interruptions(
-    clients: list[Redis],
+    clients: List[Redis],
     endpoint: Endpoint,
     fault_injection_client: FaultInjectionClient,
     action: str,
@@ -92,7 +93,7 @@ def test_connection_interruptions(
 
 @pytest.mark.parametrize("action", ("dmc_restart", "network_failure"))
 def test_pubsub_with_connection_interruptions(
-    clients: list[Redis],
+    clients: List[Redis],
     endpoint: Endpoint,
     fault_injection_client: FaultInjectionClient,
     action: str,
