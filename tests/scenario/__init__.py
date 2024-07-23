@@ -1,8 +1,8 @@
 import dataclasses
 import json
 import os.path
-from urllib.parse import urlparse
 from typing import List
+from urllib.parse import urlparse
 
 import pytest
 
