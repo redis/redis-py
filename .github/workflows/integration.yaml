@@ -28,7 +28,7 @@ env:
   # this speeds up coverage with Python 3.12: https://github.com/nedbat/coveragepy/issues/1665
   COVERAGE_CORE: sysmon
   REDIS_IMAGE: redis:7.4-rc2
-  REDIS_STACK_IMAGE: redis/redis-stack-server:7.4.0-rc2
+  REDIS_STACK_IMAGE: redis/redis-stack-server:latest
 
 jobs:
   dependency-audit:

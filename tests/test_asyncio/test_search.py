@@ -1540,10 +1540,10 @@ async def test_aggregations_add_scores(decoded_r: redis.Redis):
         )
     )
 
-    assert await decoded_r.ft().client.hset(
+    assert await decoded_r.hset(
         "doc1", mapping={"name": "bar", "age": "25"}
     )
-    assert await decoded_r.ft().client.hset(
+    assert await decoded_r.hset(
         "doc2", mapping={"name": "foo", "age": "19"}
     )
 

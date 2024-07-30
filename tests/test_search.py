@@ -1450,8 +1450,8 @@ def test_aggregations_add_scores(client):
         )
     )
 
-    client.ft().client.hset("doc1", mapping={"name": "bar", "age": "25"})
-    client.ft().client.hset("doc2", mapping={"name": "foo", "age": "19"})
+    client.hset("doc1", mapping={"name": "bar", "age": "25"})
+    client.hset("doc2", mapping={"name": "foo", "age": "19"})
 
     req = aggregations.AggregateRequest("*").add_scores()
     res = client.ft().aggregate(req)
