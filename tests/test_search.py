@@ -1455,9 +1455,15 @@ def test_aggregations_add_scores(client):
 
     req = aggregations.AggregateRequest("*").add_scores()
     res = client.ft().aggregate(req)
-    assert len(res.rows) == 2
-    assert res.rows[0] == ["__score", "0.2"]
-    assert res.rows[1] == ["__score", "0.2"]
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+        assert res["results"][0]["extra_attributes"] == {"__score": "0.2"}
+        assert res["results"][1]["extra_attributes"] == {"__score": "0.2"}
+    else:
+        assert len(res.rows) == 2
+        assert res.rows[0] == ["__score", "0.2"]
+        assert res.rows[1] == ["__score", "0.2"]
 
 
 @pytest.mark.redismod
