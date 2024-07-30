@@ -1531,6 +1531,32 @@ async def test_withsuffixtrie(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+async def test_aggregations_add_scores(decoded_r: redis.Redis):
+    assert await decoded_r.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            NumericField("age", sortable=True),
+        )
+    )
+
+    assert await decoded_r.hset("doc1", mapping={"name": "bar", "age": "25"})
+    assert await decoded_r.hset("doc2", mapping={"name": "foo", "age": "19"})
+
+    req = aggregations.AggregateRequest("*").add_scores()
+    res = await decoded_r.ft().aggregate(req)
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+        assert res["results"][0]["extra_attributes"] == {"__score": "0.2"}
+        assert res["results"][1]["extra_attributes"] == {"__score": "0.2"}
+    else:
+        assert len(res.rows) == 2
+        assert res.rows[0] == ["__score", "0.2"]
+        assert res.rows[1] == ["__score", "0.2"]
+
+
+@pytest.mark.redismod
 @skip_if_redis_enterprise()
 async def test_search_commands_in_pipeline(decoded_r: redis.Redis):
     p = await decoded_r.ft().pipeline()
