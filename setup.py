@@ -8,7 +8,7 @@ setup(
     long_description_content_type="text/markdown",
     keywords=["Redis", "key-value store", "database"],
     license="MIT",
-    version="5.0.7",
+    version="5.0.8",
     packages=find_packages(
         include=[
             "redis",
@@ -58,7 +58,7 @@ setup(
         "Programming Language :: Python :: Implementation :: PyPy",
     ],
     extras_require={
-        "hiredis": ["hiredis>=1.0.0"],
+        "hiredis": ["hiredis>1.0.0"],
         "ocsp": ["cryptography>=36.0.1", "pyopenssl==20.0.1", "requests>=2.26.0"],
     },
 )

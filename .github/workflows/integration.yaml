@@ -26,7 +26,7 @@ permissions:
 env:
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   REDIS_IMAGE: redis:7.4-rc2
-  REDIS_STACK_IMAGE: redis/redis-stack-server:7.4.0-rc2
+  REDIS_STACK_IMAGE: redis/redis-stack-server:7.4.0-v0
 
 jobs:
   dependency-audit:
@@ -80,7 +80,7 @@ jobs:
           pip install -r requirements.txt
           pip install -r dev_requirements.txt
           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-           pip install hiredis
+           pip install "hiredis>=2.0.0,<3.0.0"
           fi
           invoke devenv
           sleep 10 # time to settle
@@ -136,7 +136,7 @@ jobs:
           pip install -r requirements.txt
           pip install -r dev_requirements.txt
           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-            pip install hiredis
+            pip install "hiredis>=2.0.0,<3.0.0"
           fi
           invoke devenv
           sleep 10 # time to settle
