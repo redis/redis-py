@@ -134,6 +134,13 @@ def pytest_addoption(parser):
         help="Name of the Redis master service that the sentinels are monitoring",
     )
 
+    parser.addoption(
+        "--endpoints-config",
+        action="store",
+        default="endpoints.json",
+        help="Path to the Redis endpoints configuration file",
+    )
+
 
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
