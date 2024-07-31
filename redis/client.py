@@ -1048,7 +1048,7 @@ class PubSub:
                 yield response
 
     def get_message(
-        self, ignore_subscribe_messages: bool = False, timeout: float = 0.0
+        self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = None
     ):
         """
         Get the next message if one is available, otherwise None.
