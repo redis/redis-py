@@ -60,17 +60,17 @@ class TimeSeriesCommands:
             duplicate_policy:
                 Policy for handling multiple samples with identical timestamps. Can be
                 one of:
-                    - 'block': An error will occur and the new value will be ignored.
-                    - 'first': Ignore the new value.
-                    - 'last': Override with the latest value.
-                    - 'min': Only override if the value is lower than the existing
-                      value.
-                    - 'max': Only override if the value is higher than the existing
-                      value.
-                    - 'sum': If a previous sample exists, add the new sample to it so
-                      that the updated value is equal to (previous + new). If no
-                      previous sample exists, set the updated value equal to the new
-                      value.
+
+                - 'block': An error will occur and the new value will be ignored.
+                - 'first': Ignore the new value.
+                - 'last': Override with the latest value.
+                - 'min': Only override if the value is lower than the existing value.
+                - 'max': Only override if the value is higher than the existing value.
+                - 'sum': If a previous sample exists, add the new sample to it so
+                  that the updated value is equal to (previous + new). If no
+                  previous sample exists, set the updated value equal to the new
+                  value.
+
             ignore_max_time_diff:
                 A non-negative integer value, in milliseconds, that sets an ignore
                 threshold for added timestamps. If the difference between the last
@@ -130,17 +130,17 @@ class TimeSeriesCommands:
             duplicate_policy:
                 Policy for handling multiple samples with identical timestamps. Can be
                 one of:
-                    - 'block': An error will occur and the new value will be ignored.
-                    - 'first': Ignore the new value.
-                    - 'last': Override with the latest value.
-                    - 'min': Only override if the value is lower than the existing
-                      value.
-                    - 'max': Only override if the value is higher than the existing
-                      value.
-                    - 'sum': If a previous sample exists, add the new sample to it so
-                      that the updated value is equal to (previous + new). If no
-                      previous sample exists, set the updated value equal to the new
-                      value.
+
+                - 'block': An error will occur and the new value will be ignored.
+                - 'first': Ignore the new value.
+                - 'last': Override with the latest value.
+                - 'min': Only override if the value is lower than the existing value.
+                - 'max': Only override if the value is higher than the existing value.
+                - 'sum': If a previous sample exists, add the new sample to it so
+                  that the updated value is equal to (previous + new). If no
+                  previous sample exists, set the updated value equal to the new
+                  value.
+
             ignore_max_time_diff:
                 A non-negative integer value, in milliseconds, that sets an ignore
                 threshold for added timestamps. If the difference between the last
@@ -210,17 +210,17 @@ class TimeSeriesCommands:
             duplicate_policy:
                 Policy for handling multiple samples with identical timestamps. Can be
                 one of:
-                    - 'block': An error will occur and the new value will be ignored.
-                    - 'first': Ignore the new value.
-                    - 'last': Override with the latest value.
-                    - 'min': Only override if the value is lower than the existing
-                      value.
-                    - 'max': Only override if the value is higher than the existing
-                      value.
-                    - 'sum': If a previous sample exists, add the new sample to it so
-                      that the updated value is equal to (previous + new). If no
-                      previous sample exists, set the updated value equal to the new
-                      value.
+
+                - 'block': An error will occur and the new value will be ignored.
+                - 'first': Ignore the new value.
+                - 'last': Override with the latest value.
+                - 'min': Only override if the value is lower than the existing value.
+                - 'max': Only override if the value is higher than the existing value.
+                - 'sum': If a previous sample exists, add the new sample to it so
+                  that the updated value is equal to (previous + new). If no
+                  previous sample exists, set the updated value equal to the new
+                  value.
+
             ignore_max_time_diff:
                 A non-negative integer value, in milliseconds, that sets an ignore
                 threshold for added timestamps. If the difference between the last
@@ -331,17 +331,17 @@ class TimeSeriesCommands:
             duplicate_policy:
                 Policy for handling multiple samples with identical timestamps. Can be
                 one of:
-                    - 'block': An error will occur and the new value will be ignored.
-                    - 'first': Ignore the new value.
-                    - 'last': Override with the latest value.
-                    - 'min': Only override if the value is lower than the existing
-                      value.
-                    - 'max': Only override if the value is higher than the existing
-                      value.
-                    - 'sum': If a previous sample exists, add the new sample to it so
-                      that the updated value is equal to (previous + new). If no
-                      previous sample exists, set the updated value equal to the new
-                      value.
+
+                - 'block': An error will occur and the new value will be ignored.
+                - 'first': Ignore the new value.
+                - 'last': Override with the latest value.
+                - 'min': Only override if the value is lower than the existing value.
+                - 'max': Only override if the value is higher than the existing value.
+                - 'sum': If a previous sample exists, add the new sample to it so
+                  that the updated value is equal to (previous + new). If no
+                  previous sample exists, set the updated value equal to the new
+                  value.
+
             ignore_max_time_diff:
                 A non-negative integer value, in milliseconds, that sets an ignore
                 threshold for added timestamps. If the difference between the last
@@ -423,17 +423,17 @@ class TimeSeriesCommands:
             duplicate_policy:
                 Policy for handling multiple samples with identical timestamps. Can be
                 one of:
-                    - 'block': An error will occur and the new value will be ignored.
-                    - 'first': Ignore the new value.
-                    - 'last': Override with the latest value.
-                    - 'min': Only override if the value is lower than the existing
-                      value.
-                    - 'max': Only override if the value is higher than the existing
-                      value.
-                    - 'sum': If a previous sample exists, add the new sample to it so
-                      that the updated value is equal to (previous + new). If no
-                      previous sample exists, set the updated value equal to the new
-                      value.
+
+                - 'block': An error will occur and the new value will be ignored.
+                - 'first': Ignore the new value.
+                - 'last': Override with the latest value.
+                - 'min': Only override if the value is lower than the existing value.
+                - 'max': Only override if the value is higher than the existing value.
+                - 'sum': If a previous sample exists, add the new sample to it so
+                  that the updated value is equal to (previous + new). If no
+                  previous sample exists, set the updated value equal to the new
+                  value.
+
             ignore_max_time_diff:
                 A non-negative integer value, in milliseconds, that sets an ignore
                 threshold for added timestamps. If the difference between the last
