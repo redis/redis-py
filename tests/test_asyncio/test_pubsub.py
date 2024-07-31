@@ -40,7 +40,7 @@ async def wait_for_message(pubsub, timeout=0.2, ignore_subscribe_messages=False)
     timeout = now + timeout
     while now < timeout:
         message = await pubsub.get_message(
-            ignore_subscribe_messages=ignore_subscribe_messages
+            ignore_subscribe_messages=ignore_subscribe_messages, timeout=0.01
         )
         if message is not None:
             return message
@@ -354,6 +354,15 @@ class TestPubSubMessages:
         assert await r.publish("foo", "test message") == 1
 
         message = await wait_for_message(p)
+        assert isinstance(message, dict)
+        assert message == make_message("message", "foo", "test message")
+
+    async def test_published_message_to_channel_with_blocking_get_message(self, r: redis.Redis, pubsub):
+        await pubsub.subscribe("foo")
+        assert await wait_for_message(pubsub) == make_message("subscribe", "foo", 1)
+
+        assert await r.publish("foo", "test message") == 1
+        message = await pubsub.get_message(ignore_subscribe_messages=True)
         assert isinstance(message, dict)
         assert message == make_message("message", "foo", "test message")
 

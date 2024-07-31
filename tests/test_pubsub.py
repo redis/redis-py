@@ -28,13 +28,13 @@ def wait_for_message(
     while now < timeout:
         if node:
             message = pubsub.get_sharded_message(
-                ignore_subscribe_messages=ignore_subscribe_messages, target_node=node
+                ignore_subscribe_messages=ignore_subscribe_messages, target_node=node, timeout=0.01
             )
         elif func:
-            message = func(ignore_subscribe_messages=ignore_subscribe_messages)
+            message = func(ignore_subscribe_messages=ignore_subscribe_messages, timeout=0.01)
         else:
             message = pubsub.get_message(
-                ignore_subscribe_messages=ignore_subscribe_messages
+                ignore_subscribe_messages=ignore_subscribe_messages, timeout=0.01
             )
         if message is not None:
             return message
@@ -472,6 +472,16 @@ class TestPubSubMessages:
         assert r.publish("foo", "test message") == 1
 
         message = wait_for_message(p)
+        assert isinstance(message, dict)
+        assert message == make_message("message", "foo", "test message")
+
+    async def test_published_message_to_channel_with_blocking_get_message(self, r):
+        pubsub = r.pubsub()
+        pubsub.subscribe("foo")
+        assert wait_for_message(pubsub) == make_message("subscribe", "foo", 1)
+
+        assert r.publish("foo", "test message") == 1
+        message = pubsub.get_message(ignore_subscribe_messages=True)
         assert isinstance(message, dict)
         assert message == make_message("message", "foo", "test message")
 
@@ -920,7 +930,7 @@ class TestPubSubTimeouts:
     def test_get_message_not_subscribed_return_none(self, r):
         p = r.pubsub()
         assert p.subscribed is False
-        assert p.get_message() is None
+        assert p.get_message(timeout=0) is None
         assert p.get_message(timeout=0.1) is None
         with patch.object(threading.Event, "wait") as mock:
             mock.return_value = False
@@ -931,7 +941,7 @@ class TestPubSubTimeouts:
         p = r.pubsub()
 
         def poll(ps, expected_res):
-            assert ps.get_message() is None
+            assert ps.get_message(timeout=0) is None
             message = ps.get_message(timeout=1)
             assert message == expected_res
 
