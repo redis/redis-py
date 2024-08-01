@@ -58,7 +58,6 @@ class NodeProxy:
     def __init__(self, addr, redis_addr):
         self.addr = addr
         self.redis_addr = redis_addr
-        self.send_event = asyncio.Event()
         self.server = None
         self.task = None
         self.n_connections = 0
@@ -83,14 +82,20 @@ class NodeProxy:
             await asyncio.gather(pipe1, pipe2)
         finally:
             redis_writer.close()
+            await self.redis_writer.wait_closed()
+            writer.close()
+            await writer.wait_closed()
 
     async def aclose(self):
-        self.task.cancel()
         try:
-            await self.task
+            self.task.cancel()
+            await asyncio.wait_for(self.task, timeout=1)
+            self.server.close()
+            await self.server.wait_closed()
+        except asyncio.TimeoutError:
+            pass
         except asyncio.CancelledError:
             pass
-        await self.server.wait_closed()
 
     async def pipe(
         self,
@@ -1748,49 +1753,49 @@ class TestClusterRedisCommands:
 
     async def test_cluster_sdiff(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2", "3")
-        assert await r.sdiff("{foo}a", "{foo}b") == {b"1", b"2", b"3"}
+        assert set(await r.sdiff("{foo}a", "{foo}b")) == {b"1", b"2", b"3"}
         await r.sadd("{foo}b", "2", "3")
-        assert await r.sdiff("{foo}a", "{foo}b") == {b"1"}
+        assert await r.sdiff("{foo}a", "{foo}b") == [b"1"]
 
     async def test_cluster_sdiffstore(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2", "3")
         assert await r.sdiffstore("{foo}c", "{foo}a", "{foo}b") == 3
-        assert await r.smembers("{foo}c") == {b"1", b"2", b"3"}
+        assert set(await r.smembers("{foo}c")) == {b"1", b"2", b"3"}
         await r.sadd("{foo}b", "2", "3")
         assert await r.sdiffstore("{foo}c", "{foo}a", "{foo}b") == 1
-        assert await r.smembers("{foo}c") == {b"1"}
+        assert await r.smembers("{foo}c") == [b"1"]
 
     async def test_cluster_sinter(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2", "3")
-        assert await r.sinter("{foo}a", "{foo}b") == set()
+        assert await r.sinter("{foo}a", "{foo}b") == []
         await r.sadd("{foo}b", "2", "3")
-        assert await r.sinter("{foo}a", "{foo}b") == {b"2", b"3"}
+        assert set(await r.sinter("{foo}a", "{foo}b")) == {b"2", b"3"}
 
     async def test_cluster_sinterstore(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2", "3")
         assert await r.sinterstore("{foo}c", "{foo}a", "{foo}b") == 0
-        assert await r.smembers("{foo}c") == set()
+        assert await r.smembers("{foo}c") == []
         await r.sadd("{foo}b", "2", "3")
         assert await r.sinterstore("{foo}c", "{foo}a", "{foo}b") == 2
-        assert await r.smembers("{foo}c") == {b"2", b"3"}
+        assert set(await r.smembers("{foo}c")) == {b"2", b"3"}
 
     async def test_cluster_smove(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "a1", "a2")
         await r.sadd("{foo}b", "b1", "b2")
         assert await r.smove("{foo}a", "{foo}b", "a1")
-        assert await r.smembers("{foo}a") == {b"a2"}
-        assert await r.smembers("{foo}b") == {b"b1", b"b2", b"a1"}
+        assert await r.smembers("{foo}a") == [b"a2"]
+        assert set(await r.smembers("{foo}b")) == {b"b1", b"b2", b"a1"}
 
     async def test_cluster_sunion(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2")
         await r.sadd("{foo}b", "2", "3")
-        assert await r.sunion("{foo}a", "{foo}b") == {b"1", b"2", b"3"}
+        assert set(await r.sunion("{foo}a", "{foo}b")) == {b"1", b"2", b"3"}
 
     async def test_cluster_sunionstore(self, r: RedisCluster) -> None:
         await r.sadd("{foo}a", "1", "2")
         await r.sadd("{foo}b", "2", "3")
         assert await r.sunionstore("{foo}c", "{foo}a", "{foo}b") == 3
-        assert await r.smembers("{foo}c") == {b"1", b"2", b"3"}
+        assert set(await r.smembers("{foo}c")) == {b"1", b"2", b"3"}
 
     @skip_if_server_version_lt("6.2.0")
     async def test_cluster_zdiff(self, r: RedisCluster) -> None:

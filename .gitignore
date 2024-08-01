@@ -16,4 +16,6 @@ coverage.xml
 .venv*
 *.xml
 .coverage*
+prof
+profile_output*
 docker/stunnel/keys

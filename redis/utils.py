@@ -6,8 +6,8 @@ from typing import Any, Dict, Mapping, Union
 try:
     import hiredis  # noqa
 
-    # Only support Hiredis >= 1.0:
-    HIREDIS_AVAILABLE = not hiredis.__version__.startswith("0.")
+    # Only support Hiredis >= 3.0:
+    HIREDIS_AVAILABLE = int(hiredis.__version__.split(".")[0]) >= 3
     HIREDIS_PACK_AVAILABLE = hasattr(hiredis, "pack_command")
 except ImportError:
     HIREDIS_AVAILABLE = False

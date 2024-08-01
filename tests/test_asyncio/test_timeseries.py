@@ -746,7 +746,7 @@ async def test_query_index(decoded_r: redis.Redis):
     assert 2 == len(await decoded_r.ts().queryindex(["Test=This"]))
     assert 1 == len(await decoded_r.ts().queryindex(["Taste=That"]))
     assert_resp_response(
-        decoded_r, await decoded_r.ts().queryindex(["Taste=That"]), [2], {"2"}
+        decoded_r, await decoded_r.ts().queryindex(["Taste=That"]), [2], ["2"]
     )
 
 
