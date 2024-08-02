@@ -882,7 +882,7 @@ class RedisSSLContext:
         self,
         keyfile: Optional[str] = None,
         certfile: Optional[str] = None,
-        cert_reqs: Optional[str] = None,
+        cert_reqs: Optional[Union[str, VerifyMode]] = None,
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
         check_hostname: bool = False,
@@ -892,7 +892,7 @@ class RedisSSLContext:
         self.keyfile = keyfile
         self.certfile = certfile
         if cert_reqs is None:
-            self.cert_reqs = ssl.CERT_NONE
+            cert_reqs = ssl.CERT_NONE
         elif isinstance(cert_reqs, str):
             CERT_REQS = {
                 "none": ssl.CERT_NONE,
@@ -903,7 +903,8 @@ class RedisSSLContext:
                 raise RedisError(
                     f"Invalid SSL Certificate Requirements Flag: {cert_reqs}"
                 )
-            self.cert_reqs = CERT_REQS[cert_reqs]
+            cert_reqs = CERT_REQS[cert_reqs]
+        self.cert_reqs = cert_reqs
         self.ca_certs = ca_certs
         self.ca_data = ca_data
         self.check_hostname = check_hostname
