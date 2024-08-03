@@ -88,15 +88,11 @@ class _RESP3Parser(_RESPBase):
         # set response
         elif byte == b"~":
             # redis can return unhashable types (like dict) in a set,
-            # so we need to first convert to a list, and then try to convert it to a set
+            # so we return sets as list, all the time, for predictability
             response = [
                 self._read_response(disable_decoding=disable_decoding)
                 for _ in range(int(response))
             ]
-            try:
-                response = set(response)
-            except TypeError:
-                pass
         # map response
         elif byte == b"%":
             # We cannot use a dict-comprehension to parse stream.
@@ -233,15 +229,11 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
         # set response
         elif byte == b"~":
             # redis can return unhashable types (like dict) in a set,
-            # so we need to first convert to a list, and then try to convert it to a set
+            # so we always convert to a list, to have predictable return types
             response = [
                 (await self._read_response(disable_decoding=disable_decoding))
                 for _ in range(int(response))
             ]
-            try:
-                response = set(response)
-            except TypeError:
-                pass
         # map response
         elif byte == b"%":
             # We cannot use a dict-comprehension to parse stream.

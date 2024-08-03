@@ -41,6 +41,15 @@ def test_bulk(client):
 
 
 @pytest.mark.redismod
+def test_graph_creation_throws_deprecation_warning(client):
+    """Verify that a DeprecationWarning is raised when creating a Graph instance."""
+
+    match = "RedisGraph support is deprecated as of Redis Stack 7.2"
+    with pytest.warns(DeprecationWarning, match=match):
+        client.graph()
+
+
+@pytest.mark.redismod
 @skip_if_resp_version(3)
 def test_graph_creation(client):
     graph = client.graph()

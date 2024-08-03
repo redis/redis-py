@@ -813,8 +813,26 @@ class SSLConnection(Connection):
         super().__init__(**kwargs)
 
     def _connect(self):
-        "Wrap the socket with SSL support"
+        """
+        Wrap the socket with SSL support, handling potential errors.
+        """
         sock = super()._connect()
+        try:
+            return self._wrap_socket_with_ssl(sock)
+        except (OSError, RedisError):
+            sock.close()
+            raise
+
+    def _wrap_socket_with_ssl(self, sock):
+        """
+        Wraps the socket with SSL support.
+
+        Args:
+            sock: The plain socket to wrap with SSL.
+
+        Returns:
+            An SSL wrapped socket.
+        """
         context = ssl.create_default_context()
         context.check_hostname = self.check_hostname
         context.verify_mode = self.cert_reqs
@@ -836,7 +854,6 @@ class SSLConnection(Connection):
             context.minimum_version = self.ssl_min_version
         if self.ssl_ciphers:
             context.set_ciphers(self.ssl_ciphers)
-        sslsock = context.wrap_socket(sock, server_hostname=self.host)
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE is False:
             raise RedisError("cryptography is not installed.")
 
@@ -845,6 +862,8 @@ class SSLConnection(Connection):
                 "Either an OCSP staple or pure OCSP connection must be validated "
                 "- not both."
             )
+
+        sslsock = context.wrap_socket(sock, server_hostname=self.host)
 
         # validation for the stapled case
         if self.ssl_validate_ocsp_stapled:
@@ -902,7 +921,12 @@ class UnixDomainSocketConnection(AbstractConnection):
         "Create a Unix domain socket connection"
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(self.socket_connect_timeout)
-        sock.connect(self.path)
+        try:
+            sock.connect(self.path)
+        except OSError:
+            # Prevent ResourceWarnings for unclosed sockets.
+            sock.close()
+            raise
         sock.settimeout(self.socket_timeout)
         return sock
 
@@ -957,7 +981,7 @@ def parse_url(url):
                 try:
                     kwargs[name] = parser(value)
                 except (TypeError, ValueError):
-                    raise ValueError(f"Invalid value for `{name}` in connection URL.")
+                    raise ValueError(f"Invalid value for '{name}' in connection URL.")
             else:
                 kwargs[name] = value
 

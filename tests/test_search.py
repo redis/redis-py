@@ -4,6 +4,7 @@ import os
 import time
 from io import TextIOWrapper
 
+import numpy as np
 import pytest
 import redis
 import redis.commands.search
@@ -26,9 +27,9 @@ from redis.commands.search.suggestion import Suggestion
 
 from .conftest import (
     _get_client,
-    assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
+    skip_if_resp_version,
     skip_ifmodversion_lt,
 )
 
@@ -891,7 +892,7 @@ def test_dict_operations(client):
 
     # Dump dict and inspect content
     res = client.ft().dict_dump("custom_dict")
-    assert_resp_response(client, res, ["item1", "item3"], {"item1", "item3"})
+    assert res == ["item1", "item3"]
 
     # Remove rest of the items before reload
     client.ft().dict_del("custom_dict", *res)
@@ -1440,6 +1441,32 @@ def test_aggregations_filter(client):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+def test_aggregations_add_scores(client):
+    client.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            NumericField("age", sortable=True),
+        )
+    )
+
+    client.hset("doc1", mapping={"name": "bar", "age": "25"})
+    client.hset("doc2", mapping={"name": "foo", "age": "19"})
+
+    req = aggregations.AggregateRequest("*").add_scores()
+    res = client.ft().aggregate(req)
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+        assert res["results"][0]["extra_attributes"] == {"__score": "0.2"}
+        assert res["results"][1]["extra_attributes"] == {"__score": "0.2"}
+    else:
+        assert len(res.rows) == 2
+        assert res.rows[0] == ["__score", "0.2"]
+        assert res.rows[1] == ["__score", "0.2"]
+
+
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_index_definition(client):
     """
@@ -1703,6 +1730,54 @@ def test_search_return_fields(client):
         assert 1 == len(total["results"])
         assert "doc:1" == total["results"][0]["id"]
         assert "telmatosaurus" == total["results"][0]["extra_attributes"]["txt"]
+
+
+@pytest.mark.redismod
+@skip_if_resp_version(3)
+def test_binary_and_text_fields(client):
+    fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+
+    index_name = "mixed_index"
+    mixed_data = {"first_name": "🐍python", "vector_emb": fake_vec.tobytes()}
+    client.hset(f"{index_name}:1", mapping=mixed_data)
+
+    schema = (
+        TagField("first_name"),
+        VectorField(
+            "embeddings_bio",
+            algorithm="HNSW",
+            attributes={
+                "TYPE": "FLOAT32",
+                "DIM": 4,
+                "DISTANCE_METRIC": "COSINE",
+            },
+        ),
+    )
+
+    client.ft(index_name).create_index(
+        fields=schema,
+        definition=IndexDefinition(
+            prefix=[f"{index_name}:"], index_type=IndexType.HASH
+        ),
+    )
+
+    query = (
+        Query("*")
+        .return_field("vector_emb", decode_field=False)
+        .return_field("first_name")
+    )
+    docs = client.ft(index_name).search(query=query, query_params={}).docs
+    decoded_vec_from_search_results = np.frombuffer(
+        docs[0]["vector_emb"], dtype=np.float32
+    )
+
+    assert np.array_equal(
+        decoded_vec_from_search_results, fake_vec
+    ), "The vectors are not equal"
+
+    assert (
+        docs[0]["first_name"] == mixed_data["first_name"]
+    ), "The text field is not decoded correctly"
 
 
 @pytest.mark.redismod

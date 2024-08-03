@@ -155,7 +155,7 @@ class GraphCommands:
     def config(self, name, value=None, set=False):
         """
         Retrieve or update a RedisGraph configuration.
-        For more information see `https://redis.io/commands/graph.config-get/>`_. # noqa
+        For more information see `<https://redis.io/commands/graph.config-get/>`__.
 
         Args:
 

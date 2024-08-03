@@ -64,7 +64,7 @@ class CommandsProtocol(Protocol):
     def execute_command(self, *args, **options) -> ResponseT[Any]: ...
 
 
-class ClusterCommandsProtocol(CommandsProtocol, Protocol):
+class ClusterCommandsProtocol(CommandsProtocol):
     encoder: "Encoder"
 
     def execute_command(self, *args, **options) -> ResponseT[Any]: ...
