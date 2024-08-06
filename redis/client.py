@@ -311,6 +311,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, CacheMixin):
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
+                if use_cache and protocol in [3, "3"]:
+                    kwargs.update(
+                        {
+                            "use_cache": use_cache,
+                            "cache": cache,
+                            "cache_size": cache_size,
+                            "cache_ttl": cache_ttl,
+                        }
+                    )
             connection_pool = ConnectionPool(**kwargs)
             self.auto_close_connection_pool = True
         else:
@@ -320,7 +329,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, CacheMixin):
 
         if use_cache and self.connection_pool.get_protocol() not in [3, "3"]:
             raise RedisError("Client caching is only supported with RESP version 3")
-        CacheMixin.__init__(self, use_cache, self.connection_pool, cache, cache_size, cache_ttl)
 
         self.connection = None
         if single_connection_client:
@@ -535,7 +543,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, CacheMixin):
         """
         Send a command and parse the response
         """
-        conn.send_command(*args)
+        conn.send_command(*args, **options)
         return self.parse_response(conn, command_name, **options)
 
     def _disconnect_raise(self, conn, error):
@@ -553,8 +561,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, CacheMixin):
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
-        if self.use_cache:
-            return self.cached_call(self._execute_command, *args, **options)
         return self._execute_command(*args, **options)
 
     def _execute_command(self, *args, **options):
