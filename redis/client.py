@@ -15,7 +15,6 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
     bool_ok,
 )
-from redis.cache import CacheMixin
 from redis.commands import (
     CoreCommands,
     RedisModuleCommands,
@@ -86,7 +85,7 @@ class AbstractRedis:
     pass
 
 
-class Redis(RedisModuleCommands, CoreCommands, SentinelCommands, CacheMixin):
+class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     """
     Implementation of the Redis protocol.
 

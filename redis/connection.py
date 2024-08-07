@@ -11,6 +11,8 @@ from queue import Empty, Full, LifoQueue
 from time import time
 from typing import Any, Callable, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
+
+from apscheduler.schedulers.background import BackgroundScheduler
 from cachetools import TTLCache, Cache, LRUCache
 from cachetools.keys import hashkey
 from redis.cache import CacheConfiguration
@@ -788,15 +790,21 @@ class CacheProxyConnection(ConnectionInterface):
         if self._cache.get(self._current_command_hash):
             return
 
-        # Send command over socket only if it's read-only command that not yet cached.
+        # Set temporary entry as a status to prevent race condition from another connection.
+        self._cache[self._current_command_hash] = "caching-in-progress"
+
+        # Send command over socket only if it's allowed read-only command that not yet cached.
         self._conn.send_command(*args, **kwargs)
 
     def can_read(self, timeout=0):
         return self._conn.can_read(timeout)
 
     def read_response(self, disable_decoding=False, *, disconnect_on_error=True, push_request=False):
-        # Check if command response exists in a cache.
-        if self._current_command_hash in self._cache:
+        # Check if command response exists in a cache and it's not in progress.
+        if (
+                self._current_command_hash in self._cache
+                and self._cache[self._current_command_hash] != "caching-in-progress"
+        ):
             return self._cache[self._current_command_hash]
 
         response = self._conn.read_response(
@@ -805,8 +813,12 @@ class CacheProxyConnection(ConnectionInterface):
             push_request=push_request
         )
 
-        # Check if command that was sent is write command to prevent caching of write replies.
-        if response is None or self._current_command_hash is None:
+        # If response is None prevent from caching and remove temporary cache entry.
+        if response is None:
+            self._cache.pop(self._current_command_hash)
+            return response
+        # Prevent not-allowed command from caching.
+        elif self._current_command_hash is None:
             return response
 
         # Create separate mapping for keys or add current response to associated keys.
@@ -817,7 +829,12 @@ class CacheProxyConnection(ConnectionInterface):
             else:
                 self._keys_mapping[key] = [self._current_command_hash]
 
-        self._cache[self._current_command_hash] = response
+        cache_entry = self._cache.get(self._current_command_hash, None)
+
+        # Cache only responses that still valid and wasn't invalidated by another connection in meantime
+        if cache_entry is not None:
+            self._cache[self._current_command_hash] = response
+
         return response
 
     def pack_command(self, *args):
@@ -1218,6 +1235,7 @@ class ConnectionPool:
         self.max_connections = max_connections
         self._cache = None
         self._cache_conf = None
+        self._scheduler = None
 
         if connection_kwargs.get("use_cache"):
             if connection_kwargs.get("protocol") not in [3, "3"]:
@@ -1225,15 +1243,20 @@ class ConnectionPool:
 
             self._cache_conf = CacheConfiguration(**self.connection_kwargs)
 
-            if self.connection_kwargs.get("cache"):
-                self._cache = self.connection_kwargs.get("cache")
+            cache = self.connection_kwargs.get("cache")
+            if cache is not None:
+                self._cache = cache
             else:
                 self._cache = TTLCache(self.connection_kwargs["cache_size"], self.connection_kwargs["cache_ttl"])
 
-            connection_kwargs.pop("use_cache", None)
-            connection_kwargs.pop("cache_size", None)
-            connection_kwargs.pop("cache_ttl", None)
-            connection_kwargs.pop("cache", None)
+            # self.scheduler = BackgroundScheduler()
+            # self.scheduler.add_job(self._perform_health_check, "interval", seconds=2)
+            # self.scheduler.start()
+
+        connection_kwargs.pop("use_cache", None)
+        connection_kwargs.pop("cache_size", None)
+        connection_kwargs.pop("cache_ttl", None)
+        connection_kwargs.pop("cache", None)
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
@@ -1245,6 +1268,10 @@ class ConnectionPool:
         # release the lock.
         self._fork_lock = threading.Lock()
         self.reset()
+
+    def __del__(self):
+        if self._scheduler is not None:
+            self.scheduler.shutdown()
 
     def __repr__(self) -> (str, str):
         return (
@@ -1431,6 +1458,16 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
+
+    def _perform_health_check(self) -> None:
+        self._checkpid()
+        with self._lock:
+            while self._available_connections:
+                conn = self._available_connections.pop()
+                self._in_use_connections.add(conn)
+                conn.send_command('PING')
+                conn.read_response()
+                self.release(conn)
 
 
 class BlockingConnectionPool(ConnectionPool):
