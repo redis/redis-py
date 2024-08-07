@@ -760,59 +760,56 @@ class CacheProxyConnection(ConnectionInterface):
         self._conn.check_health()
 
     def send_packed_command(self, command, check_health=True):
-        cache_key = hashkey(command)
-
-        if self._cache.get(cache_key):
-            self._current_command_hash = cache_key
-            return
-
-        self._current_command_hash = None
+        self._process_pending_invalidations()
+        # TODO: Investigate if it's possible to unpack command or extract keys from packed command
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
+        self._process_pending_invalidations()
+
+        # If command is write command or not allowed to cache skip it.
         if not self._conf.is_allowed_to_cache(args[0]):
             self._current_command_hash = None
             self._current_command_keys = None
             self._conn.send_command(*args, **kwargs)
             return
 
+        # Create hash representation of current executed command.
         self._current_command_hash = hashkey(*args)
 
+        # Extract keys from current command.
         if kwargs.get("keys"):
             self._current_command_keys = kwargs["keys"]
 
             if not isinstance(self._current_command_keys, list):
                 raise TypeError("Cache keys must be a list.")
 
+        # If current command reply already cached prevent sending data over socket.
         if self._cache.get(self._current_command_hash):
             return
 
+        # Send command over socket only if it's read-only command that not yet cached.
         self._conn.send_command(*args, **kwargs)
 
     def can_read(self, timeout=0):
         return self._conn.can_read(timeout)
 
     def read_response(self, disable_decoding=False, *, disconnect_on_error=True, push_request=False):
+        # Check if command response exists in a cache.
+        if self._current_command_hash in self._cache:
+            return self._cache[self._current_command_hash]
+
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
             disconnect_on_error=disconnect_on_error,
             push_request=push_request
         )
 
-        if isinstance(response, List) and len(response) > 0 and response[0] == 'invalidate':
-            self._on_invalidation_callback(response)
-            self.read_response(
-                disable_decoding=disable_decoding,
-                disconnect_on_error=disconnect_on_error,
-                push_request=push_request
-            )
-
+        # Check if command that was sent is write command to prevent caching of write replies.
         if response is None or self._current_command_hash is None:
             return response
 
-        if self._current_command_hash in self._cache:
-            return self._cache[self._current_command_hash]
-
+        # Create separate mapping for keys or add current response to associated keys.
         for key in self._current_command_keys:
             if key in self._keys_mapping:
                 if self._current_command_hash not in self._keys_mapping[key]:
@@ -824,10 +821,10 @@ class CacheProxyConnection(ConnectionInterface):
         return response
 
     def pack_command(self, *args):
-        pass
+        return self._conn.pack_command(*args)
 
     def pack_commands(self, commands):
-        pass
+        return self._conn.pack_commands(commands)
 
     def _connect(self):
         self._conn._connect()
@@ -838,24 +835,27 @@ class CacheProxyConnection(ConnectionInterface):
     def _enable_tracking_callback(self, conn: ConnectionInterface) -> None:
         conn.send_command('CLIENT', 'TRACKING', 'ON')
         conn.read_response()
+        conn._parser.set_invalidation_push_handler(self._on_invalidation_callback)
 
     def _process_pending_invalidations(self):
-        print(f'connection {self} {id(self)} process invalidations')
         while self.can_read():
-            self.read_response(push_request=True)
+            self._conn.read_response(push_request=True)
 
     def _on_invalidation_callback(
             self, data: List[Union[str, Optional[List[str]]]]
     ):
+        # Flush cache when DB flushed on server-side
         if data[1] is None:
             self._cache.clear()
         else:
             for key in data[1]:
                 normalized_key = ensure_string(key)
                 if normalized_key in self._keys_mapping:
+                    # Make sure that all command responses associated with this key will be deleted
                     for cache_key in self._keys_mapping[normalized_key]:
                         self._cache.pop(cache_key)
-
+                # Removes key from mapping cache
+                self._keys_mapping.pop(normalized_key)
 
 
 class SSLConnection(Connection):
@@ -1235,7 +1235,6 @@ class ConnectionPool:
             connection_kwargs.pop("cache_ttl", None)
             connection_kwargs.pop("cache", None)
 
-
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
         # after a fork. during this time, multiple threads in the child
@@ -1343,7 +1342,7 @@ class ConnectionPool:
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
             try:
-                if connection.can_read():
+                if connection.can_read() and self._cache is None:
                     raise ConnectionError("Connection has data")
             except (ConnectionError, OSError):
                 connection.disconnect()
