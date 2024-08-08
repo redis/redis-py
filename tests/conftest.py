@@ -16,7 +16,7 @@ from redis.exceptions import RedisClusterException
 from redis.retry import Retry
 
 REDIS_INFO = {}
-default_redis_url = "redis://localhost:6379/0"
+default_redis_url = "redis://localhost:6372/0"
 default_protocol = "2"
 default_redismod_url = "redis://localhost:6479"
 

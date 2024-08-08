@@ -11,7 +11,6 @@ from cachetools import Cache
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.helpers import parse_scan
 from redis.backoff import default_backoff
-from redis.cache import CacheMixin
 from redis.client import CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
@@ -446,7 +445,7 @@ class AbstractRedisCluster:
                     self.nodes_manager.default_node = random.choice(replicas)
 
 
-class RedisCluster(AbstractRedisCluster, RedisClusterCommands, CacheMixin):
+class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
     @classmethod
     def from_url(cls, url, **kwargs):
         """
@@ -504,7 +503,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands, CacheMixin):
         dynamic_startup_nodes: bool = True,
         url: Optional[str] = None,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
-        use_cache: Optional[bool] = False,
+        use_cache: bool = False,
+        cache: Optional[Cache] = None,
+        cache_size: int = 128,
+        cache_ttl: int = 300,
         **kwargs,
     ):
         """
@@ -628,6 +630,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands, CacheMixin):
             kwargs.get("encoding_errors", "strict"),
             kwargs.get("decode_responses", False),
         )
+        protocol = kwargs.get("protocol", None)
+        if use_cache and protocol not in [3, "3"]:
+            raise RedisError("Client caching is only supported with RESP version 3")
+
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
@@ -641,6 +647,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands, CacheMixin):
             dynamic_startup_nodes=dynamic_startup_nodes,
             address_remap=address_remap,
             use_cache=use_cache,
+            cache=cache,
+            cache_size=cache_size,
+            cache_ttl=cache_ttl,
             **kwargs,
         )
 
@@ -648,11 +657,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands, CacheMixin):
             self.__class__.CLUSTER_COMMANDS_RESPONSE_CALLBACKS
         )
         self.result_callbacks = CaseInsensitiveDict(self.__class__.RESULT_CALLBACKS)
-
-        protocol = kwargs.get("protocol", None)
-        if use_cache and protocol not in [3, "3"]:
-            raise RedisError("Client caching is only supported with RESP version 3")
-        CacheMixin.__init__(self, use_cache, None)
 
         self.commands_parser = CommandsParser(self)
         self._lock = threading.Lock()
@@ -1057,8 +1061,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands, CacheMixin):
         return nodes
 
     def execute_command(self, *args, **options):
-        if self.use_cache:
-            return self.cached_call(self._execute_command, *args, **options)
         return self._internal_execute_command(*args, **options)
 
     def _internal_execute_command(self, *args, **kwargs):
@@ -1163,7 +1165,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands, CacheMixin):
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
                     asking = False
-                connection.send_command(*args)
+                connection.send_command(*args, **kwargs)
                 response = redis_node.parse_response(connection, command, **kwargs)
                 if command in self.cluster_response_callbacks:
                     response = self.cluster_response_callbacks[command](
@@ -1317,7 +1319,7 @@ class LoadBalancer:
         self.primary_to_idx.clear()
 
 
-class NodesManager(CacheMixin):
+class NodesManager():
     def __init__(
         self,
         startup_nodes,
@@ -1327,8 +1329,10 @@ class NodesManager(CacheMixin):
         dynamic_startup_nodes=True,
         connection_pool_class=ConnectionPool,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
-        use_cache: Optional[bool] = False,
+        use_cache: bool = False,
         cache: Optional[Cache] = None,
+        cache_size: int = 128,
+        cache_ttl: int = 300,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1342,13 +1346,15 @@ class NodesManager(CacheMixin):
         self.connection_pool_class = connection_pool_class
         self.address_remap = address_remap
         self.use_cache = use_cache
+        self.cache = cache
+        self.cache_size = cache_size
+        self.cache_ttl = cache_ttl
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
         if lock is None:
             lock = threading.Lock()
         self._lock = lock
-        CacheMixin.__init__(self, use_cache, None, cache)
         self.initialize()
 
     def get_node(self, host=None, port=None, node_name=None):
@@ -1486,9 +1492,21 @@ class NodesManager(CacheMixin):
             # Create a redis node with a costumed connection pool
             kwargs.update({"host": host})
             kwargs.update({"port": port})
-            r = Redis(connection_pool=self.connection_pool_class(**kwargs), use_cache=self.use_cache, cache=self.cache)
+            kwargs.update({"use_cache": self.use_cache})
+            kwargs.update({"cache": self.cache})
+            kwargs.update({"cache_size": self.cache_size})
+            kwargs.update({"cache_ttl": self.cache_ttl})
+            r = Redis(connection_pool=self.connection_pool_class(**kwargs))
         else:
-            r = Redis(host=host, port=port, use_cache=self.use_cache, cache=self.cache, **kwargs)
+            r = Redis(
+                host=host,
+                port=port,
+                use_cache=self.use_cache,
+                cache=self.cache,
+                cache_size=self.cache_size,
+                cache_ttl=self.cache_ttl,
+                **kwargs,
+            )
         return r
 
     def _get_or_create_cluster_node(self, host, port, role, tmp_nodes_cache):

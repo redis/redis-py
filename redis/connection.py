@@ -8,7 +8,7 @@ import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from time import time
+from time import time, sleep
 from typing import Any, Callable, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -756,6 +756,7 @@ class CacheProxyConnection(ConnectionInterface):
         self._conn.on_connect()
 
     def disconnect(self, *args):
+        self._cache.clear()
         self._conn.disconnect(*args)
 
     def check_health(self):
@@ -1235,7 +1236,7 @@ class ConnectionPool:
         self.max_connections = max_connections
         self._cache = None
         self._cache_conf = None
-        self._scheduler = None
+        self.scheduler = None
 
         if connection_kwargs.get("use_cache"):
             if connection_kwargs.get("protocol") not in [3, "3"]:
@@ -1249,9 +1250,9 @@ class ConnectionPool:
             else:
                 self._cache = TTLCache(self.connection_kwargs["cache_size"], self.connection_kwargs["cache_ttl"])
 
-            # self.scheduler = BackgroundScheduler()
-            # self.scheduler.add_job(self._perform_health_check, "interval", seconds=2)
-            # self.scheduler.start()
+            self.scheduler = BackgroundScheduler()
+            self.scheduler.add_job(self._perform_health_check, "interval", seconds=2, id="cache_health_check")
+            self.scheduler.start()
 
         connection_kwargs.pop("use_cache", None)
         connection_kwargs.pop("cache_size", None)
@@ -1268,10 +1269,6 @@ class ConnectionPool:
         # release the lock.
         self._fork_lock = threading.Lock()
         self.reset()
-
-    def __del__(self):
-        if self._scheduler is not None:
-            self.scheduler.shutdown()
 
     def __repr__(self) -> (str, str):
         return (
@@ -1464,10 +1461,8 @@ class ConnectionPool:
         with self._lock:
             while self._available_connections:
                 conn = self._available_connections.pop()
-                self._in_use_connections.add(conn)
                 conn.send_command('PING')
                 conn.read_response()
-                self.release(conn)
 
 
 class BlockingConnectionPool(ConnectionPool):
