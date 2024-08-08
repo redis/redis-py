@@ -1541,7 +1541,14 @@ class BlockingConnectionPool(ConnectionPool):
 
     def make_connection(self):
         "Make a fresh connection."
-        connection = self.connection_class(**self.connection_kwargs)
+        if self._cache is not None and self._cache_conf is not None:
+            connection = CacheProxyConnection(
+                self.connection_class(**self.connection_kwargs),
+                self._cache,
+                self._cache_conf
+            )
+        else:
+            connection = self.connection_class(**self.connection_kwargs)
         self._connections.append(connection)
         return connection
 
