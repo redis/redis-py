@@ -1421,6 +1421,8 @@ class Pipeline(Redis):
         for r, cmd in zip(response, commands):
             if not isinstance(r, Exception):
                 args, options = cmd
+                # Remove keys entry, it needs only for cache.
+                options.pop("keys", None)
                 command_name = args[0]
                 if command_name in self.response_callbacks:
                     r = self.response_callbacks[command_name](r, **options)
