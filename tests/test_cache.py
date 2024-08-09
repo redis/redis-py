@@ -488,3 +488,21 @@ class TestClusterCache:
         assert r.flushall()
         assert r.get("foo") is None
         assert cache.currsize == 0
+
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+@pytest.mark.onlynoncluster
+class TestSentinelCache:
+    def test_get_from_cache(self, cache, master):
+        master.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert master.get("foo") == b"bar"
+        # get key from local cache
+        assert cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        master.set("foo", "barbar")
+        # send any command to redis (process invalidation in background)
+        master.ping()
+        # the command is not in the local cache anymore
+        assert cache.get(("GET", "foo")) is None
+        # get key from redis
+        assert master.get("foo") == b"barbar"

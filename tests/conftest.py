@@ -410,7 +410,7 @@ def sslclient(request):
 
 
 @pytest.fixture()
-def sentinel_setup(local_cache, request):
+def sentinel_setup(cache, request):
     sentinel_ips = request.config.getoption("--sentinels")
     sentinel_endpoints = [
         (ip.strip(), int(port.strip()))
@@ -420,7 +420,8 @@ def sentinel_setup(local_cache, request):
     sentinel = Sentinel(
         sentinel_endpoints,
         socket_timeout=0.1,
-        client_cache=local_cache,
+        use_cache=cache,
+        cache=cache,
         protocol=3,
         **kwargs,
     )
