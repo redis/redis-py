@@ -1402,6 +1402,39 @@ class TestRedisCommands:
         pairs = [k async for k in r.zscan_iter("a", match="a")]
         assert set(pairs) == {(b"a", 1)}
 
+    async def test_scan_iter_family_executes_commands_with_same_iter_req_id(self):
+        """Assert that all calls to execute_command receives the iter_req_id kwarg"""
+        import uuid
+
+        from redis.commands.core import AsyncScanCommands
+
+        from .compat import mock
+
+        with mock.patch.object(
+            AsyncScanCommands, "execute_command", mock.AsyncMock(return_value=(0, []))
+        ) as mock_execute_command, mock.patch.object(
+            uuid, "uuid4", return_value="uuid"
+        ):
+            [a async for a in AsyncScanCommands().scan_iter()]
+            mock_execute_command.assert_called_with("SCAN", "0", iter_req_id="uuid")
+            [a async for a in AsyncScanCommands().sscan_iter("")]
+            mock_execute_command.assert_called_with(
+                "SSCAN", "", "0", iter_req_id="uuid"
+            )
+        with mock.patch.object(
+            AsyncScanCommands, "execute_command", mock.AsyncMock(return_value=(0, {}))
+        ) as mock_execute_command, mock.patch.object(
+            uuid, "uuid4", return_value="uuid"
+        ):
+            [a async for a in AsyncScanCommands().hscan_iter("")]
+            mock_execute_command.assert_called_with(
+                "HSCAN", "", "0", no_values=None, iter_req_id="uuid"
+            )
+            [a async for a in AsyncScanCommands().zscan_iter("")]
+            mock_execute_command.assert_called_with(
+                "ZSCAN", "", "0", score_cast_func=mock.ANY, iter_req_id="uuid"
+            )
+
     # SET COMMANDS
     async def test_sadd(self, r: redis.Redis):
         members = {b"1", b"2", b"3"}

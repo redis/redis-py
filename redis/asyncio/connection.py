@@ -1057,6 +1057,14 @@ class ConnectionPool:
     ``connection_class``.
     """
 
+    def cleanup(self, **options):
+        """
+        Additional cleanup operations that the connection pool might need to do.
+        See SentinelManagedConnection for an example cleanup operation that
+        might need to be done.
+        """
+        pass
+
     @classmethod
     def from_url(cls: Type[_CP], url: str, **kwargs) -> _CP:
         """
@@ -1118,7 +1126,7 @@ class ConnectionPool:
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
 
-        self._available_connections: List[AbstractConnection] = []
+        self._available_connections = self.reset_available_connections()
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
 
@@ -1129,8 +1137,11 @@ class ConnectionPool:
         )
 
     def reset(self):
-        self._available_connections = []
+        self._available_connections = self.reset_available_connections()
         self._in_use_connections = weakref.WeakSet()
+
+    def reset_available_connections(self):
+        return []
 
     def can_get_connection(self) -> bool:
         """Return True if a connection can be retrieved from the pool."""
@@ -1324,3 +1335,6 @@ class BlockingConnectionPool(ConnectionPool):
         async with self._condition:
             await super().release(connection)
             self._condition.notify()
+
+    def cleanup(self, **options):
+        pass
