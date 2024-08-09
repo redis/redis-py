@@ -1577,7 +1577,7 @@ class TestClusterRedisCommands:
         assert isinstance(stats, dict)
         for key, value in stats.items():
             if key.startswith("db."):
-                assert isinstance(value, dict)
+                assert not isinstance(value, list)
 
     @skip_if_server_version_lt("4.0.0")
     def test_memory_help(self, r):
@@ -1868,49 +1868,49 @@ class TestClusterRedisCommands:
 
     def test_cluster_sdiff(self, r):
         r.sadd("{foo}a", "1", "2", "3")
-        assert r.sdiff("{foo}a", "{foo}b") == {b"1", b"2", b"3"}
+        assert set(r.sdiff("{foo}a", "{foo}b")) == {b"1", b"2", b"3"}
         r.sadd("{foo}b", "2", "3")
-        assert r.sdiff("{foo}a", "{foo}b") == {b"1"}
+        assert r.sdiff("{foo}a", "{foo}b") == [b"1"]
 
     def test_cluster_sdiffstore(self, r):
         r.sadd("{foo}a", "1", "2", "3")
         assert r.sdiffstore("{foo}c", "{foo}a", "{foo}b") == 3
-        assert r.smembers("{foo}c") == {b"1", b"2", b"3"}
+        assert set(r.smembers("{foo}c")) == {b"1", b"2", b"3"}
         r.sadd("{foo}b", "2", "3")
         assert r.sdiffstore("{foo}c", "{foo}a", "{foo}b") == 1
-        assert r.smembers("{foo}c") == {b"1"}
+        assert r.smembers("{foo}c") == [b"1"]
 
     def test_cluster_sinter(self, r):
         r.sadd("{foo}a", "1", "2", "3")
-        assert r.sinter("{foo}a", "{foo}b") == set()
+        assert r.sinter("{foo}a", "{foo}b") == []
         r.sadd("{foo}b", "2", "3")
-        assert r.sinter("{foo}a", "{foo}b") == {b"2", b"3"}
+        assert set(r.sinter("{foo}a", "{foo}b")) == {b"2", b"3"}
 
     def test_cluster_sinterstore(self, r):
         r.sadd("{foo}a", "1", "2", "3")
         assert r.sinterstore("{foo}c", "{foo}a", "{foo}b") == 0
-        assert r.smembers("{foo}c") == set()
+        assert r.smembers("{foo}c") == []
         r.sadd("{foo}b", "2", "3")
         assert r.sinterstore("{foo}c", "{foo}a", "{foo}b") == 2
-        assert r.smembers("{foo}c") == {b"2", b"3"}
+        assert set(r.smembers("{foo}c")) == {b"2", b"3"}
 
     def test_cluster_smove(self, r):
         r.sadd("{foo}a", "a1", "a2")
         r.sadd("{foo}b", "b1", "b2")
         assert r.smove("{foo}a", "{foo}b", "a1")
-        assert r.smembers("{foo}a") == {b"a2"}
-        assert r.smembers("{foo}b") == {b"b1", b"b2", b"a1"}
+        assert r.smembers("{foo}a") == [b"a2"]
+        assert set(r.smembers("{foo}b")) == {b"b1", b"b2", b"a1"}
 
     def test_cluster_sunion(self, r):
         r.sadd("{foo}a", "1", "2")
         r.sadd("{foo}b", "2", "3")
-        assert r.sunion("{foo}a", "{foo}b") == {b"1", b"2", b"3"}
+        assert set(r.sunion("{foo}a", "{foo}b")) == {b"1", b"2", b"3"}
 
     def test_cluster_sunionstore(self, r):
         r.sadd("{foo}a", "1", "2")
         r.sadd("{foo}b", "2", "3")
         assert r.sunionstore("{foo}c", "{foo}a", "{foo}b") == 3
-        assert r.smembers("{foo}c") == {b"1", b"2", b"3"}
+        assert set(r.smembers("{foo}c")) == {b"1", b"2", b"3"}
 
     @skip_if_server_version_lt("6.2.0")
     def test_cluster_zdiff(self, r):
@@ -2450,6 +2450,7 @@ class TestClusterRedisCommands:
             except Exception:
                 pass
 
+    @pytest.mark.redismod
     @skip_if_server_version_lt("7.1.140")
     def test_tfunction_load_delete(self, r):
         r.gears_refresh_cluster()
@@ -2458,6 +2459,7 @@ class TestClusterRedisCommands:
         assert r.tfunction_load(lib_code)
         assert r.tfunction_delete("lib1")
 
+    @pytest.mark.redismod
     @skip_if_server_version_lt("7.1.140")
     def test_tfunction_list(self, r):
         r.gears_refresh_cluster()
@@ -2481,6 +2483,7 @@ class TestClusterRedisCommands:
         assert r.tfunction_delete("lib2")
         assert r.tfunction_delete("lib3")
 
+    @pytest.mark.redismod
     @skip_if_server_version_lt("7.1.140")
     def test_tfcall(self, r):
         r.gears_refresh_cluster()

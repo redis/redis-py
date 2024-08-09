@@ -18,7 +18,7 @@ from redis.retry import Retry
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
 default_protocol = "2"
-default_redismod_url = "redis://localhost:6379"
+default_redismod_url = "redis://localhost:6479"
 
 # default ssl client ignores verification for the purpose of testing
 default_redis_ssl_url = "rediss://localhost:6666"
@@ -70,6 +70,21 @@ class BooleanOptionalAction(argparse.Action):
 
     def format_usage(self):
         return " | ".join(self.option_strings)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def enable_tracemalloc():
+    """
+    Enable tracemalloc while tests are being executed.
+    """
+    try:
+        import tracemalloc
+
+        tracemalloc.start()
+        yield
+        tracemalloc.stop()
+    except ImportError:
+        yield
 
 
 def pytest_addoption(parser):
@@ -135,6 +150,8 @@ def _get_info(redis_url):
 def pytest_sessionstart(session):
     # during test discovery, e.g. with VS Code, we may not
     # have a server running.
+    protocol = session.config.getoption("--protocol")
+    REDIS_INFO["resp_version"] = int(protocol) if protocol else None
     redis_url = session.config.getoption("--redis-url")
     try:
         info = _get_info(redis_url)
@@ -157,8 +174,12 @@ def pytest_sessionstart(session):
     session.config.REDIS_INFO = REDIS_INFO
 
     # module info
+    stack_url = redis_url
+    if stack_url == default_redis_url:
+        stack_url = default_redismod_url
     try:
-        REDIS_INFO["modules"] = info["modules"]
+        stack_info = _get_info(stack_url)
+        REDIS_INFO["modules"] = stack_info["modules"]
     except (KeyError, redis.exceptions.ConnectionError):
         pass
 
@@ -240,7 +261,9 @@ def skip_ifmodversion_lt(min_version: str, module_name: str):
     for j in modules:
         if module_name == j.get("name"):
             version = j.get("ver")
-            mv = int(min_version.replace(".", ""))
+            mv = int(
+                "".join(["%02d" % int(segment) for segment in min_version.split(".")])
+            )
             check = version < mv
             return pytest.mark.skipif(check, reason="Redis module version")
 
@@ -273,6 +296,11 @@ def skip_if_cryptography() -> _TestDecorator:
         return pytest.mark.skipif(True, reason="Cryptography dependency found")
     except ImportError:
         return pytest.mark.skipif(False, reason="No cryptography dependency")
+
+
+def skip_if_resp_version(resp_version) -> _TestDecorator:
+    check = REDIS_INFO.get("resp_version", None) == resp_version
+    return pytest.mark.skipif(check, reason=f"RESP version required != {resp_version}")
 
 
 def _get_client(
@@ -338,6 +366,21 @@ def cluster_teardown(client, flushdb):
 @pytest.fixture()
 def r(request):
     with _get_client(redis.Redis, request) as client:
+        yield client
+
+
+@pytest.fixture()
+def stack_url(request):
+    stack_url = request.config.getoption("--redis-url", default=default_redismod_url)
+    if stack_url == default_redis_url:
+        return default_redismod_url
+    else:
+        return stack_url
+
+
+@pytest.fixture()
+def stack_r(request, stack_url):
+    with _get_client(redis.Redis, request, from_url=stack_url) as client:
         yield client
 
 

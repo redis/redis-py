@@ -38,7 +38,7 @@ def parse_info(response):
     response = str_if_bytes(response)
 
     def get_value(value):
-        if "," not in value or "=" not in value:
+        if "," not in value and "=" not in value:
             try:
                 if "." in value:
                     return float(value)
@@ -46,11 +46,18 @@ def parse_info(response):
                     return int(value)
             except ValueError:
                 return value
+        elif "=" not in value:
+            return [get_value(v) for v in value.split(",") if v]
         else:
             sub_dict = {}
             for item in value.split(","):
-                k, v = item.rsplit("=", 1)
-                sub_dict[k] = get_value(v)
+                if not item:
+                    continue
+                if "=" in item:
+                    k, v = item.rsplit("=", 1)
+                    sub_dict[k] = get_value(v)
+                else:
+                    sub_dict[item] = True
             return sub_dict
 
     for line in response.splitlines():
@@ -268,17 +275,22 @@ def parse_xinfo_stream(response, **options):
         data = {str_if_bytes(k): v for k, v in response.items()}
     if not options.get("full", False):
         first = data.get("first-entry")
-        if first is not None:
+        if first is not None and first[0] is not None:
             data["first-entry"] = (first[0], pairs_to_dict(first[1]))
         last = data["last-entry"]
-        if last is not None:
+        if last is not None and last[0] is not None:
             data["last-entry"] = (last[0], pairs_to_dict(last[1]))
     else:
         data["entries"] = {_id: pairs_to_dict(entry) for _id, entry in data["entries"]}
-        if isinstance(data["groups"][0], list):
+        if len(data["groups"]) > 0 and isinstance(data["groups"][0], list):
             data["groups"] = [
                 pairs_to_dict(group, decode_keys=True) for group in data["groups"]
             ]
+            for g in data["groups"]:
+                if g["consumers"] and g["consumers"][0] is not None:
+                    g["consumers"] = [
+                        pairs_to_dict(c, decode_keys=True) for c in g["consumers"]
+                    ]
         else:
             data["groups"] = [
                 {str_if_bytes(k): v for k, v in group.items()}
@@ -495,7 +507,7 @@ def parse_geosearch_generic(response, **options):
     except KeyError:  # it means the command was sent via execute_command
         return response
 
-    if type(response) != list:
+    if not isinstance(response, list):
         response_list = [response]
     else:
         response_list = response
@@ -771,9 +783,6 @@ _RedisCallbacks = {
 
 
 _RedisCallbacksRESP2 = {
-    **string_keys_to_dict(
-        "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
-    ),
     **string_keys_to_dict(
         "ZDIFF ZINTER ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZRANK ZREVRANGE "
         "ZREVRANGEBYSCORE ZREVRANK ZUNION",

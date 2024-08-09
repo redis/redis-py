@@ -15,7 +15,7 @@ class _RESP3Parser(_RESPBase):
     def __init__(self, socket_read_size):
         super().__init__(socket_read_size)
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
-        self.invalidations_push_handler_func = None
+        self.invalidation_push_handler_func = None
 
     def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
@@ -88,15 +88,11 @@ class _RESP3Parser(_RESPBase):
         # set response
         elif byte == b"~":
             # redis can return unhashable types (like dict) in a set,
-            # so we need to first convert to a list, and then try to convert it to a set
+            # so we return sets as list, all the time, for predictability
             response = [
                 self._read_response(disable_decoding=disable_decoding)
                 for _ in range(int(response))
             ]
-            try:
-                response = set(response)
-            except TypeError:
-                pass
         # map response
         elif byte == b"%":
             # We cannot use a dict-comprehension to parse stream.
@@ -129,7 +125,10 @@ class _RESP3Parser(_RESPBase):
 
     def handle_push_response(self, response, disable_decoding, push_request):
         if response[0] in _INVALIDATION_MESSAGE:
-            res = self.invalidation_push_handler_func(response)
+            if self.invalidation_push_handler_func:
+                res = self.invalidation_push_handler_func(response)
+            else:
+                res = None
         else:
             res = self.pubsub_push_handler_func(response)
         if not push_request:
@@ -142,15 +141,15 @@ class _RESP3Parser(_RESPBase):
     def set_pubsub_push_handler(self, pubsub_push_handler_func):
         self.pubsub_push_handler_func = pubsub_push_handler_func
 
-    def set_invalidation_push_handler(self, invalidations_push_handler_func):
-        self.invalidation_push_handler_func = invalidations_push_handler_func
+    def set_invalidation_push_handler(self, invalidation_push_handler_func):
+        self.invalidation_push_handler_func = invalidation_push_handler_func
 
 
 class _AsyncRESP3Parser(_AsyncRESPBase):
     def __init__(self, socket_read_size):
         super().__init__(socket_read_size)
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
-        self.invalidations_push_handler_func = None
+        self.invalidation_push_handler_func = None
 
     def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
@@ -230,15 +229,11 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
         # set response
         elif byte == b"~":
             # redis can return unhashable types (like dict) in a set,
-            # so we need to first convert to a list, and then try to convert it to a set
+            # so we always convert to a list, to have predictable return types
             response = [
                 (await self._read_response(disable_decoding=disable_decoding))
                 for _ in range(int(response))
             ]
-            try:
-                response = set(response)
-            except TypeError:
-                pass
         # map response
         elif byte == b"%":
             # We cannot use a dict-comprehension to parse stream.
@@ -273,7 +268,10 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
 
     async def handle_push_response(self, response, disable_decoding, push_request):
         if response[0] in _INVALIDATION_MESSAGE:
-            res = self.invalidation_push_handler_func(response)
+            if self.invalidation_push_handler_func:
+                res = self.invalidation_push_handler_func(response)
+            else:
+                res = None
         else:
             res = self.pubsub_push_handler_func(response)
         if not push_request:
@@ -286,5 +284,5 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
     def set_pubsub_push_handler(self, pubsub_push_handler_func):
         self.pubsub_push_handler_func = pubsub_push_handler_func
 
-    def set_invalidation_push_handler(self, invalidations_push_handler_func):
-        self.invalidation_push_handler_func = invalidations_push_handler_func
+    def set_invalidation_push_handler(self, invalidation_push_handler_func):
+        self.invalidation_push_handler_func = invalidation_push_handler_func

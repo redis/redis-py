@@ -261,4 +261,4 @@ async def test_cluster(master_host):
 
             await asyncio.gather(*[doit() for _ in range(10)])
         finally:
-            await r.close()
+            await r.aclose()

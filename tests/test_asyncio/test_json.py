@@ -1,10 +1,17 @@
 import pytest
+import pytest_asyncio
 import redis.asyncio as redis
 from redis import exceptions
 from redis.commands.json.path import Path
 from tests.conftest import assert_resp_response, skip_ifmodversion_lt
 
 
+@pytest_asyncio.fixture()
+async def decoded_r(create_redis, stack_url):
+    return await create_redis(decode_responses=True, url=stack_url)
+
+
+@pytest.mark.redismod
 async def test_json_setbinarykey(decoded_r: redis.Redis):
     d = {"hello": "world", b"some": "value"}
     with pytest.raises(TypeError):
@@ -12,38 +19,40 @@ async def test_json_setbinarykey(decoded_r: redis.Redis):
     assert await decoded_r.json().set("somekey", Path.root_path(), d, decode_keys=True)
 
 
+@pytest.mark.redismod
 async def test_json_setgetdeleteforget(decoded_r: redis.Redis):
     assert await decoded_r.json().set("foo", Path.root_path(), "bar")
-    assert_resp_response(decoded_r, await decoded_r.json().get("foo"), "bar", [["bar"]])
+    assert await decoded_r.json().get("foo") == "bar"
     assert await decoded_r.json().get("baz") is None
     assert await decoded_r.json().delete("foo") == 1
     assert await decoded_r.json().forget("foo") == 0  # second delete
     assert await decoded_r.exists("foo") == 0
 
 
+@pytest.mark.redismod
 async def test_jsonget(decoded_r: redis.Redis):
     await decoded_r.json().set("foo", Path.root_path(), "bar")
-    assert_resp_response(decoded_r, await decoded_r.json().get("foo"), "bar", [["bar"]])
+    assert await decoded_r.json().get("foo") == "bar"
 
 
+@pytest.mark.redismod
 async def test_json_get_jset(decoded_r: redis.Redis):
     assert await decoded_r.json().set("foo", Path.root_path(), "bar")
-    assert_resp_response(decoded_r, await decoded_r.json().get("foo"), "bar", [["bar"]])
+    assert await decoded_r.json().get("foo") == "bar"
     assert await decoded_r.json().get("baz") is None
     assert 1 == await decoded_r.json().delete("foo")
     assert await decoded_r.exists("foo") == 0
 
 
+@pytest.mark.redismod
 async def test_nonascii_setgetdelete(decoded_r: redis.Redis):
     assert await decoded_r.json().set("notascii", Path.root_path(), "hyvää-élève")
-    res = "hyvää-élève"
-    assert_resp_response(
-        decoded_r, await decoded_r.json().get("notascii", no_escape=True), res, [[res]]
-    )
+    assert await decoded_r.json().get("notascii", no_escape=True) == "hyvää-élève"
     assert 1 == await decoded_r.json().delete("notascii")
     assert await decoded_r.exists("notascii") == 0
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.6.0", "ReJSON")
 async def test_json_merge(decoded_r: redis.Redis):
     # Test with root path $
@@ -78,6 +87,7 @@ async def test_json_merge(decoded_r: redis.Redis):
     }
 
 
+@pytest.mark.redismod
 async def test_jsonsetexistentialmodifiersshouldsucceed(decoded_r: redis.Redis):
     obj = {"foo": "bar"}
     assert await decoded_r.json().set("obj", Path.root_path(), obj)
@@ -90,11 +100,12 @@ async def test_jsonsetexistentialmodifiersshouldsucceed(decoded_r: redis.Redis):
     assert await decoded_r.json().set("obj", Path("foo"), "baz", xx=True)
     assert await decoded_r.json().set("obj", Path("qaz"), "baz", nx=True)
 
-    # Test that flags are mutually exlusive
+    # Test that flags are mutually exclusive
     with pytest.raises(Exception):
         await decoded_r.json().set("obj", Path("foo"), "baz", nx=True, xx=True)
 
 
+@pytest.mark.redismod
 async def test_mgetshouldsucceed(decoded_r: redis.Redis):
     await decoded_r.json().set("1", Path.root_path(), 1)
     await decoded_r.json().set("2", Path.root_path(), 2)
@@ -104,6 +115,7 @@ async def test_mgetshouldsucceed(decoded_r: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.6.0", "ReJSON")
 async def test_mset(decoded_r: redis.Redis):
     await decoded_r.json().mset(
@@ -114,13 +126,15 @@ async def test_mset(decoded_r: redis.Redis):
     assert await decoded_r.json().mget(["1", "2"], Path.root_path()) == [1, 2]
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "ReJSON")  # todo: update after the release
 async def test_clear(decoded_r: redis.Redis):
     await decoded_r.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 1 == await decoded_r.json().clear("arr", Path.root_path())
-    assert_resp_response(decoded_r, await decoded_r.json().get("arr"), [], [[[]]])
+    assert_resp_response(decoded_r, await decoded_r.json().get("arr"), [], [])
 
 
+@pytest.mark.redismod
 async def test_type(decoded_r: redis.Redis):
     await decoded_r.json().set("1", Path.root_path(), 1)
     assert_resp_response(
@@ -134,6 +148,7 @@ async def test_type(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 async def test_numincrby(decoded_r):
     await decoded_r.json().set("num", Path.root_path(), 1)
     assert_resp_response(
@@ -145,6 +160,7 @@ async def test_numincrby(decoded_r):
     assert_resp_response(decoded_r, res, 1.25, [1.25])
 
 
+@pytest.mark.redismod
 async def test_nummultby(decoded_r: redis.Redis):
     await decoded_r.json().set("num", Path.root_path(), 1)
 
@@ -157,6 +173,7 @@ async def test_nummultby(decoded_r: redis.Redis):
         assert_resp_response(decoded_r, res, 2.5, [2.5])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("99.99.99", "ReJSON")  # todo: update after the release
 async def test_toggle(decoded_r: redis.Redis):
     await decoded_r.json().set("bool", Path.root_path(), False)
@@ -168,13 +185,14 @@ async def test_toggle(decoded_r: redis.Redis):
         await decoded_r.json().toggle("num", Path.root_path())
 
 
+@pytest.mark.redismod
 async def test_strappend(decoded_r: redis.Redis):
     await decoded_r.json().set("jsonkey", Path.root_path(), "foo")
     assert 6 == await decoded_r.json().strappend("jsonkey", "bar")
-    res = await decoded_r.json().get("jsonkey", Path.root_path())
-    assert_resp_response(decoded_r, res, "foobar", [["foobar"]])
+    assert "foobar" == await decoded_r.json().get("jsonkey", Path.root_path())
 
 
+@pytest.mark.redismod
 async def test_strlen(decoded_r: redis.Redis):
     await decoded_r.json().set("str", Path.root_path(), "foo")
     assert 3 == await decoded_r.json().strlen("str", Path.root_path())
@@ -183,6 +201,7 @@ async def test_strlen(decoded_r: redis.Redis):
     assert 6 == await decoded_r.json().strlen("str")
 
 
+@pytest.mark.redismod
 async def test_arrappend(decoded_r: redis.Redis):
     await decoded_r.json().set("arr", Path.root_path(), [1])
     assert 2 == await decoded_r.json().arrappend("arr", Path.root_path(), 2)
@@ -190,6 +209,7 @@ async def test_arrappend(decoded_r: redis.Redis):
     assert 7 == await decoded_r.json().arrappend("arr", Path.root_path(), *[5, 6, 7])
 
 
+@pytest.mark.redismod
 async def test_arrindex(decoded_r: redis.Redis):
     r_path = Path.root_path()
     await decoded_r.json().set("arr", r_path, [0, 1, 2, 3, 4])
@@ -202,19 +222,19 @@ async def test_arrindex(decoded_r: redis.Redis):
     assert -1 == await decoded_r.json().arrindex("arr", r_path, 4, start=1, stop=3)
 
 
+@pytest.mark.redismod
 async def test_arrinsert(decoded_r: redis.Redis):
     await decoded_r.json().set("arr", Path.root_path(), [0, 4])
     assert 5 == await decoded_r.json().arrinsert("arr", Path.root_path(), 1, *[1, 2, 3])
-    res = [0, 1, 2, 3, 4]
-    assert_resp_response(decoded_r, await decoded_r.json().get("arr"), res, [[res]])
+    assert await decoded_r.json().get("arr") == [0, 1, 2, 3, 4]
 
     # test prepends
     await decoded_r.json().set("val2", Path.root_path(), [5, 6, 7, 8, 9])
     await decoded_r.json().arrinsert("val2", Path.root_path(), 0, ["some", "thing"])
-    res = [["some", "thing"], 5, 6, 7, 8, 9]
-    assert_resp_response(decoded_r, await decoded_r.json().get("val2"), res, [[res]])
+    assert await decoded_r.json().get("val2") == [["some", "thing"], 5, 6, 7, 8, 9]
 
 
+@pytest.mark.redismod
 async def test_arrlen(decoded_r: redis.Redis):
     await decoded_r.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 5 == await decoded_r.json().arrlen("arr", Path.root_path())
@@ -222,13 +242,14 @@ async def test_arrlen(decoded_r: redis.Redis):
     assert await decoded_r.json().arrlen("fakekey") is None
 
 
+@pytest.mark.redismod
 async def test_arrpop(decoded_r: redis.Redis):
     await decoded_r.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 4 == await decoded_r.json().arrpop("arr", Path.root_path(), 4)
     assert 3 == await decoded_r.json().arrpop("arr", Path.root_path(), -1)
     assert 2 == await decoded_r.json().arrpop("arr", Path.root_path())
     assert 0 == await decoded_r.json().arrpop("arr", Path.root_path(), 0)
-    assert_resp_response(decoded_r, await decoded_r.json().get("arr"), [1], [[[1]]])
+    assert [1] == await decoded_r.json().get("arr")
 
     # test out of bounds
     await decoded_r.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
@@ -239,11 +260,11 @@ async def test_arrpop(decoded_r: redis.Redis):
     assert await decoded_r.json().arrpop("arr") is None
 
 
+@pytest.mark.redismod
 async def test_arrtrim(decoded_r: redis.Redis):
     await decoded_r.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 3 == await decoded_r.json().arrtrim("arr", Path.root_path(), 1, 3)
-    res = await decoded_r.json().get("arr")
-    assert_resp_response(decoded_r, res, [1, 2, 3], [[[1, 2, 3]]])
+    assert [1, 2, 3] == await decoded_r.json().get("arr")
 
     # <0 test, should be 0 equivalent
     await decoded_r.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
@@ -262,6 +283,7 @@ async def test_arrtrim(decoded_r: redis.Redis):
     assert 0 == await decoded_r.json().arrtrim("arr", Path.root_path(), 9, 11)
 
 
+@pytest.mark.redismod
 async def test_resp(decoded_r: redis.Redis):
     obj = {"foo": "bar", "baz": 1, "qaz": True}
     await decoded_r.json().set("obj", Path.root_path(), obj)
@@ -271,6 +293,7 @@ async def test_resp(decoded_r: redis.Redis):
     assert isinstance(await decoded_r.json().resp("obj"), list)
 
 
+@pytest.mark.redismod
 async def test_objkeys(decoded_r: redis.Redis):
     obj = {"foo": "bar", "baz": "qaz"}
     await decoded_r.json().set("obj", Path.root_path(), obj)
@@ -287,6 +310,7 @@ async def test_objkeys(decoded_r: redis.Redis):
     assert await decoded_r.json().objkeys("fakekey") is None
 
 
+@pytest.mark.redismod
 async def test_objlen(decoded_r: redis.Redis):
     obj = {"foo": "bar", "baz": "qaz"}
     await decoded_r.json().set("obj", Path.root_path(), obj)
@@ -320,19 +344,19 @@ async def test_objlen(decoded_r: redis.Redis):
 #     assert await decoded_r.get("foo") is None
 
 
+@pytest.mark.redismod
 async def test_json_delete_with_dollar(decoded_r: redis.Redis):
     doc1 = {"a": 1, "nested": {"a": 2, "b": 3}}
     assert await decoded_r.json().set("doc1", "$", doc1)
     assert await decoded_r.json().delete("doc1", "$..a") == 2
-    res = [{"nested": {"b": 3}}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == [{"nested": {"b": 3}}]
 
     doc2 = {"a": {"a": 2, "b": 3}, "b": ["a", "b"], "nested": {"b": [True, "a", "b"]}}
     assert await decoded_r.json().set("doc2", "$", doc2)
     assert await decoded_r.json().delete("doc2", "$..a") == 1
-    res = await decoded_r.json().get("doc2", "$")
-    res = [{"nested": {"b": [True, "a", "b"]}, "b": ["a", "b"]}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc2", "$"), res, [res])
+    assert await decoded_r.json().get("doc2", "$") == [
+        {"nested": {"b": [True, "a", "b"]}, "b": ["a", "b"]}
+    ]
 
     doc3 = [
         {
@@ -363,8 +387,7 @@ async def test_json_delete_with_dollar(decoded_r: redis.Redis):
             }
         ]
     ]
-    res = await decoded_r.json().get("doc3", "$")
-    assert_resp_response(decoded_r, res, doc3val, [doc3val])
+    assert await decoded_r.json().get("doc3", "$") == doc3val
 
     # Test async default path
     assert await decoded_r.json().delete("doc3") == 1
@@ -373,18 +396,19 @@ async def test_json_delete_with_dollar(decoded_r: redis.Redis):
     await decoded_r.json().delete("not_a_document", "..a")
 
 
+@pytest.mark.redismod
 async def test_json_forget_with_dollar(decoded_r: redis.Redis):
     doc1 = {"a": 1, "nested": {"a": 2, "b": 3}}
     assert await decoded_r.json().set("doc1", "$", doc1)
     assert await decoded_r.json().forget("doc1", "$..a") == 2
-    res = [{"nested": {"b": 3}}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == [{"nested": {"b": 3}}]
 
     doc2 = {"a": {"a": 2, "b": 3}, "b": ["a", "b"], "nested": {"b": [True, "a", "b"]}}
     assert await decoded_r.json().set("doc2", "$", doc2)
     assert await decoded_r.json().forget("doc2", "$..a") == 1
-    res = [{"nested": {"b": [True, "a", "b"]}, "b": ["a", "b"]}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc2", "$"), res, [res])
+    assert await decoded_r.json().get("doc2", "$") == [
+        {"nested": {"b": [True, "a", "b"]}, "b": ["a", "b"]}
+    ]
 
     doc3 = [
         {
@@ -415,8 +439,7 @@ async def test_json_forget_with_dollar(decoded_r: redis.Redis):
             }
         ]
     ]
-    res = await decoded_r.json().get("doc3", "$")
-    assert_resp_response(decoded_r, res, doc3val, [doc3val])
+    assert await decoded_r.json().get("doc3", "$") == doc3val
 
     # Test async default path
     assert await decoded_r.json().forget("doc3") == 1
@@ -426,6 +449,7 @@ async def test_json_forget_with_dollar(decoded_r: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 async def test_json_mget_dollar(decoded_r: redis.Redis):
     # Test mget with multi paths
     await decoded_r.json().set(
@@ -439,17 +463,11 @@ async def test_json_mget_dollar(decoded_r: redis.Redis):
         {"a": 4, "b": 5, "nested": {"a": 6}, "c": None, "nested2": {"a": [None]}},
     )
     # Compare also to single JSON.GET
-    res = [1, 3, None]
-    assert_resp_response(
-        decoded_r, await decoded_r.json().get("doc1", "$..a"), res, [res]
-    )
-    res = [4, 6, [None]]
-    assert_resp_response(
-        decoded_r, await decoded_r.json().get("doc2", "$..a"), res, [res]
-    )
+    assert await decoded_r.json().get("doc1", "$..a") == [1, 3, None]
+    assert await decoded_r.json().get("doc2", "$..a") == [4, 6, [None]]
 
     # Test mget with single path
-    await decoded_r.json().mget("doc1", "$..a") == [1, 3, None]
+    assert await decoded_r.json().mget(["doc1"], "$..a") == [[1, 3, None]]
     # Test mget with multi path
     res = await decoded_r.json().mget(["doc1", "doc2"], "$..a")
     assert res == [[1, 3, None], [4, 6, [None]]]
@@ -461,6 +479,7 @@ async def test_json_mget_dollar(decoded_r: redis.Redis):
     assert res == [None, None]
 
 
+@pytest.mark.redismod
 async def test_numby_commands_dollar(decoded_r: redis.Redis):
     # Test NUMINCRBY
     await decoded_r.json().set(
@@ -504,7 +523,9 @@ async def test_numby_commands_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1", "$", {"a": "b", "b": [{"a": 2}, {"a": 5.0}, {"a": "c"}]}
     )
-    await decoded_r.json().numincrby("doc1", ".b[0].a", 3) == 5
+    assert_resp_response(
+        decoded_r, await decoded_r.json().numincrby("doc1", ".b[0].a", 3), 5, [5]
+    )
 
     # Test legacy NUMMULTBY
     await decoded_r.json().set(
@@ -512,39 +533,43 @@ async def test_numby_commands_dollar(decoded_r: redis.Redis):
     )
 
     with pytest.deprecated_call():
-        await decoded_r.json().nummultby("doc1", ".b[0].a", 3) == 6
+        assert_resp_response(
+            decoded_r, await decoded_r.json().nummultby("doc1", ".b[0].a", 3), 6, [6]
+        )
 
 
+@pytest.mark.redismod
 async def test_strappend_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1", "$", {"a": "foo", "nested1": {"a": "hello"}, "nested2": {"a": 31}}
     )
     # Test multi
-    await decoded_r.json().strappend("doc1", "bar", "$..a") == [6, 8, None]
+    assert await decoded_r.json().strappend("doc1", "bar", "$..a") == [6, 8, None]
 
     res = [{"a": "foobar", "nested1": {"a": "hellobar"}, "nested2": {"a": 31}}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test single
-    await decoded_r.json().strappend("doc1", "baz", "$.nested1.a") == [11]
+    assert await decoded_r.json().strappend("doc1", "baz", "$.nested1.a") == [11]
 
     res = [{"a": "foobar", "nested1": {"a": "hellobarbaz"}, "nested2": {"a": 31}}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
         await decoded_r.json().strappend("non_existing_doc", "$..a", "err")
 
     # Test multi
-    await decoded_r.json().strappend("doc1", "bar", ".*.a") == 8
+    assert await decoded_r.json().strappend("doc1", "bar", ".*.a") == 14
     res = [{"a": "foobar", "nested1": {"a": "hellobarbazbar"}, "nested2": {"a": 31}}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test missing path
     with pytest.raises(exceptions.ResponseError):
         await decoded_r.json().strappend("doc1", "piu")
 
 
+@pytest.mark.redismod
 async def test_strlen_dollar(decoded_r: redis.Redis):
     # Test multi
     await decoded_r.json().set(
@@ -557,14 +582,15 @@ async def test_strlen_dollar(decoded_r: redis.Redis):
     assert res1 == res2
 
     # Test single
-    await decoded_r.json().strlen("doc1", "$.nested1.a") == [8]
-    await decoded_r.json().strlen("doc1", "$.nested2.a") == [None]
+    assert await decoded_r.json().strlen("doc1", "$.nested1.a") == [8]
+    assert await decoded_r.json().strlen("doc1", "$.nested2.a") == [None]
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
         await decoded_r.json().strlen("non_existing_doc", "$..a")
 
 
+@pytest.mark.redismod
 async def test_arrappend_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1",
@@ -576,7 +602,8 @@ async def test_arrappend_dollar(decoded_r: redis.Redis):
         },
     )
     # Test multi
-    await decoded_r.json().arrappend("doc1", "$..a", "bar", "racuda") == [3, 5, None]
+    res = [3, 5, None]
+    assert await decoded_r.json().arrappend("doc1", "$..a", "bar", "racuda") == res
     res = [
         {
             "a": ["foo", "bar", "racuda"],
@@ -584,7 +611,7 @@ async def test_arrappend_dollar(decoded_r: redis.Redis):
             "nested2": {"a": 31},
         }
     ]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test single
     assert await decoded_r.json().arrappend("doc1", "$.nested1.a", "baz") == [6]
@@ -595,7 +622,7 @@ async def test_arrappend_dollar(decoded_r: redis.Redis):
             "nested2": {"a": 31},
         }
     ]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -621,7 +648,7 @@ async def test_arrappend_dollar(decoded_r: redis.Redis):
             "nested2": {"a": 31},
         }
     ]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
     # Test single
     assert await decoded_r.json().arrappend("doc1", ".nested1.a", "baz") == 6
     res = [
@@ -631,13 +658,14 @@ async def test_arrappend_dollar(decoded_r: redis.Redis):
             "nested2": {"a": 31},
         }
     ]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
         await decoded_r.json().arrappend("non_existing_doc", "$..a")
 
 
+@pytest.mark.redismod
 async def test_arrinsert_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1",
@@ -659,7 +687,7 @@ async def test_arrinsert_dollar(decoded_r: redis.Redis):
             "nested2": {"a": 31},
         }
     ]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
     # Test single
     assert await decoded_r.json().arrinsert("doc1", "$.nested1.a", -2, "baz") == [6]
     res = [
@@ -669,13 +697,14 @@ async def test_arrinsert_dollar(decoded_r: redis.Redis):
             "nested2": {"a": 31},
         }
     ]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
         await decoded_r.json().arrappend("non_existing_doc", "$..a")
 
 
+@pytest.mark.redismod
 async def test_arrlen_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1",
@@ -721,6 +750,7 @@ async def test_arrlen_dollar(decoded_r: redis.Redis):
     assert await decoded_r.json().arrlen("non_existing_doc", "..a") is None
 
 
+@pytest.mark.redismod
 async def test_arrpop_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1",
@@ -736,7 +766,7 @@ async def test_arrpop_dollar(decoded_r: redis.Redis):
     assert await decoded_r.json().arrpop("doc1", "$..a", 1) == ['"foo"', None, None]
 
     res = [{"a": [], "nested1": {"a": ["hello", "world"]}, "nested2": {"a": 31}}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -753,15 +783,16 @@ async def test_arrpop_dollar(decoded_r: redis.Redis):
         },
     )
     # Test multi (all paths are updated, but return result of last path)
-    await decoded_r.json().arrpop("doc1", "..a", "1") is None
+    assert await decoded_r.json().arrpop("doc1", "..a", "1") == "null"
     res = [{"a": [], "nested1": {"a": ["hello", "world"]}, "nested2": {"a": 31}}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # # Test missing key
     with pytest.raises(exceptions.ResponseError):
         await decoded_r.json().arrpop("non_existing_doc", "..a")
 
 
+@pytest.mark.redismod
 async def test_arrtrim_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1",
@@ -775,15 +806,15 @@ async def test_arrtrim_dollar(decoded_r: redis.Redis):
     # Test multi
     assert await decoded_r.json().arrtrim("doc1", "$..a", "1", -1) == [0, 2, None]
     res = [{"a": [], "nested1": {"a": [None, "world"]}, "nested2": {"a": 31}}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     assert await decoded_r.json().arrtrim("doc1", "$..a", "1", "1") == [0, 1, None]
     res = [{"a": [], "nested1": {"a": ["world"]}, "nested2": {"a": 31}}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
     # Test single
     assert await decoded_r.json().arrtrim("doc1", "$.nested1.a", 1, 0) == [0]
     res = [{"a": [], "nested1": {"a": []}, "nested2": {"a": 31}}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
@@ -806,13 +837,14 @@ async def test_arrtrim_dollar(decoded_r: redis.Redis):
     # Test single
     assert await decoded_r.json().arrtrim("doc1", ".nested1.a", "1", "1") == 1
     res = [{"a": [], "nested1": {"a": ["world"]}, "nested2": {"a": 31}}]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
         await decoded_r.json().arrtrim("non_existing_doc", "..a", 1, 1)
 
 
+@pytest.mark.redismod
 async def test_objkeys_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1",
@@ -842,6 +874,7 @@ async def test_objkeys_dollar(decoded_r: redis.Redis):
     assert await decoded_r.json().objkeys("doc1", "$..nowhere") == []
 
 
+@pytest.mark.redismod
 async def test_objlen_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1",
@@ -896,6 +929,7 @@ def load_types_data(nested_key_name):
     return jdata, types
 
 
+@pytest.mark.redismod
 async def test_type_dollar(decoded_r: redis.Redis):
     jdata, jtypes = load_types_data("a")
     await decoded_r.json().set("doc1", "$", jdata)
@@ -914,6 +948,7 @@ async def test_type_dollar(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 async def test_clear_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1",
@@ -932,7 +967,7 @@ async def test_clear_dollar(decoded_r: redis.Redis):
     res = [
         {"nested1": {"a": {}}, "a": [], "nested2": {"a": "claro"}, "nested3": {"a": {}}}
     ]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test single
     await decoded_r.json().set(
@@ -954,19 +989,18 @@ async def test_clear_dollar(decoded_r: redis.Redis):
             "nested3": {"a": {"baz": 50}},
         }
     ]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test missing path (async defaults to root)
     assert await decoded_r.json().clear("doc1") == 1
-    assert_resp_response(
-        decoded_r, await decoded_r.json().get("doc1", "$"), [{}], [[{}]]
-    )
+    assert await decoded_r.json().get("doc1", "$") == [{}]
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):
         await decoded_r.json().clear("non_existing_doc", "$..a")
 
 
+@pytest.mark.redismod
 async def test_toggle_dollar(decoded_r: redis.Redis):
     await decoded_r.json().set(
         "doc1",
@@ -988,7 +1022,7 @@ async def test_toggle_dollar(decoded_r: redis.Redis):
             "nested3": {"a": False},
         }
     ]
-    assert_resp_response(decoded_r, await decoded_r.json().get("doc1", "$"), res, [res])
+    assert await decoded_r.json().get("doc1", "$") == res
 
     # Test missing key
     with pytest.raises(exceptions.ResponseError):

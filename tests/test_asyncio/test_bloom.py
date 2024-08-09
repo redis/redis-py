@@ -1,9 +1,9 @@
 from math import inf
 
 import pytest
+import pytest_asyncio
 import redis.asyncio as redis
-from redis.exceptions import ModuleError, RedisError
-from redis.utils import HIREDIS_AVAILABLE
+from redis.exceptions import RedisError
 from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
@@ -11,10 +11,16 @@ from tests.conftest import (
 )
 
 
+@pytest_asyncio.fixture()
+async def decoded_r(create_redis, stack_url):
+    return await create_redis(decode_responses=True, url=stack_url)
+
+
 def intlist(obj):
     return [int(v) for v in obj]
 
 
+@pytest.mark.redismod
 async def test_create(decoded_r: redis.Redis):
     """Test CREATE/RESERVE calls"""
     assert await decoded_r.bf().create("bloom", 0.01, 1000)
@@ -30,10 +36,12 @@ async def test_create(decoded_r: redis.Redis):
 
 
 @pytest.mark.experimental
+@pytest.mark.redismod
 async def test_tdigest_create(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 100)
 
 
+@pytest.mark.redismod
 async def test_bf_add(decoded_r: redis.Redis):
     assert await decoded_r.bf().create("bloom", 0.01, 1000)
     assert 1 == await decoded_r.bf().add("bloom", "foo")
@@ -46,6 +54,7 @@ async def test_bf_add(decoded_r: redis.Redis):
     assert [1, 0] == intlist(await decoded_r.bf().mexists("bloom", "foo", "noexist"))
 
 
+@pytest.mark.redismod
 async def test_bf_insert(decoded_r: redis.Redis):
     assert await decoded_r.bf().create("bloom", 0.01, 1000)
     assert [1] == intlist(await decoded_r.bf().insert("bloom", ["foo"]))
@@ -76,6 +85,7 @@ async def test_bf_insert(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
     # Store a filter
     await decoded_r.bf().create("myBloom", "0.0001", "1000")
@@ -94,10 +104,6 @@ async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
 
     await do_verify()
     cmds = []
-    if HIREDIS_AVAILABLE:
-        with pytest.raises(ModuleError):
-            cur = await decoded_r.bf().scandump("myBloom", 0)
-        return
 
     cur = await decoded_r.bf().scandump("myBloom", 0)
     first = cur[0]
@@ -127,6 +133,7 @@ async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
     await decoded_r.bf().create("myBloom", "0.0001", "10000000")
 
 
+@pytest.mark.redismod
 async def test_bf_info(decoded_r: redis.Redis):
     expansion = 4
     # Store a filter
@@ -158,6 +165,7 @@ async def test_bf_info(decoded_r: redis.Redis):
         assert True
 
 
+@pytest.mark.redismod
 async def test_bf_card(decoded_r: redis.Redis):
     # return 0 if the key does not exist
     assert await decoded_r.bf().card("not_exist") == 0
@@ -172,6 +180,7 @@ async def test_bf_card(decoded_r: redis.Redis):
         await decoded_r.bf().card("setKey")
 
 
+@pytest.mark.redismod
 async def test_cf_add_and_insert(decoded_r: redis.Redis):
     assert await decoded_r.cf().create("cuckoo", 1000)
     assert await decoded_r.cf().add("cuckoo", "filter")
@@ -197,6 +206,7 @@ async def test_cf_add_and_insert(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 async def test_cf_exists_and_del(decoded_r: redis.Redis):
     assert await decoded_r.cf().create("cuckoo", 1000)
     assert await decoded_r.cf().add("cuckoo", "filter")
@@ -208,6 +218,7 @@ async def test_cf_exists_and_del(decoded_r: redis.Redis):
     assert 0 == await decoded_r.cf().count("cuckoo", "filter")
 
 
+@pytest.mark.redismod
 async def test_cms(decoded_r: redis.Redis):
     assert await decoded_r.cms().initbydim("dim", 1000, 5)
     assert await decoded_r.cms().initbyprob("prob", 0.01, 0.01)
@@ -224,6 +235,7 @@ async def test_cms(decoded_r: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 async def test_cms_merge(decoded_r: redis.Redis):
     assert await decoded_r.cms().initbydim("A", 1000, 5)
     assert await decoded_r.cms().initbydim("B", 1000, 5)
@@ -240,6 +252,7 @@ async def test_cms_merge(decoded_r: redis.Redis):
     assert [16, 15, 21] == await decoded_r.cms().query("C", "foo", "bar", "baz")
 
 
+@pytest.mark.redismod
 async def test_topk(decoded_r: redis.Redis):
     # test list with empty buckets
     assert await decoded_r.topk().reserve("topk", 3, 50, 4, 0.9)
@@ -320,6 +333,7 @@ async def test_topk(decoded_r: redis.Redis):
     assert 0.9 == round(float(info["decay"]), 1)
 
 
+@pytest.mark.redismod
 async def test_topk_incrby(decoded_r: redis.Redis):
     await decoded_r.flushdb()
     assert await decoded_r.topk().reserve("topk", 3, 10, 3, 1)
@@ -335,6 +349,7 @@ async def test_topk_incrby(decoded_r: redis.Redis):
 
 
 @pytest.mark.experimental
+@pytest.mark.redismod
 async def test_tdigest_reset(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 10)
     # reset on empty histogram
@@ -351,6 +366,7 @@ async def test_tdigest_reset(decoded_r: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 async def test_tdigest_merge(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("to-tDigest", 10)
     assert await decoded_r.tdigest().create("from-tDigest", 10)
@@ -378,6 +394,7 @@ async def test_tdigest_merge(decoded_r: redis.Redis):
 
 
 @pytest.mark.experimental
+@pytest.mark.redismod
 async def test_tdigest_min_and_max(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 100)
     # insert data-points into sketch
@@ -388,6 +405,7 @@ async def test_tdigest_min_and_max(decoded_r: redis.Redis):
 
 
 @pytest.mark.experimental
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.0", "bf")
 async def test_tdigest_quantile(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 500)
@@ -416,6 +434,7 @@ async def test_tdigest_quantile(decoded_r: redis.Redis):
 
 
 @pytest.mark.experimental
+@pytest.mark.redismod
 async def test_tdigest_cdf(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 100)
     # insert data-points into sketch
@@ -427,6 +446,7 @@ async def test_tdigest_cdf(decoded_r: redis.Redis):
 
 
 @pytest.mark.experimental
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.0", "bf")
 async def test_tdigest_trimmed_mean(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("tDigest", 100)
@@ -437,6 +457,7 @@ async def test_tdigest_trimmed_mean(decoded_r: redis.Redis):
 
 
 @pytest.mark.experimental
+@pytest.mark.redismod
 async def test_tdigest_rank(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("t-digest", 500)
     assert await decoded_r.tdigest().add("t-digest", list(range(0, 20)))
@@ -447,6 +468,7 @@ async def test_tdigest_rank(decoded_r: redis.Redis):
 
 
 @pytest.mark.experimental
+@pytest.mark.redismod
 async def test_tdigest_revrank(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("t-digest", 500)
     assert await decoded_r.tdigest().add("t-digest", list(range(0, 20)))
@@ -456,6 +478,7 @@ async def test_tdigest_revrank(decoded_r: redis.Redis):
 
 
 @pytest.mark.experimental
+@pytest.mark.redismod
 async def test_tdigest_byrank(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("t-digest", 500)
     assert await decoded_r.tdigest().add("t-digest", list(range(1, 11)))
@@ -467,6 +490,7 @@ async def test_tdigest_byrank(decoded_r: redis.Redis):
 
 
 @pytest.mark.experimental
+@pytest.mark.redismod
 async def test_tdigest_byrevrank(decoded_r: redis.Redis):
     assert await decoded_r.tdigest().create("t-digest", 500)
     assert await decoded_r.tdigest().add("t-digest", list(range(1, 11)))
@@ -475,19 +499,3 @@ async def test_tdigest_byrevrank(decoded_r: redis.Redis):
     assert (await decoded_r.tdigest().byrevrank("t-digest", 100))[0] == -inf
     with pytest.raises(redis.ResponseError):
         (await decoded_r.tdigest().byrevrank("t-digest", -1))[0]
-
-
-# # async def test_pipeline(decoded_r: redis.Redis):
-#     pipeline = await decoded_r.bf().pipeline()
-#     assert not await decoded_r.bf().execute_command("get pipeline")
-#
-#     assert await decoded_r.bf().create("pipeline", 0.01, 1000)
-#     for i in range(100):
-#         pipeline.add("pipeline", i)
-#     for i in range(100):
-#         assert not (await decoded_r.bf().exists("pipeline", i))
-#
-#     pipeline.execute()
-#
-#     for i in range(100):
-#         assert await decoded_r.bf().exists("pipeline", i)

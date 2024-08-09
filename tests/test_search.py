@@ -4,6 +4,7 @@ import os
 import time
 from io import TextIOWrapper
 
+import numpy as np
 import pytest
 import redis
 import redis.commands.search
@@ -26,9 +27,9 @@ from redis.commands.search.suggestion import Suggestion
 
 from .conftest import (
     _get_client,
-    assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
+    skip_if_resp_version,
     skip_ifmodversion_lt,
 )
 
@@ -107,8 +108,8 @@ def createIndex(client, num_docs=100, definition=None):
 
 
 @pytest.fixture
-def client(request):
-    r = _get_client(redis.Redis, request, decode_responses=True)
+def client(request, stack_url):
+    r = _get_client(redis.Redis, request, decode_responses=True, from_url=stack_url)
     r.flushdb()
     return r
 
@@ -891,7 +892,7 @@ def test_dict_operations(client):
 
     # Dump dict and inspect content
     res = client.ft().dict_dump("custom_dict")
-    assert_resp_response(client, res, ["item1", "item3"], {"item1", "item3"})
+    assert res == ["item1", "item3"]
 
     # Remove rest of the items before reload
     client.ft().dict_del("custom_dict", *res)
@@ -1440,6 +1441,32 @@ def test_aggregations_filter(client):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+def test_aggregations_add_scores(client):
+    client.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            NumericField("age", sortable=True),
+        )
+    )
+
+    client.hset("doc1", mapping={"name": "bar", "age": "25"})
+    client.hset("doc2", mapping={"name": "foo", "age": "19"})
+
+    req = aggregations.AggregateRequest("*").add_scores()
+    res = client.ft().aggregate(req)
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+        assert res["results"][0]["extra_attributes"] == {"__score": "0.2"}
+        assert res["results"][1]["extra_attributes"] == {"__score": "0.2"}
+    else:
+        assert len(res.rows) == 2
+        assert res.rows[0] == ["__score", "0.2"]
+        assert res.rows[1] == ["__score", "0.2"]
+
+
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_index_definition(client):
     """
@@ -1703,6 +1730,54 @@ def test_search_return_fields(client):
         assert 1 == len(total["results"])
         assert "doc:1" == total["results"][0]["id"]
         assert "telmatosaurus" == total["results"][0]["extra_attributes"]["txt"]
+
+
+@pytest.mark.redismod
+@skip_if_resp_version(3)
+def test_binary_and_text_fields(client):
+    fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+
+    index_name = "mixed_index"
+    mixed_data = {"first_name": "🐍python", "vector_emb": fake_vec.tobytes()}
+    client.hset(f"{index_name}:1", mapping=mixed_data)
+
+    schema = (
+        TagField("first_name"),
+        VectorField(
+            "embeddings_bio",
+            algorithm="HNSW",
+            attributes={
+                "TYPE": "FLOAT32",
+                "DIM": 4,
+                "DISTANCE_METRIC": "COSINE",
+            },
+        ),
+    )
+
+    client.ft(index_name).create_index(
+        fields=schema,
+        definition=IndexDefinition(
+            prefix=[f"{index_name}:"], index_type=IndexType.HASH
+        ),
+    )
+
+    query = (
+        Query("*")
+        .return_field("vector_emb", decode_field=False)
+        .return_field("first_name")
+    )
+    docs = client.ft(index_name).search(query=query, query_params={}).docs
+    decoded_vec_from_search_results = np.frombuffer(
+        docs[0]["vector_emb"], dtype=np.float32
+    )
+
+    assert np.array_equal(
+        decoded_vec_from_search_results, fake_vec
+    ), "The vectors are not equal"
+
+    assert (
+        docs[0]["first_name"] == mixed_data["first_name"]
+    ), "The text field is not decoded correctly"
 
 
 @pytest.mark.redismod
@@ -2105,16 +2180,60 @@ def test_geo_params(client):
     params_dict = {"lat": "34.95126", "lon": "29.69465", "radius": 1000, "units": "km"}
     q = Query("@g:[$lon $lat $radius $units]").dialect(2)
     res = client.ft().search(q, query_params=params_dict)
-    if is_resp2_connection(client):
-        assert 3 == res.total
-        assert "doc1" == res.docs[0].id
-        assert "doc2" == res.docs[1].id
-        assert "doc3" == res.docs[2].id
-    else:
-        assert 3 == res["total_results"]
-        assert "doc1" == res["results"][0]["id"]
-        assert "doc2" == res["results"][1]["id"]
-        assert "doc3" == res["results"][2]["id"]
+    _assert_search_result(client, res, ["doc1", "doc2", "doc3"])
+
+
+@pytest.mark.redismod
+def test_geoshapes_query_intersects_and_disjoint(client):
+    client.ft().create_index((GeoShapeField("g", coord_system=GeoShapeField.FLAT)))
+    client.hset("doc_point1", mapping={"g": "POINT (10 10)"})
+    client.hset("doc_point2", mapping={"g": "POINT (50 50)"})
+    client.hset("doc_polygon1", mapping={"g": "POLYGON ((20 20, 25 35, 35 25, 20 20))"})
+    client.hset(
+        "doc_polygon2", mapping={"g": "POLYGON ((60 60, 65 75, 70 70, 65 55, 60 60))"}
+    )
+
+    intersection = client.ft().search(
+        Query("@g:[intersects $shape]").dialect(3),
+        query_params={"shape": "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))"},
+    )
+    _assert_search_result(client, intersection, ["doc_point2", "doc_polygon1"])
+
+    disjunction = client.ft().search(
+        Query("@g:[disjoint $shape]").dialect(3),
+        query_params={"shape": "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))"},
+    )
+    _assert_search_result(client, disjunction, ["doc_point1", "doc_polygon2"])
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.0", "search")
+def test_geoshapes_query_contains_and_within(client):
+    client.ft().create_index((GeoShapeField("g", coord_system=GeoShapeField.FLAT)))
+    client.hset("doc_point1", mapping={"g": "POINT (10 10)"})
+    client.hset("doc_point2", mapping={"g": "POINT (50 50)"})
+    client.hset("doc_polygon1", mapping={"g": "POLYGON ((20 20, 25 35, 35 25, 20 20))"})
+    client.hset(
+        "doc_polygon2", mapping={"g": "POLYGON ((60 60, 65 75, 70 70, 65 55, 60 60))"}
+    )
+
+    contains_a = client.ft().search(
+        Query("@g:[contains $shape]").dialect(3),
+        query_params={"shape": "POINT(25 25)"},
+    )
+    _assert_search_result(client, contains_a, ["doc_polygon1"])
+
+    contains_b = client.ft().search(
+        Query("@g:[contains $shape]").dialect(3),
+        query_params={"shape": "POLYGON((24 24, 24 26, 25 25, 24 24))"},
+    )
+    _assert_search_result(client, contains_b, ["doc_polygon1"])
+
+    within = client.ft().search(
+        Query("@g:[within $shape]").dialect(3),
+        query_params={"shape": "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))"},
+    )
+    _assert_search_result(client, within, ["doc_point2", "doc_polygon1"])
 
 
 @pytest.mark.redismod
@@ -2278,7 +2397,213 @@ def test_geoshape(client: redis.Redis):
     q2 = Query("@geom:[CONTAINS $poly]").dialect(3)
     qp2 = {"poly": "POLYGON((2 2, 2 50, 50 50, 50 2, 2 2))"}
     result = client.ft().search(q1, query_params=qp1)
-    assert len(result.docs) == 1
-    assert result.docs[0]["id"] == "small"
+    _assert_search_result(client, result, ["small"])
     result = client.ft().search(q2, query_params=qp2)
-    assert len(result.docs) == 2
+    _assert_search_result(client, result, ["small", "large"])
+
+
+@pytest.mark.redismod
+def test_search_missing_fields(client):
+    definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
+
+    fields = [
+        TextField("title", sortable=True),
+        TagField("features", index_missing=True),
+        TextField("description", index_missing=True),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+    # All fields present
+    client.hset(
+        "property:1",
+        mapping={
+            "title": "Luxury Villa in Malibu",
+            "features": "pool,sea view,modern",
+            "description": "A stunning modern villa overlooking the Pacific Ocean.",
+        },
+    )
+
+    # Missing features
+    client.hset(
+        "property:2",
+        mapping={
+            "title": "Downtown Flat",
+            "description": "Modern flat in central Paris with easy access to metro.",
+        },
+    )
+
+    # Missing description
+    client.hset(
+        "property:3",
+        mapping={
+            "title": "Beachfront Bungalow",
+            "features": "beachfront,sun deck",
+        },
+    )
+
+    with pytest.raises(redis.exceptions.ResponseError) as e:
+        client.ft().search(
+            Query("ismissing(@title)").dialect(2).return_field("id").no_content()
+        )
+    assert "to be defined with 'INDEXMISSING'" in e.value.args[0]
+
+    res = client.ft().search(
+        Query("ismissing(@features)").dialect(2).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:2"])
+
+    res = client.ft().search(
+        Query("-ismissing(@features)").dialect(2).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:3"])
+
+    res = client.ft().search(
+        Query("ismissing(@description)").dialect(2).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:3"])
+
+    res = client.ft().search(
+        Query("-ismissing(@description)").dialect(2).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:2"])
+
+
+@pytest.mark.redismod
+def test_search_empty_fields(client):
+    definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
+
+    fields = [
+        TextField("title", sortable=True),
+        TagField("features", index_empty=True),
+        TextField("description", index_empty=True),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+    # All fields present
+    client.hset(
+        "property:1",
+        mapping={
+            "title": "Luxury Villa in Malibu",
+            "features": "pool,sea view,modern",
+            "description": "A stunning modern villa overlooking the Pacific Ocean.",
+        },
+    )
+
+    # Empty features
+    client.hset(
+        "property:2",
+        mapping={
+            "title": "Downtown Flat",
+            "features": "",
+            "description": "Modern flat in central Paris with easy access to metro.",
+        },
+    )
+
+    # Empty description
+    client.hset(
+        "property:3",
+        mapping={
+            "title": "Beachfront Bungalow",
+            "features": "beachfront,sun deck",
+            "description": "",
+        },
+    )
+
+    with pytest.raises(redis.exceptions.ResponseError) as e:
+        client.ft().search(
+            Query("@title:''").dialect(2).return_field("id").no_content()
+        )
+    assert "Use `INDEXEMPTY` in field creation" in e.value.args[0]
+
+    res = client.ft().search(
+        Query("@features:{$empty}").dialect(2).return_field("id").no_content(),
+        query_params={"empty": ""},
+    )
+    _assert_search_result(client, res, ["property:2"])
+
+    res = client.ft().search(
+        Query("-@features:{$empty}").dialect(2).return_field("id").no_content(),
+        query_params={"empty": ""},
+    )
+    _assert_search_result(client, res, ["property:1", "property:3"])
+
+    res = client.ft().search(
+        Query("@description:''").dialect(2).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:3"])
+
+    res = client.ft().search(
+        Query("-@description:''").dialect(2).return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:2"])
+
+
+@pytest.mark.redismod
+def test_special_characters_in_fields(client):
+    definition = IndexDefinition(prefix=["resource:"], index_type=IndexType.HASH)
+
+    fields = [
+        TagField("uuid"),
+        TagField("tags", separator="|"),
+        TextField("description"),
+        NumericField("rating"),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+    client.hset(
+        "resource:1",
+        mapping={
+            "uuid": "123e4567-e89b-12d3-a456-426614174000",
+            "tags": "finance|crypto|$btc|blockchain",
+            "description": "Analysis of blockchain technologies & Bitcoin's potential.",
+            "rating": 5,
+        },
+    )
+
+    client.hset(
+        "resource:2",
+        mapping={
+            "uuid": "987e6543-e21c-12d3-a456-426614174999",
+            "tags": "health|well-being|fitness|new-year's-resolutions",
+            "description": "Health trends for the new year, including fitness regimes.",
+            "rating": 4,
+        },
+    )
+
+    # no need to escape - when using params
+    res = client.ft().search(
+        Query("@uuid:{$uuid}").dialect(2),
+        query_params={"uuid": "123e4567-e89b-12d3-a456-426614174000"},
+    )
+    _assert_search_result(client, res, ["resource:1"])
+
+    # with double quotes exact match no need to escape the - even without params
+    res = client.ft().search(
+        Query('@uuid:{"123e4567-e89b-12d3-a456-426614174000"}').dialect(2)
+    )
+    _assert_search_result(client, res, ["resource:1"])
+
+    res = client.ft().search(Query('@tags:{"new-year\'s-resolutions"}').dialect(2))
+    _assert_search_result(client, res, ["resource:2"])
+
+    # possible to search numeric fields by single value
+    res = client.ft().search(Query("@rating:[4]").dialect(2))
+    _assert_search_result(client, res, ["resource:2"])
+
+    # some chars still need escaping
+    res = client.ft().search(Query(r"@tags:{\$btc}").dialect(2))
+    _assert_search_result(client, res, ["resource:1"])
+
+
+def _assert_search_result(client, result, expected_doc_ids):
+    """
+    Make sure the result of a geo search is as expected, taking into account the RESP
+    version being used.
+    """
+    if is_resp2_connection(client):
+        assert set([doc.id for doc in result.docs]) == set(expected_doc_ids)
+    else:
+        assert set([doc["id"] for doc in result["results"]]) == set(expected_doc_ids)

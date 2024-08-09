@@ -23,107 +23,113 @@ concurrency:
 permissions:
   contents: read  #  to fetch code (actions/checkout)
 
+env:
+  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  # this speeds up coverage with Python 3.12: https://github.com/nedbat/coveragepy/issues/1665
+  COVERAGE_CORE: sysmon
+  REDIS_IMAGE: redis:7.4-rc2
+  REDIS_STACK_IMAGE: redis/redis-stack-server:latest
+
 jobs:
-
-   dependency-audit:
-     name: Dependency audit
-     runs-on: ubuntu-latest
-     steps:
-       - uses: actions/checkout@v4
-       - uses: pypa/gh-action-pip-audit@v1.0.8
-         with:
-           inputs: requirements.txt dev_requirements.txt
-           ignore-vulns: |
-             GHSA-w596-4wvx-j9j6  # subversion related git pull, dependency for pytest. There is no impact here.
-
-   lint:
-     name: Code linters
-     runs-on: ubuntu-latest
-     steps:
-       - uses: actions/checkout@v4
-       - uses: actions/setup-python@v5
-         with:
-           python-version: 3.9
-           cache: 'pip'
-       - name: run code linters
-         run: |
-           pip install -r dev_requirements.txt
-           invoke linters
-
-   run-tests:
-     runs-on: ubuntu-latest
-     timeout-minutes: 60
-     strategy:
-       max-parallel: 15
-       fail-fast: false
-       matrix:
-         python-version: ['3.8', '3.9', '3.10', '3.11', 'pypy-3.8', 'pypy-3.9']
-         test-type: ['standalone', 'cluster']
-         connection-type: ['hiredis', 'plain']
-     env:
-       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-     name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
-     steps:
-       - uses: actions/checkout@v4
-       - uses: actions/setup-python@v5
-         with:
-           python-version: ${{ matrix.python-version }}
-           cache: 'pip'
-       - name: run tests
-         run: |
-           pip install -U setuptools wheel
-           pip install -r requirements.txt
-           pip install -r dev_requirements.txt
-           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-            pip install hiredis
-           fi
-           invoke devenv
-           sleep 10 # time to settle
-           invoke ${{matrix.test-type}}-tests
-
-       - uses: actions/upload-artifact@v4
-         if: success() || failure()
-         with:
-           name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}
-           path: '${{matrix.test-type}}*results.xml'
-
-       - name: Upload codecov coverage
-         uses: codecov/codecov-action@v4
-         with:
-           fail_ci_if_error: false
-
-       - name: View Test Results
-         uses: dorny/test-reporter@v1
-         if: success() || failure()
-         continue-on-error: true
-         with:
-           name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}
-           path: '*.xml'
-           reporter: java-junit
-           list-suites: all
-           list-tests: all
-           max-annotations: 10
-           fail-on-error: 'false'
-
-   resp3_tests:
+  dependency-audit:
+    name: Dependency audit
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.8', '3.11']
-        test-type: ['standalone', 'cluster']
-        connection-type: ['hiredis', 'plain']
-        protocol: ['3']
-    env:
-       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pypa/gh-action-pip-audit@v1.0.8
+        with:
+          inputs: requirements.txt dev_requirements.txt
+          ignore-vulns: |
+            GHSA-w596-4wvx-j9j6  # subversion related git pull, dependency for pytest. There is no impact here.
+
+  lint:
+    name: Code linters
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
+          python-version: 3.9
+          cache: 'pip'
+      - name: run code linters
+        run: |
+          pip install -r dev_requirements.txt
+          invoke linters
+
+  resp2-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.8', 'pypy-3.9']
+        test-type: ['standalone', 'cluster']
+        connection-type: ['hiredis', 'plain']
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: RESP2 ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
-      - name: run tests
+
+      - name: Run tests
+        run: |
+          pip install -U setuptools wheel
+          pip install -r requirements.txt
+          pip install -r dev_requirements.txt
+          if [ "${{matrix.connection-type}}" == "hiredis" ]; then
+           pip install hiredis
+          fi
+          invoke devenv
+          sleep 10 # time to settle
+          invoke ${{matrix.test-type}}-tests
+          ls -1
+
+      - name: Upload test results and profiling data
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}
+          path: |
+            ${{matrix.test-type}}*-results.xml
+            prof/**
+            profile_output*
+          if-no-files-found: error
+          retention-days: 10
+
+      - name: Upload codecov coverage
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: false
+
+  resp3-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.12']
+        test-type: ['standalone', 'cluster']
+        connection-type: ['hiredis', 'plain']
+        event-loop: ['asyncio', 'uvloop']
+        exclude:
+          - test-type: 'cluster'
+            connection-type: 'hiredis'
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: RESP3 ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.event-loop}}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Run tests
         run: |
           pip install -U setuptools wheel
           pip install -r requirements.txt
@@ -132,14 +138,33 @@ jobs:
             pip install hiredis
           fi
           invoke devenv
-          sleep 5 # time to settle
-          invoke ${{matrix.test-type}}-tests
-          invoke ${{matrix.test-type}}-tests --uvloop
+          sleep 10 # time to settle
+          if [ "${{matrix.event-loop}}" == "uvloop" ]; then
+            invoke ${{matrix.test-type}}-tests --uvloop --protocol=3
+          else
+            invoke ${{matrix.test-type}}-tests --protocol=3
+          fi
 
-   build_and_test_package:
+      - name: Upload test results and profiling data
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}-${{matrix.event-loop}}-resp3
+          path: |
+            ${{matrix.test-type}}*-results.xml
+            prof/**
+            profile_output*
+          if-no-files-found: error
+          retention-days: 10
+
+      - name: Upload codecov coverage
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: false
+
+  build-and-test-package:
     name: Validate building and installing the package
     runs-on: ubuntu-latest
-    needs: [run-tests]
+    needs: [resp2-tests, resp3-tests]
     strategy:
       fail-fast: false
       matrix:
@@ -153,13 +178,13 @@ jobs:
         run: |
           bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
 
-   install_package_from_commit:
+  install-package-from-commit:
     name: Install package from commit hash
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', 'pypy-3.8', 'pypy-3.9']
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.8', 'pypy-3.9']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
