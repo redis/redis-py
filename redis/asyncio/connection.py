@@ -49,16 +49,9 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
-from redis.typing import EncodableT, KeysT, ResponseT
+from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, get_lib_version, str_if_bytes
 
-from .._cache import (
-    DEFAULT_ALLOW_LIST,
-    DEFAULT_DENY_LIST,
-    DEFAULT_EVICTION_POLICY,
-    AbstractCache,
-    _LocalCache,
-)
 from .._parsers import (
     BaseParser,
     Encoder,
@@ -121,9 +114,6 @@ class AbstractConnection:
         "encoder",
         "ssl_context",
         "protocol",
-        "client_cache",
-        "cache_deny_list",
-        "cache_allow_list",
         "_reader",
         "_writer",
         "_parser",
@@ -158,13 +148,6 @@ class AbstractConnection:
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        cache_enabled: bool = False,
-        client_cache: Optional[AbstractCache] = None,
-        cache_max_size: int = 10000,
-        cache_ttl: int = 0,
-        cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
-        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -222,18 +205,6 @@ class AbstractConnection:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
             self.protocol = protocol
-        if cache_enabled:
-            _cache = _LocalCache(cache_max_size, cache_ttl, cache_policy)
-        else:
-            _cache = None
-        self.client_cache = client_cache if client_cache is not None else _cache
-        if self.client_cache is not None:
-            if self.protocol not in [3, "3"]:
-                raise RedisError(
-                    "client caching is only supported with protocol version 3 or higher"
-                )
-            self.cache_deny_list = cache_deny_list
-            self.cache_allow_list = cache_allow_list
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage
@@ -425,11 +396,6 @@ class AbstractConnection:
         # if a database is specified, switch to it. Also pipeline this
         if self.db:
             await self.send_command("SELECT", self.db)
-        # if client caching is enabled, start tracking
-        if self.client_cache:
-            await self.send_command("CLIENT", "TRACKING", "ON")
-            await self.read_response()
-            self._parser.set_invalidation_push_handler(self._cache_invalidation_process)
 
         # read responses from pipeline
         for _ in (sent for sent in (self.lib_name, self.lib_version) if sent):
@@ -464,9 +430,6 @@ class AbstractConnection:
             raise TimeoutError(
                 f"Timed out closing connection after {self.socket_connect_timeout}"
             ) from None
-        finally:
-            if self.client_cache:
-                self.client_cache.flush()
 
     async def _send_ping(self):
         """Send PING, expect PONG in return"""
@@ -688,60 +651,9 @@ class AbstractConnection:
         """Check if the socket is empty"""
         return len(self._reader._buffer) == 0
 
-    def _cache_invalidation_process(
-        self, data: List[Union[str, Optional[List[str]]]]
-    ) -> None:
-        """
-        Invalidate (delete) all redis commands associated with a specific key.
-        `data` is a list of strings, where the first string is the invalidation message
-        and the second string is the list of keys to invalidate.
-        (if the list of keys is None, then all keys are invalidated)
-        """
-        if data[1] is None:
-            self.client_cache.flush()
-        else:
-            for key in data[1]:
-                self.client_cache.invalidate_key(str_if_bytes(key))
-
-    async def _get_from_local_cache(self, command: str):
-        """
-        If the command is in the local cache, return the response
-        """
-        if (
-            self.client_cache is None
-            or command[0] in self.cache_deny_list
-            or command[0] not in self.cache_allow_list
-        ):
-            return None
+    async def process_invalidation_messages(self):
         while not self._socket_is_empty():
             await self.read_response(push_request=True)
-        return self.client_cache.get(command)
-
-    def _add_to_local_cache(
-        self, command: Tuple[str], response: ResponseT, keys: List[KeysT]
-    ):
-        """
-        Add the command and response to the local cache if the command
-        is allowed to be cached
-        """
-        if (
-            self.client_cache is not None
-            and (self.cache_deny_list == [] or command[0] not in self.cache_deny_list)
-            and (self.cache_allow_list == [] or command[0] in self.cache_allow_list)
-        ):
-            self.client_cache.set(command, response, keys)
-
-    def flush_cache(self):
-        if self.client_cache:
-            self.client_cache.flush()
-
-    def delete_command_from_cache(self, command):
-        if self.client_cache:
-            self.client_cache.delete_command(command)
-
-    def invalidate_key_from_cache(self, key):
-        if self.client_cache:
-            self.client_cache.invalidate_key(key)
 
 
 class Connection(AbstractConnection):
@@ -1177,18 +1089,12 @@ class ConnectionPool:
     async def ensure_connection(self, connection: AbstractConnection):
         """Ensure that the connection object is connected and valid"""
         await connection.connect()
-        # if client caching is not enabled connections that the pool
-        # provides should be ready to send a command.
-        # if not, the connection was either returned to the
+        # connections that the pool provides should be ready to send
+        # a command. if not, the connection was either returned to the
         # pool before all data has been read or the socket has been
         # closed. either way, reconnect and verify everything is good.
-        # (if caching enabled the connection will not always be ready
-        # to send a command because it may contain invalidation messages)
         try:
-            if (
-                await connection.can_read_destructive()
-                and connection.client_cache is None
-            ):
+            if await connection.can_read_destructive():
                 raise ConnectionError("Connection has data") from None
         except (ConnectionError, OSError):
             await connection.disconnect()
@@ -1234,21 +1140,6 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
-
-    def flush_cache(self):
-        connections = chain(self._available_connections, self._in_use_connections)
-        for connection in connections:
-            connection.flush_cache()
-
-    def delete_command_from_cache(self, command: str):
-        connections = chain(self._available_connections, self._in_use_connections)
-        for connection in connections:
-            connection.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key: str):
-        connections = chain(self._available_connections, self._in_use_connections)
-        for connection in connections:
-            connection.invalidate_key_from_cache(key)
 
 
 class BlockingConnectionPool(ConnectionPool):

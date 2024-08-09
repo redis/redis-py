@@ -410,7 +410,7 @@ def sslclient(request):
 
 
 @pytest.fixture()
-def sentinel_setup(local_cache, request):
+def sentinel_setup(cache, request):
     sentinel_ips = request.config.getoption("--sentinels")
     sentinel_endpoints = [
         (ip.strip(), int(port.strip()))
@@ -420,7 +420,8 @@ def sentinel_setup(local_cache, request):
     sentinel = Sentinel(
         sentinel_endpoints,
         socket_timeout=0.1,
-        client_cache=local_cache,
+        use_cache=cache,
+        cache=cache,
         protocol=3,
         **kwargs,
     )
@@ -441,7 +442,6 @@ def _gen_cluster_mock_resp(r, response):
     connection = Mock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
-    connection._get_from_local_cache.return_value = None
     with mock.patch.object(r, "connection", connection):
         yield r
 

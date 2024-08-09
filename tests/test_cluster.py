@@ -208,7 +208,6 @@ def get_mocked_redis_client(
 def mock_node_resp(node, response):
     connection = Mock()
     connection.read_response.return_value = response
-    connection._get_from_local_cache.return_value = None
     node.redis_connection.connection = connection
     return node
 
@@ -216,7 +215,6 @@ def mock_node_resp(node, response):
 def mock_node_resp_func(node, func):
     connection = Mock()
     connection.read_response.side_effect = func
-    connection._get_from_local_cache.return_value = None
     node.redis_connection.connection = connection
     return node
 
@@ -485,7 +483,6 @@ class TestRedisClusterObj:
         redis_mock_node.execute_command.side_effect = mock_execute_command
         # Mock response value for all other commands
         redis_mock_node.parse_response.return_value = "MOCK_OK"
-        redis_mock_node.connection._get_from_local_cache.return_value = None
         for node in r.get_nodes():
             if node.port != primary.port:
                 node.redis_connection = redis_mock_node

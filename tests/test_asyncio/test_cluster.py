@@ -190,7 +190,6 @@ def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
     connection = mock.AsyncMock(spec=Connection)
     connection.is_connected = True
     connection.read_response.return_value = response
-    connection._get_from_local_cache.return_value = None
     while node._free:
         node._free.pop()
     node._free.append(connection)
@@ -201,7 +200,6 @@ def mock_node_resp_exc(node: ClusterNode, exc: Exception) -> ClusterNode:
     connection = mock.AsyncMock(spec=Connection)
     connection.is_connected = True
     connection.read_response.side_effect = exc
-    connection._get_from_local_cache.return_value = None
     while node._free:
         node._free.pop()
     node._free.append(connection)
