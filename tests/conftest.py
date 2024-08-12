@@ -410,22 +410,30 @@ def sslclient(request):
 
 
 @pytest.fixture()
-def sentinel_setup(cache, request):
+def sentinel_setup(request):
     sentinel_ips = request.config.getoption("--sentinels")
     sentinel_endpoints = [
         (ip.strip(), int(port.strip()))
         for ip, port in (endpoint.split(":") for endpoint in sentinel_ips.split(","))
     ]
     kwargs = request.param.get("kwargs", {}) if hasattr(request, "param") else {}
+    use_cache = request.param.get("use_cache", False)
+    cache = request.param.get("cache", None)
+    cache_size = request.param.get("cache_size", 128)
+    cache_ttl = request.param.get("cache_ttl", 300)
+    force_master_ip = request.param.get("force_master_ip", None)
     sentinel = Sentinel(
         sentinel_endpoints,
+        force_master_ip=force_master_ip,
         socket_timeout=0.1,
-        use_cache=cache,
+        use_cache=use_cache,
         cache=cache,
+        cache_ttl=cache_ttl,
+        cache_size=cache_size,
         protocol=3,
         **kwargs,
     )
-    yield sentinel
+    yield sentinel, cache
     for s in sentinel.sentinels:
         s.close()
 
@@ -433,8 +441,9 @@ def sentinel_setup(cache, request):
 @pytest.fixture()
 def master(request, sentinel_setup):
     master_service = request.config.getoption("--master-service")
-    master = sentinel_setup.master_for(master_service)
-    yield master
+    sentinel, cache = sentinel_setup
+    master = sentinel.master_for(master_service)
+    yield master, cache
     master.close()
 
 

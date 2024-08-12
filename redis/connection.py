@@ -729,6 +729,8 @@ class CacheProxyConnection(ConnectionInterface):
         self.pid = os.getpid()
         self._conn = conn
         self.retry = self._conn.retry
+        self.host = self._conn.host
+        self.port = self._conn.port
         self._cache = cache
         self._conf = conf
         self._current_command_hash = None
@@ -770,7 +772,7 @@ class CacheProxyConnection(ConnectionInterface):
     def send_command(self, *args, **kwargs):
         self._process_pending_invalidations()
 
-        # If command is write command or not allowed to cache skip it.
+        # If command is write command or not allowed to cache, transfer control to the actual connection.
         if not self._conf.is_allowed_to_cache(args[0]):
             self._current_command_hash = None
             self._current_command_keys = None

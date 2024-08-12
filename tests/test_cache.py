@@ -5,7 +5,6 @@ import pytest
 from cachetools import TTLCache, LRUCache, LFUCache
 
 import redis
-from redis import Redis, RedisCluster
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import _get_client
 
@@ -113,8 +112,6 @@ class TestCache:
         threading.Thread(target=r2.set, args=("bar", "bar")).start()
         # Wait for health check
         time.sleep(2)
-        # Trigger object destructor to shutdown health check thread
-        del r
         # Make sure that value was invalidated
         assert cache.get(("GET", "foo")) is None
         assert cache.get(("GET", "bar")) is None
@@ -492,7 +489,14 @@ class TestClusterCache:
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 class TestSentinelCache:
-    def test_get_from_cache(self, cache, master):
+    @pytest.mark.parametrize(
+        "sentinel_setup",
+        [{"cache": LRUCache(maxsize=128), "use_cache": True, "force_master_ip": "localhost"}],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_get_from_cache(self, master, cache):
+        master, cache = master
         master.set("foo", "bar")
         # get key from redis and save in local cache
         assert master.get("foo") == b"bar"
@@ -500,9 +504,77 @@ class TestSentinelCache:
         assert cache.get(("GET", "foo")) == b"bar"
         # change key in redis (cause invalidation)
         master.set("foo", "barbar")
-        # send any command to redis (process invalidation in background)
-        master.ping()
-        # the command is not in the local cache anymore
-        assert cache.get(("GET", "foo")) is None
         # get key from redis
         assert master.get("foo") == b"barbar"
+        # Make sure that new value was cached
+        assert cache.get(("GET", "foo")) == b"barbar"
+
+    @pytest.mark.parametrize(
+        "sentinel_setup",
+        [{"cache": LRUCache(maxsize=128), "use_cache": True, "force_master_ip": "localhost"}],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_get_from_cache_multithreaded(self, master, cache):
+        master, cache = master
+        # Running commands over two threads
+        threading.Thread(target=set_get, args=(master, "foo", "bar")).start()
+        threading.Thread(target=set_get, args=(master, "bar", "foo")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        # Make sure that both values was cached.
+        assert cache.get(("GET", "foo")) == b"bar"
+        assert cache.get(("GET", "bar")) == b"foo"
+
+        # Running commands over two threads
+        threading.Thread(target=set_get, args=(master, "foo", "baz")).start()
+        threading.Thread(target=set_get, args=(master, "bar", "bar")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        # Make sure that new values was cached.
+        assert cache.get(("GET", "foo")) == b"baz"
+        assert cache.get(("GET", "bar")) == b"bar"
+
+    @pytest.mark.parametrize(
+        "sentinel_setup",
+        [{"cache": LRUCache(maxsize=128), "use_cache": True, "force_master_ip": "localhost"}],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_health_check_invalidate_cache(self, master, cache):
+        master, cache = master
+        # add key to redis
+        master.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert master.get("foo") == b"bar"
+        # get key from local cache
+        assert cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        master.set("foo", "barbar")
+        # Wait for health check
+        time.sleep(2)
+        # Make sure that value was invalidated
+        assert cache.get(("GET", "foo")) is None
+
+    @pytest.mark.parametrize(
+        "sentinel_setup",
+        [{"cache": LRUCache(maxsize=128), "use_cache": True, "force_master_ip": "localhost"}],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_cache_clears_on_disconnect(self, master, cache):
+        master, cache = master
+        # add key to redis
+        master.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert master.get("foo") == b"bar"
+        # get key from local cache
+        assert cache.get(("GET", "foo")) == b"bar"
+        # Force disconnection
+        master.connection_pool.get_connection('_').disconnect()
+        # Make sure cache is empty
+        assert cache.currsize == 0
