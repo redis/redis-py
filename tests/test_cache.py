@@ -57,19 +57,30 @@ class TestCache:
     def test_get_from_cache_multithreaded(self, r, cache):
         r, cache = r
         # Running commands over two threads
-        threading.Thread(target=set_get, args=(r, "foo", "bar")).start()
-        threading.Thread(target=set_get, args=(r, "bar", "foo")).start()
+        threading.Thread(target=r.set("foo", "bar")).start()
+        threading.Thread(target=r.set("bar", "foo")).start()
 
         # Wait for command execution to be finished
         time.sleep(0.1)
 
-        # Make sure that both values was cached.
+        threading.Thread(target=r.get("foo")).start()
+        threading.Thread(target=r.get("bar")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        # Make sure that responses was cached.
         assert cache.get(("GET", "foo")) == b"bar"
         assert cache.get(("GET", "bar")) == b"foo"
 
-        # Running commands over two threads
-        threading.Thread(target=set_get, args=(r, "foo", "baz")).start()
-        threading.Thread(target=set_get, args=(r, "bar", "bar")).start()
+        threading.Thread(target=r.set("foo", "baz")).start()
+        threading.Thread(target=r.set("bar", "bar")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        threading.Thread(target=r.get("foo")).start()
+        threading.Thread(target=r.get("bar")).start()
 
         # Wait for command execution to be finished
         time.sleep(0.1)
@@ -100,16 +111,21 @@ class TestCache:
     def test_health_check_invalidate_cache_multithreaded(self, r, r2, cache):
         r, cache = r
         # Running commands over two threads
-        threading.Thread(target=set_get, args=(r, "foo", "bar")).start()
-        threading.Thread(target=set_get, args=(r, "bar", "foo")).start()
+        threading.Thread(target=r.set("foo", "bar")).start()
+        threading.Thread(target=r.set("bar", "foo")).start()
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+        # get keys from server
+        threading.Thread(target=r.get("foo")).start()
+        threading.Thread(target=r.get("bar")).start()
         # Wait for command execution to be finished
         time.sleep(0.1)
         # get key from local cache
         assert cache.get(("GET", "foo")) == b"bar"
         assert cache.get(("GET", "bar")) == b"foo"
         # change key in redis (cause invalidation)
-        threading.Thread(target=r2.set, args=("foo", "baz")).start()
-        threading.Thread(target=r2.set, args=("bar", "bar")).start()
+        threading.Thread(target=r2.set("foo", "baz")).start()
+        threading.Thread(target=r2.set("bar", "bar")).start()
         # Wait for health check
         time.sleep(2)
         # Make sure that value was invalidated
@@ -283,12 +299,18 @@ class TestClusterCache:
         assert cache.get(("GET", "foo")) == b"barbar"
 
     @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
-    @pytest.mark.onlynoncluster
-    def test_get_from_cache_multithreaded(self, r, r2, cache):
+    @pytest.mark.onlycluster
+    def test_get_from_cache_multithreaded(self, r, cache):
         r, cache = r
         # Running commands over two threads
-        threading.Thread(target=set_get, args=(r, "foo", "bar")).start()
-        threading.Thread(target=set_get, args=(r, "bar", "foo")).start()
+        threading.Thread(target=r.set("foo", "bar")).start()
+        threading.Thread(target=r.set("bar", "foo")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        threading.Thread(target=r.get("foo")).start()
+        threading.Thread(target=r.get("bar")).start()
 
         # Wait for command execution to be finished
         time.sleep(0.1)
@@ -298,8 +320,14 @@ class TestClusterCache:
         assert cache.get(("GET", "bar")) == b"foo"
 
         # Running commands over two threads
-        threading.Thread(target=set_get, args=(r, "foo", "baz")).start()
-        threading.Thread(target=set_get, args=(r, "bar", "bar")).start()
+        threading.Thread(target=r.set("foo", "baz")).start()
+        threading.Thread(target=r.set("bar", "bar")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        threading.Thread(target=r.get("foo")).start()
+        threading.Thread(target=r.get("bar")).start()
 
         # Wait for command execution to be finished
         time.sleep(0.1)
@@ -309,7 +337,7 @@ class TestClusterCache:
         assert cache.get(("GET", "bar")) == b"bar"
 
     @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
-    @pytest.mark.onlynoncluster
+    @pytest.mark.onlycluster
     def test_health_check_invalidate_cache(self, r, r2, cache):
         r, cache = r
         # add key to redis
@@ -326,20 +354,23 @@ class TestClusterCache:
         assert cache.get(("GET", "foo")) is None
 
     @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
-    @pytest.mark.onlynoncluster
+    @pytest.mark.onlycluster
     def test_health_check_invalidate_cache_multithreaded(self, r, r2, cache):
         r, cache = r
         # Running commands over two threads
-        threading.Thread(target=set_get, args=(r, "foo", "bar")).start()
-        threading.Thread(target=set_get, args=(r, "bar", "foo")).start()
+        threading.Thread(target=r.set("foo", "bar")).start()
+        threading.Thread(target=r.set("bar", "foo")).start()
         # Wait for command execution to be finished
         time.sleep(0.1)
+        # get keys from server
+        threading.Thread(target=r.get("foo")).start()
+        threading.Thread(target=r.get("bar")).start()
         # get key from local cache
         assert cache.get(("GET", "foo")) == b"bar"
         assert cache.get(("GET", "bar")) == b"foo"
         # change key in redis (cause invalidation)
-        threading.Thread(target=r2.set, args=("foo", "baz")).start()
-        threading.Thread(target=r2.set, args=("bar", "bar")).start()
+        threading.Thread(target=r.set("foo", "baz")).start()
+        threading.Thread(target=r.set("bar", "bar")).start()
         # Wait for health check
         time.sleep(2)
         # Make sure that value was invalidated
@@ -347,7 +378,7 @@ class TestClusterCache:
         assert cache.get(("GET", "bar")) is None
 
     @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
-    @pytest.mark.onlynoncluster
+    @pytest.mark.onlycluster
     def test_cache_clears_on_disconnect(self, r, r2, cache):
         r, cache = r
         # add key to redis
@@ -366,6 +397,7 @@ class TestClusterCache:
         [{"cache": LRUCache(3), "use_cache": True}],
         indirect=True,
     )
+    @pytest.mark.onlycluster
     def test_cache_lru_eviction(self, r, cache):
         r, cache = r
         # add 3 keys to redis
@@ -387,6 +419,7 @@ class TestClusterCache:
         assert cache.get(("GET", "foo")) is None
 
     @pytest.mark.parametrize("r", [{"cache": TTLCache(maxsize=128, ttl=1), "use_cache": True}], indirect=True)
+    @pytest.mark.onlycluster
     def test_cache_ttl(self, r, cache):
         r, cache = r
         # add key to redis
@@ -405,6 +438,7 @@ class TestClusterCache:
         [{"cache": LFUCache(3), "use_cache": True}],
         indirect=True,
     )
+    @pytest.mark.onlycluster
     def test_cache_lfu_eviction(self, r, cache):
         r, cache = r
         # add 3 keys to redis
@@ -432,6 +466,7 @@ class TestClusterCache:
         [{"cache": LRUCache(maxsize=128), "use_cache": True}],
         indirect=True,
     )
+    @pytest.mark.onlycluster
     def test_cache_ignore_not_allowed_command(self, r):
         r, cache = r
         # add fields to hash
@@ -445,6 +480,7 @@ class TestClusterCache:
         [{"cache": LRUCache(maxsize=128), "use_cache": True}],
         indirect=True,
     )
+    @pytest.mark.onlycluster
     def test_cache_invalidate_all_related_responses(self, r, cache):
         r, cache = r
         # Add keys
@@ -466,6 +502,7 @@ class TestClusterCache:
         [{"cache": LRUCache(maxsize=128), "use_cache": True}],
         indirect=True,
     )
+    @pytest.mark.onlycluster
     def test_cache_flushed_on_server_flush(self, r, cache):
         r, cache = r
         # Add keys
@@ -517,9 +554,17 @@ class TestSentinelCache:
     @pytest.mark.onlynoncluster
     def test_get_from_cache_multithreaded(self, master, cache):
         master, cache = master
+
         # Running commands over two threads
-        threading.Thread(target=set_get, args=(master, "foo", "bar")).start()
-        threading.Thread(target=set_get, args=(master, "bar", "foo")).start()
+        threading.Thread(target=master.set("foo", "bar")).start()
+        threading.Thread(target=master.set("bar", "foo")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        # Running commands over two threads
+        threading.Thread(target=master.get("foo")).start()
+        threading.Thread(target=master.get("bar")).start()
 
         # Wait for command execution to be finished
         time.sleep(0.1)
@@ -529,8 +574,15 @@ class TestSentinelCache:
         assert cache.get(("GET", "bar")) == b"foo"
 
         # Running commands over two threads
-        threading.Thread(target=set_get, args=(master, "foo", "baz")).start()
-        threading.Thread(target=set_get, args=(master, "bar", "bar")).start()
+        threading.Thread(target=master.set("foo", "baz")).start()
+        threading.Thread(target=master.set("bar", "bar")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        # Running commands over two threads
+        threading.Thread(target=master.get("foo")).start()
+        threading.Thread(target=master.get("bar")).start()
 
         # Wait for command execution to be finished
         time.sleep(0.1)
