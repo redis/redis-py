@@ -1034,6 +1034,9 @@ class ClusterNode:
         if EMPTY_RESPONSE in kwargs:
             kwargs.pop(EMPTY_RESPONSE)
 
+        # Remove keys entry, it needs only for cache.
+        kwargs.pop("keys", None)
+
         # Return response
         if command in self.response_callbacks:
             return self.response_callbacks[command](response, **kwargs)
