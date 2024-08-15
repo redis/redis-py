@@ -15,6 +15,7 @@ from redis.asyncio.sentinel import (
 )
 from redis.asyncio.utils import from_url
 from redis.backoff import default_backoff
+from redis.connection import ConnectionInterface
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -38,6 +39,7 @@ __all__ = [
     "BlockingConnectionPool",
     "BusyLoadingError",
     "ChildDeadlockedError",
+    "ConnectionInterface",
     "Connection",
     "ConnectionError",
     "ConnectionPool",

@@ -5,6 +5,8 @@ import inspect
 import socket
 import ssl
 import sys
+import threading
+import time
 import warnings
 import weakref
 from abc import abstractmethod
@@ -23,10 +25,16 @@ from typing import (
     Type,
     TypedDict,
     TypeVar,
-    Union,
+    Union, Coroutine,
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
+from cachetools import TTLCache, Cache, LRUCache
+from cachetools.keys import hashkey
+
+from ..cache import CacheConfiguration
 from ..utils import format_error_message
 
 # the functionality is available in 3.11.x but has a major issue before
@@ -38,7 +46,7 @@ else:
 
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.connection import DEFAULT_RESP_VERSION
+from redis.connection import DEFAULT_RESP_VERSION, CacheProxyConnection
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
@@ -90,6 +98,70 @@ class AsyncConnectCallbackProtocol(Protocol):
 
 
 ConnectCallbackT = Union[ConnectCallbackProtocol, AsyncConnectCallbackProtocol]
+
+
+class AsyncConnectionInterface:
+    @abstractmethod
+    def repr_pieces(self):
+        pass
+
+    @abstractmethod
+    def register_connect_callback(self, callback):
+        pass
+
+    @abstractmethod
+    def deregister_connect_callback(self, callback):
+        pass
+
+    @abstractmethod
+    def set_parser(self, parser_class):
+        pass
+
+    @abstractmethod
+    async def connect(self):
+        pass
+
+    @abstractmethod
+    async def on_connect(self):
+        pass
+
+    @abstractmethod
+    async def disconnect(self, *args):
+        pass
+
+    @abstractmethod
+    async def check_health(self):
+        pass
+
+    @abstractmethod
+    async def send_packed_command(self, command, check_health=True):
+        pass
+
+    @abstractmethod
+    async def send_command(self, *args, **kwargs):
+        pass
+
+    @abstractmethod
+    async def can_read_destructive(self):
+        pass
+
+    @abstractmethod
+    async def read_response(
+            self,
+            disable_decoding=False,
+            *,
+            disconnect_on_error=True,
+            push_request=False,
+    ):
+        pass
+
+    @abstractmethod
+    def pack_command(self, *args):
+        pass
+
+    @abstractmethod
+    def pack_commands(self, commands):
+        pass
 
 
 class AbstractConnection:
@@ -651,10 +723,6 @@ class AbstractConnection:
         """Check if the socket is empty"""
         return len(self._reader._buffer) == 0
 
-    async def process_invalidation_messages(self):
-        while not self._socket_is_empty():
-            await self.read_response(push_request=True)
-
 
 class Connection(AbstractConnection):
     "Manages TCP communication to and from a Redis server"
@@ -711,6 +779,171 @@ class Connection(AbstractConnection):
 
     def _host_error(self) -> str:
         return f"{self.host}:{self.port}"
+
+
+def ensure_string(key):
+    if isinstance(key, bytes):
+        return key.decode('utf-8')
+    elif isinstance(key, str):
+        return key
+    else:
+        raise TypeError("Key must be either a string or bytes")
+
+
+class AsyncCacheProxyConnection(AsyncConnectionInterface):
+    def __init__(self, conn: AsyncConnectionInterface, cache: Cache, conf: CacheConfiguration):
+        self._conn = conn
+        self.retry = self._conn.retry
+        self.host = self._conn.host
+        self.port = self._conn.port
+        self._cache = cache
+        self._conf = conf
+        self._current_command_hash = None
+        self._current_command_keys = None
+        self._current_options = None
+        self._keys_mapping = LRUCache(maxsize=10000)
+        self.register_connect_callback(self._enable_tracking_callback)
+
+    def repr_pieces(self):
+        return self._conn.repr_pieces()
+
+    def register_connect_callback(self, callback):
+        self._conn.register_connect_callback(callback)
+
+    def deregister_connect_callback(self, callback):
+        self._conn.deregister_connect_callback(callback)
+
+    def set_parser(self, parser_class):
+        self._conn.set_parser(parser_class)
+
+    async def connect(self):
+        await self._conn.connect()
+
+    async def on_connect(self):
+        await self._conn.on_connect()
+
+    async def disconnect(self, *args):
+        self._cache.clear()
+        await self._conn.disconnect(*args)
+
+    async def check_health(self):
+        await self._conn.check_health()
+
+    async def send_packed_command(self, command, check_health=True):
+        await self._process_pending_invalidations()
+        # TODO: Investigate if it's possible to unpack command or extract keys from packed command
+        await self._conn.send_packed_command(command)
+
+    async def send_command(self, *args, **kwargs):
+        await self._process_pending_invalidations()
+
+        # If command is write command or not allowed to cache, transfer control to the actual connection.
+        if not self._conf.is_allowed_to_cache(args[0]):
+            self._current_command_hash = None
+            self._current_command_keys = None
+            await self._conn.send_command(*args, **kwargs)
+            return
+
+        # Create hash representation of current executed command.
+        self._current_command_hash = hashkey(*args)
+
+        # Extract keys from current command.
+        if kwargs.get("keys"):
+            self._current_command_keys = kwargs["keys"]
+
+        if not isinstance(self._current_command_keys, list):
+            raise TypeError("Cache keys must be a list.")
+
+        # If current command reply already cached prevent sending data over socket.
+        if self._cache.get(self._current_command_hash):
+            return
+
+        # Set temporary entry as a status to prevent race condition from another connection.
+        self._cache[self._current_command_hash] = "caching-in-progress"
+
+        # Send command over socket only if it's allowed read-only command that not yet cached.
+        await self._conn.send_command(*args, **kwargs)
+
+    async def can_read_destructive(self):
+        return await self._conn.can_read_destructive()
+
+    async def read_response(self, disable_decoding=False, *, disconnect_on_error=True, push_request=False):
+        # Check if command response exists in a cache and it's not in progress.
+        if (
+                self._current_command_hash in self._cache
+                and self._cache[self._current_command_hash] != "caching-in-progress"
+        ):
+            return self._cache[self._current_command_hash]
+
+        response = await self._conn.read_response(
+            disable_decoding=disable_decoding,
+            disconnect_on_error=disconnect_on_error,
+            push_request=push_request
+        )
+
+        # If response is None prevent from caching and remove temporary cache entry.
+        if response is None:
+            self._cache.pop(self._current_command_hash)
+            return response
+        # Prevent not-allowed command from caching.
+        elif self._current_command_hash is None:
+            return response
+
+        # Create separate mapping for keys or add current response to associated keys.
+        for key in self._current_command_keys:
+            if key in self._keys_mapping:
+                if self._current_command_hash not in self._keys_mapping[key]:
+                    self._keys_mapping[key].append(self._current_command_hash)
+            else:
+                self._keys_mapping[key] = [self._current_command_hash]
+
+        cache_entry = self._cache.get(self._current_command_hash, None)
+
+        # Cache only responses that still valid and wasn't invalidated by another connection in meantime
+        if cache_entry is not None:
+            self._cache[self._current_command_hash] = response
+
+        return response
+
+    def pack_command(self, *args):
+        return self._conn.pack_command(*args)
+
+    def pack_commands(self, commands):
+        return self._conn.pack_commands(commands)
+
+    def _connect(self):
+        self._conn._connect()
+
+    def _close(self):
+        self._conn._close()
+
+    def _host_error(self):
+        return self._conn._host_error()
+
+    async def _process_pending_invalidations(self):
+        while not await self._conn.can_read_destructive():
+            await self._conn.read_response(push_request=True)
+
+    async def _enable_tracking_callback(self, conn: AsyncConnectionInterface) -> None:
+        await conn.send_command('CLIENT', 'TRACKING', 'ON')
+        await conn.read_response()
+        conn._parser.set_invalidation_push_handler(self._on_invalidation_callback)
+
+    async def _on_invalidation_callback(
+            self, data: List[Union[str, Optional[List[str]]]]
+    ):
+        # Flush cache when DB flushed on server-side
+        if data[1] is None:
+            self._cache.clear()
+        else:
+            for key in data[1]:
+                normalized_key = ensure_string(key)
+                if normalized_key in self._keys_mapping:
+                    # Make sure that all command responses associated with this key will be deleted
+                    for cache_key in self._keys_mapping[normalized_key]:
+                        self._cache.pop(cache_key)
+                # Removes key from mapping cache
+                self._keys_mapping.pop(normalized_key)
 
 
 class SSLConnection(Connection):
@@ -1029,6 +1262,31 @@ class ConnectionPool:
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
+        self._cache = None
+        self._cache_conf = None
+        self.scheduler = None
+
+        if connection_kwargs.get("use_cache"):
+            if connection_kwargs.get("protocol") not in [3, "3"]:
+                raise RedisError("Client caching is only supported with RESP version 3")
+
+            self._cache_conf = CacheConfiguration(**self.connection_kwargs)
+
+            cache = self.connection_kwargs.get("cache")
+            if cache is not None:
+                self._cache = cache
+            else:
+                self._cache = TTLCache(self.connection_kwargs["cache_size"], self.connection_kwargs["cache_ttl"])
+
+            loop = asyncio.get_event_loop()
+            loop.create_task(self._run_cache_healthcheck())
+            loop.run_forever()
+
+
+        connection_kwargs.pop("use_cache", None)
+        connection_kwargs.pop("cache_size", None)
+        connection_kwargs.pop("cache_ttl", None)
+        connection_kwargs.pop("cache", None)
 
         self._available_connections: List[AbstractConnection] = []
         self._in_use_connections: Set[AbstractConnection] = set()
@@ -1083,6 +1341,13 @@ class ConnectionPool:
         )
 
     def make_connection(self):
+        if self._cache is not None and self._cache_conf is not None:
+            return AsyncCacheProxyConnection(
+                self.connection_class(**self.connection_kwargs),
+                self._cache,
+                self._cache_conf
+            )
+
         """Create a new connection.  Can be overridden by child classes."""
         return self.connection_class(**self.connection_kwargs)
 
@@ -1094,7 +1359,10 @@ class ConnectionPool:
         # pool before all data has been read or the socket has been
         # closed. either way, reconnect and verify everything is good.
         try:
-            if await connection.can_read_destructive():
+            if (
+                    not await connection.can_read_destructive()
+                    and self._cache is None
+            ):
                 raise ConnectionError("Connection has data") from None
         except (ConnectionError, OSError):
             await connection.disconnect()
@@ -1140,6 +1408,17 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
+
+    async def _run_cache_healthcheck(self) -> None:
+        self.scheduler = AsyncIOScheduler()
+        self.scheduler.add_job(self._perform_health_check, "interval", seconds=2, id="cache_health_check")
+        self.scheduler.start()
+
+    async def _perform_health_check(self) -> None:
+        while self._available_connections:
+            conn = self._available_connections.pop()
+            await conn.send_command('PING')
+            await conn.read_response()
 
 
 class BlockingConnectionPool(ConnectionPool):

@@ -855,7 +855,7 @@ class CacheProxyConnection(ConnectionInterface):
         self._conn._connect()
 
     def _host_error(self):
-        self._conn._host_error()
+        return self._conn._host_error()
 
     def _enable_tracking_callback(self, conn: ConnectionInterface) -> None:
         conn.send_command('CLIENT', 'TRACKING', 'ON')

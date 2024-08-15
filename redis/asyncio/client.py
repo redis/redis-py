@@ -26,6 +26,8 @@ from typing import (
     cast,
 )
 
+from cachetools import Cache
+
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,
@@ -159,10 +161,16 @@ class Redis(
         arguments always win.
 
         """
+        use_cache = kwargs.pop("use_cache", False)
+        cache_size = kwargs.pop("cache_size", 128)
+        cache_ttl = kwargs.pop("cache_ttl", 300)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
         client = cls(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
+            use_cache=use_cache,
+            cache_size=cache_size,
+            cache_ttl=cache_ttl
         )
         if auto_close_connection_pool is not None:
             warnings.warn(
@@ -233,6 +241,10 @@ class Redis(
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        use_cache: bool = False,
+        cache: Optional[Cache] = None,
+        cache_size: int = 128,
+        cache_ttl: int = 300,
     ):
         """
         Initialize a new Redis client.
@@ -317,6 +329,16 @@ class Redis(
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
+
+            if use_cache and protocol in [3, "3"]:
+                kwargs.update(
+                    {
+                        "use_cache": use_cache,
+                        "cache": cache,
+                        "cache_size": cache_size,
+                        "cache_ttl": cache_ttl,
+                    }
+                )
             # This arg only used if no pool is passed in
             self.auto_close_connection_pool = auto_close_connection_pool
             connection_pool = ConnectionPool(**kwargs)
@@ -584,7 +606,7 @@ class Redis(
         """
         Send a command and parse the response
         """
-        await conn.send_command(*args)
+        await conn.send_command(*args, **options)
         return await self.parse_response(conn, command_name, **options)
 
     async def _disconnect_raise(self, conn: Connection, error: Exception):

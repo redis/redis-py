@@ -144,11 +144,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         single_connection_client = kwargs.pop("single_connection_client", False)
         use_cache = kwargs.pop("use_cache", False)
+        cache_size = kwargs.pop("cache_size", 128)
+        cache_ttl = kwargs.pop("cache_ttl", 300)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
         client = cls(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
-            use_cache=use_cache
+            use_cache=use_cache,
+            cache_size=cache_size,
+            cache_ttl=cache_ttl,
         )
         client.auto_close_connection_pool = True
         return client

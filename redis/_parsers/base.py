@@ -181,8 +181,7 @@ class _AsyncRESPBase(AsyncBaseParser):
         if self._buffer:
             return True
         try:
-            async with async_timeout(0):
-                return self._stream.at_eof()
+            return len(self._stream._buffer) == 0
         except TimeoutError:
             return False
 

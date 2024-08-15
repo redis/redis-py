@@ -1,3 +1,4 @@
+import asyncio
 from logging import getLogger
 from typing import Any, Union
 
@@ -151,6 +152,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
         super().__init__(socket_read_size)
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
         self.invalidation_push_handler_func = None
+        self._lock = asyncio.Lock()
 
     async def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
