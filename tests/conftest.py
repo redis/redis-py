@@ -11,9 +11,10 @@ import redis
 from packaging.version import Version
 from redis import Sentinel
 from redis.backoff import NoBackoff
-from redis.connection import Connection, parse_url
+from redis.connection import Connection, parse_url, SSLConnection
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
+from tests.ssl_utils import get_ssl_filename
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
@@ -323,6 +324,18 @@ def _get_client(
     cluster_mode = REDIS_INFO["cluster_enabled"]
     if not cluster_mode:
         url_options = parse_url(redis_url)
+        connection_class = Connection
+        ssl = kwargs.pop("ssl", False)
+        if ssl:
+            connection_class = SSLConnection
+            kwargs["ssl_certfile"] = get_ssl_filename("client-cert.pem")
+            kwargs["ssl_keyfile"] = get_ssl_filename("client-key.pem")
+            # When you try to assign "required" as single string, it assigns tuple instead of string.
+            # Probably some reserved keyword, I can't explain how does it work -_-
+            kwargs["ssl_cert_reqs"] = "require"+"d"
+            kwargs["ssl_ca_certs"] = get_ssl_filename("ca-cert.pem")
+            kwargs["port"] = 6666
+        kwargs["connection_class"] = connection_class
         url_options.update(kwargs)
         pool = redis.ConnectionPool(**url_options)
         client = cls(connection_pool=pool)

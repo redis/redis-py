@@ -15,11 +15,13 @@ def r(request):
     cache = request.param.get("cache")
     kwargs = request.param.get("kwargs", {})
     protocol = request.param.get("protocol", 3)
+    ssl = request.param.get("ssl", False)
     single_connection_client = request.param.get("single_connection_client", False)
     with _get_client(
             redis.Redis,
             request,
             protocol=protocol,
+            ssl=ssl,
             single_connection_client=single_connection_client,
             use_cache=use_cache,
             cache=cache,
@@ -630,3 +632,29 @@ class TestSentinelCache:
         master.connection_pool.get_connection('_').disconnect()
         # Make sure cache is empty
         assert cache.currsize == 0
+
+@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+@pytest.mark.onlynoncluster
+class TestSSLCache:
+    @pytest.mark.parametrize("r", [
+        {
+            "cache": TTLCache(128, 300),
+            "use_cache": True,
+            "ssl": True,
+        }
+    ], indirect=True)
+    @pytest.mark.onlynoncluster
+    def test_get_from_cache(self, r, r2, cache):
+        r, cache = r
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") == b"bar"
+        # get key from local cache
+        assert cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        assert r2.set("foo", "barbar")
+        # Retrieves a new value from server and cache it
+        assert r.get("foo") == b"barbar"
+        # Make sure that new value was cached
+        assert cache.get(("GET", "foo")) == b"barbar"

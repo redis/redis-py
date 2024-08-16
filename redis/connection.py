@@ -863,7 +863,9 @@ class CacheProxyConnection(ConnectionInterface):
         conn._parser.set_invalidation_push_handler(self._on_invalidation_callback)
 
     def _process_pending_invalidations(self):
-        while self.can_read():
+        while self.retry.call_with_retry_on_false(
+            lambda: self.can_read()
+        ):
             self._conn.read_response(push_request=True)
 
     def _on_invalidation_callback(

@@ -643,10 +643,10 @@ class TestRedisClusterObj:
                 mocks["send_command"].assert_has_calls(
                     [
                         call("READONLY"),
-                        call("GET", "foo"),
+                        call("GET", "foo", keys=['foo']),
                         call("READONLY"),
-                        call("GET", "foo"),
-                        call("GET", "foo"),
+                        call("GET", "foo", keys=['foo']),
+                        call("GET", "foo", keys=['foo']),
                     ]
                 )
 
