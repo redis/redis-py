@@ -17,7 +17,7 @@ class _RESP3Parser(_RESPBase):
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
         self.invalidation_push_handler_func = None
 
-    async def handle_pubsub_push_response(self, response):
+    def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
         logger.info("Push response: " + str(response))
         return response
