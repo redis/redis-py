@@ -17,7 +17,7 @@ from redis.retry import Retry
 from tests.ssl_utils import get_ssl_filename
 
 REDIS_INFO = {}
-default_redis_url = "redis://localhost:6379/0"
+default_redis_url = "redis://localhost:16379/0"
 default_protocol = "2"
 default_redismod_url = "redis://localhost:6479"
 
@@ -322,10 +322,10 @@ def _get_client(
         kwargs["protocol"] = request.config.getoption("--protocol")
 
     cluster_mode = REDIS_INFO["cluster_enabled"]
+    ssl = kwargs.pop("ssl", False)
     if not cluster_mode:
         url_options = parse_url(redis_url)
         connection_class = Connection
-        ssl = kwargs.pop("ssl", False)
         if ssl:
             connection_class = SSLConnection
             kwargs["ssl_certfile"] = get_ssl_filename("client-cert.pem")
