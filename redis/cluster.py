@@ -11,6 +11,7 @@ from cachetools import Cache
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.helpers import parse_scan
 from redis.backoff import default_backoff
+from redis.cache import EvictionPolicy
 from redis.client import CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
@@ -505,6 +506,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         use_cache: bool = False,
         cache: Optional[Cache] = None,
+        cache_eviction: Optional[EvictionPolicy] = None,
         cache_size: int = 128,
         cache_ttl: int = 300,
         **kwargs,
@@ -648,6 +650,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             address_remap=address_remap,
             use_cache=use_cache,
             cache=cache,
+            cache_eviction=cache_eviction,
             cache_size=cache_size,
             cache_ttl=cache_ttl,
             **kwargs,
@@ -1331,6 +1334,7 @@ class NodesManager():
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         use_cache: bool = False,
         cache: Optional[Cache] = None,
+        cache_eviction: Optional[EvictionPolicy] = None,
         cache_size: int = 128,
         cache_ttl: int = 300,
         **kwargs,
@@ -1347,6 +1351,7 @@ class NodesManager():
         self.address_remap = address_remap
         self.use_cache = use_cache
         self.cache = cache
+        self.cache_eviction = cache_eviction
         self.cache_size = cache_size
         self.cache_ttl = cache_ttl
         self._moved_exception = None
@@ -1494,6 +1499,7 @@ class NodesManager():
             kwargs.update({"port": port})
             kwargs.update({"use_cache": self.use_cache})
             kwargs.update({"cache": self.cache})
+            kwargs.update({"cache_eviction": self.cache_eviction})
             kwargs.update({"cache_size": self.cache_size})
             kwargs.update({"cache_ttl": self.cache_ttl})
             r = Redis(connection_pool=self.connection_pool_class(**kwargs))
@@ -1503,6 +1509,7 @@ class NodesManager():
                 port=port,
                 use_cache=self.use_cache,
                 cache=self.cache,
+                cache_eviction=self.cache_eviction,
                 cache_size=self.cache_size,
                 cache_ttl=self.cache_ttl,
                 **kwargs,
@@ -1681,9 +1688,6 @@ class NodesManager():
         if self.address_remap:
             return self.address_remap((host, port))
         return host, port
-
-    def get_cache(self) -> Optional[Cache]:
-        return self.connection_pool.cache
 
 
 class ClusterPubSub(PubSub):

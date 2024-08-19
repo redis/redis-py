@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from apscheduler.schedulers.background import BackgroundScheduler
 from cachetools import TTLCache, Cache, LRUCache
 from cachetools.keys import hashkey
-from redis.cache import CacheConfiguration
+from redis.cache import CacheConfiguration, CacheFactory
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .backoff import NoBackoff
@@ -1246,6 +1246,7 @@ class ConnectionPool:
         self.max_connections = max_connections
         self.cache = None
         self._cache_conf = None
+        self._cache_factory = None
         self.cache_lock = None
         self.scheduler = None
 
@@ -1260,13 +1261,15 @@ class ConnectionPool:
             if cache is not None:
                 self.cache = cache
             else:
-                self.cache = TTLCache(self.connection_kwargs["cache_size"], self.connection_kwargs["cache_ttl"])
+                cache_factory = CacheFactory(self._cache_conf)
+                self.cache = cache_factory.get_cache()
 
             self.scheduler = BackgroundScheduler()
             self.scheduler.add_job(self._perform_health_check, "interval", seconds=2, id="cache_health_check")
             self.scheduler.start()
 
         connection_kwargs.pop("use_cache", None)
+        connection_kwargs.pop("cache_eviction", None)
         connection_kwargs.pop("cache_size", None)
         connection_kwargs.pop("cache_ttl", None)
         connection_kwargs.pop("cache", None)

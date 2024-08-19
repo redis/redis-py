@@ -15,6 +15,7 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
     bool_ok,
 )
+from redis.cache import EvictionPolicy
 from redis.commands import (
     CoreCommands,
     RedisModuleCommands,
@@ -216,6 +217,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         protocol: Optional[int] = 2,
         use_cache: bool = False,
         cache: Optional[Cache] = None,
+        cache_eviction: Optional[EvictionPolicy] = None,
         cache_size: int = 128,
         cache_ttl: int = 300,
     ) -> None:
@@ -315,6 +317,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                         {
                             "use_cache": use_cache,
                             "cache": cache,
+                            "cache_eviction": cache_eviction,
                             "cache_size": cache_size,
                             "cache_ttl": cache_ttl,
                         }

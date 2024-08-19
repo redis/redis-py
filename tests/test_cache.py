@@ -5,6 +5,7 @@ import pytest
 from cachetools import TTLCache, LRUCache, LFUCache
 
 import redis
+from redis.cache import EvictionPolicy, CacheClass
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import _get_client
 
@@ -13,6 +14,9 @@ from tests.conftest import _get_client
 def r(request):
     use_cache = request.param.get("use_cache", False)
     cache = request.param.get("cache")
+    cache_eviction = request.param.get("cache_eviction")
+    cache_size = request.param.get("cache_size")
+    cache_ttl = request.param.get("cache_ttl")
     kwargs = request.param.get("kwargs", {})
     protocol = request.param.get("protocol", 3)
     ssl = request.param.get("ssl", False)
@@ -25,6 +29,9 @@ def r(request):
             single_connection_client=single_connection_client,
             use_cache=use_cache,
             cache=cache,
+            cache_eviction=cache_eviction,
+            cache_size=cache_size,
+            cache_ttl=cache_ttl,
             **kwargs,
     ) as client:
         yield client
@@ -41,7 +48,7 @@ class TestCache:
         {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
     ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
-    def test_get_from_cache(self, r, r2):
+    def test_get_from_given_cache(self, r, r2):
         cache = r.get_cache()
         # add key to redis
         r.set("foo", "bar")
@@ -55,6 +62,31 @@ class TestCache:
         assert r.get("foo") == b"barbar"
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
+
+    @pytest.mark.parametrize("r", [
+        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_size": 128, "cache_ttl": 300},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.LRU, "cache_size": 128},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 128},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.RANDOM, "cache_size": 128},
+    ], ids=["TTL", "LRU", "LFU", "RANDOM"], indirect=True)
+    def test_get_from_custom_cache(self, request, r, r2):
+        cache_class = CacheClass[request.node.callspec.id]
+        cache = r.get_cache()
+        assert isinstance(cache, cache_class.value)
+
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") == b"bar"
+        # get key from local cache
+        assert cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        r2.set("foo", "barbar")
+        # Retrieves a new value from server and cache it
+        assert r.get("foo") == b"barbar"
+        # Make sure that new value was cached
+        assert cache.get(("GET", "foo")) == b"barbar"
+
 
     @pytest.mark.parametrize("r", [
         {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
@@ -175,8 +207,8 @@ class TestCache:
         assert cache.currsize == 0
 
     @pytest.mark.parametrize("r", [
-        {"cache": LRUCache(3), "use_cache": True, "single_connection_client": True},
-        {"cache": LRUCache(3), "use_cache": True, "single_connection_client": False},
+        {"use_cache": True, "cache_size": 3, "single_connection_client": True},
+        {"use_cache": True, "cache_size": 3, "single_connection_client": False},
     ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
     def test_cache_lru_eviction(self, r, cache):
@@ -200,8 +232,8 @@ class TestCache:
         assert cache.get(("GET", "foo")) is None
 
     @pytest.mark.parametrize("r", [
-        {"cache": TTLCache(128, 1), "use_cache": True, "single_connection_client": True},
-        {"cache": TTLCache(128, 1), "use_cache": True, "single_connection_client": False},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_ttl": 1, "single_connection_client": True},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_ttl": 1, "single_connection_client": False},
     ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
     def test_cache_ttl(self, r):
@@ -218,8 +250,8 @@ class TestCache:
         assert cache.get(("GET", "foo")) is None
 
     @pytest.mark.parametrize("r", [
-        {"cache": LFUCache(3), "use_cache": True, "single_connection_client": True},
-        {"cache": LFUCache(3), "use_cache": True, "single_connection_client": False},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 3, "single_connection_client": True},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 3, "single_connection_client": False},
     ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
     def test_cache_lfu_eviction(self, r):
@@ -318,6 +350,31 @@ class TestClusterCache:
         cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # add key to redis
         r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") == b"bar"
+        # get key from local cache
+        assert cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        r2.set("foo", "barbar")
+        # Retrieves a new value from server and cache it
+        assert r.get("foo") == b"barbar"
+        # Make sure that new value was cached
+        assert cache.get(("GET", "foo")) == b"barbar"
+
+    @pytest.mark.parametrize("r", [
+        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_size": 128, "cache_ttl": 300},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.LRU, "cache_size": 128},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 128},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.RANDOM, "cache_size": 128},
+    ], ids=["TTL", "LRU", "LFU", "RANDOM"], indirect=True)
+    @pytest.mark.onlycluster
+    def test_get_from_custom_cache(self, request, r, r2):
+        cache_class = CacheClass[request.node.callspec.id]
+        cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
+        assert isinstance(cache, cache_class.value)
+
+        # add key to redis
+        assert r.set("foo", "bar")
         # get key from redis and save in local cache
         assert r.get("foo") == b"bar"
         # get key from local cache
@@ -577,6 +634,30 @@ class TestSentinelCache:
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
 
+    @pytest.mark.parametrize("r", [
+        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_size": 128, "cache_ttl": 300},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.LRU, "cache_size": 128},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 128},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.RANDOM, "cache_size": 128},
+    ], ids=["TTL", "LRU", "LFU", "RANDOM"], indirect=True)
+    def test_get_from_custom_cache(self, request, r, r2):
+        cache_class = CacheClass[request.node.callspec.id]
+        cache = r.get_cache()
+        assert isinstance(cache, cache_class.value)
+
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") == b"bar"
+        # get key from local cache
+        assert cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        r2.set("foo", "barbar")
+        # Retrieves a new value from server and cache it
+        assert r.get("foo") == b"barbar"
+        # Make sure that new value was cached
+        assert cache.get(("GET", "foo")) == b"barbar"
+
     @pytest.mark.parametrize(
         "sentinel_setup",
         [{"cache": LRUCache(maxsize=128), "use_cache": True, "force_master_ip": "localhost"}],
@@ -683,6 +764,30 @@ class TestSSLCache:
         assert cache.get(("GET", "foo")) == b"bar"
         # change key in redis (cause invalidation)
         assert r2.set("foo", "barbar")
+        # Retrieves a new value from server and cache it
+        assert r.get("foo") == b"barbar"
+        # Make sure that new value was cached
+        assert cache.get(("GET", "foo")) == b"barbar"
+
+    @pytest.mark.parametrize("r", [
+        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_size": 128, "cache_ttl": 300, "ssl": True},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.LRU, "cache_size": 128, "ssl": True},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 128, "ssl": True},
+        {"use_cache": True, "cache_eviction": EvictionPolicy.RANDOM, "cache_size": 128, "ssl": True},
+    ], ids=["TTL", "LRU", "LFU", "RANDOM"], indirect=True)
+    def test_get_from_custom_cache(self, request, r, r2):
+        cache_class = CacheClass[request.node.callspec.id]
+        cache = r.get_cache()
+        assert isinstance(cache, cache_class.value)
+
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") == b"bar"
+        # get key from local cache
+        assert cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        r2.set("foo", "barbar")
         # Retrieves a new value from server and cache it
         assert r.get("foo") == b"barbar"
         # Make sure that new value was cached
