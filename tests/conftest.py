@@ -446,7 +446,7 @@ def sentinel_setup(request):
         protocol=3,
         **kwargs,
     )
-    yield sentinel, cache
+    yield sentinel
     for s in sentinel.sentinels:
         s.close()
 
@@ -454,9 +454,8 @@ def sentinel_setup(request):
 @pytest.fixture()
 def master(request, sentinel_setup):
     master_service = request.config.getoption("--master-service")
-    sentinel, cache = sentinel_setup
-    master = sentinel.master_for(master_service)
-    yield master, cache
+    master = sentinel_setup.master_for(master_service)
+    yield master
     master.close()
 
 

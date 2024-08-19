@@ -1682,6 +1682,9 @@ class NodesManager():
             return self.address_remap((host, port))
         return host, port
 
+    def get_cache(self) -> Optional[Cache]:
+        return self.connection_pool.cache
+
 
 class ClusterPubSub(PubSub):
     """

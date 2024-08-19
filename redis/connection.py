@@ -812,7 +812,7 @@ class CacheProxyConnection(ConnectionInterface):
                     self._current_command_hash in self._cache
                     and self._cache[self._current_command_hash] != "caching-in-progress"
             ):
-                return self._cache[self._current_command_hash]
+                return copy.deepcopy(self._cache[self._current_command_hash])
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
@@ -821,7 +821,7 @@ class CacheProxyConnection(ConnectionInterface):
         )
 
         with self._cache_lock:
-            # If response is None prevent from caching and remove temporary cache entry.
+            # If response is None prevent from caching.
             if response is None:
                 self._cache.pop(self._current_command_hash)
                 return response
@@ -839,7 +839,7 @@ class CacheProxyConnection(ConnectionInterface):
 
             cache_entry = self._cache.get(self._current_command_hash, None)
 
-            # Cache only responses that still valid and wasn't invalidated by another connection in meantime
+            # Cache only responses that still valid and wasn't invalidated by another connection in meantime.
             if cache_entry is not None:
                 self._cache[self._current_command_hash] = response
 
@@ -1244,7 +1244,7 @@ class ConnectionPool:
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
-        self._cache = None
+        self.cache = None
         self._cache_conf = None
         self.cache_lock = None
         self.scheduler = None
@@ -1258,9 +1258,9 @@ class ConnectionPool:
 
             cache = self.connection_kwargs.get("cache")
             if cache is not None:
-                self._cache = cache
+                self.cache = cache
             else:
-                self._cache = TTLCache(self.connection_kwargs["cache_size"], self.connection_kwargs["cache_ttl"])
+                self.cache = TTLCache(self.connection_kwargs["cache_size"], self.connection_kwargs["cache_ttl"])
 
             self.scheduler = BackgroundScheduler()
             self.scheduler.add_job(self._perform_health_check, "interval", seconds=2, id="cache_health_check")
@@ -1378,7 +1378,7 @@ class ConnectionPool:
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
             try:
-                if connection.can_read() and self._cache is None:
+                if connection.can_read() and self.cache is None:
                     raise ConnectionError("Connection has data")
             except (ConnectionError, OSError):
                 connection.disconnect()
@@ -1408,10 +1408,10 @@ class ConnectionPool:
             raise ConnectionError("Too many connections")
         self._created_connections += 1
 
-        if self._cache is not None and self._cache_conf is not None:
+        if self.cache is not None and self._cache_conf is not None:
             return CacheProxyConnection(
                 self.connection_class(**self.connection_kwargs),
-                self._cache,
+                self.cache,
                 self._cache_conf,
                 self._cache_lock
             )
@@ -1558,10 +1558,10 @@ class BlockingConnectionPool(ConnectionPool):
 
     def make_connection(self):
         "Make a fresh connection."
-        if self._cache is not None and self._cache_conf is not None:
+        if self.cache is not None and self._cache_conf is not None:
             connection = CacheProxyConnection(
                 self.connection_class(**self.connection_kwargs),
-                self._cache,
+                self.cache,
                 self._cache_conf,
                 self._cache_lock
             )

@@ -601,6 +601,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             return self.response_callbacks[command_name](response, **options)
         return response
 
+    def get_cache(self) -> Optional[Cache]:
+        return self.connection_pool.cache
+
 
 StrictRedis = Redis
 

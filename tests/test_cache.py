@@ -27,20 +27,22 @@ def r(request):
             cache=cache,
             **kwargs,
     ) as client:
-        yield client, cache
+        yield client
 
 
 def set_get(client, key, value):
     client.set(key, value)
     return client.get(key)
 
-
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 class TestCache:
-    @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize("r", [
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
+    ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
-    def test_get_from_cache(self, r, r2, cache):
-        r, cache = r
+    def test_get_from_cache(self, r, r2):
+        cache = r.get_cache()
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -54,10 +56,13 @@ class TestCache:
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
 
-    @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize("r", [
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
+    ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
-    def test_get_from_cache_multithreaded(self, r, cache):
-        r, cache = r
+    def test_get_from_cache_multithreaded(self, r):
+        cache = r.get_cache()
         # Running commands over two threads
         threading.Thread(target=r.set("foo", "bar")).start()
         threading.Thread(target=r.set("bar", "foo")).start()
@@ -91,10 +96,27 @@ class TestCache:
         assert cache.get(("GET", "foo")) == b"baz"
         assert cache.get(("GET", "bar")) == b"bar"
 
-    @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize("r", [
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
+    ], indirect=True)
     @pytest.mark.onlynoncluster
-    def test_health_check_invalidate_cache(self, r, r2, cache):
-        r, cache = r
+    def test_prevent_race_condition_from_multiple_threads(self, r, cache):
+        cache = r.get_cache()
+
+        # Set initial key.
+        assert r.set("foo", "bar")
+
+        # Running concurrent commands over two threads to override same key.
+        threading.Thread(target=r.get("foo")).start()
+        threading.Thread(target=set_get, args=(r, "foo", "baz")).start()
+        assert cache.get(("GET", "foo")) == b"bar"
+
+    @pytest.mark.parametrize("r", [
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
+    ], indirect=True)
+    @pytest.mark.onlynoncluster
+    def test_health_check_invalidate_cache(self, r, r2):
+        cache = r.get_cache()
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -110,8 +132,8 @@ class TestCache:
 
     @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
     @pytest.mark.onlynoncluster
-    def test_health_check_invalidate_cache_multithreaded(self, r, r2, cache):
-        r, cache = r
+    def test_health_check_invalidate_cache_multithreaded(self, r, r2):
+        cache = r.get_cache()
         # Running commands over two threads
         threading.Thread(target=r.set("foo", "bar")).start()
         threading.Thread(target=r.set("bar", "foo")).start()
@@ -134,10 +156,13 @@ class TestCache:
         assert cache.get(("GET", "foo")) is None
         assert cache.get(("GET", "bar")) is None
 
-    @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize("r", [
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
+    ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
-    def test_cache_clears_on_disconnect(self, r, r2, cache):
-        r, cache = r
+    def test_cache_clears_on_disconnect(self, r, cache):
+        cache = r.get_cache()
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -149,14 +174,13 @@ class TestCache:
         # Make sure cache is empty
         assert cache.currsize == 0
 
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": LRUCache(3), "use_cache": True}],
-        indirect=True,
-    )
+    @pytest.mark.parametrize("r", [
+        {"cache": LRUCache(3), "use_cache": True, "single_connection_client": True},
+        {"cache": LRUCache(3), "use_cache": True, "single_connection_client": False},
+    ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
     def test_cache_lru_eviction(self, r, cache):
-        r, cache = r
+        cache = r.get_cache()
         # add 3 keys to redis
         r.set("foo", "bar")
         r.set("foo2", "bar2")
@@ -175,10 +199,13 @@ class TestCache:
         # the first key is not in the local cache anymore
         assert cache.get(("GET", "foo")) is None
 
-    @pytest.mark.parametrize("r", [{"cache": TTLCache(maxsize=128, ttl=1), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize("r", [
+        {"cache": TTLCache(128, 1), "use_cache": True, "single_connection_client": True},
+        {"cache": TTLCache(128, 1), "use_cache": True, "single_connection_client": False},
+    ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
-    def test_cache_ttl(self, r, cache):
-        r, cache = r
+    def test_cache_ttl(self, r):
+        cache = r.get_cache()
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -190,14 +217,13 @@ class TestCache:
         # the key is not in the local cache anymore
         assert cache.get(("GET", "foo")) is None
 
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": LFUCache(3), "use_cache": True}],
-        indirect=True,
-    )
+    @pytest.mark.parametrize("r", [
+        {"cache": LFUCache(3), "use_cache": True, "single_connection_client": True},
+        {"cache": LFUCache(3), "use_cache": True, "single_connection_client": False},
+    ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
-    def test_cache_lfu_eviction(self, r, cache):
-        r, cache = r
+    def test_cache_lfu_eviction(self, r):
+        cache = r.get_cache()
         # add 3 keys to redis
         r.set("foo", "bar")
         r.set("foo2", "bar2")
@@ -218,35 +244,39 @@ class TestCache:
         assert cache.get(("GET", "foo")) == b"bar"
         assert cache.get(("GET", "foo2")) is None
 
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": LRUCache(maxsize=128), "use_cache": True}],
-        indirect=True,
-    )
+    @pytest.mark.parametrize("r", [
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
+    ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
     def test_cache_ignore_not_allowed_command(self, r):
-        r, cache = r
+        cache = r.get_cache()
         # add fields to hash
         assert r.hset("foo", "bar", "baz")
         # get random field
         assert r.hrandfield("foo") == b"bar"
         assert cache.get(("HRANDFIELD", "foo")) is None
 
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": LRUCache(maxsize=128), "use_cache": True}],
-        indirect=True,
-    )
+    @pytest.mark.parametrize("r", [
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
+    ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
-    def test_cache_invalidate_all_related_responses(self, r, cache):
-        r, cache = r
+    def test_cache_invalidate_all_related_responses(self, r):
+        cache = r.get_cache()
         # Add keys
         assert r.set("foo", "bar")
         assert r.set("bar", "foo")
 
+        res = r.mget("foo", "bar")
         # Make sure that replies was cached
-        assert r.mget("foo", "bar") == [b"bar", b"foo"]
-        assert cache.get(("MGET", "foo", "bar")) == [b"bar", b"foo"]
+        assert res == [b"bar", b"foo"]
+        assert cache.get(("MGET", "foo", "bar")) == res
+
+        # Make sure that objects are immutable.
+        another_res = r.mget("foo", "bar")
+        res.append(b"baz")
+        assert another_res != res
 
         # Invalidate one of the keys and make sure that all associated cached entries was removed
         assert r.set("foo", "baz")
@@ -254,14 +284,13 @@ class TestCache:
         assert cache.get(("MGET", "foo", "bar")) is None
         assert cache.get(("GET", "foo")) == b"baz"
 
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": LRUCache(maxsize=128), "use_cache": True}],
-        indirect=True,
-    )
+    @pytest.mark.parametrize("r", [
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
+        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
+    ], ids=["single", "pool"], indirect=True)
     @pytest.mark.onlynoncluster
-    def test_cache_flushed_on_server_flush(self, r, cache):
-        r, cache = r
+    def test_cache_flushed_on_server_flush(self, r):
+        cache = r.get_cache()
         # Add keys
         assert r.set("foo", "bar")
         assert r.set("bar", "foo")
@@ -286,7 +315,7 @@ class TestCache:
 class TestClusterCache:
     @pytest.mark.parametrize("r", [{"cache": LRUCache(maxsize=128), "use_cache": True}], indirect=True)
     def test_get_from_cache(self, r, r2):
-        r, cache = r
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -302,8 +331,8 @@ class TestClusterCache:
 
     @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
     @pytest.mark.onlycluster
-    def test_get_from_cache_multithreaded(self, r, cache):
-        r, cache = r
+    def test_get_from_cache_multithreaded(self, r):
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # Running commands over two threads
         threading.Thread(target=r.set("foo", "bar")).start()
         threading.Thread(target=r.set("bar", "foo")).start()
@@ -340,8 +369,8 @@ class TestClusterCache:
 
     @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
     @pytest.mark.onlycluster
-    def test_health_check_invalidate_cache(self, r, r2, cache):
-        r, cache = r
+    def test_health_check_invalidate_cache(self, r, r2):
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -357,8 +386,8 @@ class TestClusterCache:
 
     @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
     @pytest.mark.onlycluster
-    def test_health_check_invalidate_cache_multithreaded(self, r, r2, cache):
-        r, cache = r
+    def test_health_check_invalidate_cache_multithreaded(self, r, r2):
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # Running commands over two threads
         threading.Thread(target=r.set("foo", "bar")).start()
         threading.Thread(target=r.set("bar", "foo")).start()
@@ -381,8 +410,8 @@ class TestClusterCache:
 
     @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
     @pytest.mark.onlycluster
-    def test_cache_clears_on_disconnect(self, r, r2, cache):
-        r, cache = r
+    def test_cache_clears_on_disconnect(self, r, r2):
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -400,8 +429,8 @@ class TestClusterCache:
         indirect=True,
     )
     @pytest.mark.onlycluster
-    def test_cache_lru_eviction(self, r, cache):
-        r, cache = r
+    def test_cache_lru_eviction(self, r):
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # add 3 keys to redis
         r.set("foo", "bar")
         r.set("foo2", "bar2")
@@ -422,8 +451,8 @@ class TestClusterCache:
 
     @pytest.mark.parametrize("r", [{"cache": TTLCache(maxsize=128, ttl=1), "use_cache": True}], indirect=True)
     @pytest.mark.onlycluster
-    def test_cache_ttl(self, r, cache):
-        r, cache = r
+    def test_cache_ttl(self, r):
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -441,8 +470,8 @@ class TestClusterCache:
         indirect=True,
     )
     @pytest.mark.onlycluster
-    def test_cache_lfu_eviction(self, r, cache):
-        r, cache = r
+    def test_cache_lfu_eviction(self, r):
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # add 3 keys to redis
         r.set("foo", "bar")
         r.set("foo2", "bar2")
@@ -470,7 +499,7 @@ class TestClusterCache:
     )
     @pytest.mark.onlycluster
     def test_cache_ignore_not_allowed_command(self, r):
-        r, cache = r
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # add fields to hash
         assert r.hset("foo", "bar", "baz")
         # get random field
@@ -484,7 +513,7 @@ class TestClusterCache:
     )
     @pytest.mark.onlycluster
     def test_cache_invalidate_all_related_responses(self, r, cache):
-        r, cache = r
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # Add keys
         assert r.set("foo{slot}", "bar")
         assert r.set("bar{slot}", "foo")
@@ -506,7 +535,7 @@ class TestClusterCache:
     )
     @pytest.mark.onlycluster
     def test_cache_flushed_on_server_flush(self, r, cache):
-        r, cache = r
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # Add keys
         assert r.set("foo", "bar")
         assert r.set("bar", "foo")
@@ -534,8 +563,8 @@ class TestSentinelCache:
         indirect=True,
     )
     @pytest.mark.onlynoncluster
-    def test_get_from_cache(self, master, cache):
-        master, cache = master
+    def test_get_from_cache(self, master):
+        cache = master.get_cache()
         master.set("foo", "bar")
         # get key from redis and save in local cache
         assert master.get("foo") == b"bar"
@@ -554,8 +583,8 @@ class TestSentinelCache:
         indirect=True,
     )
     @pytest.mark.onlynoncluster
-    def test_get_from_cache_multithreaded(self, master, cache):
-        master, cache = master
+    def test_get_from_cache_multithreaded(self, master):
+        cache = master.get_cache()
 
         # Running commands over two threads
         threading.Thread(target=master.set("foo", "bar")).start()
@@ -600,7 +629,7 @@ class TestSentinelCache:
     )
     @pytest.mark.onlynoncluster
     def test_health_check_invalidate_cache(self, master, cache):
-        master, cache = master
+        cache = master.get_cache()
         # add key to redis
         master.set("foo", "bar")
         # get key from redis and save in local cache
@@ -621,7 +650,7 @@ class TestSentinelCache:
     )
     @pytest.mark.onlynoncluster
     def test_cache_clears_on_disconnect(self, master, cache):
-        master, cache = master
+        cache = master.get_cache()
         # add key to redis
         master.set("foo", "bar")
         # get key from redis and save in local cache
@@ -645,7 +674,7 @@ class TestSSLCache:
     ], indirect=True)
     @pytest.mark.onlynoncluster
     def test_get_from_cache(self, r, r2, cache):
-        r, cache = r
+        cache = r.get_cache()
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
@@ -658,3 +687,97 @@ class TestSSLCache:
         assert r.get("foo") == b"barbar"
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
+
+    @pytest.mark.parametrize("r", [
+        {
+            "cache": TTLCache(128, 300),
+            "use_cache": True,
+            "ssl": True,
+        }
+    ], indirect=True)
+    @pytest.mark.onlynoncluster
+    def test_get_from_cache_multithreaded(self, r):
+        cache = r.get_cache()
+        # Running commands over two threads
+        threading.Thread(target=r.set("foo", "bar")).start()
+        threading.Thread(target=r.set("bar", "foo")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        threading.Thread(target=r.get("foo")).start()
+        threading.Thread(target=r.get("bar")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        # Make sure that responses was cached.
+        assert cache.get(("GET", "foo")) == b"bar"
+        assert cache.get(("GET", "bar")) == b"foo"
+
+        threading.Thread(target=r.set("foo", "baz")).start()
+        threading.Thread(target=r.set("bar", "bar")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        threading.Thread(target=r.get("foo")).start()
+        threading.Thread(target=r.get("bar")).start()
+
+        # Wait for command execution to be finished
+        time.sleep(0.1)
+
+        # Make sure that new values was cached.
+        assert cache.get(("GET", "foo")) == b"baz"
+        assert cache.get(("GET", "bar")) == b"bar"
+
+    @pytest.mark.parametrize("r", [
+        {
+            "cache": TTLCache(128, 300),
+            "use_cache": True,
+            "ssl": True,
+        }
+    ], indirect=True)
+    @pytest.mark.onlynoncluster
+    def test_health_check_invalidate_cache(self, r, r2):
+        cache = r.get_cache()
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") == b"bar"
+        # get key from local cache
+        assert cache.get(("GET", "foo")) == b"bar"
+        # change key in redis (cause invalidation)
+        r2.set("foo", "barbar")
+        # Wait for health check
+        time.sleep(2)
+        # Make sure that value was invalidated
+        assert cache.get(("GET", "foo")) is None
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "ssl": True,
+            }
+        ],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_cache_invalidate_all_related_responses(self, r):
+        cache = r.get_cache()
+        # Add keys
+        assert r.set("foo", "bar")
+        assert r.set("bar", "foo")
+
+        # Make sure that replies was cached
+        assert r.mget("foo", "bar") == [b"bar", b"foo"]
+        assert cache.get(("MGET", "foo", "bar")) == [b"bar", b"foo"]
+
+        # Invalidate one of the keys and make sure that all associated cached entries was removed
+        assert r.set("foo", "baz")
+        assert r.get("foo") == b"baz"
+        assert cache.get(("MGET", "foo", "bar")) is None
+        assert cache.get(("GET", "foo")) == b"baz"
