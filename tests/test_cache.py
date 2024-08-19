@@ -42,6 +42,7 @@ def set_get(client, key, value):
     return client.get(key)
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+@pytest.mark.onlynoncluster
 class TestCache:
     @pytest.mark.parametrize("r", [
         {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
@@ -69,6 +70,7 @@ class TestCache:
         {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 128},
         {"use_cache": True, "cache_eviction": EvictionPolicy.RANDOM, "cache_size": 128},
     ], ids=["TTL", "LRU", "LFU", "RANDOM"], indirect=True)
+    @pytest.mark.onlynoncluster
     def test_get_from_custom_cache(self, request, r, r2):
         cache_class = CacheClass[request.node.callspec.id]
         cache = r.get_cache()
@@ -367,7 +369,6 @@ class TestClusterCache:
         {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 128},
         {"use_cache": True, "cache_eviction": EvictionPolicy.RANDOM, "cache_size": 128},
     ], ids=["TTL", "LRU", "LFU", "RANDOM"], indirect=True)
-    @pytest.mark.onlycluster
     def test_get_from_custom_cache(self, request, r, r2):
         cache_class = CacheClass[request.node.callspec.id]
         cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
