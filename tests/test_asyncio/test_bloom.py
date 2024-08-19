@@ -3,8 +3,7 @@ from math import inf
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
-from redis.exceptions import ModuleError, RedisError
-from redis.utils import HIREDIS_AVAILABLE
+from redis.exceptions import RedisError
 from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
@@ -105,10 +104,6 @@ async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
 
     await do_verify()
     cmds = []
-    if HIREDIS_AVAILABLE:
-        with pytest.raises(ModuleError):
-            cur = await decoded_r.bf().scandump("myBloom", 0)
-        return
 
     cur = await decoded_r.bf().scandump("myBloom", 0)
     first = cur[0]

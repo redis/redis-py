@@ -24,7 +24,6 @@ from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
 from tests.conftest import (
-    assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,
@@ -862,7 +861,7 @@ async def test_tags(decoded_r: redis.Redis):
         assert 1 == res["total_results"]
 
         q2 = await decoded_r.ft().tagvals("tags")
-        assert set(tags.split(",") + tags2.split(",")) == q2
+        assert set(tags.split(",") + tags2.split(",")) == set(q2)
 
 
 @pytest.mark.redismod
@@ -986,7 +985,7 @@ async def test_dict_operations(decoded_r: redis.Redis):
 
     # Dump dict and inspect content
     res = await decoded_r.ft().dict_dump("custom_dict")
-    assert_resp_response(decoded_r, res, ["item1", "item3"], {"item1", "item3"})
+    assert res == ["item1", "item3"]
 
     # Remove rest of the items before reload
     await decoded_r.ft().dict_del("custom_dict", *res)
@@ -1529,6 +1528,32 @@ async def test_withsuffixtrie(decoded_r: redis.Redis):
         await waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+async def test_aggregations_add_scores(decoded_r: redis.Redis):
+    assert await decoded_r.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            NumericField("age", sortable=True),
+        )
+    )
+
+    assert await decoded_r.hset("doc1", mapping={"name": "bar", "age": "25"})
+    assert await decoded_r.hset("doc2", mapping={"name": "foo", "age": "19"})
+
+    req = aggregations.AggregateRequest("*").add_scores()
+    res = await decoded_r.ft().aggregate(req)
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+        assert res["results"][0]["extra_attributes"] == {"__score": "0.2"}
+        assert res["results"][1]["extra_attributes"] == {"__score": "0.2"}
+    else:
+        assert len(res.rows) == 2
+        assert res.rows[0] == ["__score", "0.2"]
+        assert res.rows[1] == ["__score", "0.2"]
 
 
 @pytest.mark.redismod

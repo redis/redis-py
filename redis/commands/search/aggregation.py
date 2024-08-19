@@ -111,6 +111,7 @@ class AggregateRequest:
         self._verbatim = False
         self._cursor = []
         self._dialect = None
+        self._add_scores = False
 
     def load(self, *fields: List[str]) -> "AggregateRequest":
         """
@@ -292,6 +293,13 @@ class AggregateRequest:
         self._with_schema = True
         return self
 
+    def add_scores(self) -> "AggregateRequest":
+        """
+        If set, includes the score as an ordinary field of the row.
+        """
+        self._add_scores = True
+        return self
+
     def verbatim(self) -> "AggregateRequest":
         self._verbatim = True
         return self
@@ -314,6 +322,9 @@ class AggregateRequest:
 
         if self._verbatim:
             ret.append("VERBATIM")
+
+        if self._add_scores:
+            ret.append("ADDSCORES")
 
         if self._cursor:
             ret += self._cursor
