@@ -468,9 +468,7 @@ class TestRedisClusterObj:
         self, create_redis: Callable[..., RedisCluster]
     ) -> None:
         rc = await create_redis(
-            cls=RedisCluster, 
-            max_connections=10,
-            wait_for_connections=True
+            cls=RedisCluster, max_connections=10, wait_for_connections=True
         )
         for node in rc.get_nodes():
             assert node.max_connections == 10
@@ -483,12 +481,8 @@ class TestRedisClusterObj:
             read_response.side_effect = read_response_mocked
 
             await asyncio.gather(
-                *(
-                    rc.ping(target_nodes=RedisCluster.DEFAULT_NODE)
-                    for _ in range(20)
-                )
+                *(rc.ping(target_nodes=RedisCluster.DEFAULT_NODE) for _ in range(20))
             )
-        
         assert len(rc.get_default_node()._connections) == 10
         await rc.aclose()
 

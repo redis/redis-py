@@ -1,5 +1,4 @@
 import asyncio
-import collections
 import random
 import socket
 import ssl
@@ -7,7 +6,6 @@ import warnings
 from typing import (
     Any,
     Callable,
-    Deque,
     Dict,
     Generator,
     List,
@@ -65,9 +63,9 @@ from redis.exceptions import (
     RedisClusterException,
     ResponseError,
     SlotNotCoveredError,
-    TryAgainError,
 )
 from redis.exceptions import TimeoutError as RedisTimeoutError
+from redis.exceptions import TryAgainError
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
     deprecated_function,
@@ -1001,7 +999,7 @@ class ClusterNode:
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.response_callbacks = connection_kwargs.pop("response_callbacks", {})
-        self.acquire_connection_timeout = connection_kwargs.get('socket_timeout', 30)
+        self.acquire_connection_timeout = connection_kwargs.get("socket_timeout", 30)
 
         self._connections: List[Connection] = []
         self._free: asyncio.Queue[Connection] = asyncio.Queue()
@@ -1057,12 +1055,13 @@ class ClusterNode:
             elif self.wait_for_connections:
                 try:
                     connection = await asyncio.wait_for(
-                        self._free.get(),
-                        self.acquire_connection_timeout
+                        self._free.get(), self.acquire_connection_timeout
                     )
                     return connection
                 except TimeoutError:
-                    raise RedisTimeoutError("Timeout reached waiting for a free connection")
+                    raise RedisTimeoutError(
+                        "Timeout reached waiting for a free connection"
+                    )
 
             raise MaxConnectionsError()
 
