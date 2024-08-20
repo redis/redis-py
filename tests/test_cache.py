@@ -1,9 +1,10 @@
 import threading
 import time
+
 import pytest
-from cachetools import TTLCache, LRUCache, LFUCache
 import redis
-from redis.cache import EvictionPolicy, CacheClass
+from cachetools import LFUCache, LRUCache, TTLCache
+from redis.cache import CacheClass, EvictionPolicy
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import _get_client, skip_if_resp_version
 

@@ -5,12 +5,13 @@ from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
 from urllib.parse import urlparse
+
 import pytest
 import redis
 from packaging.version import Version
 from redis import Sentinel
 from redis.backoff import NoBackoff
-from redis.connection import Connection, parse_url, SSLConnection
+from redis.connection import Connection, SSLConnection, parse_url
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
 from tests.ssl_utils import get_ssl_filename

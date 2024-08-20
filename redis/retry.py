@@ -6,10 +6,10 @@ from typing import (
     Any,
     Callable,
     Iterable,
+    Optional,
     Tuple,
     Type,
     TypeVar,
-    Optional,
 )
 
 from redis.exceptions import ConnectionError, TimeoutError

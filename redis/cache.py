@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from enum import Enum
-from cachetools import LRUCache, LFUCache, RRCache, Cache, TTLCache
+
+from cachetools import Cache, LFUCache, LRUCache, RRCache, TTLCache
 
 
 class EvictionPolicy(Enum):
