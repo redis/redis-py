@@ -307,7 +307,11 @@ class Sentinel(SentinelCommands):
                     self.sentinels[0],
                 )
 
-                ip = self._force_master_ip if self._force_master_ip is not None else state["ip"]
+                ip = (
+                    self._force_master_ip
+                    if self._force_master_ip is not None
+                    else state["ip"]
+                )
                 return ip, state["port"]
 
         error_info = ""

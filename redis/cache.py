@@ -4,7 +4,7 @@ from enum import Enum
 
 from cachetools import LRUCache, LFUCache, RRCache, Cache, TTLCache
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class EvictionPolicy(Enum):
@@ -152,4 +152,3 @@ class CacheFactory(CacheFactoryInterface):
 
     def _get_cache_class(self, eviction_policy: EvictionPolicy) -> CacheClass:
         return CacheClass[eviction_policy.value]
-

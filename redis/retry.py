@@ -1,7 +1,16 @@
 import socket
 import time
 from time import sleep
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Tuple, Type, TypeVar, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Iterable,
+    Tuple,
+    Type,
+    TypeVar,
+    Optional,
+)
 
 from redis.exceptions import ConnectionError, TimeoutError
 
@@ -71,12 +80,12 @@ class Retry:
                     sleep(backoff)
 
     def call_with_retry_on_false(
-            self,
-            do: Callable[[], T],
-            on_false: Optional[Callable[[], T]] = None,
-            max_retries: Optional[int] = 3,
-            timeout: Optional[float] = 0,
-            exponent: Optional[int] = 2,
+        self,
+        do: Callable[[], T],
+        on_false: Optional[Callable[[], T]] = None,
+        max_retries: Optional[int] = 3,
+        timeout: Optional[float] = 0,
+        exponent: Optional[int] = 2,
     ) -> bool:
         """
         Execute an operation that returns boolean value with retry
@@ -97,14 +106,7 @@ class Retry:
                 time.sleep(timeout)
 
             return self.call_with_retry_on_false(
-                do,
-                on_false,
-                max_retries - 1,
-                timeout * exponent,
-                exponent
+                do, on_false, max_retries - 1, timeout * exponent, exponent
             )
 
         return False
-
-
-

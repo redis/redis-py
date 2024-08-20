@@ -1322,7 +1322,7 @@ class LoadBalancer:
         self.primary_to_idx.clear()
 
 
-class NodesManager():
+class NodesManager:
     def __init__(
         self,
         startup_nodes,

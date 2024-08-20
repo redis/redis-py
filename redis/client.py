@@ -149,7 +149,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         client = cls(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
-            use_cache=use_cache
+            use_cache=use_cache,
         )
         client.auto_close_connection_pool = True
         return client

@@ -22,28 +22,42 @@ def r(request):
     ssl = request.param.get("ssl", False)
     single_connection_client = request.param.get("single_connection_client", False)
     with _get_client(
-            redis.Redis,
-            request,
-            protocol=protocol,
-            ssl=ssl,
-            single_connection_client=single_connection_client,
-            use_cache=use_cache,
-            cache=cache,
-            cache_eviction=cache_eviction,
-            cache_size=cache_size,
-            cache_ttl=cache_ttl,
-            **kwargs,
+        redis.Redis,
+        request,
+        protocol=protocol,
+        ssl=ssl,
+        single_connection_client=single_connection_client,
+        use_cache=use_cache,
+        cache=cache,
+        cache_eviction=cache_eviction,
+        cache_size=cache_size,
+        cache_ttl=cache_ttl,
+        **kwargs,
     ) as client:
         yield client
+
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 class TestCache:
-    @pytest.mark.parametrize("r", [
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
-    ], ids=["single", "pool"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": True,
+            },
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_get_from_given_cache(self, r, r2):
         cache = r.get_cache()
@@ -60,12 +74,34 @@ class TestCache:
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
 
-    @pytest.mark.parametrize("r", [
-        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_size": 128, "cache_ttl": 300},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.LRU, "cache_size": 128},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 128},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.RANDOM, "cache_size": 128},
-    ], ids=["TTL", "LRU", "LFU", "RANDOM"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.TTL,
+                "cache_size": 128,
+                "cache_ttl": 300,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.LRU,
+                "cache_size": 128,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.LFU,
+                "cache_size": 128,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.RANDOM,
+                "cache_size": 128,
+            },
+        ],
+        ids=["TTL", "LRU", "LFU", "RANDOM"],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_get_from_custom_cache(self, request, r, r2):
         cache_class = CacheClass[request.node.callspec.id]
@@ -85,11 +121,23 @@ class TestCache:
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
 
-
-    @pytest.mark.parametrize("r", [
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
-    ], ids=["single", "pool"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": True,
+            },
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_get_from_cache_multithreaded(self, r):
         cache = r.get_cache()
@@ -126,9 +174,17 @@ class TestCache:
         assert cache.get(("GET", "foo")) == b"baz"
         assert cache.get(("GET", "bar")) == b"bar"
 
-    @pytest.mark.parametrize("r", [
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
-    ], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": False,
+            },
+        ],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_health_check_invalidate_cache(self, r, r2):
         cache = r.get_cache()
@@ -145,7 +201,9 @@ class TestCache:
         # Make sure that value was invalidated
         assert cache.get(("GET", "foo")) is None
 
-    @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize(
+        "r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True
+    )
     @pytest.mark.onlynoncluster
     def test_health_check_invalidate_cache_multithreaded(self, r, r2):
         cache = r.get_cache()
@@ -171,10 +229,23 @@ class TestCache:
         assert cache.get(("GET", "foo")) is None
         assert cache.get(("GET", "bar")) is None
 
-    @pytest.mark.parametrize("r", [
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
-    ], ids=["single", "pool"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": True,
+            },
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_cache_clears_on_disconnect(self, r, cache):
         cache = r.get_cache()
@@ -185,14 +256,19 @@ class TestCache:
         # get key from local cache
         assert cache.get(("GET", "foo")) == b"bar"
         # Force disconnection
-        r.connection_pool.get_connection('_').disconnect()
+        r.connection_pool.get_connection("_").disconnect()
         # Make sure cache is empty
         assert cache.currsize == 0
 
-    @pytest.mark.parametrize("r", [
-        {"use_cache": True, "cache_size": 3, "single_connection_client": True},
-        {"use_cache": True, "cache_size": 3, "single_connection_client": False},
-    ], ids=["single", "pool"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {"use_cache": True, "cache_size": 3, "single_connection_client": True},
+            {"use_cache": True, "cache_size": 3, "single_connection_client": False},
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_cache_lru_eviction(self, r, cache):
         cache = r.get_cache()
@@ -214,10 +290,25 @@ class TestCache:
         # the first key is not in the local cache anymore
         assert cache.get(("GET", "foo")) is None
 
-    @pytest.mark.parametrize("r", [
-        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_ttl": 1, "single_connection_client": True},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_ttl": 1, "single_connection_client": False},
-    ], ids=["single", "pool"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.TTL,
+                "cache_ttl": 1,
+                "single_connection_client": True,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.TTL,
+                "cache_ttl": 1,
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_cache_ttl(self, r):
         cache = r.get_cache()
@@ -232,10 +323,25 @@ class TestCache:
         # the key is not in the local cache anymore
         assert cache.get(("GET", "foo")) is None
 
-    @pytest.mark.parametrize("r", [
-        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 3, "single_connection_client": True},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 3, "single_connection_client": False},
-    ], ids=["single", "pool"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.LFU,
+                "cache_size": 3,
+                "single_connection_client": True,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.LFU,
+                "cache_size": 3,
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_cache_lfu_eviction(self, r):
         cache = r.get_cache()
@@ -259,10 +365,23 @@ class TestCache:
         assert cache.get(("GET", "foo")) == b"bar"
         assert cache.get(("GET", "foo2")) is None
 
-    @pytest.mark.parametrize("r", [
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
-    ], ids=["single", "pool"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": True,
+            },
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_cache_ignore_not_allowed_command(self, r):
         cache = r.get_cache()
@@ -272,10 +391,23 @@ class TestCache:
         assert r.hrandfield("foo") == b"bar"
         assert cache.get(("HRANDFIELD", "foo")) is None
 
-    @pytest.mark.parametrize("r", [
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
-    ], ids=["single", "pool"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": True,
+            },
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_cache_invalidate_all_related_responses(self, r):
         cache = r.get_cache()
@@ -299,10 +431,23 @@ class TestCache:
         assert cache.get(("MGET", "foo", "bar")) is None
         assert cache.get(("GET", "foo")) == b"baz"
 
-    @pytest.mark.parametrize("r", [
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
-    ], ids=["single", "pool"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": True,
+            },
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_cache_flushed_on_server_flush(self, r):
         cache = r.get_cache()
@@ -329,7 +474,9 @@ class TestCache:
 @pytest.mark.onlycluster
 @skip_if_resp_version(2)
 class TestClusterCache:
-    @pytest.mark.parametrize("r", [{"cache": LRUCache(maxsize=128), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize(
+        "r", [{"cache": LRUCache(maxsize=128), "use_cache": True}], indirect=True
+    )
     def test_get_from_cache(self, r, r2):
         cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # add key to redis
@@ -345,12 +492,34 @@ class TestClusterCache:
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
 
-    @pytest.mark.parametrize("r", [
-        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_size": 128, "cache_ttl": 300},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.LRU, "cache_size": 128},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 128},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.RANDOM, "cache_size": 128},
-    ], ids=["TTL", "LRU", "LFU", "RANDOM"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.TTL,
+                "cache_size": 128,
+                "cache_ttl": 300,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.LRU,
+                "cache_size": 128,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.LFU,
+                "cache_size": 128,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.RANDOM,
+                "cache_size": 128,
+            },
+        ],
+        ids=["TTL", "LRU", "LFU", "RANDOM"],
+        indirect=True,
+    )
     def test_get_from_custom_cache(self, request, r, r2):
         cache_class = CacheClass[request.node.callspec.id]
         cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
@@ -369,7 +538,9 @@ class TestClusterCache:
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
 
-    @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize(
+        "r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True
+    )
     @pytest.mark.onlycluster
     def test_get_from_cache_multithreaded(self, r):
         cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
@@ -407,7 +578,9 @@ class TestClusterCache:
         assert cache.get(("GET", "foo")) == b"baz"
         assert cache.get(("GET", "bar")) == b"bar"
 
-    @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize(
+        "r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True
+    )
     @pytest.mark.onlycluster
     def test_health_check_invalidate_cache(self, r, r2):
         cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
@@ -424,7 +597,9 @@ class TestClusterCache:
         # Make sure that value was invalidated
         assert cache.get(("GET", "foo")) is None
 
-    @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize(
+        "r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True
+    )
     @pytest.mark.onlycluster
     def test_health_check_invalidate_cache_multithreaded(self, r, r2):
         cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
@@ -448,7 +623,9 @@ class TestClusterCache:
         assert cache.get(("GET", "foo")) is None
         assert cache.get(("GET", "bar")) is None
 
-    @pytest.mark.parametrize("r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize(
+        "r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True
+    )
     @pytest.mark.onlycluster
     def test_cache_clears_on_disconnect(self, r, r2):
         cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
@@ -459,7 +636,9 @@ class TestClusterCache:
         # get key from local cache
         assert cache.get(("GET", "foo")) == b"bar"
         # Force disconnection
-        r.nodes_manager.get_node_from_slot(10).redis_connection.connection_pool.get_connection("_").disconnect()
+        r.nodes_manager.get_node_from_slot(
+            10
+        ).redis_connection.connection_pool.get_connection("_").disconnect()
         # Make sure cache is empty
         assert cache.currsize == 0
 
@@ -489,7 +668,9 @@ class TestClusterCache:
         # the first key is not in the local cache anymore
         assert cache.get(("GET", "foo")) is None
 
-    @pytest.mark.parametrize("r", [{"cache": TTLCache(maxsize=128, ttl=1), "use_cache": True}], indirect=True)
+    @pytest.mark.parametrize(
+        "r", [{"cache": TTLCache(maxsize=128, ttl=1), "use_cache": True}], indirect=True
+    )
     @pytest.mark.onlycluster
     def test_cache_ttl(self, r):
         cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
@@ -594,13 +775,20 @@ class TestClusterCache:
         assert r.get("foo") is None
         assert cache.currsize == 0
 
+
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 class TestSentinelCache:
     @pytest.mark.parametrize(
         "sentinel_setup",
-        [{"cache": LRUCache(maxsize=128), "use_cache": True, "force_master_ip": "localhost"}],
+        [
+            {
+                "cache": LRUCache(maxsize=128),
+                "use_cache": True,
+                "force_master_ip": "localhost",
+            }
+        ],
         indirect=True,
     )
     @pytest.mark.onlynoncluster
@@ -618,12 +806,34 @@ class TestSentinelCache:
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
 
-    @pytest.mark.parametrize("r", [
-        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_size": 128, "cache_ttl": 300},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.LRU, "cache_size": 128},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 128},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.RANDOM, "cache_size": 128},
-    ], ids=["TTL", "LRU", "LFU", "RANDOM"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.TTL,
+                "cache_size": 128,
+                "cache_ttl": 300,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.LRU,
+                "cache_size": 128,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.LFU,
+                "cache_size": 128,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.RANDOM,
+                "cache_size": 128,
+            },
+        ],
+        ids=["TTL", "LRU", "LFU", "RANDOM"],
+        indirect=True,
+    )
     def test_get_from_custom_cache(self, request, r, r2):
         cache_class = CacheClass[request.node.callspec.id]
         cache = r.get_cache()
@@ -644,7 +854,13 @@ class TestSentinelCache:
 
     @pytest.mark.parametrize(
         "sentinel_setup",
-        [{"cache": LRUCache(maxsize=128), "use_cache": True, "force_master_ip": "localhost"}],
+        [
+            {
+                "cache": LRUCache(maxsize=128),
+                "use_cache": True,
+                "force_master_ip": "localhost",
+            }
+        ],
         indirect=True,
     )
     @pytest.mark.onlynoncluster
@@ -689,7 +905,13 @@ class TestSentinelCache:
 
     @pytest.mark.parametrize(
         "sentinel_setup",
-        [{"cache": LRUCache(maxsize=128), "use_cache": True, "force_master_ip": "localhost"}],
+        [
+            {
+                "cache": LRUCache(maxsize=128),
+                "use_cache": True,
+                "force_master_ip": "localhost",
+            }
+        ],
         indirect=True,
     )
     @pytest.mark.onlynoncluster
@@ -710,7 +932,13 @@ class TestSentinelCache:
 
     @pytest.mark.parametrize(
         "sentinel_setup",
-        [{"cache": LRUCache(maxsize=128), "use_cache": True, "force_master_ip": "localhost"}],
+        [
+            {
+                "cache": LRUCache(maxsize=128),
+                "use_cache": True,
+                "force_master_ip": "localhost",
+            }
+        ],
         indirect=True,
     )
     @pytest.mark.onlynoncluster
@@ -723,21 +951,26 @@ class TestSentinelCache:
         # get key from local cache
         assert cache.get(("GET", "foo")) == b"bar"
         # Force disconnection
-        master.connection_pool.get_connection('_').disconnect()
+        master.connection_pool.get_connection("_").disconnect()
         # Make sure cache is empty
         assert cache.currsize == 0
+
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 class TestSSLCache:
-    @pytest.mark.parametrize("r", [
-        {
-            "cache": TTLCache(128, 300),
-            "use_cache": True,
-            "ssl": True,
-        }
-    ], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "ssl": True,
+            }
+        ],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_get_from_cache(self, r, r2, cache):
         cache = r.get_cache()
@@ -754,12 +987,38 @@ class TestSSLCache:
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
 
-    @pytest.mark.parametrize("r", [
-        {"use_cache": True, "cache_eviction": EvictionPolicy.TTL, "cache_size": 128, "cache_ttl": 300, "ssl": True},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.LRU, "cache_size": 128, "ssl": True},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.LFU, "cache_size": 128, "ssl": True},
-        {"use_cache": True, "cache_eviction": EvictionPolicy.RANDOM, "cache_size": 128, "ssl": True},
-    ], ids=["TTL", "LRU", "LFU", "RANDOM"], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.TTL,
+                "cache_size": 128,
+                "cache_ttl": 300,
+                "ssl": True,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.LRU,
+                "cache_size": 128,
+                "ssl": True,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.LFU,
+                "cache_size": 128,
+                "ssl": True,
+            },
+            {
+                "use_cache": True,
+                "cache_eviction": EvictionPolicy.RANDOM,
+                "cache_size": 128,
+                "ssl": True,
+            },
+        ],
+        ids=["TTL", "LRU", "LFU", "RANDOM"],
+        indirect=True,
+    )
     def test_get_from_custom_cache(self, request, r, r2):
         cache_class = CacheClass[request.node.callspec.id]
         cache = r.get_cache()
@@ -778,13 +1037,17 @@ class TestSSLCache:
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
 
-    @pytest.mark.parametrize("r", [
-        {
-            "cache": TTLCache(128, 300),
-            "use_cache": True,
-            "ssl": True,
-        }
-    ], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "ssl": True,
+            }
+        ],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_get_from_cache_multithreaded(self, r):
         cache = r.get_cache()
@@ -821,13 +1084,17 @@ class TestSSLCache:
         assert cache.get(("GET", "foo")) == b"baz"
         assert cache.get(("GET", "bar")) == b"bar"
 
-    @pytest.mark.parametrize("r", [
-        {
-            "cache": TTLCache(128, 300),
-            "use_cache": True,
-            "ssl": True,
-        }
-    ], indirect=True)
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": TTLCache(128, 300),
+                "use_cache": True,
+                "ssl": True,
+            }
+        ],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
     def test_health_check_invalidate_cache(self, r, r2):
         cache = r.get_cache()
