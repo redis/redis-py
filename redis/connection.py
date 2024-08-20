@@ -889,7 +889,8 @@ class CacheProxyConnection(ConnectionInterface):
                 for key in data[1]:
                     normalized_key = ensure_string(key)
                     if normalized_key in self._keys_mapping:
-                        # Make sure that all command responses associated with this key will be deleted
+                        # Make sure that all command responses
+                        # associated with this key will be deleted
                         for cache_key in self._keys_mapping[normalized_key]:
                             self._cache.pop(cache_key)
                     # Removes key from mapping cache
