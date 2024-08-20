@@ -7,7 +7,7 @@ from cachetools import TTLCache, LRUCache, LFUCache
 import redis
 from redis.cache import EvictionPolicy, CacheClass
 from redis.utils import HIREDIS_AVAILABLE
-from tests.conftest import _get_client
+from tests.conftest import _get_client, skip_if_resp_version
 
 
 @pytest.fixture()
@@ -36,13 +36,9 @@ def r(request):
     ) as client:
         yield client
 
-
-def set_get(client, key, value):
-    client.set(key, value)
-    return client.get(key)
-
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
+@skip_if_resp_version(2)
 class TestCache:
     @pytest.mark.parametrize("r", [
         {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": True},
@@ -331,6 +327,7 @@ class TestCache:
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
+@skip_if_resp_version(2)
 class TestClusterCache:
     @pytest.mark.parametrize("r", [{"cache": LRUCache(maxsize=128), "use_cache": True}], indirect=True)
     def test_get_from_cache(self, r, r2):
@@ -599,6 +596,7 @@ class TestClusterCache:
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
+@skip_if_resp_version(2)
 class TestSentinelCache:
     @pytest.mark.parametrize(
         "sentinel_setup",
@@ -731,6 +729,7 @@ class TestSentinelCache:
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
+@skip_if_resp_version(2)
 class TestSSLCache:
     @pytest.mark.parametrize("r", [
         {
