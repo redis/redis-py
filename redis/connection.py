@@ -767,7 +767,6 @@ class CacheProxyConnection(ConnectionInterface):
         self._conn.check_health()
 
     def send_packed_command(self, command, check_health=True):
-        self._process_pending_invalidations()
         # TODO: Investigate if it's possible to unpack command or extract keys from packed command
         self._conn.send_packed_command(command)
 

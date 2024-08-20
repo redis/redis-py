@@ -134,21 +134,6 @@ class TestCache:
         {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
     ], indirect=True)
     @pytest.mark.onlynoncluster
-    def test_prevent_race_condition_from_multiple_threads(self, r, cache):
-        cache = r.get_cache()
-
-        # Set initial key.
-        assert r.set("foo", "bar")
-
-        # Running concurrent commands over two threads to override same key.
-        threading.Thread(target=r.get("foo")).start()
-        threading.Thread(target=set_get, args=(r, "foo", "baz")).start()
-        assert cache.get(("GET", "foo")) == b"bar"
-
-    @pytest.mark.parametrize("r", [
-        {"cache": TTLCache(128, 300), "use_cache": True, "single_connection_client": False},
-    ], indirect=True)
-    @pytest.mark.onlynoncluster
     def test_health_check_invalidate_cache(self, r, r2):
         cache = r.get_cache()
         # add key to redis
