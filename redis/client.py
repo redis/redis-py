@@ -5,9 +5,7 @@ import time
 import warnings
 from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Type, Union
-
 from cachetools import Cache
-
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import (
     _RedisCallbacks,

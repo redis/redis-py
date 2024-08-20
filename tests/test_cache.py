@@ -1,9 +1,7 @@
 import threading
 import time
-
 import pytest
 from cachetools import TTLCache, LRUCache, LFUCache
-
 import redis
 from redis.cache import EvictionPolicy, CacheClass
 from redis.utils import HIREDIS_AVAILABLE

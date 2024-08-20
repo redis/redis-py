@@ -5,7 +5,6 @@ from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
 from urllib.parse import urlparse
-
 import pytest
 import redis
 from packaging.version import Version

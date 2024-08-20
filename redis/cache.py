@@ -1,10 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import TypeVar
 from enum import Enum
-
 from cachetools import LRUCache, LFUCache, RRCache, Cache, TTLCache
-
-T = TypeVar("T")
 
 
 class EvictionPolicy(Enum):
