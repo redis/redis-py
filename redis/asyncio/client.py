@@ -27,7 +27,6 @@ from typing import (
 )
 
 from cachetools import Cache
-
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,

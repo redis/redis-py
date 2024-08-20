@@ -330,8 +330,10 @@ def _get_client(
             connection_class = SSLConnection
             kwargs["ssl_certfile"] = get_ssl_filename("client-cert.pem")
             kwargs["ssl_keyfile"] = get_ssl_filename("client-key.pem")
-            # When you try to assign "required" as single string, it assigns tuple instead of string.
-            # Probably some reserved keyword, I can't explain how does it work -_-
+            # When you try to assign "required" as single string
+            # it assigns tuple instead of string.
+            # Probably some reserved keyword
+            # I can't explain how does it work -_-
             kwargs["ssl_cert_reqs"] = "require" + "d"
             kwargs["ssl_ca_certs"] = get_ssl_filename("ca-cert.pem")
             kwargs["port"] = 6666

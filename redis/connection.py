@@ -8,12 +8,12 @@ import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from time import time, sleep
+from time import time
 from typing import Any, Callable, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from cachetools import TTLCache, Cache, LRUCache
+from cachetools import Cache, LRUCache
 from cachetools.keys import hashkey
 from redis.cache import CacheConfiguration, CacheFactory
 
@@ -773,13 +773,15 @@ class CacheProxyConnection(ConnectionInterface):
         self._conn.check_health()
 
     def send_packed_command(self, command, check_health=True):
-        # TODO: Investigate if it's possible to unpack command or extract keys from packed command
+        # TODO: Investigate if it's possible to unpack command
+        #  or extract keys from packed command
         self._conn.send_packed_command(command)
 
     def send_command(self, *args, **kwargs):
         self._process_pending_invalidations()
 
-        # If command is write command or not allowed to cache, transfer control to the actual connection.
+        # If command is write command or not allowed to cache
+        # transfer control to the actual connection.
         if not self._conf.is_allowed_to_cache(args[0]):
             self._current_command_hash = None
             self._current_command_keys = None
@@ -797,14 +799,17 @@ class CacheProxyConnection(ConnectionInterface):
                 raise TypeError("Cache keys must be a list.")
 
         with self._cache_lock:
-            # If current command reply already cached prevent sending data over socket.
+            # If current command reply already cached
+            # prevent sending data over socket.
             if self._cache.get(self._current_command_hash):
                 return
 
-            # Set temporary entry as a status to prevent race condition from another connection.
+            # Set temporary entry as a status to prevent
+            # race condition from another connection.
             self._cache[self._current_command_hash] = "caching-in-progress"
 
-        # Send command over socket only if it's allowed read-only command that not yet cached.
+        # Send command over socket only if it's allowed
+        # read-only command that not yet cached.
         self._conn.send_command(*args, **kwargs)
 
     def can_read(self, timeout=0):
@@ -836,7 +841,8 @@ class CacheProxyConnection(ConnectionInterface):
             elif self._current_command_hash is None:
                 return response
 
-            # Create separate mapping for keys or add current response to associated keys.
+            # Create separate mapping for keys
+            # or add current response to associated keys.
             for key in self._current_command_keys:
                 if key in self._keys_mapping:
                     if self._current_command_hash not in self._keys_mapping[key]:
@@ -846,7 +852,8 @@ class CacheProxyConnection(ConnectionInterface):
 
             cache_entry = self._cache.get(self._current_command_hash, None)
 
-            # Cache only responses that still valid and wasn't invalidated by another connection in meantime.
+            # Cache only responses that still valid
+            # and wasn't invalidated by another connection in meantime.
             if cache_entry is not None:
                 self._cache[self._current_command_hash] = response
 

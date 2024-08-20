@@ -425,7 +425,8 @@ class TestCache:
         res.append(b"baz")
         assert another_res != res
 
-        # Invalidate one of the keys and make sure that all associated cached entries was removed
+        # Invalidate one of the keys and make sure that
+        # all associated cached entries was removed
         assert r.set("foo", "baz")
         assert r.get("foo") == b"baz"
         assert cache.get(("MGET", "foo", "bar")) is None
@@ -743,7 +744,8 @@ class TestClusterCache:
         assert r.mget("foo{slot}", "bar{slot}") == [b"bar", b"foo"]
         assert cache.get(("MGET", "foo{slot}", "bar{slot}")) == [b"bar", b"foo"]
 
-        # Invalidate one of the keys and make sure that all associated cached entries was removed
+        # Invalidate one of the keys and make sure
+        # that all associated cached entries was removed
         assert r.set("foo{slot}", "baz")
         assert r.get("foo{slot}") == b"baz"
         assert cache.get(("MGET", "foo{slot}", "bar{slot}")) is None
@@ -1133,7 +1135,8 @@ class TestSSLCache:
         assert r.mget("foo", "bar") == [b"bar", b"foo"]
         assert cache.get(("MGET", "foo", "bar")) == [b"bar", b"foo"]
 
-        # Invalidate one of the keys and make sure that all associated cached entries was removed
+        # Invalidate one of the keys and make sure
+        # that all associated cached entries was removed
         assert r.set("foo", "baz")
         assert r.get("foo") == b"baz"
         assert cache.get(("MGET", "foo", "bar")) is None
