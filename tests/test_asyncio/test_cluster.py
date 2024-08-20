@@ -464,6 +464,34 @@ class TestRedisClusterObj:
 
         await rc.aclose()
 
+    async def test_max_connections_waited(
+        self, create_redis: Callable[..., RedisCluster]
+    ) -> None:
+        rc = await create_redis(
+            cls=RedisCluster, 
+            max_connections=10,
+            wait_for_connections=True
+        )
+        for node in rc.get_nodes():
+            assert node.max_connections == 10
+
+        with mock.patch.object(Connection, "read_response") as read_response:
+
+            async def read_response_mocked(*args: Any, **kwargs: Any) -> None:
+                await asyncio.sleep(1)
+
+            read_response.side_effect = read_response_mocked
+
+            await asyncio.gather(
+                *(
+                    rc.ping(target_nodes=RedisCluster.DEFAULT_NODE)
+                    for _ in range(20)
+                )
+            )
+        
+        assert len(rc.get_default_node()._connections) == 10
+        await rc.aclose()
+
     async def test_execute_command_errors(self, r: RedisCluster) -> None:
         """
         Test that if no key is provided then exception should be raised.

@@ -65,9 +65,9 @@ from redis.exceptions import (
     RedisClusterException,
     ResponseError,
     SlotNotCoveredError,
-    TimeoutError,
     TryAgainError,
 )
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
     deprecated_function,
@@ -264,6 +264,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         socket_timeout: Optional[float] = None,
         retry: Optional["Retry"] = None,
         retry_on_error: Optional[List[Type[Exception]]] = None,
+        wait_for_connections: bool = False,
         # SSL related kwargs
         ssl: bool = False,
         ssl_ca_certs: Optional[str] = None,
@@ -326,6 +327,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_timeout": socket_timeout,
             "retry": retry,
             "protocol": protocol,
+            "wait_for_connections": wait_for_connections,
             # Client cache related kwargs
             "cache_enabled": cache_enabled,
             "client_cache": client_cache,
@@ -364,7 +366,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             )
             if not retry_on_error:
                 # Default errors for retrying
-                retry_on_error = [ConnectionError, TimeoutError]
+                retry_on_error = [ConnectionError, RedisTimeoutError]
             self.retry.update_supported_errors(retry_on_error)
             kwargs.update({"retry": self.retry})
 
@@ -800,7 +802,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 return await target_node.execute_command(*args, **kwargs)
             except (BusyLoadingError, MaxConnectionsError):
                 raise
-            except (ConnectionError, TimeoutError):
+            except (ConnectionError, RedisTimeoutError):
                 # Connection retries are being handled in the node's
                 # Retry object.
                 # Remove the failed node from the startup nodes before we try
@@ -962,6 +964,7 @@ class ClusterNode:
     __slots__ = (
         "_connections",
         "_free",
+        "acquire_connection_timeout",
         "connection_class",
         "connection_kwargs",
         "host",
@@ -970,6 +973,7 @@ class ClusterNode:
         "port",
         "response_callbacks",
         "server_type",
+        "wait_for_connections",
     )
 
     def __init__(
@@ -980,6 +984,7 @@ class ClusterNode:
         *,
         max_connections: int = 2**31,
         connection_class: Type[Connection] = Connection,
+        wait_for_connections: bool = False,
         **connection_kwargs: Any,
     ) -> None:
         if host == "localhost":
@@ -996,9 +1001,11 @@ class ClusterNode:
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.response_callbacks = connection_kwargs.pop("response_callbacks", {})
+        self.acquire_connection_timeout = connection_kwargs.get('socket_timeout', 30)
 
         self._connections: List[Connection] = []
-        self._free: Deque[Connection] = collections.deque(maxlen=self.max_connections)
+        self._free: asyncio.Queue[Connection] = asyncio.Queue()
+        self.wait_for_connections = wait_for_connections
 
     def __repr__(self) -> str:
         return (
@@ -1039,14 +1046,23 @@ class ClusterNode:
         if exc:
             raise exc
 
-    def acquire_connection(self) -> Connection:
+    async def acquire_connection(self) -> Connection:
         try:
-            return self._free.popleft()
-        except IndexError:
+            return self._free.get_nowait()
+        except asyncio.QueueEmpty:
             if len(self._connections) < self.max_connections:
                 connection = self.connection_class(**self.connection_kwargs)
                 self._connections.append(connection)
                 return connection
+            elif self.wait_for_connections:
+                try:
+                    connection = await asyncio.wait_for(
+                        self._free.get(),
+                        self.acquire_connection_timeout
+                    )
+                    return connection
+                except TimeoutError:
+                    raise RedisTimeoutError("Timeout reached waiting for a free connection")
 
             raise MaxConnectionsError()
 
@@ -1075,12 +1091,12 @@ class ClusterNode:
 
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
-        connection = self.acquire_connection()
+        connection = await self.acquire_connection()
         keys = kwargs.pop("keys", None)
 
         response_from_cache = await connection._get_from_local_cache(args)
         if response_from_cache is not None:
-            self._free.append(connection)
+            await self._free.put(connection)
             return response_from_cache
         else:
             # Execute command
@@ -1094,11 +1110,11 @@ class ClusterNode:
                 return response
             finally:
                 # Release connection
-                self._free.append(connection)
+                await self._free.put(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
-        connection = self.acquire_connection()
+        connection = await self.acquire_connection()
 
         # Execute command
         await connection.send_packed_command(
@@ -1117,7 +1133,7 @@ class ClusterNode:
                 ret = True
 
         # Release connection
-        self._free.append(connection)
+        await self._free.put(connection)
 
         return ret
 
