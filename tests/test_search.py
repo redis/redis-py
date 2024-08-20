@@ -27,7 +27,6 @@ from redis.commands.search.suggestion import Suggestion
 
 from .conftest import (
     _get_client,
-    assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,
@@ -893,7 +892,7 @@ def test_dict_operations(client):
 
     # Dump dict and inspect content
     res = client.ft().dict_dump("custom_dict")
-    assert_resp_response(client, res, ["item1", "item3"], {"item1", "item3"})
+    assert res == ["item1", "item3"]
 
     # Remove rest of the items before reload
     client.ft().dict_del("custom_dict", *res)
@@ -1439,6 +1438,32 @@ def test_aggregations_filter(client):
             assert len(res["results"]) == 2
             assert res["results"][0]["extra_attributes"] == {"age": "19"}
             assert res["results"][1]["extra_attributes"] == {"age": "25"}
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+def test_aggregations_add_scores(client):
+    client.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            NumericField("age", sortable=True),
+        )
+    )
+
+    client.hset("doc1", mapping={"name": "bar", "age": "25"})
+    client.hset("doc2", mapping={"name": "foo", "age": "19"})
+
+    req = aggregations.AggregateRequest("*").add_scores()
+    res = client.ft().aggregate(req)
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+        assert res["results"][0]["extra_attributes"] == {"__score": "0.2"}
+        assert res["results"][1]["extra_attributes"] == {"__score": "0.2"}
+    else:
+        assert len(res.rows) == 2
+        assert res.rows[0] == ["__score", "0.2"]
+        assert res.rows[1] == ["__score", "0.2"]
 
 
 @pytest.mark.redismod
