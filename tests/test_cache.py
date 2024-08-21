@@ -4,7 +4,7 @@ import time
 import pytest
 import redis
 from cachetools import LFUCache, LRUCache, TTLCache
-from redis.cache import CacheClass, EvictionPolicy
+from redis.cache import CacheToolsAdapter, EvictionPolicy, EvictionPolicyCacheClass
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import _get_client, skip_if_resp_version
 
@@ -44,12 +44,12 @@ class TestCache:
         "r",
         [
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": True,
             },
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": False,
             },
@@ -103,9 +103,9 @@ class TestCache:
     )
     @pytest.mark.onlynoncluster
     def test_get_from_custom_cache(self, request, r, r2):
-        cache_class = CacheClass[request.node.callspec.id]
+        expected_policy = EvictionPolicy(request.node.callspec.id)
         cache = r.get_cache()
-        assert isinstance(cache, cache_class.value)
+        assert expected_policy == cache.eviction_policy
 
         # add key to redis
         r.set("foo", "bar")
@@ -124,12 +124,12 @@ class TestCache:
         "r",
         [
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": True,
             },
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": False,
             },
@@ -177,7 +177,7 @@ class TestCache:
         "r",
         [
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": False,
             },
@@ -201,7 +201,9 @@ class TestCache:
         assert cache.get(("GET", "foo")) is None
 
     @pytest.mark.parametrize(
-        "r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True
+        "r",
+        [{"cache": CacheToolsAdapter(TTLCache(128, 300)), "use_cache": True}],
+        indirect=True,
     )
     @pytest.mark.onlynoncluster
     def test_health_check_invalidate_cache_multithreaded(self, r, r2):
@@ -232,12 +234,12 @@ class TestCache:
         "r",
         [
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": True,
             },
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": False,
             },
@@ -368,12 +370,12 @@ class TestCache:
         "r",
         [
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": True,
             },
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": False,
             },
@@ -394,12 +396,12 @@ class TestCache:
         "r",
         [
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": True,
             },
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": False,
             },
@@ -435,12 +437,12 @@ class TestCache:
         "r",
         [
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": True,
             },
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "single_connection_client": False,
             },
@@ -475,7 +477,9 @@ class TestCache:
 @skip_if_resp_version(2)
 class TestClusterCache:
     @pytest.mark.parametrize(
-        "r", [{"cache": LRUCache(maxsize=128), "use_cache": True}], indirect=True
+        "r",
+        [{"cache": CacheToolsAdapter(LRUCache(maxsize=128)), "use_cache": True}],
+        indirect=True,
     )
     def test_get_from_cache(self, r, r2):
         cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
@@ -521,9 +525,9 @@ class TestClusterCache:
         indirect=True,
     )
     def test_get_from_custom_cache(self, request, r, r2):
-        cache_class = CacheClass[request.node.callspec.id]
+        expected_policy = EvictionPolicy[request.node.callspec.id]
         cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
-        assert isinstance(cache, cache_class.value)
+        assert expected_policy == cache.eviction_policy
 
         # add key to redis
         assert r.set("foo", "bar")
@@ -539,7 +543,9 @@ class TestClusterCache:
         assert cache.get(("GET", "foo")) == b"barbar"
 
     @pytest.mark.parametrize(
-        "r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True
+        "r",
+        [{"cache": CacheToolsAdapter(TTLCache(128, 300)), "use_cache": True}],
+        indirect=True,
     )
     @pytest.mark.onlycluster
     def test_get_from_cache_multithreaded(self, r):
@@ -579,7 +585,9 @@ class TestClusterCache:
         assert cache.get(("GET", "bar")) == b"bar"
 
     @pytest.mark.parametrize(
-        "r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True
+        "r",
+        [{"cache": CacheToolsAdapter(TTLCache(128, 300)), "use_cache": True}],
+        indirect=True,
     )
     @pytest.mark.onlycluster
     def test_health_check_invalidate_cache(self, r, r2):
@@ -598,7 +606,9 @@ class TestClusterCache:
         assert cache.get(("GET", "foo")) is None
 
     @pytest.mark.parametrize(
-        "r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True
+        "r",
+        [{"cache": CacheToolsAdapter(TTLCache(128, 300)), "use_cache": True}],
+        indirect=True,
     )
     @pytest.mark.onlycluster
     def test_health_check_invalidate_cache_multithreaded(self, r, r2):
@@ -624,7 +634,9 @@ class TestClusterCache:
         assert cache.get(("GET", "bar")) is None
 
     @pytest.mark.parametrize(
-        "r", [{"cache": TTLCache(128, 300), "use_cache": True}], indirect=True
+        "r",
+        [{"cache": CacheToolsAdapter(TTLCache(128, 300)), "use_cache": True}],
+        indirect=True,
     )
     @pytest.mark.onlycluster
     def test_cache_clears_on_disconnect(self, r, r2):
@@ -644,7 +656,7 @@ class TestClusterCache:
 
     @pytest.mark.parametrize(
         "r",
-        [{"cache": LRUCache(3), "use_cache": True}],
+        [{"cache": CacheToolsAdapter(LRUCache(3)), "use_cache": True}],
         indirect=True,
     )
     @pytest.mark.onlycluster
@@ -669,7 +681,9 @@ class TestClusterCache:
         assert cache.get(("GET", "foo")) is None
 
     @pytest.mark.parametrize(
-        "r", [{"cache": TTLCache(maxsize=128, ttl=1), "use_cache": True}], indirect=True
+        "r",
+        [{"cache": CacheToolsAdapter(TTLCache(maxsize=128, ttl=1)), "use_cache": True}],
+        indirect=True,
     )
     @pytest.mark.onlycluster
     def test_cache_ttl(self, r):
@@ -687,7 +701,7 @@ class TestClusterCache:
 
     @pytest.mark.parametrize(
         "r",
-        [{"cache": LFUCache(3), "use_cache": True}],
+        [{"cache": CacheToolsAdapter(LFUCache(3)), "use_cache": True}],
         indirect=True,
     )
     @pytest.mark.onlycluster
@@ -715,7 +729,7 @@ class TestClusterCache:
 
     @pytest.mark.parametrize(
         "r",
-        [{"cache": LRUCache(maxsize=128), "use_cache": True}],
+        [{"cache": CacheToolsAdapter(LRUCache(maxsize=128)), "use_cache": True}],
         indirect=True,
     )
     @pytest.mark.onlycluster
@@ -729,7 +743,7 @@ class TestClusterCache:
 
     @pytest.mark.parametrize(
         "r",
-        [{"cache": LRUCache(maxsize=128), "use_cache": True}],
+        [{"cache": CacheToolsAdapter(LRUCache(maxsize=128)), "use_cache": True}],
         indirect=True,
     )
     @pytest.mark.onlycluster
@@ -752,7 +766,7 @@ class TestClusterCache:
 
     @pytest.mark.parametrize(
         "r",
-        [{"cache": LRUCache(maxsize=128), "use_cache": True}],
+        [{"cache": CacheToolsAdapter(LRUCache(maxsize=128)), "use_cache": True}],
         indirect=True,
     )
     @pytest.mark.onlycluster
@@ -785,7 +799,7 @@ class TestSentinelCache:
         "sentinel_setup",
         [
             {
-                "cache": LRUCache(maxsize=128),
+                "cache": CacheToolsAdapter(LRUCache(maxsize=128)),
                 "use_cache": True,
                 "force_master_ip": "localhost",
             }
@@ -836,9 +850,9 @@ class TestSentinelCache:
         indirect=True,
     )
     def test_get_from_custom_cache(self, request, r, r2):
-        cache_class = CacheClass[request.node.callspec.id]
+        expected_policy = EvictionPolicy[request.node.callspec.id]
         cache = r.get_cache()
-        assert isinstance(cache, cache_class.value)
+        assert expected_policy == cache.eviction_policy
 
         # add key to redis
         r.set("foo", "bar")
@@ -857,7 +871,7 @@ class TestSentinelCache:
         "sentinel_setup",
         [
             {
-                "cache": LRUCache(maxsize=128),
+                "cache": CacheToolsAdapter(LRUCache(maxsize=128)),
                 "use_cache": True,
                 "force_master_ip": "localhost",
             }
@@ -908,7 +922,7 @@ class TestSentinelCache:
         "sentinel_setup",
         [
             {
-                "cache": LRUCache(maxsize=128),
+                "cache": CacheToolsAdapter(LRUCache(maxsize=128)),
                 "use_cache": True,
                 "force_master_ip": "localhost",
             }
@@ -935,7 +949,7 @@ class TestSentinelCache:
         "sentinel_setup",
         [
             {
-                "cache": LRUCache(maxsize=128),
+                "cache": CacheToolsAdapter(LRUCache(maxsize=128)),
                 "use_cache": True,
                 "force_master_ip": "localhost",
             }
@@ -959,13 +973,13 @@ class TestSentinelCache:
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
-@skip_if_resp_version(2)
+# @skip_if_resp_version(2)
 class TestSSLCache:
     @pytest.mark.parametrize(
         "r",
         [
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "ssl": True,
             }
@@ -1021,9 +1035,9 @@ class TestSSLCache:
         indirect=True,
     )
     def test_get_from_custom_cache(self, request, r, r2):
-        cache_class = CacheClass[request.node.callspec.id]
+        expected_policy = EvictionPolicy[request.node.callspec.id]
         cache = r.get_cache()
-        assert isinstance(cache, cache_class.value)
+        assert expected_policy == cache.eviction_policy
 
         # add key to redis
         r.set("foo", "bar")
@@ -1042,7 +1056,7 @@ class TestSSLCache:
         "r",
         [
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "ssl": True,
             }
@@ -1089,7 +1103,7 @@ class TestSSLCache:
         "r",
         [
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "ssl": True,
             }
@@ -1116,7 +1130,7 @@ class TestSSLCache:
         "r",
         [
             {
-                "cache": TTLCache(128, 300),
+                "cache": CacheToolsAdapter(TTLCache(128, 300)),
                 "use_cache": True,
                 "ssl": True,
             }

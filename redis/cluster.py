@@ -10,7 +10,7 @@ from cachetools import Cache
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.helpers import parse_scan
 from redis.backoff import default_backoff
-from redis.cache import EvictionPolicy
+from redis.cache import CacheInterface, EvictionPolicy
 from redis.client import CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
@@ -170,6 +170,9 @@ REDIS_ALLOWED_KEYS = (
     "unix_socket_path",
     "username",
     "use_cache",
+    "cache",
+    "cache_size",
+    "cache_ttl",
 )
 KWARGS_DISABLED_KEYS = ("host", "port")
 
@@ -504,7 +507,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         url: Optional[str] = None,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         use_cache: bool = False,
-        cache: Optional[Cache] = None,
+        cache: Optional[CacheInterface] = None,
         cache_eviction: Optional[EvictionPolicy] = None,
         cache_size: int = 128,
         cache_ttl: int = 300,

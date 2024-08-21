@@ -15,7 +15,12 @@ from urllib.parse import parse_qs, unquote, urlparse
 from apscheduler.schedulers.background import BackgroundScheduler
 from cachetools import Cache, LRUCache
 from cachetools.keys import hashkey
-from redis.cache import CacheConfiguration, CacheFactory
+from redis.cache import (
+    CacheConfiguration,
+    CacheFactoryInterface,
+    CacheInterface,
+    CacheToolsFactory,
+)
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .backoff import NoBackoff
@@ -728,7 +733,7 @@ class CacheProxyConnection(ConnectionInterface):
     def __init__(
         self,
         conn: ConnectionInterface,
-        cache: Cache,
+        cache: CacheInterface,
         conf: CacheConfiguration,
         cache_lock: threading.Lock,
     ):
@@ -806,7 +811,7 @@ class CacheProxyConnection(ConnectionInterface):
 
             # Set temporary entry as a status to prevent
             # race condition from another connection.
-            self._cache[self._current_command_hash] = "caching-in-progress"
+            self._cache.set(self._current_command_hash, "caching-in-progress")
 
         # Send command over socket only if it's allowed
         # read-only command that not yet cached.
@@ -821,10 +826,10 @@ class CacheProxyConnection(ConnectionInterface):
         with self._cache_lock:
             # Check if command response exists in a cache and it's not in progress.
             if (
-                self._current_command_hash in self._cache
-                and self._cache[self._current_command_hash] != "caching-in-progress"
+                self._cache.exists(self._current_command_hash)
+                and self._cache.get(self._current_command_hash) != "caching-in-progress"
             ):
-                return copy.deepcopy(self._cache[self._current_command_hash])
+                return copy.deepcopy(self._cache.get(self._current_command_hash))
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
@@ -835,7 +840,7 @@ class CacheProxyConnection(ConnectionInterface):
         with self._cache_lock:
             # If response is None prevent from caching.
             if response is None:
-                self._cache.pop(self._current_command_hash)
+                self._cache.remove(self._current_command_hash)
                 return response
             # Prevent not-allowed command from caching.
             elif self._current_command_hash is None:
@@ -855,7 +860,7 @@ class CacheProxyConnection(ConnectionInterface):
             # Cache only responses that still valid
             # and wasn't invalidated by another connection in meantime.
             if cache_entry is not None:
-                self._cache[self._current_command_hash] = response
+                self._cache.set(self._current_command_hash, response)
 
         return response
 
@@ -892,7 +897,7 @@ class CacheProxyConnection(ConnectionInterface):
                         # Make sure that all command responses
                         # associated with this key will be deleted
                         for cache_key in self._keys_mapping[normalized_key]:
-                            self._cache.pop(cache_key)
+                            self._cache.remove(cache_key)
                     # Removes key from mapping cache
                     self._keys_mapping.pop(normalized_key)
 
@@ -1246,6 +1251,7 @@ class ConnectionPool:
         self,
         connection_class=Connection,
         max_connections: Optional[int] = None,
+        cache_factory: Optional[CacheFactoryInterface] = None,
         **connection_kwargs,
     ):
         max_connections = max_connections or 2**31
@@ -1257,7 +1263,7 @@ class ConnectionPool:
         self.max_connections = max_connections
         self.cache = None
         self._cache_conf = None
-        self._cache_factory = None
+        self._cache_factory = cache_factory
         self.cache_lock = None
         self.scheduler = None
 
@@ -1269,11 +1275,17 @@ class ConnectionPool:
             self._cache_lock = threading.Lock()
 
             cache = self.connection_kwargs.get("cache")
+
             if cache is not None:
+                if not isinstance(cache, CacheInterface):
+                    raise ValueError("Cache must implement CacheInterface")
+
                 self.cache = cache
             else:
-                cache_factory = CacheFactory(self._cache_conf)
-                self.cache = cache_factory.get_cache()
+                if self._cache_factory is not None:
+                    self.cache = self._cache_factory.get_cache()
+                else:
+                    self.cache = CacheToolsFactory(self._cache_conf).get_cache()
 
             self.scheduler = BackgroundScheduler()
             self.scheduler.add_job(

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from enum import Enum
+from typing import Any, Hashable
 
 from cachetools import Cache, LFUCache, LRUCache, RRCache, TTLCache
 
@@ -121,31 +122,112 @@ class CacheConfiguration:
         return command in self.DEFAULT_ALLOW_LIST
 
 
-class CacheClass(Enum):
+class EvictionPolicyCacheClass(Enum):
     LRU = LRUCache
     LFU = LFUCache
     RANDOM = RRCache
     TTL = TTLCache
 
 
-class CacheFactoryInterface(ABC):
+class CacheClassEvictionPolicy(Enum):
+    LRUCache = EvictionPolicy.LRU
+    LFUCache = EvictionPolicy.LFU
+    RRCache = EvictionPolicy.RANDOM
+    TTLCache = EvictionPolicy.TTL
+
+
+class CacheInterface(ABC):
+
+    @property
     @abstractmethod
-    def get_cache(self) -> Cache:
+    def currsize(self) -> float:
+        pass
+
+    @property
+    @abstractmethod
+    def maxsize(self) -> float:
+        pass
+
+    @property
+    @abstractmethod
+    def eviction_policy(self) -> EvictionPolicy:
+        pass
+
+    @abstractmethod
+    def get(self, key: Hashable, default: Any = None):
+        pass
+
+    @abstractmethod
+    def set(self, key: Hashable, value: Any):
+        pass
+
+    @abstractmethod
+    def exists(self, key: Hashable) -> bool:
+        pass
+
+    @abstractmethod
+    def remove(self, key: Hashable):
+        pass
+
+    @abstractmethod
+    def clear(self):
         pass
 
 
-class CacheFactory(CacheFactoryInterface):
+class CacheFactoryInterface(ABC):
+    @abstractmethod
+    def get_cache(self) -> CacheInterface:
+        pass
+
+
+class CacheToolsFactory(CacheFactoryInterface):
     def __init__(self, conf: CacheConfiguration):
         self._conf = conf
 
-    def get_cache(self) -> Cache:
+    def get_cache(self) -> CacheInterface:
         eviction_policy = self._conf.get_eviction_policy()
         cache_class = self._get_cache_class(eviction_policy).value
 
         if eviction_policy == EvictionPolicy.TTL:
-            return cache_class(self._conf.get_max_size(), self._conf.get_ttl())
+            cache_inst = cache_class(self._conf.get_max_size(), self._conf.get_ttl())
+        else:
+            cache_inst = cache_class(self._conf.get_max_size())
 
-        return cache_class(self._conf.get_max_size())
+        return CacheToolsAdapter(cache_inst)
 
-    def _get_cache_class(self, eviction_policy: EvictionPolicy) -> CacheClass:
-        return CacheClass[eviction_policy.value]
+    def _get_cache_class(
+        self, eviction_policy: EvictionPolicy
+    ) -> EvictionPolicyCacheClass:
+        return EvictionPolicyCacheClass[eviction_policy.value]
+
+
+class CacheToolsAdapter(CacheInterface):
+    def __init__(self, cache: Cache):
+        self._cache = cache
+
+    def get(self, key: Hashable, default: Any = None):
+        return self._cache.get(key, default)
+
+    def set(self, key: Hashable, value: Any):
+        self._cache[key] = value
+
+    def exists(self, key: Hashable) -> bool:
+        return key in self._cache
+
+    def remove(self, key: Hashable):
+        self._cache.pop(key)
+
+    def clear(self):
+        self._cache.clear()
+
+    @property
+    def currsize(self) -> float:
+        return self._cache.currsize
+
+    @property
+    def maxsize(self) -> float:
+        return self._cache.maxsize
+
+    @property
+    def eviction_policy(self) -> EvictionPolicy:
+        return CacheClassEvictionPolicy[self._cache.__class__.__name__].value
