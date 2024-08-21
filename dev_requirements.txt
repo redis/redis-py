@@ -1,5 +1,5 @@
 black==24.3.0
-cachetools
+cachetools>=5.5.0
 apscheduler
 click==8.0.4
 flake8-isort

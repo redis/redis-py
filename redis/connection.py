@@ -730,12 +730,14 @@ def ensure_string(key):
 
 
 class CacheProxyConnection(ConnectionInterface):
+    CACHE_DUMMY_STATUS = "caching-in-progress"
+    KEYS_MAPPING_CACHE_SIZE = 10000
+
     def __init__(
         self,
         conn: ConnectionInterface,
         cache: CacheInterface,
-        conf: CacheConfiguration,
-        cache_lock: threading.Lock,
+        conf: CacheConfiguration
     ):
         self.pid = os.getpid()
         self._conn = conn
@@ -743,12 +745,12 @@ class CacheProxyConnection(ConnectionInterface):
         self.host = self._conn.host
         self.port = self._conn.port
         self._cache = cache
-        self._cache_lock = cache_lock
+        self._cache_lock = threading.Lock()
         self._conf = conf
         self._current_command_hash = None
         self._current_command_keys = None
         self._current_options = None
-        self._keys_mapping = LRUCache(maxsize=10000)
+        self._keys_mapping = LRUCache(maxsize=self.KEYS_MAPPING_CACHE_SIZE)
         self.register_connect_callback(self._enable_tracking_callback)
 
     def repr_pieces(self):
@@ -772,6 +774,7 @@ class CacheProxyConnection(ConnectionInterface):
     def disconnect(self, *args):
         with self._cache_lock:
             self._cache.clear()
+        self._keys_mapping.clear()
         self._conn.disconnect(*args)
 
     def check_health(self):
@@ -811,7 +814,7 @@ class CacheProxyConnection(ConnectionInterface):
 
             # Set temporary entry as a status to prevent
             # race condition from another connection.
-            self._cache.set(self._current_command_hash, "caching-in-progress")
+            self._cache.set(self._current_command_hash, self.CACHE_DUMMY_STATUS)
 
         # Send command over socket only if it's allowed
         # read-only command that not yet cached.
@@ -827,7 +830,7 @@ class CacheProxyConnection(ConnectionInterface):
             # Check if command response exists in a cache and it's not in progress.
             if (
                 self._cache.exists(self._current_command_hash)
-                and self._cache.get(self._current_command_hash) != "caching-in-progress"
+                and self._cache.get(self._current_command_hash) != self.CACHE_DUMMY_STATUS
             ):
                 return copy.deepcopy(self._cache.get(self._current_command_hash))
 
@@ -1264,7 +1267,6 @@ class ConnectionPool:
         self.cache = None
         self._cache_conf = None
         self._cache_factory = cache_factory
-        self.cache_lock = None
         self.scheduler = None
 
         if connection_kwargs.get("use_cache"):
@@ -1272,7 +1274,6 @@ class ConnectionPool:
                 raise RedisError("Client caching is only supported with RESP version 3")
 
             self._cache_conf = CacheConfiguration(**self.connection_kwargs)
-            self._cache_lock = threading.Lock()
 
             cache = self.connection_kwargs.get("cache")
 
@@ -1443,8 +1444,7 @@ class ConnectionPool:
             return CacheProxyConnection(
                 self.connection_class(**self.connection_kwargs),
                 self.cache,
-                self._cache_conf,
-                self._cache_lock,
+                self._cache_conf
             )
 
         return self.connection_class(**self.connection_kwargs)

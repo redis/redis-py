@@ -1,3 +1,3 @@
 async-timeout>=4.0.3
-cachetools
+cachetools>=5.5.0
 apscheduler
