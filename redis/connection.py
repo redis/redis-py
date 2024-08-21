@@ -734,10 +734,7 @@ class CacheProxyConnection(ConnectionInterface):
     KEYS_MAPPING_CACHE_SIZE = 10000
 
     def __init__(
-        self,
-        conn: ConnectionInterface,
-        cache: CacheInterface,
-        conf: CacheConfiguration
+        self, conn: ConnectionInterface, cache: CacheInterface, conf: CacheConfiguration
     ):
         self.pid = os.getpid()
         self._conn = conn
@@ -830,7 +827,8 @@ class CacheProxyConnection(ConnectionInterface):
             # Check if command response exists in a cache and it's not in progress.
             if (
                 self._cache.exists(self._current_command_hash)
-                and self._cache.get(self._current_command_hash) != self.CACHE_DUMMY_STATUS
+                and self._cache.get(self._current_command_hash)
+                != self.CACHE_DUMMY_STATUS
             ):
                 return copy.deepcopy(self._cache.get(self._current_command_hash))
 
@@ -1444,7 +1442,7 @@ class ConnectionPool:
             return CacheProxyConnection(
                 self.connection_class(**self.connection_kwargs),
                 self.cache,
-                self._cache_conf
+                self._cache_conf,
             )
 
         return self.connection_class(**self.connection_kwargs)

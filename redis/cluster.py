@@ -508,8 +508,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         use_cache: bool = False,
         cache: Optional[CacheInterface] = None,
         cache_eviction: Optional[EvictionPolicy] = None,
-        cache_size: int = 128,
-        cache_ttl: int = 300,
+        cache_size: int = 10000,
+        cache_ttl: int = 0,
         **kwargs,
     ):
         """
@@ -1336,8 +1336,8 @@ class NodesManager:
         use_cache: bool = False,
         cache: Optional[CacheInterface] = None,
         cache_eviction: Optional[EvictionPolicy] = None,
-        cache_size: int = 128,
-        cache_ttl: int = 300,
+        cache_size: int = 10000,
+        cache_ttl: int = 0,
         **kwargs,
     ):
         self.nodes_cache = {}

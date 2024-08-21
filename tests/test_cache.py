@@ -38,7 +38,7 @@ def r(request):
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
-@skip_if_resp_version(2)
+# @skip_if_resp_version(2)
 class TestCache:
     @pytest.mark.parametrize(
         "r",

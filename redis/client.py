@@ -216,8 +216,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         use_cache: bool = False,
         cache: Optional[CacheInterface] = None,
         cache_eviction: Optional[EvictionPolicy] = None,
-        cache_size: int = 128,
-        cache_ttl: int = 300,
+        cache_size: int = 10000,
+        cache_ttl: int = 0,
     ) -> None:
         """
         Initialize a new Redis client.
