@@ -13,7 +13,7 @@ from typing import Any, Callable, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from cachetools import Cache, LRUCache
+from cachetools import LRUCache
 from cachetools.keys import hashkey
 from redis.cache import (
     CacheConfiguration,

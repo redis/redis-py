@@ -4,7 +4,7 @@ import time
 import pytest
 import redis
 from cachetools import LFUCache, LRUCache, TTLCache
-from redis.cache import CacheToolsAdapter, EvictionPolicy, EvictionPolicyCacheClass
+from redis.cache import CacheToolsAdapter, EvictionPolicy
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import _get_client, skip_if_resp_version
 
@@ -973,7 +973,7 @@ class TestSentinelCache:
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
-# @skip_if_resp_version(2)
+@skip_if_resp_version(2)
 class TestSSLCache:
     @pytest.mark.parametrize(
         "r",

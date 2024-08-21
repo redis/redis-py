@@ -26,7 +26,6 @@ from typing import (
     cast,
 )
 
-from cachetools import Cache
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,
@@ -651,9 +650,6 @@ class Redis(
             retval = self.response_callbacks[command_name](response, **options)
             return await retval if inspect.isawaitable(retval) else retval
         return response
-
-    def get_cache(self) -> Optional[Cache]:
-        return self.connection_pool.cache
 
 
 StrictRedis = Redis

@@ -6,7 +6,6 @@ import time
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from cachetools import Cache
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.helpers import parse_scan
 from redis.backoff import default_backoff
@@ -1335,7 +1334,7 @@ class NodesManager:
         connection_pool_class=ConnectionPool,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         use_cache: bool = False,
-        cache: Optional[Cache] = None,
+        cache: Optional[CacheInterface] = None,
         cache_eviction: Optional[EvictionPolicy] = None,
         cache_size: int = 128,
         cache_ttl: int = 300,
