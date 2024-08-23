@@ -1,5 +1,6 @@
 import argparse
 import random
+import threading
 import time
 from typing import Callable, TypeVar
 from unittest import mock
@@ -7,11 +8,14 @@ from unittest.mock import Mock
 from urllib.parse import urlparse
 
 import pytest
+from _pytest import unittest
+
 import redis
 from packaging.version import Version
 from redis import Sentinel
 from redis.backoff import NoBackoff
-from redis.connection import Connection, SSLConnection, parse_url
+from redis.cache import CacheConfiguration, EvictionPolicy, CacheFactoryInterface, CacheInterface
+from redis.connection import Connection, SSLConnection, parse_url, ConnectionPool, ConnectionInterface
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
 from tests.ssl_utils import get_ssl_filename
@@ -535,6 +539,33 @@ def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
     return parts.hostname, (parts.port or 6379)
+
+
+@pytest.fixture()
+def cache_conf() -> CacheConfiguration:
+    return CacheConfiguration(
+        cache_size=100,
+        cache_ttl=20,
+        cache_eviction=EvictionPolicy.TTL
+    )
+
+
+@pytest.fixture()
+def mock_cache_factory() -> CacheFactoryInterface:
+    mock_factory = Mock(spec=CacheFactoryInterface)
+    return mock_factory
+
+
+@pytest.fixture()
+def mock_cache() -> CacheInterface:
+    mock_cache = Mock(spec=CacheInterface)
+    return mock_cache
+
+
+@pytest.fixture()
+def mock_connection() -> ConnectionInterface:
+    mock_connection = Mock(spec=ConnectionInterface)
+    return mock_connection
 
 
 def wait_for_command(client, monitor, command, key=None):

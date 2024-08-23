@@ -4,7 +4,7 @@ import time
 import pytest
 import redis
 from cachetools import LFUCache, LRUCache, TTLCache
-from redis.cache import CacheToolsAdapter, EvictionPolicy
+from redis.cache import CacheToolsAdapter, EvictionPolicy, CacheConfiguration
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import _get_client, skip_if_resp_version
 
@@ -185,7 +185,7 @@ class TestCache:
         indirect=True,
     )
     @pytest.mark.onlynoncluster
-    def test_health_check_invalidate_cache(self, r, r2):
+    def test_health_check_invalidate_cache(self, r):
         cache = r.get_cache()
         # add key to redis
         r.set("foo", "bar")
@@ -194,7 +194,7 @@ class TestCache:
         # get key from local cache
         assert cache.get(("GET", "foo")) == b"bar"
         # change key in redis (cause invalidation)
-        r2.set("foo", "barbar")
+        r.set("foo", "barbar")
         # Wait for health check
         time.sleep(2)
         # Make sure that value was invalidated
@@ -1154,3 +1154,26 @@ class TestSSLCache:
         assert r.get("foo") == b"baz"
         assert cache.get(("MGET", "foo", "bar")) is None
         assert cache.get(("GET", "foo")) == b"baz"
+
+
+class TestUnitCacheConfiguration:
+    TTL = 20
+    MAX_SIZE = 100
+    EVICTION_POLICY = EvictionPolicy.TTL
+
+    def test_get_ttl(self, cache_conf: CacheConfiguration):
+        assert self.TTL == cache_conf.get_ttl()
+
+    def test_get_max_size(self, cache_conf: CacheConfiguration):
+        assert self.MAX_SIZE == cache_conf.get_max_size()
+
+    def test_get_eviction_policy(self, cache_conf: CacheConfiguration):
+        assert self.EVICTION_POLICY == cache_conf.get_eviction_policy()
+
+    def test_is_exceeds_max_size(self, cache_conf: CacheConfiguration):
+        assert not cache_conf.is_exceeds_max_size(self.MAX_SIZE)
+        assert cache_conf.is_exceeds_max_size(self.MAX_SIZE + 1)
+
+    def test_is_allowed_to_cache(self, cache_conf: CacheConfiguration):
+        assert cache_conf.is_allowed_to_cache("GET")
+        assert not cache_conf.is_allowed_to_cache("SET")

@@ -8,11 +8,10 @@ import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from time import time
+from time import time, sleep
 from typing import Any, Callable, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
-from apscheduler.schedulers.background import BackgroundScheduler
 from cachetools import LRUCache
 from cachetools.keys import hashkey
 from redis.cache import (
@@ -21,6 +20,7 @@ from redis.cache import (
     CacheInterface,
     CacheToolsFactory,
 )
+from . import scheduler
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .backoff import NoBackoff
@@ -36,6 +36,7 @@ from .exceptions import (
     TimeoutError,
 )
 from .retry import Retry
+from .scheduler import Scheduler
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
     HIREDIS_AVAILABLE,
@@ -1265,7 +1266,9 @@ class ConnectionPool:
         self.cache = None
         self._cache_conf = None
         self._cache_factory = cache_factory
-        self.scheduler = None
+        self._scheduler = None
+        self._hc_cancel_event = None
+        self._hc_thread = None
 
         if connection_kwargs.get("use_cache"):
             if connection_kwargs.get("protocol") not in [3, "3"]:
@@ -1286,14 +1289,7 @@ class ConnectionPool:
                 else:
                     self.cache = CacheToolsFactory(self._cache_conf).get_cache()
 
-            self.scheduler = BackgroundScheduler()
-            self.scheduler.add_job(
-                self._perform_health_check,
-                "interval",
-                seconds=2,
-                id="cache_health_check",
-            )
-            self.scheduler.start()
+            self._scheduler = Scheduler()
 
         connection_kwargs.pop("use_cache", None)
         connection_kwargs.pop("cache_eviction", None)
@@ -1311,6 +1307,16 @@ class ConnectionPool:
         # release the lock.
         self._fork_lock = threading.Lock()
         self.reset()
+
+        # Run scheduled healthcheck to avoid stale invalidations in idle connections.
+        if self.cache is not None and self._scheduler is not None:
+            self._hc_cancel_event = threading.Event()
+            self._hc_thread = self._scheduler.run_with_interval(
+                self._perform_health_check,
+                2,
+                self._hc_cancel_event
+            )
+
 
     def __repr__(self) -> (str, str):
         return (
@@ -1491,6 +1497,14 @@ class ConnectionPool:
             for connection in connections:
                 connection.disconnect()
 
+        # Send an event to stop scheduled healthcheck execution.
+        if self._hc_cancel_event is not None and not self._hc_cancel_event.is_set():
+            self._hc_cancel_event.set()
+
+        # Joins healthcheck thread on disconnect.
+        if self._hc_thread is not None and not self._hc_thread.is_alive():
+            self._hc_thread.join()
+
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
         self.disconnect()
@@ -1502,13 +1516,14 @@ class ConnectionPool:
         for conn in self._in_use_connections:
             conn.retry = retry
 
-    def _perform_health_check(self) -> None:
+    def _perform_health_check(self, done: threading.Event) -> None:
         self._checkpid()
         with self._lock:
             while self._available_connections:
                 conn = self._available_connections.pop()
                 conn.send_command("PING")
                 conn.read_response()
+            done.set()
 
 
 class BlockingConnectionPool(ConnectionPool):
