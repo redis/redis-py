@@ -2,7 +2,6 @@ import threading
 import time
 
 import pytest
-
 from redis.scheduler import Scheduler
 
 
@@ -15,10 +14,10 @@ class TestScheduler:
             (0.1, 2, (0, 0)),
         ],
         ids=[
-            'small polling period (0.001s)',
-            'large polling period (0.1s)',
-            'interval larger than timeout - no execution',
-        ]
+            "small polling period (0.001s)",
+            "large polling period (0.1s)",
+            "interval larger than timeout - no execution",
+        ],
     )
     def test_run_with_interval(self, polling_period, interval, expected_count):
         scheduler = Scheduler(polling_period=polling_period)
@@ -30,7 +29,9 @@ class TestScheduler:
             counter += 1
             done.set()
 
-        scheduler.run_with_interval(func=callback, interval=interval, cancel=cancel_event)
+        scheduler.run_with_interval(
+            func=callback, interval=interval, cancel=cancel_event
+        )
         time.sleep(1)
         cancel_event.set()
         cancel_event.wait()

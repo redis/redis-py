@@ -8,7 +8,7 @@ import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from time import time, sleep
+from time import sleep, time
 from typing import Any, Callable, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -20,8 +20,8 @@ from redis.cache import (
     CacheInterface,
     CacheToolsFactory,
 )
-from . import scheduler
 
+from . import scheduler
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -1312,11 +1312,8 @@ class ConnectionPool:
         if self.cache is not None and self._scheduler is not None:
             self._hc_cancel_event = threading.Event()
             self._hc_thread = self._scheduler.run_with_interval(
-                self._perform_health_check,
-                2,
-                self._hc_cancel_event
+                self._perform_health_check, 2, self._hc_cancel_event
             )
-
 
     def __repr__(self) -> (str, str):
         return (

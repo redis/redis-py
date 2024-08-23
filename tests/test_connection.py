@@ -4,20 +4,20 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-from cachetools import TTLCache, LRUCache
-
 import redis
+from cachetools import LRUCache, TTLCache
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis.backoff import NoBackoff
-from redis.cache import EvictionPolicy, CacheInterface, CacheToolsAdapter
+from redis.cache import CacheInterface, CacheToolsAdapter, EvictionPolicy
 from redis.connection import (
+    CacheProxyConnection,
     Connection,
     SSLConnection,
     UnixDomainSocketConnection,
-    parse_url, CacheProxyConnection,
+    parse_url,
 )
-from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError, RedisError
+from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
 
@@ -353,11 +353,12 @@ def test_unix_socket_connection_failure():
 
 class TestUnitConnectionPool:
 
-    @pytest.mark.parametrize("max_conn", (-1, 'str'), ids=("non-positive", "wrong type"))
+    @pytest.mark.parametrize(
+        "max_conn", (-1, "str"), ids=("non-positive", "wrong type")
+    )
     def test_throws_error_on_incorrect_max_connections(self, max_conn):
         with pytest.raises(
-                ValueError,
-                match='"max_connections" must be a positive integer'
+            ValueError, match='"max_connections" must be a positive integer'
         ):
             ConnectionPool(
                 max_connections=max_conn,
@@ -365,36 +366,23 @@ class TestUnitConnectionPool:
 
     def test_throws_error_on_cache_enable_in_resp2(self):
         with pytest.raises(
-                RedisError,
-                match="Client caching is only supported with RESP version 3"
+            RedisError, match="Client caching is only supported with RESP version 3"
         ):
-            ConnectionPool(
-                protocol=2,
-                use_cache=True
-            )
+            ConnectionPool(protocol=2, use_cache=True)
 
     def test_throws_error_on_incorrect_cache_implementation(self):
-        with pytest.raises(
-                ValueError,
-                match="Cache must implement CacheInterface"
-        ):
-            ConnectionPool(
-                protocol=3,
-                use_cache=True,
-                cache=TTLCache(100, 20)
-            )
+        with pytest.raises(ValueError, match="Cache must implement CacheInterface"):
+            ConnectionPool(protocol=3, use_cache=True, cache=TTLCache(100, 20))
 
     def test_returns_custom_cache_implementation(self, mock_cache):
-        connection_pool = ConnectionPool(
-            protocol=3,
-            use_cache=True,
-            cache=mock_cache
-        )
+        connection_pool = ConnectionPool(protocol=3, use_cache=True, cache=mock_cache)
 
         assert mock_cache == connection_pool.cache
         connection_pool.disconnect()
 
-    def test_creates_cache_with_custom_cache_factory(self, mock_cache_factory, mock_cache):
+    def test_creates_cache_with_custom_cache_factory(
+        self, mock_cache_factory, mock_cache
+    ):
         mock_cache_factory.get_cache.return_value = mock_cache
 
         connection_pool = ConnectionPool(
@@ -403,7 +391,7 @@ class TestUnitConnectionPool:
             cache_size=100,
             cache_ttl=20,
             cache_eviction=EvictionPolicy.TTL,
-            cache_factory=mock_cache_factory
+            cache_factory=mock_cache_factory,
         )
 
         assert connection_pool.cache == mock_cache
@@ -415,7 +403,7 @@ class TestUnitConnectionPool:
             use_cache=True,
             cache_size=100,
             cache_ttl=20,
-            cache_eviction=EvictionPolicy.TTL
+            cache_eviction=EvictionPolicy.TTL,
         )
 
         assert isinstance(connection_pool.cache, CacheInterface)
@@ -424,10 +412,7 @@ class TestUnitConnectionPool:
         connection_pool.disconnect()
 
     def test_make_connection_proxy_connection_on_given_cache(self):
-        connection_pool = ConnectionPool(
-            protocol=3,
-            use_cache=True
-        )
+        connection_pool = ConnectionPool(protocol=3, use_cache=True)
 
         assert isinstance(connection_pool.make_connection(), CacheProxyConnection)
         connection_pool.disconnect()
@@ -436,16 +421,17 @@ class TestUnitConnectionPool:
 class TestUnitCacheProxyConnection:
     def test_clears_cache_on_disconnect(self, mock_connection, cache_conf):
         cache = LRUCache(100)
-        cache['key'] = 'value'
-        assert cache['key'] == 'value'
+        cache["key"] = "value"
+        assert cache["key"] == "value"
 
         mock_connection.disconnect.return_value = None
-        mock_connection.retry = 'mock'
-        mock_connection.host = 'mock'
-        mock_connection.port = 'mock'
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
 
-        proxy_connection = CacheProxyConnection(mock_connection, CacheToolsAdapter(cache), cache_conf)
+        proxy_connection = CacheProxyConnection(
+            mock_connection, CacheToolsAdapter(cache), cache_conf
+        )
         proxy_connection.disconnect()
 
         assert cache.currsize == 0
-

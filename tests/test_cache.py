@@ -4,7 +4,7 @@ import time
 import pytest
 import redis
 from cachetools import LFUCache, LRUCache, TTLCache
-from redis.cache import CacheToolsAdapter, EvictionPolicy, CacheConfiguration
+from redis.cache import CacheConfiguration, CacheToolsAdapter, EvictionPolicy
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import _get_client, skip_if_resp_version
 

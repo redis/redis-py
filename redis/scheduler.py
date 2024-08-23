@@ -13,37 +13,36 @@ class Scheduler:
         self.polling_period = polling_period
 
     def run_with_interval(
-            self,
-            func: Callable[[threading.Event, ...], None],
-            interval: float,
-            cancel: threading.Event,
-            args: tuple = (),
+        self,
+        func: Callable[[threading.Event, ...], None],
+        interval: float,
+        cancel: threading.Event,
+        args: tuple = (),
     ) -> threading.Thread:
         """
         Run scheduled execution with given interval
         in a separate thread until cancel event won't be set.
         """
         done = threading.Event()
-        thread = threading.Thread(target=self._run_timer, args=(func, interval, (done, *args), done, cancel))
+        thread = threading.Thread(
+            target=self._run_timer, args=(func, interval, (done, *args), done, cancel)
+        )
         thread.start()
         return thread
 
     def _get_timer(
-            self,
-            func: Callable[[threading.Event, ...], None],
-            interval: float,
-            args: tuple
+        self, func: Callable[[threading.Event, ...], None], interval: float, args: tuple
     ) -> threading.Timer:
         timer = threading.Timer(interval=interval, function=func, args=args)
         return timer
 
     def _run_timer(
-            self,
-            func: Callable[[threading.Event, ...], None],
-            interval: float,
-            args: tuple,
-            done: threading.Event,
-            cancel: threading.Event
+        self,
+        func: Callable[[threading.Event, ...], None],
+        interval: float,
+        args: tuple,
+        done: threading.Event,
+        cancel: threading.Event,
     ):
         timer = self._get_timer(func, interval, args)
         timer.start()

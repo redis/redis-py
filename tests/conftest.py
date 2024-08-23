@@ -8,14 +8,24 @@ from unittest.mock import Mock
 from urllib.parse import urlparse
 
 import pytest
-from _pytest import unittest
-
 import redis
+from _pytest import unittest
 from packaging.version import Version
 from redis import Sentinel
 from redis.backoff import NoBackoff
-from redis.cache import CacheConfiguration, EvictionPolicy, CacheFactoryInterface, CacheInterface
-from redis.connection import Connection, SSLConnection, parse_url, ConnectionPool, ConnectionInterface
+from redis.cache import (
+    CacheConfiguration,
+    CacheFactoryInterface,
+    CacheInterface,
+    EvictionPolicy,
+)
+from redis.connection import (
+    Connection,
+    ConnectionInterface,
+    ConnectionPool,
+    SSLConnection,
+    parse_url,
+)
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
 from tests.ssl_utils import get_ssl_filename
@@ -544,9 +554,7 @@ def master_host(request):
 @pytest.fixture()
 def cache_conf() -> CacheConfiguration:
     return CacheConfiguration(
-        cache_size=100,
-        cache_ttl=20,
-        cache_eviction=EvictionPolicy.TTL
+        cache_size=100, cache_ttl=20, cache_eviction=EvictionPolicy.TTL
     )
 
 
