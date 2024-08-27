@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "redis"
-version = "5.2.1"
+dynamic = ["version"]
 description = "Python client for Redis database and key-value store"
 readme = "README.md"
 license = "MIT"
@@ -56,6 +56,9 @@ Code = "https://github.com/redis/redis-py"
 Documentation = "https://redis.readthedocs.io/en/latest/"
 Homepage = "https://github.com/redis/redis-py"
 "Issue tracker" = "https://github.com/redis/redis-py/issues"
+
+[tool.hatch.version]
+path = "redis/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 include = [
