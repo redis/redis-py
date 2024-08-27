@@ -14,7 +14,7 @@ class Scheduler:
 
     def run_with_interval(
         self,
-        func: Callable[[threading.Event, ...], None],
+        func: Callable,
         interval: float,
         cancel: threading.Event,
         args: tuple = (),
@@ -31,14 +31,14 @@ class Scheduler:
         return thread
 
     def _get_timer(
-        self, func: Callable[[threading.Event, ...], None], interval: float, args: tuple
+        self, func: Callable, interval: float, args: tuple
     ) -> threading.Timer:
         timer = threading.Timer(interval=interval, function=func, args=args)
         return timer
 
     def _run_timer(
         self,
-        func: Callable[[threading.Event, ...], None],
+        func: Callable,
         interval: float,
         args: tuple,
         done: threading.Event,
