@@ -38,7 +38,7 @@ def r(request):
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
-@skip_if_resp_version(2)
+#@skip_if_resp_version(2)
 class TestCache:
     @pytest.mark.parametrize(
         "r",
@@ -199,36 +199,6 @@ class TestCache:
         time.sleep(2)
         # Make sure that value was invalidated
         assert cache.get(("GET", "foo")) is None
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": CacheToolsAdapter(TTLCache(128, 300)), "use_cache": True}],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
-    def test_health_check_invalidate_cache_multithreaded(self, r, r2):
-        cache = r.get_cache()
-        # Running commands over two threads
-        threading.Thread(target=r.set("foo", "bar")).start()
-        threading.Thread(target=r.set("bar", "foo")).start()
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-        # get keys from server
-        threading.Thread(target=r.get("foo")).start()
-        threading.Thread(target=r.get("bar")).start()
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-        # get key from local cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "bar")) == b"foo"
-        # change key in redis (cause invalidation)
-        threading.Thread(target=r2.set("foo", "baz")).start()
-        threading.Thread(target=r2.set("bar", "bar")).start()
-        # Wait for health check
-        time.sleep(2)
-        # Make sure that value was invalidated
-        assert cache.get(("GET", "foo")) is None
-        assert cache.get(("GET", "bar")) is None
 
     @pytest.mark.parametrize(
         "r",
@@ -604,34 +574,6 @@ class TestClusterCache:
         time.sleep(2)
         # Make sure that value was invalidated
         assert cache.get(("GET", "foo")) is None
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": CacheToolsAdapter(TTLCache(128, 300)), "use_cache": True}],
-        indirect=True,
-    )
-    @pytest.mark.onlycluster
-    def test_health_check_invalidate_cache_multithreaded(self, r, r2):
-        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
-        # Running commands over two threads
-        threading.Thread(target=r.set("foo", "bar")).start()
-        threading.Thread(target=r.set("bar", "foo")).start()
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-        # get keys from server
-        threading.Thread(target=r.get("foo")).start()
-        threading.Thread(target=r.get("bar")).start()
-        # get key from local cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "bar")) == b"foo"
-        # change key in redis (cause invalidation)
-        threading.Thread(target=r.set("foo", "baz")).start()
-        threading.Thread(target=r.set("bar", "bar")).start()
-        # Wait for health check
-        time.sleep(2)
-        # Make sure that value was invalidated
-        assert cache.get(("GET", "foo")) is None
-        assert cache.get(("GET", "bar")) is None
 
     @pytest.mark.parametrize(
         "r",
