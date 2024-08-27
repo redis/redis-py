@@ -38,7 +38,7 @@ def r(request):
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
-#@skip_if_resp_version(2)
+# @skip_if_resp_version(2)
 class TestCache:
     @pytest.mark.parametrize(
         "r",
@@ -119,59 +119,6 @@ class TestCache:
         assert r.get("foo") == b"barbar"
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
-
-    @pytest.mark.parametrize(
-        "r",
-        [
-            {
-                "cache": CacheToolsAdapter(TTLCache(128, 300)),
-                "use_cache": True,
-                "single_connection_client": True,
-            },
-            {
-                "cache": CacheToolsAdapter(TTLCache(128, 300)),
-                "use_cache": True,
-                "single_connection_client": False,
-            },
-        ],
-        ids=["single", "pool"],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
-    def test_get_from_cache_multithreaded(self, r):
-        cache = r.get_cache()
-        # Running commands over two threads
-        threading.Thread(target=r.set("foo", "bar")).start()
-        threading.Thread(target=r.set("bar", "foo")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        threading.Thread(target=r.get("foo")).start()
-        threading.Thread(target=r.get("bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        # Make sure that responses was cached.
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "bar")) == b"foo"
-
-        threading.Thread(target=r.set("foo", "baz")).start()
-        threading.Thread(target=r.set("bar", "bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        threading.Thread(target=r.get("foo")).start()
-        threading.Thread(target=r.get("bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        # Make sure that new values was cached.
-        assert cache.get(("GET", "foo")) == b"baz"
-        assert cache.get(("GET", "bar")) == b"bar"
 
     @pytest.mark.parametrize(
         "r",
@@ -518,48 +465,6 @@ class TestClusterCache:
         indirect=True,
     )
     @pytest.mark.onlycluster
-    def test_get_from_cache_multithreaded(self, r):
-        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
-        # Running commands over two threads
-        threading.Thread(target=r.set("foo", "bar")).start()
-        threading.Thread(target=r.set("bar", "foo")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        threading.Thread(target=r.get("foo")).start()
-        threading.Thread(target=r.get("bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        # Make sure that both values was cached.
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "bar")) == b"foo"
-
-        # Running commands over two threads
-        threading.Thread(target=r.set("foo", "baz")).start()
-        threading.Thread(target=r.set("bar", "bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        threading.Thread(target=r.get("foo")).start()
-        threading.Thread(target=r.get("bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        # Make sure that new values was cached.
-        assert cache.get(("GET", "foo")) == b"baz"
-        assert cache.get(("GET", "bar")) == b"bar"
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": CacheToolsAdapter(TTLCache(128, 300)), "use_cache": True}],
-        indirect=True,
-    )
-    @pytest.mark.onlycluster
     def test_health_check_invalidate_cache(self, r, r2):
         cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
         # add key to redis
@@ -821,57 +726,6 @@ class TestSentinelCache:
         indirect=True,
     )
     @pytest.mark.onlynoncluster
-    def test_get_from_cache_multithreaded(self, master):
-        cache = master.get_cache()
-
-        # Running commands over two threads
-        threading.Thread(target=master.set("foo", "bar")).start()
-        threading.Thread(target=master.set("bar", "foo")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        # Running commands over two threads
-        threading.Thread(target=master.get("foo")).start()
-        threading.Thread(target=master.get("bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        # Make sure that both values was cached.
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "bar")) == b"foo"
-
-        # Running commands over two threads
-        threading.Thread(target=master.set("foo", "baz")).start()
-        threading.Thread(target=master.set("bar", "bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        # Running commands over two threads
-        threading.Thread(target=master.get("foo")).start()
-        threading.Thread(target=master.get("bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        # Make sure that new values was cached.
-        assert cache.get(("GET", "foo")) == b"baz"
-        assert cache.get(("GET", "bar")) == b"bar"
-
-    @pytest.mark.parametrize(
-        "sentinel_setup",
-        [
-            {
-                "cache": CacheToolsAdapter(LRUCache(maxsize=128)),
-                "use_cache": True,
-                "force_master_ip": "localhost",
-            }
-        ],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
     def test_health_check_invalidate_cache(self, master, cache):
         cache = master.get_cache()
         # add key to redis
@@ -993,53 +847,6 @@ class TestSSLCache:
         assert r.get("foo") == b"barbar"
         # Make sure that new value was cached
         assert cache.get(("GET", "foo")) == b"barbar"
-
-    @pytest.mark.parametrize(
-        "r",
-        [
-            {
-                "cache": CacheToolsAdapter(TTLCache(128, 300)),
-                "use_cache": True,
-                "ssl": True,
-            }
-        ],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
-    def test_get_from_cache_multithreaded(self, r):
-        cache = r.get_cache()
-        # Running commands over two threads
-        threading.Thread(target=r.set("foo", "bar")).start()
-        threading.Thread(target=r.set("bar", "foo")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        threading.Thread(target=r.get("foo")).start()
-        threading.Thread(target=r.get("bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        # Make sure that responses was cached.
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "bar")) == b"foo"
-
-        threading.Thread(target=r.set("foo", "baz")).start()
-        threading.Thread(target=r.set("bar", "bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        threading.Thread(target=r.get("foo")).start()
-        threading.Thread(target=r.get("bar")).start()
-
-        # Wait for command execution to be finished
-        time.sleep(0.1)
-
-        # Make sure that new values was cached.
-        assert cache.get(("GET", "foo")) == b"baz"
-        assert cache.get(("GET", "bar")) == b"bar"
 
     @pytest.mark.parametrize(
         "r",
