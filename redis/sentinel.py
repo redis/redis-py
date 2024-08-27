@@ -115,6 +115,7 @@ class SentinelConnectionPoolProxy:
             connection_pool = self.connection_pool_ref()
             if connection_pool is not None:
                 connection_pool.disconnect(inuse_connections=False)
+                connection_pool.run_scheduled_healthcheck()
         return master_address
 
     def rotate_slaves(self):

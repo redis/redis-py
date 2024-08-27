@@ -1307,13 +1307,7 @@ class ConnectionPool:
         # release the lock.
         self._fork_lock = threading.Lock()
         self.reset()
-
-        # Run scheduled healthcheck to avoid stale invalidations in idle connections.
-        if self.cache is not None and self._scheduler is not None:
-            self._hc_cancel_event = threading.Event()
-            self._hc_thread = self._scheduler.run_with_interval(
-                self._perform_health_check, 2, self._hc_cancel_event
-            )
+        self.run_scheduled_healthcheck()
 
     def __repr__(self) -> (str, str):
         return (
@@ -1512,6 +1506,14 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
+
+    def run_scheduled_healthcheck(self) -> None:
+        # Run scheduled healthcheck to avoid stale invalidations in idle connections.
+        if self.cache is not None and self._scheduler is not None:
+            self._hc_cancel_event = threading.Event()
+            self._hc_thread = self._scheduler.run_with_interval(
+                self._perform_health_check, 2, self._hc_cancel_event
+            )
 
     def _perform_health_check(self, done: threading.Event) -> None:
         self._checkpid()
