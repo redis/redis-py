@@ -17,11 +17,11 @@ class EvictionPolicyType(Enum):
 
 
 class CacheKey:
-    def __init__(self, command: str, redis_keys: tuple[str, ...]):
+    def __init__(self, command: str, redis_keys: tuple):
         self.command = command
         self.redis_keys = redis_keys
 
-    def get_redis_keys(self) -> tuple[str, ...]:
+    def get_redis_keys(self) -> tuple:
         return self.redis_keys
 
     def __hash__(self):

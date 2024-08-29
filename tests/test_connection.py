@@ -381,7 +381,7 @@ class TestUnitConnectionPool:
 
     def test_throws_error_on_incorrect_cache_implementation(self):
         with pytest.raises(ValueError, match="Cache must implement CacheInterface"):
-            ConnectionPool(protocol=3, use_cache=True, cache=TTLCache(100, 20))
+            ConnectionPool(protocol=3, use_cache=True, cache='wrong')
 
     def test_returns_custom_cache_implementation(self, mock_cache):
         connection_pool = ConnectionPool(protocol=3, use_cache=True, cache=mock_cache)
@@ -423,7 +423,7 @@ class TestUnitConnectionPool:
 
 class TestUnitCacheProxyConnection:
     def test_clears_cache_on_disconnect(self, mock_connection, cache_conf):
-        cache = DefaultCache(10, eviction_policy=LRUPolicy())
+        cache = DefaultCache(CacheConfiguration(max_size=10))
         cache_key = CacheKey(command="GET", redis_keys=("foo",))
 
         cache.set(
@@ -438,7 +438,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.host = "mock"
         mock_connection.port = "mock"
 
-        proxy_connection = CacheProxyConnection(mock_connection, cache, cache_conf)
+        proxy_connection = CacheProxyConnection(mock_connection, cache)
         proxy_connection.disconnect()
 
         assert len(cache.get_collection()) == 0
