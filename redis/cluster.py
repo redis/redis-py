@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.helpers import parse_scan
 from redis.backoff import default_backoff
-from redis.cache import CacheInterface, EvictionPolicy
+from redis.cache import CacheConfiguration, CacheInterface
 from redis.client import CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
@@ -170,8 +170,7 @@ REDIS_ALLOWED_KEYS = (
     "username",
     "use_cache",
     "cache",
-    "cache_size",
-    "cache_ttl",
+    "cache_config",
 )
 KWARGS_DISABLED_KEYS = ("host", "port")
 
@@ -507,9 +506,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         use_cache: bool = False,
         cache: Optional[CacheInterface] = None,
-        cache_eviction: Optional[EvictionPolicy] = None,
-        cache_size: int = 10000,
-        cache_ttl: int = 0,
+        cache_config: Optional[CacheConfiguration] = None,
         **kwargs,
     ):
         """
@@ -651,9 +648,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             address_remap=address_remap,
             use_cache=use_cache,
             cache=cache,
-            cache_eviction=cache_eviction,
-            cache_size=cache_size,
-            cache_ttl=cache_ttl,
+            cache_config=cache_config,
             **kwargs,
         )
 
@@ -1335,9 +1330,7 @@ class NodesManager:
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         use_cache: bool = False,
         cache: Optional[CacheInterface] = None,
-        cache_eviction: Optional[EvictionPolicy] = None,
-        cache_size: int = 10000,
-        cache_ttl: int = 0,
+        cache_config: Optional[CacheConfiguration] = None,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1352,9 +1345,7 @@ class NodesManager:
         self.address_remap = address_remap
         self.use_cache = use_cache
         self.cache = cache
-        self.cache_eviction = cache_eviction
-        self.cache_size = cache_size
-        self.cache_ttl = cache_ttl
+        self.cache_config = cache_config
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
@@ -1500,9 +1491,7 @@ class NodesManager:
             kwargs.update({"port": port})
             kwargs.update({"use_cache": self.use_cache})
             kwargs.update({"cache": self.cache})
-            kwargs.update({"cache_eviction": self.cache_eviction})
-            kwargs.update({"cache_size": self.cache_size})
-            kwargs.update({"cache_ttl": self.cache_ttl})
+            kwargs.update({"cache_config": self.cache_config})
             r = Redis(connection_pool=self.connection_pool_class(**kwargs))
         else:
             r = Redis(
@@ -1510,9 +1499,7 @@ class NodesManager:
                 port=port,
                 use_cache=self.use_cache,
                 cache=self.cache,
-                cache_eviction=self.cache_eviction,
-                cache_size=self.cache_size,
-                cache_ttl=self.cache_ttl,
+                cache_config=self.cache_config,
                 **kwargs,
             )
         return r
@@ -1563,6 +1550,7 @@ class NodesManager:
                 # Make sure cluster mode is enabled on this node
                 try:
                     cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
+                    r.connection_pool.disconnect()
                 except ResponseError:
                     raise RedisClusterException(
                         "Cluster mode is not enabled on this node"

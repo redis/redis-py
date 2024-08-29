@@ -13,7 +13,7 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
     bool_ok,
 )
-from redis.cache import CacheInterface, EvictionPolicy
+from redis.cache import CacheConfiguration, CacheInterface
 from redis.commands import (
     CoreCommands,
     RedisModuleCommands,
@@ -215,9 +215,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         protocol: Optional[int] = 2,
         use_cache: bool = False,
         cache: Optional[CacheInterface] = None,
-        cache_eviction: Optional[EvictionPolicy] = None,
-        cache_size: int = 10000,
-        cache_ttl: int = 0,
+        cache_config: Optional[CacheConfiguration] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -315,9 +313,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                         {
                             "use_cache": use_cache,
                             "cache": cache,
-                            "cache_eviction": cache_eviction,
-                            "cache_size": cache_size,
-                            "cache_ttl": cache_ttl,
+                            "cache_config": cache_config,
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)

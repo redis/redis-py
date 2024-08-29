@@ -5,11 +5,20 @@ from unittest.mock import patch
 
 import pytest
 import redis
-from cachetools import LRUCache, TTLCache
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis.backoff import NoBackoff
-from redis.cache import CacheInterface, CacheToolsAdapter, EvictionPolicy
+from redis.cache import (
+    CacheConfiguration,
+    CacheEntry,
+    CacheEntryStatus,
+    CacheInterface,
+    CacheKey,
+    DefaultCache,
+    EvictionPolicy,
+    EvictionPolicyInterface,
+    LRUPolicy,
+)
 from redis.connection import (
     CacheProxyConnection,
     Connection,
@@ -388,9 +397,7 @@ class TestUnitConnectionPool:
         connection_pool = ConnectionPool(
             protocol=3,
             use_cache=True,
-            cache_size=100,
-            cache_ttl=20,
-            cache_eviction=EvictionPolicy.TTL,
+            cache_config=CacheConfiguration(max_size=5),
             cache_factory=mock_cache_factory,
         )
 
@@ -399,16 +406,12 @@ class TestUnitConnectionPool:
 
     def test_creates_cache_with_given_configuration(self, mock_cache):
         connection_pool = ConnectionPool(
-            protocol=3,
-            use_cache=True,
-            cache_size=100,
-            cache_ttl=20,
-            cache_eviction=EvictionPolicy.TTL,
+            protocol=3, use_cache=True, cache_config=CacheConfiguration(max_size=100)
         )
 
         assert isinstance(connection_pool.cache, CacheInterface)
-        assert connection_pool.cache.maxsize == 100
-        assert connection_pool.cache.eviction_policy == EvictionPolicy.TTL
+        assert connection_pool.cache.get_max_size() == 100
+        assert isinstance(connection_pool.cache.get_eviction_policy(), LRUPolicy)
         connection_pool.disconnect()
 
     def test_make_connection_proxy_connection_on_given_cache(self):
@@ -420,18 +423,22 @@ class TestUnitConnectionPool:
 
 class TestUnitCacheProxyConnection:
     def test_clears_cache_on_disconnect(self, mock_connection, cache_conf):
-        cache = LRUCache(100)
-        cache["key"] = "value"
-        assert cache["key"] == "value"
+        cache = DefaultCache(10, eviction_policy=LRUPolicy())
+        cache_key = CacheKey(command="GET", redis_keys=("foo",))
+
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key, cache_value=b"bar", status=CacheEntryStatus.VALID
+            )
+        )
+        assert cache.get(cache_key).cache_value == b"bar"
 
         mock_connection.disconnect.return_value = None
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
 
-        proxy_connection = CacheProxyConnection(
-            mock_connection, CacheToolsAdapter(cache), cache_conf
-        )
+        proxy_connection = CacheProxyConnection(mock_connection, cache, cache_conf)
         proxy_connection.disconnect()
 
-        assert cache.currsize == 0
+        assert len(cache.get_collection()) == 0

@@ -8,20 +8,20 @@ import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from time import sleep, time
+from time import time
 from typing import Any, Callable, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
-from cachetools import LRUCache
-from cachetools.keys import hashkey
 from redis.cache import (
     CacheConfiguration,
+    CacheEntry,
+    CacheEntryStatus,
+    CacheFactory,
     CacheFactoryInterface,
     CacheInterface,
-    CacheToolsFactory,
+    CacheKey,
 )
 
-from . import scheduler
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -731,12 +731,9 @@ def ensure_string(key):
 
 
 class CacheProxyConnection(ConnectionInterface):
-    CACHE_DUMMY_STATUS = "caching-in-progress"
-    KEYS_MAPPING_CACHE_SIZE = 10000
+    DUMMY_CACHE_VALUE = b"foo"
 
-    def __init__(
-        self, conn: ConnectionInterface, cache: CacheInterface, conf: CacheConfiguration
-    ):
+    def __init__(self, conn: ConnectionInterface, cache: CacheInterface):
         self.pid = os.getpid()
         self._conn = conn
         self.retry = self._conn.retry
@@ -744,11 +741,8 @@ class CacheProxyConnection(ConnectionInterface):
         self.port = self._conn.port
         self._cache = cache
         self._cache_lock = threading.Lock()
-        self._conf = conf
-        self._current_command_hash = None
-        self._current_command_keys = None
+        self._current_command_cache_key = None
         self._current_options = None
-        self._keys_mapping = LRUCache(maxsize=self.KEYS_MAPPING_CACHE_SIZE)
         self.register_connect_callback(self._enable_tracking_callback)
 
     def repr_pieces(self):
@@ -771,8 +765,7 @@ class CacheProxyConnection(ConnectionInterface):
 
     def disconnect(self, *args):
         with self._cache_lock:
-            self._cache.clear()
-        self._keys_mapping.clear()
+            self._cache.flush()
         self._conn.disconnect(*args)
 
     def check_health(self):
@@ -786,33 +779,37 @@ class CacheProxyConnection(ConnectionInterface):
     def send_command(self, *args, **kwargs):
         self._process_pending_invalidations()
 
-        # If command is write command or not allowed to cache
-        # transfer control to the actual connection.
-        if not self._conf.is_allowed_to_cache(args[0]):
-            self._current_command_hash = None
-            self._current_command_keys = None
-            self._conn.send_command(*args, **kwargs)
-            return
+        with self._cache_lock:
+            # Command is write command or not allowed
+            # to be cached.
+            if not self._cache.is_cachable(CacheKey(command=args[0], redis_keys=())):
+                self._current_command_cache_key = None
+                self._conn.send_command(*args, **kwargs)
+                return
 
-        # Create hash representation of current executed command.
-        self._current_command_hash = hashkey(*args)
+        if kwargs.get("keys") is None:
+            raise ValueError("Cannot create cache key.")
 
-        # Extract keys from current command.
-        if kwargs.get("keys"):
-            self._current_command_keys = kwargs["keys"]
-
-            if not isinstance(self._current_command_keys, list):
-                raise TypeError("Cache keys must be a list.")
+        # Creates cache key.
+        self._current_command_cache_key = CacheKey(
+            command=args[0], redis_keys=tuple(kwargs.get("keys"))
+        )
 
         with self._cache_lock:
             # If current command reply already cached
             # prevent sending data over socket.
-            if self._cache.get(self._current_command_hash):
+            if self._cache.get(self._current_command_cache_key):
                 return
 
-            # Set temporary entry as a status to prevent
+            # Set temporary entry value to prevent
             # race condition from another connection.
-            self._cache.set(self._current_command_hash, self.CACHE_DUMMY_STATUS)
+            self._cache.set(
+                CacheEntry(
+                    cache_key=self._current_command_cache_key,
+                    cache_value=self.DUMMY_CACHE_VALUE,
+                    status=CacheEntryStatus.IN_PROGRESS,
+                )
+            )
 
         # Send command over socket only if it's allowed
         # read-only command that not yet cached.
@@ -827,11 +824,12 @@ class CacheProxyConnection(ConnectionInterface):
         with self._cache_lock:
             # Check if command response exists in a cache and it's not in progress.
             if (
-                self._cache.exists(self._current_command_hash)
-                and self._cache.get(self._current_command_hash)
-                != self.CACHE_DUMMY_STATUS
+                self._current_command_cache_key is not None
+                and self._cache.get(self._current_command_cache_key) is not None
+                and self._cache.get(self._current_command_cache_key).status
+                != CacheEntryStatus.IN_PROGRESS
             ):
-                return copy.deepcopy(self._cache.get(self._current_command_hash))
+                return self._cache.get(self._current_command_cache_key).cache_value
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
@@ -840,29 +838,26 @@ class CacheProxyConnection(ConnectionInterface):
         )
 
         with self._cache_lock:
+            # Prevent not-allowed command from caching.
+            if self._current_command_cache_key is None:
+                return response
             # If response is None prevent from caching.
             if response is None:
-                self._cache.remove(self._current_command_hash)
-                return response
-            # Prevent not-allowed command from caching.
-            elif self._current_command_hash is None:
+                self._cache.delete_by_cache_keys([self._current_command_cache_key])
                 return response
 
-            # Create separate mapping for keys
-            # or add current response to associated keys.
-            for key in self._current_command_keys:
-                if key in self._keys_mapping:
-                    if self._current_command_hash not in self._keys_mapping[key]:
-                        self._keys_mapping[key].append(self._current_command_hash)
-                else:
-                    self._keys_mapping[key] = [self._current_command_hash]
-
-            cache_entry = self._cache.get(self._current_command_hash, None)
+            cache_entry = self._cache.get(self._current_command_cache_key)
 
             # Cache only responses that still valid
             # and wasn't invalidated by another connection in meantime.
             if cache_entry is not None:
-                self._cache.set(self._current_command_hash, response)
+                self._cache.set(
+                    CacheEntry(
+                        cache_key=self._current_command_cache_key,
+                        cache_value=response,
+                        status=CacheEntryStatus.VALID,
+                    )
+                )
 
         return response
 
@@ -887,21 +882,13 @@ class CacheProxyConnection(ConnectionInterface):
         while self.retry.call_with_retry_on_false(lambda: self.can_read()):
             self._conn.read_response(push_request=True)
 
-    def _on_invalidation_callback(self, data: List[Union[str, Optional[List[str]]]]):
+    def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
         with self._cache_lock:
             # Flush cache when DB flushed on server-side
             if data[1] is None:
-                self._cache.clear()
+                self._cache.flush()
             else:
-                for key in data[1]:
-                    normalized_key = ensure_string(key)
-                    if normalized_key in self._keys_mapping:
-                        # Make sure that all command responses
-                        # associated with this key will be deleted
-                        for cache_key in self._keys_mapping[normalized_key]:
-                            self._cache.remove(cache_key)
-                    # Removes key from mapping cache
-                    self._keys_mapping.pop(normalized_key)
+                self._cache.delete_by_redis_keys(data[1])
 
 
 class SSLConnection(Connection):
@@ -1274,8 +1261,6 @@ class ConnectionPool:
             if connection_kwargs.get("protocol") not in [3, "3"]:
                 raise RedisError("Client caching is only supported with RESP version 3")
 
-            self._cache_conf = CacheConfiguration(**self.connection_kwargs)
-
             cache = self.connection_kwargs.get("cache")
 
             if cache is not None:
@@ -1287,15 +1272,15 @@ class ConnectionPool:
                 if self._cache_factory is not None:
                     self.cache = self._cache_factory.get_cache()
                 else:
-                    self.cache = CacheToolsFactory(self._cache_conf).get_cache()
+                    self.cache = CacheFactory(
+                        self.connection_kwargs.get("cache_config")
+                    ).get_cache()
 
             self._scheduler = Scheduler()
 
         connection_kwargs.pop("use_cache", None)
-        connection_kwargs.pop("cache_eviction", None)
-        connection_kwargs.pop("cache_size", None)
-        connection_kwargs.pop("cache_ttl", None)
         connection_kwargs.pop("cache", None)
+        connection_kwargs.pop("cache_config", None)
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
@@ -1435,11 +1420,9 @@ class ConnectionPool:
             raise ConnectionError("Too many connections")
         self._created_connections += 1
 
-        if self.cache is not None and self._cache_conf is not None:
+        if self.cache is not None:
             return CacheProxyConnection(
-                self.connection_class(**self.connection_kwargs),
-                self.cache,
-                self._cache_conf,
+                self.connection_class(**self.connection_kwargs), self.cache
             )
 
         return self.connection_class(**self.connection_kwargs)
@@ -1601,12 +1584,9 @@ class BlockingConnectionPool(ConnectionPool):
 
     def make_connection(self):
         "Make a fresh connection."
-        if self.cache is not None and self._cache_conf is not None:
+        if self.cache is not None:
             connection = CacheProxyConnection(
-                self.connection_class(**self.connection_kwargs),
-                self.cache,
-                self._cache_conf,
-                self._cache_lock,
+                self.connection_class(**self.connection_kwargs), self.cache
             )
         else:
             connection = self.connection_class(**self.connection_kwargs)

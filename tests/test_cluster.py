@@ -2692,7 +2692,7 @@ class TestNodesManager:
 
             def create_mocked_redis_node(host, port, **kwargs):
                 """
-                Helper function to return custom slots cache data from
+                Helper function to return custom slots cache_data data from
                 different redis nodes
                 """
                 if port == 7000:
@@ -2733,7 +2733,7 @@ class TestNodesManager:
                 node_2 = ClusterNode("127.0.0.1", 7001)
                 RedisCluster(startup_nodes=[node_1, node_2])
             assert str(ex.value).startswith(
-                "startup_nodes could not agree on a valid slots cache"
+                "startup_nodes could not agree on a valid slots cache_data"
             ), str(ex.value)
 
     def test_cluster_one_instance(self):

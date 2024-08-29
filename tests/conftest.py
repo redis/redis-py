@@ -1,6 +1,5 @@
 import argparse
 import random
-import threading
 import time
 from typing import Callable, TypeVar
 from unittest import mock
@@ -9,7 +8,6 @@ from urllib.parse import urlparse
 
 import pytest
 import redis
-from _pytest import unittest
 from packaging.version import Version
 from redis import Sentinel
 from redis.backoff import NoBackoff
@@ -17,15 +15,10 @@ from redis.cache import (
     CacheConfiguration,
     CacheFactoryInterface,
     CacheInterface,
+    CacheKey,
     EvictionPolicy,
 )
-from redis.connection import (
-    Connection,
-    ConnectionInterface,
-    ConnectionPool,
-    SSLConnection,
-    parse_url,
-)
+from redis.connection import Connection, ConnectionInterface, SSLConnection, parse_url
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
 from tests.ssl_utils import get_ssl_filename
@@ -448,8 +441,7 @@ def sentinel_setup(request):
     kwargs = request.param.get("kwargs", {}) if hasattr(request, "param") else {}
     use_cache = request.param.get("use_cache", False)
     cache = request.param.get("cache", None)
-    cache_size = request.param.get("cache_size", 128)
-    cache_ttl = request.param.get("cache_ttl", 300)
+    cache_config = request.param.get("cache_config", None)
     force_master_ip = request.param.get("force_master_ip", None)
     sentinel = Sentinel(
         sentinel_endpoints,
@@ -457,8 +449,7 @@ def sentinel_setup(request):
         socket_timeout=0.1,
         use_cache=use_cache,
         cache=cache,
-        cache_ttl=cache_ttl,
-        cache_size=cache_size,
+        cache_config=cache_config,
         protocol=3,
         **kwargs,
     )
@@ -553,9 +544,7 @@ def master_host(request):
 
 @pytest.fixture()
 def cache_conf() -> CacheConfiguration:
-    return CacheConfiguration(
-        cache_size=100, cache_ttl=20, cache_eviction=EvictionPolicy.TTL
-    )
+    return CacheConfiguration(max_size=100, eviction_policy=EvictionPolicy.LRU)
 
 
 @pytest.fixture()
@@ -574,6 +563,14 @@ def mock_cache() -> CacheInterface:
 def mock_connection() -> ConnectionInterface:
     mock_connection = Mock(spec=ConnectionInterface)
     return mock_connection
+
+
+@pytest.fixture()
+def cache_key(request) -> CacheKey:
+    command = request.param.get("command")
+    keys = request.param.get("redis_keys")
+
+    return CacheKey(command, keys)
 
 
 def wait_for_command(client, monitor, command, key=None):

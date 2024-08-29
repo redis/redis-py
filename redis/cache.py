@@ -1,19 +1,265 @@
+import copy
+import time
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from enum import Enum
-from typing import Any, Hashable
+from typing import Any, Collection, Hashable, List, Optional
 
-from cachetools import Cache, LFUCache, LRUCache, RRCache, TTLCache
+
+class CacheEntryStatus(Enum):
+    VALID = "VALID"
+    IN_PROGRESS = "IN_PROGRESS"
+
+
+class EvictionPolicyType(Enum):
+    time_based = "time_based"
+    frequency_based = "frequency_based"
+
+
+class CacheKey:
+    def __init__(self, command: str, redis_keys: tuple[str, ...]):
+        self.command = command
+        self.redis_keys = redis_keys
+
+    def get_redis_keys(self) -> tuple[str, ...]:
+        return self.redis_keys
+
+    def __hash__(self):
+        return hash((self.command, self.redis_keys))
+
+    def __eq__(self, other):
+        return hash(self) == hash(other)
+
+
+class CacheEntry:
+    def __init__(
+        self, cache_key: CacheKey, cache_value: bytes, status: CacheEntryStatus
+    ):
+        self.cache_key = cache_key
+        self.cache_value = cache_value
+        self.status = status
+
+
+class EvictionPolicyInterface(ABC):
+    @property
+    @abstractmethod
+    def cache(self):
+        pass
+
+    @cache.setter
+    def cache(self, value):
+        pass
+
+    @property
+    @abstractmethod
+    def type(self) -> EvictionPolicyType:
+        pass
+
+    @abstractmethod
+    def evict_next(self) -> CacheKey:
+        pass
+
+    @abstractmethod
+    def evict_many(self, count: int) -> List[CacheKey]:
+        pass
+
+    @abstractmethod
+    def touch(self, cache_key: CacheKey) -> None:
+        pass
+
+
+class CacheInterface(ABC):
+    @abstractmethod
+    def get_collection(self) -> OrderedDict[CacheKey, CacheEntry]:
+        pass
+
+    @abstractmethod
+    def get_eviction_policy(self) -> EvictionPolicyInterface:
+        pass
+
+    @abstractmethod
+    def get_max_size(self) -> int:
+        pass
+
+    @abstractmethod
+    def get(self, key: CacheKey) -> CacheEntry | None:
+        pass
+
+    @abstractmethod
+    def set(self, entry: CacheEntry) -> bool:
+        pass
+
+    @abstractmethod
+    def delete_by_cache_keys(self, cache_keys: List[CacheKey]) -> List[bool]:
+        pass
+
+    @abstractmethod
+    def delete_by_redis_keys(self, redis_keys: List[bytes]) -> List[bool]:
+        pass
+
+    @abstractmethod
+    def flush(self) -> int:
+        pass
+
+    @abstractmethod
+    def is_cachable(self, key: CacheKey) -> bool:
+        pass
+
+
+class CacheConfigurationInterface(ABC):
+    @abstractmethod
+    def get_cache_class(self):
+        pass
+
+    @abstractmethod
+    def get_max_size(self) -> int:
+        pass
+
+    @abstractmethod
+    def get_eviction_policy(self):
+        pass
+
+    @abstractmethod
+    def is_exceeds_max_size(self, count: int) -> bool:
+        pass
+
+    @abstractmethod
+    def is_allowed_to_cache(self, command: str) -> bool:
+        pass
+
+
+class DefaultCache(CacheInterface):
+    def __init__(
+        self,
+        cache_config: CacheConfigurationInterface,
+    ) -> None:
+        self._cache = OrderedDict()
+        self._cache_config = cache_config
+        self._eviction_policy = self._cache_config.get_eviction_policy().value()
+        self._eviction_policy.cache = self
+
+    def get_collection(self) -> OrderedDict[CacheKey, CacheEntry]:
+        return self._cache
+
+    def get_eviction_policy(self) -> EvictionPolicyInterface:
+        return self._eviction_policy
+
+    def get_max_size(self) -> int:
+        return self._cache_config.get_max_size()
+
+    def set(self, entry: CacheEntry) -> bool:
+        if not self.is_cachable(entry.cache_key):
+            return False
+
+        self._cache[entry.cache_key] = entry
+        self._eviction_policy.touch(entry.cache_key)
+
+        if self._cache_config.is_exceeds_max_size(len(self._cache)):
+            self._eviction_policy.evict_next()
+
+        return True
+
+    def get(self, key: CacheKey) -> CacheEntry | None:
+        entry = self._cache.get(key, None)
+
+        if entry is None:
+            return None
+
+        self._eviction_policy.touch(key)
+        return copy.deepcopy(entry)
+
+    def delete_by_cache_keys(self, cache_keys: List[CacheKey]) -> List[bool]:
+        response = []
+
+        for key in cache_keys:
+            if self.get(key) is not None:
+                self._cache.pop(key)
+                response.append(True)
+            else:
+                response.append(False)
+
+        return response
+
+    def delete_by_redis_keys(self, redis_keys: List[bytes]) -> List[bool]:
+        response = []
+        keys_to_delete = []
+
+        for redis_key in redis_keys:
+            redis_key = redis_key.decode()
+            for cache_key in self._cache:
+                if redis_key in cache_key.get_redis_keys():
+                    keys_to_delete.append(cache_key)
+                    response.append(True)
+
+        for key in keys_to_delete:
+            self._cache.pop(key)
+
+        return response
+
+    def flush(self) -> int:
+        elem_count = len(self._cache)
+        self._cache.clear()
+        return elem_count
+
+    def is_cachable(self, key: CacheKey) -> bool:
+        return self._cache_config.is_allowed_to_cache(key.command)
+
+
+class LRUPolicy(EvictionPolicyInterface):
+    def __init__(self):
+        self.cache = None
+
+    @property
+    def cache(self):
+        return self._cache
+
+    @cache.setter
+    def cache(self, cache: CacheInterface):
+        self._cache = cache
+
+    @property
+    def type(self) -> EvictionPolicyType:
+        return EvictionPolicyType.time_based
+
+    def evict_next(self) -> CacheKey:
+        self._assert_cache()
+        popped_entry = self._cache.get_collection().popitem(last=False)
+        return popped_entry[0]
+
+    def evict_many(self, count: int) -> List[CacheKey]:
+        self._assert_cache()
+        if count > len(self._cache.get_collection()):
+            raise ValueError("Evictions count is above cache size")
+
+        popped_keys = []
+
+        for _ in range(count):
+            popped_entry = self._cache.get_collection().popitem(last=False)
+            popped_keys.append(popped_entry[0])
+
+        return popped_keys
+
+    def touch(self, cache_key: CacheKey) -> None:
+        self._assert_cache()
+
+        if self._cache.get_collection().get(cache_key) is None:
+            raise ValueError(f"Given entry does not belong to the cache")
+
+        self._cache.get_collection().move_to_end(cache_key)
+
+    def _assert_cache(self):
+        if self.cache is None or not isinstance(self.cache, CacheInterface):
+            raise ValueError("Eviction policy should be associated with valid cache.")
 
 
 class EvictionPolicy(Enum):
-    LRU = "LRU"
-    LFU = "LFU"
-    RANDOM = "RANDOM"
-    TTL = "TTL"
+    LRU = LRUPolicy
 
 
-class CacheConfiguration:
+class CacheConfiguration(CacheConfigurationInterface):
+    DEFAULT_CACHE_CLASS = DefaultCache
     DEFAULT_EVICTION_POLICY = EvictionPolicy.LRU
+    DEFAULT_MAX_SIZE = 10000
 
     DEFAULT_ALLOW_LIST = [
         "BITCOUNT",
@@ -92,22 +338,18 @@ class CacheConfiguration:
         "ZUNION",
     ]
 
-    def __init__(self, **kwargs):
-        self._max_size = kwargs.get("cache_size", None)
-        self._ttl = kwargs.get("cache_ttl", None)
-        self._eviction_policy = kwargs.get("cache_eviction", None)
-        if self._max_size is None:
-            self._max_size = 10000
-        if self._ttl is None:
-            self._ttl = 0
-        if self._eviction_policy is None:
-            self._eviction_policy = EvictionPolicy.LRU
+    def __init__(
+        self,
+        max_size: int = DEFAULT_MAX_SIZE,
+        cache_class: Any = DEFAULT_CACHE_CLASS,
+        eviction_policy: EvictionPolicy = DEFAULT_EVICTION_POLICY,
+    ):
+        self._cache_class = cache_class
+        self._max_size = max_size
+        self._eviction_policy = eviction_policy
 
-        if self._eviction_policy not in EvictionPolicy:
-            raise ValueError(f"Invalid eviction_policy {self._eviction_policy}")
-
-    def get_ttl(self) -> int:
-        return self._ttl
+    def get_cache_class(self):
+        return self._cache_class
 
     def get_max_size(self) -> int:
         return self._max_size
@@ -122,112 +364,19 @@ class CacheConfiguration:
         return command in self.DEFAULT_ALLOW_LIST
 
 
-class EvictionPolicyCacheClass(Enum):
-    LRU = LRUCache
-    LFU = LFUCache
-    RANDOM = RRCache
-    TTL = TTLCache
-
-
-class CacheClassEvictionPolicy(Enum):
-    LRUCache = EvictionPolicy.LRU
-    LFUCache = EvictionPolicy.LFU
-    RRCache = EvictionPolicy.RANDOM
-    TTLCache = EvictionPolicy.TTL
-
-
-class CacheInterface(ABC):
-
-    @property
-    @abstractmethod
-    def currsize(self) -> float:
-        pass
-
-    @property
-    @abstractmethod
-    def maxsize(self) -> float:
-        pass
-
-    @property
-    @abstractmethod
-    def eviction_policy(self) -> EvictionPolicy:
-        pass
-
-    @abstractmethod
-    def get(self, key: Hashable, default: Any = None):
-        pass
-
-    @abstractmethod
-    def set(self, key: Hashable, value: Any):
-        pass
-
-    @abstractmethod
-    def exists(self, key: Hashable) -> bool:
-        pass
-
-    @abstractmethod
-    def remove(self, key: Hashable):
-        pass
-
-    @abstractmethod
-    def clear(self):
-        pass
-
-
 class CacheFactoryInterface(ABC):
     @abstractmethod
     def get_cache(self) -> CacheInterface:
         pass
 
 
-class CacheToolsFactory(CacheFactoryInterface):
-    def __init__(self, conf: CacheConfiguration):
-        self._conf = conf
+class CacheFactory(CacheFactoryInterface):
+    def __init__(self, cache_config: Optional[CacheConfiguration] = None):
+        self._config = cache_config
+
+        if self._config is None:
+            self._config = CacheConfiguration()
 
     def get_cache(self) -> CacheInterface:
-        eviction_policy = self._conf.get_eviction_policy()
-        cache_class = self._get_cache_class(eviction_policy).value
-
-        if eviction_policy == EvictionPolicy.TTL:
-            cache_inst = cache_class(self._conf.get_max_size(), self._conf.get_ttl())
-        else:
-            cache_inst = cache_class(self._conf.get_max_size())
-
-        return CacheToolsAdapter(cache_inst)
-
-    def _get_cache_class(
-        self, eviction_policy: EvictionPolicy
-    ) -> EvictionPolicyCacheClass:
-        return EvictionPolicyCacheClass[eviction_policy.value]
-
-
-class CacheToolsAdapter(CacheInterface):
-    def __init__(self, cache: Cache):
-        self._cache = cache
-
-    def get(self, key: Hashable, default: Any = None):
-        return self._cache.get(key, default)
-
-    def set(self, key: Hashable, value: Any):
-        self._cache[key] = value
-
-    def exists(self, key: Hashable) -> bool:
-        return key in self._cache
-
-    def remove(self, key: Hashable):
-        self._cache.pop(key)
-
-    def clear(self):
-        self._cache.clear()
-
-    @property
-    def currsize(self) -> float:
-        return self._cache.currsize
-
-    @property
-    def maxsize(self) -> float:
-        return self._cache.maxsize
-
-    @property
-    def eviction_policy(self) -> EvictionPolicy:
-        return CacheClassEvictionPolicy[self._cache.__class__.__name__].value
+        cache_class = self._config.get_cache_class()
+        return cache_class(cache_config=self._config)
