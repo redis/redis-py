@@ -3,7 +3,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from enum import Enum
-from typing import Any, Collection, Hashable, List, Optional
+from typing import Any, Collection, Hashable, List, Optional, Union
 
 
 class CacheEntryStatus(Enum):
@@ -82,7 +82,7 @@ class CacheInterface(ABC):
         pass
 
     @abstractmethod
-    def get(self, key: CacheKey) -> CacheEntry | None:
+    def get(self, key: CacheKey) -> Union[CacheEntry, None]:
         pass
 
     @abstractmethod
@@ -159,7 +159,7 @@ class DefaultCache(CacheInterface):
 
         return True
 
-    def get(self, key: CacheKey) -> CacheEntry | None:
+    def get(self, key: CacheKey) -> Union[CacheEntry, None]:
         entry = self._cache.get(key, None)
 
         if entry is None:
