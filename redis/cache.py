@@ -70,7 +70,7 @@ class EvictionPolicyInterface(ABC):
 
 class CacheInterface(ABC):
     @abstractmethod
-    def get_collection(self) -> OrderedDict[CacheKey, CacheEntry]:
+    def get_collection(self) -> OrderedDict:
         pass
 
     @abstractmethod
@@ -138,7 +138,7 @@ class DefaultCache(CacheInterface):
         self._eviction_policy = self._cache_config.get_eviction_policy().value()
         self._eviction_policy.cache = self
 
-    def get_collection(self) -> OrderedDict[CacheKey, CacheEntry]:
+    def get_collection(self) -> OrderedDict:
         return self._cache
 
     def get_eviction_policy(self) -> EvictionPolicyInterface:
