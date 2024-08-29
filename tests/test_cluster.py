@@ -2733,7 +2733,7 @@ class TestNodesManager:
                 node_2 = ClusterNode("127.0.0.1", 7001)
                 RedisCluster(startup_nodes=[node_1, node_2])
             assert str(ex.value).startswith(
-                "startup_nodes could not agree on a valid slots cache_data"
+                "startup_nodes could not agree on a valid slots cache"
             ), str(ex.value)
 
     def test_cluster_one_instance(self):
