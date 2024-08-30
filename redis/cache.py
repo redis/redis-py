@@ -39,6 +39,12 @@ class CacheEntry:
         self.cache_value = cache_value
         self.status = status
 
+    def __hash__(self):
+        return hash((self.cache_key, self.cache_value, self.status))
+
+    def __eq__(self, other):
+        return hash(self) == hash(other)
+
 
 class EvictionPolicyInterface(ABC):
     @property
@@ -68,9 +74,39 @@ class EvictionPolicyInterface(ABC):
         pass
 
 
+class CacheConfigurationInterface(ABC):
+    @abstractmethod
+    def get_cache_class(self):
+        pass
+
+    @abstractmethod
+    def get_max_size(self) -> int:
+        pass
+
+    @abstractmethod
+    def get_eviction_policy(self):
+        pass
+
+    @abstractmethod
+    def get_health_check_interval(self) -> float:
+        pass
+
+    @abstractmethod
+    def is_exceeds_max_size(self, count: int) -> bool:
+        pass
+
+    @abstractmethod
+    def is_allowed_to_cache(self, command: str) -> bool:
+        pass
+
+
 class CacheInterface(ABC):
     @abstractmethod
     def get_collection(self) -> OrderedDict:
+        pass
+
+    @abstractmethod
+    def get_config(self) -> CacheConfigurationInterface:
         pass
 
     @abstractmethod
@@ -78,7 +114,7 @@ class CacheInterface(ABC):
         pass
 
     @abstractmethod
-    def get_max_size(self) -> int:
+    def get_size(self) -> int:
         pass
 
     @abstractmethod
@@ -106,28 +142,6 @@ class CacheInterface(ABC):
         pass
 
 
-class CacheConfigurationInterface(ABC):
-    @abstractmethod
-    def get_cache_class(self):
-        pass
-
-    @abstractmethod
-    def get_max_size(self) -> int:
-        pass
-
-    @abstractmethod
-    def get_eviction_policy(self):
-        pass
-
-    @abstractmethod
-    def is_exceeds_max_size(self, count: int) -> bool:
-        pass
-
-    @abstractmethod
-    def is_allowed_to_cache(self, command: str) -> bool:
-        pass
-
-
 class DefaultCache(CacheInterface):
     def __init__(
         self,
@@ -141,11 +155,14 @@ class DefaultCache(CacheInterface):
     def get_collection(self) -> OrderedDict:
         return self._cache
 
+    def get_config(self) -> CacheConfigurationInterface:
+        return self._cache_config
+
     def get_eviction_policy(self) -> EvictionPolicyInterface:
         return self._eviction_policy
 
-    def get_max_size(self) -> int:
-        return self._cache_config.get_max_size()
+    def get_size(self) -> int:
+        return len(self._cache)
 
     def set(self, entry: CacheEntry) -> bool:
         if not self.is_cachable(entry.cache_key):
@@ -256,7 +273,7 @@ class EvictionPolicy(Enum):
     LRU = LRUPolicy
 
 
-class CacheConfiguration(CacheConfigurationInterface):
+class CacheConfig(CacheConfigurationInterface):
     DEFAULT_CACHE_CLASS = DefaultCache
     DEFAULT_EVICTION_POLICY = EvictionPolicy.LRU
     DEFAULT_MAX_SIZE = 10000
@@ -343,10 +360,12 @@ class CacheConfiguration(CacheConfigurationInterface):
         max_size: int = DEFAULT_MAX_SIZE,
         cache_class: Any = DEFAULT_CACHE_CLASS,
         eviction_policy: EvictionPolicy = DEFAULT_EVICTION_POLICY,
+        health_check_interval: float = 2.0,
     ):
         self._cache_class = cache_class
         self._max_size = max_size
         self._eviction_policy = eviction_policy
+        self._health_check_interval = health_check_interval
 
     def get_cache_class(self):
         return self._cache_class
@@ -356,6 +375,9 @@ class CacheConfiguration(CacheConfigurationInterface):
 
     def get_eviction_policy(self) -> EvictionPolicy:
         return self._eviction_policy
+
+    def get_health_check_interval(self) -> float:
+        return self._health_check_interval
 
     def is_exceeds_max_size(self, count: int) -> bool:
         return count > self._max_size
@@ -371,11 +393,11 @@ class CacheFactoryInterface(ABC):
 
 
 class CacheFactory(CacheFactoryInterface):
-    def __init__(self, cache_config: Optional[CacheConfiguration] = None):
+    def __init__(self, cache_config: Optional[CacheConfig] = None):
         self._config = cache_config
 
         if self._config is None:
-            self._config = CacheConfiguration()
+            self._config = CacheConfig()
 
     def get_cache(self) -> CacheInterface:
         cache_class = self._config.get_cache_class()

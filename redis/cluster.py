@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.helpers import parse_scan
 from redis.backoff import default_backoff
-from redis.cache import CacheConfiguration, CacheInterface
+from redis.cache import CacheConfig, CacheInterface
 from redis.client import CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
@@ -168,7 +168,6 @@ REDIS_ALLOWED_KEYS = (
     "ssl_password",
     "unix_socket_path",
     "username",
-    "use_cache",
     "cache",
     "cache_config",
 )
@@ -504,9 +503,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         dynamic_startup_nodes: bool = True,
         url: Optional[str] = None,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
-        use_cache: bool = False,
         cache: Optional[CacheInterface] = None,
-        cache_config: Optional[CacheConfiguration] = None,
+        cache_config: Optional[CacheConfig] = None,
         **kwargs,
     ):
         """
@@ -631,7 +629,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             kwargs.get("decode_responses", False),
         )
         protocol = kwargs.get("protocol", None)
-        if use_cache and protocol not in [3, "3"]:
+        if (cache_config or cache) and protocol not in [3, "3"]:
             raise RedisError("Client caching is only supported with RESP version 3")
 
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
@@ -646,7 +644,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             require_full_coverage=require_full_coverage,
             dynamic_startup_nodes=dynamic_startup_nodes,
             address_remap=address_remap,
-            use_cache=use_cache,
             cache=cache,
             cache_config=cache_config,
             **kwargs,
@@ -1328,9 +1325,8 @@ class NodesManager:
         dynamic_startup_nodes=True,
         connection_pool_class=ConnectionPool,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
-        use_cache: bool = False,
         cache: Optional[CacheInterface] = None,
-        cache_config: Optional[CacheConfiguration] = None,
+        cache_config: Optional[CacheConfig] = None,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1343,7 +1339,6 @@ class NodesManager:
         self._dynamic_startup_nodes = dynamic_startup_nodes
         self.connection_pool_class = connection_pool_class
         self.address_remap = address_remap
-        self.use_cache = use_cache
         self.cache = cache
         self.cache_config = cache_config
         self._moved_exception = None
@@ -1489,7 +1484,6 @@ class NodesManager:
             # Create a redis node with a costumed connection pool
             kwargs.update({"host": host})
             kwargs.update({"port": port})
-            kwargs.update({"use_cache": self.use_cache})
             kwargs.update({"cache": self.cache})
             kwargs.update({"cache_config": self.cache_config})
             r = Redis(connection_pool=self.connection_pool_class(**kwargs))
@@ -1497,7 +1491,6 @@ class NodesManager:
             r = Redis(
                 host=host,
                 port=port,
-                use_cache=self.use_cache,
                 cache=self.cache,
                 cache_config=self.cache_config,
                 **kwargs,

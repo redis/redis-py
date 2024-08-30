@@ -13,7 +13,7 @@ from typing import Any, Callable, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
-    CacheConfiguration,
+    CacheConfig,
     CacheEntry,
     CacheEntryStatus,
     CacheFactory,
@@ -879,7 +879,7 @@ class CacheProxyConnection(ConnectionInterface):
         conn._parser.set_invalidation_push_handler(self._on_invalidation_callback)
 
     def _process_pending_invalidations(self):
-        while self.retry.call_with_retry_on_false(lambda: self.can_read()):
+        while self.can_read():
             self._conn.read_response(push_request=True)
 
     def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
@@ -1251,13 +1251,12 @@ class ConnectionPool:
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
         self.cache = None
-        self._cache_conf = None
         self._cache_factory = cache_factory
         self._scheduler = None
         self._hc_cancel_event = None
         self._hc_thread = None
 
-        if connection_kwargs.get("use_cache"):
+        if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
             if connection_kwargs.get("protocol") not in [3, "3"]:
                 raise RedisError("Client caching is only supported with RESP version 3")
 
@@ -1278,7 +1277,6 @@ class ConnectionPool:
 
             self._scheduler = Scheduler()
 
-        connection_kwargs.pop("use_cache", None)
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
 
@@ -1494,8 +1492,9 @@ class ConnectionPool:
         # Run scheduled healthcheck to avoid stale invalidations in idle connections.
         if self.cache is not None and self._scheduler is not None:
             self._hc_cancel_event = threading.Event()
+            hc_interval = self.cache.get_config().get_health_check_interval()
             self._hc_thread = self._scheduler.run_with_interval(
-                self._perform_health_check, 2, self._hc_cancel_event
+                self._perform_health_check, hc_interval, self._hc_cancel_event
             )
 
     def _perform_health_check(self, done: threading.Event) -> None:

@@ -13,7 +13,7 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
     bool_ok,
 )
-from redis.cache import CacheConfiguration, CacheInterface
+from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
     CoreCommands,
     RedisModuleCommands,
@@ -142,12 +142,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         """
         single_connection_client = kwargs.pop("single_connection_client", False)
-        use_cache = kwargs.pop("use_cache", False)
         connection_pool = ConnectionPool.from_url(url, **kwargs)
         client = cls(
             connection_pool=connection_pool,
             single_connection_client=single_connection_client,
-            use_cache=use_cache,
         )
         client.auto_close_connection_pool = True
         return client
@@ -213,9 +211,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        use_cache: bool = False,
         cache: Optional[CacheInterface] = None,
-        cache_config: Optional[CacheConfiguration] = None,
+        cache_config: Optional[CacheConfig] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -308,10 +305,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
-                if use_cache and protocol in [3, "3"]:
+                if (cache_config or cache) and protocol in [3, "3"]:
                     kwargs.update(
                         {
-                            "use_cache": use_cache,
                             "cache": cache,
                             "cache_config": cache_config,
                         }
@@ -323,7 +319,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self.connection_pool = connection_pool
 
-        if use_cache and self.connection_pool.get_protocol() not in [3, "3"]:
+        if (cache_config or cache) and self.connection_pool.get_protocol() not in [3, "3"]:
             raise RedisError("Client caching is only supported with RESP version 3")
 
         self.connection = None

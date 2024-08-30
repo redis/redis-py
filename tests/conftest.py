@@ -12,7 +12,7 @@ from packaging.version import Version
 from redis import Sentinel
 from redis.backoff import NoBackoff
 from redis.cache import (
-    CacheConfiguration,
+    CacheConfig,
     CacheFactoryInterface,
     CacheInterface,
     CacheKey,
@@ -439,7 +439,6 @@ def sentinel_setup(request):
         for ip, port in (endpoint.split(":") for endpoint in sentinel_ips.split(","))
     ]
     kwargs = request.param.get("kwargs", {}) if hasattr(request, "param") else {}
-    use_cache = request.param.get("use_cache", False)
     cache = request.param.get("cache", None)
     cache_config = request.param.get("cache_config", None)
     force_master_ip = request.param.get("force_master_ip", None)
@@ -447,7 +446,6 @@ def sentinel_setup(request):
         sentinel_endpoints,
         force_master_ip=force_master_ip,
         socket_timeout=0.1,
-        use_cache=use_cache,
         cache=cache,
         cache_config=cache_config,
         protocol=3,
@@ -543,8 +541,8 @@ def master_host(request):
 
 
 @pytest.fixture()
-def cache_conf() -> CacheConfiguration:
-    return CacheConfiguration(max_size=100, eviction_policy=EvictionPolicy.LRU)
+def cache_conf() -> CacheConfig:
+    return CacheConfig(max_size=100, eviction_policy=EvictionPolicy.LRU)
 
 
 @pytest.fixture()

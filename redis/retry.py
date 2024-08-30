@@ -78,35 +78,3 @@ class Retry:
                 backoff = self._backoff.compute(failures)
                 if backoff > 0:
                     sleep(backoff)
-
-    def call_with_retry_on_false(
-        self,
-        do: Callable[[], T],
-        on_false: Optional[Callable[[], T]] = None,
-        max_retries: Optional[int] = 3,
-        timeout: Optional[float] = 0,
-        exponent: Optional[int] = 2,
-    ) -> bool:
-        """
-        Execute an operation that returns boolean value with retry
-        logic in case if false value been returned.
-        `do`: the operation to call. Expects no argument.
-        `on_false`: Callback to be executed on retry fail.
-        """
-        res = do()
-
-        if res:
-            return res
-
-        if on_false is not None:
-            on_false()
-
-        if max_retries > 0:
-            if timeout > 0:
-                time.sleep(timeout)
-
-            return self.call_with_retry_on_false(
-                do, on_false, max_retries - 1, timeout * exponent, exponent
-            )
-
-        return False
