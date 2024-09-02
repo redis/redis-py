@@ -1441,6 +1441,32 @@ def test_aggregations_filter(client):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+def test_aggregations_add_scores(client):
+    client.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            NumericField("age", sortable=True),
+        )
+    )
+
+    client.hset("doc1", mapping={"name": "bar", "age": "25"})
+    client.hset("doc2", mapping={"name": "foo", "age": "19"})
+
+    req = aggregations.AggregateRequest("*").add_scores()
+    res = client.ft().aggregate(req)
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+        assert res["results"][0]["extra_attributes"] == {"__score": "0.2"}
+        assert res["results"][1]["extra_attributes"] == {"__score": "0.2"}
+    else:
+        assert len(res.rows) == 2
+        assert res.rows[0] == ["__score", "0.2"]
+        assert res.rows[1] == ["__score", "0.2"]
+
+
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_index_definition(client):
     """
