@@ -1,14 +1,6 @@
 import socket
 from time import sleep
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Iterable,
-    Tuple,
-    Type,
-    TypeVar,
-)
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Tuple, Type, TypeVar
 
 from redis.exceptions import ConnectionError, TimeoutError
 
