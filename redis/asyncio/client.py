@@ -579,10 +579,12 @@ class Redis(
         """
         Closes Redis client connection
 
-        :param close_connection_pool: decides whether to close the connection pool used
-        by this Redis client, overriding Redis.auto_close_connection_pool. By default,
-        let Redis.auto_close_connection_pool decide whether to close the connection
-        pool.
+        Args:
+            close_connection_pool:
+                decides whether to close the connection pool used by this Redis client,
+                overriding Redis.auto_close_connection_pool.
+                By default, let Redis.auto_close_connection_pool decide
+                whether to close the connection pool.
         """
         conn = self.connection
         if conn:
