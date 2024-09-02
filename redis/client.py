@@ -319,7 +319,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self.connection_pool = connection_pool
 
-        if (cache_config or cache) and self.connection_pool.get_protocol() not in [3, "3"]:
+        if (cache_config or cache) and self.connection_pool.get_protocol() not in [
+            3,
+            "3",
+        ]:
             raise RedisError("Client caching is only supported with RESP version 3")
 
         self.connection = None

@@ -1,12 +1,10 @@
 import socket
-import time
 from time import sleep
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
     Iterable,
-    Optional,
     Tuple,
     Type,
     TypeVar,

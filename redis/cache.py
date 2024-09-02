@@ -1,9 +1,8 @@
 import copy
-import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from enum import Enum
-from typing import Any, Collection, Hashable, List, Optional, Union
+from typing import Any, List, Optional, Union
 
 
 class CacheEntryStatus(Enum):
@@ -260,7 +259,7 @@ class LRUPolicy(EvictionPolicyInterface):
         self._assert_cache()
 
         if self._cache.get_collection().get(cache_key) is None:
-            raise ValueError(f"Given entry does not belong to the cache")
+            raise ValueError("Given entry does not belong to the cache")
 
         self._cache.get_collection().move_to_end(cache_key)
 

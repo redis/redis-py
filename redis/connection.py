@@ -13,7 +13,6 @@ from typing import Any, Callable, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
-    CacheConfig,
     CacheEntry,
     CacheEntryStatus,
     CacheFactory,

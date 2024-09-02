@@ -982,7 +982,9 @@ class TestUnitDefaultCache:
         result = cache.get(cache_key)
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key, cache_value=b"new_val", status=CacheEntryStatus.VALID
+                cache_key=cache_key,
+                cache_value=b"new_val",
+                status=CacheEntryStatus.VALID,
             )
         )
 

@@ -2,7 +2,7 @@ import socket
 import types
 from typing import Any
 from unittest import mock
-from unittest.mock import patch, call, Mock
+from unittest.mock import call, patch
 
 import pytest
 import redis
@@ -16,8 +16,6 @@ from redis.cache import (
     CacheInterface,
     CacheKey,
     DefaultCache,
-    EvictionPolicy,
-    EvictionPolicyInterface,
     LRUPolicy,
 )
 from redis.connection import (
@@ -382,7 +380,7 @@ class TestUnitConnectionPool:
 
     def test_throws_error_on_incorrect_cache_implementation(self):
         with pytest.raises(ValueError, match="Cache must implement CacheInterface"):
-            ConnectionPool(protocol=3,  cache='wrong')
+            ConnectionPool(protocol=3, cache="wrong")
 
     def test_returns_custom_cache_implementation(self, mock_cache):
         connection_pool = ConnectionPool(protocol=3, cache=mock_cache)
@@ -444,7 +442,7 @@ class TestUnitCacheProxyConnection:
         assert len(cache.get_collection()) == 0
 
     def test_read_response_returns_cached_reply(self, mock_cache, mock_connection):
-        mock_connection.retry = 'mock'
+        mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
 
@@ -455,54 +453,60 @@ class TestUnitCacheProxyConnection:
             CacheEntry(
                 cache_key=CacheKey(command="GET", redis_keys=("foo",)),
                 cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
-                status=CacheEntryStatus.IN_PROGRESS
+                status=CacheEntryStatus.IN_PROGRESS,
             ),
             CacheEntry(
                 cache_key=CacheKey(command="GET", redis_keys=("foo",)),
                 cache_value=b"bar",
-                status=CacheEntryStatus.VALID
+                status=CacheEntryStatus.VALID,
             ),
             CacheEntry(
                 cache_key=CacheKey(command="GET", redis_keys=("foo",)),
                 cache_value=b"bar",
-                status=CacheEntryStatus.VALID
+                status=CacheEntryStatus.VALID,
             ),
             CacheEntry(
                 cache_key=CacheKey(command="GET", redis_keys=("foo",)),
                 cache_value=b"bar",
-                status=CacheEntryStatus.VALID
+                status=CacheEntryStatus.VALID,
             ),
         ]
         mock_connection.send_command.return_value = Any
-        mock_connection.read_response.return_value = b'bar'
+        mock_connection.read_response.return_value = b"bar"
         mock_connection.can_read.return_value = False
 
         proxy_connection = CacheProxyConnection(mock_connection, mock_cache)
-        proxy_connection.send_command(*['GET', 'foo'], **{'keys': ['foo']})
-        assert proxy_connection.read_response() == b'bar'
-        assert proxy_connection.read_response() == b'bar'
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
+        assert proxy_connection.read_response() == b"bar"
+        assert proxy_connection.read_response() == b"bar"
 
         mock_connection.read_response.assert_called_once()
-        mock_cache.set.assert_has_calls([
-            call(CacheEntry(
-                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
-                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
-                status=CacheEntryStatus.IN_PROGRESS
-            )),
-            call(CacheEntry(
-                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
-                cache_value=b"bar",
-                status=CacheEntryStatus.VALID
-            )),
-        ])
+        mock_cache.set.assert_has_calls(
+            [
+                call(
+                    CacheEntry(
+                        cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                        cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                        status=CacheEntryStatus.IN_PROGRESS,
+                    )
+                ),
+                call(
+                    CacheEntry(
+                        cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                        cache_value=b"bar",
+                        status=CacheEntryStatus.VALID,
+                    )
+                ),
+            ]
+        )
 
-        mock_cache.get.assert_has_calls([
-            call(CacheKey(command="GET", redis_keys=("foo",))),
-            call(CacheKey(command="GET", redis_keys=("foo",))),
-            call(CacheKey(command="GET", redis_keys=("foo",))),
-            call(CacheKey(command="GET", redis_keys=("foo",))),
-            call(CacheKey(command="GET", redis_keys=("foo",))),
-            call(CacheKey(command="GET", redis_keys=("foo",))),
-        ])
-
-
+        mock_cache.get.assert_has_calls(
+            [
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+            ]
+        )
