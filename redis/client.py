@@ -4,7 +4,7 @@ import threading
 import time
 import warnings
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Type, Union, Mapping, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Type, Union, Mapping
 
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import (
@@ -52,10 +52,6 @@ from redis.utils import (
     safe_str,
     str_if_bytes,
 )
-
-if TYPE_CHECKING:
-    import OpenSSL
-    import ssl
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
@@ -207,9 +203,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_password: Optional[str] = None,
         ssl_validate_ocsp: bool = False,
         ssl_validate_ocsp_stapled: bool = False,
-        ssl_ocsp_context: Optional[OpenSSL.SSL.Context] = None,
+        ssl_ocsp_context: Optional["OpenSSL.SSL.Context"] = None,
         ssl_ocsp_expected_cert: Optional[str] = None,
-        ssl_min_version: Optional[ssl.TLSVersion] = None,
+        ssl_min_version: Optional["ssl.TLSVersion"] = None,
         ssl_ciphers: Optional[str] = None,
         max_connections: Optional[int] = None,
         single_connection_client: bool = False,
