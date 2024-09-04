@@ -103,14 +103,14 @@ jobs:
       - name: Combine test coverage
         run: |
           ls -1
-          coverage combine combined-coverage.xml coverage/
+          coverage combine -a coverage/
 
       - name: Upload test results and profiling data
         uses: actions/upload-artifact@v4
         with:
           name: pytest-results-standalone-${{matrix.connection-type}}-${{matrix.python-version}}
           path: |
-            combined-coverage.xml
+            .coverage
             prof/**
             profile_output*
           if-no-files-found: error
@@ -166,14 +166,14 @@ jobs:
           invoke cluster-tests --protocol=3
 
       - name: Combine test coverage
-        run: coverage combine combined-coverage.xml coverage/
+        run: coverage combine -a coverage/
 
       - name: Upload test results and profiling data
         uses: actions/upload-artifact@v4
         with:
           name: pytest-results-cluster-${{matrix.connection-type}}-${{matrix.python-version}}
           path: |
-            combined-coverage.xml
+            .coverage
             prof/**
             profile_output*
           if-no-files-found: error
