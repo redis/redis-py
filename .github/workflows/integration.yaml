@@ -185,7 +185,7 @@ jobs:
   build-and-test-package:
     name: Validate building and installing the package
     runs-on: ubuntu-latest
-    needs: [resp2-tests, resp3-tests]
+    needs: [standalone, cluster]
     strategy:
       fail-fast: false
       matrix:
