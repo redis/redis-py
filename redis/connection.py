@@ -956,6 +956,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
     "timeout": float,
+    "is_master": to_bool,
 }
 
 
