@@ -11,9 +11,16 @@ if not hasattr(inspect, "getargspec"):
 
 @task
 def devenv(c):
-    """Brings up the test environment, by wrapping docker compose."""
+    """Brings up the test environment for standalone redis, by wrapping docker compose."""
     clean(c)
-    cmd = "docker compose --profile all up -d --build"
+    cmd = "docker compose --profile standalone --profile replica --profile sentinel up -d --build"
+    run(cmd)
+
+@task
+def devenv_cluster(c):
+    """Brings up the test environment for OSS cluster redis, by wrapping docker compose."""
+    clean(c)
+    cmd = "docker compose --profile cluster up -d --build"
     run(cmd)
 
 
@@ -55,11 +62,11 @@ def standalone_tests(c, uvloop=False, protocol=2, profile=False):
     profile_arg = "--profile" if profile else ""
     if uvloop:
         run(
-            f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -m 'not onlycluster' --uvloop --junit-xml=standalone-uvloop-results.xml"
+            f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -m 'not onlycluster' --uvloop --junit-xml=coverage/standalone-uvloop-results.xml"
         )
     else:
         run(
-            f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -m 'not onlycluster' --junit-xml=standalone-results.xml"
+            f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -m 'not onlycluster' --junit-xml=coverage/standalone-results.xml"
         )
 
 
@@ -70,11 +77,11 @@ def cluster_tests(c, uvloop=False, protocol=2, profile=False):
     cluster_url = "redis://localhost:16379/0"
     if uvloop:
         run(
-            f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster.xml -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-uvloop-results.xml --uvloop"
+            f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster.xml -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=coverage/cluster-uvloop-results.xml --uvloop"
         )
     else:
         run(
-            f"pytest  {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_clusteclient.xml -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-results.xml"
+            f"pytest  {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_clusteclient.xml -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=coverage/cluster-results.xml"
         )
 
 

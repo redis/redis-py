@@ -56,19 +56,18 @@ jobs:
           pip install -r dev_requirements.txt
           invoke linters
 
-  resp2-tests:
+  standalone:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       max-parallel: 15
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.8', 'pypy-3.9']
-        test-type: ['standalone', 'cluster']
+        python-version: [ '3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.8', 'pypy-3.9' ]
         connection-type: ['hiredis', 'plain']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: RESP2 ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}
+    name: Standalone-${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}
     steps:
       - uses: actions/checkout@v4
 
@@ -77,25 +76,39 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Run tests
+      - name: Build infrastructure
         run: |
+          pip install coverage
           pip install -U setuptools wheel
           pip install -r requirements.txt
           pip install -r dev_requirements.txt
           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
            pip install hiredis
           fi
+          mkdir coverage
           invoke devenv
           sleep 10 # time to settle
-          invoke ${{matrix.test-type}}-tests
+
+      - name: Run RESP2 tests
+        run: |
+          invoke standalone-tests
           ls -1
+
+      - name: Run RESP3 tests
+        if: ${{matrix.python-version == '3.8' || matrix.python-version == '3.12'}}
+        run: |
+          invoke standalone-tests --uvloop --protocol=3
+          invoke standalone-tests --protocol=3
+
+      - name: Combine test coverage
+        run: coverage combine combined-coverage.xml coverage/
 
       - name: Upload test results and profiling data
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}
+          name: pytest-results-standalone-${{matrix.connection-type}}-${{matrix.python-version}}
           path: |
-            ${{matrix.test-type}}*-results.xml
+            combined-coverage.xml
             prof/**
             profile_output*
           if-no-files-found: error
@@ -106,21 +119,18 @@ jobs:
         with:
           fail_ci_if_error: false
 
-  resp3-tests:
+  cluster:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
+      max-parallel: 15
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.12']
-        test-type: ['standalone', 'cluster']
+        python-version: [ '3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.8', 'pypy-3.9' ]
         connection-type: ['hiredis', 'plain']
-        event-loop: ['asyncio', 'uvloop']
-        exclude:
-          - test-type: 'cluster'
-            connection-type: 'hiredis'
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: RESP3 ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.event-loop}}
+    name: Cluster-${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}
     steps:
       - uses: actions/checkout@v4
 
@@ -129,28 +139,39 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Run tests
+      - name: Build infrastructure
         run: |
+          pip install coverage
           pip install -U setuptools wheel
           pip install -r requirements.txt
           pip install -r dev_requirements.txt
           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-            pip install hiredis
+           pip install hiredis
           fi
-          invoke devenv
+          mkdir coverage
+          invoke devenv-cluster
           sleep 10 # time to settle
-          if [ "${{matrix.event-loop}}" == "uvloop" ]; then
-            invoke ${{matrix.test-type}}-tests --uvloop --protocol=3
-          else
-            invoke ${{matrix.test-type}}-tests --protocol=3
-          fi
+
+      - name: Run RESP2 tests
+        run: |
+          invoke cluster-tests
+          ls -1
+
+      - name: Run RESP3 tests
+        if: ${{matrix.python-version == '3.8' || matrix.python-version == '3.12'}}
+        run: |
+          invoke cluster-tests --uvloop --protocol=3
+          invoke cluster-tests --protocol=3
+
+      - name: Combine test coverage
+        run: coverage combine combined-coverage.xml coverage/
 
       - name: Upload test results and profiling data
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}-${{matrix.event-loop}}-resp3
+          name: pytest-results-cluster-${{matrix.connection-type}}-${{matrix.python-version}}
           path: |
-            ${{matrix.test-type}}*-results.xml
+            combined-coverage.xml
             prof/**
             profile_output*
           if-no-files-found: error
