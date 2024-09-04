@@ -101,7 +101,9 @@ jobs:
           invoke standalone-tests --protocol=3
 
       - name: Combine test coverage
-        run: coverage combine combined-coverage.xml coverage/
+        run: |
+          ls -1
+          coverage combine combined-coverage.xml coverage/
 
       - name: Upload test results and profiling data
         uses: actions/upload-artifact@v4

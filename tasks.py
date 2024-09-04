@@ -20,7 +20,7 @@ def devenv(c):
 def devenv_cluster(c):
     """Brings up the test environment for OSS cluster redis, by wrapping docker compose."""
     clean(c)
-    cmd = "docker compose --profile cluster up -d --build"
+    cmd = "docker compose --profile cluster --profile ssl up -d --build"
     run(cmd)
 
 
