@@ -4970,6 +4970,7 @@ class TestRedisCommands:
     def test_latency_reset(self, r: redis.Redis):
         assert r.latency_reset() == 0
 
+    @pytest.mark.redismod
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
     def test_module_list(self, r):
@@ -5049,6 +5050,7 @@ class TestRedisCommands:
             ],
         )
 
+    @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
@@ -5061,6 +5063,7 @@ class TestRedisCommands:
             stack_r.module_load("/some/fake/path", "arg1", "arg2", "arg3", "arg4")
             assert "Error loading the extension." in str(excinfo.value)
 
+    @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
