@@ -78,7 +78,6 @@ jobs:
 
       - name: Build infrastructure
         run: |
-          pip install coverage
           pip install -U setuptools wheel
           pip install -r requirements.txt
           pip install -r dev_requirements.txt
@@ -100,17 +99,12 @@ jobs:
           invoke standalone-tests --uvloop --protocol=3
           invoke standalone-tests --protocol=3
 
-      - name: Combine test coverage
-        run: |
-          ls -1
-          coverage combine -a coverage/
-
       - name: Upload test results and profiling data
         uses: actions/upload-artifact@v4
         with:
           name: pytest-results-standalone-${{matrix.connection-type}}-${{matrix.python-version}}
           path: |
-            .coverage
+            coverage/*
             prof/**
             profile_output*
           if-no-files-found: error
@@ -143,7 +137,6 @@ jobs:
 
       - name: Build infrastructure
         run: |
-          pip install coverage
           pip install -U setuptools wheel
           pip install -r requirements.txt
           pip install -r dev_requirements.txt
@@ -165,15 +158,12 @@ jobs:
           invoke cluster-tests --uvloop --protocol=3
           invoke cluster-tests --protocol=3
 
-      - name: Combine test coverage
-        run: coverage combine -a coverage/
-
       - name: Upload test results and profiling data
         uses: actions/upload-artifact@v4
         with:
           name: pytest-results-cluster-${{matrix.connection-type}}-${{matrix.python-version}}
           path: |
-            .coverage
+            coverage/*
             prof/**
             profile_output*
           if-no-files-found: error
