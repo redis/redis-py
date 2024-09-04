@@ -313,7 +313,8 @@ class TestRedisClusterObj:
             called += 1
 
         with mock.patch.object(cluster, "aclose", mock_aclose):
-            await cluster.close()
+            with pytest.warns(DeprecationWarning, match=r"Use aclose\(\) instead"):
+                await cluster.close()
             assert called == 1
         await cluster.aclose()
 
