@@ -98,4 +98,10 @@ Enable caching with custom cache implementation:
 
 CacheImpl should implement a `CacheInterface` specified in `redis.cache` package.
 
+Explicit disconnect
+
+It's important to call `disconnect()` or `disconnect_connection_pools()` in case of Cluster to properly close the connection to server.
+For caching purposes, we're using a separate thread that performs health checks with configurable interval and it relies on
+`disconnect()` or `disconnect_connection_pools()` to be called before the shutdown.
+
 More robust documentation soon will be available at `official Redis documentation <https://redis.io/docs/latest/>`_.

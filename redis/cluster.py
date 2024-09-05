@@ -1056,8 +1056,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             )
         return nodes
 
-    def execute_command(self, *args, **options):
-        return self._internal_execute_command(*args, **options)
+    def execute_command(self, *args, **kwargs):
+        return self._internal_execute_command(*args, **kwargs)
 
     def _internal_execute_command(self, *args, **kwargs):
         """
