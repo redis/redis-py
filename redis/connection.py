@@ -1468,13 +1468,7 @@ class ConnectionPool:
             for connection in connections:
                 connection.disconnect()
 
-        # Send an event to stop scheduled healthcheck execution.
-        if self._hc_cancel_event is not None and not self._hc_cancel_event.is_set():
-            self._hc_cancel_event.set()
-
-        # Joins healthcheck thread on disconnect.
-        if self._hc_thread is not None and not self._hc_thread.is_alive():
-            self._hc_thread.join()
+            self.stop_scheduled_healthcheck()
 
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
@@ -1495,6 +1489,15 @@ class ConnectionPool:
             self._hc_thread = self._scheduler.run_with_interval(
                 self._perform_health_check, hc_interval, self._hc_cancel_event
             )
+
+    def stop_scheduled_healthcheck(self) -> None:
+        # Send an event to stop scheduled healthcheck execution.
+        if self._hc_cancel_event is not None and not self._hc_cancel_event.is_set():
+            self._hc_cancel_event.set()
+
+        # Joins healthcheck thread on disconnect.
+        if self._hc_thread is not None and not self._hc_thread.is_alive():
+            self._hc_thread.join()
 
     def _perform_health_check(self, done: threading.Event) -> None:
         self._checkpid()
@@ -1670,10 +1673,4 @@ class BlockingConnectionPool(ConnectionPool):
         for connection in self._connections:
             connection.disconnect()
 
-        # Send an event to stop scheduled healthcheck execution.
-        if self._hc_cancel_event is not None and not self._hc_cancel_event.is_set():
-            self._hc_cancel_event.set()
-
-        # Joins healthcheck thread on disconnect.
-        if self._hc_thread is not None and not self._hc_thread.is_alive():
-            self._hc_thread.join()
+        self.stop_scheduled_healthcheck()

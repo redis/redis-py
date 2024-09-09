@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.helpers import parse_scan
 from redis.backoff import default_backoff
-from redis.cache import CacheConfig, CacheInterface
+from redis.cache import CacheConfig, CacheInterface, CacheFactoryInterface, CacheFactory
 from redis.client import CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
@@ -1327,6 +1327,7 @@ class NodesManager:
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
+        cache_factory: Optional[CacheFactoryInterface] = None,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1339,8 +1340,9 @@ class NodesManager:
         self._dynamic_startup_nodes = dynamic_startup_nodes
         self.connection_pool_class = connection_pool_class
         self.address_remap = address_remap
-        self.cache = cache
-        self.cache_config = cache_config
+        self._cache = cache
+        self._cache_config = cache_config
+        self._cache_factory = cache_factory
         self._moved_exception = None
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
@@ -1484,15 +1486,13 @@ class NodesManager:
             # Create a redis node with a costumed connection pool
             kwargs.update({"host": host})
             kwargs.update({"port": port})
-            kwargs.update({"cache": self.cache})
-            kwargs.update({"cache_config": self.cache_config})
+            kwargs.update({"cache": self._cache})
             r = Redis(connection_pool=self.connection_pool_class(**kwargs))
         else:
             r = Redis(
                 host=host,
                 port=port,
-                cache=self.cache,
-                cache_config=self.cache_config,
+                cache=self._cache,
                 **kwargs,
             )
         return r
@@ -1623,6 +1623,12 @@ class NodesManager:
                 f"Redis Cluster cannot be connected. Please provide at least "
                 f"one reachable node: {str(exception)}"
             ) from exception
+
+        if self._cache is None and self._cache_config is not None:
+            if self._cache_factory is None:
+                self._cache = CacheFactory(self._cache_config).get_cache()
+            else:
+                self._cache = self._cache_factory.get_cache()
 
         # Create Redis connections to all nodes
         self.create_redis_connections(list(tmp_nodes_cache.values()))

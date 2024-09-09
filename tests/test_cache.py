@@ -374,6 +374,8 @@ class TestClusterCache:
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
             == b"barbar"
         )
+        # Make sure that cache is shared between nodes.
+        assert cache == r.nodes_manager.get_node_from_slot(1).redis_connection.get_cache()
 
     @pytest.mark.parametrize(
         "r",
