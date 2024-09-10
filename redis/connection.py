@@ -9,7 +9,7 @@ from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Any, Callable, List, Optional, Type, Union
+from typing import Any, Callable, List, Optional, Type, Union, Dict
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
@@ -43,7 +43,7 @@ from .utils import (
     SSL_AVAILABLE,
     format_error_message,
     get_lib_version,
-    str_if_bytes,
+    str_if_bytes, compare_versions,
 )
 
 if HIREDIS_AVAILABLE:
@@ -197,6 +197,11 @@ class ConnectionInterface:
     def pack_commands(self, commands):
         pass
 
+    @property
+    @abstractmethod
+    def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
+        pass
+
 
 class AbstractConnection(ConnectionInterface):
     "Manages communication to and from a Redis server"
@@ -272,6 +277,7 @@ class AbstractConnection(ConnectionInterface):
         self.next_health_check = 0
         self.redis_connect_func = redis_connect_func
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
+        self.handshake_metadata = None
         self._sock = None
         self._socket_read_size = socket_read_size
         self.set_parser(parser_class)
@@ -414,7 +420,7 @@ class AbstractConnection(ConnectionInterface):
             if len(auth_args) == 1:
                 auth_args = ["default", auth_args[0]]
             self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
-            response = self.read_response()
+            self.handshake_metadata = self.read_response()
             # if response.get(b"proto") != self.protocol and response.get(
             #     "proto"
             # ) != self.protocol:
@@ -445,10 +451,10 @@ class AbstractConnection(ConnectionInterface):
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
             self.send_command("HELLO", self.protocol)
-            response = self.read_response()
+            self.handshake_metadata = self.read_response()
             if (
-                response.get(b"proto") != self.protocol
-                and response.get("proto") != self.protocol
+                self.handshake_metadata.get(b"proto") != self.protocol
+                and self.handshake_metadata.get("proto") != self.protocol
             ):
                 raise ConnectionError("Invalid RESP version")
 
@@ -649,6 +655,14 @@ class AbstractConnection(ConnectionInterface):
     def get_protocol(self) -> int or str:
         return self.protocol
 
+    @property
+    def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
+        return self._handshake_metadata
+
+    @handshake_metadata.setter
+    def handshake_metadata(self, value: Union[Dict[bytes, bytes], Dict[str, str]]):
+        self._handshake_metadata = value
+
 
 class Connection(AbstractConnection):
     "Manages TCP communication to and from a Redis server"
@@ -731,6 +745,7 @@ def ensure_string(key):
 
 class CacheProxyConnection(ConnectionInterface):
     DUMMY_CACHE_VALUE = b"foo"
+    MIN_ALLOWED_VERSION = '7.4.0'
 
     def __init__(self, conn: ConnectionInterface, cache: CacheInterface):
         self.pid = os.getpid()
@@ -758,6 +773,17 @@ class CacheProxyConnection(ConnectionInterface):
 
     def connect(self):
         self._conn.connect()
+
+        server_ver = self._conn.handshake_metadata.get(b"version", None)
+        if server_ver is None:
+            raise ConnectionError("Cannot retrieve information about server version")
+
+        server_ver = server_ver.decode("utf-8")
+
+        if compare_versions(server_ver, self.MIN_ALLOWED_VERSION) == 1:
+            raise ConnectionError(
+                "Server version does not satisfies a minimal requirement for client-side caching"
+            )
 
     def on_connect(self):
         self._conn.on_connect()

@@ -13,7 +13,7 @@ from redis.cache import (
     LRUPolicy,
 )
 from redis.utils import HIREDIS_AVAILABLE
-from tests.conftest import _get_client, skip_if_resp_version
+from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
 
 
 @pytest.fixture()
@@ -40,6 +40,7 @@ def r(request):
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
+@skip_if_server_version_lt("7.4.0")
 class TestCache:
     @pytest.mark.parametrize(
         "r",
@@ -343,6 +344,7 @@ class TestCache:
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
 @skip_if_resp_version(2)
+@skip_if_server_version_lt("7.4.0")
 class TestClusterCache:
     @pytest.mark.parametrize(
         "r",
@@ -605,6 +607,7 @@ class TestClusterCache:
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
+@skip_if_server_version_lt("7.4.0")
 class TestSentinelCache:
     @pytest.mark.parametrize(
         "sentinel_setup",
@@ -729,6 +732,7 @@ class TestSentinelCache:
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
+@skip_if_server_version_lt("7.4.0")
 class TestSSLCache:
     @pytest.mark.parametrize(
         "r",
