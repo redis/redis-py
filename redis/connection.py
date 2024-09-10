@@ -9,7 +9,7 @@ from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Any, Callable, List, Optional, Type, Union, Dict
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
@@ -41,9 +41,10 @@ from .utils import (
     HIREDIS_AVAILABLE,
     HIREDIS_PACK_AVAILABLE,
     SSL_AVAILABLE,
+    compare_versions,
     format_error_message,
     get_lib_version,
-    str_if_bytes, compare_versions,
+    str_if_bytes,
 )
 
 if HIREDIS_AVAILABLE:
@@ -745,7 +746,7 @@ def ensure_string(key):
 
 class CacheProxyConnection(ConnectionInterface):
     DUMMY_CACHE_VALUE = b"foo"
-    MIN_ALLOWED_VERSION = '7.4.0'
+    MIN_ALLOWED_VERSION = "7.4.0"
 
     def __init__(self, conn: ConnectionInterface, cache: CacheInterface):
         self.pid = os.getpid()
@@ -891,6 +892,10 @@ class CacheProxyConnection(ConnectionInterface):
 
     def pack_commands(self, commands):
         return self._conn.pack_commands(commands)
+
+    @property
+    def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
+        return self._conn.handshake_metadata
 
     def _connect(self):
         self._conn._connect()
