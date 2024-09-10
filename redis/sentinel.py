@@ -240,7 +240,7 @@ class Sentinel(SentinelCommands):
         self.sentinel_kwargs = sentinel_kwargs
 
         self.sentinels = [
-            Redis(hostname, port, **self.sentinel_kwargs)
+            Redis(hostname, port, **connection_kwargs)
             for hostname, port in sentinels
         ]
         self.min_other_sentinels = min_other_sentinels
