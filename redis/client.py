@@ -1,11 +1,13 @@
 import copy
 import re
+import ssl
 import threading
 import time
 import warnings
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Type, Union, Mapping, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Mapping, Optional, Type, Union
 
+import OpenSSL
 from redis._cache import (
     DEFAULT_ALLOW_LIST,
     DEFAULT_DENY_LIST,
@@ -50,10 +52,6 @@ from redis.utils import (
     safe_str,
     str_if_bytes,
 )
-
-if TYPE_CHECKING:
-    import OpenSSL
-    import ssl
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
