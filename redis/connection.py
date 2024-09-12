@@ -783,7 +783,7 @@ class CacheProxyConnection(ConnectionInterface):
 
         if compare_versions(server_ver, self.MIN_ALLOWED_VERSION) == 1:
             raise ConnectionError(
-                "Server version does not satisfies a minimal requirement for client-side caching"  # noqa: E501
+                "To maximize compatibility with all Redis products, client-side caching is supported by Redis 7.4 or later"  # noqa: E501
             )
 
     def on_connect(self):
