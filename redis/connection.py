@@ -747,6 +747,7 @@ def ensure_string(key):
 class CacheProxyConnection(ConnectionInterface):
     DUMMY_CACHE_VALUE = b"foo"
     MIN_ALLOWED_VERSION = "7.4.0"
+    DEFAULT_SERVER_NAME = b"redis"
 
     def __init__(self, conn: ConnectionInterface, cache: CacheInterface):
         self.pid = os.getpid()
@@ -775,13 +776,17 @@ class CacheProxyConnection(ConnectionInterface):
     def connect(self):
         self._conn.connect()
 
-        server_ver = self._conn.handshake_metadata.get(b"version", None)
+        server_name = self._conn.handshake_metadata.get(b"server")
+        server_ver = self._conn.handshake_metadata.get(b"version")
         if server_ver is None:
             raise ConnectionError("Cannot retrieve information about server version")
 
         server_ver = server_ver.decode("utf-8")
 
-        if compare_versions(server_ver, self.MIN_ALLOWED_VERSION) == 1:
+        if (
+            server_name != self.DEFAULT_SERVER_NAME
+            or compare_versions(server_ver, self.MIN_ALLOWED_VERSION) == 1
+        ):
             raise ConnectionError(
                 "To maximize compatibility with all Redis products, client-side caching is supported by Redis 7.4 or later"  # noqa: E501
             )
