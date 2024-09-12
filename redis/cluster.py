@@ -2265,6 +2265,8 @@ class ClusterPipeline(RedisCluster):
         response = []
         for c in sorted(stack, key=lambda x: x.position):
             if c.args[0] in self.cluster_response_callbacks:
+                # Remove keys entry, it needs only for cache.
+                c.options.pop("keys", None)
                 c.result = self.cluster_response_callbacks[c.args[0]](
                     c.result, **c.options
                 )
