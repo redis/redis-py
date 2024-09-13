@@ -442,6 +442,7 @@ def sentinel_setup(request):
     cache = request.param.get("cache", None)
     cache_config = request.param.get("cache_config", None)
     force_master_ip = request.param.get("force_master_ip", None)
+    decode_responses = request.param.get("decode_responses", False)
     sentinel = Sentinel(
         sentinel_endpoints,
         force_master_ip=force_master_ip,
@@ -449,6 +450,7 @@ def sentinel_setup(request):
         cache=cache,
         cache_config=cache_config,
         protocol=3,
+        decode_responses=decode_responses,
         **kwargs,
     )
     yield sentinel

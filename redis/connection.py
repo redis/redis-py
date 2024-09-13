@@ -44,7 +44,7 @@ from .utils import (
     compare_versions,
     format_error_message,
     get_lib_version,
-    str_if_bytes,
+    str_if_bytes, ensure_string,
 )
 
 if HIREDIS_AVAILABLE:
@@ -735,19 +735,10 @@ class Connection(AbstractConnection):
         return f"{self.host}:{self.port}"
 
 
-def ensure_string(key):
-    if isinstance(key, bytes):
-        return key.decode("utf-8")
-    elif isinstance(key, str):
-        return key
-    else:
-        raise TypeError("Key must be either a string or bytes")
-
-
 class CacheProxyConnection(ConnectionInterface):
     DUMMY_CACHE_VALUE = b"foo"
     MIN_ALLOWED_VERSION = "7.4.0"
-    DEFAULT_SERVER_NAME = b"redis"
+    DEFAULT_SERVER_NAME = "redis"
 
     def __init__(self, conn: ConnectionInterface, cache: CacheInterface):
         self.pid = os.getpid()
@@ -776,12 +767,17 @@ class CacheProxyConnection(ConnectionInterface):
     def connect(self):
         self._conn.connect()
 
-        server_name = self._conn.handshake_metadata.get(b"server")
-        server_ver = self._conn.handshake_metadata.get(b"version")
+        server_name = self._conn.handshake_metadata.get(b"server", None)
+        if server_name is None:
+            server_name = self._conn.handshake_metadata.get("server", None)
+        server_ver = self._conn.handshake_metadata.get(b"version", None)
         if server_ver is None:
+            server_ver = self._conn.handshake_metadata.get("version", None)
+        if server_ver is None or server_ver is None:
             raise ConnectionError("Cannot retrieve information about server version")
 
-        server_ver = server_ver.decode("utf-8")
+        server_ver = ensure_string(server_ver)
+        server_name = ensure_string(server_name)
 
         if (
             server_name != self.DEFAULT_SERVER_NAME

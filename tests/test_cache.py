@@ -24,6 +24,7 @@ def r(request):
     protocol = request.param.get("protocol", 3)
     ssl = request.param.get("ssl", False)
     single_connection_client = request.param.get("single_connection_client", False)
+    decode_responses = request.param.get("decode_responses", False)
     with _get_client(
         redis.Redis,
         request,
@@ -32,6 +33,7 @@ def r(request):
         single_connection_client=single_connection_client,
         cache=cache,
         cache_config=cache_config,
+        decode_responses=decode_responses,
         **kwargs,
     ) as client:
         yield client
@@ -53,8 +55,13 @@ class TestCache:
                 "cache": DefaultCache(CacheConfig(max_size=5)),
                 "single_connection_client": False,
             },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+                "decode_responses": True,
+            },
         ],
-        ids=["single", "pool"],
+        ids=["single", "pool", "decoded"],
         indirect=True,
     )
     @pytest.mark.onlynoncluster
@@ -63,20 +70,20 @@ class TestCache:
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
-        assert r.get("foo") == b"bar"
+        assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
+            in [b"bar", "bar"]
         )
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
         # Retrieves a new value from server and cache it
-        assert r.get("foo") == b"barbar"
+        assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"barbar"
+            in [b"barbar", "barbar"]
         )
 
     @pytest.mark.parametrize(
@@ -90,8 +97,13 @@ class TestCache:
                 "cache_config": CacheConfig(max_size=128),
                 "single_connection_client": False,
             },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": False,
+                "decode_responses": True,
+            },
         ],
-        ids=["single", "pool"],
+        ids=["single", "pool", "decoded"],
         indirect=True,
     )
     @pytest.mark.onlynoncluster
@@ -103,20 +115,20 @@ class TestCache:
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
-        assert r.get("foo") == b"bar"
+        assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
+            in [b"bar", "bar"]
         )
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
         # Retrieves a new value from server and cache it
-        assert r.get("foo") == b"barbar"
+        assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"barbar"
+            in [b"barbar", "barbar"]
         )
 
     @pytest.mark.parametrize(
@@ -351,7 +363,11 @@ class TestClusterCache:
         [
             {
                 "cache": DefaultCache(CacheConfig(max_size=128)),
-            }
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "decode_responses": True,
+            },
         ],
         indirect=True,
     )
@@ -361,20 +377,20 @@ class TestClusterCache:
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
-        assert r.get("foo") == b"bar"
+        assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
+            in [b"bar", "bar"]
         )
         # change key in redis (cause invalidation)
         r.set("foo", "barbar")
         # Retrieves a new value from server and cache it
-        assert r.get("foo") == b"barbar"
+        assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"barbar"
+            in [b"barbar", "barbar"]
         )
         # Make sure that cache is shared between nodes.
         assert (
@@ -387,6 +403,10 @@ class TestClusterCache:
             {
                 "cache_config": CacheConfig(max_size=128),
             },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "decode_responses": True,
+            },
         ],
         indirect=True,
     )
@@ -398,20 +418,20 @@ class TestClusterCache:
         # add key to redis
         assert r.set("foo", "bar")
         # get key from redis and save in local cache
-        assert r.get("foo") == b"bar"
+        assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
+            in [b"bar", "bar"]
         )
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
         # Retrieves a new value from server and cache it
-        assert r.get("foo") == b"barbar"
+        assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"barbar"
+            in [b"barbar", "barbar"]
         )
 
     @pytest.mark.parametrize(
@@ -615,6 +635,11 @@ class TestSentinelCache:
             {
                 "cache": DefaultCache(CacheConfig(max_size=128)),
                 "force_master_ip": "localhost",
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "force_master_ip": "localhost",
+                "decode_responses": True,
             }
         ],
         indirect=True,
@@ -624,20 +649,20 @@ class TestSentinelCache:
         cache = master.get_cache()
         master.set("foo", "bar")
         # get key from redis and save in local cache_data
-        assert master.get("foo") == b"bar"
+        assert master.get("foo") in [b"bar", "bar"]
         # get key from local cache_data
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
+            in [b"bar", "bar"]
         )
         # change key in redis (cause invalidation)
         master.set("foo", "barbar")
         # get key from redis
-        assert master.get("foo") == b"barbar"
+        assert master.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"barbar"
+            in [b"barbar", "barbar"]
         )
 
     @pytest.mark.parametrize(
@@ -645,6 +670,10 @@ class TestSentinelCache:
         [
             {
                 "cache_config": CacheConfig(max_size=128),
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "decode_responses": True,
             },
         ],
         indirect=True,
@@ -656,20 +685,20 @@ class TestSentinelCache:
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache_data
-        assert r.get("foo") == b"bar"
+        assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache_data
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
+            in [b"bar", "bar"]
         )
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
         # Retrieves a new value from server and cache_data it
-        assert r.get("foo") == b"barbar"
+        assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"barbar"
+            in [b"barbar", "barbar"]
         )
 
     @pytest.mark.parametrize(
@@ -731,7 +760,7 @@ class TestSentinelCache:
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
-@skip_if_resp_version(2)
+#@skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
 class TestSSLCache:
     @pytest.mark.parametrize(
@@ -740,6 +769,11 @@ class TestSSLCache:
             {
                 "cache": DefaultCache(CacheConfig(max_size=128)),
                 "ssl": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "ssl": True,
+                "decode_responses": True,
             }
         ],
         indirect=True,
@@ -750,11 +784,11 @@ class TestSSLCache:
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache_data
-        assert r.get("foo") == b"bar"
+        assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache_data
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
+            in [b"bar", "bar"]
         )
         # change key in redis (cause invalidation)
         assert r2.set("foo", "barbar")
@@ -762,11 +796,11 @@ class TestSSLCache:
         # between data appears in socket buffer
         time.sleep(0.1)
         # Retrieves a new value from server and cache_data it
-        assert r.get("foo") == b"barbar"
+        assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"barbar"
+            in [b"barbar", "barbar"]
         )
 
     @pytest.mark.parametrize(
@@ -775,6 +809,11 @@ class TestSSLCache:
             {
                 "cache_config": CacheConfig(max_size=128),
                 "ssl": True,
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "ssl": True,
+                "decode_responses": True,
             },
         ],
         indirect=True,
@@ -786,11 +825,11 @@ class TestSSLCache:
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache_data
-        assert r.get("foo") == b"bar"
+        assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache_data
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
+            in [b"bar", "bar"]
         )
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
@@ -798,11 +837,11 @@ class TestSSLCache:
         # between data appears in socket buffer
         time.sleep(0.1)
         # Retrieves a new value from server and cache_data it
-        assert r.get("foo") == b"barbar"
+        assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
         assert (
             cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"barbar"
+            in [b"barbar", "barbar"]
         )
 
     @pytest.mark.parametrize(
