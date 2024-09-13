@@ -42,9 +42,10 @@ from .utils import (
     HIREDIS_PACK_AVAILABLE,
     SSL_AVAILABLE,
     compare_versions,
+    ensure_string,
     format_error_message,
     get_lib_version,
-    str_if_bytes, ensure_string,
+    str_if_bytes,
 )
 
 if HIREDIS_AVAILABLE:
