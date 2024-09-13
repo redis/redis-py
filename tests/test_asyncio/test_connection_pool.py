@@ -1,5 +1,6 @@
 import asyncio
 import re
+from itertools import chain
 
 import pytest
 import pytest_asyncio
@@ -35,7 +36,7 @@ class TestRedisAutoReleaseConnectionPool:
     def has_no_connected_connections(pool: redis.ConnectionPool):
         return not any(
             x.is_connected
-            for x in pool._available_connections + list(pool._in_use_connections)
+            for x in chain(pool._available_connections, pool._in_use_connections)
         )
 
     async def test_auto_disconnect_redis_created_pool(self, r: redis.Redis):
@@ -56,7 +57,7 @@ class TestRedisAutoReleaseConnectionPool:
         assert r2.connection_pool._in_use_connections == {new_conn}
         assert new_conn.is_connected
         assert len(r2.connection_pool._available_connections) == 1
-        assert r2.connection_pool._available_connections[0].is_connected
+        assert list(r2.connection_pool._available_connections)[0].is_connected
 
     async def test_auto_release_override_true_manual_created_pool(self, r: redis.Redis):
         assert r.auto_close_connection_pool is True, "This is from the class fixture"
@@ -84,7 +85,7 @@ class TestRedisAutoReleaseConnectionPool:
         await r.aclose(close_connection_pool=False)
         assert not self.has_no_connected_connections(r.connection_pool)
         assert r.connection_pool._in_use_connections == {new_conn}
-        assert r.connection_pool._available_connections[0].is_connected
+        assert list(r.connection_pool._available_connections)[0].is_connected
         assert self.get_total_connected_connections(r.connection_pool) == 2
 
 
@@ -93,6 +94,8 @@ class DummyConnection(Connection):
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        self.host = kwargs.get("host", None)
+        self.port = kwargs.get("port", None)
 
     def repr_pieces(self):
         return [("id", id(self)), ("kwargs", self.kwargs)]
@@ -578,7 +581,7 @@ class TestConnection:
             await bad_connection.info()
         pool = bad_connection.connection_pool
         assert len(pool._available_connections) == 1
-        assert not pool._available_connections[0]._reader
+        assert not list(pool._available_connections)[0]._reader
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
@@ -609,7 +612,7 @@ class TestConnection:
         pool = r.connection_pool
         assert not pipe.connection
         assert len(pool._available_connections) == 1
-        assert not pool._available_connections[0]._reader
+        assert not list(pool._available_connections)[0]._reader
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
@@ -626,7 +629,7 @@ class TestConnection:
         pool = r.connection_pool
         assert not pipe.connection
         assert len(pool._available_connections) == 1
-        assert not pool._available_connections[0]._reader
+        assert not list(pool._available_connections)[0]._reader
 
     @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
