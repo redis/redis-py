@@ -816,8 +816,10 @@ class TestUnitDefaultCache:
 
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key,
+                cache_value=b"val",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.get(cache_key).cache_value == b"val"
@@ -830,8 +832,10 @@ class TestUnitDefaultCache:
 
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key,
+                cache_value=b"val",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.get(cache_key).cache_value == b"val"
@@ -854,8 +858,10 @@ class TestUnitDefaultCache:
 
         assert not cache.set(
             CacheEntry(
-                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key,
+                cache_value=b"val",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
 
@@ -868,20 +874,26 @@ class TestUnitDefaultCache:
         # Set 3 different keys
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key2,
+                cache_value=b"bar1",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key3,
+                cache_value=b"bar2",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
 
@@ -894,8 +906,10 @@ class TestUnitDefaultCache:
         cache_key4 = CacheKey(command="GET", redis_keys=("foo3",))
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key4, cache_value=b"bar3", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key4,
+                cache_value=b"bar3",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
 
@@ -911,8 +925,10 @@ class TestUnitDefaultCache:
 
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key,
+                cache_value=b"val",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.get(cache_key).cache_value == b"val"
@@ -926,7 +942,7 @@ class TestUnitDefaultCache:
                 cache_key=cache_key,
                 cache_value=b"new_val",
                 status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                connection_ref=mock_connection,
             )
         )
 
@@ -944,20 +960,26 @@ class TestUnitDefaultCache:
         # Set 3 different keys
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key2,
+                cache_value=b"bar1",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key3,
+                cache_value=b"bar2",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
 
@@ -980,26 +1002,34 @@ class TestUnitDefaultCache:
         # Set 3 different keys
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key2,
+                cache_value=b"bar1",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key3,
+                cache_value=b"bar2",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key4, cache_value=b"bar3", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key4,
+                cache_value=b"bar3",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
 
@@ -1017,20 +1047,26 @@ class TestUnitDefaultCache:
         # Set 3 different keys
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key2,
+                cache_value=b"bar1",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key3,
+                cache_value=b"bar2",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
 
@@ -1054,14 +1090,18 @@ class TestUnitLRUPolicy:
 
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key2,
+                cache_value=b"foo",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
 
@@ -1079,20 +1119,26 @@ class TestUnitLRUPolicy:
 
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key2,
+                cache_value=b"foo",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key3, cache_value=b"baz", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key3,
+                cache_value=b"baz",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
 
@@ -1114,22 +1160,28 @@ class TestUnitLRUPolicy:
 
         cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key2,
+                cache_value=b"foo",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
 
         assert cache.get_collection().popitem(last=True)[0] == cache_key2
         cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection
+                cache_key=cache_key2,
+                cache_value=b"foo",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
 
