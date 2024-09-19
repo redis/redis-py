@@ -428,7 +428,8 @@ class TestUnitCacheProxyConnection:
 
         cache.set(
             CacheEntry(
-                cache_key=cache_key, cache_value=b"bar", status=CacheEntryStatus.VALID
+                cache_key=cache_key, cache_value=b"bar", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.get(cache_key).cache_value == b"bar"
@@ -438,7 +439,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.host = "mock"
         mock_connection.port = "mock"
 
-        proxy_connection = CacheProxyConnection(mock_connection, cache)
+        proxy_connection = CacheProxyConnection(mock_connection, cache, threading.Lock())
         proxy_connection.disconnect()
 
         assert len(cache.get_collection()) == 0
@@ -456,28 +457,32 @@ class TestUnitCacheProxyConnection:
                 cache_key=CacheKey(command="GET", redis_keys=("foo",)),
                 cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
                 status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=mock_connection
             ),
             CacheEntry(
                 cache_key=CacheKey(command="GET", redis_keys=("foo",)),
                 cache_value=b"bar",
                 status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             ),
             CacheEntry(
                 cache_key=CacheKey(command="GET", redis_keys=("foo",)),
                 cache_value=b"bar",
                 status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             ),
             CacheEntry(
                 cache_key=CacheKey(command="GET", redis_keys=("foo",)),
                 cache_value=b"bar",
                 status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             ),
         ]
         mock_connection.send_command.return_value = Any
         mock_connection.read_response.return_value = b"bar"
         mock_connection.can_read.return_value = False
 
-        proxy_connection = CacheProxyConnection(mock_connection, mock_cache)
+        proxy_connection = CacheProxyConnection(mock_connection, mock_cache, threading.Lock())
         proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
         assert proxy_connection.read_response() == b"bar"
         assert proxy_connection.read_response() == b"bar"
@@ -490,6 +495,7 @@ class TestUnitCacheProxyConnection:
                         cache_key=CacheKey(command="GET", redis_keys=("foo",)),
                         cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
                         status=CacheEntryStatus.IN_PROGRESS,
+                        connection_ref=mock_connection
                     )
                 ),
                 call(
@@ -497,6 +503,7 @@ class TestUnitCacheProxyConnection:
                         cache_key=CacheKey(command="GET", redis_keys=("foo",)),
                         cache_value=b"bar",
                         status=CacheEntryStatus.VALID,
+                        connection_ref=mock_connection
                     )
                 ),
             ]
