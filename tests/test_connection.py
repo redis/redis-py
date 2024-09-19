@@ -450,7 +450,8 @@ class TestUnitCacheProxyConnection:
         assert len(cache.get_collection()) == 0
 
     @pytest.mark.skipif(
-        platform.python_implementation() == "PyPy", reason="Pypy doesn't support side_effect"
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
     )
     def test_read_response_returns_cached_reply(self, mock_cache, mock_connection):
         mock_connection.retry = "mock"
@@ -531,7 +532,8 @@ class TestUnitCacheProxyConnection:
         )
 
     @pytest.mark.skipif(
-        platform.python_implementation() == "PyPy", reason="Pypy doesn't support side_effect"
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
     )
     def test_triggers_invalidation_processing_on_another_connection(
         self, mock_cache, mock_connection
