@@ -98,10 +98,4 @@ Enable caching with custom cache implementation:
 
 CacheImpl should implement a `CacheInterface` specified in `redis.cache` package.
 
-Explicit disconnect
-
-It's important to call `close()` to properly close the connection to server.
-For caching purposes, we're using a separate thread that performs health checks with configurable interval and it relies on
-`close()` to be called before the shutdown.
-
 More robust documentation soon will be available at `official Redis documentation <https://redis.io/docs/latest/>`_.

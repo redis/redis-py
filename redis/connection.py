@@ -35,7 +35,6 @@ from .exceptions import (
     TimeoutError,
 )
 from .retry import Retry
-from .scheduler import Scheduler
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
     HIREDIS_AVAILABLE,
@@ -741,12 +740,18 @@ class CacheProxyConnection(ConnectionInterface):
     MIN_ALLOWED_VERSION = "7.4.0"
     DEFAULT_SERVER_NAME = "redis"
 
-    def __init__(self, conn: ConnectionInterface, cache: CacheInterface):
+    def __init__(
+        self,
+        conn: ConnectionInterface,
+        cache: CacheInterface,
+        pool_lock: threading.Lock,
+    ):
         self.pid = os.getpid()
         self._conn = conn
         self.retry = self._conn.retry
         self.host = self._conn.host
         self.port = self._conn.port
+        self._pool_lock = pool_lock
         self._cache = cache
         self._cache_lock = threading.Lock()
         self._current_command_cache_key = None
@@ -824,9 +829,17 @@ class CacheProxyConnection(ConnectionInterface):
         )
 
         with self._cache_lock:
-            # If current command reply already cached
-            # prevent sending data over socket.
+            # We have to trigger invalidation processing in case if
+            # it was cached by another connection to avoid
+            # queueing invalidations in stale connections.
             if self._cache.get(self._current_command_cache_key):
+                entry = self._cache.get(self._current_command_cache_key)
+
+                if entry.connection_ref != self._conn:
+                    with self._pool_lock:
+                        while entry.connection_ref.can_read():
+                            entry.connection_ref.read_response(push_request=True)
+
                 return
 
             # Set temporary entry value to prevent
@@ -836,6 +849,7 @@ class CacheProxyConnection(ConnectionInterface):
                     cache_key=self._current_command_cache_key,
                     cache_value=self.DUMMY_CACHE_VALUE,
                     status=CacheEntryStatus.IN_PROGRESS,
+                    connection_ref=self._conn,
                 )
             )
 
@@ -857,7 +871,9 @@ class CacheProxyConnection(ConnectionInterface):
                 and self._cache.get(self._current_command_cache_key).status
                 != CacheEntryStatus.IN_PROGRESS
             ):
-                return self._cache.get(self._current_command_cache_key).cache_value
+                return copy.deepcopy(
+                    self._cache.get(self._current_command_cache_key).cache_value
+                )
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
@@ -879,13 +895,9 @@ class CacheProxyConnection(ConnectionInterface):
             # Cache only responses that still valid
             # and wasn't invalidated by another connection in meantime.
             if cache_entry is not None:
-                self._cache.set(
-                    CacheEntry(
-                        cache_key=self._current_command_cache_key,
-                        cache_value=response,
-                        status=CacheEntryStatus.VALID,
-                    )
-                )
+                cache_entry.status = CacheEntryStatus.VALID
+                cache_entry.cache_value = response
+                self._cache.set(cache_entry)
 
         return response
 
@@ -1284,9 +1296,6 @@ class ConnectionPool:
         self.max_connections = max_connections
         self.cache = None
         self._cache_factory = cache_factory
-        self._scheduler = None
-        self._hc_cancel_event = None
-        self._hc_thread = None
 
         if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
             if connection_kwargs.get("protocol") not in [3, "3"]:
@@ -1307,8 +1316,6 @@ class ConnectionPool:
                         self.connection_kwargs.get("cache_config")
                     ).get_cache()
 
-            self._scheduler = Scheduler()
-
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
 
@@ -1322,7 +1329,6 @@ class ConnectionPool:
         # release the lock.
         self._fork_lock = threading.Lock()
         self.reset()
-        self.run_scheduled_healthcheck()
 
     def __repr__(self) -> (str, str):
         return (
@@ -1452,7 +1458,7 @@ class ConnectionPool:
 
         if self.cache is not None:
             return CacheProxyConnection(
-                self.connection_class(**self.connection_kwargs), self.cache
+                self.connection_class(**self.connection_kwargs), self.cache, self._lock
             )
 
         return self.connection_class(**self.connection_kwargs)
@@ -1501,8 +1507,6 @@ class ConnectionPool:
             for connection in connections:
                 connection.disconnect()
 
-            self.stop_scheduled_healthcheck()
-
     def close(self) -> None:
         """Close the pool, disconnecting all connections"""
         self.disconnect()
@@ -1513,33 +1517,6 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
-
-    def run_scheduled_healthcheck(self) -> None:
-        # Run scheduled healthcheck to avoid stale invalidations in idle connections.
-        if self.cache is not None and self._scheduler is not None:
-            self._hc_cancel_event = threading.Event()
-            hc_interval = self.cache.get_config().get_health_check_interval()
-            self._hc_thread = self._scheduler.run_with_interval(
-                self._perform_health_check, hc_interval, self._hc_cancel_event
-            )
-
-    def stop_scheduled_healthcheck(self) -> None:
-        # Send an event to stop scheduled healthcheck execution.
-        if self._hc_cancel_event is not None and not self._hc_cancel_event.is_set():
-            self._hc_cancel_event.set()
-
-        # Joins healthcheck thread on disconnect.
-        if self._hc_thread is not None and not self._hc_thread.is_alive():
-            self._hc_thread.join()
-
-    def _perform_health_check(self, done: threading.Event) -> None:
-        self._checkpid()
-        with self._lock:
-            while self._available_connections:
-                conn = self._available_connections.pop()
-                conn.send_command("PING")
-                conn.read_response()
-            done.set()
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -1620,7 +1597,7 @@ class BlockingConnectionPool(ConnectionPool):
         "Make a fresh connection."
         if self.cache is not None:
             connection = CacheProxyConnection(
-                self.connection_class(**self.connection_kwargs), self.cache
+                self.connection_class(**self.connection_kwargs), self.cache, self._lock
             )
         else:
             connection = self.connection_class(**self.connection_kwargs)
@@ -1705,5 +1682,3 @@ class BlockingConnectionPool(ConnectionPool):
         self._checkpid()
         for connection in self._connections:
             connection.disconnect()
-
-        self.stop_scheduled_healthcheck()

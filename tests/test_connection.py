@@ -1,5 +1,8 @@
+import copy
 import socket
+import threading
 import types
+import weakref
 from typing import Any
 from unittest import mock
 from unittest.mock import call, patch
@@ -510,3 +513,32 @@ class TestUnitCacheProxyConnection:
                 call(CacheKey(command="GET", redis_keys=("foo",))),
             ]
         )
+
+    def test_triggers_invalidation_processing_on_another_connection(
+        self, mock_cache, mock_connection
+    ):
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+
+        another_conn = copy.deepcopy(mock_connection)
+        another_conn.can_read.side_effect = [True, False]
+        another_conn.read_response.return_value = None
+        cache_entry = CacheEntry(
+            cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+            cache_value=b"bar",
+            status=CacheEntryStatus.VALID,
+            connection_ref=another_conn,
+        )
+        mock_cache.is_cachable.return_value = True
+        mock_cache.get.return_value = cache_entry
+        mock_connection.can_read.return_value = False
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, mock_cache, threading.Lock()
+        )
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
+
+        assert proxy_connection.read_response() == b"bar"
+        assert another_conn.can_read.call_count == 2
+        another_conn.read_response.assert_called_once()

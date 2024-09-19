@@ -1,4 +1,5 @@
 import copy
+import weakref
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from enum import Enum
@@ -32,14 +33,21 @@ class CacheKey:
 
 class CacheEntry:
     def __init__(
-        self, cache_key: CacheKey, cache_value: bytes, status: CacheEntryStatus
+        self,
+        cache_key: CacheKey,
+        cache_value: bytes,
+        status: CacheEntryStatus,
+        connection_ref,
     ):
         self.cache_key = cache_key
         self.cache_value = cache_value
         self.status = status
+        self.connection_ref = connection_ref
 
     def __hash__(self):
-        return hash((self.cache_key, self.cache_value, self.status))
+        return hash(
+            (self.cache_key, self.cache_value, self.status, self.connection_ref)
+        )
 
     def __eq__(self, other):
         return hash(self) == hash(other)
@@ -84,10 +92,6 @@ class CacheConfigurationInterface(ABC):
 
     @abstractmethod
     def get_eviction_policy(self):
-        pass
-
-    @abstractmethod
-    def get_health_check_interval(self) -> float:
         pass
 
     @abstractmethod
@@ -182,7 +186,7 @@ class DefaultCache(CacheInterface):
             return None
 
         self._eviction_policy.touch(key)
-        return copy.deepcopy(entry)
+        return entry
 
     def delete_by_cache_keys(self, cache_keys: List[CacheKey]) -> List[bool]:
         response = []
@@ -360,12 +364,10 @@ class CacheConfig(CacheConfigurationInterface):
         max_size: int = DEFAULT_MAX_SIZE,
         cache_class: Any = DEFAULT_CACHE_CLASS,
         eviction_policy: EvictionPolicy = DEFAULT_EVICTION_POLICY,
-        health_check_interval: float = 2.0,
     ):
         self._cache_class = cache_class
         self._max_size = max_size
         self._eviction_policy = eviction_policy
-        self._health_check_interval = health_check_interval
 
     def get_cache_class(self):
         return self._cache_class
@@ -375,9 +377,6 @@ class CacheConfig(CacheConfigurationInterface):
 
     def get_eviction_policy(self) -> EvictionPolicy:
         return self._eviction_policy
-
-    def get_health_check_interval(self) -> float:
-        return self._health_check_interval
 
     def is_exceeds_max_size(self, count: int) -> bool:
         return count > self._max_size

@@ -135,35 +135,6 @@ class TestCache:
         "r",
         [
             {
-                "cache_config": CacheConfig(max_size=128, health_check_interval=1.0),
-                "single_connection_client": False,
-            },
-        ],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
-    def test_health_check_invalidate_cache(self, r):
-        cache = r.get_cache()
-        # add key to redis
-        r.set("foo", "bar")
-        # get key from redis and save in local cache
-        assert r.get("foo") == b"bar"
-        # get key from local cache
-        assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
-        )
-        # change key in redis (cause invalidation)
-        r.set("foo", "barbar")
-        # Wait for health check
-        time.sleep(1.0)
-        # Make sure that value was invalidated
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))) is None
-
-    @pytest.mark.parametrize(
-        "r",
-        [
-            {
                 "cache_config": CacheConfig(max_size=128),
                 "single_connection_client": True,
             },
@@ -444,34 +415,6 @@ class TestClusterCache:
         indirect=True,
     )
     @pytest.mark.onlycluster
-    def test_health_check_invalidate_cache(self, r, r2):
-        cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
-        # add key to redis
-        r.set("foo", "bar")
-        # get key from redis and save in local cache
-        assert r.get("foo") == b"bar"
-        # get key from local cache
-        assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
-        )
-        # change key in redis (cause invalidation)
-        r2.set("foo", "barbar")
-        # Wait for health check
-        time.sleep(2)
-        # Make sure that value was invalidated
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))) is None
-
-    @pytest.mark.parametrize(
-        "r",
-        [
-            {
-                "cache_config": CacheConfig(max_size=128),
-            },
-        ],
-        indirect=True,
-    )
-    @pytest.mark.onlycluster
     def test_cache_clears_on_disconnect(self, r, r2):
         cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
         # add key to redis
@@ -705,35 +648,6 @@ class TestSentinelCache:
         "sentinel_setup",
         [
             {
-                "cache_config": CacheConfig(max_size=128, health_check_interval=1.0),
-                "force_master_ip": "localhost",
-            }
-        ],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
-    def test_health_check_invalidate_cache(self, master, cache):
-        cache = master.get_cache()
-        # add key to redis
-        master.set("foo", "bar")
-        # get key from redis and save in local cache_data
-        assert master.get("foo") == b"bar"
-        # get key from local cache_data
-        assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
-        )
-        # change key in redis (cause invalidation)
-        master.set("foo", "barbar")
-        # Wait for health check
-        time.sleep(1.0)
-        # Make sure that value was invalidated
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))) is None
-
-    @pytest.mark.parametrize(
-        "sentinel_setup",
-        [
-            {
                 "cache_config": CacheConfig(max_size=128),
                 "force_master_ip": "localhost",
             }
@@ -760,7 +674,7 @@ class TestSentinelCache:
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
-# @skip_if_resp_version(2)
+@skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
 class TestSSLCache:
     @pytest.mark.parametrize(
@@ -843,35 +757,6 @@ class TestSSLCache:
             b"barbar",
             "barbar",
         ]
-
-    @pytest.mark.parametrize(
-        "r",
-        [
-            {
-                "cache_config": CacheConfig(max_size=128, health_check_interval=1.0),
-                "ssl": True,
-            }
-        ],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
-    def test_health_check_invalidate_cache(self, r, r2):
-        cache = r.get_cache()
-        # add key to redis
-        r.set("foo", "bar")
-        # get key from redis and save in local cache_data
-        assert r.get("foo") == b"bar"
-        # get key from local cache_data
-        assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
-            == b"bar"
-        )
-        # change key in redis (cause invalidation)
-        r2.set("foo", "barbar")
-        # Wait for health check
-        time.sleep(1.0)
-        # Make sure that value was invalidated
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))) is None
 
     @pytest.mark.parametrize(
         "r",
