@@ -2,7 +2,6 @@ import copy
 import socket
 import threading
 import types
-import weakref
 from typing import Any
 from unittest import mock
 from unittest.mock import call, patch

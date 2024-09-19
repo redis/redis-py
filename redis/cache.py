@@ -1,5 +1,3 @@
-import copy
-import weakref
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from enum import Enum
