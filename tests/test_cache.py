@@ -811,12 +811,13 @@ class TestUnitDefaultCache:
     @pytest.mark.parametrize(
         "cache_key", [{"command": "GET", "redis_keys": ("bar",)}], indirect=True
     )
-    def test_set_non_existing_cache_key(self, cache_key):
+    def test_set_non_existing_cache_key(self, cache_key, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID
+                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.get(cache_key).cache_value == b"val"
@@ -824,12 +825,13 @@ class TestUnitDefaultCache:
     @pytest.mark.parametrize(
         "cache_key", [{"command": "GET", "redis_keys": ("bar",)}], indirect=True
     )
-    def test_set_updates_existing_cache_key(self, cache_key):
+    def test_set_updates_existing_cache_key(self, cache_key, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID
+                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.get(cache_key).cache_value == b"val"
@@ -839,6 +841,7 @@ class TestUnitDefaultCache:
                 cache_key=cache_key,
                 cache_value=b"new_val",
                 status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
             )
         )
         assert cache.get(cache_key).cache_value == b"new_val"
@@ -846,16 +849,17 @@ class TestUnitDefaultCache:
     @pytest.mark.parametrize(
         "cache_key", [{"command": "HRANDFIELD", "redis_keys": ("bar",)}], indirect=True
     )
-    def test_set_does_not_store_not_allowed_key(self, cache_key):
+    def test_set_does_not_store_not_allowed_key(self, cache_key, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
         assert not cache.set(
             CacheEntry(
-                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID
+                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
 
-    def test_set_evict_lru_cache_key_on_reaching_max_size(self):
+    def test_set_evict_lru_cache_key_on_reaching_max_size(self, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=3))
         cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
         cache_key2 = CacheKey(command="GET", redis_keys=("foo1",))
@@ -864,17 +868,20 @@ class TestUnitDefaultCache:
         # Set 3 different keys
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID
+                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID
+                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID
+                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
 
@@ -887,7 +894,8 @@ class TestUnitDefaultCache:
         cache_key4 = CacheKey(command="GET", redis_keys=("foo3",))
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key4, cache_value=b"bar3", status=CacheEntryStatus.VALID
+                cache_key=cache_key4, cache_value=b"bar3", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
 
@@ -898,12 +906,13 @@ class TestUnitDefaultCache:
     @pytest.mark.parametrize(
         "cache_key", [{"command": "GET", "redis_keys": ("bar",)}], indirect=True
     )
-    def test_get_return_correct_value(self, cache_key):
+    def test_get_return_correct_value(self, cache_key, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID
+                cache_key=cache_key, cache_value=b"val", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.get(cache_key).cache_value == b"val"
@@ -917,13 +926,14 @@ class TestUnitDefaultCache:
                 cache_key=cache_key,
                 cache_value=b"new_val",
                 status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
 
         # Make sure that result is immutable.
         assert result.cache_value != cache.get(cache_key).cache_value
 
-    def test_delete_by_cache_keys_removes_associated_entries(self):
+    def test_delete_by_cache_keys_removes_associated_entries(self, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
         cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
@@ -934,17 +944,20 @@ class TestUnitDefaultCache:
         # Set 3 different keys
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID
+                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID
+                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID
+                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
 
@@ -956,7 +969,7 @@ class TestUnitDefaultCache:
         assert len(cache.get_collection()) == 1
         assert cache.get(cache_key3).cache_value == b"bar2"
 
-    def test_delete_by_redis_keys_removes_associated_entries(self):
+    def test_delete_by_redis_keys_removes_associated_entries(self, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
         cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
@@ -967,22 +980,26 @@ class TestUnitDefaultCache:
         # Set 3 different keys
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID
+                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID
+                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID
+                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key4, cache_value=b"bar3", status=CacheEntryStatus.VALID
+                cache_key=cache_key4, cache_value=b"bar3", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
 
@@ -990,7 +1007,7 @@ class TestUnitDefaultCache:
         assert len(cache.get_collection()) == 1
         assert cache.get(cache_key4).cache_value == b"bar3"
 
-    def test_flush(self):
+    def test_flush(self, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
         cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
@@ -1000,17 +1017,20 @@ class TestUnitDefaultCache:
         # Set 3 different keys
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID
+                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID
+                cache_key=cache_key2, cache_value=b"bar1", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID
+                cache_key=cache_key3, cache_value=b"bar2", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
 
@@ -1023,7 +1043,7 @@ class TestUnitLRUPolicy:
         policy = LRUPolicy()
         assert policy.type == EvictionPolicyType.time_based
 
-    def test_evict_next(self):
+    def test_evict_next(self, mock_connection):
         cache = DefaultCache(
             CacheConfig(max_size=5, eviction_policy=EvictionPolicy.LRU)
         )
@@ -1034,19 +1054,21 @@ class TestUnitLRUPolicy:
 
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID
+                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID
+                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
 
         assert policy.evict_next() == cache_key1
         assert cache.get(cache_key1) is None
 
-    def test_evict_many(self):
+    def test_evict_many(self, mock_connection):
         cache = DefaultCache(
             CacheConfig(max_size=5, eviction_policy=EvictionPolicy.LRU)
         )
@@ -1057,17 +1079,20 @@ class TestUnitLRUPolicy:
 
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID
+                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID
+                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         assert cache.set(
             CacheEntry(
-                cache_key=cache_key3, cache_value=b"baz", status=CacheEntryStatus.VALID
+                cache_key=cache_key3, cache_value=b"baz", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
 
@@ -1078,7 +1103,7 @@ class TestUnitLRUPolicy:
         with pytest.raises(ValueError, match="Evictions count is above cache size"):
             policy.evict_many(99)
 
-    def test_touch(self):
+    def test_touch(self, mock_connection):
         cache = DefaultCache(
             CacheConfig(max_size=5, eviction_policy=EvictionPolicy.LRU)
         )
@@ -1089,19 +1114,22 @@ class TestUnitLRUPolicy:
 
         cache.set(
             CacheEntry(
-                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID
+                cache_key=cache_key1, cache_value=b"bar", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
         cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID
+                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
 
         assert cache.get_collection().popitem(last=True)[0] == cache_key2
         cache.set(
             CacheEntry(
-                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID
+                cache_key=cache_key2, cache_value=b"foo", status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection
             )
         )
 
