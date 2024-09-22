@@ -321,6 +321,11 @@ class TestConnectionPoolURLParsing:
         assert pool.connection_class == redis.Connection
         assert pool.connection_kwargs == {"host": "localhost", "a": "1", "b": "2"}
 
+    def test_ismaster_querystring(self):
+        pool = redis.ConnectionPool.from_url("redis://localhost?1&ismaster=0")
+        assert pool.connection_class == redis.Connection
+        assert pool.connection_kwargs == {"host": "localhost", "db": 1,"ismaster": False}
+
     def test_calling_from_subclass_returns_correct_instance(self):
         pool = redis.BlockingConnectionPool.from_url("redis://localhost")
         assert isinstance(pool, redis.BlockingConnectionPool)
