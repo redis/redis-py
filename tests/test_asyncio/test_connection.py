@@ -96,7 +96,6 @@ async def test_single_connection():
 
 
 @skip_if_server_version_lt("4.0.0")
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 async def test_loading_external_modules(r):
     def inner():
