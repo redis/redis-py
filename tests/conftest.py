@@ -18,7 +18,6 @@ from redis.retry import Retry
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
 default_protocol = "2"
-default_redismod_url = "redis://localhost:6479"
 
 # default ssl client ignores verification for the purpose of testing
 default_redis_ssl_url = "rediss://localhost:6666"
@@ -159,6 +158,7 @@ def pytest_sessionstart(session):
         arch_bits = info["arch_bits"]
         cluster_enabled = info["cluster_enabled"]
         enterprise = info["enterprise"]
+        modules = info["modules"]
     except redis.ConnectionError:
         # provide optimistic defaults
         info = {}
@@ -166,22 +166,14 @@ def pytest_sessionstart(session):
         arch_bits = 64
         cluster_enabled = False
         enterprise = False
+        modules = {}
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
     REDIS_INFO["cluster_enabled"] = cluster_enabled
     REDIS_INFO["enterprise"] = enterprise
+    REDIS_INFO["modules"] = modules
     # store REDIS_INFO in config so that it is available from "condition strings"
     session.config.REDIS_INFO = REDIS_INFO
-
-    # module info
-    stack_url = redis_url
-    if stack_url == default_redis_url:
-        stack_url = default_redismod_url
-    try:
-        stack_info = _get_info(stack_url)
-        REDIS_INFO["modules"] = stack_info["modules"]
-    except (KeyError, redis.exceptions.ConnectionError):
-        pass
 
     if cluster_enabled:
         cluster_nodes = session.config.getoption("--redis-cluster-nodes")
@@ -366,21 +358,6 @@ def cluster_teardown(client, flushdb):
 @pytest.fixture()
 def r(request):
     with _get_client(redis.Redis, request) as client:
-        yield client
-
-
-@pytest.fixture()
-def stack_url(request):
-    stack_url = request.config.getoption("--redis-url", default=default_redismod_url)
-    if stack_url == default_redis_url:
-        return default_redismod_url
-    else:
-        return stack_url
-
-
-@pytest.fixture()
-def stack_r(request, stack_url):
-    with _get_client(redis.Redis, request, from_url=stack_url) as client:
         yield client
 
 

@@ -108,13 +108,12 @@ def createIndex(client, num_docs=100, definition=None):
 
 
 @pytest.fixture
-def client(request, stack_url):
-    r = _get_client(redis.Redis, request, decode_responses=True, from_url=stack_url)
+def client(request):
+    r = _get_client(redis.Redis, request, decode_responses=True)
     r.flushdb()
     return r
 
 
-@pytest.mark.redismod
 def test_client(client):
     num_docs = 500
     createIndex(client.ft(), num_docs=num_docs)
@@ -310,7 +309,6 @@ def test_client(client):
         client.ft().delete_document("doc-5ghs2")
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 def test_scores(client):
     client.ft().create_index((TextField("txt"),))
@@ -332,7 +330,6 @@ def test_scores(client):
         assert "doc1" == res["results"][1]["id"]
 
 
-@pytest.mark.redismod
 def test_stopwords(client):
     client.ft().create_index((TextField("txt"),), stopwords=["foo", "bar", "baz"])
     client.hset("doc1", mapping={"txt": "foo bar"})
@@ -350,7 +347,6 @@ def test_stopwords(client):
         assert 1 == res2["total_results"]
 
 
-@pytest.mark.redismod
 def test_filters(client):
     client.ft().create_index((TextField("txt"), NumericField("num"), GeoField("loc")))
     client.hset(
@@ -403,7 +399,6 @@ def test_filters(client):
         assert ["doc1", "doc2"] == res
 
 
-@pytest.mark.redismod
 def test_sort_by(client):
     client.ft().create_index((TextField("txt"), NumericField("num", sortable=True)))
     client.hset("doc1", mapping={"txt": "foo bar", "num": 1})
@@ -435,7 +430,6 @@ def test_sort_by(client):
         assert "doc3" == res2["results"][0]["id"]
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_drop_index(client):
     """
@@ -454,7 +448,6 @@ def test_drop_index(client):
             assert i == keep_docs[1]
 
 
-@pytest.mark.redismod
 def test_example(client):
     # Creating the index definition and schema
     client.ft().create_index((TextField("title", weight=5.0), TextField("body")))
@@ -475,7 +468,6 @@ def test_example(client):
     assert res is not None
 
 
-@pytest.mark.redismod
 @skip_if_redis_enterprise()
 def test_auto_complete(client):
     n = 0
@@ -525,7 +517,6 @@ def test_auto_complete(client):
         assert sug.payload.startswith("pl")
 
 
-@pytest.mark.redismod
 def test_no_index(client):
     client.ft().create_index(
         (
@@ -603,20 +594,17 @@ def test_no_index(client):
         TagField("name", no_index=True, sortable=False)
 
 
-@pytest.mark.redismod
 def test_explain(client):
     client.ft().create_index((TextField("f1"), TextField("f2"), TextField("f3")))
     res = client.ft().explain("@f3:f3_val @f2:f2_val @f1:f1_val")
     assert res
 
 
-@pytest.mark.redismod
 def test_explaincli(client):
     with pytest.raises(NotImplementedError):
         client.ft().explain_cli("foo")
 
 
-@pytest.mark.redismod
 def test_summarize(client):
     createIndex(client.ft())
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
@@ -659,7 +647,6 @@ def test_summarize(client):
         )
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_alias(client):
     index1 = getClient(client)
@@ -722,7 +709,6 @@ def test_alias(client):
         alias_client2.search("*").docs[0]
 
 
-@pytest.mark.redismod
 @pytest.mark.xfail(strict=False)
 def test_alias_basic(client):
     # Creating a client with one index
@@ -771,7 +757,6 @@ def test_alias_basic(client):
         _ = alias_client2.search("*").docs[0]
 
 
-@pytest.mark.redismod
 def test_textfield_sortable_nostem(client):
     # Creating the index definition with sortable and no_stem
     client.ft().create_index((TextField("txt", sortable=True, no_stem=True),))
@@ -786,7 +771,6 @@ def test_textfield_sortable_nostem(client):
         assert "NOSTEM" in response["attributes"][0]["flags"]
 
 
-@pytest.mark.redismod
 def test_alter_schema_add(client):
     # Creating the index definition and schema
     client.ft().create_index(TextField("title"))
@@ -810,7 +794,6 @@ def test_alter_schema_add(client):
         assert 1 == res["total_results"]
 
 
-@pytest.mark.redismod
 def test_spell_check(client):
     client.ft().create_index((TextField("f1"), TextField("f2")))
 
@@ -879,7 +862,6 @@ def test_spell_check(client):
         assert res == {"results": {}}
 
 
-@pytest.mark.redismod
 def test_dict_operations(client):
     client.ft().create_index((TextField("f1"), TextField("f2")))
     # Add three items
@@ -898,7 +880,6 @@ def test_dict_operations(client):
     client.ft().dict_del("custom_dict", *res)
 
 
-@pytest.mark.redismod
 def test_phonetic_matcher(client):
     client.ft().create_index((TextField("name"),))
     client.hset("doc1", mapping={"name": "Jon"})
@@ -930,7 +911,6 @@ def test_phonetic_matcher(client):
         )
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 def test_scorer(client):
     client.ft().create_index((TextField("description"),))
@@ -978,7 +958,6 @@ def test_scorer(client):
         assert 0.0 == res["results"][0]["score"]
 
 
-@pytest.mark.redismod
 def test_get(client):
     client.ft().create_index((TextField("f1"), TextField("f2")))
 
@@ -1001,7 +980,6 @@ def test_get(client):
     ] == client.ft().get("doc1", "doc2")
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_config(client):
@@ -1014,7 +992,6 @@ def test_config(client):
     assert "100" == res["TIMEOUT"]
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 def test_aggregations_groupby(client):
     # Creating the index definition and schema
@@ -1264,7 +1241,6 @@ def test_aggregations_groupby(client):
         ]
 
 
-@pytest.mark.redismod
 def test_aggregations_sort_by_and_limit(client):
     client.ft().create_index((TextField("t1"), TextField("t2")))
 
@@ -1323,7 +1299,6 @@ def test_aggregations_sort_by_and_limit(client):
         assert res["results"][0]["extra_attributes"] == {"t1": "b"}
 
 
-@pytest.mark.redismod
 def test_aggregations_load(client):
     client.ft().create_index((TextField("t1"), TextField("t2")))
 
@@ -1361,7 +1336,6 @@ def test_aggregations_load(client):
         assert res["results"][0]["extra_attributes"] == {"t1": "hello", "t2": "world"}
 
 
-@pytest.mark.redismod
 def test_aggregations_apply(client):
     client.ft().create_index(
         (
@@ -1394,7 +1368,6 @@ def test_aggregations_apply(client):
         assert res_set == {"6373878785249699840", "6373878758592700416"}
 
 
-@pytest.mark.redismod
 def test_aggregations_filter(client):
     client.ft().create_index(
         (TextField("name", sortable=True), NumericField("age", sortable=True))
@@ -1440,7 +1413,6 @@ def test_aggregations_filter(client):
             assert res["results"][1]["extra_attributes"] == {"age": "25"}
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.10.05", "search")
 def test_aggregations_add_scores(client):
     client.ft().create_index(
@@ -1466,7 +1438,6 @@ def test_aggregations_add_scores(client):
         assert res.rows[1] == ["__score", "0.2"]
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_index_definition(client):
     """
@@ -1510,20 +1481,18 @@ def test_index_definition(client):
     createIndex(client.ft(), num_docs=500, definition=definition)
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_if_redis_enterprise()
 def test_expire(client):
     client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
-    ttl = client.execute_command("ft.debug", "TTL", "idx")
+    ttl = client.execute_command("_ft.debug", "TTL", "idx")
     assert ttl > 2
 
     while ttl > 2:
-        ttl = client.execute_command("ft.debug", "TTL", "idx")
+        ttl = client.execute_command("_ft.debug", "TTL", "idx")
         time.sleep(0.01)
 
 
-@pytest.mark.redismod
 def test_skip_initial_scan(client):
     client.hset("doc1", "foo", "bar")
     q = Query("@foo:bar")
@@ -1536,7 +1505,6 @@ def test_skip_initial_scan(client):
         assert res["total_results"] == 0
 
 
-@pytest.mark.redismod
 def test_summarize_disabled_nooffset(client):
     client.ft().create_index((TextField("txt"),), no_term_offsets=True)
     client.hset("doc1", mapping={"txt": "foo bar"})
@@ -1544,7 +1512,6 @@ def test_summarize_disabled_nooffset(client):
         client.ft().search(Query("foo").summarize(fields=["txt"]))
 
 
-@pytest.mark.redismod
 def test_summarize_disabled_nohl(client):
     client.ft().create_index((TextField("txt"),), no_highlight=True)
     client.hset("doc1", mapping={"txt": "foo bar"})
@@ -1552,7 +1519,6 @@ def test_summarize_disabled_nohl(client):
         client.ft().search(Query("foo").summarize(fields=["txt"]))
 
 
-@pytest.mark.redismod
 def test_max_text_fields(client):
     # Creating the index definition
     client.ft().create_index((TextField("f0"),))
@@ -1571,7 +1537,6 @@ def test_max_text_fields(client):
         client.ft().alter_schema_add((TextField(f"f{x}"),))
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_create_client_definition(client):
     """
@@ -1589,7 +1554,6 @@ def test_create_client_definition(client):
     assert 495 == int(info["num_docs"])
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_create_client_definition_hash(client):
     """
@@ -1607,7 +1571,6 @@ def test_create_client_definition_hash(client):
     assert 495 == int(info["num_docs"])
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_create_client_definition_json(client):
     """
@@ -1632,7 +1595,6 @@ def test_create_client_definition_json(client):
         assert res["total_results"] == 1
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_fields_as_name(client):
     # create index
@@ -1660,7 +1622,6 @@ def test_fields_as_name(client):
         assert "25" == res["results"][0]["extra_attributes"]["just_a_number"]
 
 
-@pytest.mark.redismod
 def test_casesensitive(client):
     # create index
     SCHEMA = (TagField("t", case_sensitive=False),)
@@ -1694,7 +1655,6 @@ def test_casesensitive(client):
         assert "1" == res["results"][0]["id"]
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_search_return_fields(client):
     res = client.json().set(
@@ -1732,7 +1692,6 @@ def test_search_return_fields(client):
         assert "telmatosaurus" == total["results"][0]["extra_attributes"]["txt"]
 
 
-@pytest.mark.redismod
 @skip_if_resp_version(3)
 def test_binary_and_text_fields(client):
     fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
@@ -1780,7 +1739,6 @@ def test_binary_and_text_fields(client):
     ), "The text field is not decoded correctly"
 
 
-@pytest.mark.redismod
 def test_synupdate(client):
     definition = IndexDefinition(index_type=IndexType.HASH)
     client.ft().create_index(
@@ -1804,7 +1762,6 @@ def test_synupdate(client):
         assert res["results"][0]["extra_attributes"]["body"] == "another test"
 
 
-@pytest.mark.redismod
 def test_syndump(client):
     definition = IndexDefinition(index_type=IndexType.HASH)
     client.ft().create_index(
@@ -1825,7 +1782,6 @@ def test_syndump(client):
     }
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_create_json_with_alias(client):
     """
@@ -1870,7 +1826,6 @@ def test_create_json_with_alias(client):
         client.ft().search("@$.name:henry")
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_json_with_multipath(client):
     """
@@ -1914,7 +1869,6 @@ def test_json_with_multipath(client):
         assert res["total_results"] == 1
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.2.0", "search")
 def test_json_with_jsonpath(client):
     definition = IndexDefinition(index_type=IndexType.JSON)
@@ -1964,7 +1918,6 @@ def test_json_with_jsonpath(client):
         assert res["results"][0]["extra_attributes"]["name"] == "RediSearch"
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_if_redis_enterprise()
 def test_profile(client):
@@ -2013,7 +1966,6 @@ def test_profile(client):
         assert len(res["results"]) == 2  # check also the search result
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 def test_profile_limited(client):
     client.ft().create_index((TextField("t"),))
@@ -2050,7 +2002,6 @@ def test_profile_limited(client):
         assert len(res["results"]) == 3  # check also the search result
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_profile_query_params(client):
     client.ft().create_index(
@@ -2081,7 +2032,6 @@ def test_profile_query_params(client):
         assert "0" == res["results"][0]["extra_attributes"]["__v_score"]
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_vector_field(client):
     client.flushdb()
@@ -2108,7 +2058,6 @@ def test_vector_field(client):
         assert "0" == res["results"][0]["extra_attributes"]["__v_score"]
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_vector_field_error(r):
     r.flushdb()
@@ -2122,7 +2071,6 @@ def test_vector_field_error(r):
         r.ft().create_index((VectorField("v", "SORT", {}),))
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_text_params(client):
     client.flushdb()
@@ -2145,7 +2093,6 @@ def test_text_params(client):
         assert "doc2" == res["results"][1]["id"]
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_numeric_params(client):
     client.flushdb()
@@ -2169,7 +2116,6 @@ def test_numeric_params(client):
         assert "doc2" == res["results"][1]["id"]
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_geo_params(client):
     client.ft().create_index(GeoField("g"))
@@ -2183,7 +2129,6 @@ def test_geo_params(client):
     _assert_search_result(client, res, ["doc1", "doc2", "doc3"])
 
 
-@pytest.mark.redismod
 def test_geoshapes_query_intersects_and_disjoint(client):
     client.ft().create_index((GeoShapeField("g", coord_system=GeoShapeField.FLAT)))
     client.hset("doc_point1", mapping={"g": "POINT (10 10)"})
@@ -2206,7 +2151,6 @@ def test_geoshapes_query_intersects_and_disjoint(client):
     _assert_search_result(client, disjunction, ["doc_point1", "doc_polygon2"])
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.10.0", "search")
 def test_geoshapes_query_contains_and_within(client):
     client.ft().create_index((GeoShapeField("g", coord_system=GeoShapeField.FLAT)))
@@ -2236,7 +2180,6 @@ def test_geoshapes_query_contains_and_within(client):
     _assert_search_result(client, within, ["doc_point2", "doc_polygon1"])
 
 
-@pytest.mark.redismod
 @skip_if_redis_enterprise()
 def test_search_commands_in_pipeline(client):
     p = client.ft().pipeline()
@@ -2266,7 +2209,6 @@ def test_search_commands_in_pipeline(client):
         )
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_dialect_config(client):
@@ -2277,7 +2219,6 @@ def test_dialect_config(client):
         client.ft().config_set("DEFAULT_DIALECT", 0)
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_dialect(client):
     client.ft().create_index(
@@ -2311,7 +2252,6 @@ def test_dialect(client):
     assert "Syntax error" in str(err)
 
 
-@pytest.mark.redismod
 def test_expire_while_search(client: redis.Redis):
     client.ft().create_index((TextField("txt"),))
     client.hset("hset:1", "txt", "a")
@@ -2333,7 +2273,6 @@ def test_expire_while_search(client: redis.Redis):
         assert 2 == client.ft().search(Query("*"))["total_results"]
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 def test_withsuffixtrie(client: redis.Redis):
     # create index
@@ -2375,7 +2314,6 @@ def test_withsuffixtrie(client: redis.Redis):
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
 
 
-@pytest.mark.redismod
 def test_query_timeout(r: redis.Redis):
     q1 = Query("foo").timeout(5000)
     assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
@@ -2386,7 +2324,6 @@ def test_query_timeout(r: redis.Redis):
         r.ft().search(q2)
 
 
-@pytest.mark.redismod
 def test_geoshape(client: redis.Redis):
     client.ft().create_index(GeoShapeField("geom", GeoShapeField.FLAT))
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
@@ -2402,7 +2339,6 @@ def test_geoshape(client: redis.Redis):
     _assert_search_result(client, result, ["small", "large"])
 
 
-@pytest.mark.redismod
 def test_search_missing_fields(client):
     definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
 
@@ -2469,7 +2405,6 @@ def test_search_missing_fields(client):
     _assert_search_result(client, res, ["property:1", "property:2"])
 
 
-@pytest.mark.redismod
 def test_search_empty_fields(client):
     definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
 
@@ -2540,7 +2475,6 @@ def test_search_empty_fields(client):
     _assert_search_result(client, res, ["property:1", "property:2"])
 
 
-@pytest.mark.redismod
 def test_special_characters_in_fields(client):
     definition = IndexDefinition(prefix=["resource:"], index_type=IndexType.HASH)
 

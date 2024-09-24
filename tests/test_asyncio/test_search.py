@@ -40,8 +40,8 @@ TITLES_CSV = os.path.abspath(
 
 
 @pytest_asyncio.fixture()
-async def decoded_r(create_redis, stack_url):
-    return await create_redis(decode_responses=True, url=stack_url)
+async def decoded_r(create_redis):
+    return await create_redis(decode_responses=True)
 
 
 async def waitForIndex(env, idx, timeout=None):
@@ -109,7 +109,6 @@ async def createIndex(decoded_r, num_docs=100, definition=None):
     await indexer.commit()
 
 
-@pytest.mark.redismod
 async def test_client(decoded_r: redis.Redis):
     num_docs = 500
     await createIndex(decoded_r.ft(), num_docs=num_docs)
@@ -337,7 +336,6 @@ async def test_client(decoded_r: redis.Redis):
         await decoded_r.ft().delete_document("doc-5ghs2")
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 async def test_scores(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("txt"),))
@@ -359,7 +357,6 @@ async def test_scores(decoded_r: redis.Redis):
         assert "doc1" == res["results"][1]["id"]
 
 
-@pytest.mark.redismod
 async def test_stopwords(decoded_r: redis.Redis):
     stopwords = ["foo", "bar", "baz"]
     await decoded_r.ft().create_index((TextField("txt"),), stopwords=stopwords)
@@ -378,7 +375,6 @@ async def test_stopwords(decoded_r: redis.Redis):
         assert 1 == res2["total_results"]
 
 
-@pytest.mark.redismod
 async def test_filters(decoded_r: redis.Redis):
     await decoded_r.ft().create_index(
         (TextField("txt"), NumericField("num"), GeoField("loc"))
@@ -436,7 +432,6 @@ async def test_filters(decoded_r: redis.Redis):
         assert ["doc1", "doc2"] == res
 
 
-@pytest.mark.redismod
 async def test_sort_by(decoded_r: redis.Redis):
     await decoded_r.ft().create_index(
         (TextField("txt"), NumericField("num", sortable=True))
@@ -470,7 +465,6 @@ async def test_sort_by(decoded_r: redis.Redis):
         assert "doc3" == res2["results"][0]["id"]
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 async def test_drop_index(decoded_r: redis.Redis):
     """
@@ -489,7 +483,6 @@ async def test_drop_index(decoded_r: redis.Redis):
             assert i == keep_docs[1]
 
 
-@pytest.mark.redismod
 async def test_example(decoded_r: redis.Redis):
     # Creating the index definition and schema
     await decoded_r.ft().create_index(
@@ -512,7 +505,6 @@ async def test_example(decoded_r: redis.Redis):
     assert res is not None
 
 
-@pytest.mark.redismod
 async def test_auto_complete(decoded_r: redis.Redis):
     n = 0
     with open(TITLES_CSV) as f:
@@ -563,7 +555,6 @@ async def test_auto_complete(decoded_r: redis.Redis):
         assert sug.payload.startswith("pl")
 
 
-@pytest.mark.redismod
 async def test_no_index(decoded_r: redis.Redis):
     await decoded_r.ft().create_index(
         (
@@ -641,7 +632,6 @@ async def test_no_index(decoded_r: redis.Redis):
         TagField("name", no_index=True, sortable=False)
 
 
-@pytest.mark.redismod
 async def test_explain(decoded_r: redis.Redis):
     await decoded_r.ft().create_index(
         (TextField("f1"), TextField("f2"), TextField("f3"))
@@ -650,13 +640,11 @@ async def test_explain(decoded_r: redis.Redis):
     assert res
 
 
-@pytest.mark.redismod
 async def test_explaincli(decoded_r: redis.Redis):
     with pytest.raises(NotImplementedError):
         await decoded_r.ft().explain_cli("foo")
 
 
-@pytest.mark.redismod
 async def test_summarize(decoded_r: redis.Redis):
     await createIndex(decoded_r.ft())
     await waitForIndex(decoded_r, "idx")
@@ -699,7 +687,6 @@ async def test_summarize(decoded_r: redis.Redis):
         )
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 async def test_alias(decoded_r: redis.Redis):
     index1 = getClient(decoded_r)
@@ -762,7 +749,6 @@ async def test_alias(decoded_r: redis.Redis):
         (await alias_client2.search("*")).docs[0]
 
 
-@pytest.mark.redismod
 @pytest.mark.xfail(strict=False)
 async def test_alias_basic(decoded_r: redis.Redis):
     # Creating a client with one index
@@ -815,7 +801,6 @@ async def test_alias_basic(decoded_r: redis.Redis):
         _ = (await alias_client2.search("*")).docs[0]
 
 
-@pytest.mark.redismod
 async def test_tags(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("txt"), TagField("tags")))
     tags = "foo,foo bar,hello;world"
@@ -864,7 +849,6 @@ async def test_tags(decoded_r: redis.Redis):
         assert set(tags.split(",") + tags2.split(",")) == set(q2)
 
 
-@pytest.mark.redismod
 async def test_textfield_sortable_nostem(decoded_r: redis.Redis):
     # Creating the index definition with sortable and no_stem
     await decoded_r.ft().create_index((TextField("txt", sortable=True, no_stem=True),))
@@ -879,7 +863,6 @@ async def test_textfield_sortable_nostem(decoded_r: redis.Redis):
         assert "NOSTEM" in response["attributes"][0]["flags"]
 
 
-@pytest.mark.redismod
 async def test_alter_schema_add(decoded_r: redis.Redis):
     # Creating the index definition and schema
     await decoded_r.ft().create_index(TextField("title"))
@@ -903,7 +886,6 @@ async def test_alter_schema_add(decoded_r: redis.Redis):
         assert 1 == res["total_results"]
 
 
-@pytest.mark.redismod
 async def test_spell_check(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("f1"), TextField("f2")))
 
@@ -972,7 +954,6 @@ async def test_spell_check(decoded_r: redis.Redis):
         assert res == {"results": {}}
 
 
-@pytest.mark.redismod
 async def test_dict_operations(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("f1"), TextField("f2")))
     # Add three items
@@ -991,7 +972,6 @@ async def test_dict_operations(decoded_r: redis.Redis):
     await decoded_r.ft().dict_del("custom_dict", *res)
 
 
-@pytest.mark.redismod
 async def test_phonetic_matcher(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("name"),))
     await decoded_r.hset("doc1", mapping={"name": "Jon"})
@@ -1023,7 +1003,6 @@ async def test_phonetic_matcher(decoded_r: redis.Redis):
         )
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 async def test_scorer(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("description"),))
@@ -1083,7 +1062,6 @@ async def test_scorer(decoded_r: redis.Redis):
         assert 0.0 == res["results"][0]["score"]
 
 
-@pytest.mark.redismod
 async def test_get(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("f1"), TextField("f2")))
 
@@ -1106,7 +1084,6 @@ async def test_get(decoded_r: redis.Redis):
     ] == await decoded_r.ft().get("doc1", "doc2")
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
 async def test_config(decoded_r: redis.Redis):
@@ -1119,7 +1096,6 @@ async def test_config(decoded_r: redis.Redis):
     assert "100" == res["TIMEOUT"]
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
 async def test_aggregations_groupby(decoded_r: redis.Redis):
     # Creating the index definition and schema
@@ -1429,7 +1405,6 @@ async def test_aggregations_groupby(decoded_r: redis.Redis):
             ]
 
 
-@pytest.mark.redismod
 async def test_aggregations_sort_by_and_limit(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("t1"), TextField("t2")))
 
@@ -1488,7 +1463,6 @@ async def test_aggregations_sort_by_and_limit(decoded_r: redis.Redis):
         assert res["results"][0]["extra_attributes"] == {"t1": "b"}
 
 
-@pytest.mark.redismod
 @pytest.mark.experimental
 async def test_withsuffixtrie(decoded_r: redis.Redis):
     # create index
@@ -1530,7 +1504,6 @@ async def test_withsuffixtrie(decoded_r: redis.Redis):
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
 
 
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.10.05", "search")
 async def test_aggregations_add_scores(decoded_r: redis.Redis):
     assert await decoded_r.ft().create_index(
@@ -1556,7 +1529,6 @@ async def test_aggregations_add_scores(decoded_r: redis.Redis):
         assert res.rows[1] == ["__score", "0.2"]
 
 
-@pytest.mark.redismod
 @skip_if_redis_enterprise()
 async def test_search_commands_in_pipeline(decoded_r: redis.Redis):
     p = await decoded_r.ft().pipeline()
@@ -1586,7 +1558,6 @@ async def test_search_commands_in_pipeline(decoded_r: redis.Redis):
         )
 
 
-@pytest.mark.redismod
 async def test_query_timeout(decoded_r: redis.Redis):
     q1 = Query("foo").timeout(5000)
     assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
@@ -1595,7 +1566,6 @@ async def test_query_timeout(decoded_r: redis.Redis):
         await decoded_r.ft().search(q2)
 
 
-@pytest.mark.redismod
 @skip_if_resp_version(3)
 async def test_binary_and_text_fields(decoded_r: redis.Redis):
     fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)

@@ -12,7 +12,6 @@ def fixture():
     return no_args, no_props, props_only, no_label, multi_label
 
 
-@pytest.mark.redismod
 def test_to_string(fixture):
     no_args, no_props, props_only, no_label, multi_label = fixture
     assert no_args.to_string() == ""
@@ -22,7 +21,6 @@ def test_to_string(fixture):
     assert multi_label.to_string() == ""
 
 
-@pytest.mark.redismod
 def test_stringify(fixture):
     no_args, no_props, props_only, no_label, multi_label = fixture
     assert str(no_args) == "()"
@@ -32,7 +30,6 @@ def test_stringify(fixture):
     assert str(multi_label) == "(alias:l:ll)"
 
 
-@pytest.mark.redismod
 def test_comparison(fixture):
     no_args, no_props, props_only, no_label, multi_label = fixture
 

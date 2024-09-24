@@ -27,8 +27,7 @@ env:
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   # this speeds up coverage with Python 3.12: https://github.com/nedbat/coveragepy/issues/1665
   COVERAGE_CORE: sysmon
-  REDIS_IMAGE: redis:7.4-rc2
-  REDIS_STACK_IMAGE: redis/redis-stack-server:latest
+  REDIS_IMAGE: redis:8.0-M01
 
 jobs:
   dependency-audit:

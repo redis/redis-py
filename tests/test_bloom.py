@@ -13,9 +13,9 @@ from .conftest import (
 
 
 @pytest.fixture()
-def decoded_r(request, stack_url):
+def decoded_r(request):
     with _get_client(
-        redis.Redis, request, decode_responses=True, from_url=stack_url
+        redis.Redis, request, decode_responses=True
     ) as client:
         yield client
 
@@ -36,7 +36,6 @@ def client(decoded_r):
     return decoded_r
 
 
-@pytest.mark.redismod
 def test_create(client):
     """Test CREATE/RESERVE calls"""
     assert client.bf().create("bloom", 0.01, 1000)
@@ -51,7 +50,6 @@ def test_create(client):
     assert client.topk().reserve("topk", 5, 100, 5, 0.9)
 
 
-@pytest.mark.redismod
 def test_bf_reserve(client):
     """Testing BF.RESERVE"""
     assert client.bf().reserve("bloom", 0.01, 1000)
@@ -67,12 +65,10 @@ def test_bf_reserve(client):
 
 
 @pytest.mark.experimental
-@pytest.mark.redismod
 def test_tdigest_create(client):
     assert client.tdigest().create("tDigest", 100)
 
 
-@pytest.mark.redismod
 def test_bf_add(client):
     assert client.bf().create("bloom", 0.01, 1000)
     assert 1 == client.bf().add("bloom", "foo")
@@ -85,7 +81,6 @@ def test_bf_add(client):
     assert [1, 0] == intlist(client.bf().mexists("bloom", "foo", "noexist"))
 
 
-@pytest.mark.redismod
 def test_bf_insert(client):
     assert client.bf().create("bloom", 0.01, 1000)
     assert [1] == intlist(client.bf().insert("bloom", ["foo"]))
@@ -116,7 +111,6 @@ def test_bf_insert(client):
     )
 
 
-@pytest.mark.redismod
 def test_bf_scandump_and_loadchunk(client):
     # Store a filter
     client.bf().create("myBloom", "0.0001", "1000")
@@ -164,7 +158,6 @@ def test_bf_scandump_and_loadchunk(client):
     client.bf().create("myBloom", "0.0001", "10000000")
 
 
-@pytest.mark.redismod
 def test_bf_info(client):
     expansion = 4
     # Store a filter
@@ -196,7 +189,6 @@ def test_bf_info(client):
         assert True
 
 
-@pytest.mark.redismod
 def test_bf_card(client):
     # return 0 if the key does not exist
     assert client.bf().card("not_exist") == 0
@@ -211,7 +203,6 @@ def test_bf_card(client):
         client.bf().card("setKey")
 
 
-@pytest.mark.redismod
 def test_cf_add_and_insert(client):
     assert client.cf().create("cuckoo", 1000)
     assert client.cf().add("cuckoo", "filter")
@@ -237,7 +228,6 @@ def test_cf_add_and_insert(client):
     )
 
 
-@pytest.mark.redismod
 def test_cf_exists_and_del(client):
     assert client.cf().create("cuckoo", 1000)
     assert client.cf().add("cuckoo", "filter")
@@ -250,7 +240,6 @@ def test_cf_exists_and_del(client):
     assert 0 == client.cf().count("cuckoo", "filter")
 
 
-@pytest.mark.redismod
 def test_cms(client):
     assert client.cms().initbydim("dim", 1000, 5)
     assert client.cms().initbyprob("prob", 0.01, 0.01)
@@ -267,7 +256,6 @@ def test_cms(client):
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.redismod
 def test_cms_merge(client):
     assert client.cms().initbydim("A", 1000, 5)
     assert client.cms().initbydim("B", 1000, 5)
@@ -284,7 +272,6 @@ def test_cms_merge(client):
     assert [16, 15, 21] == client.cms().query("C", "foo", "bar", "baz")
 
 
-@pytest.mark.redismod
 def test_topk(client):
     # test list with empty buckets
     assert client.topk().reserve("topk", 3, 50, 4, 0.9)
@@ -364,7 +351,6 @@ def test_topk(client):
     assert 0.9 == round(float(info["decay"]), 1)
 
 
-@pytest.mark.redismod
 def test_topk_incrby(client):
     client.flushdb()
     assert client.topk().reserve("topk", 3, 10, 3, 1)
@@ -379,7 +365,6 @@ def test_topk_incrby(client):
 
 
 @pytest.mark.experimental
-@pytest.mark.redismod
 def test_tdigest_reset(client):
     assert client.tdigest().create("tDigest", 10)
     # reset on empty histogram
@@ -396,7 +381,6 @@ def test_tdigest_reset(client):
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.redismod
 def test_tdigest_merge(client):
     assert client.tdigest().create("to-tDigest", 10)
     assert client.tdigest().create("from-tDigest", 10)
@@ -424,7 +408,6 @@ def test_tdigest_merge(client):
 
 
 @pytest.mark.experimental
-@pytest.mark.redismod
 def test_tdigest_min_and_max(client):
     assert client.tdigest().create("tDigest", 100)
     # insert data-points into sketch
@@ -435,7 +418,6 @@ def test_tdigest_min_and_max(client):
 
 
 @pytest.mark.experimental
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.0", "bf")
 def test_tdigest_quantile(client):
     assert client.tdigest().create("tDigest", 500)
@@ -457,7 +439,6 @@ def test_tdigest_quantile(client):
 
 
 @pytest.mark.experimental
-@pytest.mark.redismod
 def test_tdigest_cdf(client):
     assert client.tdigest().create("tDigest", 100)
     # insert data-points into sketch
@@ -469,7 +450,6 @@ def test_tdigest_cdf(client):
 
 
 @pytest.mark.experimental
-@pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.0", "bf")
 def test_tdigest_trimmed_mean(client):
     assert client.tdigest().create("tDigest", 100)
@@ -480,7 +460,6 @@ def test_tdigest_trimmed_mean(client):
 
 
 @pytest.mark.experimental
-@pytest.mark.redismod
 def test_tdigest_rank(client):
     assert client.tdigest().create("t-digest", 500)
     assert client.tdigest().add("t-digest", list(range(0, 20)))
@@ -491,7 +470,6 @@ def test_tdigest_rank(client):
 
 
 @pytest.mark.experimental
-@pytest.mark.redismod
 def test_tdigest_revrank(client):
     assert client.tdigest().create("t-digest", 500)
     assert client.tdigest().add("t-digest", list(range(0, 20)))
@@ -501,7 +479,6 @@ def test_tdigest_revrank(client):
 
 
 @pytest.mark.experimental
-@pytest.mark.redismod
 def test_tdigest_byrank(client):
     assert client.tdigest().create("t-digest", 500)
     assert client.tdigest().add("t-digest", list(range(1, 11)))
@@ -513,7 +490,6 @@ def test_tdigest_byrank(client):
 
 
 @pytest.mark.experimental
-@pytest.mark.redismod
 def test_tdigest_byrevrank(client):
     assert client.tdigest().create("t-digest", 500)
     assert client.tdigest().add("t-digest", list(range(1, 11)))
