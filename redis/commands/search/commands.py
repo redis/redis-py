@@ -101,15 +101,7 @@ class SearchCommands:
                 with_scores=query._with_scores,
             )
 
-        docs = {}
-        for i in range(0, len(res[1]), 2):
-            if isinstance(res[1][i + 1], list):
-                for item in res[1][i + 1]:
-                    res[1][i + 1] = parse_to_dict(item)
-
-            docs[res[1][i]] = res[1][i + 1]
-
-        return result, docs
+        return result, parse_to_dict(res[1])
 
     def _parse_spellcheck(self, res, **kwargs):
         corrections = {}
