@@ -5,7 +5,7 @@ version: "3.8"
 services:
 
   redis:
-    image: redis:8.0-M01
+    image: ${REDIS_IMAGE:-redis:latest}
     container_name: redis-standalone
     command: redis-server --enable-debug-command yes --protected-mode no
     ports:
@@ -17,7 +17,7 @@ services:
       - all
 
   replica:
-    image: redis:8.0-M01
+    image: ${REDIS_IMAGE:-redis:latest}
     container_name: redis-replica
     depends_on:
       - redis
@@ -34,7 +34,7 @@ services:
       context: .
       dockerfile: dockers/Dockerfile.cluster
       args:
-        REDIS_IMAGE: redis:8.0-M01
+        REDIS_IMAGE: ${REDIS_IMAGE:-redis:latest}
     ports:
       - 16379:16379
       - 16380:16380
@@ -63,7 +63,7 @@ services:
       - "./dockers/stunnel/keys:/etc/stunnel/keys:ro"
 
   sentinel:
-    image: redis:8.0-M01
+    image: ${REDIS_IMAGE:-redis:latest}
     container_name: redis-sentinel
     depends_on:
       - redis
@@ -77,7 +77,7 @@ services:
       - all
 
   sentinel2:
-    image: redis:8.0-M01
+    image: ${REDIS_IMAGE:-redis:latest}
     container_name: redis-sentinel2
     depends_on:
       - redis
@@ -91,7 +91,7 @@ services:
       - all
 
   sentinel3:
-    image: redis:8.0-M01
+    image: ${REDIS_IMAGE:-redis:latest}
     container_name: redis-sentinel3
     depends_on:
       - redis
