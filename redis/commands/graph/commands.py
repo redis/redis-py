@@ -171,9 +171,7 @@ class GraphCommands:
             if set:
                 params.append(value)
             else:
-                raise DataError(
-                    "``value`` can be provided only when ``set`` is True"
-                )  # noqa
+                raise DataError("``value`` can be provided only when ``set`` is True")  # noqa
         return self.execute_command(CONFIG_CMD, *params)
 
     def list_keys(self):
