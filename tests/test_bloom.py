@@ -14,9 +14,7 @@ from .conftest import (
 
 @pytest.fixture()
 def decoded_r(request):
-    with _get_client(
-        redis.Redis, request, decode_responses=True
-    ) as client:
+    with _get_client(redis.Redis, request, decode_responses=True) as client:
         yield client
 
 

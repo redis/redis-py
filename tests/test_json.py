@@ -1,10 +1,10 @@
 import pytest
 import redis
-from redis import exceptions, Redis
+from redis import Redis, exceptions
 from redis.commands.json.decoders import decode_list, unstring
 from redis.commands.json.path import Path
 
-from .conftest import assert_resp_response, skip_ifmodversion_lt, _get_client
+from .conftest import _get_client, assert_resp_response, skip_ifmodversion_lt
 
 
 @pytest.fixture
