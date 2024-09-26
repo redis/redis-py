@@ -4,7 +4,7 @@ from typing import Optional
 
 from redis.client import Redis
 from redis.commands import SentinelCommands
-from redis.connection import Connection, ConnectionPool, SSLConnection
+from redis.connection import Connection, ConnectionPool, SSLConnection, to_bool
 from redis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
 from redis.utils import str_if_bytes
 
@@ -151,7 +151,7 @@ class SentinelConnectionPool(ConnectionPool):
                 else SentinelManagedConnection
             ),
         )
-        self.is_master = kwargs.pop("is_master", True)
+        self.is_master = to_bool(kwargs.pop("is_master", True))
         self.check_connection = kwargs.pop("check_connection", False)
         self.proxy = SentinelConnectionPoolProxy(
             connection_pool=self,
