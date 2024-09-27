@@ -11,9 +11,17 @@ import redis
 from packaging.version import Version
 from redis import Sentinel
 from redis.backoff import NoBackoff
-from redis.connection import Connection, parse_url
+from redis.cache import (
+    CacheConfig,
+    CacheFactoryInterface,
+    CacheInterface,
+    CacheKey,
+    EvictionPolicy,
+)
+from redis.connection import Connection, ConnectionInterface, SSLConnection, parse_url
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
+from tests.ssl_utils import get_ssl_filename
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
@@ -321,8 +329,22 @@ def _get_client(
         kwargs["protocol"] = request.config.getoption("--protocol")
 
     cluster_mode = REDIS_INFO["cluster_enabled"]
+    ssl = kwargs.pop("ssl", False)
     if not cluster_mode:
         url_options = parse_url(redis_url)
+        connection_class = Connection
+        if ssl:
+            connection_class = SSLConnection
+            kwargs["ssl_certfile"] = get_ssl_filename("client-cert.pem")
+            kwargs["ssl_keyfile"] = get_ssl_filename("client-key.pem")
+            # When you try to assign "required" as single string
+            # it assigns tuple instead of string.
+            # Probably some reserved keyword
+            # I can't explain how does it work -_-
+            kwargs["ssl_cert_reqs"] = "require" + "d"
+            kwargs["ssl_ca_certs"] = get_ssl_filename("ca-cert.pem")
+            kwargs["port"] = 6666
+        kwargs["connection_class"] = connection_class
         url_options.update(kwargs)
         pool = redis.ConnectionPool(**url_options)
         client = cls(connection_pool=pool)
@@ -410,18 +432,25 @@ def sslclient(request):
 
 
 @pytest.fixture()
-def sentinel_setup(local_cache, request):
+def sentinel_setup(request):
     sentinel_ips = request.config.getoption("--sentinels")
     sentinel_endpoints = [
         (ip.strip(), int(port.strip()))
         for ip, port in (endpoint.split(":") for endpoint in sentinel_ips.split(","))
     ]
     kwargs = request.param.get("kwargs", {}) if hasattr(request, "param") else {}
+    cache = request.param.get("cache", None)
+    cache_config = request.param.get("cache_config", None)
+    force_master_ip = request.param.get("force_master_ip", None)
+    decode_responses = request.param.get("decode_responses", False)
     sentinel = Sentinel(
         sentinel_endpoints,
+        force_master_ip=force_master_ip,
         socket_timeout=0.1,
-        client_cache=local_cache,
+        cache=cache,
+        cache_config=cache_config,
         protocol=3,
+        decode_responses=decode_responses,
         **kwargs,
     )
     yield sentinel
@@ -441,7 +470,6 @@ def _gen_cluster_mock_resp(r, response):
     connection = Mock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
-    connection._get_from_local_cache.return_value = None
     with mock.patch.object(r, "connection", connection):
         yield r
 
@@ -512,6 +540,37 @@ def master_host(request):
     url = request.config.getoption("--redis-url")
     parts = urlparse(url)
     return parts.hostname, (parts.port or 6379)
+
+
+@pytest.fixture()
+def cache_conf() -> CacheConfig:
+    return CacheConfig(max_size=100, eviction_policy=EvictionPolicy.LRU)
+
+
+@pytest.fixture()
+def mock_cache_factory() -> CacheFactoryInterface:
+    mock_factory = Mock(spec=CacheFactoryInterface)
+    return mock_factory
+
+
+@pytest.fixture()
+def mock_cache() -> CacheInterface:
+    mock_cache = Mock(spec=CacheInterface)
+    return mock_cache
+
+
+@pytest.fixture()
+def mock_connection() -> ConnectionInterface:
+    mock_connection = Mock(spec=ConnectionInterface)
+    return mock_connection
+
+
+@pytest.fixture()
+def cache_key(request) -> CacheKey:
+    command = request.param.get("command")
+    keys = request.param.get("redis_keys")
+
+    return CacheKey(command, keys)
 
 
 def wait_for_command(client, monitor, command, key=None):

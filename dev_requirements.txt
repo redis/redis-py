@@ -1,5 +1,4 @@
 black==24.3.0
-cachetools
 click==8.0.4
 flake8-isort
 flake8

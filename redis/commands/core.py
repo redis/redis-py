@@ -5728,7 +5728,7 @@ class ScriptCommands(CommandsProtocol):
         """
         Check if a script exists in the script cache by specifying the SHAs of
         each script as ``args``. Returns a list of boolean values indicating if
-        if each already script exists in the cache.
+        if each already script exists in the cache_data.
 
         For more information see  https://redis.io/commands/script-exists
         """
@@ -5742,7 +5742,7 @@ class ScriptCommands(CommandsProtocol):
     def script_flush(
         self, sync_type: Union[Literal["SYNC"], Literal["ASYNC"]] = None
     ) -> ResponseT:
-        """Flush all scripts from the script cache.
+        """Flush all scripts from the script cache_data.
 
         ``sync_type`` is by default SYNC (synchronous) but it can also be
                       ASYNC.
@@ -5773,7 +5773,7 @@ class ScriptCommands(CommandsProtocol):
 
     def script_load(self, script: ScriptTextT) -> ResponseT:
         """
-        Load a Lua ``script`` into the script cache. Returns the SHA.
+        Load a Lua ``script`` into the script cache_data. Returns the SHA.
 
         For more information see https://redis.io/commands/script-load
         """
