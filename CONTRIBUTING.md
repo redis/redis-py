@@ -40,7 +40,7 @@ Here's how to get started with your code contribution:
         c.  pip install -r dev_requirements.txt
         c.  pip install -r requirements.txt
 
-4.  If you need a development environment, run `invoke devenv`. Note: this relies on docker-compose to build environments, and assumes that you have a version supporting [docker profiles](https://docs.docker.com/compose/profiles/).
+4.  If you need a development environment, run `invoke devenv`. Note: this relies on docker compose to build environments, and assumes that you have a version supporting [docker profiles](https://docs.docker.com/compose/profiles/).
 5.  While developing, make sure the tests pass by running `invoke tests`
 6.  If you like the change and think the project could use it, send a
     pull request

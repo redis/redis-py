@@ -30,8 +30,8 @@ pip install -r requirements.txt
 **Step 4**. Start the services using Docker and make sure Uptrace is running:
 
 ```shell
-docker-compose up -d
-docker-compose logs uptrace
+docker compose up -d
+docker compose logs uptrace
 ```
 
 **Step 5**. Run the Redis client example and follow the link from the CLI to view the trace:
