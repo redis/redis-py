@@ -9,16 +9,18 @@ from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Any, Callable, List, Optional, Sequence, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
-from ._cache import (
-    DEFAULT_ALLOW_LIST,
-    DEFAULT_DENY_LIST,
-    DEFAULT_EVICTION_POLICY,
-    AbstractCache,
-    _LocalCache,
+from redis.cache import (
+    CacheEntry,
+    CacheEntryStatus,
+    CacheFactory,
+    CacheFactoryInterface,
+    CacheInterface,
+    CacheKey,
 )
+
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -33,12 +35,13 @@ from .exceptions import (
     TimeoutError,
 )
 from .retry import Retry
-from .typing import KeysT, ResponseT
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
     HIREDIS_AVAILABLE,
     HIREDIS_PACK_AVAILABLE,
     SSL_AVAILABLE,
+    compare_versions,
+    ensure_string,
     format_error_message,
     get_lib_version,
     str_if_bytes,
@@ -132,7 +135,76 @@ class PythonRespSerializer:
         return output
 
 
-class AbstractConnection:
+class ConnectionInterface:
+    @abstractmethod
+    def repr_pieces(self):
+        pass
+
+    @abstractmethod
+    def register_connect_callback(self, callback):
+        pass
+
+    @abstractmethod
+    def deregister_connect_callback(self, callback):
+        pass
+
+    @abstractmethod
+    def set_parser(self, parser_class):
+        pass
+
+    @abstractmethod
+    def connect(self):
+        pass
+
+    @abstractmethod
+    def on_connect(self):
+        pass
+
+    @abstractmethod
+    def disconnect(self, *args):
+        pass
+
+    @abstractmethod
+    def check_health(self):
+        pass
+
+    @abstractmethod
+    def send_packed_command(self, command, check_health=True):
+        pass
+
+    @abstractmethod
+    def send_command(self, *args, **kwargs):
+        pass
+
+    @abstractmethod
+    def can_read(self, timeout=0):
+        pass
+
+    @abstractmethod
+    def read_response(
+        self,
+        disable_decoding=False,
+        *,
+        disconnect_on_error=True,
+        push_request=False,
+    ):
+        pass
+
+    @abstractmethod
+    def pack_command(self, *args):
+        pass
+
+    @abstractmethod
+    def pack_commands(self, commands):
+        pass
+
+    @property
+    @abstractmethod
+    def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
+        pass
+
+
+class AbstractConnection(ConnectionInterface):
     "Manages communication to and from a Redis server"
 
     def __init__(
@@ -158,13 +230,6 @@ class AbstractConnection:
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         command_packer: Optional[Callable[[], None]] = None,
-        cache_enabled: bool = False,
-        client_cache: Optional[AbstractCache] = None,
-        cache_max_size: int = 10000,
-        cache_ttl: int = 0,
-        cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
-        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ):
         """
         Initialize a new Connection.
@@ -213,6 +278,7 @@ class AbstractConnection:
         self.next_health_check = 0
         self.redis_connect_func = redis_connect_func
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
+        self.handshake_metadata = None
         self._sock = None
         self._socket_read_size = socket_read_size
         self.set_parser(parser_class)
@@ -230,18 +296,6 @@ class AbstractConnection:
                 # p = DEFAULT_RESP_VERSION
             self.protocol = p
         self._command_packer = self._construct_command_packer(command_packer)
-        if cache_enabled:
-            _cache = _LocalCache(cache_max_size, cache_ttl, cache_policy)
-        else:
-            _cache = None
-        self.client_cache = client_cache if client_cache is not None else _cache
-        if self.client_cache is not None:
-            if self.protocol not in [3, "3"]:
-                raise RedisError(
-                    "client caching is only supported with protocol version 3 or higher"
-                )
-            self.cache_deny_list = cache_deny_list
-            self.cache_allow_list = cache_allow_list
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -367,7 +421,7 @@ class AbstractConnection:
             if len(auth_args) == 1:
                 auth_args = ["default", auth_args[0]]
             self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
-            response = self.read_response()
+            self.handshake_metadata = self.read_response()
             # if response.get(b"proto") != self.protocol and response.get(
             #     "proto"
             # ) != self.protocol:
@@ -398,10 +452,10 @@ class AbstractConnection:
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
             self.send_command("HELLO", self.protocol)
-            response = self.read_response()
+            self.handshake_metadata = self.read_response()
             if (
-                response.get(b"proto") != self.protocol
-                and response.get("proto") != self.protocol
+                self.handshake_metadata.get(b"proto") != self.protocol
+                and self.handshake_metadata.get("proto") != self.protocol
             ):
                 raise ConnectionError("Invalid RESP version")
 
@@ -432,12 +486,6 @@ class AbstractConnection:
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-        # if client caching is enabled, start tracking
-        if self.client_cache:
-            self.send_command("CLIENT", "TRACKING", "ON")
-            self.read_response()
-            self._parser.set_invalidation_push_handler(self._cache_invalidation_process)
-
     def disconnect(self, *args):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
@@ -457,9 +505,6 @@ class AbstractConnection:
             conn_sock.close()
         except OSError:
             pass
-
-        if self.client_cache:
-            self.client_cache.flush()
 
     def _send_ping(self):
         """Send PING, expect PONG in return"""
@@ -608,60 +653,16 @@ class AbstractConnection:
             output.append(SYM_EMPTY.join(pieces))
         return output
 
-    def _cache_invalidation_process(
-        self, data: List[Union[str, Optional[List[str]]]]
-    ) -> None:
-        """
-        Invalidate (delete) all redis commands associated with a specific key.
-        `data` is a list of strings, where the first string is the invalidation message
-        and the second string is the list of keys to invalidate.
-        (if the list of keys is None, then all keys are invalidated)
-        """
-        if data[1] is None:
-            self.client_cache.flush()
-        else:
-            for key in data[1]:
-                self.client_cache.invalidate_key(str_if_bytes(key))
+    def get_protocol(self) -> int or str:
+        return self.protocol
 
-    def _get_from_local_cache(self, command: Sequence[str]):
-        """
-        If the command is in the local cache, return the response
-        """
-        if (
-            self.client_cache is None
-            or command[0] in self.cache_deny_list
-            or command[0] not in self.cache_allow_list
-        ):
-            return None
-        while self.can_read():
-            self.read_response(push_request=True)
-        return self.client_cache.get(command)
+    @property
+    def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
+        return self._handshake_metadata
 
-    def _add_to_local_cache(
-        self, command: Sequence[str], response: ResponseT, keys: List[KeysT]
-    ):
-        """
-        Add the command and response to the local cache if the command
-        is allowed to be cached
-        """
-        if (
-            self.client_cache is not None
-            and (self.cache_deny_list == [] or command[0] not in self.cache_deny_list)
-            and (self.cache_allow_list == [] or command[0] in self.cache_allow_list)
-        ):
-            self.client_cache.set(command, response, keys)
-
-    def flush_cache(self):
-        if self.client_cache:
-            self.client_cache.flush()
-
-    def delete_command_from_cache(self, command: Union[str, Sequence[str]]):
-        if self.client_cache:
-            self.client_cache.delete_command(command)
-
-    def invalidate_key_from_cache(self, key: KeysT):
-        if self.client_cache:
-            self.client_cache.invalidate_key(key)
+    @handshake_metadata.setter
+    def handshake_metadata(self, value: Union[Dict[bytes, bytes], Dict[str, str]]):
+        self._handshake_metadata = value
 
 
 class Connection(AbstractConnection):
@@ -732,6 +733,206 @@ class Connection(AbstractConnection):
 
     def _host_error(self):
         return f"{self.host}:{self.port}"
+
+
+class CacheProxyConnection(ConnectionInterface):
+    DUMMY_CACHE_VALUE = b"foo"
+    MIN_ALLOWED_VERSION = "7.4.0"
+    DEFAULT_SERVER_NAME = "redis"
+
+    def __init__(
+        self,
+        conn: ConnectionInterface,
+        cache: CacheInterface,
+        pool_lock: threading.Lock,
+    ):
+        self.pid = os.getpid()
+        self._conn = conn
+        self.retry = self._conn.retry
+        self.host = self._conn.host
+        self.port = self._conn.port
+        self._pool_lock = pool_lock
+        self._cache = cache
+        self._cache_lock = threading.Lock()
+        self._current_command_cache_key = None
+        self._current_options = None
+        self.register_connect_callback(self._enable_tracking_callback)
+
+    def repr_pieces(self):
+        return self._conn.repr_pieces()
+
+    def register_connect_callback(self, callback):
+        self._conn.register_connect_callback(callback)
+
+    def deregister_connect_callback(self, callback):
+        self._conn.deregister_connect_callback(callback)
+
+    def set_parser(self, parser_class):
+        self._conn.set_parser(parser_class)
+
+    def connect(self):
+        self._conn.connect()
+
+        server_name = self._conn.handshake_metadata.get(b"server", None)
+        if server_name is None:
+            server_name = self._conn.handshake_metadata.get("server", None)
+        server_ver = self._conn.handshake_metadata.get(b"version", None)
+        if server_ver is None:
+            server_ver = self._conn.handshake_metadata.get("version", None)
+        if server_ver is None or server_ver is None:
+            raise ConnectionError("Cannot retrieve information about server version")
+
+        server_ver = ensure_string(server_ver)
+        server_name = ensure_string(server_name)
+
+        if (
+            server_name != self.DEFAULT_SERVER_NAME
+            or compare_versions(server_ver, self.MIN_ALLOWED_VERSION) == 1
+        ):
+            raise ConnectionError(
+                "To maximize compatibility with all Redis products, client-side caching is supported by Redis 7.4 or later"  # noqa: E501
+            )
+
+    def on_connect(self):
+        self._conn.on_connect()
+
+    def disconnect(self, *args):
+        with self._cache_lock:
+            self._cache.flush()
+        self._conn.disconnect(*args)
+
+    def check_health(self):
+        self._conn.check_health()
+
+    def send_packed_command(self, command, check_health=True):
+        # TODO: Investigate if it's possible to unpack command
+        #  or extract keys from packed command
+        self._conn.send_packed_command(command)
+
+    def send_command(self, *args, **kwargs):
+        self._process_pending_invalidations()
+
+        with self._cache_lock:
+            # Command is write command or not allowed
+            # to be cached.
+            if not self._cache.is_cachable(CacheKey(command=args[0], redis_keys=())):
+                self._current_command_cache_key = None
+                self._conn.send_command(*args, **kwargs)
+                return
+
+        if kwargs.get("keys") is None:
+            raise ValueError("Cannot create cache key.")
+
+        # Creates cache key.
+        self._current_command_cache_key = CacheKey(
+            command=args[0], redis_keys=tuple(kwargs.get("keys"))
+        )
+
+        with self._cache_lock:
+            # We have to trigger invalidation processing in case if
+            # it was cached by another connection to avoid
+            # queueing invalidations in stale connections.
+            if self._cache.get(self._current_command_cache_key):
+                entry = self._cache.get(self._current_command_cache_key)
+
+                if entry.connection_ref != self._conn:
+                    with self._pool_lock:
+                        while entry.connection_ref.can_read():
+                            entry.connection_ref.read_response(push_request=True)
+
+                return
+
+            # Set temporary entry value to prevent
+            # race condition from another connection.
+            self._cache.set(
+                CacheEntry(
+                    cache_key=self._current_command_cache_key,
+                    cache_value=self.DUMMY_CACHE_VALUE,
+                    status=CacheEntryStatus.IN_PROGRESS,
+                    connection_ref=self._conn,
+                )
+            )
+
+        # Send command over socket only if it's allowed
+        # read-only command that not yet cached.
+        self._conn.send_command(*args, **kwargs)
+
+    def can_read(self, timeout=0):
+        return self._conn.can_read(timeout)
+
+    def read_response(
+        self, disable_decoding=False, *, disconnect_on_error=True, push_request=False
+    ):
+        with self._cache_lock:
+            # Check if command response exists in a cache and it's not in progress.
+            if (
+                self._current_command_cache_key is not None
+                and self._cache.get(self._current_command_cache_key) is not None
+                and self._cache.get(self._current_command_cache_key).status
+                != CacheEntryStatus.IN_PROGRESS
+            ):
+                return copy.deepcopy(
+                    self._cache.get(self._current_command_cache_key).cache_value
+                )
+
+        response = self._conn.read_response(
+            disable_decoding=disable_decoding,
+            disconnect_on_error=disconnect_on_error,
+            push_request=push_request,
+        )
+
+        with self._cache_lock:
+            # Prevent not-allowed command from caching.
+            if self._current_command_cache_key is None:
+                return response
+            # If response is None prevent from caching.
+            if response is None:
+                self._cache.delete_by_cache_keys([self._current_command_cache_key])
+                return response
+
+            cache_entry = self._cache.get(self._current_command_cache_key)
+
+            # Cache only responses that still valid
+            # and wasn't invalidated by another connection in meantime.
+            if cache_entry is not None:
+                cache_entry.status = CacheEntryStatus.VALID
+                cache_entry.cache_value = response
+                self._cache.set(cache_entry)
+
+        return response
+
+    def pack_command(self, *args):
+        return self._conn.pack_command(*args)
+
+    def pack_commands(self, commands):
+        return self._conn.pack_commands(commands)
+
+    @property
+    def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
+        return self._conn.handshake_metadata
+
+    def _connect(self):
+        self._conn._connect()
+
+    def _host_error(self):
+        self._conn._host_error()
+
+    def _enable_tracking_callback(self, conn: ConnectionInterface) -> None:
+        conn.send_command("CLIENT", "TRACKING", "ON")
+        conn.read_response()
+        conn._parser.set_invalidation_push_handler(self._on_invalidation_callback)
+
+    def _process_pending_invalidations(self):
+        while self.can_read():
+            self._conn.read_response(push_request=True)
+
+    def _on_invalidation_callback(self, data: List[Union[str, Optional[List[bytes]]]]):
+        with self._cache_lock:
+            # Flush cache when DB flushed on server-side
+            if data[1] is None:
+                self._cache.flush()
+            else:
+                self._cache.delete_by_redis_keys(data[1])
 
 
 class SSLConnection(Connection):
@@ -1083,6 +1284,7 @@ class ConnectionPool:
         self,
         connection_class=Connection,
         max_connections: Optional[int] = None,
+        cache_factory: Optional[CacheFactoryInterface] = None,
         **connection_kwargs,
     ):
         max_connections = max_connections or 2**31
@@ -1092,6 +1294,30 @@ class ConnectionPool:
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
+        self.cache = None
+        self._cache_factory = cache_factory
+
+        if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
+            if connection_kwargs.get("protocol") not in [3, "3"]:
+                raise RedisError("Client caching is only supported with RESP version 3")
+
+            cache = self.connection_kwargs.get("cache")
+
+            if cache is not None:
+                if not isinstance(cache, CacheInterface):
+                    raise ValueError("Cache must implement CacheInterface")
+
+                self.cache = cache
+            else:
+                if self._cache_factory is not None:
+                    self.cache = self._cache_factory.get_cache()
+                else:
+                    self.cache = CacheFactory(
+                        self.connection_kwargs.get("cache_config")
+                    ).get_cache()
+
+        connection_kwargs.pop("cache", None)
+        connection_kwargs.pop("cache_config", None)
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
@@ -1109,6 +1335,14 @@ class ConnectionPool:
             f"<{type(self).__module__}.{type(self).__name__}"
             f"({repr(self.connection_class(**self.connection_kwargs))})>"
         )
+
+    def get_protocol(self):
+        """
+        Returns:
+            The RESP protocol version, or ``None`` if the protocol is not specified,
+            in which case the server default will be used.
+        """
+        return self.connection_kwargs.get("protocol", None)
 
     def reset(self) -> None:
         self._lock = threading.Lock()
@@ -1187,15 +1421,12 @@ class ConnectionPool:
         try:
             # ensure this connection is connected to Redis
             connection.connect()
-            # if client caching is not enabled connections that the pool
-            # provides should be ready to send a command.
-            # if not, the connection was either returned to the
+            # connections that the pool provides should be ready to send
+            # a command. if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
-            # (if caching enabled the connection will not always be ready
-            # to send a command because it may contain invalidation messages)
             try:
-                if connection.can_read() and connection.client_cache is None:
+                if connection.can_read() and self.cache is None:
                     raise ConnectionError("Connection has data")
             except (ConnectionError, OSError):
                 connection.disconnect()
@@ -1219,11 +1450,17 @@ class ConnectionPool:
             decode_responses=kwargs.get("decode_responses", False),
         )
 
-    def make_connection(self) -> "Connection":
+    def make_connection(self) -> "ConnectionInterface":
         "Create a new connection"
         if self._created_connections >= self.max_connections:
             raise ConnectionError("Too many connections")
         self._created_connections += 1
+
+        if self.cache is not None:
+            return CacheProxyConnection(
+                self.connection_class(**self.connection_kwargs), self.cache, self._lock
+            )
+
         return self.connection_class(**self.connection_kwargs)
 
     def release(self, connection: "Connection") -> None:
@@ -1280,27 +1517,6 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
-
-    def flush_cache(self):
-        self._checkpid()
-        with self._lock:
-            connections = chain(self._available_connections, self._in_use_connections)
-            for connection in connections:
-                connection.flush_cache()
-
-    def delete_command_from_cache(self, command: str):
-        self._checkpid()
-        with self._lock:
-            connections = chain(self._available_connections, self._in_use_connections)
-            for connection in connections:
-                connection.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key: str):
-        self._checkpid()
-        with self._lock:
-            connections = chain(self._available_connections, self._in_use_connections)
-            for connection in connections:
-                connection.invalidate_key_from_cache(key)
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -1379,7 +1595,12 @@ class BlockingConnectionPool(ConnectionPool):
 
     def make_connection(self):
         "Make a fresh connection."
-        connection = self.connection_class(**self.connection_kwargs)
+        if self.cache is not None:
+            connection = CacheProxyConnection(
+                self.connection_class(**self.connection_kwargs), self.cache, self._lock
+            )
+        else:
+            connection = self.connection_class(**self.connection_kwargs)
         self._connections.append(connection)
         return connection
 

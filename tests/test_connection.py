@@ -1,20 +1,34 @@
+import copy
+import platform
 import socket
+import threading
 import types
+from typing import Any
 from unittest import mock
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis.backoff import NoBackoff
+from redis.cache import (
+    CacheConfig,
+    CacheEntry,
+    CacheEntryStatus,
+    CacheInterface,
+    CacheKey,
+    DefaultCache,
+    LRUPolicy,
+)
 from redis.connection import (
+    CacheProxyConnection,
     Connection,
     SSLConnection,
     UnixDomainSocketConnection,
     parse_url,
 )
-from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
+from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
 
@@ -346,3 +360,206 @@ def test_unix_socket_connection_failure():
         str(e.value)
         == "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     )
+
+
+class TestUnitConnectionPool:
+
+    @pytest.mark.parametrize(
+        "max_conn", (-1, "str"), ids=("non-positive", "wrong type")
+    )
+    def test_throws_error_on_incorrect_max_connections(self, max_conn):
+        with pytest.raises(
+            ValueError, match='"max_connections" must be a positive integer'
+        ):
+            ConnectionPool(
+                max_connections=max_conn,
+            )
+
+    def test_throws_error_on_cache_enable_in_resp2(self):
+        with pytest.raises(
+            RedisError, match="Client caching is only supported with RESP version 3"
+        ):
+            ConnectionPool(protocol=2, cache_config=CacheConfig())
+
+    def test_throws_error_on_incorrect_cache_implementation(self):
+        with pytest.raises(ValueError, match="Cache must implement CacheInterface"):
+            ConnectionPool(protocol=3, cache="wrong")
+
+    def test_returns_custom_cache_implementation(self, mock_cache):
+        connection_pool = ConnectionPool(protocol=3, cache=mock_cache)
+
+        assert mock_cache == connection_pool.cache
+        connection_pool.disconnect()
+
+    def test_creates_cache_with_custom_cache_factory(
+        self, mock_cache_factory, mock_cache
+    ):
+        mock_cache_factory.get_cache.return_value = mock_cache
+
+        connection_pool = ConnectionPool(
+            protocol=3,
+            cache_config=CacheConfig(max_size=5),
+            cache_factory=mock_cache_factory,
+        )
+
+        assert connection_pool.cache == mock_cache
+        connection_pool.disconnect()
+
+    def test_creates_cache_with_given_configuration(self, mock_cache):
+        connection_pool = ConnectionPool(
+            protocol=3, cache_config=CacheConfig(max_size=100)
+        )
+
+        assert isinstance(connection_pool.cache, CacheInterface)
+        assert connection_pool.cache.config.get_max_size() == 100
+        assert isinstance(connection_pool.cache.eviction_policy, LRUPolicy)
+        connection_pool.disconnect()
+
+    def test_make_connection_proxy_connection_on_given_cache(self):
+        connection_pool = ConnectionPool(protocol=3, cache_config=CacheConfig())
+
+        assert isinstance(connection_pool.make_connection(), CacheProxyConnection)
+        connection_pool.disconnect()
+
+
+class TestUnitCacheProxyConnection:
+    def test_clears_cache_on_disconnect(self, mock_connection, cache_conf):
+        cache = DefaultCache(CacheConfig(max_size=10))
+        cache_key = CacheKey(command="GET", redis_keys=("foo",))
+
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.get(cache_key).cache_value == b"bar"
+
+        mock_connection.disconnect.return_value = None
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.Lock()
+        )
+        proxy_connection.disconnect()
+
+        assert len(cache.collection) == 0
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
+    def test_read_response_returns_cached_reply(self, mock_cache, mock_connection):
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+
+        mock_cache.is_cachable.return_value = True
+        mock_cache.get.side_effect = [
+            None,
+            None,
+            CacheEntry(
+                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=mock_connection,
+            ),
+            CacheEntry(
+                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            ),
+            CacheEntry(
+                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            ),
+            CacheEntry(
+                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            ),
+        ]
+        mock_connection.send_command.return_value = Any
+        mock_connection.read_response.return_value = b"bar"
+        mock_connection.can_read.return_value = False
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, mock_cache, threading.Lock()
+        )
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
+        assert proxy_connection.read_response() == b"bar"
+        assert proxy_connection.read_response() == b"bar"
+
+        mock_connection.read_response.assert_called_once()
+        mock_cache.set.assert_has_calls(
+            [
+                call(
+                    CacheEntry(
+                        cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                        cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                        status=CacheEntryStatus.IN_PROGRESS,
+                        connection_ref=mock_connection,
+                    )
+                ),
+                call(
+                    CacheEntry(
+                        cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                        cache_value=b"bar",
+                        status=CacheEntryStatus.VALID,
+                        connection_ref=mock_connection,
+                    )
+                ),
+            ]
+        )
+
+        mock_cache.get.assert_has_calls(
+            [
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+                call(CacheKey(command="GET", redis_keys=("foo",))),
+            ]
+        )
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
+    def test_triggers_invalidation_processing_on_another_connection(
+        self, mock_cache, mock_connection
+    ):
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+
+        another_conn = copy.deepcopy(mock_connection)
+        another_conn.can_read.side_effect = [True, False]
+        another_conn.read_response.return_value = None
+        cache_entry = CacheEntry(
+            cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+            cache_value=b"bar",
+            status=CacheEntryStatus.VALID,
+            connection_ref=another_conn,
+        )
+        mock_cache.is_cachable.return_value = True
+        mock_cache.get.return_value = cache_entry
+        mock_connection.can_read.return_value = False
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, mock_cache, threading.Lock()
+        )
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
+
+        assert proxy_connection.read_response() == b"bar"
+        assert another_conn.can_read.call_count == 2
+        another_conn.read_response.assert_called_once()
