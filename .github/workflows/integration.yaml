@@ -83,7 +83,7 @@ jobs:
           pip install -r requirements.txt
           pip install -r dev_requirements.txt
           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-           pip install hiredis
+           pip install "hiredis>=2.0.0,<3.0.0"
           fi
           invoke devenv
           sleep 10 # time to settle
@@ -135,7 +135,7 @@ jobs:
           pip install -r requirements.txt
           pip install -r dev_requirements.txt
           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-            pip install hiredis
+            pip install "hiredis>=2.0.0,<3.0.0"
           fi
           invoke devenv
           sleep 10 # time to settle
