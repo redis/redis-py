@@ -72,7 +72,7 @@ Client-side caching
 -------------------
 
 Client-side caching is a technique used to create high performance services.
-It exploits the memory available on application servers, servers that are usually distinct computers compared to the database nodes, to store some subset of the database information directly in the application side.
+It utilizes the memory on application servers, typically separate from the database nodes, to cache a subset of the data directly on the application side.
 For more information please check `official Redis documentation <https://redis.io/docs/latest/develop/use/client-side-caching/>`_.
 Please notice that this feature only available with RESP3 protocol enabled in sync client only. Supported in standalone, Cluster and Sentinel clients.
 
@@ -98,4 +98,4 @@ Enable caching with custom cache implementation:
 
 CacheImpl should implement a `CacheInterface` specified in `redis.cache` package.
 
-More robust documentation soon will be available at `official Redis documentation <https://redis.io/docs/latest/>`_.
+More comprehensive documentation soon will be available at `official Redis documentation <https://redis.io/docs/latest/>`_.

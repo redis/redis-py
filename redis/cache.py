@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from collections import OrderedDict
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, List, Optional, Union
 
@@ -14,19 +15,10 @@ class EvictionPolicyType(Enum):
     frequency_based = "frequency_based"
 
 
+@dataclass(frozen=True)
 class CacheKey:
-    def __init__(self, command: str, redis_keys: tuple):
-        self.command = command
-        self.redis_keys = redis_keys
-
-    def get_redis_keys(self) -> tuple:
-        return self.redis_keys
-
-    def __hash__(self):
-        return hash((self.command, self.redis_keys))
-
-    def __eq__(self, other):
-        return hash(self) == hash(other)
+    command: str
+    redis_keys: tuple
 
 
 class CacheEntry:
@@ -102,20 +94,24 @@ class CacheConfigurationInterface(ABC):
 
 
 class CacheInterface(ABC):
+    @property
     @abstractmethod
-    def get_collection(self) -> OrderedDict:
+    def collection(self) -> OrderedDict:
         pass
 
+    @property
     @abstractmethod
-    def get_config(self) -> CacheConfigurationInterface:
+    def config(self) -> CacheConfigurationInterface:
         pass
 
+    @property
     @abstractmethod
-    def get_eviction_policy(self) -> EvictionPolicyInterface:
+    def eviction_policy(self) -> EvictionPolicyInterface:
         pass
 
+    @property
     @abstractmethod
-    def get_size(self) -> int:
+    def size(self) -> int:
         pass
 
     @abstractmethod
@@ -153,16 +149,20 @@ class DefaultCache(CacheInterface):
         self._eviction_policy = self._cache_config.get_eviction_policy().value()
         self._eviction_policy.cache = self
 
-    def get_collection(self) -> OrderedDict:
+    @property
+    def collection(self) -> OrderedDict:
         return self._cache
 
-    def get_config(self) -> CacheConfigurationInterface:
+    @property
+    def config(self) -> CacheConfigurationInterface:
         return self._cache_config
 
-    def get_eviction_policy(self) -> EvictionPolicyInterface:
+    @property
+    def eviction_policy(self) -> EvictionPolicyInterface:
         return self._eviction_policy
 
-    def get_size(self) -> int:
+    @property
+    def size(self) -> int:
         return len(self._cache)
 
     def set(self, entry: CacheEntry) -> bool:
@@ -206,7 +206,7 @@ class DefaultCache(CacheInterface):
             if isinstance(redis_key, bytes):
                 redis_key = redis_key.decode()
             for cache_key in self._cache:
-                if redis_key in cache_key.get_redis_keys():
+                if redis_key in cache_key.redis_keys:
                     keys_to_delete.append(cache_key)
                     response.append(True)
 
@@ -242,18 +242,18 @@ class LRUPolicy(EvictionPolicyInterface):
 
     def evict_next(self) -> CacheKey:
         self._assert_cache()
-        popped_entry = self._cache.get_collection().popitem(last=False)
+        popped_entry = self._cache.collection.popitem(last=False)
         return popped_entry[0]
 
     def evict_many(self, count: int) -> List[CacheKey]:
         self._assert_cache()
-        if count > len(self._cache.get_collection()):
+        if count > len(self._cache.collection):
             raise ValueError("Evictions count is above cache size")
 
         popped_keys = []
 
         for _ in range(count):
-            popped_entry = self._cache.get_collection().popitem(last=False)
+            popped_entry = self._cache.collection.popitem(last=False)
             popped_keys.append(popped_entry[0])
 
         return popped_keys
@@ -261,10 +261,10 @@ class LRUPolicy(EvictionPolicyInterface):
     def touch(self, cache_key: CacheKey) -> None:
         self._assert_cache()
 
-        if self._cache.get_collection().get(cache_key) is None:
+        if self._cache.collection.get(cache_key) is None:
             raise ValueError("Given entry does not belong to the cache")
 
-        self._cache.get_collection().move_to_end(cache_key)
+        self._cache.collection.move_to_end(cache_key)
 
     def _assert_cache(self):
         if self.cache is None or not isinstance(self.cache, CacheInterface):

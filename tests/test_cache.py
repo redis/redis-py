@@ -41,7 +41,7 @@ def r(request):
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
-@skip_if_resp_version(2)
+# @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
 class TestCache:
     @pytest.mark.parametrize(
@@ -109,8 +109,8 @@ class TestCache:
     @pytest.mark.onlynoncluster
     def test_get_from_default_cache(self, r, r2):
         cache = r.get_cache()
-        assert isinstance(cache.get_eviction_policy(), LRUPolicy)
-        assert cache.get_config().get_max_size() == 128
+        assert isinstance(cache.eviction_policy, LRUPolicy)
+        assert cache.config.get_max_size() == 128
 
         # add key to redis
         r.set("foo", "bar")
@@ -161,7 +161,7 @@ class TestCache:
         # Force disconnection
         r.connection_pool.get_connection("_").disconnect()
         # Make sure cache is empty
-        assert cache.get_size() == 0
+        assert cache.size == 0
 
     @pytest.mark.parametrize(
         "r",
@@ -207,7 +207,7 @@ class TestCache:
         assert r.get("foo4") == b"bar4"
         # the first key is not in the local cache anymore
         assert cache.get(CacheKey(command="GET", redis_keys=("foo",))) is None
-        assert cache.get_size() == 3
+        assert cache.size == 3
 
     @pytest.mark.parametrize(
         "r",
@@ -321,7 +321,7 @@ class TestCache:
         # Flush server and trying to access cached entry
         assert r.flushall()
         assert r.get("foo") is None
-        assert cache.get_size() == 0
+        assert cache.size == 0
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
@@ -383,8 +383,8 @@ class TestClusterCache:
     )
     def test_get_from_custom_cache(self, r, r2):
         cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
-        assert isinstance(cache.get_eviction_policy(), LRUPolicy)
-        assert cache.get_config().get_max_size() == 128
+        assert isinstance(cache.eviction_policy, LRUPolicy)
+        assert cache.config.get_max_size() == 128
 
         # add key to redis
         assert r.set("foo", "bar")
@@ -431,7 +431,7 @@ class TestClusterCache:
             12000
         ).redis_connection.connection_pool.get_connection("_").disconnect()
         # Make sure cache is empty
-        assert cache.get_size() == 0
+        assert cache.size == 0
 
     @pytest.mark.parametrize(
         "r",
@@ -564,7 +564,7 @@ class TestClusterCache:
         # Flush server and trying to access cached entry
         assert r.flushall()
         assert r.get("foo{slot}") is None
-        assert cache.get_size() == 0
+        assert cache.size == 0
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
@@ -623,7 +623,7 @@ class TestSentinelCache:
     )
     def test_get_from_default_cache(self, r, r2):
         cache = r.get_cache()
-        assert isinstance(cache.get_eviction_policy(), LRUPolicy)
+        assert isinstance(cache.eviction_policy, LRUPolicy)
 
         # add key to redis
         r.set("foo", "bar")
@@ -669,7 +669,7 @@ class TestSentinelCache:
         # Force disconnection
         master.connection_pool.get_connection("_").disconnect()
         # Make sure cache_data is empty
-        assert cache.get_size() == 0
+        assert cache.size == 0
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
@@ -734,7 +734,7 @@ class TestSSLCache:
     )
     def test_get_from_custom_cache(self, r, r2):
         cache = r.get_cache()
-        assert isinstance(cache.get_eviction_policy(), LRUPolicy)
+        assert isinstance(cache.eviction_policy, LRUPolicy)
 
         # add key to redis
         r.set("foo", "bar")
@@ -798,15 +798,15 @@ class TestSSLCache:
 class TestUnitDefaultCache:
     def test_get_eviction_policy(self):
         cache = DefaultCache(CacheConfig(max_size=5))
-        assert isinstance(cache.get_eviction_policy(), LRUPolicy)
+        assert isinstance(cache.eviction_policy, LRUPolicy)
 
     def test_get_max_size(self):
         cache = DefaultCache(CacheConfig(max_size=5))
-        assert cache.get_config().get_max_size() == 5
+        assert cache.config.get_max_size() == 5
 
     def test_get_size(self):
         cache = DefaultCache(CacheConfig(max_size=5))
-        assert cache.get_size() == 0
+        assert cache.size == 0
 
     @pytest.mark.parametrize(
         "cache_key", [{"command": "GET", "redis_keys": ("bar",)}], indirect=True
@@ -988,7 +988,7 @@ class TestUnitDefaultCache:
             True,
             False,
         ]
-        assert len(cache.get_collection()) == 1
+        assert len(cache.collection) == 1
         assert cache.get(cache_key3).cache_value == b"bar2"
 
     def test_delete_by_redis_keys_removes_associated_entries(self, mock_connection):
@@ -1034,7 +1034,7 @@ class TestUnitDefaultCache:
         )
 
         assert cache.delete_by_redis_keys([b"foo", b"foo1"]) == [True, True, True]
-        assert len(cache.get_collection()) == 1
+        assert len(cache.collection) == 1
         assert cache.get(cache_key4).cache_value == b"bar3"
 
     def test_flush(self, mock_connection):
@@ -1071,7 +1071,7 @@ class TestUnitDefaultCache:
         )
 
         assert cache.flush() == 3
-        assert len(cache.get_collection()) == 0
+        assert len(cache.collection) == 0
 
 
 class TestUnitLRUPolicy:
@@ -1083,7 +1083,7 @@ class TestUnitLRUPolicy:
         cache = DefaultCache(
             CacheConfig(max_size=5, eviction_policy=EvictionPolicy.LRU)
         )
-        policy = cache.get_eviction_policy()
+        policy = cache.eviction_policy
 
         cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
         cache_key2 = CacheKey(command="GET", redis_keys=("bar",))
@@ -1112,7 +1112,7 @@ class TestUnitLRUPolicy:
         cache = DefaultCache(
             CacheConfig(max_size=5, eviction_policy=EvictionPolicy.LRU)
         )
-        policy = cache.get_eviction_policy()
+        policy = cache.eviction_policy
         cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
         cache_key2 = CacheKey(command="GET", redis_keys=("bar",))
         cache_key3 = CacheKey(command="GET", redis_keys=("baz",))
@@ -1153,7 +1153,7 @@ class TestUnitLRUPolicy:
         cache = DefaultCache(
             CacheConfig(max_size=5, eviction_policy=EvictionPolicy.LRU)
         )
-        policy = cache.get_eviction_policy()
+        policy = cache.eviction_policy
 
         cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
         cache_key2 = CacheKey(command="GET", redis_keys=("bar",))
@@ -1175,7 +1175,7 @@ class TestUnitLRUPolicy:
             )
         )
 
-        assert cache.get_collection().popitem(last=True)[0] == cache_key2
+        assert cache.collection.popitem(last=True)[0] == cache_key2
         cache.set(
             CacheEntry(
                 cache_key=cache_key2,
@@ -1186,7 +1186,7 @@ class TestUnitLRUPolicy:
         )
 
         policy.touch(cache_key1)
-        assert cache.get_collection().popitem(last=True)[0] == cache_key1
+        assert cache.collection.popitem(last=True)[0] == cache_key1
 
     def test_throws_error_on_invalid_cache(self):
         policy = LRUPolicy()

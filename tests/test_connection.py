@@ -411,8 +411,8 @@ class TestUnitConnectionPool:
         )
 
         assert isinstance(connection_pool.cache, CacheInterface)
-        assert connection_pool.cache.get_config().get_max_size() == 100
-        assert isinstance(connection_pool.cache.get_eviction_policy(), LRUPolicy)
+        assert connection_pool.cache.config.get_max_size() == 100
+        assert isinstance(connection_pool.cache.eviction_policy, LRUPolicy)
         connection_pool.disconnect()
 
     def test_make_connection_proxy_connection_on_given_cache(self):
@@ -447,7 +447,7 @@ class TestUnitCacheProxyConnection:
         )
         proxy_connection.disconnect()
 
-        assert len(cache.get_collection()) == 0
+        assert len(cache.collection) == 0
 
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",
