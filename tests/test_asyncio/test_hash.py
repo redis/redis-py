@@ -177,7 +177,7 @@ async def test_hexpireat_multiple_fields(r):
     )
     exp_time = int((datetime.now() + timedelta(seconds=1)).timestamp())
     assert await r.hexpireat("test:hash", exp_time, "field1", "field2") == [1, 1]
-    await asyncio.sleep(1.1)
+    await asyncio.sleep(1.5)
     assert await r.hexists("test:hash", "field1") is False
     assert await r.hexists("test:hash", "field2") is False
     assert await r.hexists("test:hash", "field3") is True
