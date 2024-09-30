@@ -26,12 +26,6 @@ from typing import (
     cast,
 )
 
-from redis._cache import (
-    DEFAULT_ALLOW_LIST,
-    DEFAULT_DENY_LIST,
-    DEFAULT_EVICTION_POLICY,
-    AbstractCache,
-)
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,
@@ -239,13 +233,6 @@ class Redis(
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        cache_enabled: bool = False,
-        client_cache: Optional[AbstractCache] = None,
-        cache_max_size: int = 100,
-        cache_ttl: int = 0,
-        cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
-        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ):
         """
         Initialize a new Redis client.
@@ -295,13 +282,6 @@ class Redis(
                 "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
-                "cache_enabled": cache_enabled,
-                "client_cache": client_cache,
-                "cache_max_size": cache_max_size,
-                "cache_ttl": cache_ttl,
-                "cache_policy": cache_policy,
-                "cache_deny_list": cache_deny_list,
-                "cache_allow_list": cache_allow_list,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -626,31 +606,22 @@ class Redis(
     async def execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
         await self.initialize()
-        command_name = args[0]
-        keys = options.pop("keys", None)  # keys are used only for client side caching
         pool = self.connection_pool
+        command_name = args[0]
         conn = self.connection or await pool.get_connection(command_name, **options)
-        response_from_cache = await conn._get_from_local_cache(args)
+
+        if self.single_connection_client:
+            await self._single_conn_lock.acquire()
         try:
-            if response_from_cache is not None:
-                return response_from_cache
-            else:
-                try:
-                    if self.single_connection_client:
-                        await self._single_conn_lock.acquire()
-                    response = await conn.retry.call_with_retry(
-                        lambda: self._send_command_parse_response(
-                            conn, command_name, *args, **options
-                        ),
-                        lambda error: self._disconnect_raise(conn, error),
-                    )
-                    if keys:
-                        conn._add_to_local_cache(args, response, keys)
-                    return response
-                finally:
-                    if self.single_connection_client:
-                        self._single_conn_lock.release()
+            return await conn.retry.call_with_retry(
+                lambda: self._send_command_parse_response(
+                    conn, command_name, *args, **options
+                ),
+                lambda error: self._disconnect_raise(conn, error),
+            )
         finally:
+            if self.single_connection_client:
+                self._single_conn_lock.release()
             if not self.connection:
                 await pool.release(conn)
 
@@ -672,30 +643,15 @@ class Redis(
         if EMPTY_RESPONSE in options:
             options.pop(EMPTY_RESPONSE)
 
+        # Remove keys entry, it needs only for cache.
+        options.pop("keys", None)
+
         if command_name in self.response_callbacks:
             # Mypy bug: https://github.com/python/mypy/issues/10977
             command_name = cast(str, command_name)
             retval = self.response_callbacks[command_name](response, **options)
             return await retval if inspect.isawaitable(retval) else retval
         return response
-
-    def flush_cache(self):
-        if self.connection:
-            self.connection.flush_cache()
-        else:
-            self.connection_pool.flush_cache()
-
-    def delete_command_from_cache(self, command):
-        if self.connection:
-            self.connection.delete_command_from_cache(command)
-        else:
-            self.connection_pool.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key):
-        if self.connection:
-            self.connection.invalidate_key_from_cache(key)
-        else:
-            self.connection_pool.invalidate_key_from_cache(key)
 
 
 StrictRedis = Redis
@@ -1333,7 +1289,6 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     def execute_command(
         self, *args, **kwargs
     ) -> Union["Pipeline", Awaitable["Pipeline"]]:
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
         if (self.watching or args[0] == "WATCH") and not self.explicit_transaction:
             return self.immediate_execute_command(*args, **kwargs)
         return self.pipeline_execute_command(*args, **kwargs)
