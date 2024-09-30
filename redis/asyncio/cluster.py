@@ -19,12 +19,6 @@ from typing import (
     Union,
 )
 
-from redis._cache import (
-    DEFAULT_ALLOW_LIST,
-    DEFAULT_DENY_LIST,
-    DEFAULT_EVICTION_POLICY,
-    AbstractCache,
-)
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -276,13 +270,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_ciphers: Optional[str] = None,
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
-        cache_enabled: bool = False,
-        client_cache: Optional[AbstractCache] = None,
-        cache_max_size: int = 100,
-        cache_ttl: int = 0,
-        cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
-        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -326,14 +313,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_timeout": socket_timeout,
             "retry": retry,
             "protocol": protocol,
-            # Client cache related kwargs
-            "cache_enabled": cache_enabled,
-            "client_cache": client_cache,
-            "cache_max_size": cache_max_size,
-            "cache_ttl": cache_ttl,
-            "cache_policy": cache_policy,
-            "cache_deny_list": cache_deny_list,
-            "cache_allow_list": cache_allow_list,
         }
 
         if ssl:
@@ -938,18 +917,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             thread_local=thread_local,
         )
 
-    def flush_cache(self):
-        if self.nodes_manager:
-            self.nodes_manager.flush_cache()
-
-    def delete_command_from_cache(self, command):
-        if self.nodes_manager:
-            self.nodes_manager.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key):
-        if self.nodes_manager:
-            self.nodes_manager.invalidate_key_from_cache(key)
-
 
 class ClusterNode:
     """
@@ -1067,6 +1034,9 @@ class ClusterNode:
         if EMPTY_RESPONSE in kwargs:
             kwargs.pop(EMPTY_RESPONSE)
 
+        # Remove keys entry, it needs only for cache.
+        kwargs.pop("keys", None)
+
         # Return response
         if command in self.response_callbacks:
             return self.response_callbacks[command](response, **kwargs)
@@ -1076,25 +1046,16 @@ class ClusterNode:
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
-        keys = kwargs.pop("keys", None)
 
-        response_from_cache = await connection._get_from_local_cache(args)
-        if response_from_cache is not None:
+        # Execute command
+        await connection.send_packed_command(connection.pack_command(*args), False)
+
+        # Read response
+        try:
+            return await self.parse_response(connection, args[0], **kwargs)
+        finally:
+            # Release connection
             self._free.append(connection)
-            return response_from_cache
-        else:
-            # Execute command
-            await connection.send_packed_command(connection.pack_command(*args), False)
-
-            # Read response
-            try:
-                response = await self.parse_response(connection, args[0], **kwargs)
-                if keys:
-                    connection._add_to_local_cache(args, response, keys)
-                return response
-            finally:
-                # Release connection
-                self._free.append(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
@@ -1120,18 +1081,6 @@ class ClusterNode:
         self._free.append(connection)
 
         return ret
-
-    def flush_cache(self):
-        for connection in self._connections:
-            connection.flush_cache()
-
-    def delete_command_from_cache(self, command):
-        for connection in self._connections:
-            connection.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key):
-        for connection in self._connections:
-            connection.invalidate_key_from_cache(key)
 
 
 class NodesManager:
@@ -1416,18 +1365,6 @@ class NodesManager:
             return self.address_remap((host, port))
         return host, port
 
-    def flush_cache(self):
-        for node in self.nodes_cache.values():
-            node.flush_cache()
-
-    def delete_command_from_cache(self, command):
-        for node in self.nodes_cache.values():
-            node.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key):
-        for node in self.nodes_cache.values():
-            node.invalidate_key_from_cache(key)
-
 
 class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands):
     """
@@ -1516,7 +1453,6 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
               or List[:class:`~.ClusterNode`] or Dict[Any, :class:`~.ClusterNode`]
             - Rest of the kwargs are passed to the Redis connection
         """
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
         self._command_stack.append(
             PipelineCommand(len(self._command_stack), *args, **kwargs)
         )

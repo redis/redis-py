@@ -1,67 +1,186 @@
 import time
-from collections import defaultdict
-from typing import List, Sequence, Union
 
-import cachetools
 import pytest
 import redis
-from redis import RedisError
-from redis._cache import AbstractCache, EvictionPolicy, _LocalCache
-from redis.typing import KeyT, ResponseT
+from redis.cache import (
+    CacheConfig,
+    CacheEntry,
+    CacheEntryStatus,
+    CacheKey,
+    DefaultCache,
+    EvictionPolicy,
+    EvictionPolicyType,
+    LRUPolicy,
+)
 from redis.utils import HIREDIS_AVAILABLE
-from tests.conftest import _get_client
+from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
 
 
 @pytest.fixture()
 def r(request):
     cache = request.param.get("cache")
+    cache_config = request.param.get("cache_config")
     kwargs = request.param.get("kwargs", {})
     protocol = request.param.get("protocol", 3)
+    ssl = request.param.get("ssl", False)
     single_connection_client = request.param.get("single_connection_client", False)
+    decode_responses = request.param.get("decode_responses", False)
     with _get_client(
         redis.Redis,
         request,
-        single_connection_client=single_connection_client,
         protocol=protocol,
-        client_cache=cache,
+        ssl=ssl,
+        single_connection_client=single_connection_client,
+        cache=cache,
+        cache_config=cache_config,
+        decode_responses=decode_responses,
         **kwargs,
     ) as client:
-        yield client, cache
-
-
-@pytest.fixture()
-def local_cache():
-    return _LocalCache()
+        yield client
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
-class TestLocalCache:
-    @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
+@pytest.mark.onlynoncluster
+# @skip_if_resp_version(2)
+@skip_if_server_version_lt("7.4.0")
+class TestCache:
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+                "decode_responses": True,
+            },
+        ],
+        ids=["single", "pool", "decoded"],
+        indirect=True,
+    )
     @pytest.mark.onlynoncluster
-    def test_get_from_cache(self, r, r2):
-        r, cache = r
+    def test_get_from_given_cache(self, r, r2):
+        cache = r.get_cache()
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") in [b"bar", "bar"]
+        # get key from local cache
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"bar",
+            "bar",
+        ]
+        # change key in redis (cause invalidation)
+        r2.set("foo", "barbar")
+        # Retrieves a new value from server and cache it
+        assert r.get("foo") in [b"barbar", "barbar"]
+        # Make sure that new value was cached
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"barbar",
+            "barbar",
+        ]
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": True,
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": False,
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": False,
+                "decode_responses": True,
+            },
+        ],
+        ids=["single", "pool", "decoded"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_get_from_default_cache(self, r, r2):
+        cache = r.get_cache()
+        assert isinstance(cache.eviction_policy, LRUPolicy)
+        assert cache.config.get_max_size() == 128
+
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") in [b"bar", "bar"]
+        # get key from local cache
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"bar",
+            "bar",
+        ]
+        # change key in redis (cause invalidation)
+        r2.set("foo", "barbar")
+        # Retrieves a new value from server and cache it
+        assert r.get("foo") in [b"barbar", "barbar"]
+        # Make sure that new value was cached
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"barbar",
+            "barbar",
+        ]
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": True,
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_cache_clears_on_disconnect(self, r, cache):
+        cache = r.get_cache()
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
         assert r.get("foo") == b"bar"
         # get key from local cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        # change key in redis (cause invalidation)
-        r2.set("foo", "barbar")
-        # send any command to redis (process invalidation in background)
-        r.ping()
-        # the command is not in the local cache anymore
-        assert cache.get(("GET", "foo")) is None
-        # get key from redis
-        assert r.get("foo") == b"barbar"
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            == b"bar"
+        )
+        # Force disconnection
+        r.connection_pool.get_connection("_").disconnect()
+        # Make sure cache is empty
+        assert cache.size == 0
 
     @pytest.mark.parametrize(
         "r",
-        [{"cache": _LocalCache(max_size=3)}],
+        [
+            {
+                "cache_config": CacheConfig(max_size=3),
+                "single_connection_client": True,
+            },
+            {
+                "cache_config": CacheConfig(max_size=3),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
         indirect=True,
     )
-    def test_cache_lru_eviction(self, r):
-        r, cache = r
+    @pytest.mark.onlynoncluster
+    def test_cache_lru_eviction(self, r, cache):
+        cache = r.get_cache()
         # add 3 keys to redis
         r.set("foo", "bar")
         r.set("foo2", "bar2")
@@ -71,517 +190,1034 @@ class TestLocalCache:
         assert r.get("foo2") == b"bar2"
         assert r.get("foo3") == b"bar3"
         # get the 3 keys from local cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "foo2")) == b"bar2"
-        assert cache.get(("GET", "foo3")) == b"bar3"
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            == b"bar"
+        )
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo2",))).cache_value
+            == b"bar2"
+        )
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo3",))).cache_value
+            == b"bar3"
+        )
         # add 1 more key to redis (exceed the max size)
         r.set("foo4", "bar4")
         assert r.get("foo4") == b"bar4"
         # the first key is not in the local cache anymore
-        assert cache.get(("GET", "foo")) is None
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))) is None
+        assert cache.size == 3
 
-    @pytest.mark.parametrize("r", [{"cache": _LocalCache(ttl=1)}], indirect=True)
-    def test_cache_ttl(self, r):
-        r, cache = r
-        # add key to redis
-        r.set("foo", "bar")
-        # get key from redis and save in local cache
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": True,
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_cache_ignore_not_allowed_command(self, r):
+        cache = r.get_cache()
+        # add fields to hash
+        assert r.hset("foo", "bar", "baz")
+        # get random field
+        assert r.hrandfield("foo") == b"bar"
+        assert cache.get(CacheKey(command="HRANDFIELD", redis_keys=("foo",))) is None
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": True,
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_cache_invalidate_all_related_responses(self, r):
+        cache = r.get_cache()
+        # Add keys
+        assert r.set("foo", "bar")
+        assert r.set("bar", "foo")
+
+        res = r.mget("foo", "bar")
+        # Make sure that replies was cached
+        assert res == [b"bar", b"foo"]
+        assert (
+            cache.get(CacheKey(command="MGET", redis_keys=("foo", "bar"))).cache_value
+            == res
+        )
+
+        # Make sure that objects are immutable.
+        another_res = r.mget("foo", "bar")
+        res.append(b"baz")
+        assert another_res != res
+
+        # Invalidate one of the keys and make sure that
+        # all associated cached entries was removed
+        assert r.set("foo", "baz")
+        assert r.get("foo") == b"baz"
+        assert cache.get(CacheKey(command="MGET", redis_keys=("foo", "bar"))) is None
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            == b"baz"
+        )
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": True,
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "single_connection_client": False,
+            },
+        ],
+        ids=["single", "pool"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_cache_flushed_on_server_flush(self, r):
+        cache = r.get_cache()
+        # Add keys
+        assert r.set("foo", "bar")
+        assert r.set("bar", "foo")
+        assert r.set("baz", "bar")
+
+        # Make sure that replies was cached
         assert r.get("foo") == b"bar"
-        # get key from local cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        # wait for the key to expire
-        time.sleep(1)
-        # the key is not in the local cache anymore
-        assert cache.get(("GET", "foo")) is None
+        assert r.get("bar") == b"foo"
+        assert r.get("baz") == b"bar"
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            == b"bar"
+        )
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("bar",))).cache_value
+            == b"foo"
+        )
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("baz",))).cache_value
+            == b"bar"
+        )
 
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(max_size=3, eviction_policy=EvictionPolicy.LFU)}],
-        indirect=True,
-    )
-    def test_cache_lfu_eviction(self, r):
-        r, cache = r
-        # add 3 keys to redis
-        r.set("foo", "bar")
-        r.set("foo2", "bar2")
-        r.set("foo3", "bar3")
-        # get 3 keys from redis and save in local cache
-        assert r.get("foo") == b"bar"
-        assert r.get("foo2") == b"bar2"
-        assert r.get("foo3") == b"bar3"
-        # change the order of the keys in the cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "foo3")) == b"bar3"
-        # add 1 more key to redis (exceed the max size)
-        r.set("foo4", "bar4")
-        assert r.get("foo4") == b"bar4"
-        # test the eviction policy
-        assert len(cache.cache) == 3
-        assert cache.get(("GET", "foo")) == b"bar"
-        assert cache.get(("GET", "foo2")) is None
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
-    def test_cache_decode_response(self, r):
-        r, cache = r
-        r.set("foo", "bar")
-        # get key from redis and save in local cache
-        assert r.get("foo") == "bar"
-        # get key from local cache
-        assert cache.get(("GET", "foo")) == "bar"
-        # change key in redis (cause invalidation)
-        r.set("foo", "barbar")
-        # send any command to redis (process invalidation in background)
-        r.ping()
-        # the command is not in the local cache anymore
-        assert cache.get(("GET", "foo")) is None
-        # get key from redis
-        assert r.get("foo") == "barbar"
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"cache_deny_list": ["LLEN"]}}],
-        indirect=True,
-    )
-    def test_cache_deny_list(self, r):
-        r, cache = r
-        # add list to redis
-        r.lpush("mylist", "foo", "bar", "baz")
-        assert r.llen("mylist") == 3
-        assert r.lindex("mylist", 1) == b"bar"
-        assert cache.get(("LLEN", "mylist")) is None
-        assert cache.get(("LINDEX", "mylist", 1)) == b"bar"
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"cache_allow_list": ["LLEN"]}}],
-        indirect=True,
-    )
-    def test_cache_allow_list(self, r):
-        r, cache = r
-        r.lpush("mylist", "foo", "bar", "baz")
-        assert r.llen("mylist") == 3
-        assert r.lindex("mylist", 1) == b"bar"
-        assert cache.get(("LLEN", "mylist")) == 3
-        assert cache.get(("LINDEX", "mylist", 1)) is None
-
-    @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
-    def test_cache_return_copy(self, r):
-        r, cache = r
-        r.lpush("mylist", "foo", "bar", "baz")
-        assert r.lrange("mylist", 0, -1) == [b"baz", b"bar", b"foo"]
-        res = cache.get(("LRANGE", "mylist", 0, -1))
-        assert res == [b"baz", b"bar", b"foo"]
-        res.append(b"new")
-        check = cache.get(("LRANGE", "mylist", 0, -1))
-        assert check == [b"baz", b"bar", b"foo"]
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
-    def test_csc_not_cause_disconnects(self, r):
-        r, cache = r
-        id1 = r.client_id()
-        r.mset({"a": 1, "b": 1, "c": 1, "d": 1, "e": 1, "f": 1})
-        assert r.mget("a", "b", "c", "d", "e", "f") == ["1", "1", "1", "1", "1", "1"]
-        id2 = r.client_id()
-
-        # client should get value from client cache
-        assert r.mget("a", "b", "c", "d", "e", "f") == ["1", "1", "1", "1", "1", "1"]
-        assert cache.get(("MGET", "a", "b", "c", "d", "e", "f")) == [
-            "1",
-            "1",
-            "1",
-            "1",
-            "1",
-            "1",
-        ]
-
-        r.mset({"a": 2, "b": 2, "c": 2, "d": 2, "e": 2, "f": 2})
-        id3 = r.client_id()
-        # client should get value from redis server post invalidate messages
-        assert r.mget("a", "b", "c", "d", "e", "f") == ["2", "2", "2", "2", "2", "2"]
-
-        r.mset({"a": 3, "b": 3, "c": 3, "d": 3, "e": 3, "f": 3})
-        # need to check that we get correct value 3 and not 2
-        assert r.mget("a", "b", "c", "d", "e", "f") == ["3", "3", "3", "3", "3", "3"]
-        # client should get value from client cache
-        assert r.mget("a", "b", "c", "d", "e", "f") == ["3", "3", "3", "3", "3", "3"]
-
-        r.mset({"a": 4, "b": 4, "c": 4, "d": 4, "e": 4, "f": 4})
-        # need to check that we get correct value 4 and not 3
-        assert r.mget("a", "b", "c", "d", "e", "f") == ["4", "4", "4", "4", "4", "4"]
-        # client should get value from client cache
-        assert r.mget("a", "b", "c", "d", "e", "f") == ["4", "4", "4", "4", "4", "4"]
-        id4 = r.client_id()
-        assert id1 == id2 == id3 == id4
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
-    def test_multiple_commands_same_key(self, r):
-        r, cache = r
-        r.mset({"a": 1, "b": 1})
-        assert r.mget("a", "b") == ["1", "1"]
-        # value should be in local cache
-        assert cache.get(("MGET", "a", "b")) == ["1", "1"]
-        # set only one key
-        r.set("a", 2)
-        # send any command to redis (process invalidation in background)
-        r.ping()
-        # the command is not in the local cache anymore
-        assert cache.get(("MGET", "a", "b")) is None
-        # get from redis
-        assert r.mget("a", "b") == ["2", "1"]
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
-        indirect=True,
-    )
-    def test_delete_one_command(self, r):
-        r, cache = r
-        r.mset({"a{a}": 1, "b{a}": 1})
-        r.set("c", 1)
-        assert r.mget("a{a}", "b{a}") == ["1", "1"]
-        assert r.get("c") == "1"
-        # values should be in local cache
-        assert cache.get(("MGET", "a{a}", "b{a}")) == ["1", "1"]
-        assert cache.get(("GET", "c")) == "1"
-        # delete one command from the cache
-        r.delete_command_from_cache(("MGET", "a{a}", "b{a}"))
-        # the other command is still in the local cache anymore
-        assert cache.get(("MGET", "a{a}", "b{a}")) is None
-        assert cache.get(("GET", "c")) == "1"
-        # get from redis
-        assert r.mget("a{a}", "b{a}") == ["1", "1"]
-        assert r.get("c") == "1"
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
-        indirect=True,
-    )
-    def test_delete_several_commands(self, r):
-        r, cache = r
-        r.mset({"a{a}": 1, "b{a}": 1})
-        r.set("c", 1)
-        assert r.mget("a{a}", "b{a}") == ["1", "1"]
-        assert r.get("c") == "1"
-        # values should be in local cache
-        assert cache.get(("MGET", "a{a}", "b{a}")) == ["1", "1"]
-        assert cache.get(("GET", "c")) == "1"
-        # delete the commands from the cache
-        cache.delete_commands([("MGET", "a{a}", "b{a}"), ("GET", "c")])
-        # the commands are not in the local cache anymore
-        assert cache.get(("MGET", "a{a}", "b{a}")) is None
-        assert cache.get(("GET", "c")) is None
-        # get from redis
-        assert r.mget("a{a}", "b{a}") == ["1", "1"]
-        assert r.get("c") == "1"
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
-        indirect=True,
-    )
-    def test_invalidate_key(self, r):
-        r, cache = r
-        r.mset({"a{a}": 1, "b{a}": 1})
-        r.set("c", 1)
-        assert r.mget("a{a}", "b{a}") == ["1", "1"]
-        assert r.get("c") == "1"
-        # values should be in local cache
-        assert cache.get(("MGET", "a{a}", "b{a}")) == ["1", "1"]
-        assert cache.get(("GET", "c")) == "1"
-        # invalidate one key from the cache
-        r.invalidate_key_from_cache("b{a}")
-        # one other command is still in the local cache anymore
-        assert cache.get(("MGET", "a{a}", "b{a}")) is None
-        assert cache.get(("GET", "c")) == "1"
-        # get from redis
-        assert r.mget("a{a}", "b{a}") == ["1", "1"]
-        assert r.get("c") == "1"
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
-        indirect=True,
-    )
-    def test_flush_entire_cache(self, r):
-        r, cache = r
-        r.mset({"a{a}": 1, "b{a}": 1})
-        r.set("c", 1)
-        assert r.mget("a{a}", "b{a}") == ["1", "1"]
-        assert r.get("c") == "1"
-        # values should be in local cache
-        assert cache.get(("MGET", "a{a}", "b{a}")) == ["1", "1"]
-        assert cache.get(("GET", "c")) == "1"
-        # flush the local cache
-        r.flush_cache()
-        # the commands are not in the local cache anymore
-        assert cache.get(("MGET", "a{a}", "b{a}")) is None
-        assert cache.get(("GET", "c")) is None
-        # get from redis
-        assert r.mget("a{a}", "b{a}") == ["1", "1"]
-        assert r.get("c") == "1"
-
-    @pytest.mark.onlynoncluster
-    def test_cache_not_available_with_resp2(self, request):
-        with pytest.raises(RedisError) as e:
-            _get_client(redis.Redis, request, protocol=2, client_cache=_LocalCache())
-        assert "protocol version 3 or higher" in str(e.value)
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
-    def test_execute_command_args_not_split(self, r):
-        r, cache = r
-        assert r.execute_command("SET a 1") == "OK"
-        assert r.execute_command("GET a") == "1"
-        # "get a" is not whitelisted by default, the args should be separated
-        assert cache.get(("GET a",)) is None
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
-        indirect=True,
-    )
-    def test_execute_command_keys_provided(self, r):
-        r, cache = r
-        assert r.execute_command("SET", "b", "2") is True
-        assert r.execute_command("GET", "b", keys=["b"]) == "2"
-        assert cache.get(("GET", "b")) == "2"
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
-        indirect=True,
-    )
-    def test_execute_command_keys_not_provided(self, r):
-        r, cache = r
-        assert r.execute_command("SET", "b", "2") is True
-        assert r.execute_command("GET", "b") == "2"  # keys not provided, not cached
-        assert cache.get(("GET", "b")) is None
-
-    @pytest.mark.parametrize(
-        "r",
-        [{"cache": _LocalCache(), "single_connection_client": True}],
-        indirect=True,
-    )
-    @pytest.mark.onlynoncluster
-    def test_single_connection(self, r):
-        r, cache = r
-        # add key to redis
-        r.set("foo", "bar")
-        # get key from redis and save in local cache
-        assert r.get("foo") == b"bar"
-        # get key from local cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        # change key in redis (cause invalidation)
-        r.set("foo", "barbar")
-        # send any command to redis (process invalidation in background)
-        r.ping()
-        # the command is not in the local cache anymore
-        assert cache.get(("GET", "foo")) is None
-        # get key from redis
-        assert r.get("foo") == b"barbar"
-
-    @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
-    def test_get_from_cache_invalidate_via_get(self, r, r2):
-        r, cache = r
-        # add key to redis
-        r.set("foo", "bar")
-        # get key from redis and save in local cache
-        assert r.get("foo") == b"bar"
-        # get key from local cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        # change key in redis (cause invalidation)
-        r2.set("foo", "barbar")
-        # don't send any command to redis, just run another get
-        # it should process the invalidation in background
-        assert r.get("foo") == b"barbar"
+        # Flush server and trying to access cached entry
+        assert r.flushall()
+        assert r.get("foo") is None
+        assert cache.size == 0
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
-class TestClusterLocalCache:
-    @pytest.mark.parametrize("r", [{"cache": _LocalCache()}], indirect=True)
-    def test_get_from_cache(self, r, r2):
-        r, cache = r
+@skip_if_resp_version(2)
+@skip_if_server_version_lt("7.4.0")
+class TestClusterCache:
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "decode_responses": True,
+            },
+        ],
+        indirect=True,
+    )
+    @pytest.mark.onlycluster
+    def test_get_from_cache(self, r):
+        cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") in [b"bar", "bar"]
+        # get key from local cache
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"bar",
+            "bar",
+        ]
+        # change key in redis (cause invalidation)
+        r.set("foo", "barbar")
+        # Retrieves a new value from server and cache it
+        assert r.get("foo") in [b"barbar", "barbar"]
+        # Make sure that new value was cached
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"barbar",
+            "barbar",
+        ]
+        # Make sure that cache is shared between nodes.
+        assert (
+            cache == r.nodes_manager.get_node_from_slot(1).redis_connection.get_cache()
+        )
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "decode_responses": True,
+            },
+        ],
+        indirect=True,
+    )
+    def test_get_from_custom_cache(self, r, r2):
+        cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
+        assert isinstance(cache.eviction_policy, LRUPolicy)
+        assert cache.config.get_max_size() == 128
+
+        # add key to redis
+        assert r.set("foo", "bar")
+        # get key from redis and save in local cache
+        assert r.get("foo") in [b"bar", "bar"]
+        # get key from local cache
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"bar",
+            "bar",
+        ]
+        # change key in redis (cause invalidation)
+        r2.set("foo", "barbar")
+        # Retrieves a new value from server and cache it
+        assert r.get("foo") in [b"barbar", "barbar"]
+        # Make sure that new value was cached
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"barbar",
+            "barbar",
+        ]
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+            },
+        ],
+        indirect=True,
+    )
+    @pytest.mark.onlycluster
+    def test_cache_clears_on_disconnect(self, r, r2):
+        cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
         # add key to redis
         r.set("foo", "bar")
         # get key from redis and save in local cache
         assert r.get("foo") == b"bar"
         # get key from local cache
-        assert cache.get(("GET", "foo")) == b"bar"
-        # change key in redis (cause invalidation)
-        r2.set("foo", "barbar")
-        # send any command to redis (process invalidation in background)
-        node = r.get_node_from_key("foo")
-        r.ping(target_nodes=node)
-        # the command is not in the local cache anymore
-        assert cache.get(("GET", "foo")) is None
-        # get key from redis
-        assert r.get("foo") == b"barbar"
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            == b"bar"
+        )
+        # Force disconnection
+        r.nodes_manager.get_node_from_slot(
+            12000
+        ).redis_connection.connection_pool.get_connection("_").disconnect()
+        # Make sure cache is empty
+        assert cache.size == 0
 
     @pytest.mark.parametrize(
         "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        [
+            {
+                "cache_config": CacheConfig(max_size=3),
+            },
+        ],
         indirect=True,
     )
-    def test_cache_decode_response(self, r):
-        r, cache = r
-        r.set("foo", "bar")
-        # get key from redis and save in local cache
-        assert r.get("foo") == "bar"
-        # get key from local cache
-        assert cache.get(("GET", "foo")) == "bar"
-        # change key in redis (cause invalidation)
-        r.set("foo", "barbar")
-        # send any command to redis (process invalidation in background)
-        node = r.get_node_from_key("foo")
-        r.ping(target_nodes=node)
-        # the command is not in the local cache anymore
-        assert cache.get(("GET", "foo")) is None
-        # get key from redis
-        assert r.get("foo") == "barbar"
+    @pytest.mark.onlycluster
+    def test_cache_lru_eviction(self, r):
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
+        # add 3 keys to redis
+        r.set("foo{slot}", "bar")
+        r.set("foo2{slot}", "bar2")
+        r.set("foo3{slot}", "bar3")
+        # get 3 keys from redis and save in local cache
+        assert r.get("foo{slot}") == b"bar"
+        assert r.get("foo2{slot}") == b"bar2"
+        assert r.get("foo3{slot}") == b"bar3"
+        # get the 3 keys from local cache
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo{slot}",))).cache_value
+            == b"bar"
+        )
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo2{slot}",))).cache_value
+            == b"bar2"
+        )
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo3{slot}",))).cache_value
+            == b"bar3"
+        )
+        # add 1 more key to redis (exceed the max size)
+        r.set("foo4{slot}", "bar4")
+        assert r.get("foo4{slot}") == b"bar4"
+        # the first key is not in the local cache_data anymore
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo{slot}",))) is None
 
     @pytest.mark.parametrize(
         "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+            },
+        ],
         indirect=True,
     )
-    def test_execute_command_keys_provided(self, r):
-        r, cache = r
-        assert r.execute_command("SET", "b", "2") is True
-        assert r.execute_command("GET", "b", keys=["b"]) == "2"
-        assert cache.get(("GET", "b")) == "2"
+    @pytest.mark.onlycluster
+    def test_cache_ignore_not_allowed_command(self, r):
+        cache = r.nodes_manager.get_node_from_slot(12000).redis_connection.get_cache()
+        # add fields to hash
+        assert r.hset("foo", "bar", "baz")
+        # get random field
+        assert r.hrandfield("foo") == b"bar"
+        assert cache.get(CacheKey(command="HRANDFIELD", redis_keys=("foo",))) is None
 
     @pytest.mark.parametrize(
         "r",
-        [{"cache": _LocalCache(), "kwargs": {"decode_responses": True}}],
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+            },
+        ],
         indirect=True,
     )
-    def test_execute_command_keys_not_provided(self, r):
-        r, cache = r
-        assert r.execute_command("SET", "b", "2") is True
-        assert r.execute_command("GET", "b") == "2"  # keys not provided, not cached
-        assert cache.get(("GET", "b")) is None
+    @pytest.mark.onlycluster
+    def test_cache_invalidate_all_related_responses(self, r, cache):
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
+        # Add keys
+        assert r.set("foo{slot}", "bar")
+        assert r.set("bar{slot}", "foo")
+
+        # Make sure that replies was cached
+        assert r.mget("foo{slot}", "bar{slot}") == [b"bar", b"foo"]
+        assert cache.get(
+            CacheKey(command="MGET", redis_keys=("foo{slot}", "bar{slot}")),
+        ).cache_value == [b"bar", b"foo"]
+
+        # Invalidate one of the keys and make sure
+        # that all associated cached entries was removed
+        assert r.set("foo{slot}", "baz")
+        assert r.get("foo{slot}") == b"baz"
+        assert (
+            cache.get(
+                CacheKey(command="MGET", redis_keys=("foo{slot}", "bar{slot}")),
+            )
+            is None
+        )
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo{slot}",))).cache_value
+            == b"baz"
+        )
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+            },
+        ],
+        indirect=True,
+    )
+    @pytest.mark.onlycluster
+    def test_cache_flushed_on_server_flush(self, r, cache):
+        cache = r.nodes_manager.get_node_from_slot(10).redis_connection.get_cache()
+        # Add keys
+        assert r.set("foo{slot}", "bar")
+        assert r.set("bar{slot}", "foo")
+        assert r.set("baz{slot}", "bar")
+
+        # Make sure that replies was cached
+        assert r.get("foo{slot}") == b"bar"
+        assert r.get("bar{slot}") == b"foo"
+        assert r.get("baz{slot}") == b"bar"
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo{slot}",))).cache_value
+            == b"bar"
+        )
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("bar{slot}",))).cache_value
+            == b"foo"
+        )
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("baz{slot}",))).cache_value
+            == b"bar"
+        )
+
+        # Flush server and trying to access cached entry
+        assert r.flushall()
+        assert r.get("foo{slot}") is None
+        assert cache.size == 0
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
-class TestSentinelLocalCache:
-
-    def test_get_from_cache(self, local_cache, master):
+@skip_if_resp_version(2)
+@skip_if_server_version_lt("7.4.0")
+class TestSentinelCache:
+    @pytest.mark.parametrize(
+        "sentinel_setup",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "force_master_ip": "localhost",
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "force_master_ip": "localhost",
+                "decode_responses": True,
+            },
+        ],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_get_from_cache(self, master):
+        cache = master.get_cache()
         master.set("foo", "bar")
-        # get key from redis and save in local cache
-        assert master.get("foo") == b"bar"
-        # get key from local cache
-        assert local_cache.get(("GET", "foo")) == b"bar"
+        # get key from redis and save in local cache_data
+        assert master.get("foo") in [b"bar", "bar"]
+        # get key from local cache_data
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"bar",
+            "bar",
+        ]
         # change key in redis (cause invalidation)
         master.set("foo", "barbar")
-        # send any command to redis (process invalidation in background)
-        master.ping()
-        # the command is not in the local cache anymore
-        assert local_cache.get(("GET", "foo")) is None
         # get key from redis
-        assert master.get("foo") == b"barbar"
+        assert master.get("foo") in [b"barbar", "barbar"]
+        # Make sure that new value was cached
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"barbar",
+            "barbar",
+        ]
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "decode_responses": True,
+            },
+        ],
+        indirect=True,
+    )
+    def test_get_from_default_cache(self, r, r2):
+        cache = r.get_cache()
+        assert isinstance(cache.eviction_policy, LRUPolicy)
+
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache_data
+        assert r.get("foo") in [b"bar", "bar"]
+        # get key from local cache_data
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"bar",
+            "bar",
+        ]
+        # change key in redis (cause invalidation)
+        r2.set("foo", "barbar")
+        # Retrieves a new value from server and cache_data it
+        assert r.get("foo") in [b"barbar", "barbar"]
+        # Make sure that new value was cached
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"barbar",
+            "barbar",
+        ]
 
     @pytest.mark.parametrize(
         "sentinel_setup",
-        [{"kwargs": {"decode_responses": True}}],
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "force_master_ip": "localhost",
+            }
+        ],
         indirect=True,
     )
-    def test_cache_decode_response(self, local_cache, sentinel_setup, master):
+    @pytest.mark.onlynoncluster
+    def test_cache_clears_on_disconnect(self, master, cache):
+        cache = master.get_cache()
+        # add key to redis
         master.set("foo", "bar")
-        # get key from redis and save in local cache
-        assert master.get("foo") == "bar"
-        # get key from local cache
-        assert local_cache.get(("GET", "foo")) == "bar"
-        # change key in redis (cause invalidation)
-        master.set("foo", "barbar")
-        # send any command to redis (process invalidation in background)
-        master.ping()
-        # the command is not in the local cache anymore
-        assert local_cache.get(("GET", "foo")) is None
-        # get key from redis
-        assert master.get("foo") == "barbar"
+        # get key from redis and save in local cache_data
+        assert master.get("foo") == b"bar"
+        # get key from local cache_data
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            == b"bar"
+        )
+        # Force disconnection
+        master.connection_pool.get_connection("_").disconnect()
+        # Make sure cache_data is empty
+        assert cache.size == 0
 
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
-class TestCustomCache:
-    class _CustomCache(AbstractCache):
-        def __init__(self):
-            self.responses = cachetools.LRUCache(maxsize=1000)
-            self.keys_to_commands = defaultdict(list)
-            self.commands_to_keys = defaultdict(list)
-
-        def set(
-            self,
-            command: Union[str, Sequence[str]],
-            response: ResponseT,
-            keys_in_command: List[KeyT],
-        ):
-            self.responses[command] = response
-            for key in keys_in_command:
-                self.keys_to_commands[key].append(tuple(command))
-                self.commands_to_keys[command].append(tuple(keys_in_command))
-
-        def get(self, command: Union[str, Sequence[str]]) -> ResponseT:
-            return self.responses.get(command)
-
-        def delete_command(self, command: Union[str, Sequence[str]]):
-            self.responses.pop(command, None)
-            keys = self.commands_to_keys.pop(command, [])
-            for key in keys:
-                if command in self.keys_to_commands[key]:
-                    self.keys_to_commands[key].remove(command)
-
-        def delete_commands(self, commands: List[Union[str, Sequence[str]]]):
-            for command in commands:
-                self.delete_command(command)
-
-        def flush(self):
-            self.responses.clear()
-            self.commands_to_keys.clear()
-            self.keys_to_commands.clear()
-
-        def invalidate_key(self, key: KeyT):
-            commands = self.keys_to_commands.pop(key, [])
-            for command in commands:
-                self.delete_command(command)
-
-    @pytest.mark.parametrize("r", [{"cache": _CustomCache()}], indirect=True)
-    def test_get_from_cache(self, r, r2):
-        r, cache = r
+@skip_if_resp_version(2)
+@skip_if_server_version_lt("7.4.0")
+class TestSSLCache:
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "ssl": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=128)),
+                "ssl": True,
+                "decode_responses": True,
+            },
+        ],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_get_from_cache(self, r, r2, cache):
+        cache = r.get_cache()
         # add key to redis
         r.set("foo", "bar")
-        # get key from redis and save in local cache
-        assert r.get("foo") == b"bar"
-        # get key from local cache
-        assert cache.get(("GET", "foo")) == b"bar"
+        # get key from redis and save in local cache_data
+        assert r.get("foo") in [b"bar", "bar"]
+        # get key from local cache_data
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"bar",
+            "bar",
+        ]
+        # change key in redis (cause invalidation)
+        assert r2.set("foo", "barbar")
+        # Timeout needed for SSL connection because there's timeout
+        # between data appears in socket buffer
+        time.sleep(0.1)
+        # Retrieves a new value from server and cache_data it
+        assert r.get("foo") in [b"barbar", "barbar"]
+        # Make sure that new value was cached
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"barbar",
+            "barbar",
+        ]
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "ssl": True,
+            },
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "ssl": True,
+                "decode_responses": True,
+            },
+        ],
+        indirect=True,
+    )
+    def test_get_from_custom_cache(self, r, r2):
+        cache = r.get_cache()
+        assert isinstance(cache.eviction_policy, LRUPolicy)
+
+        # add key to redis
+        r.set("foo", "bar")
+        # get key from redis and save in local cache_data
+        assert r.get("foo") in [b"bar", "bar"]
+        # get key from local cache_data
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"bar",
+            "bar",
+        ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
-        # send any command to redis (process invalidation in background)
-        r.ping()
-        # the command is not in the local cache anymore
-        assert cache.get(("GET", "foo")) is None
-        # get key from redis
-        assert r.get("foo") == b"barbar"
+        # Timeout needed for SSL connection because there's timeout
+        # between data appears in socket buffer
+        time.sleep(0.1)
+        # Retrieves a new value from server and cache_data it
+        assert r.get("foo") in [b"barbar", "barbar"]
+        # Make sure that new value was cached
+        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+            b"barbar",
+            "barbar",
+        ]
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache_config": CacheConfig(max_size=128),
+                "ssl": True,
+            }
+        ],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_cache_invalidate_all_related_responses(self, r):
+        cache = r.get_cache()
+        # Add keys
+        assert r.set("foo", "bar")
+        assert r.set("bar", "foo")
+
+        # Make sure that replies was cached
+        assert r.mget("foo", "bar") == [b"bar", b"foo"]
+        assert cache.get(
+            CacheKey(command="MGET", redis_keys=("foo", "bar"))
+        ).cache_value == [b"bar", b"foo"]
+
+        # Invalidate one of the keys and make sure
+        # that all associated cached entries was removed
+        assert r.set("foo", "baz")
+        # Timeout needed for SSL connection because there's timeout
+        # between data appears in socket buffer
+        time.sleep(0.1)
+        assert r.get("foo") == b"baz"
+        assert cache.get(CacheKey(command="MGET", redis_keys=("foo", "bar"))) is None
+        assert (
+            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            == b"baz"
+        )
+
+
+class TestUnitDefaultCache:
+    def test_get_eviction_policy(self):
+        cache = DefaultCache(CacheConfig(max_size=5))
+        assert isinstance(cache.eviction_policy, LRUPolicy)
+
+    def test_get_max_size(self):
+        cache = DefaultCache(CacheConfig(max_size=5))
+        assert cache.config.get_max_size() == 5
+
+    def test_get_size(self):
+        cache = DefaultCache(CacheConfig(max_size=5))
+        assert cache.size == 0
+
+    @pytest.mark.parametrize(
+        "cache_key", [{"command": "GET", "redis_keys": ("bar",)}], indirect=True
+    )
+    def test_set_non_existing_cache_key(self, cache_key, mock_connection):
+        cache = DefaultCache(CacheConfig(max_size=5))
+
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"val",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.get(cache_key).cache_value == b"val"
+
+    @pytest.mark.parametrize(
+        "cache_key", [{"command": "GET", "redis_keys": ("bar",)}], indirect=True
+    )
+    def test_set_updates_existing_cache_key(self, cache_key, mock_connection):
+        cache = DefaultCache(CacheConfig(max_size=5))
+
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"val",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.get(cache_key).cache_value == b"val"
+
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"new_val",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.get(cache_key).cache_value == b"new_val"
+
+    @pytest.mark.parametrize(
+        "cache_key", [{"command": "HRANDFIELD", "redis_keys": ("bar",)}], indirect=True
+    )
+    def test_set_does_not_store_not_allowed_key(self, cache_key, mock_connection):
+        cache = DefaultCache(CacheConfig(max_size=5))
+
+        assert not cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"val",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+    def test_set_evict_lru_cache_key_on_reaching_max_size(self, mock_connection):
+        cache = DefaultCache(CacheConfig(max_size=3))
+        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
+        cache_key2 = CacheKey(command="GET", redis_keys=("foo1",))
+        cache_key3 = CacheKey(command="GET", redis_keys=("foo2",))
+
+        # Set 3 different keys
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key2,
+                cache_value=b"bar1",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key3,
+                cache_value=b"bar2",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        # Accessing key in the order that it makes 2nd key LRU
+        assert cache.get(cache_key1).cache_value == b"bar"
+        assert cache.get(cache_key2).cache_value == b"bar1"
+        assert cache.get(cache_key3).cache_value == b"bar2"
+        assert cache.get(cache_key1).cache_value == b"bar"
+
+        cache_key4 = CacheKey(command="GET", redis_keys=("foo3",))
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key4,
+                cache_value=b"bar3",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        # Make sure that new key was added and 2nd is evicted
+        assert cache.get(cache_key4).cache_value == b"bar3"
+        assert cache.get(cache_key2) is None
+
+    @pytest.mark.parametrize(
+        "cache_key", [{"command": "GET", "redis_keys": ("bar",)}], indirect=True
+    )
+    def test_get_return_correct_value(self, cache_key, mock_connection):
+        cache = DefaultCache(CacheConfig(max_size=5))
+
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"val",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.get(cache_key).cache_value == b"val"
+
+        wrong_key = CacheKey(command="HGET", redis_keys=("foo",))
+        assert cache.get(wrong_key) is None
+
+        result = cache.get(cache_key)
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"new_val",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        # Make sure that result is immutable.
+        assert result.cache_value != cache.get(cache_key).cache_value
+
+    def test_delete_by_cache_keys_removes_associated_entries(self, mock_connection):
+        cache = DefaultCache(CacheConfig(max_size=5))
+
+        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
+        cache_key2 = CacheKey(command="GET", redis_keys=("foo1",))
+        cache_key3 = CacheKey(command="GET", redis_keys=("foo2",))
+        cache_key4 = CacheKey(command="GET", redis_keys=("foo3",))
+
+        # Set 3 different keys
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key2,
+                cache_value=b"bar1",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key3,
+                cache_value=b"bar2",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        assert cache.delete_by_cache_keys([cache_key1, cache_key2, cache_key4]) == [
+            True,
+            True,
+            False,
+        ]
+        assert len(cache.collection) == 1
+        assert cache.get(cache_key3).cache_value == b"bar2"
+
+    def test_delete_by_redis_keys_removes_associated_entries(self, mock_connection):
+        cache = DefaultCache(CacheConfig(max_size=5))
+
+        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
+        cache_key2 = CacheKey(command="GET", redis_keys=("foo1",))
+        cache_key3 = CacheKey(command="MGET", redis_keys=("foo", "foo3"))
+        cache_key4 = CacheKey(command="MGET", redis_keys=("foo2", "foo3"))
+
+        # Set 3 different keys
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key2,
+                cache_value=b"bar1",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key3,
+                cache_value=b"bar2",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key4,
+                cache_value=b"bar3",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        assert cache.delete_by_redis_keys([b"foo", b"foo1"]) == [True, True, True]
+        assert len(cache.collection) == 1
+        assert cache.get(cache_key4).cache_value == b"bar3"
+
+    def test_flush(self, mock_connection):
+        cache = DefaultCache(CacheConfig(max_size=5))
+
+        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
+        cache_key2 = CacheKey(command="GET", redis_keys=("foo1",))
+        cache_key3 = CacheKey(command="GET", redis_keys=("foo2",))
+
+        # Set 3 different keys
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key2,
+                cache_value=b"bar1",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key3,
+                cache_value=b"bar2",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        assert cache.flush() == 3
+        assert len(cache.collection) == 0
+
+
+class TestUnitLRUPolicy:
+    def test_type(self):
+        policy = LRUPolicy()
+        assert policy.type == EvictionPolicyType.time_based
+
+    def test_evict_next(self, mock_connection):
+        cache = DefaultCache(
+            CacheConfig(max_size=5, eviction_policy=EvictionPolicy.LRU)
+        )
+        policy = cache.eviction_policy
+
+        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
+        cache_key2 = CacheKey(command="GET", redis_keys=("bar",))
+
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key2,
+                cache_value=b"foo",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        assert policy.evict_next() == cache_key1
+        assert cache.get(cache_key1) is None
+
+    def test_evict_many(self, mock_connection):
+        cache = DefaultCache(
+            CacheConfig(max_size=5, eviction_policy=EvictionPolicy.LRU)
+        )
+        policy = cache.eviction_policy
+        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
+        cache_key2 = CacheKey(command="GET", redis_keys=("bar",))
+        cache_key3 = CacheKey(command="GET", redis_keys=("baz",))
+
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key2,
+                cache_value=b"foo",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        assert cache.set(
+            CacheEntry(
+                cache_key=cache_key3,
+                cache_value=b"baz",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        assert policy.evict_many(2) == [cache_key1, cache_key2]
+        assert cache.get(cache_key1) is None
+        assert cache.get(cache_key2) is None
+
+        with pytest.raises(ValueError, match="Evictions count is above cache size"):
+            policy.evict_many(99)
+
+    def test_touch(self, mock_connection):
+        cache = DefaultCache(
+            CacheConfig(max_size=5, eviction_policy=EvictionPolicy.LRU)
+        )
+        policy = cache.eviction_policy
+
+        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
+        cache_key2 = CacheKey(command="GET", redis_keys=("bar",))
+
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key1,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key2,
+                cache_value=b"foo",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        assert cache.collection.popitem(last=True)[0] == cache_key2
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key2,
+                cache_value=b"foo",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        policy.touch(cache_key1)
+        assert cache.collection.popitem(last=True)[0] == cache_key1
+
+    def test_throws_error_on_invalid_cache(self):
+        policy = LRUPolicy()
+
+        with pytest.raises(
+            ValueError, match="Eviction policy should be associated with valid cache."
+        ):
+            policy.evict_next()
+
+        policy.cache = "wrong_type"
+
+        with pytest.raises(
+            ValueError, match="Eviction policy should be associated with valid cache."
+        ):
+            policy.evict_next()
+
+
+class TestUnitCacheConfiguration:
+    MAX_SIZE = 100
+    EVICTION_POLICY = EvictionPolicy.LRU
+
+    def test_get_max_size(self, cache_conf: CacheConfig):
+        assert self.MAX_SIZE == cache_conf.get_max_size()
+
+    def test_get_eviction_policy(self, cache_conf: CacheConfig):
+        assert self.EVICTION_POLICY == cache_conf.get_eviction_policy()
+
+    def test_is_exceeds_max_size(self, cache_conf: CacheConfig):
+        assert not cache_conf.is_exceeds_max_size(self.MAX_SIZE)
+        assert cache_conf.is_exceeds_max_size(self.MAX_SIZE + 1)
+
+    def test_is_allowed_to_cache(self, cache_conf: CacheConfig):
+        assert cache_conf.is_allowed_to_cache("GET")
+        assert not cache_conf.is_allowed_to_cache("SET")

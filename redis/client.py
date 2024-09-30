@@ -6,12 +6,6 @@ import warnings
 from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
-from redis._cache import (
-    DEFAULT_ALLOW_LIST,
-    DEFAULT_DENY_LIST,
-    DEFAULT_EVICTION_POLICY,
-    AbstractCache,
-)
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -19,6 +13,7 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
     bool_ok,
 )
+from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
     CoreCommands,
     RedisModuleCommands,
@@ -216,13 +211,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        cache_enabled: bool = False,
-        client_cache: Optional[AbstractCache] = None,
-        cache_max_size: int = 10000,
-        cache_ttl: int = 0,
-        cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
-        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
+        cache: Optional[CacheInterface] = None,
+        cache_config: Optional[CacheConfig] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -274,13 +264,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,
-                "cache_enabled": cache_enabled,
-                "client_cache": client_cache,
-                "cache_max_size": cache_max_size,
-                "cache_ttl": cache_ttl,
-                "cache_policy": cache_policy,
-                "cache_deny_list": cache_deny_list,
-                "cache_allow_list": cache_allow_list,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -322,12 +305,26 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
+                if (cache_config or cache) and protocol in [3, "3"]:
+                    kwargs.update(
+                        {
+                            "cache": cache,
+                            "cache_config": cache_config,
+                        }
+                    )
             connection_pool = ConnectionPool(**kwargs)
             self.auto_close_connection_pool = True
         else:
             self.auto_close_connection_pool = False
 
         self.connection_pool = connection_pool
+
+        if (cache_config or cache) and self.connection_pool.get_protocol() not in [
+            3,
+            "3",
+        ]:
+            raise RedisError("Client caching is only supported with RESP version 3")
+
         self.connection = None
         if single_connection_client:
             self.connection = self.connection_pool.get_connection("_")
@@ -541,7 +538,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         Send a command and parse the response
         """
-        conn.send_command(*args)
+        conn.send_command(*args, **options)
         return self.parse_response(conn, command_name, **options)
 
     def _disconnect_raise(self, conn, error):
@@ -559,25 +556,20 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
+        return self._execute_command(*args, **options)
+
+    def _execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
-        command_name = args[0]
-        keys = options.pop("keys", None)
         pool = self.connection_pool
+        command_name = args[0]
         conn = self.connection or pool.get_connection(command_name, **options)
-        response_from_cache = conn._get_from_local_cache(args)
         try:
-            if response_from_cache is not None:
-                return response_from_cache
-            else:
-                response = conn.retry.call_with_retry(
-                    lambda: self._send_command_parse_response(
-                        conn, command_name, *args, **options
-                    ),
-                    lambda error: self._disconnect_raise(conn, error),
-                )
-                if keys:
-                    conn._add_to_local_cache(args, response, keys)
-                return response
+            return conn.retry.call_with_retry(
+                lambda: self._send_command_parse_response(
+                    conn, command_name, *args, **options
+                ),
+                lambda error: self._disconnect_raise(conn, error),
+            )
         finally:
             if not self.connection:
                 pool.release(conn)
@@ -598,27 +590,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if EMPTY_RESPONSE in options:
             options.pop(EMPTY_RESPONSE)
 
+        # Remove keys entry, it needs only for cache.
+        options.pop("keys", None)
+
         if command_name in self.response_callbacks:
             return self.response_callbacks[command_name](response, **options)
         return response
 
-    def flush_cache(self):
-        if self.connection:
-            self.connection.flush_cache()
-        else:
-            self.connection_pool.flush_cache()
-
-    def delete_command_from_cache(self, command):
-        if self.connection:
-            self.connection.delete_command_from_cache(command)
-        else:
-            self.connection_pool.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key):
-        if self.connection:
-            self.connection.invalidate_key_from_cache(key)
-        else:
-            self.connection_pool.invalidate_key_from_cache(key)
+    def get_cache(self) -> Optional[CacheInterface]:
+        return self.connection_pool.cache
 
 
 StrictRedis = Redis
@@ -1314,7 +1294,6 @@ class Pipeline(Redis):
         self.explicit_transaction = True
 
     def execute_command(self, *args, **kwargs):
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
         if (self.watching or args[0] == "WATCH") and not self.explicit_transaction:
             return self.immediate_execute_command(*args, **kwargs)
         return self.pipeline_execute_command(*args, **kwargs)
@@ -1441,6 +1420,8 @@ class Pipeline(Redis):
         for r, cmd in zip(response, commands):
             if not isinstance(r, Exception):
                 args, options = cmd
+                # Remove keys entry, it needs only for cache.
+                options.pop("keys", None)
                 command_name = args[0]
                 if command_name in self.response_callbacks:
                     r = self.response_callbacks[command_name](r, **options)
