@@ -25,23 +25,12 @@ from .conftest import (
     assert_resp_response_in,
     is_resp2_connection,
     skip_if_redis_enterprise,
+    skip_if_resp_version,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
-    skip_unless_arch_bits, skip_if_resp_version,
+    skip_unless_arch_bits,
 )
 
-@pytest.fixture()
-def r(request):
-    protocol = 2
-
-    if hasattr(request, "param"):
-        protocol = request.param.get("protocol", 2)
-    with _get_client(
-        redis.Redis,
-        request,
-        protocol=protocol,
-    ) as client:
-        yield client
 
 @pytest.fixture()
 def slowlog(request, r):
@@ -2257,13 +2246,13 @@ class TestRedisCommands:
         assert r.scard("a") == 3
 
     @pytest.mark.onlynoncluster
+    @skip_if_resp_version(3)
     def test_sdiff(self, r):
         r.sadd("a", "1", "2", "3")
         assert set(r.sdiff("a", "b")) == {b"1", b"2", b"3"}
         r.sadd("b", "2", "3")
         assert r.sdiff("a", "b") == {b"1"}
 
-    @pytest.mark.parametrize("r", [{"protocol": 3}], indirect=True)
     @pytest.mark.onlynoncluster
     @skip_if_resp_version(2)
     def test_sdiff_resp3(self, r):
@@ -2273,6 +2262,7 @@ class TestRedisCommands:
         assert r.sdiff("a", "b") == [b"1"]
 
     @pytest.mark.onlynoncluster
+    @skip_if_resp_version(3)
     def test_sdiffstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sdiffstore("c", "a", "b") == 3
@@ -2281,7 +2271,6 @@ class TestRedisCommands:
         assert r.sdiffstore("c", "a", "b") == 1
         assert r.smembers("c") == {b"1"}
 
-    @pytest.mark.parametrize("r", [{"protocol": 3}], indirect=True)
     @pytest.mark.onlynoncluster
     @skip_if_resp_version(2)
     def test_sdiffstore_resp3(self, r):
@@ -2290,16 +2279,16 @@ class TestRedisCommands:
         assert set(r.smembers("c")) == {b"1", b"2", b"3"}
         r.sadd("b", "2", "3")
         assert r.sdiffstore("c", "a", "b") == 1
-        assert r.smembers("c") == {b"1"}
+        assert r.smembers("c") == [b"1"]
 
     @pytest.mark.onlynoncluster
+    @skip_if_resp_version(3)
     def test_sinter(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sinter("a", "b") == set()
         r.sadd("b", "2", "3")
         assert set(r.sinter("a", "b")) == {b"2", b"3"}
 
-    @pytest.mark.parametrize("r", [{"protocol": 3}], indirect=True)
     @pytest.mark.onlynoncluster
     @skip_if_resp_version(2)
     def test_sinter_resp3(self, r):
@@ -2318,6 +2307,7 @@ class TestRedisCommands:
         assert r.sintercard(3, ["a", "b", "c"], limit=1) == 1
 
     @pytest.mark.onlynoncluster
+    @skip_if_resp_version(3)
     def test_sinterstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sinterstore("c", "a", "b") == 0
@@ -2326,7 +2316,6 @@ class TestRedisCommands:
         assert r.sinterstore("c", "a", "b") == 2
         assert set(r.smembers("c")) == {b"2", b"3"}
 
-    @pytest.mark.parametrize("r", [{"protocol": 3}], indirect=True)
     @pytest.mark.onlynoncluster
     @skip_if_resp_version(2)
     def test_sinterstore_resp3(self, r):
@@ -2356,11 +2345,21 @@ class TestRedisCommands:
         assert r.smismember("a", ["1", "4", "2", "3"]) == result_list
 
     @pytest.mark.onlynoncluster
+    @skip_if_resp_version(3)
     def test_smove(self, r):
         r.sadd("a", "a1", "a2")
         r.sadd("b", "b1", "b2")
         assert r.smove("a", "b", "a1")
         assert r.smembers("a") == {b"a2"}
+        assert set(r.smembers("b")) == {b"b1", b"b2", b"a1"}
+
+    @pytest.mark.onlynoncluster
+    @skip_if_resp_version(2)
+    def test_smove_resp3(self, r):
+        r.sadd("a", "a1", "a2")
+        r.sadd("b", "b1", "b2")
+        assert r.smove("a", "b", "a1")
+        assert r.smembers("a") == [b"a2"]
         assert set(r.smembers("b")) == {b"b1", b"b2", b"a1"}
 
     def test_spop(self, r):
