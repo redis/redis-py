@@ -12,7 +12,9 @@ try:
         raise ImportError("hiredis package should be >= 3.0.0")
     HIREDIS_PACK_AVAILABLE = hasattr(hiredis, "pack_command")
     if not HIREDIS_PACK_AVAILABLE:
-        raise ImportError("pack_command is not available in the current version of hiredis.")
+        raise ImportError(
+            "pack_command is not available in the current version of hiredis."
+        )
 except ImportError:
     HIREDIS_AVAILABLE = False
     HIREDIS_PACK_AVAILABLE = False
