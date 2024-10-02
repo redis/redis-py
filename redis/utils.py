@@ -12,7 +12,6 @@ try:
         raise ImportError("hiredis package should be >= 3.0.0")
 except ImportError:
     HIREDIS_AVAILABLE = False
-    HIREDIS_PACK_AVAILABLE = False
 
 try:
     import ssl  # noqa
