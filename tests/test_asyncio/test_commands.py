@@ -1417,7 +1417,7 @@ class TestRedisCommands:
         await r.sadd("a", "1", "2", "3")
         assert set(await r.sdiff("a", "b")) == {b"1", b"2", b"3"}
         await r.sadd("b", "2", "3")
-        assert await r.sdiff("a", "b") == [b"1"]
+        assert await r.sdiff("a", "b") == {b"1"}
 
     @pytest.mark.onlynoncluster
     async def test_sdiffstore(self, r: redis.Redis):
@@ -1426,12 +1426,12 @@ class TestRedisCommands:
         assert set(await r.smembers("c")) == {b"1", b"2", b"3"}
         await r.sadd("b", "2", "3")
         assert await r.sdiffstore("c", "a", "b") == 1
-        assert await r.smembers("c") == [b"1"]
+        assert await r.smembers("c") == {b"1"}
 
     @pytest.mark.onlynoncluster
     async def test_sinter(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
-        assert await r.sinter("a", "b") == []
+        assert await r.sinter("a", "b") == set()
         await r.sadd("b", "2", "3")
         assert set(await r.sinter("a", "b")) == {b"2", b"3"}
 
@@ -1439,7 +1439,7 @@ class TestRedisCommands:
     async def test_sinterstore(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
         assert await r.sinterstore("c", "a", "b") == 0
-        assert await r.smembers("c") == []
+        assert await r.smembers("c") == set()
         await r.sadd("b", "2", "3")
         assert await r.sinterstore("c", "a", "b") == 2
         assert set(await r.smembers("c")) == {b"2", b"3"}
@@ -1460,7 +1460,7 @@ class TestRedisCommands:
         await r.sadd("a", "a1", "a2")
         await r.sadd("b", "b1", "b2")
         assert await r.smove("a", "b", "a1")
-        assert await r.smembers("a") == [b"a2"]
+        assert await r.smembers("a") == {b"a2"}
         assert set(await r.smembers("b")) == {b"b1", b"b2", b"a1"}
 
     async def test_spop(self, r: redis.Redis):

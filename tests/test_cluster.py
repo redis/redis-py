@@ -48,7 +48,7 @@ from .conftest import (
     skip_if_redis_enterprise,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
-    wait_for_command,
+    wait_for_command, skip_if_resp_version,
 )
 
 default_host = "127.0.0.1"
@@ -283,6 +283,19 @@ def moved_redirection_helper(request, failover=False):
             assert rc.get_node(host=r_host, port=r_port).server_type == PRIMARY
             assert prev_primary.server_type == REPLICA
 
+
+@pytest.fixture()
+def r(request):
+    protocol = 2
+
+    if hasattr(request, "param"):
+        protocol = request.param.get("protocol", 2)
+    with _get_client(
+        redis.Redis,
+        request,
+        protocol=protocol,
+    ) as client:
+        yield client
 
 @pytest.mark.onlycluster
 class TestRedisClusterObj:
@@ -1867,9 +1880,27 @@ class TestClusterRedisCommands:
         r.sadd("{foo}a", "1", "2", "3")
         assert set(r.sdiff("{foo}a", "{foo}b")) == {b"1", b"2", b"3"}
         r.sadd("{foo}b", "2", "3")
+        assert r.sdiff("{foo}a", "{foo}b") == {b"1"}
+
+    @pytest.mark.parametrize("r", [{"protocol": 3}], indirect=True)
+    @skip_if_resp_version(2)
+    def test_cluster_sdiff_resp3(self, r):
+        r.sadd("{foo}a", "1", "2", "3")
+        assert set(r.sdiff("{foo}a", "{foo}b")) == {b"1", b"2", b"3"}
+        r.sadd("{foo}b", "2", "3")
         assert r.sdiff("{foo}a", "{foo}b") == [b"1"]
 
     def test_cluster_sdiffstore(self, r):
+        r.sadd("{foo}a", "1", "2", "3")
+        assert r.sdiffstore("{foo}c", "{foo}a", "{foo}b") == 3
+        assert set(r.smembers("{foo}c")) == {b"1", b"2", b"3"}
+        r.sadd("{foo}b", "2", "3")
+        assert r.sdiffstore("{foo}c", "{foo}a", "{foo}b") == 1
+        assert r.smembers("{foo}c") == {b"1"}
+
+    @pytest.mark.parametrize("r", [{"protocol": 3}], indirect=True)
+    @skip_if_resp_version(2)
+    def test_cluster_sdiffstore_resp3(self, r):
         r.sadd("{foo}a", "1", "2", "3")
         assert r.sdiffstore("{foo}c", "{foo}a", "{foo}b") == 3
         assert set(r.smembers("{foo}c")) == {b"1", b"2", b"3"}
@@ -1879,11 +1910,29 @@ class TestClusterRedisCommands:
 
     def test_cluster_sinter(self, r):
         r.sadd("{foo}a", "1", "2", "3")
+        assert r.sinter("{foo}a", "{foo}b") == set()
+        r.sadd("{foo}b", "2", "3")
+        assert set(r.sinter("{foo}a", "{foo}b")) == {b"2", b"3"}
+
+    @pytest.mark.parametrize("r", [{"protocol": 3}], indirect=True)
+    @skip_if_resp_version(2)
+    def test_cluster_sinter_resp3(self, r):
+        r.sadd("{foo}a", "1", "2", "3")
         assert r.sinter("{foo}a", "{foo}b") == []
         r.sadd("{foo}b", "2", "3")
         assert set(r.sinter("{foo}a", "{foo}b")) == {b"2", b"3"}
 
     def test_cluster_sinterstore(self, r):
+        r.sadd("{foo}a", "1", "2", "3")
+        assert r.sinterstore("{foo}c", "{foo}a", "{foo}b") == 0
+        assert r.smembers("{foo}c") == set()
+        r.sadd("{foo}b", "2", "3")
+        assert r.sinterstore("{foo}c", "{foo}a", "{foo}b") == 2
+        assert set(r.smembers("{foo}c")) == {b"2", b"3"}
+
+    @pytest.mark.parametrize("r", [{"protocol": 3}], indirect=True)
+    @skip_if_resp_version(2)
+    def test_cluster_sinterstore_resp3(self, r):
         r.sadd("{foo}a", "1", "2", "3")
         assert r.sinterstore("{foo}c", "{foo}a", "{foo}b") == 0
         assert r.smembers("{foo}c") == []
@@ -1892,6 +1941,15 @@ class TestClusterRedisCommands:
         assert set(r.smembers("{foo}c")) == {b"2", b"3"}
 
     def test_cluster_smove(self, r):
+        r.sadd("{foo}a", "a1", "a2")
+        r.sadd("{foo}b", "b1", "b2")
+        assert r.smove("{foo}a", "{foo}b", "a1")
+        assert r.smembers("{foo}a") == {b"a2"}
+        assert set(r.smembers("{foo}b")) == {b"b1", b"b2", b"a1"}
+
+    @pytest.mark.parametrize("r", [{"protocol": 3}], indirect=True)
+    @skip_if_resp_version(2)
+    def test_cluster_smove_resp3(self, r):
         r.sadd("{foo}a", "a1", "a2")
         r.sadd("{foo}b", "b1", "b2")
         assert r.smove("{foo}a", "{foo}b", "a1")
