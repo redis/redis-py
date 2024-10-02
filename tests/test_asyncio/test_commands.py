@@ -24,7 +24,6 @@ from tests.conftest import (
     assert_resp_response,
     assert_resp_response_in,
     is_resp2_connection,
-    skip_if_resp_version,
     skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
@@ -1413,59 +1412,29 @@ class TestRedisCommands:
         await r.sadd("a", "1", "2", "3")
         assert await r.scard("a") == 3
 
-    @skip_if_resp_version(3)
     @pytest.mark.onlynoncluster
     async def test_sdiff(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
-        assert set(await r.sdiff("a", "b")) == {b"1", b"2", b"3"}
+        assert await r.sdiff("a", "b") == {b"1", b"2", b"3"}
         await r.sadd("b", "2", "3")
         assert await r.sdiff("a", "b") == {b"1"}
 
-    @skip_if_resp_version(2)
-    @pytest.mark.onlynoncluster
-    async def test_sdiff_resp3(self, r: redis.Redis):
-        await r.sadd("a", "1", "2", "3")
-        assert set(await r.sdiff("a", "b")) == {b"1", b"2", b"3"}
-        await r.sadd("b", "2", "3")
-        assert await r.sdiff("a", "b") == [b"1"]
-
-    @skip_if_resp_version(3)
     @pytest.mark.onlynoncluster
     async def test_sdiffstore(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
         assert await r.sdiffstore("c", "a", "b") == 3
-        assert set(await r.smembers("c")) == {b"1", b"2", b"3"}
+        assert await r.smembers("c") == {b"1", b"2", b"3"}
         await r.sadd("b", "2", "3")
         assert await r.sdiffstore("c", "a", "b") == 1
         assert await r.smembers("c") == {b"1"}
 
-    @skip_if_resp_version(2)
-    @pytest.mark.onlynoncluster
-    async def test_sdiffstore_resp3(self, r: redis.Redis):
-        await r.sadd("a", "1", "2", "3")
-        assert await r.sdiffstore("c", "a", "b") == 3
-        assert set(await r.smembers("c")) == {b"1", b"2", b"3"}
-        await r.sadd("b", "2", "3")
-        assert await r.sdiffstore("c", "a", "b") == 1
-        assert await r.smembers("c") == [b"1"]
-
-    @skip_if_resp_version(3)
     @pytest.mark.onlynoncluster
     async def test_sinter(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
         assert await r.sinter("a", "b") == set()
         await r.sadd("b", "2", "3")
-        assert set(await r.sinter("a", "b")) == {b"2", b"3"}
+        assert await r.sinter("a", "b") == {b"2", b"3"}
 
-    @skip_if_resp_version(2)
-    @pytest.mark.onlynoncluster
-    async def test_sinter_resp3(self, r: redis.Redis):
-        await r.sadd("a", "1", "2", "3")
-        assert await r.sinter("a", "b") == []
-        await r.sadd("b", "2", "3")
-        assert await r.sinter("a", "b") == [b"2", b"3"]
-
-    @skip_if_resp_version(3)
     @pytest.mark.onlynoncluster
     async def test_sinterstore(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
@@ -1473,17 +1442,7 @@ class TestRedisCommands:
         assert await r.smembers("c") == set()
         await r.sadd("b", "2", "3")
         assert await r.sinterstore("c", "a", "b") == 2
-        assert set(await r.smembers("c")) == {b"2", b"3"}
-
-    @skip_if_resp_version(2)
-    @pytest.mark.onlynoncluster
-    async def test_sinterstore_resp3(self, r: redis.Redis):
-        await r.sadd("a", "1", "2", "3")
-        assert await r.sinterstore("c", "a", "b") == 0
-        assert await r.smembers("c") == []
-        await r.sadd("b", "2", "3")
-        assert await r.sinterstore("c", "a", "b") == 2
-        assert set(await r.smembers("c")) == {b"2", b"3"}
+        assert await r.smembers("c") == {b"2", b"3"}
 
     async def test_sismember(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
@@ -1496,23 +1455,13 @@ class TestRedisCommands:
         await r.sadd("a", "1", "2", "3")
         assert set(await r.smembers("a")) == {b"1", b"2", b"3"}
 
-    @skip_if_resp_version(3)
     @pytest.mark.onlynoncluster
     async def test_smove(self, r: redis.Redis):
         await r.sadd("a", "a1", "a2")
         await r.sadd("b", "b1", "b2")
         assert await r.smove("a", "b", "a1")
         assert await r.smembers("a") == {b"a2"}
-        assert set(await r.smembers("b")) == {b"b1", b"b2", b"a1"}
-
-    @skip_if_resp_version(2)
-    @pytest.mark.onlynoncluster
-    async def test_smove_resp3(self, r: redis.Redis):
-        await r.sadd("a", "a1", "a2")
-        await r.sadd("b", "b1", "b2")
-        assert await r.smove("a", "b", "a1")
-        assert await r.smembers("a") == [b"a2"]
-        assert set(await r.smembers("b")) == {b"b1", b"b2", b"a1"}
+        assert await r.smembers("b") == {b"b1", b"b2", b"a1"}
 
     async def test_spop(self, r: redis.Redis):
         s = [b"1", b"2", b"3"]
