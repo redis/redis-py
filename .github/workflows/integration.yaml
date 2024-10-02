@@ -93,7 +93,7 @@ jobs:
       - name: Run tests against hiredis < 3.0.0
         if: ${{ matrix.connection-type == 'hiredis' && matrix.python-version == '3.12'}}
         run: |
-          pip uninstall hiredis
+          pip uninstall hiredis -y
           pip install -U setuptools wheel
           pip install -r requirements.txt
           pip install -r dev_requirements.txt
@@ -163,7 +163,7 @@ jobs:
       - name: Run tests against hiredis < 3.0.0
         if: ${{ matrix.connection-type == 'hiredis' && matrix.python-version == '3.12'}}
         run: |
-          pip uninstall hiredis
+          pip uninstall hiredis -y
           pip install -U setuptools wheel
           pip install -r requirements.txt
           pip install -r dev_requirements.txt
