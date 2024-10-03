@@ -1,6 +1,5 @@
 import pytest
 import redis
-from redis.connection import Connection
 
 from .conftest import _get_client
 
