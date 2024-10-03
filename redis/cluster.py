@@ -1163,6 +1163,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     asking = False
                 connection.send_command(*args, **kwargs)
                 response = redis_node.parse_response(connection, command, **kwargs)
+
+                # Remove keys entry, it needs only for cache.
+                kwargs.pop("keys", None)
+
                 if command in self.cluster_response_callbacks:
                     response = self.cluster_response_callbacks[command](
                         response, **kwargs
