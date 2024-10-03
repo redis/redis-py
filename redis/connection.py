@@ -313,6 +313,8 @@ class AbstractConnection(ConnectionInterface):
     def _construct_command_packer(self, packer):
         if packer is not None:
             return packer
+        elif HIREDIS_AVAILABLE:
+            return HiredisRespSerializer()
         else:
             return PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
 
