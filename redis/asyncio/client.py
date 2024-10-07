@@ -1423,6 +1423,10 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             if not isinstance(r, Exception):
                 args, options = cmd
                 command_name = args[0]
+
+                # Remove keys entry, it needs only for cache.
+                options.pop("keys", None)
+
                 if command_name in self.response_callbacks:
                     r = self.response_callbacks[command_name](r, **options)
                     if inspect.isawaitable(r):

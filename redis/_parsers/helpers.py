@@ -786,6 +786,9 @@ _RedisCallbacks = {
 
 _RedisCallbacksRESP2 = {
     **string_keys_to_dict(
+        "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
+    ),
+    **string_keys_to_dict(
         "ZDIFF ZINTER ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZRANK ZREVRANGE "
         "ZREVRANGEBYSCORE ZREVRANK ZUNION",
         zset_score_pairs,
@@ -829,6 +832,9 @@ _RedisCallbacksRESP2 = {
 
 
 _RedisCallbacksRESP3 = {
+    **string_keys_to_dict(
+        "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
+    ),
     **string_keys_to_dict(
         "ZRANGE ZINTER ZPOPMAX ZPOPMIN ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE "
         "ZUNION HGETALL XREADGROUP",

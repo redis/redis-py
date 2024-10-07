@@ -2247,25 +2247,25 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     def test_sdiff(self, r):
         r.sadd("a", "1", "2", "3")
-        assert set(r.sdiff("a", "b")) == {b"1", b"2", b"3"}
+        assert r.sdiff("a", "b") == {b"1", b"2", b"3"}
         r.sadd("b", "2", "3")
-        assert r.sdiff("a", "b") == [b"1"]
+        assert r.sdiff("a", "b") == {b"1"}
 
     @pytest.mark.onlynoncluster
     def test_sdiffstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sdiffstore("c", "a", "b") == 3
-        assert set(r.smembers("c")) == {b"1", b"2", b"3"}
+        assert r.smembers("c") == {b"1", b"2", b"3"}
         r.sadd("b", "2", "3")
         assert r.sdiffstore("c", "a", "b") == 1
-        assert r.smembers("c") == [b"1"]
+        assert r.smembers("c") == {b"1"}
 
     @pytest.mark.onlynoncluster
     def test_sinter(self, r):
         r.sadd("a", "1", "2", "3")
-        assert r.sinter("a", "b") == []
+        assert r.sinter("a", "b") == set()
         r.sadd("b", "2", "3")
-        assert set(r.sinter("a", "b")) == {b"2", b"3"}
+        assert r.sinter("a", "b") == {b"2", b"3"}
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
@@ -2280,10 +2280,10 @@ class TestRedisCommands:
     def test_sinterstore(self, r):
         r.sadd("a", "1", "2", "3")
         assert r.sinterstore("c", "a", "b") == 0
-        assert r.smembers("c") == []
+        assert r.smembers("c") == set()
         r.sadd("b", "2", "3")
         assert r.sinterstore("c", "a", "b") == 2
-        assert set(r.smembers("c")) == {b"2", b"3"}
+        assert r.smembers("c") == {b"2", b"3"}
 
     def test_sismember(self, r):
         r.sadd("a", "1", "2", "3")
@@ -2308,8 +2308,8 @@ class TestRedisCommands:
         r.sadd("a", "a1", "a2")
         r.sadd("b", "b1", "b2")
         assert r.smove("a", "b", "a1")
-        assert r.smembers("a") == [b"a2"]
-        assert set(r.smembers("b")) == {b"b1", b"b2", b"a1"}
+        assert r.smembers("a") == {b"a2"}
+        assert r.smembers("b") == {b"b1", b"b2", b"a1"}
 
     def test_spop(self, r):
         s = [b"1", b"2", b"3"]

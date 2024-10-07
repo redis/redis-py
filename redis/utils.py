@@ -8,10 +8,10 @@ try:
 
     # Only support Hiredis >= 3.0:
     HIREDIS_AVAILABLE = int(hiredis.__version__.split(".")[0]) >= 3
-    HIREDIS_PACK_AVAILABLE = hasattr(hiredis, "pack_command")
+    if not HIREDIS_AVAILABLE:
+        raise ImportError("hiredis package should be >= 3.0.0")
 except ImportError:
     HIREDIS_AVAILABLE = False
-    HIREDIS_PACK_AVAILABLE = False
 
 try:
     import ssl  # noqa

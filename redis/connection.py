@@ -38,7 +38,6 @@ from .retry import Retry
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
     HIREDIS_AVAILABLE,
-    HIREDIS_PACK_AVAILABLE,
     SSL_AVAILABLE,
     compare_versions,
     ensure_string,
@@ -314,7 +313,7 @@ class AbstractConnection(ConnectionInterface):
     def _construct_command_packer(self, packer):
         if packer is not None:
             return packer
-        elif HIREDIS_PACK_AVAILABLE:
+        elif HIREDIS_AVAILABLE:
             return HiredisRespSerializer()
         else:
             return PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
