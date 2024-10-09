@@ -517,7 +517,18 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         self.close()
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except AttributeError as exc:
+            if exc.name in ("getpid", "Lock"):
+                # cf https://github.com/redis/redis-py/issues/3014
+                # Most likely means the "os" or "threading" reference in
+                # connection.py was unloaded before this method was called; this
+                # can happen on process exit, cf the warning in
+                # https://docs.python.org/3/reference/datamodel.html#object.__del__
+                pass
+            else:
+                raise
 
     def close(self):
         # In case a connection property does not yet exist
