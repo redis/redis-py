@@ -8,6 +8,7 @@ from redis import exceptions
 from redis.asyncio.sentinel import (
     MasterNotFoundError,
     Sentinel,
+    SentinelBlockingConnectionPool,
     SentinelConnectionPool,
     SlaveNotFoundError,
 )
@@ -182,40 +183,77 @@ async def test_discover_slaves(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
-async def test_master_for(cluster, sentinel, master_ip):
-    async with sentinel.master_for("mymaster", db=9) as master:
+@pytest.mark.parametrize(
+    "connection_pool_class",
+    [SentinelConnectionPool, SentinelBlockingConnectionPool],
+)
+async def test_master_for(cluster, sentinel, master_ip, connection_pool_class):
+    async with sentinel.master_for(
+        "mymaster",
+        db=9,
+        connection_pool_class=connection_pool_class,
+    ) as master:
         assert await master.ping()
         assert master.connection_pool.master_address == (master_ip, 6379)
 
     # Use internal connection check
-    async with sentinel.master_for("mymaster", db=9, check_connection=True) as master:
+    async with sentinel.master_for(
+        "mymaster",
+        db=9,
+        check_connection=True,
+        connection_pool_class=connection_pool_class,
+    ) as master:
         assert await master.ping()
 
 
 @pytest.mark.onlynoncluster
-async def test_slave_for(cluster, sentinel):
+@pytest.mark.parametrize(
+    "connection_pool_class",
+    [SentinelConnectionPool, SentinelBlockingConnectionPool],
+)
+async def test_slave_for(cluster, sentinel, connection_pool_class):
     cluster.slaves = [
         {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}
     ]
-    async with sentinel.slave_for("mymaster", db=9) as slave:
+    async with sentinel.slave_for(
+        "mymaster",
+        db=9,
+        connection_pool_class=connection_pool_class,
+    ) as slave:
         assert await slave.ping()
 
 
 @pytest.mark.onlynoncluster
-async def test_slave_for_slave_not_found_error(cluster, sentinel):
+@pytest.mark.parametrize(
+    "connection_pool_class",
+    [SentinelConnectionPool, SentinelBlockingConnectionPool],
+)
+async def test_slave_for_slave_not_found_error(
+    cluster,
+    sentinel,
+    connection_pool_class,
+):
     cluster.master["is_odown"] = True
-    async with sentinel.slave_for("mymaster", db=9) as slave:
+    async with sentinel.slave_for(
+        "mymaster",
+        db=9,
+        connection_pool_class=connection_pool_class,
+    ) as slave:
         with pytest.raises(SlaveNotFoundError):
             await slave.ping()
 
 
 @pytest.mark.onlynoncluster
-async def test_slave_round_robin(cluster, sentinel, master_ip):
+@pytest.mark.parametrize(
+    "connection_pool_class",
+    [SentinelConnectionPool, SentinelBlockingConnectionPool],
+)
+async def test_slave_round_robin(cluster, sentinel, master_ip, connection_pool_class):
     cluster.slaves = [
         {"ip": "slave0", "port": 6379, "is_odown": False, "is_sdown": False},
         {"ip": "slave1", "port": 6379, "is_odown": False, "is_sdown": False},
     ]
-    pool = SentinelConnectionPool("mymaster", sentinel)
+    pool = connection_pool_class("mymaster", sentinel)
     rotator = pool.rotate_slaves()
     assert await rotator.__anext__() in (("slave0", 6379), ("slave1", 6379))
     assert await rotator.__anext__() in (("slave0", 6379), ("slave1", 6379))
@@ -242,15 +280,39 @@ async def test_reset(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.parametrize("method_name", ["master_for", "slave_for"])
-async def test_auto_close_pool(cluster, sentinel, method_name):
+@pytest.mark.parametrize(
+    "method_name,connection_pool_class",
+    [
+        pytest.param(
+            "master_for",
+            SentinelConnectionPool,
+            id="master_for__SentinelConnectionPool",
+        ),
+        pytest.param(
+            "slave_for",
+            SentinelConnectionPool,
+            id="slave_for__SentinelConnectionPool",
+        ),
+        pytest.param(
+            "master_for",
+            SentinelBlockingConnectionPool,
+            id="master_for__SentinelBlockingConnectionPool",
+        ),
+        pytest.param(
+            "slave_for",
+            SentinelBlockingConnectionPool,
+            id="slave_for__SentinelBlockingConnectionPool",
+        ),
+    ],
+)
+async def test_auto_close_pool(cluster, sentinel, method_name, connection_pool_class):
     """
     Check that the connection pool created by the sentinel client is
     automatically closed
     """
 
     method = getattr(sentinel, method_name)
-    client = method("mymaster", db=9)
+    client = method("mymaster", db=9, connection_pool_class=connection_pool_class)
     pool = client.connection_pool
     assert client.auto_close_connection_pool is True
     calls = 0

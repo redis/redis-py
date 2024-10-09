@@ -45,6 +45,7 @@ RedisJSON
 RedisTimeSeries
 SHA
 SearchCommands
+SentinelBlockingConnectionPool
 SentinelCommands
 SentinelConnectionPool
 Sharded
