@@ -21,7 +21,7 @@ from redis.cache import (
 from redis.connection import Connection, ConnectionInterface, SSLConnection, parse_url
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
-from tests.ssl_utils import get_ssl_filename
+from tests.ssl_utils import get_tls_certificates
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
@@ -325,6 +325,9 @@ def _get_client(
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
+
+    redis_tls_url = request.config.getoption("--redis-ssl-url")
+
     if "protocol" not in redis_url and kwargs.get("protocol") is None:
         kwargs["protocol"] = request.config.getoption("--protocol")
 
@@ -335,15 +338,11 @@ def _get_client(
         connection_class = Connection
         if ssl:
             connection_class = SSLConnection
-            kwargs["ssl_certfile"] = get_ssl_filename("client-cert.pem")
-            kwargs["ssl_keyfile"] = get_ssl_filename("client-key.pem")
-            # When you try to assign "required" as single string
-            # it assigns tuple instead of string.
-            # Probably some reserved keyword
-            # I can't explain how does it work -_-
-            kwargs["ssl_cert_reqs"] = "require" + "d"
-            kwargs["ssl_ca_certs"] = get_ssl_filename("ca-cert.pem")
-            kwargs["port"] = 6666
+            kwargs["ssl_certfile"], kwargs["ssl_keyfile"], kwargs["ssl_ca_certs"] = (
+                get_tls_certificates()
+            )
+            kwargs["ssl_cert_reqs"] = "required"
+            kwargs["port"] = redis_tls_url.port
         kwargs["connection_class"] = connection_class
         url_options.update(kwargs)
         pool = redis.ConnectionPool(**url_options)

@@ -11,7 +11,7 @@ from redis.asyncio.connection import (
 )
 from redis.exceptions import ConnectionError
 
-from ..ssl_utils import get_ssl_filename
+from ..ssl_utils import get_tls_certificates, CertificateType
 
 _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"
@@ -57,9 +57,7 @@ async def test_uds_connect(uds_address):
 )
 async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
     host, port = tcp_address
-    certfile = get_ssl_filename("client-cert.pem")
-    keyfile = get_ssl_filename("client-key.pem")
-    ca_certfile = get_ssl_filename("ca-cert.pem")
+    certfile, keyfile, ca_certfile = get_tls_certificates()
     conn = SSLConnection(
         host=host,
         port=port,
@@ -86,9 +84,9 @@ async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
 )
 async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     host, port = tcp_address
-    certfile = get_ssl_filename("client-cert.pem")
-    keyfile = get_ssl_filename("client-key.pem")
-    ca_certfile = get_ssl_filename("ca-cert.pem")
+
+    certfile, keyfile, ca_certfile = get_tls_certificates()
+
     conn = SSLConnection(
         host=host,
         port=port,
@@ -105,8 +103,7 @@ async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
 @pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3")
 async def test_tcp_ssl_version_mismatch(tcp_address):
     host, port = tcp_address
-    certfile = get_ssl_filename("server-cert.pem")
-    keyfile = get_ssl_filename("server-key.pem")
+    certfile, keyfile, _ = get_tls_certificates(cert_type=CertificateType.server)
     conn = SSLConnection(
         host=host,
         port=port,
