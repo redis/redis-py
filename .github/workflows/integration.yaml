@@ -86,7 +86,7 @@ jobs:
            pip install hiredis
           fi
           invoke devenv
-          sleep 10 # time to settle
+          sleep 10 # time to settle          
           invoke ${{matrix.test-type}}-tests
           ls -1
 

@@ -6,10 +6,11 @@ services:
     image: redislabs/client-libs-test:8.0-M01
     container_name: redis-standalone
     environment:
-      - REDIS_TLS_ENABLED=yes
+      - TLS_ENABLED=yes
+      - REDIS_CLUSTER=no
       - PORT=6379
       - TLS_PORT=6666
-      - REDIS_DIRECTIVES=--enable-debug-command yes
+    command: --enable-debug-command yes --tls-auth-clients optional
     ports:
       - 6379:6379
       - 6666:6666 # TLS port
@@ -42,7 +43,7 @@ services:
       - TLS_ENABLED=yes
       - PORT=16379
       - TLS_PORT=17379
-      - REDIS_DIRECTIVES=--tls-auth-clients optional
+    command: --tls-auth-clients optional
     ports:
       - "16379-16384:16379-16384"
       - "17379-17384:17379-17384"

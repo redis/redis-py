@@ -57,17 +57,21 @@ async def test_uds_connect(uds_address):
 )
 async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
     host, port = tcp_address
-    certfile, keyfile, ca_certfile = get_tls_certificates()
+
+    server_certs = get_tls_certificates(cert_type=CertificateType.server)
+
     conn = SSLConnection(
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
-        ssl_ca_certs=ca_certfile,
+        ssl_ca_certs=server_certs.ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl.TLSVersion.TLSv1_2,
         ssl_ciphers=ssl_ciphers,
     )
-    await _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    await _assert_connect(
+        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+    )
     await conn.disconnect()
 
 
@@ -85,17 +89,19 @@ async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
 async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     host, port = tcp_address
 
-    certfile, keyfile, ca_certfile = get_tls_certificates()
+    server_certs = get_tls_certificates(cert_type=CertificateType.server)
 
     conn = SSLConnection(
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
-        ssl_ca_certs=ca_certfile,
+        ssl_ca_certs=server_certs.ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl_min_version,
     )
-    await _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    await _assert_connect(
+        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+    )
     await conn.disconnect()
 
 
