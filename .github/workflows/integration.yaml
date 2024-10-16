@@ -86,12 +86,7 @@ jobs:
            pip install hiredis
           fi
           invoke devenv
-          sleep 10 # time to settle
-          
-          # Fix permissions on TLS keys
-          sudo chmod 644 dockers/standalone/tls/*.key
-          sudo chmod 644 dockers/cluster/tls/*.key
-          
+          sleep 10 # time to settle          
           invoke ${{matrix.test-type}}-tests
           ls -1
 
@@ -107,11 +102,6 @@ jobs:
           fi
           invoke devenv
           sleep 10 # time to settle
-          
-          # Fix permissions on TLS keys
-          sudo chmod 644 dockers/standalone/tls/*.key
-          sudo chmod 644 dockers/cluster/tls/*.key
-          
           invoke ${{matrix.test-type}}-tests
           ls -1
 
@@ -164,11 +154,6 @@ jobs:
           fi
           invoke devenv
           sleep 10 # time to settle
-          
-          # Fix permissions on TLS keys
-          sudo chmod 644 dockers/standalone/tls/*.key
-          sudo chmod 644 dockers/cluster/tls/*.key
-          
           if [ "${{matrix.event-loop}}" == "uvloop" ]; then
             invoke ${{matrix.test-type}}-tests --uvloop --protocol=3
           else
@@ -187,11 +172,6 @@ jobs:
           fi
           invoke devenv
           sleep 10 # time to settle
-          
-          # Fix permissions on TLS keys
-          sudo chmod 644 dockers/standalone/tls/*.key
-          sudo chmod 644 dockers/cluster/tls/*.key          
-          
           if [ "${{matrix.event-loop}}" == "uvloop" ]; then
             invoke ${{matrix.test-type}}-tests --uvloop --protocol=3
           else
