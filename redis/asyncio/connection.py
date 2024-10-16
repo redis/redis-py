@@ -221,7 +221,10 @@ class AbstractConnection:
         Internal method to silently close the connection without waiting
         """
         if self._writer:
-            self._writer.close()
+            try:
+                self._writer.close()
+            except RuntimeError:
+                pass
             self._writer = self._reader = None
 
     def __repr__(self):
