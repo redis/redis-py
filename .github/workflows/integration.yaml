@@ -64,13 +64,12 @@ jobs:
       fail-fast: false
       matrix:
         redis-version: ['8.0.0-M01']
-        test-type: ['standalone', 'cluster']
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.9', 'pypy-3.10']
         parser-backend: ['plain']
         event-loop: ['asyncio']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }} (${{matrix.test-type}}); Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
@@ -90,20 +89,18 @@ jobs:
       fail-fast: false
       matrix:
         redis-version: [ '8.0.0-M01' ]
-        test-type: [ 'standalone', 'cluster' ]
         python-version: [ '3.8', '3.12']
         parser-backend: [ 'hiredis' ]
         event-loop: [ 'asyncio' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }} (${{matrix.test-type}}); Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
           python-version: ${{ matrix.python-version }}
-          test-type: ${{ matrix.test-type }}
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
 
@@ -112,7 +109,6 @@ jobs:
         if: ${{ matrix.parser-backend == 'hiredis' && matrix.python-version == '3.12'}}
         with:
           python-version: ${{ matrix.python-version }}
-          test-type: ${{ matrix.test-type }}
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
           hiredis-version: '<3.0.0'
@@ -132,14 +128,13 @@ jobs:
         event-loop: [ 'uvloop' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }} (${{matrix.test-type}}); Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
           python-version: ${{ matrix.python-version }}
-          test-type: ${{ matrix.test-type }}
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
 

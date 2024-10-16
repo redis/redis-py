@@ -4,9 +4,6 @@ inputs:
   python-version:
     description: 'Python version to use for running tests'
     default: '3.12'
-  test-type:
-    description: 'Type of tests to run: standalone or cluster'
-    required: true
   parser-backend:
     description: 'Parser backend to use: plain or hiredis'
     required: true
@@ -46,28 +43,39 @@ runs:
     - name: Run RESP2 tests
       run: |              
         if [ "${{inputs.event-loop}}" == "uvloop" ]; then
-          invoke ${{inputs.test-type}}-tests --uvloop --protocol=2
+          invoke standalone-tests --uvloop --protocol=2
+          invoke cluster-tests --uvloop --protocol=2
         else
-          invoke ${{inputs.test-type}}-tests --protocol=2
+          invoke standalone-tests --protocol=2
+          invoke cluster-tests --protocol=2
         fi
       shell: bash
 
     - name: Run RESP3 tests
-      if: ${{ inputs.test-type != 'cluster' && inputs.parser-backend != 'hiredis' }}
       run: |
         if [ "${{inputs.event-loop}}" == "uvloop" ]; then
-          invoke ${{inputs.test-type}}-tests --uvloop --protocol=3
+          invoke standalone-tests --uvloop --protocol=3
+        
+          # hiredis does not support RESP3 on cluster
+          if [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
+            invoke cluster-tests --uvloop --protocol=3
+          fi
         else
-          invoke ${{inputs.test-type}}-tests --protocol=3
+          invoke standalone-tests --protocol=3
+        
+          # hiredis does not support RESP3 on cluster
+          if [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
+            invoke cluster-tests --uvloop --protocol=3
+          fi
         fi
       shell: bash
 
     - name: Upload test results and profiling data
       uses: actions/upload-artifact@v4
       with:
-        name: pytest-results-${{inputs.redis-version}}-${{inputs.test-type}}-${{inputs.parser-backend}}-${{inputs.python-version}}-${{inputs.event-loop}}
+        name: pytest-results-${{inputs.redis-version}}-${{inputs.parser-backend}}-${{inputs.python-version}}-${{inputs.event-loop}}
         path: |
-          ${{inputs.test-type}}*-results.xml
+          *-results.xml
           prof/**
           profile_output*
         if-no-files-found: error
