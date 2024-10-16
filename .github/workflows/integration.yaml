@@ -70,7 +70,7 @@ jobs:
         event-loop: ['asyncio']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }} - RESP${{ matrix.resp-protocol }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.parser-backend}}-${{matrix.event-loop}}
+    name: Redis ${{ matrix.redis-version }} (${{matrix.test-type}}); Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
@@ -83,6 +83,7 @@ jobs:
 
   hiredis-tests:
     runs-on: ubuntu-latest
+    needs: [tests]
     timeout-minutes: 60
     strategy:
       max-parallel: 15
@@ -95,7 +96,7 @@ jobs:
         event-loop: [ 'asyncio' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }} - RESP${{ matrix.resp-protocol }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.parser-backend}}-${{matrix.event-loop}}
+    name: Redis ${{ matrix.redis-version }} (${{matrix.test-type}}); Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
@@ -118,6 +119,7 @@ jobs:
 
   uvloop-tests:
     runs-on: ubuntu-latest
+    needs: [tests]
     timeout-minutes: 60
     strategy:
       max-parallel: 15
@@ -130,7 +132,7 @@ jobs:
         event-loop: [ 'uvloop' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }} - RESP${{ matrix.resp-protocol }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.parser-backend}}-${{matrix.event-loop}}
+    name: Redis ${{ matrix.redis-version }} (${{matrix.test-type}}); Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
