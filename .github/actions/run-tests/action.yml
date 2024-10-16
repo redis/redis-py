@@ -54,8 +54,8 @@ runs:
             ["6.2.16"]="6.2.6-v17"
           )
                   
-          if [[ -v version_mapping[$REDIS_VERSION] ]]; then
-            export REDIS_STACK_IMAGE="redis/redis-stack-server:${version_mapping[$version]}"
+          if [[ -v redis_stack_version_mapping[$REDIS_VERSION] ]]; then
+            export REDIS_STACK_IMAGE="redis/redis-stack-server:${redis_stack_version_mapping[$REDIS_VERSION]}"
             echo "REDIS_MOD_URL=redis://127.0.0.1:6479/0" >> $GITHUB_ENV
           else
             echo "Version not found in the mapping."
