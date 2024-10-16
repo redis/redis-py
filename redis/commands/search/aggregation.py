@@ -1,4 +1,4 @@
-from typing import List, Union, Optional
+from typing import List, Union
 
 FIELDNAME = object()
 
@@ -112,7 +112,7 @@ class AggregateRequest:
         self._cursor = []
         self._dialect = None
         self._add_scores = False
-        self._scorer = Optional[str] = None
+        self._scorer = None
 
     def load(self, *fields: List[str]) -> "AggregateRequest":
         """
