@@ -64,21 +64,10 @@ jobs:
       fail-fast: false
       matrix:
         redis-version: ['8.0.0-M01']
-        resp-protocol: ['2', '3']
         test-type: ['standalone', 'cluster']
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.9', 'pypy-3.10']
-        parser-backend: ['hiredis', 'plain']
+        parser-backend: ['plain']
         event-loop: ['asyncio']
-        include:
-          # Run uvloop tests only for resp3
-          - resp-protocol: '3'
-            parser-backend: 'plain'
-            redis-version: '8.0.0-M01'
-            event-loop: 'uvloop'
-        exclude:
-          - test-type: 'cluster'
-            parser-backend: 'hiredis'
-            resp-protocol: '3'
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }} - RESP${{ matrix.resp-protocol }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.parser-backend}}-${{matrix.event-loop}}
@@ -90,8 +79,32 @@ jobs:
             python-version: ${{ matrix.python-version }}
             test-type: ${{ matrix.test-type }}
             parser-backend: ${{ matrix.parser-backend }}
-            resp-protocol: ${{ matrix.resp-protocol }}
             redis-version: ${{ matrix.redis-version }}
+
+  hiredis-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        redis-version: [ '8.0.0-M01' ]
+        test-type: [ 'standalone', 'cluster' ]
+        python-version: [ '3.8', '3.12']
+        parser-backend: [ 'hiredis' ]
+        event-loop: [ 'asyncio' ]
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: Redis ${{ matrix.redis-version }} - RESP${{ matrix.resp-protocol }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.parser-backend}}-${{matrix.event-loop}}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        uses: ./.github/actions/run-tests
+        with:
+          python-version: ${{ matrix.python-version }}
+          test-type: ${{ matrix.test-type }}
+          parser-backend: ${{ matrix.parser-backend }}
+          redis-version: ${{ matrix.redis-version }}
 
       - name: Run tests against hiredis < 3.0.0
         uses: ./.github/actions/run-tests
@@ -100,9 +113,33 @@ jobs:
           python-version: ${{ matrix.python-version }}
           test-type: ${{ matrix.test-type }}
           parser-backend: ${{ matrix.parser-backend }}
-          resp-protocol: ${{ matrix.resp-protocol }}
           redis-version: ${{ matrix.redis-version }}
           hiredis-version: '<3.0.0'
+
+  uvloop-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        redis-version: [ '8.0.0-M01' ]
+        test-type: [ 'standalone', 'cluster' ]
+        python-version: [ '3.8', '3.12' ]
+        parser-backend: [ 'plain' ]
+        event-loop: [ 'uvloop' ]
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: Redis ${{ matrix.redis-version }} - RESP${{ matrix.resp-protocol }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.parser-backend}}-${{matrix.event-loop}}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        uses: ./.github/actions/run-tests
+        with:
+          python-version: ${{ matrix.python-version }}
+          test-type: ${{ matrix.test-type }}
+          parser-backend: ${{ matrix.parser-backend }}
+          redis-version: ${{ matrix.redis-version }}
 
   build-and-test-package:
     name: Validate building and installing the package
