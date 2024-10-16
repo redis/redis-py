@@ -29,24 +29,55 @@ runs:
         cache: 'pip'
 
     - name: Setup Test environment
+      env:
+        REDIS_VERSION: ${{ inputs.redis-version }}
+        REDIS_IMAGE: "redis:${{ inputs.redis-version }}"
+        CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ inputs.redis-version }}"
       run: |
+        set -e
         pip install -U setuptools wheel
         pip install -r requirements.txt
         pip install -r dev_requirements.txt
         if [ "${{inputs.parser-backend}}" == "hiredis" ]; then
          pip install hiredis${{inputs.hiredis-version}}
         fi
-        invoke devenv
+        
+        redis_major_version=$(echo "$REDIS_VERSION" | grep -oP '^\d+')
+        
+        if (( redis_major_version < 8 )); then
+          echo "Using redis-stack for module tests"
+        
+          # Mapping of redis version to stack version  
+          declare -A redis_stack_version_mapping=(
+            ["7.4.1"]="7.4.0-v1"
+            ["7.2.6"]="7.2.0-v13"
+            ["6.2.16"]="6.2.6-v17"
+          )
+                  
+          if [[ -v version_mapping[$REDIS_VERSION] ]]; then
+            export REDIS_STACK_IMAGE="redis/redis-stack-server:${version_mapping[$version]}"
+            echo "REDIS_MOD_URL=redis://127.0.0.1:6479/0" >> $GITHUB_ENV
+          else
+            echo "Version not found in the mapping."
+            exit 1
+          fi
+          invoke devenv --endpoints=all-stack
+        else
+          echo "Using redis CE for module tests"
+          echo "REDIS_MOD_URL=redis://127.0.0.1:6379" >> $GITHUB_ENV
+          invoke devenv --endpoints all
+        fi        
+        
         sleep 10 # time to settle
       shell: bash
 
     - name: Run RESP2 tests
       run: |              
         if [ "${{inputs.event-loop}}" == "uvloop" ]; then
-          invoke standalone-tests --uvloop --protocol=2
+          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} --uvloop --protocol=2
           invoke cluster-tests --uvloop --protocol=2
         else
-          invoke standalone-tests --protocol=2
+          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} --protocol=2
           invoke cluster-tests --protocol=2
         fi
       shell: bash
@@ -54,14 +85,14 @@ runs:
     - name: Run RESP3 tests
       run: |
         if [ "${{inputs.event-loop}}" == "uvloop" ]; then
-          invoke standalone-tests --uvloop --protocol=3
+          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} --uvloop --protocol=3
         
           # hiredis does not support RESP3 on cluster
           if [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
             invoke cluster-tests --uvloop --protocol=3
           fi
         else
-          invoke standalone-tests --protocol=3
+          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} --protocol=3
         
           # hiredis does not support RESP3 on cluster
           if [ "${{inputs.parser-backend}}" != 'hiredis' ]; then

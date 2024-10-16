@@ -63,7 +63,7 @@ jobs:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: ['8.0.0-M01']
+        redis-version: ['8.0.0-M01', '7.4.1', '7.2.6', '6.2.16']
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.9', 'pypy-3.10']
         parser-backend: ['plain']
         event-loop: ['asyncio']
@@ -76,7 +76,6 @@ jobs:
         uses: ./.github/actions/run-tests
         with:
             python-version: ${{ matrix.python-version }}
-            test-type: ${{ matrix.test-type }}
             parser-backend: ${{ matrix.parser-backend }}
             redis-version: ${{ matrix.redis-version }}
 
@@ -122,7 +121,6 @@ jobs:
       fail-fast: false
       matrix:
         redis-version: [ '8.0.0-M01' ]
-        test-type: [ 'standalone', 'cluster' ]
         python-version: [ '3.8', '3.12' ]
         parser-backend: [ 'plain' ]
         event-loop: [ 'uvloop' ]
