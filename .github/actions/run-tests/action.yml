@@ -10,9 +10,6 @@ inputs:
   parser-backend:
     description: 'Parser backend to use: plain or hiredis'
     required: true
-  resp-protocol:
-    description: 'RESP protocol version to use: 2 or 3'
-    required: true
   redis-version:
     description: 'Redis version to test against'
     required: true
@@ -34,7 +31,7 @@ runs:
         python-version: ${{ inputs.python-version }}
         cache: 'pip'
 
-    - name: Run tests
+    - name: Setup Test environment
       run: |
         pip install -U setuptools wheel
         pip install -r requirements.txt
@@ -43,21 +40,32 @@ runs:
          pip install hiredis${{inputs.hiredis-version}}
         fi
         invoke devenv
-        sleep 10 # time to settle 
-        
-        if [ "${{inputs.event-loop}}" == "uvloop" ]; then
-          invoke ${{inputs.test-type}}-tests --uvloop --protocol=${{inputs.resp-protocol}}
-        else
-          invoke ${{inputs.test-type}}-tests --protocol=${{inputs.resp-protocol}}
-        fi
+        sleep 10 # time to settle
+      shell: bash
 
-        ls -1
+    - name: Run RESP2 tests
+      run: |              
+        if [ "${{inputs.event-loop}}" == "uvloop" ]; then
+          invoke ${{inputs.test-type}}-tests --uvloop --protocol=2
+        else
+          invoke ${{inputs.test-type}}-tests --protocol=2
+        fi
+      shell: bash
+
+    - name: Run RESP3 tests
+      if: ${{ inputs.test-type != 'cluster' && inputs.parser-backend != 'hiredis' }}
+      run: |
+        if [ "${{inputs.event-loop}}" == "uvloop" ]; then
+          invoke ${{inputs.test-type}}-tests --uvloop --protocol=3
+        else
+          invoke ${{inputs.test-type}}-tests --protocol=3
+        fi
       shell: bash
 
     - name: Upload test results and profiling data
       uses: actions/upload-artifact@v4
       with:
-        name: pytest-results-${{inputs.test-type}}-${{inputs.parser-backend}}-${{inputs.python-version}}-${{inputs.event-loop}}-${{inputs.resp-protocol}}
+        name: pytest-results-${{inputs.redis-version}}-${{inputs.test-type}}-${{inputs.parser-backend}}-${{inputs.python-version}}-${{inputs.event-loop}}
         path: |
           ${{inputs.test-type}}*-results.xml
           prof/**
