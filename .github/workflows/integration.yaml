@@ -66,33 +66,14 @@ jobs:
         redis-version: ['8.0.0-M01']
         resp-protocol: ['2', '3']
         test-type: ['standalone', 'cluster']
-        python-version: ['3.8', '3.12']
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.9', 'pypy-3.10']
         parser-backend: ['hiredis', 'plain']
         event-loop: ['asyncio']
         include:
-          # Run python compatibility tests only for latest redis version and plain parser backends
-          - python-version: '3.9'
-            resp-protocol: '2'
-            redis-version: '8.0.0-M01'
-            parser-backend: 'plain'
-          - python-version: '3.10'
-            resp-protocol: '2'
-            redis-version: '8.0.0-M01'
-            parser-backend: 'hiredis'
-          - python-version: '3.11'
-            resp-protocol: '2'
-            redis-version: '8.0.0-M01'
-            parser-backend: 'plain'
-          - python-version: 'pypy-3.9'
-            resp-protocol: '2'
-            redis-version: '8.0.0-M01'
-            parser-backend: 'plain'
-          - python-version: 'pypy-3.10'
-            resp-protocol: '2'
-            redis-version: '8.0.0-M01'
-            parser-backend: 'plain'
           # Run uvloop tests only for resp3
           - resp-protocol: '3'
+            parser-backend: 'plain'
+            redis-version: '8.0.0-M01'
             event-loop: 'uvloop'
         exclude:
           - test-type: 'cluster'
@@ -100,7 +81,7 @@ jobs:
             resp-protocol: '3'
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: RESP${{ matrix.resp-protocol }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.parser-backend}}
+    name: Redis ${{ matrix.redis-version }} - RESP${{ matrix.resp-protocol }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.parser-backend}}-${{matrix.event-loop}}
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
