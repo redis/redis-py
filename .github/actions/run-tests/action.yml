@@ -1,0 +1,71 @@
+name: 'Run redis-py tests'
+description: 'Runs redis-py tests against different Redis versions and configurations'
+inputs:
+  python-version:
+    description: 'Python version to use for running tests'
+    default: '3.12'
+  test-type:
+    description: 'Type of tests to run: standalone or cluster'
+    required: true
+  parser-backend:
+    description: 'Parser backend to use: plain or hiredis'
+    required: true
+  resp-protocol:
+    description: 'RESP protocol version to use: 2 or 3'
+    required: true
+  redis-version:
+    description: 'Redis version to test against'
+    required: true
+  hiredis-version:
+    description: 'hiredis version to test against'
+    required: false
+    default: '>3.0.0'
+  event-loop:
+    description: 'Event loop to use'
+    required: false
+    default: 'asyncio'
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: 'pip'
+
+    - name: Run tests
+      run: |
+        pip install -U setuptools wheel
+        pip install -r requirements.txt
+        pip install -r dev_requirements.txt
+        if [ "${{inputs.parser-backend}}" == "hiredis" ]; then
+         pip install hiredis${{inputs.hiredis-version}}
+        fi
+        invoke devenv
+        sleep 10 # time to settle 
+        
+        if [ "${{inputs.event-loop}}" == "uvloop" ]; then
+          invoke ${{inputs.test-type}}-tests --uvloop --protocol=${{inputs.resp-protocol}}
+        else
+          invoke ${{inputs.test-type}}-tests --protocol=${{inputs.resp-protocol}}
+        fi
+
+        ls -1
+      shell: bash
+
+    - name: Upload test results and profiling data
+      uses: actions/upload-artifact@v4
+      with:
+        name: pytest-results-${{inputs.test-type}}-${{inputs.parser-backend}}-${{inputs.python-version}}-${{inputs.event-loop}}-${{inputs.resp-protocol}}
+        path: |
+          ${{inputs.test-type}}*-results.xml
+          prof/**
+          profile_output*
+        if-no-files-found: error
+        retention-days: 10
+
+    - name: Upload codecov coverage
+      uses: codecov/codecov-action@v4
+      with:
+        fail_ci_if_error: false
