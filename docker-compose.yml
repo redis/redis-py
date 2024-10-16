@@ -3,7 +3,7 @@
 services:
 
   redis:
-    image: redislabs/client-libs-test:8.0-M01
+    image: ${CLIENT_LIBS_TEST_IMAGE:-redislabs/client-libs-test:8.0-M01}
     container_name: redis-standalone
     environment:
       - TLS_ENABLED=yes
@@ -20,6 +20,7 @@ services:
       - standalone
       - sentinel
       - replica
+      - all-stack
       - all
 
   replica:
@@ -32,10 +33,11 @@ services:
       - 6380:6379
     profiles:
       - replica
+      - all-stack
       - all
 
   cluster:
-    image: redislabs/client-libs-test:8.0-M01
+    image: ${CLIENT_LIBS_TEST_IMAGE:-redislabs/client-libs-test:8.0-M01}
     container_name: redis-cluster
     environment:
       - REDIS_CLUSTER=yes
@@ -51,6 +53,7 @@ services:
       - "./dockers/cluster:/redis/work"
     profiles:
       - cluster
+      - all-stack
       - all
 
   sentinel:
@@ -65,6 +68,7 @@ services:
       - "./dockers/sentinel.conf:/redis.conf"
     profiles:
       - sentinel
+      - all-stack
       - all
 
   sentinel2:
@@ -79,6 +83,7 @@ services:
       - "./dockers/sentinel.conf:/redis.conf"
     profiles:
       - sentinel
+      - all-stack
       - all
 
   sentinel3:
@@ -93,6 +98,7 @@ services:
       - "./dockers/sentinel.conf:/redis.conf"
     profiles:
       - sentinel
+      - all-stack
       - all
 
   redis-stack:
@@ -104,7 +110,7 @@ services:
       - "REDIS_ARGS=--enable-debug-command yes --enable-module-command yes"
     profiles:
       - standalone
-      - all
+      - all-stack
 
   redis-stack-graph:
     image: redis/redis-stack-server:6.2.6-v15
@@ -112,5 +118,4 @@ services:
     ports:
       - 6480:6379
     profiles:
-      - standalone
-      - all
+      - graph

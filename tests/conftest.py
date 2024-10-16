@@ -104,6 +104,13 @@ def pytest_addoption(parser):
     )
 
     parser.addoption(
+        "--redis-mod-url",
+        default=default_redismod_url,
+        action="store",
+        help="Redis with modules connection string, defaults to `%(default)s`",
+    )
+
+    parser.addoption(
         "--protocol",
         default=default_protocol,
         action="store",
@@ -182,9 +189,8 @@ def pytest_sessionstart(session):
     session.config.REDIS_INFO = REDIS_INFO
 
     # module info
-    stack_url = redis_url
-    if stack_url == default_redis_url:
-        stack_url = default_redismod_url
+    stack_url = session.config.getoption("--redis-mod-url")
+
     try:
         stack_info = _get_info(stack_url)
         REDIS_INFO["modules"] = stack_info["modules"]
@@ -392,11 +398,7 @@ def r(request):
 
 @pytest.fixture()
 def stack_url(request):
-    stack_url = request.config.getoption("--redis-url", default=default_redismod_url)
-    if stack_url == default_redis_url:
-        return default_redismod_url
-    else:
-        return stack_url
+    return request.config.getoption("--redis-mod-url", default=default_redismod_url)
 
 
 @pytest.fixture()
