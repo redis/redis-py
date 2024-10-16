@@ -84,6 +84,7 @@ jobs:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: RESP${{ matrix.resp-protocol }} ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.parser-backend}}
     steps:
+      - uses: actions/checkout@v4
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
