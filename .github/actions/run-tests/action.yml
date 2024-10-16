@@ -3,20 +3,16 @@ description: 'Runs redis-py tests against different Redis versions and configura
 inputs:
   python-version:
     description: 'Python version to use for running tests'
-    required: true
     default: '3.12'
   test-type:
-    description: 'Type of tests to run'
+    description: 'Type of tests to run: standalone or cluster'
     required: true
-    default: 'standalone'
   parser-backend:
-    description: 'Parser backend to use'
+    description: 'Parser backend to use: plain or hiredis'
     required: true
-    default: 'plain'
   resp-protocol:
-    description: 'RESP protocol version to use'
+    description: 'RESP protocol version to use: 2 or 3'
     required: true
-    default: '2'
   redis-version:
     description: 'Redis version to test against'
     required: true
@@ -49,10 +45,10 @@ runs:
         invoke devenv
         sleep 10 # time to settle 
         
-        if [ "${{input.event-loop}}" == "uvloop" ]; then
-          invoke ${{input.test-type}}-tests --uvloop --protocol=${{inputs.resp-protocol}}
+        if [ "${{inputs.event-loop}}" == "uvloop" ]; then
+          invoke ${{inputs.test-type}}-tests --uvloop --protocol=${{inputs.resp-protocol}}
         else
-          invoke ${{input.test-type}}-tests --protocol=${{inputs.resp-protocol}}
+          invoke ${{inputs.test-type}}-tests --protocol=${{inputs.resp-protocol}}
         fi
 
         ls -1
@@ -61,9 +57,9 @@ runs:
     - name: Upload test results and profiling data
       uses: actions/upload-artifact@v4
       with:
-        name: pytest-results-${{input.test-type}}-${{input.parser-backend}}-${{input.python-version}}-${{input.event-loop}}-${{input.resp-protocol}}
+        name: pytest-results-${{inputs.test-type}}-${{inputs.parser-backend}}-${{inputs.python-version}}-${{inputs.event-loop}}-${{inputs.resp-protocol}}
         path: |
-          ${{input.test-type}}*-results.xml
+          ${{inputs.test-type}}*-results.xml
           prof/**
           profile_output*
         if-no-files-found: error

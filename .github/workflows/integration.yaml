@@ -70,12 +70,30 @@ jobs:
         parser-backend: ['hiredis', 'plain']
         event-loop: ['asyncio']
         include:
-          # Run python compatibility and uvloop tests only for latest redis version and plain parser backends
-          - python-version: ['3.9', '3.10', '3.11', 'pypy-3.9', 'pypy-3.10']
-            event-loop: ['asyncio', 'uvloop']
+          # Run python compatibility tests only for latest redis version and plain parser backends
+          - python-version: '3.9'
             resp-protocol: '2'
             redis-version: '8.0.0-M01'
             parser-backend: 'plain'
+          - python-version: '3.10'
+            resp-protocol: '2'
+            redis-version: '8.0.0-M01'
+            parser-backend: 'hiredis'
+          - python-version: '3.11'
+            resp-protocol: '2'
+            redis-version: '8.0.0-M01'
+            parser-backend: 'plain'
+          - python-version: 'pypy-3.9'
+            resp-protocol: '2'
+            redis-version: '8.0.0-M01'
+            parser-backend: 'plain'
+          - python-version: 'pypy-3.10'
+            resp-protocol: '2'
+            redis-version: '8.0.0-M01'
+            parser-backend: 'plain'
+          # Run uvloop tests only for resp3
+          - resp-protocol: '3'
+            event-loop: 'uvloop'
         exclude:
           - test-type: 'cluster'
             parser-backend: 'hiredis'
