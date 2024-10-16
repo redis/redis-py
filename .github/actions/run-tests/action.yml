@@ -73,10 +73,10 @@ runs:
     - name: Run RESP2 tests
       run: |              
         if [ "${{inputs.event-loop}}" == "uvloop" ]; then
-          invoke standalone-tests --redismod-url=${REDISMOD_URL} --uvloop --protocol=2
+          invoke standalone-tests --redis-mod-url=${REDISMOD_URL} --uvloop --protocol=2
           invoke cluster-tests --uvloop --protocol=2
         else
-          invoke standalone-tests --redismod-url=${REDISMOD_URL} --protocol=2
+          invoke standalone-tests --redis-mod-url=${REDISMOD_URL} --protocol=2
           invoke cluster-tests --protocol=2
         fi
       shell: bash
@@ -84,14 +84,14 @@ runs:
     - name: Run RESP3 tests
       run: |
         if [ "${{inputs.event-loop}}" == "uvloop" ]; then
-          invoke standalone-tests --redismod-url=${REDISMOD_URL} --uvloop --protocol=3
+          invoke standalone-tests --redis-mod-url=${REDISMOD_URL} --uvloop --protocol=3
         
           # hiredis does not support RESP3 on cluster
           if [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
             invoke cluster-tests --uvloop --protocol=3
           fi
         else
-          invoke standalone-tests --redismod-url=${REDISMOD_URL} --protocol=3
+          invoke standalone-tests --redis-mod-url=${REDISMOD_URL} --protocol=3
         
           # hiredis does not support RESP3 on cluster
           if [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
