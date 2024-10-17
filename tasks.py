@@ -70,7 +70,7 @@ def cluster_tests(c, uvloop=False, protocol=2, profile=False):
     """Run tests against a redis cluster"""
     profile_arg = "--profile" if profile else ""
     cluster_url = "redis://localhost:16379/0"
-    cluster_tls_url = "rediss://localhost:17379/0"
+    cluster_tls_url = "rediss://localhost:27379/0"
     if uvloop:
         run(
             f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster_resp{protocol}_uvloop.xml -m 'not onlynoncluster and not redismod and not graph' --redis-url={cluster_url} --redis-ssl-url={cluster_tls_url} --junit-xml=cluster-resp{protocol}-uvloop-results.xml --uvloop"
