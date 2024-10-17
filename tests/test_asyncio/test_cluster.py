@@ -493,8 +493,8 @@ class TestRedisClusterObj:
         Test command execution with nodes flag REPLICAS
         """
         replicas = r.get_replicas()
-        if not replicas:
-            r = await get_mocked_redis_client(default_host, default_port)
+        assert len(replicas) != 0, "This test requires Cluster with 1 replica"
+
         primaries = r.get_primaries()
         mock_all_nodes_resp(r, "PONG")
         assert await r.ping(target_nodes=RedisCluster.REPLICAS) is True
