@@ -76,7 +76,7 @@ runs:
         echo "::endgroup::"
       shell: bash
 
-    - name: Run RESP2 tests
+    - name: Run tests
       run: |
         run_tests() {
           local protocol=$1
@@ -100,6 +100,13 @@ runs:
   
         run_tests 2
         run_tests 3
+      shell: bash
+
+    - name: Debug
+      if: failure()
+      run: |
+        echo "Docker Containers:"
+        docker ps
       shell: bash
 
     - name: Upload test results and profiling data
