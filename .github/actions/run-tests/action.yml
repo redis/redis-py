@@ -35,13 +35,17 @@ runs:
         CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ inputs.redis-version }}"
       run: |
         set -e
+        
+        echo "::group::Installing dependencies"
         pip install -U setuptools wheel
         pip install -r requirements.txt
         pip install -r dev_requirements.txt
         if [ "${{inputs.parser-backend}}" == "hiredis" ]; then
          pip install hiredis${{inputs.hiredis-version}}
         fi
+        echo "::endgroup::"
         
+        echo "::group::Starting Redis servers"
         redis_major_version=$(echo "$REDIS_VERSION" | grep -oP '^\d+')
         
         if (( redis_major_version < 8 )); then
@@ -69,36 +73,33 @@ runs:
         fi        
         
         sleep 10 # time to settle
+        echo "::endgroup::"
       shell: bash
 
     - name: Run RESP2 tests
-      run: |              
-        if [ "${{inputs.event-loop}}" == "uvloop" ]; then
-          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} --uvloop --protocol=2
-          invoke cluster-tests --uvloop --protocol=2
-        else
-          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} --protocol=2
-          invoke cluster-tests --protocol=2
-        fi
-      shell: bash
-
-    - name: Run RESP3 tests
       run: |
-        if [ "${{inputs.event-loop}}" == "uvloop" ]; then
-          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} --uvloop --protocol=3
-        
-          # hiredis does not support RESP3 on cluster
-          if [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
-            invoke cluster-tests --uvloop --protocol=3
+        run_tests() {
+          local protocol=$1
+          local eventloop=""
+    
+          if [ "${{inputs.event-loop}}" == "uvloop" ]; then
+            eventloop="--uvloop"
           fi
-        else
-          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} --protocol=3
-        
-          # hiredis does not support RESP3 on cluster
-          if [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
-            invoke cluster-tests --uvloop --protocol=3
+    
+          echo "::group::RESP${protocol} standalone tests"
+          echo "REDIS_MOD_URL=${REDIS_MOD_URL}"
+          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol=${protocol}
+          echo "::endgroup::"
+    
+          if [ "$protocol" == "2" ] || [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
+            echo "::group::RESP${protocol} cluster tests"
+            invoke cluster-tests $eventloop --protocol=${protocol}
+            echo "::endgroup::"
           fi
-        fi
+        }
+  
+        run_tests 2
+        run_tests 3
       shell: bash
 
     - name: Upload test results and profiling data
