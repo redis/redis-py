@@ -29,6 +29,7 @@ env:
   COVERAGE_CORE: sysmon
   REDIS_IMAGE: redis:latest
   REDIS_STACK_IMAGE: redis/redis-stack-server:latest
+  CURRENT_REDIS_VERSION: '7.4.1'
 
 jobs:
   dependency-audit:
@@ -63,7 +64,7 @@ jobs:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: ['7.4.1'] #, '8.0-M01', '7.2.6', '6.2.16']
+        redis-version: [${{ env.CURRENT_REDIS_VERSION }}] #, '8.0-M01', '7.2.6', '6.2.16']
         python-version: ['3.8', '3.12']
         parser-backend: ['plain']
         event-loop: ['asyncio']
@@ -87,7 +88,7 @@ jobs:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: [ '8.0-M01' ]
+        redis-version: [ ${{ env.CURRENT_REDIS_VERSION }}]
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.9', 'pypy-3.10']
         parser-backend: [ 'plain' ]
         event-loop: [ 'asyncio' ]
@@ -111,7 +112,7 @@ jobs:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: [ '8.0-M01' ]
+        redis-version: [ ${{ env.CURRENT_REDIS_VERSION }} ]
         python-version: [ '3.8', '3.12']
         parser-backend: [ 'hiredis' ]
         event-loop: [ 'asyncio' ]
@@ -144,7 +145,7 @@ jobs:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: [ '8.0-M01' ]
+        redis-version: [ ${{ env.CURRENT_REDIS_VERSION }} ]
         python-version: [ '3.8', '3.12' ]
         parser-backend: [ 'plain' ]
         event-loop: [ 'uvloop' ]
