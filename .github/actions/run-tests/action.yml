@@ -90,7 +90,7 @@ runs:
     
           echo "::group::RESP${protocol} standalone tests"
           echo "REDIS_MOD_URL=${REDIS_MOD_URL}"
-          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol=${protocol}
+          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}"
           echo "::endgroup::"
     
           if [ "$protocol" == "2" ] || [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
