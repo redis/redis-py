@@ -107,6 +107,7 @@ runs:
       run: |
         echo "Docker Containers:"
         docker ps
+        redis-cli -p 16379 CLUSTER NODES
       shell: bash
 
     - name: Upload test results and profiling data
