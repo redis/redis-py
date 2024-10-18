@@ -34,7 +34,7 @@ runs:
         REDIS_IMAGE: "redis:${{ inputs.redis-version }}"
         CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ inputs.redis-version }}"
       run: |
-        set -e
+        set -ex
         
         echo "::group::Installing dependencies"
         pip install -U setuptools wheel
