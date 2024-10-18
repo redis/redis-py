@@ -765,6 +765,7 @@ async def test_uncompressed(decoded_r: redis.Redis):
         assert compressed_info["memoryUsage"] != uncompressed_info["memoryUsage"]
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 async def test_create_with_insertion_filters(decoded_r: redis.Redis):
     await decoded_r.ts().create(
@@ -788,6 +789,7 @@ async def test_create_with_insertion_filters(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 async def test_alter_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().add("time-series-1", 1000, 1.0)
@@ -812,6 +814,7 @@ async def test_alter_with_insertion_filters(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 async def test_add_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().add(
@@ -829,6 +832,7 @@ async def test_add_with_insertion_filters(decoded_r: redis.Redis):
     assert_resp_response(decoded_r, data_points, [(1000, 1.0)], [[1000, 1.0]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 async def test_incrby_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().incrby(
@@ -851,6 +855,7 @@ async def test_incrby_with_insertion_filters(decoded_r: redis.Redis):
     assert_resp_response(decoded_r, data_points, [(1000, 11.1)], [[1000, 11.1]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 async def test_decrby_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().decrby(

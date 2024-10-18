@@ -38,7 +38,7 @@ from tests.conftest import (
     skip_unless_arch_bits,
 )
 
-from ..ssl_utils import get_ssl_filename
+from ..ssl_utils import get_tls_certificates
 from .compat import aclosing, mock
 
 pytestmark = pytest.mark.onlycluster
@@ -493,8 +493,8 @@ class TestRedisClusterObj:
         Test command execution with nodes flag REPLICAS
         """
         replicas = r.get_replicas()
-        if not replicas:
-            r = await get_mocked_redis_client(default_host, default_port)
+        assert len(replicas) != 0, "This test requires Cluster with 1 replica"
+
         primaries = r.get_primaries()
         mock_all_nodes_resp(r, "PONG")
         assert await r.ping(target_nodes=RedisCluster.REPLICAS) is True
@@ -2899,9 +2899,7 @@ class TestSSL:
     appropriate port.
     """
 
-    CA_CERT = get_ssl_filename("ca-cert.pem")
-    CLIENT_CERT = get_ssl_filename("client-cert.pem")
-    CLIENT_KEY = get_ssl_filename("client-key.pem")
+    CLIENT_CERT, CLIENT_KEY, CA_CERT = get_tls_certificates("cluster")
 
     @pytest_asyncio.fixture()
     def create_client(self, request: FixtureRequest) -> Callable[..., RedisCluster]:
