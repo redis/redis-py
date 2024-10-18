@@ -19,9 +19,12 @@ class TestSSL:
     """
 
     @pytest.fixture(autouse=True)
-    def _set_ssl_certs(self):
-        self.client_certs = get_tls_certificates()
-        self.server_certs = get_tls_certificates(cert_type=CertificateType.server)
+    def _set_ssl_certs(self, request):
+        tls_cert_subdir = request.session.config.REDIS_INFO["tls_cert_subdir"]
+        self.client_certs = get_tls_certificates(tls_cert_subdir)
+        self.server_certs = get_tls_certificates(
+            tls_cert_subdir, cert_type=CertificateType.server
+        )
 
     def test_ssl_with_invalid_cert(self, request):
         ssl_url = request.config.option.redis_ssl_url

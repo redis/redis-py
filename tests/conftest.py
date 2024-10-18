@@ -184,6 +184,7 @@ def pytest_sessionstart(session):
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
     REDIS_INFO["cluster_enabled"] = cluster_enabled
+    REDIS_INFO["tls_cert_subdir"] = "cluster" if cluster_enabled else "standalone"
     REDIS_INFO["enterprise"] = enterprise
     # store REDIS_INFO in config so that it is available from "condition strings"
     session.config.REDIS_INFO = REDIS_INFO
