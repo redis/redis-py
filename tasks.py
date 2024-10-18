@@ -61,7 +61,8 @@ def standalone_tests(c, uvloop=False, protocol=2, profile=False, redis_mod_url=N
         )
     else:
         run(
-            f"pytest {profile_arg} --protocol={protocol} {redis_mod_url} --cov=./ --cov-report=xml:coverage_resp{protocol}.xml -m 'not onlycluster and not graph' --junit-xml=standalone-resp{protocol}-results.xml"
+            f"pytest {profile_arg} --protocol={protocol} {redis_mod_url} --cov=./ --cov-report=xml:coverage_resp{protocol}.xml -m 'not onlycluster and not graph' --junit-xml=standalone-resp{protocol}-results.xml",
+            echo=True
         )
 
 
