@@ -57,14 +57,24 @@ jobs:
           pip install -r dev_requirements.txt
           invoke linters
 
+  redis_version:
+    runs-on: ubuntu-latest
+    outputs:
+      CURRENT: ${{ env.CURRENT_REDIS_VERSION }}
+    steps:
+      - name: Compute outputs
+        run: |
+          echo "CURRENT=${{ env.CURRENT_REDIS_VERSION }}" >> $GITHUB_OUTPUT
+
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    needs: redis_version
     strategy:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: [${{ env.CURRENT_REDIS_VERSION }}] #, '8.0-M01', '7.2.6', '6.2.16']
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ] #, '8.0-M01', '7.2.6', '6.2.16']
         python-version: ['3.8', '3.12']
         parser-backend: ['plain']
         event-loop: ['asyncio']
@@ -82,13 +92,13 @@ jobs:
 
   python-compatibility-tests:
     runs-on: ubuntu-latest
-    needs: [ tests ]
+    needs: [ redis_version, tests ]
     timeout-minutes: 60
     strategy:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: [ ${{ env.CURRENT_REDIS_VERSION }}]
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
         python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.9', 'pypy-3.10']
         parser-backend: [ 'plain' ]
         event-loop: [ 'asyncio' ]
@@ -106,13 +116,13 @@ jobs:
 
   hiredis-tests:
     runs-on: ubuntu-latest
-    needs: [tests]
+    needs: [redis_version, tests]
     timeout-minutes: 60
     strategy:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: [ ${{ env.CURRENT_REDIS_VERSION }} ]
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
         python-version: [ '3.8', '3.12']
         parser-backend: [ 'hiredis' ]
         event-loop: [ 'asyncio' ]
@@ -139,13 +149,13 @@ jobs:
 
   uvloop-tests:
     runs-on: ubuntu-latest
-    needs: [tests]
+    needs: [redis_version, tests]
     timeout-minutes: 60
     strategy:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: [ ${{ env.CURRENT_REDIS_VERSION }} ]
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
         python-version: [ '3.8', '3.12' ]
         parser-backend: [ 'plain' ]
         event-loop: [ 'uvloop' ]

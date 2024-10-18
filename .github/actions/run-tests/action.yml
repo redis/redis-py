@@ -78,6 +78,8 @@ runs:
 
     - name: Run tests
       run: |
+        set -e
+        
         run_tests() {
           local protocol=$1
           local eventloop=""
@@ -88,7 +90,7 @@ runs:
     
           echo "::group::RESP${protocol} standalone tests"
           echo "REDIS_MOD_URL=${REDIS_MOD_URL}"
-          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol=${protocol}
+          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}"
           echo "::endgroup::"
     
           if [ "$protocol" == "2" ] || [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
@@ -98,17 +100,25 @@ runs:
           fi
         }
   
-        run_tests 2
-        run_tests 3
+        run_tests 2 "${{inputs.event-loop}}"
+        run_tests 3 "${{inputs.event-loop}}"
       shell: bash
 
     - name: Debug
       if: failure()
       run: |
+        sudo apt-get install -y redis-tools
         echo "Docker Containers:"
         docker ps
         redis-cli -p 16379 CLUSTER NODES
       shell: bash
+
+    - name: Setup upterm session
+      if: failure()
+      uses: lhotari/action-upterm@v1
+      with:
+        limit-access-to-actor: true
+        limit-access-to-users: uglide
 
     - name: Upload test results and profiling data
       uses: actions/upload-artifact@v4
