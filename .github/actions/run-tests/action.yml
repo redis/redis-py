@@ -76,6 +76,9 @@ runs:
         echo "::endgroup::"
       shell: bash
 
+    - name: Setup tmate session
+      uses: mxschmitt/action-tmate@v3
+
     - name: Run tests
       run: |
         set -ex
@@ -100,8 +103,8 @@ runs:
           fi
         }
   
-        run_tests 2
-        run_tests 3
+        run_tests 2 "${{inputs.event-loop}}"
+        run_tests 3 "${{inputs.event-loop}}"
       shell: bash
 
     - name: Debug
