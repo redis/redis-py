@@ -78,6 +78,8 @@ runs:
 
     - name: Run tests
       run: |
+        set -ex
+        
         run_tests() {
           local protocol=$1
           local eventloop=""
