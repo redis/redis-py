@@ -9,7 +9,7 @@ packaging>=20.4
 pytest
 pytest-asyncio>=0.23.0,<0.24.0
 pytest-cov
-pytest-profiling
+pytest-profiling==1.7.0
 pytest-timeout
 ujson>=4.2.0
 uvloop
