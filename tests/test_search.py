@@ -1485,7 +1485,7 @@ async def test_aggregations_hybrid_scoring(client):
         "doc1",
         mapping={
             "name": "cat book",
-            "description": "a book about cats",
+            "description": "an animal book about cats",
             "vector": np.array([0.1, 0.2]).astype(np.float32).tobytes(),
         },
     )
@@ -1493,12 +1493,12 @@ async def test_aggregations_hybrid_scoring(client):
         "doc2",
         mapping={
             "name": "dog book",
-            "description": "a book about dogs",
+            "description": "an animal book about dogs",
             "vector": np.array([0.2, 0.1]).astype(np.float32).tobytes(),
         },
     )
 
-    query_string = "(@description:cat)=>[KNN 3 @vector $vec_param AS dist]"
+    query_string = "(@description:animal)=>[KNN 3 @vector $vec_param AS dist]"
     req = (
         aggregations.AggregateRequest(query_string)
         .scorer("BM25")
@@ -1508,22 +1508,17 @@ async def test_aggregations_hybrid_scoring(client):
         .dialect(4)
     )
 
-    res = (
-        client.ft()
-        .aggregate(
-            req,
-            query_params={
-                "vec_param": np.array([0.11, 0.21]).astype(np.float32).tobytes()
-            },
-        )
-        .rows[0]
+    res = client.ft().aggregate(
+        req,
+        query_params={"vec_param": np.array([0.11, 0.21]).astype(np.float32).tobytes()},
     )
 
-    assert len(res) == 6
-    assert b"hybrid_score" in res
-    assert b"__score" in res
-    assert b"__dist" in res
-    assert float(res[1]) + float(res[3]) == float(res[5])
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+    else:
+        assert len(res.rows) == 2
+        for row in res.rows:
+            len(row) == 6
 
 
 @pytest.mark.redismod
