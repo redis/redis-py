@@ -380,20 +380,22 @@ class TestRedisClusterObj:
         async with RedisCluster.from_url(url) as rc_default:
             # Test default retry
             retry = rc_default.connection_kwargs.get("retry")
+
+            # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
+            host = rc_default.get_default_node().host
+
             assert isinstance(retry, Retry)
             assert retry._retries == 3
             assert isinstance(retry._backoff, type(default_backoff()))
-            assert rc_default.get_node("127.0.0.1", 16379).connection_kwargs.get(
+            assert rc_default.get_node(host, 16379).connection_kwargs.get(
                 "retry"
-            ) == rc_default.get_node("127.0.0.1", 16380).connection_kwargs.get("retry")
+            ) == rc_default.get_node(host, 16380).connection_kwargs.get("retry")
 
         retry = Retry(ExponentialBackoff(10, 5), 5)
         async with RedisCluster.from_url(url, retry=retry) as rc_custom_retry:
             # Test custom retry
             assert (
-                rc_custom_retry.get_node("127.0.0.1", 16379).connection_kwargs.get(
-                    "retry"
-                )
+                rc_custom_retry.get_node(host, 16379).connection_kwargs.get("retry")
                 == retry
             )
 
@@ -402,9 +404,7 @@ class TestRedisClusterObj:
         ) as rc_no_retries:
             # Test no connection retries
             assert (
-                rc_no_retries.get_node("127.0.0.1", 16379).connection_kwargs.get(
-                    "retry"
-                )
+                rc_no_retries.get_node(host, 16379).connection_kwargs.get("retry")
                 is None
             )
 
@@ -412,7 +412,7 @@ class TestRedisClusterObj:
             url, retry=Retry(NoBackoff(), 0)
         ) as rc_no_retries:
             assert (
-                rc_no_retries.get_node("127.0.0.1", 16379)
+                rc_no_retries.get_node(host, 16379)
                 .connection_kwargs.get("retry")
                 ._retries
                 == 0
