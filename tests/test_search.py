@@ -1522,6 +1522,14 @@ async def test_aggregations_hybrid_scoring(client):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+async def test_invalid_scorer():
+
+    with pytest.raises(ValueError):
+        aggregations.AggregateRequest("*").scorer("blah")
+
+
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_index_definition(client):
     """

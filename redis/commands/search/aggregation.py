@@ -1,6 +1,16 @@
+from enum import Enum
 from typing import List, Union
 
 FIELDNAME = object()
+
+
+class Scorers(Enum):
+    TFIDF = "TFIDF"
+    TFIDF_DOCNORM = "TFIDF.DOCNORM"
+    BM25 = "BM25"
+    DISMAX = "DISMAX"
+    DOCSCORE = "DOCSCORE"
+    HAMMING = "HAMMING"
 
 
 class Limit:
@@ -112,7 +122,7 @@ class AggregateRequest:
         self._cursor = []
         self._dialect = None
         self._add_scores = False
-        self._scorer = None
+        self._scorer = Scorers.TFIDF.value
 
     def load(self, *fields: List[str]) -> "AggregateRequest":
         """
@@ -309,7 +319,7 @@ class AggregateRequest:
         :param scorer: The scoring function to use
                        (e.g. `TFIDF.DOCNORM` or `BM25`)
         """
-        self._scorer = scorer
+        self._scorer = Scorers(scorer).value
         return self
 
     def verbatim(self) -> "AggregateRequest":
