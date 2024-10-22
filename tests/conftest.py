@@ -349,7 +349,7 @@ def _get_client(
                 get_tls_certificates()
             )
             kwargs["ssl_cert_reqs"] = "required"
-            kwargs["port"] = redis_tls_url.port
+            kwargs["port"] = urlparse(redis_tls_url).port
         kwargs["connection_class"] = connection_class
         url_options.update(kwargs)
         pool = redis.ConnectionPool(**url_options)
