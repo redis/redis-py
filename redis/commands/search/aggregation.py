@@ -311,7 +311,7 @@ class AggregateRequest:
         self._add_scores = True
         return self
 
-    def scorer(self, scorer: str) -> "AggregateRequest":
+    def scorer(self, scorer: Scorers) -> "AggregateRequest":
         """
         Use a different scoring function to evaluate document relevance.
         Default is `TFIDF`.
