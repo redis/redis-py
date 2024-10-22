@@ -1612,14 +1612,6 @@ async def test_aggregations_hybrid_scoring(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
-@skip_ifmodversion_lt("2.10.05", "search")
-async def test_invalid_scorer():
-
-    with pytest.raises(ValueError):
-        aggregations.AggregateRequest("*").scorer("blah")
-
-
-@pytest.mark.redismod
 @skip_if_redis_enterprise()
 async def test_search_commands_in_pipeline(decoded_r: redis.Redis):
     p = await decoded_r.ft().pipeline()

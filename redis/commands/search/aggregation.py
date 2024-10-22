@@ -1,16 +1,6 @@
-from enum import Enum
 from typing import List, Union
 
 FIELDNAME = object()
-
-
-class Scorers(Enum):
-    TFIDF = "TFIDF"
-    TFIDF_DOCNORM = "TFIDF.DOCNORM"
-    BM25 = "BM25"
-    DISMAX = "DISMAX"
-    DOCSCORE = "DOCSCORE"
-    HAMMING = "HAMMING"
 
 
 class Limit:
@@ -122,7 +112,7 @@ class AggregateRequest:
         self._cursor = []
         self._dialect = None
         self._add_scores = False
-        self._scorer = Scorers.TFIDF.value
+        self._scorer = "TFIDF"
 
     def load(self, *fields: List[str]) -> "AggregateRequest":
         """
@@ -311,7 +301,7 @@ class AggregateRequest:
         self._add_scores = True
         return self
 
-    def scorer(self, scorer: Scorers) -> "AggregateRequest":
+    def scorer(self, scorer: str) -> "AggregateRequest":
         """
         Use a different scoring function to evaluate document relevance.
         Default is `TFIDF`.
@@ -319,7 +309,7 @@ class AggregateRequest:
         :param scorer: The scoring function to use
                        (e.g. `TFIDF.DOCNORM` or `BM25`)
         """
-        self._scorer = Scorers(scorer).value
+        self._scorer = scorer
         return self
 
     def verbatim(self) -> "AggregateRequest":
