@@ -7,7 +7,7 @@ import redis
 from redis.exceptions import ConnectionError, RedisError
 
 from .conftest import skip_if_cryptography, skip_if_nocryptography
-from .ssl_utils import get_tls_certificates, CertificateType
+from .ssl_utils import CertificateType, get_tls_certificates
 
 
 @pytest.mark.ssl

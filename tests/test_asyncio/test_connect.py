@@ -11,7 +11,7 @@ from redis.asyncio.connection import (
 )
 from redis.exceptions import ConnectionError
 
-from ..ssl_utils import get_tls_certificates, CertificateType
+from ..ssl_utils import CertificateType, get_tls_certificates
 
 _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"

@@ -1,8 +1,6 @@
 import enum
 import os
-
 from collections import namedtuple
-
 
 CLIENT_CERT_NAME = "client.crt"
 CLIENT_KEY_NAME = "client.key"
