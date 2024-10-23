@@ -69,9 +69,9 @@ runs:
             exit 1
           fi
                   
-          if (( redis_major_version < 6 )); then
-            export REDIS_STACK_EXTRA_ARGS="--save ''"
-            export REDIS_EXTRA_ARGS="--save ''"
+          if (( redis_major_version < 7 )); then
+            export REDIS_STACK_EXTRA_ARGS="--tls-auth-clients optional --save ''"
+            export REDIS_EXTRA_ARGS="--tls-auth-clients optional --save ''"
           fi
         
           invoke devenv --endpoints=all-stack
