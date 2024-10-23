@@ -42,7 +42,7 @@ runs:
         pip install -r dev_requirements.txt
         if [ "${{inputs.parser-backend}}" == "hiredis" ]; then
           pip install hiredis${{inputs.hiredis-version}}
-          echo "PARSER_BACKEND=${{inputs.parser-backend}}_${"${{inputs.hiredis-version}}"//[^a-zA-Z0-9]/_}" >> $GITHUB_ENV
+          echo "PARSER_BACKEND=$(echo "${{inputs.parser-backend}}_${{inputs.hiredis-version}}" | sed 's/[^a-zA-Z0-9]/_/g') >> $GITHUB_ENV        
         else
           echo "PARSER_BACKEND=${{inputs.parser-backend}}" >> $GITHUB_ENV
         fi
@@ -68,6 +68,12 @@ runs:
             echo "Version not found in the mapping."
             exit 1
           fi
+                  
+          if (( redis_major_version < 6 )); then
+            export REDIS_STACK_EXTRA_ARGS="--save ''"
+            export REDIS_EXTRA_ARGS="--save ''"
+          fi
+        
           invoke devenv --endpoints=all-stack
         else
           echo "Using redis CE for module tests"
