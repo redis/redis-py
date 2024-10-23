@@ -35,13 +35,16 @@ runs:
         CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ inputs.redis-version }}"
       run: |
         set -e
-        
+                
         echo "::group::Installing dependencies"
         pip install -U setuptools wheel
         pip install -r requirements.txt
         pip install -r dev_requirements.txt
         if [ "${{inputs.parser-backend}}" == "hiredis" ]; then
-         pip install hiredis${{inputs.hiredis-version}}
+          pip install hiredis${{inputs.hiredis-version}}
+          echo "PARSER_BACKEND=${{inputs.parser-backend}}_${"${{inputs.hiredis-version}}"//[^a-zA-Z0-9]/_}" >> $GITHUB_ENV
+        else
+          echo "PARSER_BACKEND=${{inputs.parser-backend}}" >> $GITHUB_ENV
         fi
         echo "::endgroup::"
         
@@ -113,17 +116,10 @@ runs:
         redis-cli -p 16379 CLUSTER NODES
       shell: bash
 
-    - name: Setup upterm session
-      if: failure()
-      uses: lhotari/action-upterm@v1
-      with:
-        limit-access-to-actor: true
-        limit-access-to-users: uglide
-
     - name: Upload test results and profiling data
       uses: actions/upload-artifact@v4
       with:
-        name: pytest-results-${{inputs.redis-version}}-${{inputs.parser-backend}}-${{inputs.python-version}}-${{inputs.event-loop}}
+        name: pytest-results-redis_${{inputs.redis-version}}-python_${{inputs.python-version}}-parser_${{env.PARSER_BACKEND}}-el_${{inputs.event-loop}}
         path: |
           *-results.xml
           prof/**
