@@ -50,18 +50,21 @@ def tests(c, uvloop=False, protocol=2, profile=False):
 
 
 @task
-def standalone_tests(c, uvloop=False, protocol=2, profile=False, redis_mod_url=None):
+def standalone_tests(
+    c, uvloop=False, protocol=2, profile=False, redis_mod_url=None, extra_markers=""
+):
     """Run tests against a standalone redis instance"""
     profile_arg = "--profile" if profile else ""
     redis_mod_url = f"--redis-mod-url={redis_mod_url}" if redis_mod_url else ""
+    extra_markers = f" and {extra_markers}" if extra_markers else ""
 
     if uvloop:
         run(
-            f"pytest {profile_arg} --protocol={protocol} {redis_mod_url} --cov=./ --cov-report=xml:coverage_resp{protocol}_uvloop.xml -m 'not onlycluster and not graph' --uvloop --junit-xml=standalone-resp{protocol}-uvloop-results.xml"
+            f"pytest {profile_arg} --protocol={protocol} {redis_mod_url} --cov=./ --cov-report=xml:coverage_resp{protocol}_uvloop.xml -m 'not onlycluster and not graph{extra_markers}' --uvloop --junit-xml=standalone-resp{protocol}-uvloop-results.xml"
         )
     else:
         run(
-            f"pytest {profile_arg} --protocol={protocol} {redis_mod_url} --cov=./ --cov-report=xml:coverage_resp{protocol}.xml -m 'not onlycluster and not graph' --junit-xml=standalone-resp{protocol}-results.xml"
+            f"pytest {profile_arg} --protocol={protocol} {redis_mod_url} --cov=./ --cov-report=xml:coverage_resp{protocol}.xml -m 'not onlycluster and not graph{extra_markers}' --junit-xml=standalone-resp{protocol}-results.xml"
         )
 
 

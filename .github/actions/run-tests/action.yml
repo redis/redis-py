@@ -72,6 +72,7 @@ runs:
           if (( redis_major_version < 7 )); then
             export REDIS_STACK_EXTRA_ARGS="--tls-auth-clients optional --save ''"
             export REDIS_EXTRA_ARGS="--tls-auth-clients optional --save ''"
+            echo "REDIS_MAJOR_VERSION=${redis_major_version}" >> $GITHUB_ENV
           fi
         
           invoke devenv --endpoints=all-stack
@@ -99,7 +100,14 @@ runs:
     
           echo "::group::RESP${protocol} standalone tests"
           echo "REDIS_MOD_URL=${REDIS_MOD_URL}"
-          invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}"
+        
+          if (( $REDIS_MAJOR_VERSION < 7 )) && [ "$protocol" == "3" ]; then
+            echo "Skipping module tests: Modules doesn't support RESP3 for Redis versions < 7"
+            invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}" --extra-markers="not redismod"
+          else        
+            invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}"
+          fi
+        
           echo "::endgroup::"
     
           if [ "$protocol" == "2" ] || [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
