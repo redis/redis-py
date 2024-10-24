@@ -125,6 +125,7 @@ jobs:
         redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
         python-version: [ '3.8', '3.12']
         parser-backend: [ 'hiredis' ]
+        hiredis-version: [ '>=3.0.0', '<3.0.0' ]
         event-loop: [ 'asyncio' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
@@ -137,15 +138,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
-
-      - name: Run tests against hiredis < 3.0.0
-        uses: ./.github/actions/run-tests
-        if: ${{ matrix.parser-backend == 'hiredis' && matrix.python-version == '3.12'}}
-        with:
-          python-version: ${{ matrix.python-version }}
-          parser-backend: ${{ matrix.parser-backend }}
-          redis-version: ${{ matrix.redis-version }}
-          hiredis-version: '<3.0.0'
+          hiredis-version: ${{ matrix.hiredis-version }}
 
   uvloop-tests:
     runs-on: ubuntu-latest
