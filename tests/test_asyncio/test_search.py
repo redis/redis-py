@@ -1025,6 +1025,8 @@ async def test_phonetic_matcher(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+# NOTE(imalinovskyi): This test contains hardcoded scores valid only for RediSearch 2.8+
+@skip_ifmodversion_lt("2.8.0", "search")
 async def test_scorer(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("description"),))
 

@@ -7,7 +7,7 @@ import redis
 from redis.exceptions import ConnectionError, RedisError
 
 from .conftest import skip_if_cryptography, skip_if_nocryptography
-from .ssl_utils import get_ssl_filename
+from .ssl_utils import CertificateType, get_tls_certificates
 
 
 @pytest.mark.ssl
@@ -18,10 +18,13 @@ class TestSSL:
     and connecting to the appropriate port.
     """
 
-    CA_CERT = get_ssl_filename("ca-cert.pem")
-    CLIENT_CERT = get_ssl_filename("client-cert.pem")
-    CLIENT_KEY = get_ssl_filename("client-key.pem")
-    SERVER_CERT = get_ssl_filename("server-cert.pem")
+    @pytest.fixture(autouse=True)
+    def _set_ssl_certs(self, request):
+        tls_cert_subdir = request.session.config.REDIS_INFO["tls_cert_subdir"]
+        self.client_certs = get_tls_certificates(tls_cert_subdir)
+        self.server_certs = get_tls_certificates(
+            tls_cert_subdir, cert_type=CertificateType.server
+        )
 
     def test_ssl_with_invalid_cert(self, request):
         ssl_url = request.config.option.redis_ssl_url
@@ -55,16 +58,16 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.CLIENT_CERT,
-            ssl_keyfile=self.CLIENT_KEY,
+            ssl_certfile=self.client_certs.certfile,
+            ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
-            ssl_ca_certs=self.CA_CERT,
+            ssl_ca_certs=self.client_certs.ca_certfile,
         )
         assert r.ping()
         r.close()
 
     def test_validating_self_signed_string_certificate(self, request):
-        with open(self.CA_CERT) as f:
+        with open(self.client_certs.ca_certfile) as f:
             cert_data = f.read()
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
@@ -72,8 +75,8 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.CLIENT_CERT,
-            ssl_keyfile=self.CLIENT_KEY,
+            ssl_certfile=self.client_certs.certfile,
+            ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
             ssl_ca_data=cert_data,
         )
@@ -149,10 +152,10 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.CLIENT_CERT,
-            ssl_keyfile=self.CLIENT_KEY,
+            ssl_certfile=self.client_certs.certfile,
+            ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
-            ssl_ca_certs=self.CA_CERT,
+            ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_validate_ocsp=True,
         )
         return r
@@ -247,10 +250,10 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.CLIENT_CERT,
-            ssl_keyfile=self.CLIENT_KEY,
+            ssl_certfile=self.client_certs.cert,
+            ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
-            ssl_ca_certs=self.CA_CERT,
+            ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_validate_ocsp=True,
             ssl_ocsp_context=p,  # just needs to not be none
         )
@@ -260,19 +263,19 @@ class TestSSL:
         r.close()
 
         ctx = OpenSSL.SSL.Context(OpenSSL.SSL.SSLv23_METHOD)
-        ctx.use_certificate_file(self.CLIENT_CERT)
-        ctx.use_privatekey_file(self.CLIENT_KEY)
+        ctx.use_certificate_file(self.client_certs.cert)
+        ctx.use_privatekey_file(self.client_certs.keyfile)
 
         r = redis.Redis(
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.CLIENT_CERT,
-            ssl_keyfile=self.CLIENT_KEY,
+            ssl_certfile=self.client_certs.cert,
+            ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
-            ssl_ca_certs=self.CA_CERT,
+            ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_ocsp_context=ctx,
-            ssl_ocsp_expected_cert=open(self.SERVER_CERT, "rb").read(),
+            ssl_ocsp_expected_cert=open(self.server_certs.ca_certfile, "rb").read(),
             ssl_validate_ocsp_stapled=True,
         )
 
@@ -285,10 +288,10 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_certfile=self.CLIENT_CERT,
-            ssl_keyfile=self.CLIENT_KEY,
+            ssl_certfile=self.client_certs.cert,
+            ssl_keyfile=self.client_certs.keyfile,
             ssl_cert_reqs="required",
-            ssl_ca_certs=self.CA_CERT,
+            ssl_ca_certs=self.client_certs.ca_certfile,
             ssl_validate_ocsp_stapled=True,
         )
 

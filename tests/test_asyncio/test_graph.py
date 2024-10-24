@@ -12,7 +12,7 @@ async def decoded_r(create_redis, stack_url):
     return await create_redis(decode_responses=True, url="redis://localhost:6480")
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_bulk(decoded_r):
     with pytest.raises(NotImplementedError):
@@ -20,7 +20,7 @@ async def test_bulk(decoded_r):
         await decoded_r.graph().bulk(foo="bar!")
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_graph_creation(decoded_r: redis.Redis):
     graph = decoded_r.graph()
@@ -66,7 +66,7 @@ async def test_graph_creation(decoded_r: redis.Redis):
     await graph.delete()
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_array_functions(decoded_r: redis.Redis):
     graph = decoded_r.graph()
@@ -90,7 +90,7 @@ async def test_array_functions(decoded_r: redis.Redis):
     assert [a] == result.result_set[0][0]
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_path(decoded_r: redis.Redis):
     node0 = Node(node_id=0, label="L1")
@@ -111,7 +111,7 @@ async def test_path(decoded_r: redis.Redis):
     assert expected_results == result.result_set
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_param(decoded_r: redis.Redis):
     params = [1, 2.3, "str", True, False, None, [0, 1, 2]]
@@ -122,7 +122,7 @@ async def test_param(decoded_r: redis.Redis):
         assert expected_results == result.result_set
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_map(decoded_r: redis.Redis):
     query = "RETURN {a:1, b:'str', c:NULL, d:[1,2,3], e:True, f:{x:1, y:2}}"
@@ -140,7 +140,7 @@ async def test_map(decoded_r: redis.Redis):
     assert actual == expected
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_point(decoded_r: redis.Redis):
     query = "RETURN point({latitude: 32.070794860, longitude: 34.820751118})"
@@ -158,7 +158,7 @@ async def test_point(decoded_r: redis.Redis):
     assert abs(actual["longitude"] - expected_lon) < 0.001
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_index_response(decoded_r: redis.Redis):
     result_set = await decoded_r.graph().query("CREATE INDEX ON :person(age)")
@@ -174,7 +174,7 @@ async def test_index_response(decoded_r: redis.Redis):
         await decoded_r.graph().query("DROP INDEX ON :person(age)")
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_stringify_query_result(decoded_r: redis.Redis):
     graph = decoded_r.graph()
@@ -229,7 +229,7 @@ async def test_stringify_query_result(decoded_r: redis.Redis):
     await graph.delete()
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_optional_match(decoded_r: redis.Redis):
     # Build a graph of form (a)-[R]->(b)
@@ -255,7 +255,7 @@ async def test_optional_match(decoded_r: redis.Redis):
     await graph.delete()
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_cached_execution(decoded_r: redis.Redis):
     await decoded_r.graph().query("CREATE ()")
@@ -276,7 +276,7 @@ async def test_cached_execution(decoded_r: redis.Redis):
     assert cached_result.cached_execution
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_slowlog(decoded_r: redis.Redis):
     create_query = """CREATE
@@ -291,7 +291,7 @@ async def test_slowlog(decoded_r: redis.Redis):
 
 
 @pytest.mark.xfail(strict=False)
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_query_timeout(decoded_r: redis.Redis):
     # Build a sample graph with 1000 nodes.
@@ -306,7 +306,7 @@ async def test_query_timeout(decoded_r: redis.Redis):
         assert False is False
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_read_only_query(decoded_r: redis.Redis):
     with pytest.raises(Exception):
@@ -316,7 +316,7 @@ async def test_read_only_query(decoded_r: redis.Redis):
         assert False is False
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_profile(decoded_r: redis.Redis):
     q = """UNWIND range(1, 3) AS x CREATE (p:Person {v:x})"""
@@ -333,7 +333,7 @@ async def test_profile(decoded_r: redis.Redis):
 
 
 @skip_if_redis_enterprise()
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_config(decoded_r: redis.Redis):
     config_name = "RESULTSET_SIZE"
@@ -366,7 +366,7 @@ async def test_config(decoded_r: redis.Redis):
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_list_keys(decoded_r: redis.Redis):
     result = await decoded_r.graph().list_keys()
@@ -390,7 +390,7 @@ async def test_list_keys(decoded_r: redis.Redis):
     assert result == []
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_multi_label(decoded_r: redis.Redis):
     redis_graph = decoded_r.graph("g")
@@ -417,7 +417,7 @@ async def test_multi_label(decoded_r: redis.Redis):
         assert True
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_execution_plan(decoded_r: redis.Redis):
     redis_graph = decoded_r.graph("execution_plan")
@@ -437,7 +437,7 @@ async def test_execution_plan(decoded_r: redis.Redis):
     await redis_graph.delete()
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 @skip_if_resp_version(3)
 async def test_explain(decoded_r: redis.Redis):
     redis_graph = decoded_r.graph("execution_plan")

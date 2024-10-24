@@ -8,7 +8,7 @@ import pytest
 from redis.connection import Connection, SSLConnection, UnixDomainSocketConnection
 from redis.exceptions import RedisError
 
-from .ssl_utils import get_ssl_filename
+from .ssl_utils import CertificateType, get_tls_certificates
 
 _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"
@@ -54,18 +54,18 @@ def test_uds_connect(uds_address):
 )
 def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     host, port = tcp_address
-    certfile = get_ssl_filename("client-cert.pem")
-    keyfile = get_ssl_filename("client-key.pem")
-    ca_certfile = get_ssl_filename("ca-cert.pem")
+    server_certs = get_tls_certificates(cert_type=CertificateType.server)
     conn = SSLConnection(
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
-        ssl_ca_certs=ca_certfile,
+        ssl_ca_certs=server_certs.ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl_min_version,
     )
-    _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    _assert_connect(
+        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+    )
 
 
 @pytest.mark.ssl
@@ -79,19 +79,21 @@ def test_tcp_ssl_connect(tcp_address, ssl_min_version):
 )
 def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
     host, port = tcp_address
-    certfile = get_ssl_filename("client-cert.pem")
-    keyfile = get_ssl_filename("client-key.pem")
-    ca_certfile = get_ssl_filename("ca-cert.pem")
+
+    server_certs = get_tls_certificates(cert_type=CertificateType.server)
+
     conn = SSLConnection(
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
-        ssl_ca_certs=ca_certfile,
+        ssl_ca_certs=server_certs.ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl.TLSVersion.TLSv1_2,
         ssl_ciphers=ssl_ciphers,
     )
-    _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    _assert_connect(
+        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+    )
 
 
 """
@@ -115,8 +117,7 @@ def test_unix_socket_with_timeout():
 @pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3")
 def test_tcp_ssl_version_mismatch(tcp_address):
     host, port = tcp_address
-    certfile = get_ssl_filename("server-cert.pem")
-    keyfile = get_ssl_filename("server-key.pem")
+    certfile, keyfile, _ = get_tls_certificates(cert_type=CertificateType.server)
     conn = SSLConnection(
         host=host,
         port=port,

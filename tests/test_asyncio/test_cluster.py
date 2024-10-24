@@ -33,12 +33,11 @@ from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
-    skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
 
-from ..ssl_utils import get_ssl_filename
+from ..ssl_utils import get_tls_certificates
 from .compat import aclosing, mock
 
 pytestmark = pytest.mark.onlycluster
@@ -380,20 +379,22 @@ class TestRedisClusterObj:
         async with RedisCluster.from_url(url) as rc_default:
             # Test default retry
             retry = rc_default.connection_kwargs.get("retry")
+
+            # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
+            host = rc_default.get_default_node().host
+
             assert isinstance(retry, Retry)
             assert retry._retries == 3
             assert isinstance(retry._backoff, type(default_backoff()))
-            assert rc_default.get_node("127.0.0.1", 16379).connection_kwargs.get(
+            assert rc_default.get_node(host, 16379).connection_kwargs.get(
                 "retry"
-            ) == rc_default.get_node("127.0.0.1", 16380).connection_kwargs.get("retry")
+            ) == rc_default.get_node(host, 16380).connection_kwargs.get("retry")
 
         retry = Retry(ExponentialBackoff(10, 5), 5)
         async with RedisCluster.from_url(url, retry=retry) as rc_custom_retry:
             # Test custom retry
             assert (
-                rc_custom_retry.get_node("127.0.0.1", 16379).connection_kwargs.get(
-                    "retry"
-                )
+                rc_custom_retry.get_node(host, 16379).connection_kwargs.get("retry")
                 == retry
             )
 
@@ -402,9 +403,7 @@ class TestRedisClusterObj:
         ) as rc_no_retries:
             # Test no connection retries
             assert (
-                rc_no_retries.get_node("127.0.0.1", 16379).connection_kwargs.get(
-                    "retry"
-                )
+                rc_no_retries.get_node(host, 16379).connection_kwargs.get("retry")
                 is None
             )
 
@@ -412,7 +411,7 @@ class TestRedisClusterObj:
             url, retry=Retry(NoBackoff(), 0)
         ) as rc_no_retries:
             assert (
-                rc_no_retries.get_node("127.0.0.1", 16379)
+                rc_no_retries.get_node(host, 16379)
                 .connection_kwargs.get("retry")
                 ._retries
                 == 0
@@ -493,8 +492,8 @@ class TestRedisClusterObj:
         Test command execution with nodes flag REPLICAS
         """
         replicas = r.get_replicas()
-        if not replicas:
-            r = await get_mocked_redis_client(default_host, default_port)
+        assert len(replicas) != 0, "This test requires Cluster with 1 replica"
+
         primaries = r.get_primaries()
         mock_all_nodes_resp(r, "PONG")
         assert await r.ping(target_nodes=RedisCluster.REPLICAS) is True
@@ -2804,7 +2803,6 @@ class TestClusterPipeline:
             assert ask_node._free.pop().read_response.await_count
             assert res == ["MOCK_OK"]
 
-    @skip_if_server_version_gte("7.0.0")
     async def test_moved_redirection_on_slave_with_default(
         self, r: RedisCluster
     ) -> None:
@@ -2824,11 +2822,7 @@ class TestClusterPipeline:
             async def parse_response(
                 self, connection: Connection, command: str, **kwargs: Any
             ) -> Any:
-                if (
-                    command == "GET"
-                    and self.host != primary.host
-                    and self.port != primary.port
-                ):
+                if command == "GET" and self.port != primary.port:
                     raise MovedError(moved_error)
 
                 return await parse_response_orig(connection, command, **kwargs)
@@ -2899,9 +2893,7 @@ class TestSSL:
     appropriate port.
     """
 
-    CA_CERT = get_ssl_filename("ca-cert.pem")
-    CLIENT_CERT = get_ssl_filename("client-cert.pem")
-    CLIENT_KEY = get_ssl_filename("client-key.pem")
+    CLIENT_CERT, CLIENT_KEY, CA_CERT = get_tls_certificates("cluster")
 
     @pytest_asyncio.fixture()
     def create_client(self, request: FixtureRequest) -> Callable[..., RedisCluster]:

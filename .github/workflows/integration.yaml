@@ -29,6 +29,7 @@ env:
   COVERAGE_CORE: sysmon
   REDIS_IMAGE: redis:latest
   REDIS_STACK_IMAGE: redis/redis-stack-server:latest
+  CURRENT_REDIS_VERSION: '7.4.1'
 
 jobs:
   dependency-audit:
@@ -56,148 +57,118 @@ jobs:
           pip install -r dev_requirements.txt
           invoke linters
 
-  resp2-tests:
+  redis_version:
     runs-on: ubuntu-latest
+    outputs:
+      CURRENT: ${{ env.CURRENT_REDIS_VERSION }}
+    steps:
+      - name: Compute outputs
+        run: |
+          echo "CURRENT=${{ env.CURRENT_REDIS_VERSION }}" >> $GITHUB_OUTPUT
+
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: redis_version
+    strategy:
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}', '7.2.6', '6.2.16']
+        python-version: ['3.8', '3.12']
+        parser-backend: ['plain']
+        event-loop: ['asyncio']
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        uses: ./.github/actions/run-tests
+        with:
+            python-version: ${{ matrix.python-version }}
+            parser-backend: ${{ matrix.parser-backend }}
+            redis-version: ${{ matrix.redis-version }}
+
+  python-compatibility-tests:
+    runs-on: ubuntu-latest
+    needs: [ redis_version, tests ]
     timeout-minutes: 60
     strategy:
       max-parallel: 15
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', 'pypy-3.9', 'pypy-3.10']
-        test-type: ['standalone', 'cluster']
-        connection-type: ['hiredis', 'plain']
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
+        python-version: ['3.9', '3.10', '3.11', 'pypy-3.9', 'pypy-3.10']
+        parser-backend: [ 'plain' ]
+        event-loop: [ 'asyncio' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: RESP2 ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - name: Run tests
+        uses: ./.github/actions/run-tests
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip'
+          parser-backend: ${{ matrix.parser-backend }}
+          redis-version: ${{ matrix.redis-version }}
 
-      - name: Run tests
-        run: |
-          pip install -U setuptools wheel
-          pip install -r requirements.txt
-          pip install -r dev_requirements.txt
-          if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-           pip install hiredis
-          fi
-          invoke devenv
-          sleep 10 # time to settle
-          invoke ${{matrix.test-type}}-tests
-          ls -1
-
-      - name: Run tests against hiredis < 3.0.0
-        if: ${{ matrix.connection-type == 'hiredis' && matrix.python-version == '3.12'}}
-        run: |
-          pip uninstall hiredis -y
-          pip install -U setuptools wheel
-          pip install -r requirements.txt
-          pip install -r dev_requirements.txt
-          if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-           pip install "hiredis<3.0.0"
-          fi
-          invoke devenv
-          sleep 10 # time to settle
-          invoke ${{matrix.test-type}}-tests
-          ls -1
-
-      - name: Upload test results and profiling data
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}
-          path: |
-            ${{matrix.test-type}}*-results.xml
-            prof/**
-            profile_output*
-          if-no-files-found: error
-          retention-days: 10
-
-      - name: Upload codecov coverage
-        uses: codecov/codecov-action@v4
-        with:
-          fail_ci_if_error: false
-
-  resp3-tests:
+  hiredis-tests:
     runs-on: ubuntu-latest
+    needs: [redis_version, tests]
+    timeout-minutes: 60
     strategy:
+      max-parallel: 15
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.12']
-        test-type: ['standalone', 'cluster']
-        connection-type: ['hiredis', 'plain']
-        event-loop: ['asyncio', 'uvloop']
-        exclude:
-          - test-type: 'cluster'
-            connection-type: 'hiredis'
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
+        python-version: [ '3.8', '3.12']
+        parser-backend: [ 'hiredis' ]
+        hiredis-version: [ '>=3.0.0', '<3.0.0' ]
+        event-loop: [ 'asyncio' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: RESP3 ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.event-loop}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - name: Run tests
+        uses: ./.github/actions/run-tests
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip'
+          parser-backend: ${{ matrix.parser-backend }}
+          redis-version: ${{ matrix.redis-version }}
+          hiredis-version: ${{ matrix.hiredis-version }}
 
+  uvloop-tests:
+    runs-on: ubuntu-latest
+    needs: [redis_version, tests]
+    timeout-minutes: 60
+    strategy:
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
+        python-version: [ '3.8', '3.12' ]
+        parser-backend: [ 'plain' ]
+        event-loop: [ 'uvloop' ]
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
+    steps:
+      - uses: actions/checkout@v4
       - name: Run tests
-        run: |
-          pip install -U setuptools wheel
-          pip install -r requirements.txt
-          pip install -r dev_requirements.txt
-          if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-            pip install hiredis
-          fi
-          invoke devenv
-          sleep 10 # time to settle
-          if [ "${{matrix.event-loop}}" == "uvloop" ]; then
-            invoke ${{matrix.test-type}}-tests --uvloop --protocol=3
-          else
-            invoke ${{matrix.test-type}}-tests --protocol=3
-          fi
-
-      - name: Run tests against hiredis < 3.0.0
-        if: ${{ matrix.connection-type == 'hiredis' && matrix.python-version == '3.12'}}
-        run: |
-          pip uninstall hiredis -y
-          pip install -U setuptools wheel
-          pip install -r requirements.txt
-          pip install -r dev_requirements.txt
-          if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-            pip install "hiredis<3.0.0"
-          fi
-          invoke devenv
-          sleep 10 # time to settle
-          if [ "${{matrix.event-loop}}" == "uvloop" ]; then
-            invoke ${{matrix.test-type}}-tests --uvloop --protocol=3
-          else
-            invoke ${{matrix.test-type}}-tests --protocol=3
-          fi
-
-      - name: Upload test results and profiling data
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/run-tests
         with:
-          name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}-${{matrix.event-loop}}-resp3
-          path: |
-            ${{matrix.test-type}}*-results.xml
-            prof/**
-            profile_output*
-          if-no-files-found: error
-          retention-days: 10
-
-      - name: Upload codecov coverage
-        uses: codecov/codecov-action@v4
-        with:
-          fail_ci_if_error: false
+          python-version: ${{ matrix.python-version }}
+          parser-backend: ${{ matrix.parser-backend }}
+          redis-version: ${{ matrix.redis-version }}
+          event-loop: ${{ matrix.event-loop }}
 
   build-and-test-package:
     name: Validate building and installing the package
     runs-on: ubuntu-latest
-    needs: [resp2-tests, resp3-tests]
+    needs: [tests]
     strategy:
       fail-fast: false
       matrix:
@@ -208,6 +179,10 @@ jobs:
         with:
           python-version: 3.9
       - name: Run installed unit tests
+        env:
+          REDIS_VERSION: ${{ env.CURRENT_REDIS_VERSION }}
+          REDIS_IMAGE: "redis:${{ env.CURRENT_REDIS_VERSION }}"
+          CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ env.CURRENT_REDIS_VERSION }}"
         run: |
           bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
 

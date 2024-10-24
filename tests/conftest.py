@@ -21,7 +21,7 @@ from redis.cache import (
 from redis.connection import Connection, ConnectionInterface, SSLConnection, parse_url
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
-from tests.ssl_utils import get_ssl_filename
+from tests.ssl_utils import get_tls_certificates
 
 REDIS_INFO = {}
 default_redis_url = "redis://localhost:6379/0"
@@ -104,6 +104,13 @@ def pytest_addoption(parser):
     )
 
     parser.addoption(
+        "--redis-mod-url",
+        default=default_redismod_url,
+        action="store",
+        help="Redis with modules connection string, defaults to `%(default)s`",
+    )
+
+    parser.addoption(
         "--protocol",
         default=default_protocol,
         action="store",
@@ -177,14 +184,14 @@ def pytest_sessionstart(session):
     REDIS_INFO["version"] = version
     REDIS_INFO["arch_bits"] = arch_bits
     REDIS_INFO["cluster_enabled"] = cluster_enabled
+    REDIS_INFO["tls_cert_subdir"] = "cluster" if cluster_enabled else "standalone"
     REDIS_INFO["enterprise"] = enterprise
     # store REDIS_INFO in config so that it is available from "condition strings"
     session.config.REDIS_INFO = REDIS_INFO
 
     # module info
-    stack_url = redis_url
-    if stack_url == default_redis_url:
-        stack_url = default_redismod_url
+    stack_url = session.config.getoption("--redis-mod-url")
+
     try:
         stack_info = _get_info(stack_url)
         REDIS_INFO["modules"] = stack_info["modules"]
@@ -325,6 +332,9 @@ def _get_client(
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
+
+    redis_tls_url = request.config.getoption("--redis-ssl-url")
+
     if "protocol" not in redis_url and kwargs.get("protocol") is None:
         kwargs["protocol"] = request.config.getoption("--protocol")
 
@@ -335,15 +345,11 @@ def _get_client(
         connection_class = Connection
         if ssl:
             connection_class = SSLConnection
-            kwargs["ssl_certfile"] = get_ssl_filename("client-cert.pem")
-            kwargs["ssl_keyfile"] = get_ssl_filename("client-key.pem")
-            # When you try to assign "required" as single string
-            # it assigns tuple instead of string.
-            # Probably some reserved keyword
-            # I can't explain how does it work -_-
-            kwargs["ssl_cert_reqs"] = "require" + "d"
-            kwargs["ssl_ca_certs"] = get_ssl_filename("ca-cert.pem")
-            kwargs["port"] = 6666
+            kwargs["ssl_certfile"], kwargs["ssl_keyfile"], kwargs["ssl_ca_certs"] = (
+                get_tls_certificates()
+            )
+            kwargs["ssl_cert_reqs"] = "required"
+            kwargs["port"] = urlparse(redis_tls_url).port
         kwargs["connection_class"] = connection_class
         url_options.update(kwargs)
         pool = redis.ConnectionPool(**url_options)
@@ -393,11 +399,7 @@ def r(request):
 
 @pytest.fixture()
 def stack_url(request):
-    stack_url = request.config.getoption("--redis-url", default=default_redismod_url)
-    if stack_url == default_redis_url:
-        return default_redismod_url
-    else:
-        return stack_url
+    return request.config.getoption("--redis-mod-url", default=default_redismod_url)
 
 
 @pytest.fixture()

@@ -1,69 +1,64 @@
 ---
 
-version: "3.8"
-
 services:
 
   redis:
-    image: ${REDIS_IMAGE:-redis:latest}
+    image: ${CLIENT_LIBS_TEST_IMAGE:-redislabs/client-libs-test:7.4.1}
     container_name: redis-standalone
-    command: redis-server --enable-debug-command yes --protected-mode no
+    environment:
+      - TLS_ENABLED=yes
+      - REDIS_CLUSTER=no
+      - PORT=6379
+      - TLS_PORT=6666
+    command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --tls-auth-clients optional --save ""}
     ports:
       - 6379:6379
+      - 6666:6666 # TLS port
+    volumes:
+      - "./dockers/standalone:/redis/work"
     profiles:
       - standalone
       - sentinel
       - replica
+      - all-stack
       - all
 
   replica:
-    image: ${REDIS_IMAGE:-redis:latest}
+    image: ${REDIS_IMAGE:-redis:7.4.1}
     container_name: redis-replica
     depends_on:
       - redis
-    command: redis-server --replicaof redis 6379 --protected-mode no
+    command: redis-server --replicaof redis 6379 --protected-mode no --save ""
     ports:
       - 6380:6379
     profiles:
       - replica
+      - all-stack
       - all
 
   cluster:
+    image: ${CLIENT_LIBS_TEST_IMAGE:-redislabs/client-libs-test:7.4.1}
     container_name: redis-cluster
-    build:
-      context: .
-      dockerfile: dockers/Dockerfile.cluster
-      args:
-        REDIS_IMAGE: ${REDIS_IMAGE:-redis:latest}
+    environment:
+      - REDIS_CLUSTER=yes
+      - NODES=6
+      - REPLICAS=1
+      - TLS_ENABLED=yes
+      - PORT=16379
+      - TLS_PORT=27379
+    command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --tls-auth-clients optional --save ""}
     ports:
-      - 16379:16379
-      - 16380:16380
-      - 16381:16381
-      - 16382:16382
-      - 16383:16383
-      - 16384:16384
+      - "16379-16384:16379-16384"
+      - "27379-27384:27379-27384"
     volumes:
-      - "./dockers/cluster.redis.conf:/redis.conf:ro"
+      - "./dockers/cluster:/redis/work"
     profiles:
       - cluster
+      - all-stack
       - all
-
-  stunnel:
-    image: redisfab/stunnel:latest
-    depends_on:
-      - redis
-    ports:
-      - 6666:6666
-    profiles:
-      - all
-      - standalone
-      - ssl
-    volumes:
-      - "./dockers/stunnel/conf:/etc/stunnel/conf.d:ro"
-      - "./dockers/stunnel/keys:/etc/stunnel/keys:ro"
 
   sentinel:
-    image: ${REDIS_IMAGE:-redis:latest}
+    image: ${REDIS_IMAGE:-redis:7.4.1}
     container_name: redis-sentinel
     depends_on:
       - redis
@@ -74,10 +69,11 @@ services:
       - "./dockers/sentinel.conf:/redis.conf"
     profiles:
       - sentinel
+      - all-stack
       - all
 
   sentinel2:
-    image: ${REDIS_IMAGE:-redis:latest}
+    image: ${REDIS_IMAGE:-redis:7.4.1}
     container_name: redis-sentinel2
     depends_on:
       - redis
@@ -88,10 +84,11 @@ services:
       - "./dockers/sentinel.conf:/redis.conf"
     profiles:
       - sentinel
+      - all-stack
       - all
 
   sentinel3:
-    image: ${REDIS_IMAGE:-redis:latest}
+    image: ${REDIS_IMAGE:-redis:7.4.1}
     container_name: redis-sentinel3
     depends_on:
       - redis
@@ -102,6 +99,7 @@ services:
       - "./dockers/sentinel.conf:/redis.conf"
     profiles:
       - sentinel
+      - all-stack
       - all
 
   redis-stack:
@@ -110,10 +108,10 @@ services:
     ports:
       - 6479:6379
     environment:
-      - "REDIS_ARGS=--enable-debug-command yes --enable-module-command yes"
+      - "REDIS_ARGS=${REDIS_STACK_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --save ''}"
     profiles:
       - standalone
-      - all
+      - all-stack
 
   redis-stack-graph:
     image: redis/redis-stack-server:6.2.6-v15
@@ -121,5 +119,4 @@ services:
     ports:
       - 6480:6379
     profiles:
-      - standalone
-      - all
+      - graph
