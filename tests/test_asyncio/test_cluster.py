@@ -2804,7 +2804,6 @@ class TestClusterPipeline:
             assert ask_node._free.pop().read_response.await_count
             assert res == ["MOCK_OK"]
 
-    @skip_if_server_version_gte("7.0.0")
     async def test_moved_redirection_on_slave_with_default(
         self, r: RedisCluster
     ) -> None:
@@ -2814,6 +2813,7 @@ class TestClusterPipeline:
         # set read_from_replicas to True
         r.read_from_replicas = True
         primary = r.get_node_from_key(key, False)
+        replica = r.get_node_from_key(key, True)
         moved_error = f"{r.keyslot(key)} {primary.host}:{primary.port}"
 
         parse_response_orig = primary.parse_response
@@ -2824,11 +2824,7 @@ class TestClusterPipeline:
             async def parse_response(
                 self, connection: Connection, command: str, **kwargs: Any
             ) -> Any:
-                if (
-                    command == "GET"
-                    and self.host != primary.host
-                    and self.port != primary.port
-                ):
+                if command == "GET" and self.port != primary.port:
                     raise MovedError(moved_error)
 
                 return await parse_response_orig(connection, command, **kwargs)
