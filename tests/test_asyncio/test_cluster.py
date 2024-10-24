@@ -33,7 +33,6 @@ from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
-    skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
@@ -2813,7 +2812,6 @@ class TestClusterPipeline:
         # set read_from_replicas to True
         r.read_from_replicas = True
         primary = r.get_node_from_key(key, False)
-        replica = r.get_node_from_key(key, True)
         moved_error = f"{r.keyslot(key)} {primary.host}:{primary.port}"
 
         parse_response_orig = primary.parse_response
