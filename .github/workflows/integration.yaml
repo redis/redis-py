@@ -129,7 +129,7 @@ jobs:
         event-loop: [ 'asyncio' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}
     steps:
       - uses: actions/checkout@v4
       - name: Run tests
@@ -178,6 +178,10 @@ jobs:
         with:
           python-version: 3.9
       - name: Run installed unit tests
+        env:
+          REDIS_VERSION: ${{ env.CURRENT_REDIS_VERSION }}
+          REDIS_IMAGE: "redis:${{ env.CURRENT_REDIS_VERSION }}"
+          CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ env.CURRENT_REDIS_VERSION }}"
         run: |
           bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
 

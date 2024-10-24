@@ -41,7 +41,7 @@ runs:
         pip install -r requirements.txt
         pip install -r dev_requirements.txt
         if [ "${{inputs.parser-backend}}" == "hiredis" ]; then
-          pip install hiredis${{inputs.hiredis-version}}
+          pip install "hiredis${{inputs.hiredis-version}}"
           echo "PARSER_BACKEND=$(echo "${{inputs.parser-backend}}_${{inputs.hiredis-version}}" | sed 's/[^a-zA-Z0-9]/_/g')" >> $GITHUB_ENV        
         else
           echo "PARSER_BACKEND=${{inputs.parser-backend}}" >> $GITHUB_ENV
