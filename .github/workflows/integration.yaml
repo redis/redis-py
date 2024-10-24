@@ -163,6 +163,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
+          event-loop: ${{ matrix.event-loop }}
 
   build-and-test-package:
     name: Validate building and installing the package
