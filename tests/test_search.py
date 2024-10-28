@@ -1467,6 +1467,61 @@ def test_aggregations_add_scores(client):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+async def test_aggregations_hybrid_scoring(client):
+    client.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            TextField("description", sortable=True, weight=5.0),
+            VectorField(
+                "vector",
+                "HNSW",
+                {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "COSINE"},
+            ),
+        )
+    )
+
+    client.hset(
+        "doc1",
+        mapping={
+            "name": "cat book",
+            "description": "an animal book about cats",
+            "vector": np.array([0.1, 0.2]).astype(np.float32).tobytes(),
+        },
+    )
+    client.hset(
+        "doc2",
+        mapping={
+            "name": "dog book",
+            "description": "an animal book about dogs",
+            "vector": np.array([0.2, 0.1]).astype(np.float32).tobytes(),
+        },
+    )
+
+    query_string = "(@description:animal)=>[KNN 3 @vector $vec_param AS dist]"
+    req = (
+        aggregations.AggregateRequest(query_string)
+        .scorer("BM25")
+        .add_scores()
+        .apply(hybrid_score="@__score + @dist")
+        .load("*")
+        .dialect(4)
+    )
+
+    res = client.ft().aggregate(
+        req,
+        query_params={"vec_param": np.array([0.11, 0.21]).astype(np.float32).tobytes()},
+    )
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+    else:
+        assert len(res.rows) == 2
+        for row in res.rows:
+            len(row) == 6
+
+
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_index_definition(client):
     """
