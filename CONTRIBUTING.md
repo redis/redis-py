@@ -38,7 +38,7 @@ Here's how to get started with your code contribution:
         a.  python -m venv .venv
         b.  source .venv/bin/activate
         c.  pip install -r dev_requirements.txt
-        c.  pip install -r requirements.txt
+        c.  pip install -e .
 
 4.  If you need a development environment, run `invoke devenv`. Note: this relies on docker-compose to build environments, and assumes that you have a version supporting [docker profiles](https://docs.docker.com/compose/profiles/).
 5.  While developing, make sure the tests pass by running `invoke tests`
