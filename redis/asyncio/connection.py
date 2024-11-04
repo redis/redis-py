@@ -36,10 +36,13 @@ if sys.version_info >= (3, 11, 3):
 else:
     from async_timeout import timeout as async_timeout
 
+from redis.asyncio.credentials import (
+    CredentialProvider,
+    UsernamePasswordCredentialProvider,
+)
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.connection import DEFAULT_RESP_VERSION
-from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -333,7 +336,7 @@ class AbstractConnection:
                 self.credential_provider
                 or UsernamePasswordCredentialProvider(self.username, self.password)
             )
-            auth_args = cred_provider.get_credentials()
+            auth_args = await cred_provider.get_credentials()
             # if resp version is specified and we have auth args,
             # we need to send them via HELLO
         if auth_args and self.protocol not in [2, "2"]:

@@ -38,6 +38,7 @@ from redis.asyncio.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
+from redis.asyncio.credentials import CredentialProvider
 from redis.asyncio.lock import Lock
 from redis.asyncio.retry import Retry
 from redis.client import (
@@ -52,7 +53,6 @@ from redis.commands import (
     AsyncSentinelCommands,
     list_or_args,
 )
-from redis.credentials import CredentialProvider
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
