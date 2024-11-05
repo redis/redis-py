@@ -143,3 +143,5 @@ assert str(aggResult) == (
     "[['city', 'London', 'count', '1'], ['city', 'Tel Aviv', 'count', '2']]"
 )
 # REMOVE_END
+
+r.close()
