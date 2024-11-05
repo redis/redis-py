@@ -24,6 +24,7 @@ try:
     r.ft("idx:users").dropindex(True)
 except redis.exceptions.ResponseError:
     pass
+
 r.delete("user:1", "user:2", "user:3")
 # REMOVE_END
 
@@ -34,12 +35,14 @@ user1 = {
     "age": 42,
     "city": "London"
 }
+
 user2 = {
     "name": "Eden Zamir",
     "email": "eden.zamir@example.com",
     "age": 29,
     "city": "Tel Aviv"
 }
+
 user3 = {
     "name": "Paul Zamir",
     "email": "paul.zamir@example.com",
@@ -113,6 +116,8 @@ print(citiesResult)
 
 # Tests for 'query2' step.
 # REMOVE_START
+citiesResult.sort(key=lambda doc: doc['id'])
+
 assert str(citiesResult) == (
     "[Document {'id': 'user:1', 'payload': None, 'city': 'London'}, "
     + "Document {'id': 'user:3', 'payload': None, 'city': 'Tel Aviv'}]"
@@ -132,6 +137,8 @@ print(aggResult)
 
 # Tests for 'query3' step.
 # REMOVE_START
+aggResult.sort(key=lambda row: row[1])
+
 assert str(aggResult) == (
     "[['city', 'London', 'count', '1'], ['city', 'Tel Aviv', 'count', '2']]"
 )
