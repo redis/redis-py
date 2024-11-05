@@ -1557,6 +1557,61 @@ async def test_aggregations_add_scores(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+async def test_aggregations_hybrid_scoring(decoded_r: redis.Redis):
+    assert await decoded_r.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            TextField("description", sortable=True, weight=5.0),
+            VectorField(
+                "vector",
+                "HNSW",
+                {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "COSINE"},
+            ),
+        )
+    )
+
+    assert await decoded_r.hset(
+        "doc1",
+        mapping={
+            "name": "cat book",
+            "description": "an animal book about cats",
+            "vector": np.array([0.1, 0.2]).astype(np.float32).tobytes(),
+        },
+    )
+    assert await decoded_r.hset(
+        "doc2",
+        mapping={
+            "name": "dog book",
+            "description": "an animal book about dogs",
+            "vector": np.array([0.2, 0.1]).astype(np.float32).tobytes(),
+        },
+    )
+
+    query_string = "(@description:animal)=>[KNN 3 @vector $vec_param AS dist]"
+    req = (
+        aggregations.AggregateRequest(query_string)
+        .scorer("BM25")
+        .add_scores()
+        .apply(hybrid_score="@__score + @dist")
+        .load("*")
+        .dialect(4)
+    )
+
+    res = await decoded_r.ft().aggregate(
+        req,
+        query_params={"vec_param": np.array([0.11, 0.22]).astype(np.float32).tobytes()},
+    )
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+    else:
+        assert len(res.rows) == 2
+        for row in res.rows:
+            len(row) == 6
+
+
+@pytest.mark.redismod
 @skip_if_redis_enterprise()
 async def test_search_commands_in_pipeline(decoded_r: redis.Redis):
     p = await decoded_r.ft().pipeline()
