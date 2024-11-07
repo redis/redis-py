@@ -27,7 +27,6 @@ except redis.exceptions.ResponseError:
 
 r.delete("user:1", "user:2", "user:3")
 # REMOVE_END
-
 # STEP_START create_data
 user1 = {
     "name": "Paul John",
@@ -65,26 +64,22 @@ indexCreated = r.ft("idx:users").create_index(
     )
 )
 # STEP_END
-
 # Tests for 'make_index' step.
 # REMOVE_START
 assert indexCreated
 # REMOVE_END
-
 
 # STEP_START add_data
 user1Set = r.json().set("user:1", Path.root_path(), user1)
 user2Set = r.json().set("user:2", Path.root_path(), user2)
 user3Set = r.json().set("user:3", Path.root_path(), user3)
 # STEP_END
-
 # Tests for 'add_data' step.
 # REMOVE_START
 assert user1Set
 assert user2Set
 assert user3Set
 # REMOVE_END
-
 
 # STEP_START query1
 findPaulResult = r.ft("idx:users").search(
@@ -94,7 +89,6 @@ findPaulResult = r.ft("idx:users").search(
 print(findPaulResult)
 # >>> Result{1 total, docs: [Document {'id': 'user:3', ...
 # STEP_END
-
 # Tests for 'query1' step.
 # REMOVE_START
 assert str(findPaulResult) == (
@@ -104,7 +98,6 @@ assert str(findPaulResult) == (
 )
 # REMOVE_END
 
-
 # STEP_START query2
 citiesResult = r.ft("idx:users").search(
     Query("Paul").return_field("$.city", as_field="city")
@@ -113,7 +106,6 @@ citiesResult = r.ft("idx:users").search(
 print(citiesResult)
 # >>> [Document {'id': 'user:1', 'payload': None, ...
 # STEP_END
-
 # Tests for 'query2' step.
 # REMOVE_START
 citiesResult.sort(key=lambda doc: doc['id'])
@@ -124,7 +116,6 @@ assert str(citiesResult) == (
 )
 # REMOVE_END
 
-
 # STEP_START query3
 req = aggregations.AggregateRequest("*").group_by(
     '@city', reducers.count().alias('count')
@@ -134,7 +125,6 @@ aggResult = r.ft("idx:users").aggregate(req).rows
 print(aggResult)
 # >>> [['city', 'London', 'count', '1'], ['city', 'Tel Aviv', 'count', '2']]
 # STEP_END
-
 # Tests for 'query3' step.
 # REMOVE_START
 aggResult.sort(key=lambda row: row[1])
