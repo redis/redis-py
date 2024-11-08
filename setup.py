@@ -8,7 +8,7 @@ setup(
     long_description_content_type="text/markdown",
     keywords=["Redis", "key-value store", "database"],
     license="MIT",
-    version="5.0.8",
+    version="5.0.9",
     packages=find_packages(
         include=[
             "redis",
