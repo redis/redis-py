@@ -7,7 +7,7 @@ invoke==1.7.3
 mock==4.0.3
 packaging>=20.4
 pytest
-pytest-asyncio
+pytest-asyncio>=0.23.0,<0.24.0
 pytest-cov
 pytest-timeout
 ujson>=4.2.0
