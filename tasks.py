@@ -13,7 +13,7 @@ if not hasattr(inspect, "getargspec"):
 def devenv(c):
     """Brings up the test environment, by wrapping docker compose."""
     clean(c)
-    cmd = "docker-compose --profile all up -d --build"
+    cmd = "docker compose --profile all up -d --build"
     run(cmd)
 
 
@@ -85,7 +85,7 @@ def clean(c):
         shutil.rmtree("build")
     if os.path.isdir("dist"):
         shutil.rmtree("dist")
-    run("docker-compose --profile all rm -s -f")
+    run("docker compose --profile all rm -s -f")
 
 
 @task
