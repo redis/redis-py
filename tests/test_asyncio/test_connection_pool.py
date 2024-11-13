@@ -1,5 +1,6 @@
 import asyncio
 import re
+from unittest import mock
 
 import pytest
 import pytest_asyncio
@@ -7,7 +8,7 @@ import redis.asyncio as redis
 from redis.asyncio.connection import Connection, to_bool
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
-from .compat import aclosing, mock
+from .compat import aclosing
 from .conftest import asynccontextmanager
 from .test_pubsub import wait_for_message
 
