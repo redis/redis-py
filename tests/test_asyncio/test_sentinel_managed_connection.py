@@ -1,11 +1,10 @@
 import socket
+from unittest import mock
 
 import pytest
 from redis.asyncio.retry import Retry
 from redis.asyncio.sentinel import SentinelManagedConnection
 from redis.backoff import NoBackoff
-
-from .compat import mock
 
 pytestmark = pytest.mark.asyncio
 
