@@ -4,6 +4,7 @@ import random
 import socket
 import ssl
 import warnings
+from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
@@ -1006,16 +1007,23 @@ class ClusterNode:
         if exc:
             raise exc
 
+    @contextmanager
     def acquire_connection(self) -> Connection:
+        """Context manager acquiring a connection on enter and automatically
+        freeing it on exit."""
         try:
-            return self._free.popleft()
+            connection = self._free.popleft()
         except IndexError:
             if len(self._connections) < self.max_connections:
                 connection = self.connection_class(**self.connection_kwargs)
                 self._connections.append(connection)
-                return connection
+            else:
+                raise MaxConnectionsError()
 
-            raise MaxConnectionsError()
+        try:
+            yield connection
+        finally:
+            self._free.append(connection)
 
     async def parse_response(
         self, connection: Connection, command: str, **kwargs: Any
@@ -1045,42 +1053,35 @@ class ClusterNode:
 
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
-        connection = self.acquire_connection()
+        with self.acquire_connection() as connection:
 
-        # Execute command
-        await connection.send_packed_command(connection.pack_command(*args), False)
+            # Execute command
+            await connection.send_packed_command(connection.pack_command(*args), False)
 
-        # Read response
-        try:
+            # Read response
             return await self.parse_response(connection, args[0], **kwargs)
-        finally:
-            # Release connection
-            self._free.append(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
-        connection = self.acquire_connection()
+        with self.acquire_connection() as connection:
 
-        # Execute command
-        await connection.send_packed_command(
-            connection.pack_commands(cmd.args for cmd in commands), False
-        )
+            # Execute command
+            await connection.send_packed_command(
+                connection.pack_commands(cmd.args for cmd in commands), False
+            )
 
-        # Read responses
-        ret = False
-        for cmd in commands:
-            try:
-                cmd.result = await self.parse_response(
-                    connection, cmd.args[0], **cmd.kwargs
-                )
-            except Exception as e:
-                cmd.result = e
-                ret = True
+            # Read responses
+            ret = False
+            for cmd in commands:
+                try:
+                    cmd.result = await self.parse_response(
+                        connection, cmd.args[0], **cmd.kwargs
+                    )
+                except Exception as e:
+                    cmd.result = e
+                    ret = True
 
-        # Release connection
-        self._free.append(connection)
-
-        return ret
+            return ret
 
 
 class NodesManager:

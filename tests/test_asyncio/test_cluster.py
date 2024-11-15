@@ -360,20 +360,20 @@ class TestRedisClusterObj:
                 assert n_retry._retries == retry._retries
                 assert isinstance(n_retry._backoff, NoBackoff)
             rand_cluster_node = r.get_random_node()
-            existing_conn = rand_cluster_node.acquire_connection()
-            # Change retry policy
-            new_retry = Retry(ExponentialBackoff(), 3)
-            r.set_retry(new_retry)
-            assert r.get_retry()._retries == new_retry._retries
-            assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
-            for node in r.get_nodes():
-                n_retry = node.connection_kwargs.get("retry")
-                assert n_retry is not None
-                assert n_retry._retries == new_retry._retries
-                assert isinstance(n_retry._backoff, ExponentialBackoff)
-            assert existing_conn.retry._retries == new_retry._retries
-            new_conn = rand_cluster_node.acquire_connection()
-            assert new_conn.retry._retries == new_retry._retries
+            with rand_cluster_node.acquire_connection() as existing_conn:
+                # Change retry policy
+                new_retry = Retry(ExponentialBackoff(), 3)
+                r.set_retry(new_retry)
+                assert r.get_retry()._retries == new_retry._retries
+                assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
+                for node in r.get_nodes():
+                    n_retry = node.connection_kwargs.get("retry")
+                    assert n_retry is not None
+                    assert n_retry._retries == new_retry._retries
+                    assert isinstance(n_retry._backoff, ExponentialBackoff)
+                assert existing_conn.retry._retries == new_retry._retries
+                with rand_cluster_node.acquire_connection() as new_conn:
+                    assert new_conn.retry._retries == new_retry._retries
 
     async def test_cluster_retry_object(self, request: FixtureRequest) -> None:
         url = request.config.getoption("--redis-url")
