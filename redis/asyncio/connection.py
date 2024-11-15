@@ -104,7 +104,7 @@ class AbstractConnection:
         "credential_provider",
         "password",
         "socket_timeout",
-        "default_command_timeout",
+        "command_timeout",
         "socket_connect_timeout",
         "redis_connect_func",
         "retry_on_timeout",
@@ -149,7 +149,7 @@ class AbstractConnection:
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        default_command_timeout: Optional[float] = None,
+        command_timeout: Optional[float] = None,
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -169,7 +169,7 @@ class AbstractConnection:
         if socket_connect_timeout is None:
             socket_connect_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout
-        self.default_command_timeout = default_command_timeout
+        self.command_timeout = command_timeout
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
             retry_on_error = []
@@ -212,8 +212,8 @@ class AbstractConnection:
     def _get_command_timeout(self, timeout: Optional[float] = None):
         if timeout is not None:
             return timeout
-        if self.default_command_timeout is not None:
-            return self.default_command_timeout
+        if self.command_timeout is not None:
+            return self.command_timeout
         return self.socket_timeout
 
     def __del__(self, _warnings: Any = warnings):

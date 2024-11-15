@@ -270,7 +270,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_ciphers: Optional[str] = None,
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
-        default_command_timeout: Optional[float] = None,
+        command_timeout: Optional[float] = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -312,7 +312,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_keepalive": socket_keepalive,
             "socket_keepalive_options": socket_keepalive_options,
             "socket_timeout": socket_timeout,
-            "default_command_timeout": default_command_timeout,
+            "command_timeout": command_timeout,
             "retry": retry,
             "protocol": protocol,
         }

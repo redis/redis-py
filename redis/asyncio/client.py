@@ -233,7 +233,7 @@ class Redis(
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        default_command_timeout: Optional[float] = None,
+        command_timeout: Optional[float] = None,
     ):
         """
         Initialize a new Redis client.
@@ -283,7 +283,7 @@ class Redis(
                 "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
-                "default_command_timeout": default_command_timeout,
+                "command_timeout": command_timeout,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
