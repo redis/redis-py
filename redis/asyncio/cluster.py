@@ -231,7 +231,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         port: Union[str, int] = 6379,
         # Cluster related kwargs
         startup_nodes: Optional[List["ClusterNode"]] = None,
-        require_full_coverage: bool = False,
+        require_full_coverage: bool = True,
         read_from_replicas: bool = False,
         reinitialize_steps: int = 5,
         cluster_error_retry_attempts: int = 3,
