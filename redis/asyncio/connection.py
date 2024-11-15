@@ -104,6 +104,7 @@ class AbstractConnection:
         "credential_provider",
         "password",
         "socket_timeout",
+        "default_command_timeout",
         "socket_connect_timeout",
         "redis_connect_func",
         "retry_on_timeout",
@@ -148,6 +149,7 @@ class AbstractConnection:
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        default_command_timeout: Optional[float] = None,
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -167,6 +169,7 @@ class AbstractConnection:
         if socket_connect_timeout is None:
             socket_connect_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout
+        self.default_command_timeout = default_command_timeout
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
             retry_on_error = []
@@ -205,6 +208,13 @@ class AbstractConnection:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
             self.protocol = protocol
+
+    def _get_command_timeout(self, timeout: Optional[float] = None):
+        if timeout is not None:
+            return timeout
+        if self.default_command_timeout is not None:
+            return self.default_command_timeout
+        return self.socket_timeout
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage
@@ -466,10 +476,9 @@ class AbstractConnection:
                 command = command.encode()
             if isinstance(command, bytes):
                 command = [command]
-            if self.socket_timeout:
-                await asyncio.wait_for(
-                    self._send_packed_command(command), self.socket_timeout
-                )
+            timeout = self._get_command_timeout()
+            if timeout:
+                await asyncio.wait_for(self._send_packed_command(command), timeout)
             else:
                 self._writer.writelines(command)
                 await self._writer.drain()
@@ -518,7 +527,7 @@ class AbstractConnection:
         push_request: Optional[bool] = False,
     ):
         """Read the response from a previously sent command"""
-        read_timeout = timeout if timeout is not None else self.socket_timeout
+        read_timeout = self._get_command_timeout(timeout)
         host_error = self._host_error()
         try:
             if (
