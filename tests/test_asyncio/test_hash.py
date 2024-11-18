@@ -1,4 +1,5 @@
 import asyncio
+import math
 from datetime import datetime, timedelta
 
 from tests.conftest import skip_if_server_version_lt
@@ -175,9 +176,9 @@ async def test_hexpireat_multiple_fields(r):
         "test:hash",
         mapping={"field1": "value1", "field2": "value2", "field3": "value3"},
     )
-    exp_time = int((datetime.now() + timedelta(seconds=1)).timestamp())
+    exp_time = math.ceil((datetime.now() + timedelta(seconds=1)).timestamp())
     assert await r.hexpireat("test:hash", exp_time, "field1", "field2") == [1, 1]
-    await asyncio.sleep(1.5)
+    await asyncio.sleep(2.1)
     assert await r.hexists("test:hash", "field1") is False
     assert await r.hexists("test:hash", "field2") is False
     assert await r.hexists("test:hash", "field3") is True
