@@ -1,6 +1,5 @@
 import asyncio
 import random
-import weakref
 from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type
 
 from redis.asyncio.client import Redis
