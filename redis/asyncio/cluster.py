@@ -1070,12 +1070,13 @@ class ClusterNode:
         ret = False
         for cmd in commands:
             try:
-                cmd.result = await self.parse_response(
+                result = await self.parse_response(
                     connection, cmd.args[0], **cmd.kwargs
                 )
             except Exception as e:
-                cmd.result = e
+                result = e
                 ret = True
+            cmd.set_node_result(self.name, result)
 
         # Release connection
         self._free.append(connection)
@@ -1530,12 +1531,11 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                     raise RedisClusterException(
                         f"No targets were found to execute {cmd.args} command on"
                     )
-            if len(target_nodes) > 1:
-                raise RedisClusterException(f"Too many targets for command {cmd.args}")
-            node = target_nodes[0]
-            if node.name not in nodes:
-                nodes[node.name] = (node, [])
-            nodes[node.name][1].append(cmd)
+            cmd.target_nodes = target_nodes
+            for node in target_nodes:
+                if node.name not in nodes:
+                    nodes[node.name] = (node, [])
+                nodes[node.name][1].append(cmd)
 
         errors = await asyncio.gather(
             *(
@@ -1550,20 +1550,27 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                 for cmd in todo:
                     if isinstance(cmd.result, (TryAgainError, MovedError, AskError)):
                         try:
-                            cmd.result = await client.execute_command(
+                            result = await client.execute_command(
                                 *cmd.args, **cmd.kwargs
                             )
                         except Exception as e:
-                            cmd.result = e
+                            result = e
+
+                        if isinstance(result, dict):
+                            cmd.result = result
+                        else:
+                            cmd.set_node_result(cmd.target_nodes[0].name, result)
 
             if raise_on_error:
                 for cmd in todo:
-                    result = cmd.result
-                    if isinstance(result, Exception):
+                    name_exc = cmd.get_first_exception()
+                    if name_exc:
+                        name, exc = name_exc
                         command = " ".join(map(safe_str, cmd.args))
                         msg = (
                             f"Command # {cmd.position + 1} ({command}) of pipeline "
-                            f"caused error: {result.args}"
+                            f"caused error on node {name}: "
+                            f"{result.args}"
                         )
                         result.args = (msg,) + result.args[1:]
                         raise result
@@ -1581,7 +1588,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         client.replace_default_node()
                         break
 
-        return [cmd.result for cmd in stack]
+        return [cmd.unwrap_result() for cmd in stack]
 
     def _split_command_across_slots(
         self, command: str, *keys: KeyT
@@ -1620,7 +1627,25 @@ class PipelineCommand:
         self.args = args
         self.kwargs = kwargs
         self.position = position
-        self.result: Union[Any, Exception] = None
+        self.result: Dict[str, Union[Any, Exception]] = {}
+        self.target_nodes = None
+
+    def set_node_result(self, node_name: str, result: Union[Any, Exception]):
+        self.result[node_name] = result
+
+    def unwrap_result(
+        self,
+    ) -> Optional[Union[Union[Any, Exception], Dict[str, Union[Any, Exception]]]]:
+        if len(self.result) == 0:
+            return None
+        if len(self.result) == 1:
+            return next(iter(self.result.values()))
+        return self.result
+
+    def get_first_exception(self) -> Optional[Tuple[str, Exception]]:
+        return next(
+            ((n, r) for n, r in self.result.items() if isinstance(r, Exception)), None
+        )
 
     def __repr__(self) -> str:
         return f"[{self.position}] {self.args} ({self.kwargs})"
