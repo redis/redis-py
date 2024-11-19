@@ -1,4 +1,5 @@
-from typing import Optional, Tuple, Union
+from abc import ABC, abstractmethod
+from typing import Optional, Tuple, Union, Callable, Any
 
 
 class CredentialProvider:
@@ -8,6 +9,17 @@ class CredentialProvider:
 
     def get_credentials(self) -> Union[Tuple[str], Tuple[str, str]]:
         raise NotImplementedError("get_credentials must be implemented")
+
+
+class StreamingCredentialProvider(CredentialProvider, ABC):
+    @abstractmethod
+    def on_next(self, callback: Callable[[Any], None]):
+        pass
+
+    @abstractmethod
+    def is_streaming(self) -> bool:
+        pass
+
 
 
 class UsernamePasswordCredentialProvider(CredentialProvider):
