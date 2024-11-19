@@ -1567,6 +1567,8 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                     if name_exc:
                         name, exc = name_exc
                         command = " ".join(map(safe_str, cmd.args))
+                        # Note: this will only raise the first exception, but that is
+                        # consistent with RedisCluster.execute_command.
                         msg = (
                             f"Command # {cmd.position + 1} ({command}) of pipeline "
                             f"caused error on node {name}: "
@@ -1635,7 +1637,7 @@ class PipelineCommand:
 
     def unwrap_result(
         self,
-    ) -> Optional[Union[Union[Any, Exception], Dict[str, Union[Any, Exception]]]]:
+    ) -> Optional[Union[Any, Exception, Dict[str, Union[Any, Exception]]]]:
         if len(self.result) == 0:
             return None
         if len(self.result) == 1:
