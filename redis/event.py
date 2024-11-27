@@ -80,8 +80,6 @@ class ReAuthBeforeCommandExecutionListener(EventListenerInterface):
 
         credentials = event.credential_provider.get_credentials()
 
-        print(hash(credentials) != self._current_cred)
-
         if hash(credentials) != self._current_cred:
             self._current_cred = hash(credentials)
             event.connection.send_command('AUTH', credentials[0], credentials[1])
