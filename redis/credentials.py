@@ -12,8 +12,21 @@ class CredentialProvider:
 
 
 class StreamingCredentialProvider(CredentialProvider, ABC):
+    """
+    Credential provider that streams credentials in the background.
+    """
     @abstractmethod
     def on_next(self, callback: Callable[[Any], None]):
+        """
+        Specifies the callback that should be invoked when the next credentials will be retrieved.
+
+        :param callback: Callback with
+        :return:
+        """
+        pass
+
+    @abstractmethod
+    def on_error(self, callback: Callable[[Exception], None]):
         pass
 
     @abstractmethod

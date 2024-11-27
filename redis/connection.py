@@ -23,7 +23,8 @@ from redis.cache import (
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .backoff import NoBackoff
-from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from .credentials import CredentialProvider, UsernamePasswordCredentialProvider, StreamingCredentialProvider
+from .event import EventDispatcherInterface, EventDispatcher, BeforeCommandExecutionEvent
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -229,6 +230,7 @@ class AbstractConnection(ConnectionInterface):
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         command_packer: Optional[Callable[[], None]] = None,
+        event_dispatcher: Optional[EventDispatcherInterface] = EventDispatcher()
     ):
         """
         Initialize a new Connection.
@@ -283,6 +285,8 @@ class AbstractConnection(ConnectionInterface):
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+        self._event_dispatcher = event_dispatcher
+        self._init_auth_args = None
         try:
             p = int(protocol)
         except TypeError:
@@ -408,6 +412,7 @@ class AbstractConnection(ConnectionInterface):
                 or UsernamePasswordCredentialProvider(self.username, self.password)
             )
             auth_args = cred_provider.get_credentials()
+            self._init_auth_args = hash(auth_args)
 
         # if resp version is specified and we have auth args,
         # we need to send them via HELLO
@@ -553,6 +558,10 @@ class AbstractConnection(ConnectionInterface):
 
     def send_command(self, *args, **kwargs):
         """Pack and send a command to the Redis server"""
+        if isinstance(self.credential_provider, StreamingCredentialProvider):
+            self._event_dispatcher.dispatch(
+                BeforeCommandExecutionEvent(args, self._init_auth_args, self, self.credential_provider)
+            )
         self.send_packed_command(
             self._command_packer.pack(*args),
             check_health=kwargs.get("check_health", True),
@@ -1318,6 +1327,12 @@ class ConnectionPool:
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
 
+        cred_provider = connection_kwargs.get("credential_provider")
+
+        if cred_provider is not None and isinstance(cred_provider, StreamingCredentialProvider):
+            cred_provider.on_next(self._re_auth)
+
+
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
         # after a fork. during this time, multiple threads in the child
@@ -1516,6 +1531,14 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
+
+    def _re_auth(self, token):
+        with self._lock:
+            for conn in self._available_connections:
+                conn.send_command(
+                    'AUTH', token.try_get('oid'), token.get_value()
+                )
+                conn.read_response()
 
 
 class BlockingConnectionPool(ConnectionPool):
