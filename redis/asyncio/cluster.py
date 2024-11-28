@@ -141,7 +141,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
           listed in the CLUSTER SLOTS output.
           If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
           specific IP addresses, it is best to set it to false.
-          The data read from replicas is eventually consistent with the data in primary nodes.
     :param reinitialize_steps:
         | Specifies the number of MOVED errors that need to occur before reinitializing
           the whole cluster topology. If a MOVED error occurs and the cluster does not
