@@ -862,21 +862,22 @@ class TestRedisClusterObj:
 
     def test_cluster_retry_object(self, r) -> None:
         # Test default retry
+        # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
+        host = r.get_default_node().host
+
         retry = r.get_connection_kwargs().get("retry")
         assert isinstance(retry, Retry)
         assert retry._retries == 0
         assert isinstance(retry._backoff, type(default_backoff()))
-        node1 = r.get_node("127.0.0.1", 16379).redis_connection
-        node2 = r.get_node("127.0.0.1", 16380).redis_connection
+        node1 = r.get_node(host, 16379).redis_connection
+        node2 = r.get_node(host, 16380).redis_connection
         assert node1.get_retry()._retries == node2.get_retry()._retries
 
         # Test custom retry
         retry = Retry(ExponentialBackoff(10, 5), 5)
-        rc_custom_retry = RedisCluster("127.0.0.1", 16379, retry=retry)
+        rc_custom_retry = RedisCluster(host, 16379, retry=retry)
         assert (
-            rc_custom_retry.get_node("127.0.0.1", 16379)
-            .redis_connection.get_retry()
-            ._retries
+            rc_custom_retry.get_node(host, 16379).redis_connection.get_retry()._retries
             == retry._retries
         )
 
