@@ -133,6 +133,14 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         | Enable read from replicas in READONLY mode. You can read possibly stale data.
           When set to true, read commands will be assigned between the primary and
           its replications in a Round-Robin manner.
+    :param dynamic_startup_nodes:
+        | Set the RedisCluster's startup nodes to all the discovered nodes.
+          If true (default value), the cluster's discovered nodes will be used to
+          determine the cluster nodes-slots mapping in the next topology refresh.
+          It will remove the initial passed startup nodes if their endpoints aren't
+          listed in the CLUSTER SLOTS output.
+          If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
+          specific IP addresses, it is best to set it to false.
     :param reinitialize_steps:
         | Specifies the number of MOVED errors that need to occur before reinitializing
           the whole cluster topology. If a MOVED error occurs and the cluster does not
@@ -233,6 +241,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         startup_nodes: Optional[List["ClusterNode"]] = None,
         require_full_coverage: bool = True,
         read_from_replicas: bool = False,
+        dynamic_startup_nodes: bool = True,
         reinitialize_steps: int = 5,
         cluster_error_retry_attempts: int = 3,
         connection_error_retry_attempts: int = 3,
@@ -370,6 +379,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             startup_nodes,
             require_full_coverage,
             kwargs,
+            dynamic_startup_nodes=dynamic_startup_nodes,
             address_remap=address_remap,
         )
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
@@ -1093,6 +1103,7 @@ class NodesManager:
         "require_full_coverage",
         "slots_cache",
         "startup_nodes",
+        "_dynamic_startup_nodes",
         "address_remap",
     )
 
@@ -1101,11 +1112,13 @@ class NodesManager:
         startup_nodes: List["ClusterNode"],
         require_full_coverage: bool,
         connection_kwargs: Dict[str, Any],
+        dynamic_startup_nodes: bool = True,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
     ) -> None:
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.require_full_coverage = require_full_coverage
         self.connection_kwargs = connection_kwargs
+        self._dynamic_startup_nodes = dynamic_startup_nodes
         self.address_remap = address_remap
 
         self.default_node: "ClusterNode" = None
@@ -1338,8 +1351,10 @@ class NodesManager:
         # Set the tmp variables to the real variables
         self.slots_cache = tmp_slots
         self.set_nodes(self.nodes_cache, tmp_nodes_cache, remove_old=True)
-        # Populate the startup nodes with all discovered nodes
-        self.set_nodes(self.startup_nodes, self.nodes_cache, remove_old=True)
+
+        if self._dynamic_startup_nodes:
+            # Populate the startup nodes with all discovered nodes
+            self.set_nodes(self.startup_nodes, self.nodes_cache, remove_old=True)
 
         # Set the default node
         self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
