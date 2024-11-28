@@ -1521,8 +1521,8 @@ def test_set_path(client):
 
     root = tempfile.mkdtemp()
     sub = tempfile.mkdtemp(dir=root)
-    jsonfile = tempfile.mktemp(suffix=".json", dir=sub)
-    nojsonfile = tempfile.mktemp(dir=root)
+    jsonfile = tempfile.mkstemp(suffix=".json", dir=sub)[1]
+    nojsonfile = tempfile.mkstemp(dir=root)[1]
 
     with open(jsonfile, "w+") as fp:
         fp.write(json.dumps({"hello": "world"}))
