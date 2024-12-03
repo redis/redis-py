@@ -23,7 +23,7 @@ class EventDispatcherInterface(ABC):
 
 
 class EventDispatcher(EventDispatcherInterface):
-
+    # TODO: Make dispatcher to accept external mappings.
     def __init__(self):
         """
         Mapping should be extended for any new events or listeners to be added.
@@ -77,7 +77,7 @@ class AfterPooledConnectionsInstantiationEvent:
     """
     def __init__(
             self,
-            connection_pools,
+            connection_pools: List,
             credential_provider: Optional[CredentialProvider] = None,
     ):
         self._connection_pools = connection_pools
