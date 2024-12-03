@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
+from typing import List, Union, Optional
 
-from redis.credentials import StreamingCredentialProvider
+from redis.credentials import StreamingCredentialProvider, CredentialProvider
 
 
 class EventListenerInterface(ABC):
@@ -30,6 +31,9 @@ class EventDispatcher(EventDispatcherInterface):
         self._event_listeners_mapping = {
             BeforeCommandExecutionEvent: [
                 ReAuthBeforeCommandExecutionListener(),
+            ],
+            AfterPooledConnectionsInstantiationEvent: [
+                RegisterReAuthForPooledConnections()
             ]
         }
 
@@ -67,6 +71,27 @@ class BeforeCommandExecutionEvent:
         return self._credential_provider
 
 
+class AfterPooledConnectionsInstantiationEvent:
+    """
+    Event that will be fired after pooled connection instances was created.
+    """
+    def __init__(
+            self,
+            connection_pools,
+            credential_provider: Optional[CredentialProvider] = None,
+    ):
+        self._connection_pools = connection_pools
+        self._credential_provider = credential_provider
+
+    @property
+    def connection_pools(self):
+        return self._connection_pools
+
+    @property
+    def credential_provider(self) -> Union[CredentialProvider, None]:
+        return self._credential_provider
+
+
 class ReAuthBeforeCommandExecutionListener(EventListenerInterface):
     """
     Listener that performs re-authentication (if needed) for StreamingCredentialProviders before command execution.
@@ -84,3 +109,21 @@ class ReAuthBeforeCommandExecutionListener(EventListenerInterface):
             self._current_cred = hash(credentials)
             event.connection.send_command('AUTH', credentials[0], credentials[1])
             event.connection.read_response()
+
+
+class RegisterReAuthForPooledConnections(EventListenerInterface):
+    def __init__(self):
+        self._event = None
+
+    """
+    Listener that registers a re-authentication callback for pooled connections.
+    Required by :class:`StreamingCredentialProvider`.
+    """
+    def listen(self, event: AfterPooledConnectionsInstantiationEvent):
+        if isinstance(event.credential_provider, StreamingCredentialProvider):
+            self._event = event
+            event.credential_provider.on_next(self._re_auth)
+
+    def _re_auth(self, token):
+        for pool in self._event.connection_pools:
+            pool.re_auth_callback(token)

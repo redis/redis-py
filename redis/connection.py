@@ -1327,11 +1327,6 @@ class ConnectionPool:
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
 
-        cred_provider = connection_kwargs.get("credential_provider")
-
-        if cred_provider is not None and isinstance(cred_provider, StreamingCredentialProvider):
-            cred_provider.on_next(self._re_auth)
-
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
@@ -1532,7 +1527,7 @@ class ConnectionPool:
         for conn in self._in_use_connections:
             conn.retry = retry
 
-    def _re_auth(self, token):
+    def re_auth_callback(self, token):
         with self._lock:
             for conn in self._available_connections:
                 conn.send_command(

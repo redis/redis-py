@@ -27,6 +27,7 @@ from redis.connection import (
     UnixDomainSocketConnection,
 )
 from redis.credentials import CredentialProvider
+from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -213,6 +214,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         protocol: Optional[int] = 2,
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
+        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
     ) -> None:
         """
         Initialize a new Redis client.
@@ -312,7 +314,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "cache_config": cache_config,
                         }
                     )
-            connection_pool = ConnectionPool(**kwargs)
+            connection_pool = ConnectionPool(**kwargs, event_dispatcher=event_dispatcher)
+            event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
+                [connection_pool],
+                credential_provider
+            ))
             self.auto_close_connection_pool = True
         else:
             self.auto_close_connection_pool = False
