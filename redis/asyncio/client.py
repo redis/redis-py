@@ -1362,8 +1362,10 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         pre: CommandT = (("MULTI",), {})
         post: CommandT = (("EXEC",), {})
         cmds = (pre, *commands, post)
-        all_cmds = connection.pack_commands(
-            args for args, options in cmds if EMPTY_RESPONSE not in options
+        # Run pack_commands in a thread to prevent blocking
+        all_cmds = await asyncio.to_thread(
+            connection.pack_commands,
+            (args for args, options in cmds if EMPTY_RESPONSE not in options)
         )
         await connection.send_packed_command(all_cmds)
         errors = []
@@ -1387,6 +1389,9 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 except ResponseError as err:
                     self.annotate_exception(err, i + 1, command[0])
                     errors.append((i, err))
+            # Release back to event loop to prevent blocking
+            if i % 100 == 0:
+                await asyncio.sleep(0)
 
         # parse the EXEC.
         try:
@@ -1419,7 +1424,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
 
         # We have to run response callbacks manually
         data = []
-        for r, cmd in zip(response, commands):
+        # Enumerate and then release back to event loop to prevent blocking
+        for i, (r, cmd) in enumerate(zip(response, commands)):
             if not isinstance(r, Exception):
                 args, options = cmd
                 command_name = args[0]
@@ -1432,6 +1438,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                     if inspect.isawaitable(r):
                         r = await r
             data.append(r)
+            if i % 100 == 0:
+                await asyncio.sleep(0)
         return data
 
     async def _execute_pipeline(
