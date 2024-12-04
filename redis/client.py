@@ -324,6 +324,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.auto_close_connection_pool = False
 
         self.connection_pool = connection_pool
+        event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
+            [connection_pool],
+            credential_provider
+        ))
 
         if (cache_config or cache) and self.connection_pool.get_protocol() not in [
             3,
