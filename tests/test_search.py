@@ -30,6 +30,7 @@ from .conftest import (
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,
+    skip_if_server_version_lt,
     skip_ifmodversion_lt,
 )
 
@@ -932,6 +933,8 @@ def test_phonetic_matcher(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+# NOTE(imalinovskyi): This test contains hardcoded scores valid only for RediSearch 2.8+
+@skip_ifmodversion_lt("2.8.0", "search")
 def test_scorer(client):
     client.ft().create_index((TextField("description"),))
 
@@ -2239,6 +2242,8 @@ def test_geo_params(client):
 
 
 @pytest.mark.redismod
+@skip_if_server_version_lt("7.4.0")
+@skip_ifmodversion_lt("2.10.0", "search")
 def test_geoshapes_query_intersects_and_disjoint(client):
     client.ft().create_index((GeoShapeField("g", coord_system=GeoShapeField.FLAT)))
     client.hset("doc_point1", mapping={"g": "POINT (10 10)"})
@@ -2442,6 +2447,8 @@ def test_query_timeout(r: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_if_server_version_lt("7.2.0")
+@skip_ifmodversion_lt("2.8.4", "search")
 def test_geoshape(client: redis.Redis):
     client.ft().create_index(GeoShapeField("geom", GeoShapeField.FLAT))
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
@@ -2458,6 +2465,8 @@ def test_geoshape(client: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_if_server_version_lt("7.4.0")
+@skip_ifmodversion_lt("2.10.0", "search")
 def test_search_missing_fields(client):
     definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
 
@@ -2525,6 +2534,8 @@ def test_search_missing_fields(client):
 
 
 @pytest.mark.redismod
+@skip_if_server_version_lt("7.4.0")
+@skip_ifmodversion_lt("2.10.0", "search")
 def test_search_empty_fields(client):
     definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
 
@@ -2596,6 +2607,8 @@ def test_search_empty_fields(client):
 
 
 @pytest.mark.redismod
+@skip_if_server_version_lt("7.4.0")
+@skip_ifmodversion_lt("2.10.0", "search")
 def test_special_characters_in_fields(client):
     definition = IndexDefinition(prefix=["resource:"], index_type=IndexType.HASH)
 

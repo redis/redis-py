@@ -19,3 +19,7 @@ coverage.xml
 prof
 profile_output*
 docker/stunnel/keys
+/dockers/*/node-*/*
+/dockers/*/tls/*
+/dockers/standalone/
+/dockers/cluster/
