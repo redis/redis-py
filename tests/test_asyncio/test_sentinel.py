@@ -264,3 +264,27 @@ async def test_auto_close_pool(cluster, sentinel, method_name):
 
     assert calls == 1
     await pool.disconnect()
+
+
+@pytest.mark.onlynoncluster
+async def test_repr_correctly_represents_connection_object(sentinel):
+    pool = SentinelConnectionPool("mymaster", sentinel)
+    connection = await pool.get_connection("PING")
+
+    assert (
+        str(connection)
+        == "<redis.asyncio.sentinel.SentinelManagedConnection,host=127.0.0.1,port=6379)>"
+    )
+    assert connection.connection_pool == pool
+    await pool.release(connection)
+
+    del pool
+
+    assert (
+        str(connection)
+        == "<redis.asyncio.sentinel.SentinelManagedConnection,host=127.0.0.1,port=6379)>"
+    )
+    with pytest.raises(
+        ReferenceError, match="weakly-referenced object no longer exists"
+    ):
+        assert connection.connection_pool
