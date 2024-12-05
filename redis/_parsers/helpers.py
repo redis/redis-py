@@ -396,13 +396,20 @@ def parse_slowlog_get(response, **options):
         # an O(N) complexity) instead of the command.
         if isinstance(item[3], list):
             result["command"] = space.join(item[3])
-            result["client_address"] = item[4]
-            result["client_name"] = item[5]
+
+            # These fields are optional, depends on environment.
+            if len(item) >= 6:
+                result["client_address"] = item[4]
+                result["client_name"] = item[5]
         else:
             result["complexity"] = item[3]
             result["command"] = space.join(item[4])
-            result["client_address"] = item[5]
-            result["client_name"] = item[6]
+
+            # These fields are optional, depends on environment.
+            if len(item) >= 7:
+                result["client_address"] = item[5]
+                result["client_name"] = item[6]
+
         return result
 
     return [parse_item(item) for item in response]
