@@ -53,6 +53,4 @@ class UsernamePasswordCredentialProvider(CredentialProvider):
         return (self.password,)
 
     async def get_credentials_async(self) -> Union[Tuple[str], Tuple[str, str]]:
-        if self.username:
-            return self.username, self.password
-        return (self.password,)
+        return self.get_credentials()
