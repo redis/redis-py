@@ -29,11 +29,7 @@ class SentinelManagedConnection(Connection):
         super().__init__(**kwargs)
 
     def __repr__(self):
-        pool = self.connection_pool
-        s = (
-            f"<{self.__class__.__module__}.{self.__class__.__name__}"
-            f"(service={pool.service_name}"
-        )
+        s = f"<{self.__class__.__module__}.{self.__class__.__name__}"
         if self.host:
             host_info = f",host={self.host},port={self.port}"
             s += host_info
