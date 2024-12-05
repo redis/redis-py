@@ -1,5 +1,6 @@
 import asyncio
 import random
+import weakref
 from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type
 
 from redis.asyncio.client import Redis
@@ -28,10 +29,8 @@ class SentinelManagedConnection(Connection):
         super().__init__(**kwargs)
 
     def __repr__(self):
-        pool = self.connection_pool
         s = (
             f"<{self.__class__.__module__}.{self.__class__.__name__}"
-            f"(service={pool.service_name}"
         )
         if self.host:
             host_info = f",host={self.host},port={self.port}"
@@ -116,7 +115,7 @@ class SentinelConnectionPool(ConnectionPool):
         self.is_master = kwargs.pop("is_master", True)
         self.check_connection = kwargs.pop("check_connection", False)
         super().__init__(**kwargs)
-        self.connection_kwargs["connection_pool"] = self
+        self.connection_kwargs["connection_pool"] = weakref.proxy(self)
         self.service_name = service_name
         self.sentinel_manager = sentinel_manager
         self.master_address = None
