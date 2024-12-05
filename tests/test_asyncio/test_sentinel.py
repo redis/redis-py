@@ -1,5 +1,4 @@
 import socket
-import weakref
 from unittest import mock
 
 import pytest
