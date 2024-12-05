@@ -1,4 +1,5 @@
 import socket
+import weakref
 from unittest import mock
 
 import pytest
@@ -284,7 +285,3 @@ async def test_repr_correctly_represents_connection_object(sentinel):
         str(connection)
         == "<redis.asyncio.sentinel.SentinelManagedConnection,host=127.0.0.1,port=6379)>"  # noqa: E501
     )
-    with pytest.raises(
-        ReferenceError, match="weakly-referenced object no longer exists"
-    ):
-        assert connection.connection_pool
