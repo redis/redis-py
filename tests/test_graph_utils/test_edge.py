@@ -2,7 +2,7 @@ import pytest
 from redis.commands.graph import edge, node
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 def test_init():
     with pytest.raises(AssertionError):
         edge.Edge(None, None, None)
@@ -14,7 +14,7 @@ def test_init():
     )
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 def test_to_string():
     props_result = edge.Edge(
         node.Node(), None, node.Node(), properties={"a": "a", "b": 10}
@@ -27,7 +27,7 @@ def test_to_string():
     assert no_props_result == ""
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 def test_stringify():
     john = node.Node(
         alias="a",
@@ -60,7 +60,7 @@ def test_stringify():
     )
 
 
-@pytest.mark.redismod
+@pytest.mark.graph
 def test_comparison():
     node1 = node.Node(node_id=1)
     node2 = node.Node(node_id=2)
