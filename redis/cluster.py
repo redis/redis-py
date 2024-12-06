@@ -140,6 +140,7 @@ REDIS_ALLOWED_KEYS = (
     "credential_provider",
     "db",
     "decode_responses",
+    "command_timeout",
     "encoding",
     "encoding_errors",
     "errors",
