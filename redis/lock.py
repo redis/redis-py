@@ -264,7 +264,7 @@ class Lock:
                 lock_name=self.name,
             )
 
-    def extend(self, additional_time: int, replace_ttl: bool = False) -> bool:
+    def extend(self, additional_time: Number, replace_ttl: bool = False) -> bool:
         """
         Adds more time to an already acquired lock.
 
