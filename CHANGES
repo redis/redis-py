@@ -1,3 +1,4 @@
+    * Fix #3416, prevent blocking in async Pipeline with many commands
     * Move doctests (doc code examples) to main branch
     * Update `ResponseT` type hint
     * Allow to control the minimum SSL version
