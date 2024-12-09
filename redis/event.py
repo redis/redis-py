@@ -149,7 +149,7 @@ class AsyncReAuthBeforeCommandExecutionListener(AsyncEventListenerInterface):
         if self._current_cred is None:
             self._current_cred = event.initial_cred
 
-        credentials = await event.credential_provider.get_credentials_async()
+        credentials = event.credential_provider.get_credentials()
 
         if hash(credentials) != self._current_cred:
             self._current_cred = hash(credentials)
