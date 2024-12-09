@@ -1045,7 +1045,6 @@ class ConnectionPool:
         self._available_connections: List[AbstractConnection] = []
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
-        self._lock = threading.Lock()
 
     def __repr__(self):
         return (
