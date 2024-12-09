@@ -230,7 +230,7 @@ class AbstractConnection(ConnectionInterface):
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         command_packer: Optional[Callable[[], None]] = None,
-        event_dispatcher: Optional[EventDispatcherInterface] = EventDispatcher()
+        event_dispatcher: Optional[EventDispatcher] = EventDispatcher()
     ):
         """
         Initialize a new Connection.

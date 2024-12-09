@@ -314,20 +314,22 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "cache_config": cache_config,
                         }
                     )
-            connection_pool = ConnectionPool(**kwargs, event_dispatcher=event_dispatcher)
+            connection_pool = ConnectionPool(**kwargs)
             event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
                 [connection_pool],
+                ClientType.SYNC,
                 credential_provider
             ))
             self.auto_close_connection_pool = True
         else:
             self.auto_close_connection_pool = False
+            event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
+                [connection_pool],
+                ClientType.SYNC,
+                credential_provider
+            ))
 
         self.connection_pool = connection_pool
-        event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
-            [connection_pool],
-            credential_provider
-        ))
 
         if (cache_config or cache) and self.connection_pool.get_protocol() not in [
             3,

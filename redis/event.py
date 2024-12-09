@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import List, Union, Optional
 
 from redis.credentials import StreamingCredentialProvider, CredentialProvider
@@ -13,12 +14,25 @@ class EventListenerInterface(ABC):
         pass
 
 
+class AsyncEventListenerInterface(ABC):
+    """
+    Represents an async listener for given event object.
+    """
+    @abstractmethod
+    async def listen(self, event: object):
+        pass
+
+
 class EventDispatcherInterface(ABC):
     """
     Represents a dispatcher that dispatches events to listeners associated with given event.
     """
     @abstractmethod
     def dispatch(self, event: object):
+        pass
+
+    @abstractmethod
+    async def dispatch_async(self, event: object):
         pass
 
 
@@ -34,7 +48,10 @@ class EventDispatcher(EventDispatcherInterface):
             ],
             AfterPooledConnectionsInstantiationEvent: [
                 RegisterReAuthForPooledConnections()
-            ]
+            ],
+            AsyncBeforeCommandExecutionEvent: [
+                AsyncReAuthBeforeCommandExecutionListener(),
+            ],
         }
 
     def dispatch(self, event: object):
@@ -42,6 +59,12 @@ class EventDispatcher(EventDispatcherInterface):
 
         for listener in listeners:
             listener.listen(event)
+
+    async def dispatch_async(self, event: object):
+        listeners = self._event_listeners_mapping.get(type(event))
+
+        for listener in listeners:
+            await listener.listen(event)
 
 
 class BeforeCommandExecutionEvent:
@@ -69,6 +92,10 @@ class BeforeCommandExecutionEvent:
     @property
     def credential_provider(self) -> StreamingCredentialProvider:
         return self._credential_provider
+
+
+class AsyncBeforeCommandExecutionEvent(BeforeCommandExecutionEvent):
+    pass
 
 
 class AfterPooledConnectionsInstantiationEvent:
@@ -111,14 +138,33 @@ class ReAuthBeforeCommandExecutionListener(EventListenerInterface):
             event.connection.read_response()
 
 
-class RegisterReAuthForPooledConnections(EventListenerInterface):
+class AsyncReAuthBeforeCommandExecutionListener(AsyncEventListenerInterface):
+    """
+    Async listener that performs re-authentication (if needed) for StreamingCredentialProviders before command execution
+    """
     def __init__(self):
-        self._event = None
+        self._current_cred = None
 
+    async def listen(self, event: AsyncBeforeCommandExecutionEvent):
+        if self._current_cred is None:
+            self._current_cred = event.initial_cred
+
+        credentials = await event.credential_provider.get_credentials_async()
+
+        if hash(credentials) != self._current_cred:
+            self._current_cred = hash(credentials)
+            await event.connection.send_command('AUTH', credentials[0], credentials[1])
+            await event.connection.read_response()
+
+
+class RegisterReAuthForPooledConnections(EventListenerInterface):
     """
     Listener that registers a re-authentication callback for pooled connections.
     Required by :class:`StreamingCredentialProvider`.
     """
+    def __init__(self):
+        self._event = None
+
     def listen(self, event: AfterPooledConnectionsInstantiationEvent):
         if isinstance(event.credential_provider, StreamingCredentialProvider):
             self._event = event
