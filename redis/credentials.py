@@ -10,9 +10,6 @@ class CredentialProvider:
     def get_credentials(self) -> Union[Tuple[str], Tuple[str, str]]:
         raise NotImplementedError("get_credentials must be implemented")
 
-    async def get_credentials_async(self) -> Union[Tuple[str], Tuple[str, str]]:
-        raise NotImplementedError("get_credentials_async must be implemented")
-
 
 class StreamingCredentialProvider(CredentialProvider, ABC):
     """
@@ -51,6 +48,3 @@ class UsernamePasswordCredentialProvider(CredentialProvider):
         if self.username:
             return self.username, self.password
         return (self.password,)
-
-    async def get_credentials_async(self) -> Union[Tuple[str], Tuple[str, str]]:
-        return self.get_credentials()

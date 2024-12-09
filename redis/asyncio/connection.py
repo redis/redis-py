@@ -339,7 +339,7 @@ class AbstractConnection:
                 self.credential_provider
                 or UsernamePasswordCredentialProvider(self.username, self.password)
             )
-            auth_args = await cred_provider.get_credentials_async()
+            auth_args = cred_provider.get_credentials()
             self._init_auth_args = hash(auth_args)
 
             # if resp version is specified and we have auth args,
