@@ -317,7 +317,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             connection_pool = ConnectionPool(**kwargs)
             event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
                 [connection_pool],
-                ClientType.SYNC,
                 credential_provider
             ))
             self.auto_close_connection_pool = True
@@ -325,7 +324,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.auto_close_connection_pool = False
             event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
                 [connection_pool],
-                ClientType.SYNC,
                 credential_provider
             ))
 
