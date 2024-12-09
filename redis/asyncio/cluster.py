@@ -27,6 +27,7 @@ from redis._parsers.helpers import (
 )
 from redis.asyncio.client import ResponseCallbackT
 from redis.asyncio.connection import Connection, DefaultParser, SSLConnection, parse_url
+from redis.asyncio.credentials import CredentialProvider
 from redis.asyncio.lock import Lock
 from redis.asyncio.retry import Retry
 from redis.backoff import default_backoff
@@ -44,7 +45,6 @@ from redis.cluster import (
 )
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
-from redis.credentials import CredentialProvider
 from redis.exceptions import (
     AskError,
     BusyLoadingError,
