@@ -5,6 +5,7 @@ import inspect
 import socket
 import ssl
 import sys
+import threading
 import warnings
 import weakref
 from abc import abstractmethod
@@ -27,6 +28,7 @@ from typing import (
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
+from ..event import EventDispatcher, AsyncBeforeCommandExecutionEvent
 from ..utils import format_error_message
 
 # the functionality is available in 3.11.x but has a major issue before
@@ -39,7 +41,7 @@ else:
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.connection import DEFAULT_RESP_VERSION
-from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider, StreamingCredentialProvider
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -148,6 +150,7 @@ class AbstractConnection:
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        event_dispatcher: Optional[EventDispatcher] = EventDispatcher()
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -195,6 +198,9 @@ class AbstractConnection:
         self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
+        self._event_dispatcher = event_dispatcher
+        self._init_auth_args = None
+
         try:
             p = int(protocol)
         except TypeError:
@@ -340,6 +346,8 @@ class AbstractConnection:
                 or UsernamePasswordCredentialProvider(self.username, self.password)
             )
             auth_args = cred_provider.get_credentials()
+            self._init_auth_args = hash(auth_args)
+
             # if resp version is specified and we have auth args,
             # we need to send them via HELLO
         if auth_args and self.protocol not in [2, "2"]:
@@ -502,6 +510,10 @@ class AbstractConnection:
 
     async def send_command(self, *args: Any, **kwargs: Any) -> None:
         """Pack and send a command to the Redis server"""
+        if isinstance(self.credential_provider, StreamingCredentialProvider):
+            await self._event_dispatcher.dispatch_async(
+                AsyncBeforeCommandExecutionEvent(args, self._init_auth_args, self, self.credential_provider)
+            )
         await self.send_packed_command(
             self.pack_command(*args), check_health=kwargs.get("check_health", True)
         )

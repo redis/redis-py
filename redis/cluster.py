@@ -15,6 +15,7 @@ from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
 from redis.connection import ConnectionPool, DefaultParser, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
+from redis.event import EventDispatcher, EventDispatcherInterface, AfterPooledConnectionsInstantiationEvent
 from redis.exceptions import (
     AskError,
     AuthenticationError,
@@ -505,6 +506,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
+        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
         **kwargs,
     ):
         """
@@ -646,6 +648,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             address_remap=address_remap,
             cache=cache,
             cache_config=cache_config,
+            event_dispatcher=event_dispatcher,
             **kwargs,
         )
 
@@ -1332,6 +1335,7 @@ class NodesManager:
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         cache_factory: Optional[CacheFactoryInterface] = None,
+        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1353,6 +1357,8 @@ class NodesManager:
         if lock is None:
             lock = threading.Lock()
         self._lock = lock
+        self._event_dispatcher = event_dispatcher
+        self._credential_provider = self.connection_kwargs.get("credential_provider", None)
         self.initialize()
 
     def get_node(self, host=None, port=None, node_name=None):
@@ -1479,11 +1485,17 @@ class NodesManager:
         """
         This function will create a redis connection to all nodes in :nodes:
         """
+        connection_pools = []
         for node in nodes:
             if node.redis_connection is None:
                 node.redis_connection = self.create_redis_node(
                     host=node.host, port=node.port, **self.connection_kwargs
                 )
+                connection_pools.append(node.redis_connection.connection_pool)
+
+        self._event_dispatcher.dispatch(
+            AfterPooledConnectionsInstantiationEvent(connection_pools, self._credential_provider)
+        )
 
     def create_redis_node(self, host, port, **kwargs):
         if self.from_url:
