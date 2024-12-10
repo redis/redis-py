@@ -558,10 +558,6 @@ class AbstractConnection(ConnectionInterface):
 
     def send_command(self, *args, **kwargs):
         """Pack and send a command to the Redis server"""
-        if isinstance(self.credential_provider, StreamingCredentialProvider):
-            self._event_dispatcher.dispatch(
-                BeforeCommandExecutionEvent(args, self._init_auth_args, self, self.credential_provider)
-            )
         self.send_packed_command(
             self._command_packer.pack(*args),
             check_health=kwargs.get("check_health", True),

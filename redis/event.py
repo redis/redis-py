@@ -98,6 +98,11 @@ class AsyncBeforeCommandExecutionEvent(BeforeCommandExecutionEvent):
     pass
 
 
+class ClientType(Enum):
+    SYNC = "sync",
+    ASYNC = "async",
+
+
 class AfterPooledConnectionsInstantiationEvent:
     """
     Event that will be fired after pooled connection instances was created.
@@ -105,14 +110,20 @@ class AfterPooledConnectionsInstantiationEvent:
     def __init__(
             self,
             connection_pools: List,
+            client_type: ClientType,
             credential_provider: Optional[CredentialProvider] = None,
     ):
         self._connection_pools = connection_pools
+        self._client_type = client_type
         self._credential_provider = credential_provider
 
     @property
     def connection_pools(self):
         return self._connection_pools
+
+    @property
+    def client_type(self) -> ClientType:
+        return self._client_type
 
     @property
     def credential_provider(self) -> Union[CredentialProvider, None]:
@@ -127,6 +138,9 @@ class ReAuthBeforeCommandExecutionListener(EventListenerInterface):
         self._current_cred = None
 
     def listen(self, event: BeforeCommandExecutionEvent):
+        if event.command[0] == 'AUTH':
+            return
+
         if self._current_cred is None:
             self._current_cred = event.initial_cred
 
@@ -168,8 +182,16 @@ class RegisterReAuthForPooledConnections(EventListenerInterface):
     def listen(self, event: AfterPooledConnectionsInstantiationEvent):
         if isinstance(event.credential_provider, StreamingCredentialProvider):
             self._event = event
-            event.credential_provider.on_next(self._re_auth)
+
+            if event.client_type == ClientType.SYNC:
+                event.credential_provider.on_next(self._re_auth)
+            else:
+                event.credential_provider.on_next(self._re_auth_async)
 
     def _re_auth(self, token):
         for pool in self._event.connection_pools:
             pool.re_auth_callback(token)
+
+    async def _re_auth_async(self, token):
+        for pool in self._event.connection_pools:
+            await pool.re_auth_callback(token)

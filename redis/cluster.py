@@ -15,7 +15,7 @@ from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
 from redis.connection import ConnectionPool, DefaultParser, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
-from redis.event import EventDispatcher, EventDispatcherInterface, AfterPooledConnectionsInstantiationEvent
+from redis.event import EventDispatcher, EventDispatcherInterface, AfterPooledConnectionsInstantiationEvent, ClientType
 from redis.exceptions import (
     AskError,
     AuthenticationError,
@@ -1494,7 +1494,11 @@ class NodesManager:
                 connection_pools.append(node.redis_connection.connection_pool)
 
         self._event_dispatcher.dispatch(
-            AfterPooledConnectionsInstantiationEvent(connection_pools, self._credential_provider)
+            AfterPooledConnectionsInstantiationEvent(
+                connection_pools,
+                ClientType.SYNC,
+                self._credential_provider
+            )
         )
 
     def create_redis_node(self, host, port, **kwargs):

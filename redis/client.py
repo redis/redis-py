@@ -27,7 +27,7 @@ from redis.connection import (
     UnixDomainSocketConnection,
 )
 from redis.credentials import CredentialProvider
-from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent
+from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent, ClientType
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,

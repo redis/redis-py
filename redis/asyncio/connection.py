@@ -504,10 +504,6 @@ class AbstractConnection:
 
     async def send_command(self, *args: Any, **kwargs: Any) -> None:
         """Pack and send a command to the Redis server"""
-        if isinstance(self.credential_provider, StreamingCredentialProvider):
-            await self._event_dispatcher.dispatch_async(
-                AsyncBeforeCommandExecutionEvent(args, self._init_auth_args, self, self.credential_provider)
-            )
         await self.send_packed_command(
             self.pack_command(*args), check_health=kwargs.get("check_health", True)
         )
@@ -1045,6 +1041,7 @@ class ConnectionPool:
         self._available_connections: List[AbstractConnection] = []
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
+        self._lock = asyncio.Lock()
 
     def __repr__(self):
         return (
@@ -1064,13 +1061,14 @@ class ConnectionPool:
         )
 
     async def get_connection(self, command_name, *keys, **options):
-        """Get a connected connection from the pool"""
-        connection = self.get_available_connection()
-        try:
-            await self.ensure_connection(connection)
-        except BaseException:
-            await self.release(connection)
-            raise
+        async with self._lock:
+            """Get a connected connection from the pool"""
+            connection = self.get_available_connection()
+            try:
+                await self.ensure_connection(connection)
+            except BaseException:
+                await self.release(connection)
+                raise
 
         return connection
 
@@ -1152,6 +1150,14 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
+
+    async def re_auth_callback(self, token):
+        async with self._lock:
+            for conn in self._available_connections:
+                await conn.send_command(
+                    'AUTH', token.try_get('oid'), token.get_value()
+                )
+                await conn.read_response()
 
 
 class BlockingConnectionPool(ConnectionPool):
