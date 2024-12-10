@@ -53,6 +53,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.credentials import CredentialProvider
+from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent, ClientType
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -233,6 +234,7 @@ class Redis(
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
     ):
         """
         Initialize a new Redis client.
@@ -320,9 +322,19 @@ class Redis(
             # This arg only used if no pool is passed in
             self.auto_close_connection_pool = auto_close_connection_pool
             connection_pool = ConnectionPool(**kwargs)
+            event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
+                [connection_pool],
+                ClientType.ASYNC,
+                credential_provider
+            ))
         else:
             # If a pool is passed in, do not close it
             self.auto_close_connection_pool = False
+            event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
+                [connection_pool],
+                ClientType.ASYNC,
+                credential_provider
+            ))
 
         self.connection_pool = connection_pool
         self.single_connection_client = single_connection_client
