@@ -53,7 +53,8 @@ from redis.commands import (
     list_or_args,
 )
 from redis.credentials import CredentialProvider
-from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent, ClientType
+from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent, ClientType, \
+    AfterSingleConnectionInstantiationEvent
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -337,6 +338,7 @@ class Redis(
             ))
 
         self.connection_pool = connection_pool
+        self._event_dispatcher = event_dispatcher
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
@@ -366,6 +368,10 @@ class Redis(
             async with self._single_conn_lock:
                 if self.connection is None:
                     self.connection = await self.connection_pool.get_connection("_")
+
+            self._event_dispatcher.dispatch(
+                AfterSingleConnectionInstantiationEvent(self.connection, ClientType.ASYNC, self._single_conn_lock)
+            )
         return self
 
     def set_response_callback(self, command: str, callback: ResponseCallbackT):

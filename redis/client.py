@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import re
 import threading
@@ -27,7 +28,8 @@ from redis.connection import (
     UnixDomainSocketConnection,
 )
 from redis.credentials import CredentialProvider
-from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent, ClientType
+from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent, ClientType, \
+    AfterSingleConnectionInstantiationEvent
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -337,9 +339,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ]:
             raise RedisError("Client caching is only supported with RESP version 3")
 
+        self._connection_lock = threading.Lock()
         self.connection = None
         if single_connection_client:
             self.connection = self.connection_pool.get_connection("_")
+            event_dispatcher.dispatch(
+                AfterSingleConnectionInstantiationEvent(self.connection, ClientType.SYNC, self._connection_lock)
+            )
 
         self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
 

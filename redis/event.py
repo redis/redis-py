@@ -1,3 +1,5 @@
+import asyncio
+import threading
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Union, Optional
@@ -9,6 +11,7 @@ class EventListenerInterface(ABC):
     """
     Represents a listener for given event object.
     """
+
     @abstractmethod
     def listen(self, event: object):
         pass
@@ -18,6 +21,7 @@ class AsyncEventListenerInterface(ABC):
     """
     Represents an async listener for given event object.
     """
+
     @abstractmethod
     async def listen(self, event: object):
         pass
@@ -27,6 +31,7 @@ class EventDispatcherInterface(ABC):
     """
     Represents a dispatcher that dispatches events to listeners associated with given event.
     """
+
     @abstractmethod
     def dispatch(self, event: object):
         pass
@@ -48,6 +53,9 @@ class EventDispatcher(EventDispatcherInterface):
             ],
             AfterPooledConnectionsInstantiationEvent: [
                 RegisterReAuthForPooledConnections()
+            ],
+            AfterSingleConnectionInstantiationEvent: [
+                RegisterReAuthForSingleConnection()
             ],
             AsyncBeforeCommandExecutionEvent: [
                 AsyncReAuthBeforeCommandExecutionListener(),
@@ -71,6 +79,7 @@ class BeforeCommandExecutionEvent:
     """
     Event that will be fired before each command execution.
     """
+
     def __init__(self, command, initial_cred, connection, credential_provider: StreamingCredentialProvider):
         self._command = command
         self._initial_cred = initial_cred
@@ -107,6 +116,7 @@ class AfterPooledConnectionsInstantiationEvent:
     """
     Event that will be fired after pooled connection instances was created.
     """
+
     def __init__(
             self,
             connection_pools: List,
@@ -130,10 +140,40 @@ class AfterPooledConnectionsInstantiationEvent:
         return self._credential_provider
 
 
+class AfterSingleConnectionInstantiationEvent:
+    """
+    Event that will be fired after single connection instances was created.
+
+    :param connection_lock: For sync client thread-lock should be provided, for async asyncio.Lock
+    """
+    def __init__(
+            self,
+            connection,
+            client_type: ClientType,
+            connection_lock: Union[threading.Lock, asyncio.Lock]
+    ):
+        self._connection = connection
+        self._client_type = client_type
+        self._connection_lock = connection_lock
+
+    @property
+    def connection(self):
+        return self._connection
+
+    @property
+    def client_type(self) -> ClientType:
+        return self._client_type
+
+    @property
+    def connection_lock(self) -> Union[threading.Lock, asyncio.Lock]:
+        return self._connection_lock
+
+
 class ReAuthBeforeCommandExecutionListener(EventListenerInterface):
     """
     Listener that performs re-authentication (if needed) for StreamingCredentialProviders before command execution.
     """
+
     def __init__(self):
         self._current_cred = None
 
@@ -156,6 +196,7 @@ class AsyncReAuthBeforeCommandExecutionListener(AsyncEventListenerInterface):
     """
     Async listener that performs re-authentication (if needed) for StreamingCredentialProviders before command execution
     """
+
     def __init__(self):
         self._current_cred = None
 
@@ -176,6 +217,7 @@ class RegisterReAuthForPooledConnections(EventListenerInterface):
     Listener that registers a re-authentication callback for pooled connections.
     Required by :class:`StreamingCredentialProvider`.
     """
+
     def __init__(self):
         self._event = None
 
@@ -195,3 +237,31 @@ class RegisterReAuthForPooledConnections(EventListenerInterface):
     async def _re_auth_async(self, token):
         for pool in self._event.connection_pools:
             await pool.re_auth_callback(token)
+
+
+class RegisterReAuthForSingleConnection(EventListenerInterface):
+    """
+    Listener that registers a re-authentication callback for single connection.
+    Required by :class:`StreamingCredentialProvider`.
+    """
+    def __init__(self):
+        self._event = None
+
+    def listen(self, event: AfterSingleConnectionInstantiationEvent):
+        if isinstance(event.connection.credential_provider, StreamingCredentialProvider):
+            self._event = event
+
+            if event.client_type == ClientType.SYNC:
+                event.connection.credential_provider.on_next(self._re_auth)
+            else:
+                event.connection.credential_provider.on_next(self._re_auth_async)
+
+    def _re_auth(self, token):
+        with self._event.connection_lock:
+            self._event.connection.send_command('AUTH', token.try_get('oid'), token.get_value())
+            self._event.connection.read_response()
+
+    async def _re_auth_async(self, token):
+        async with self._event.connection_lock:
+            await self._event.connection.send_command('AUTH', token.try_get('oid'), token.get_value())
+            await self._event.connection.read_response()

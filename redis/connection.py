@@ -413,6 +413,7 @@ class AbstractConnection(ConnectionInterface):
             )
             auth_args = cred_provider.get_credentials()
             self._init_auth_args = hash(auth_args)
+            print(auth_args)
 
         # if resp version is specified and we have auth args,
         # we need to send them via HELLO
