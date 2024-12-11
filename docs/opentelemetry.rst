@@ -46,7 +46,7 @@ You can then use it to instrument code like this:
 
    RedisInstrumentor().instrument()
 
-Once the code is patched, you can use redis-py as usually:
+Once the code is patched, you can use redis-py as usual:
 
 .. code-block:: python
 
