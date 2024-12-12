@@ -499,9 +499,9 @@ class TestUnitCacheProxyConnection:
         )
         proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
         assert proxy_connection.read_response() == b"bar"
+        assert proxy_connection._current_command_cache_key is None
         assert proxy_connection.read_response() == b"bar"
 
-        mock_connection.read_response.assert_called_once()
         mock_cache.set.assert_has_calls(
             [
                 call(
@@ -525,9 +525,6 @@ class TestUnitCacheProxyConnection:
 
         mock_cache.get.assert_has_calls(
             [
-                call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
                 call(CacheKey(command="GET", redis_keys=("foo",))),
                 call(CacheKey(command="GET", redis_keys=("foo",))),
                 call(CacheKey(command="GET", redis_keys=("foo",))),
