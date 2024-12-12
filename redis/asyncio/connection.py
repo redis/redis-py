@@ -28,7 +28,8 @@ from typing import (
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
-from ..event import EventDispatcher, AsyncBeforeCommandExecutionEvent
+from ..auth.token import TokenInterface
+from ..event import EventDispatcher, AsyncAfterConnectionReleasedEvent
 from ..utils import format_error_message
 
 # the functionality is available in 3.11.x but has a major issue before
@@ -199,7 +200,7 @@ class AbstractConnection:
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
         self._event_dispatcher = event_dispatcher
-        self._init_auth_args = None
+        self._re_auth_token: Optional[TokenInterface] = None
 
         try:
             p = int(protocol)
@@ -346,7 +347,6 @@ class AbstractConnection:
                 or UsernamePasswordCredentialProvider(self.username, self.password)
             )
             auth_args = await cred_provider.get_credentials_async()
-            self._init_auth_args = hash(auth_args)
 
             # if resp version is specified and we have auth args,
             # we need to send them via HELLO
@@ -668,6 +668,19 @@ class AbstractConnection:
     async def process_invalidation_messages(self):
         while not self._socket_is_empty():
             await self.read_response(push_request=True)
+
+    def set_re_auth_token(self, token: TokenInterface):
+        self._re_auth_token = token
+
+    async def re_auth(self):
+        if self._re_auth_token is not None:
+            await self.send_command(
+                'AUTH',
+                self._re_auth_token.try_get('oid'),
+                self._re_auth_token.get_value()
+            )
+            await self.read_response()
+            self._re_auth_token = None
 
 
 class Connection(AbstractConnection):
@@ -1048,6 +1061,9 @@ class ConnectionPool:
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
         self._lock = asyncio.Lock()
+        self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
+        if self._event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
 
     def __repr__(self):
         return (
@@ -1124,6 +1140,7 @@ class ConnectionPool:
         # not doing so is an error that will cause an exception here.
         self._in_use_connections.remove(connection)
         self._available_connections.append(connection)
+        await self._event_dispatcher.dispatch_async(AsyncAfterConnectionReleasedEvent(connection))
 
     async def disconnect(self, inuse_connections: bool = True):
         """
@@ -1157,13 +1174,27 @@ class ConnectionPool:
         for conn in self._in_use_connections:
             conn.retry = retry
 
-    async def re_auth_callback(self, token):
+    async def re_auth_callback(self, token: TokenInterface):
         async with self._lock:
             for conn in self._available_connections:
-                await conn.send_command(
-                    'AUTH', token.try_get('oid'), token.get_value()
+                await conn.retry.call_with_retry(
+                    lambda: conn.send_command('AUTH', token.try_get('oid'), token.get_value()),
+                    lambda error: self._mock(error)
                 )
-                await conn.read_response()
+                await conn.retry.call_with_retry(
+                    lambda: conn.read_response(),
+                    lambda error: self._mock(error)
+                )
+            for conn in self._in_use_connections:
+                conn.set_re_auth_token(token)
+
+    async def _mock(self, error: RedisError):
+        """
+        Dummy functions, needs to be passed as error callback to retry object.
+        :param error:
+        :return:
+        """
+        pass
 
 
 class BlockingConnectionPool(ConnectionPool):

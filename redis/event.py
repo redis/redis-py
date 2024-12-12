@@ -48,8 +48,8 @@ class EventDispatcher(EventDispatcherInterface):
         Mapping should be extended for any new events or listeners to be added.
         """
         self._event_listeners_mapping = {
-            BeforeCommandExecutionEvent: [
-                ReAuthBeforeCommandExecutionListener(),
+            AfterConnectionReleasedEvent: [
+                ReAuthConnectionListener(),
             ],
             AfterPooledConnectionsInstantiationEvent: [
                 RegisterReAuthForPooledConnections()
@@ -57,8 +57,8 @@ class EventDispatcher(EventDispatcherInterface):
             AfterSingleConnectionInstantiationEvent: [
                 RegisterReAuthForSingleConnection()
             ],
-            AsyncBeforeCommandExecutionEvent: [
-                AsyncReAuthBeforeCommandExecutionListener(),
+            AsyncAfterConnectionReleasedEvent: [
+                AsyncReAuthConnectionListener(),
             ],
         }
 
@@ -75,35 +75,20 @@ class EventDispatcher(EventDispatcherInterface):
             await listener.listen(event)
 
 
-class BeforeCommandExecutionEvent:
+class AfterConnectionReleasedEvent:
     """
     Event that will be fired before each command execution.
     """
 
-    def __init__(self, command, initial_cred, connection, credential_provider: StreamingCredentialProvider):
-        self._command = command
-        self._initial_cred = initial_cred
-        self._credential_provider = credential_provider
+    def __init__(self, connection):
         self._connection = connection
-
-    @property
-    def command(self):
-        return self._command
-
-    @property
-    def initial_cred(self):
-        return self._initial_cred
 
     @property
     def connection(self):
         return self._connection
 
-    @property
-    def credential_provider(self) -> StreamingCredentialProvider:
-        return self._credential_provider
 
-
-class AsyncBeforeCommandExecutionEvent(BeforeCommandExecutionEvent):
+class AsyncAfterConnectionReleasedEvent(AfterConnectionReleasedEvent):
     pass
 
 
@@ -169,47 +154,22 @@ class AfterSingleConnectionInstantiationEvent:
         return self._connection_lock
 
 
-class ReAuthBeforeCommandExecutionListener(EventListenerInterface):
+class ReAuthConnectionListener(EventListenerInterface):
     """
-    Listener that performs re-authentication (if needed) for StreamingCredentialProviders before command execution.
-    """
-
-    def __init__(self):
-        self._current_cred = None
-
-    def listen(self, event: BeforeCommandExecutionEvent):
-        if event.command[0] == 'AUTH':
-            return
-
-        if self._current_cred is None:
-            self._current_cred = event.initial_cred
-
-        credentials = event.credential_provider.get_credentials()
-
-        if hash(credentials) != self._current_cred:
-            self._current_cred = hash(credentials)
-            event.connection.send_command('AUTH', credentials[0], credentials[1])
-            event.connection.read_response()
-
-
-class AsyncReAuthBeforeCommandExecutionListener(AsyncEventListenerInterface):
-    """
-    Async listener that performs re-authentication (if needed) for StreamingCredentialProviders before command execution
+    Listener that performs re-authentication of given connection.
     """
 
-    def __init__(self):
-        self._current_cred = None
+    def listen(self, event: AfterConnectionReleasedEvent):
+        event.connection.re_auth()
 
-    async def listen(self, event: AsyncBeforeCommandExecutionEvent):
-        if self._current_cred is None:
-            self._current_cred = event.initial_cred
 
-        credentials = await event.credential_provider.get_credentials_async()
+class AsyncReAuthConnectionListener(AsyncEventListenerInterface):
+    """
+    Async listener that performs re-authentication of given connection.
+    """
 
-        if hash(credentials) != self._current_cred:
-            self._current_cred = hash(credentials)
-            await event.connection.send_command('AUTH', credentials[0], credentials[1])
-            await event.connection.read_response()
+    async def listen(self, event: AsyncAfterConnectionReleasedEvent):
+        await event.connection.re_auth()
 
 
 class RegisterReAuthForPooledConnections(EventListenerInterface):
