@@ -23,7 +23,7 @@ from tests.test_asyncio.conftest import get_credential_provider
 
 
 @pytest_asyncio.fixture()
-async def r(request, create_redis):
+async def r_credential(request, create_redis):
     credential_provider = request.param.get("cred_provider_class", None)
 
     if credential_provider is not None:
@@ -420,7 +420,7 @@ class TestStreamingCredentialProvider:
 @pytest.mark.onlynoncluster
 class TestEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
-        "r",
+        "r_credential",
         [
             {
                 "cred_provider_class": EntraIdCredentialsProvider,
@@ -434,5 +434,5 @@ class TestEntraIdCredentialsProvider:
         indirect=True,
     )
     @pytest.mark.asyncio
-    async def test_async_auth_pool_with_credential_provider(self, r: Redis):
-        assert await r.ping() is True
+    async def test_async_auth_pool_with_credential_provider(self, r_credential: Redis):
+        assert await r_credential.ping() is True
