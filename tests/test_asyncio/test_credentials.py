@@ -434,5 +434,7 @@ class TestEntraIdCredentialsProvider:
         indirect=True,
     )
     @pytest.mark.asyncio
+    @pytest.mark.cp_integration
+    @pytest.mark.onlynoncluster
     async def test_async_auth_pool_with_credential_provider(self, r_credential: Redis):
         assert await r_credential.ping() is True
