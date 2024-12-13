@@ -161,7 +161,7 @@ class TokenManager:
             block_for_initial: bool = False,
             initial_delay_in_ms: float = 0,
             skip_initial: bool = False,
-    ) -> Callable[[], Coroutine[Any, Any, None]]:
+    ) -> Callable[[], None]:
         self._listener = listener
 
         loop = asyncio.get_running_loop()
@@ -174,14 +174,13 @@ class TokenManager:
         if block_for_initial:
             await init_event.wait()
 
-        return self.stop_async
+        return self.stop
 
     def stop(self):
+        if self._init_timer is not None:
+            self._init_timer.cancel()
         if self._next_timer is not None:
             self._next_timer.cancel()
-
-    async def stop_async(self):
-        return self.stop()
 
     def acquire_token(self, force_refresh=False) -> TokenResponse:
         try:
