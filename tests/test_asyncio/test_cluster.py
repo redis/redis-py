@@ -360,7 +360,7 @@ class TestRedisClusterObj:
                 assert n_retry._retries == retry._retries
                 assert isinstance(n_retry._backoff, NoBackoff)
             rand_cluster_node = r.get_random_node()
-            with rand_cluster_node.acquire_connection() as existing_conn:
+            async with rand_cluster_node.acquire_connection() as existing_conn:
                 # Change retry policy
                 new_retry = Retry(ExponentialBackoff(), 3)
                 r.set_retry(new_retry)
@@ -372,7 +372,7 @@ class TestRedisClusterObj:
                     assert n_retry._retries == new_retry._retries
                     assert isinstance(n_retry._backoff, ExponentialBackoff)
                 assert existing_conn.retry._retries == new_retry._retries
-                with rand_cluster_node.acquire_connection() as new_conn:
+                async with rand_cluster_node.acquire_connection() as new_conn:
                     assert new_conn.retry._retries == new_retry._retries
 
     async def test_cluster_retry_object(self, request: FixtureRequest) -> None:

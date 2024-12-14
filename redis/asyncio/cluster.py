@@ -1,14 +1,12 @@
 import asyncio
-import collections
 import random
 import socket
 import ssl
 import warnings
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from typing import (
     Any,
     Callable,
-    Deque,
     Dict,
     Generator,
     List,
@@ -156,6 +154,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
           maximum number of connections are already created, a
           :class:`~.MaxConnectionsError` is raised. This error may be retried as defined
           by :attr:`connection_error_retry_attempts`
+    :param connection_queueing_timeout:
+        | The maximum time in seconds to wait for a free node connection (as
+          specified by ``max_connections``). If the timeout is reached, a
+          :class:`~.MaxConnectionsError` is raised. If set to <= 0, no
+          queueing is done and a :class:`~.MaxConnectionsError` is raised
+          if no free connection is available.
     :param address_remap:
         | An optional callable which, when provided with an internal network
           address of a node, e.g. a `(host, port)` tuple, will return the address
@@ -238,6 +242,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         cluster_error_retry_attempts: int = 3,
         connection_error_retry_attempts: int = 3,
         max_connections: int = 2**31,
+        connection_queueing_timeout: float = 0,
         # Client related kwargs
         db: Union[str, int] = 0,
         path: Optional[str] = None,
@@ -293,6 +298,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         kwargs: Dict[str, Any] = {
             "max_connections": max_connections,
+            "connection_queueing_timeout": connection_queueing_timeout,
             "connection_class": Connection,
             "parser_class": ClusterParser,
             # Client related kwargs
@@ -934,6 +940,7 @@ class ClusterNode:
         "connection_kwargs",
         "host",
         "max_connections",
+        "connection_queueing_timeout",
         "name",
         "port",
         "response_callbacks",
@@ -947,6 +954,7 @@ class ClusterNode:
         server_type: Optional[str] = None,
         *,
         max_connections: int = 2**31,
+        connection_queueing_timeout: float = 0,
         connection_class: Type[Connection] = Connection,
         **connection_kwargs: Any,
     ) -> None:
@@ -961,12 +969,13 @@ class ClusterNode:
         self.server_type = server_type
 
         self.max_connections = max_connections
+        self.connection_queueing_timeout = connection_queueing_timeout
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.response_callbacks = connection_kwargs.pop("response_callbacks", {})
 
         self._connections: List[Connection] = []
-        self._free: Deque[Connection] = collections.deque(maxlen=self.max_connections)
+        self._free: asyncio.Queue[Connection] = asyncio.Queue(maxsize=self.max_connections)
 
     def __repr__(self) -> str:
         return (
@@ -1007,23 +1016,32 @@ class ClusterNode:
         if exc:
             raise exc
 
-    @contextmanager
-    def acquire_connection(self) -> Connection:
+    @asynccontextmanager
+    async def acquire_connection(self) -> Connection:
         """Context manager acquiring a connection on enter and automatically
         freeing it on exit."""
+
+        # Try to get a free connection
         try:
-            connection = self._free.popleft()
-        except IndexError:
+            connection = self._free.get_nowait()
+        except asyncio.QueueEmpty:
             if len(self._connections) < self.max_connections:
                 connection = self.connection_class(**self.connection_kwargs)
                 self._connections.append(connection)
             else:
-                raise MaxConnectionsError()
+                if self.connection_queueing_timeout <= 0:
+                    raise MaxConnectionsError()
+                try:
+                    connection = await asyncio.wait_for(
+                        self._free.get(), self.connection_queueing_timeout
+                    )
+                except asyncio.TimeoutError:
+                    raise MaxConnectionsError()
 
         try:
             yield connection
         finally:
-            self._free.append(connection)
+            self._free.put_nowait(connection)
 
     async def parse_response(
         self, connection: Connection, command: str, **kwargs: Any
@@ -1053,7 +1071,7 @@ class ClusterNode:
 
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
-        with self.acquire_connection() as connection:
+        async with self.acquire_connection() as connection:
 
             # Execute command
             await connection.send_packed_command(connection.pack_command(*args), False)
@@ -1063,7 +1081,7 @@ class ClusterNode:
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
-        with self.acquire_connection() as connection:
+        async with self.acquire_connection() as connection:
 
             # Execute command
             await connection.send_packed_command(
