@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Union, Optional
 
+from redis.auth.token import TokenInterface
 from redis.credentials import StreamingCredentialProvider, CredentialProvider
 
 
@@ -56,6 +57,9 @@ class EventDispatcher(EventDispatcherInterface):
             ],
             AfterSingleConnectionInstantiationEvent: [
                 RegisterReAuthForSingleConnection()
+            ],
+            AfterAsyncClusterInstantiationEvent: [
+                RegisterReAuthForAsyncClusterNodes()
             ],
             AsyncAfterConnectionReleasedEvent: [
                 AsyncReAuthConnectionListener(),
@@ -154,6 +158,29 @@ class AfterSingleConnectionInstantiationEvent:
         return self._connection_lock
 
 
+class AfterAsyncClusterInstantiationEvent:
+    """
+    Event that will be fired after async cluster instance was created.
+
+    Async cluster doesn't use connection pools, instead ClusterNode object manages connections.
+    """
+    def __init__(
+            self,
+            nodes: dict,
+            credential_provider: Optional[CredentialProvider] = None,
+    ):
+        self._nodes = nodes
+        self._credential_provider = credential_provider
+
+    @property
+    def nodes(self) -> dict:
+        return self._nodes
+
+    @property
+    def credential_provider(self) -> Union[CredentialProvider, None]:
+        return self._credential_provider
+
+
 class ReAuthConnectionListener(EventListenerInterface):
     """
     Listener that performs re-authentication of given connection.
@@ -225,3 +252,17 @@ class RegisterReAuthForSingleConnection(EventListenerInterface):
         async with self._event.connection_lock:
             await self._event.connection.send_command('AUTH', token.try_get('oid'), token.get_value())
             await self._event.connection.read_response()
+
+
+class RegisterReAuthForAsyncClusterNodes(EventListenerInterface):
+    def __init__(self):
+        self._event = None
+
+    def listen(self, event: AfterAsyncClusterInstantiationEvent):
+        if isinstance(event.credential_provider, StreamingCredentialProvider):
+            self._event = event
+            event.credential_provider.on_next(self._re_auth)
+
+    async def _re_auth(self, token: TokenInterface):
+        for key in self._event.nodes:
+            await self._event.nodes[key].re_auth_callback(token)
