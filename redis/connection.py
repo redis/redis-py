@@ -870,9 +870,11 @@ class CacheProxyConnection(ConnectionInterface):
                 and self._cache.get(self._current_command_cache_key).status
                 != CacheEntryStatus.IN_PROGRESS
             ):
-                return copy.deepcopy(
+                res = copy.deepcopy(
                     self._cache.get(self._current_command_cache_key).cache_value
                 )
+                self._current_command_cache_key = None
+                return res
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
@@ -897,6 +899,8 @@ class CacheProxyConnection(ConnectionInterface):
                 cache_entry.status = CacheEntryStatus.VALID
                 cache_entry.cache_value = response
                 self._cache.set(cache_entry)
+
+            self._current_command_cache_key = None
 
         return response
 

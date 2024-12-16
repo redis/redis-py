@@ -468,24 +468,6 @@ class TestUnitCacheProxyConnection:
                 status=CacheEntryStatus.IN_PROGRESS,
                 connection_ref=mock_connection,
             ),
-            CacheEntry(
-                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
-                cache_value=b"bar",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            ),
-            CacheEntry(
-                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
-                cache_value=b"bar",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            ),
-            CacheEntry(
-                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
-                cache_value=b"bar",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            ),
         ]
         mock_connection.send_command.return_value = Any
         mock_connection.read_response.return_value = b"bar"
@@ -496,9 +478,9 @@ class TestUnitCacheProxyConnection:
         )
         proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
         assert proxy_connection.read_response() == b"bar"
+        assert proxy_connection._current_command_cache_key is None
         assert proxy_connection.read_response() == b"bar"
 
-        mock_connection.read_response.assert_called_once()
         mock_cache.set.assert_has_calls(
             [
                 call(
@@ -522,9 +504,6 @@ class TestUnitCacheProxyConnection:
 
         mock_cache.get.assert_has_calls(
             [
-                call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
                 call(CacheKey(command="GET", redis_keys=("foo",))),
                 call(CacheKey(command="GET", redis_keys=("foo",))),
                 call(CacheKey(command="GET", redis_keys=("foo",))),
