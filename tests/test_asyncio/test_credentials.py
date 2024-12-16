@@ -417,7 +417,6 @@ class TestStreamingCredentialProvider:
 
 @pytest.mark.asyncio
 @pytest.mark.cp_integration
-@pytest.mark.onlynoncluster
 class TestEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
         "r_credential",
@@ -435,6 +434,5 @@ class TestEntraIdCredentialsProvider:
     )
     @pytest.mark.asyncio
     @pytest.mark.cp_integration
-    @pytest.mark.onlynoncluster
     async def test_async_auth_pool_with_credential_provider(self, r_credential: Redis):
         assert await r_credential.ping() is True

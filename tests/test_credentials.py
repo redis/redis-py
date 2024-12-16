@@ -389,7 +389,6 @@ class TestStreamingCredentialProvider:
         mock_failed_connection.read_response.assert_has_calls([call(), call(), call()])
 
 
-@pytest.mark.onlynoncluster
 @pytest.mark.cp_integration
 class TestEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
@@ -407,7 +406,6 @@ class TestEntraIdCredentialsProvider:
         ids=['pool', 'single'],
         indirect=True,
     )
-    @pytest.mark.onlynoncluster
     @pytest.mark.cp_integration
     def test_auth_pool_with_credential_provider(self, r: redis.Redis):
         assert r.ping() is True
