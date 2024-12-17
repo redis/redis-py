@@ -190,9 +190,12 @@ def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
     connection = mock.AsyncMock(spec=Connection)
     connection.is_connected = True
     connection.read_response.return_value = response
-    while node._free:
-        node._free.pop()
-    node._free.append(connection)
+    while True:
+        try:
+            node._free.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+    node._free.put_nowait(connection)
     return node
 
 
@@ -200,9 +203,12 @@ def mock_node_resp_exc(node: ClusterNode, exc: Exception) -> ClusterNode:
     connection = mock.AsyncMock(spec=Connection)
     connection.is_connected = True
     connection.read_response.side_effect = exc
-    while node._free:
-        node._free.pop()
-    node._free.append(connection)
+    while True:
+        try:
+            node._free.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+    node._free.put_nowait(connection)
     return node
 
 
@@ -482,10 +488,10 @@ class TestRedisClusterObj:
         mock_all_nodes_resp(r, "PONG")
         assert await r.ping(target_nodes=RedisCluster.PRIMARIES) is True
         for primary in primaries:
-            conn = primary._free.pop()
+            conn = primary._free.get_nowait()
             assert conn.read_response.called is True
         for replica in replicas:
-            conn = replica._free.pop()
+            conn = replica._free.get_nowait()
             assert conn.read_response.called is not True
 
     async def test_execute_command_node_flag_replicas(self, r: RedisCluster) -> None:
@@ -499,10 +505,10 @@ class TestRedisClusterObj:
         mock_all_nodes_resp(r, "PONG")
         assert await r.ping(target_nodes=RedisCluster.REPLICAS) is True
         for replica in replicas:
-            conn = replica._free.pop()
+            conn = replica._free.get_nowait()
             assert conn.read_response.called is True
         for primary in primaries:
-            conn = primary._free.pop()
+            conn = primary._free.get_nowait()
             assert conn.read_response.called is not True
 
         await r.aclose()
@@ -514,7 +520,7 @@ class TestRedisClusterObj:
         mock_all_nodes_resp(r, "PONG")
         assert await r.ping(target_nodes=RedisCluster.ALL_NODES) is True
         for node in r.get_nodes():
-            conn = node._free.pop()
+            conn = node._free.get_nowait()
             assert conn.read_response.called is True
 
     async def test_execute_command_node_flag_random(self, r: RedisCluster) -> None:
@@ -525,7 +531,7 @@ class TestRedisClusterObj:
         assert await r.ping(target_nodes=RedisCluster.RANDOM) is True
         called_count = 0
         for node in r.get_nodes():
-            conn = node._free.pop()
+            conn = node._free.get_nowait()
             if conn.read_response.called is True:
                 called_count += 1
         assert called_count == 1
@@ -538,7 +544,7 @@ class TestRedisClusterObj:
         def_node = r.get_default_node()
         mock_node_resp(def_node, "PONG")
         assert await r.ping() is True
-        conn = def_node._free.pop()
+        conn = def_node._free.get_nowait()
         assert conn.read_response.called
 
     async def test_ask_redirection(self, r: RedisCluster) -> None:
@@ -1106,8 +1112,8 @@ class TestClusterRedisCommands:
         node0 = r.get_node(default_host, 7000)
         node1 = r.get_node(default_host, 7001)
         assert await r.cluster_delslots(0, 8192) == [True, True]
-        assert node0._free.pop().read_response.called
-        assert node1._free.pop().read_response.called
+        assert node0._free.get_nowait().read_response.called
+        assert node1._free.get_nowait().read_response.called
 
         await r.aclose()
 
@@ -1119,7 +1125,7 @@ class TestClusterRedisCommands:
         node = r.get_random_node()
         await r.cluster_addslots(node, 1, 2, 3, 4, 5)
         assert await r.cluster_delslotsrange(1, 5)
-        assert node._free.pop().read_response.called
+        assert node._free.get_nowait().read_response.called
         await r.aclose()
 
     @skip_if_redis_enterprise()
@@ -1279,7 +1285,7 @@ class TestClusterRedisCommands:
         node = r.nodes_manager.get_node_from_slot(12182)
         mock_node_resp(node, "OK")
         assert await r.cluster_setslot_stable(12182) is True
-        assert node._free.pop().read_response.called
+        assert node._free.get_nowait().read_response.called
 
     @skip_if_redis_enterprise()
     async def test_cluster_replicas(self, r: RedisCluster) -> None:
@@ -1328,7 +1334,7 @@ class TestClusterRedisCommands:
         for res in all_replicas_results.values():
             assert res is True
         for replica in r.get_replicas():
-            assert replica._free.pop().read_response.called
+            assert replica._free.get_nowait().read_response.called
 
         await r.aclose()
 
@@ -1341,7 +1347,7 @@ class TestClusterRedisCommands:
         for res in all_replicas_results.values():
             assert res is True
         for replica in r.get_replicas():
-            assert replica._free.pop().read_response.called
+            assert replica._free.get_nowait().read_response.called
 
         await r.aclose()
 
@@ -2800,8 +2806,8 @@ class TestClusterPipeline:
             mock_node_resp_exc(first_node, AskError(ask_msg))
             mock_node_resp(ask_node, "MOCK_OK")
             res = await pipe.get(key).execute()
-            assert first_node._free.pop().read_response.await_count
-            assert ask_node._free.pop().read_response.await_count
+            assert first_node._free.get_nowait().read_response.await_count
+            assert ask_node._free.get_nowait().read_response.await_count
             assert res == ["MOCK_OK"]
 
     @skip_if_server_version_gte("7.0.0")
@@ -2857,7 +2863,7 @@ class TestClusterPipeline:
             executed_on_replica = False
             for node in slot_nodes:
                 if node.server_type == REPLICA:
-                    if node._free.pop().read_response.await_count:
+                    if node._free.get_nowait().read_response.await_count:
                         executed_on_replica = True
                         break
             assert executed_on_replica
