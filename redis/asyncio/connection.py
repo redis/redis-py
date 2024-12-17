@@ -334,6 +334,9 @@ class AbstractConnection:
     def _error_message(self, exception: BaseException) -> str:
         return format_error_message(self._host_error(), exception)
 
+    def get_protocol(self):
+        return self.protocol
+
     async def on_connect(self) -> None:
         """Initialize the connection, authenticate and select a database"""
         self._parser.on_connect(self)

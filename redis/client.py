@@ -29,7 +29,7 @@ from redis.connection import (
 )
 from redis.credentials import CredentialProvider
 from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent, ClientType, \
-    AfterSingleConnectionInstantiationEvent
+    AfterSingleConnectionInstantiationEvent, AfterPubSubConnectionInstantiationEvent
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -332,6 +332,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             ))
 
         self.connection_pool = connection_pool
+        self._event_dispatcher = event_dispatcher
 
         if (cache_config or cache) and self.connection_pool.get_protocol() not in [
             3,
@@ -518,7 +519,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         subscribe to channels and listen for messages that get published to
         them.
         """
-        return PubSub(self.connection_pool, **kwargs)
+        return PubSub(self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs)
 
     def monitor(self):
         return Monitor(self.connection_pool)
@@ -709,6 +710,7 @@ class PubSub:
         ignore_subscribe_messages: bool = False,
         encoder: Optional["Encoder"] = None,
         push_handler_func: Union[None, Callable[[str], None]] = None,
+        event_dispatcher: Optional["EventDispatcher"] = EventDispatcher(),
     ):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -719,6 +721,8 @@ class PubSub:
         # to lookup channel and pattern names for callback handlers.
         self.encoder = encoder
         self.push_handler_func = push_handler_func
+        self._event_dispatcher = event_dispatcher
+        self._lock = threading.Lock()
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
         self.health_check_response_b = self.encoder.encode(self.HEALTH_CHECK_MESSAGE)
@@ -809,11 +813,20 @@ class PubSub:
             self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
+            self._event_dispatcher.dispatch(
+                AfterPubSubConnectionInstantiationEvent(
+                    self.connection,
+                    self.connection_pool,
+                    ClientType.SYNC,
+                    self._lock
+                )
+            )
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}
         if not self.subscribed:
             self.clean_health_check_responses()
-        self._execute(connection, connection.send_command, *args, **kwargs)
+        with self._lock:
+            self._execute(connection, connection.send_command, *args, **kwargs)
 
     def clean_health_check_responses(self) -> None:
         """

@@ -154,6 +154,10 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
+    def get_protocol(self):
+        pass
+
+    @abstractmethod
     def connect(self):
         pass
 

@@ -414,6 +414,115 @@ class TestStreamingCredentialProvider:
         mock_another_connection.read_response.assert_has_calls([call()])
         mock_failed_connection.read_response.assert_has_calls([call(), call(), call()])
 
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
+    async def test_re_auth_pub_sub_in_resp3(self, credential_provider):
+        mock_pubsub_connection = Mock(spec=Connection)
+        mock_pubsub_connection.get_protocol.return_value = 3
+        mock_pubsub_connection.credential_provider = credential_provider
+        mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
+        mock_another_connection = Mock(spec=Connection)
+        mock_another_connection.retry = Retry(NoBackoff(), 3)
+
+        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection.side_effect = [mock_pubsub_connection, mock_another_connection]
+        mock_pool._available_connections = [mock_another_connection]
+        mock_pool._lock = AsyncLock()
+        auth_token = None
+
+        async def re_auth_callback(token):
+            nonlocal auth_token
+            auth_token = token
+            async with mock_pool._lock:
+                for conn in mock_pool._available_connections:
+                    await conn.send_command('AUTH', token.try_get('oid'), token.get_value())
+                    await conn.read_response()
+
+        mock_pool.re_auth_callback = re_auth_callback
+
+        r = Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+        p = r.pubsub()
+        await p.subscribe('test')
+        await credential_provider.get_credentials_async()
+        await async_sleep(0.5)
+
+        mock_pubsub_connection.send_command.assert_has_calls([
+            call('SUBSCRIBE', 'test', check_health=True),
+            call('AUTH', auth_token.try_get('oid'), auth_token.get_value()),
+        ])
+        mock_another_connection.send_command.assert_has_calls([
+            call('AUTH', auth_token.try_get('oid'), auth_token.get_value())
+        ])
+
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
+    async def test_do_not_re_auth_pub_sub_in_resp2(self, credential_provider):
+        mock_pubsub_connection = Mock(spec=Connection)
+        mock_pubsub_connection.get_protocol.return_value = 2
+        mock_pubsub_connection.credential_provider = credential_provider
+        mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
+        mock_another_connection = Mock(spec=Connection)
+        mock_another_connection.retry = Retry(NoBackoff(), 3)
+
+        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection.side_effect = [mock_pubsub_connection, mock_another_connection]
+        mock_pool._available_connections = [mock_another_connection]
+        mock_pool._lock = AsyncLock()
+        auth_token = None
+
+        async def re_auth_callback(token):
+            nonlocal auth_token
+            auth_token = token
+            async with mock_pool._lock:
+                for conn in mock_pool._available_connections:
+                    await conn.send_command('AUTH', token.try_get('oid'), token.get_value())
+                    await conn.read_response()
+
+        mock_pool.re_auth_callback = re_auth_callback
+
+        r = Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+        p = r.pubsub()
+        await p.subscribe('test')
+        await credential_provider.get_credentials_async()
+        await async_sleep(0.5)
+
+        mock_pubsub_connection.send_command.assert_has_calls([
+            call('SUBSCRIBE', 'test', check_health=True),
+        ])
+        mock_another_connection.send_command.assert_has_calls([
+            call('AUTH', auth_token.try_get('oid'), auth_token.get_value())
+        ])
+
 
 @pytest.mark.asyncio
 @pytest.mark.onlynoncluster
