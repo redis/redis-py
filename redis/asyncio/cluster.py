@@ -1568,18 +1568,22 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         result.args = (msg,) + result.args[1:]
                         raise result
 
-            default_node = nodes.get(client.get_default_node().name)
-            if default_node is not None:
-                # This pipeline execution used the default node, check if we need
-                # to replace it.
-                # Note: when the error is raised we'll reset the default node in the
-                # caller function.
-                for cmd in default_node[1]:
-                    # Check if it has a command that failed with a relevant
-                    # exception
-                    if type(cmd.result) in self.__class__.ERRORS_ALLOW_RETRY:
-                        client.replace_default_node()
-                        break
+            default_cluster_node = client.get_default_node()
+            if default_cluster_node is not None:
+                # Not sure why default_cluster_node is sometimes None; maybe if the object is being
+                # closed during an execution? Either way, this avoids a potential AttributeError
+                default_node = nodes.get(default_cluster_node.name)
+                if default_node is not None:
+                    # This pipeline execution used the default node, check if we need
+                    # to replace it.
+                    # Note: when the error is raised we'll reset the default node in the
+                    # caller function.
+                    for cmd in default_node[1]:
+                        # Check if it has a command that failed with a relevant
+                        # exception
+                        if type(cmd.result) in self.__class__.ERRORS_ALLOW_RETRY:
+                            client.replace_default_node()
+                            break
 
         return [cmd.result for cmd in stack]
 
