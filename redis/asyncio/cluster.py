@@ -1576,10 +1576,10 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         msg = (
                             f"Command # {cmd.position + 1} ({command}) of pipeline "
                             f"caused error on node {name}: "
-                            f"{result.args}"
+                            f"{exc.args}"
                         )
-                        result.args = (msg,) + result.args[1:]
-                        raise result
+                        exc.args = (msg,) + exc.args[1:]
+                        raise exc
 
             default_node = nodes.get(client.get_default_node().name)
             if default_node is not None:
