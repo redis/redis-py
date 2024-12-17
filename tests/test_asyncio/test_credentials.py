@@ -416,6 +416,7 @@ class TestStreamingCredentialProvider:
 
 
 @pytest.mark.asyncio
+@pytest.mark.onlynoncluster
 @pytest.mark.cp_integration
 class TestEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
@@ -433,6 +434,58 @@ class TestEntraIdCredentialsProvider:
         indirect=True,
     )
     @pytest.mark.asyncio
+    @pytest.mark.onlynoncluster
+    @pytest.mark.cp_integration
+    async def test_async_auth_pool_with_credential_provider(self, r_credential: Redis):
+        assert await r_credential.ping() is True
+
+    @pytest.mark.parametrize(
+        "r_credential",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+            },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"block_for_initial": True}
+            },
+        ],
+        ids=["blocked", "non-blocked"],
+        indirect=True,
+    )
+    @pytest.mark.asyncio
+    @pytest.mark.onlynoncluster
+    @pytest.mark.cp_integration
+    async def test_async_pipeline_with_credential_provider(self, r_credential: Redis):
+        pipe = r_credential.pipeline()
+
+        await pipe.set('key', 'value')
+        await pipe.get('key')
+
+        assert await pipe.execute() == [True, b'value']
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.onlycluster
+@pytest.mark.cp_integration
+class TestClusterEntraIdCredentialsProvider:
+    @pytest.mark.parametrize(
+        "r_credential",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+            },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"block_for_initial": True}
+            },
+        ],
+        ids=["blocked", "non-blocked"],
+        indirect=True,
+    )
+    @pytest.mark.asyncio
+    @pytest.mark.onlycluster
     @pytest.mark.cp_integration
     async def test_async_auth_pool_with_credential_provider(self, r_credential: Redis):
         assert await r_credential.ping() is True

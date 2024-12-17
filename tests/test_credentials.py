@@ -389,6 +389,7 @@ class TestStreamingCredentialProvider:
         mock_failed_connection.read_response.assert_has_calls([call(), call(), call()])
 
 
+@pytest.mark.onlynoncluster
 @pytest.mark.cp_integration
 class TestEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
@@ -406,6 +407,56 @@ class TestEntraIdCredentialsProvider:
         ids=['pool', 'single'],
         indirect=True,
     )
+    @pytest.mark.onlynoncluster
+    @pytest.mark.cp_integration
+    def test_auth_pool_with_credential_provider(self, r: redis.Redis):
+        assert r.ping() is True
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "single_connection_client": False
+            },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "single_connection_client": True
+            },
+        ],
+        ids=['pool', 'single'],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    @pytest.mark.cp_integration
+    def test_auth_pipeline_with_credential_provider(self, r: redis.Redis):
+        pipe = r.pipeline()
+
+        pipe.set('key', 'value')
+        pipe.get('key')
+
+        assert pipe.execute() == [True, b'value']
+
+
+@pytest.mark.onlycluster
+@pytest.mark.cp_integration
+class TestClusterEntraIdCredentialsProvider:
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "single_connection_client": False
+            },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "single_connection_client": True
+            },
+        ],
+        ids=['pool', 'single'],
+        indirect=True,
+    )
+    @pytest.mark.onlycluster
     @pytest.mark.cp_integration
     def test_auth_pool_with_credential_provider(self, r: redis.Redis):
         assert r.ping() is True
