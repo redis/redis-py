@@ -721,7 +721,7 @@ class PubSub:
         # to lookup channel and pattern names for callback handlers.
         self.encoder = encoder
         self.push_handler_func = push_handler_func
-        self._event_dispatcher = event_dispatcher
+        self.event_dispatcher = event_dispatcher
         self._lock = threading.Lock()
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
@@ -813,7 +813,7 @@ class PubSub:
             self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
-            self._event_dispatcher.dispatch(
+            self.event_dispatcher.dispatch(
                 AfterPubSubConnectionInstantiationEvent(
                     self.connection,
                     self.connection_pool,

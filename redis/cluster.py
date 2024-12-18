@@ -15,7 +15,8 @@ from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
 from redis.connection import ConnectionPool, DefaultParser, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
-from redis.event import EventDispatcher, EventDispatcherInterface, AfterPooledConnectionsInstantiationEvent, ClientType
+from redis.event import EventDispatcher, EventDispatcherInterface, AfterPooledConnectionsInstantiationEvent, ClientType, \
+    AfterPubSubConnectionInstantiationEvent
 from redis.exceptions import (
     AskError,
     AuthenticationError,
@@ -1714,6 +1715,7 @@ class ClusterPubSub(PubSub):
         host=None,
         port=None,
         push_handler_func=None,
+        event_dispatcher: Optional["EventDispatcher"] = EventDispatcher(),
         **kwargs,
     ):
         """
@@ -1743,6 +1745,7 @@ class ClusterPubSub(PubSub):
             connection_pool=connection_pool,
             encoder=redis_cluster.encoder,
             push_handler_func=push_handler_func,
+            event_dispatcher=event_dispatcher,
             **kwargs,
         )
 
@@ -1829,6 +1832,14 @@ class ClusterPubSub(PubSub):
             self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
+            self.event_dispatcher.dispatch(
+                AfterPubSubConnectionInstantiationEvent(
+                    self.connection,
+                    self.connection_pool,
+                    ClientType.SYNC,
+                    self._lock
+                )
+            )
         connection = self.connection
         self._execute(connection, connection.send_command, *args)
 
