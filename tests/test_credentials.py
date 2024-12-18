@@ -7,8 +7,8 @@ from typing import Optional, Tuple, Union
 from asyncio import sleep as asyncio_sleep, Lock as AsyncioLock
 
 import pytest
-from entraid.cred_provider import TokenAuthConfig, EntraIdCredentialsProvider
-from entraid.identity_provider import create_provider_from_service_principal
+from redis_entraid.cred_provider import TokenAuthConfig, EntraIdCredentialsProvider
+from redis_entraid.identity_provider import create_provider_from_service_principal
 from mock.mock import Mock, call
 
 import redis

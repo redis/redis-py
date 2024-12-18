@@ -8,8 +8,8 @@ from typing import Union
 import jwt
 import pytest
 import pytest_asyncio
-from entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
-from entraid.identity_provider import ManagedIdentityType, create_provider_from_managed_identity, \
+from redis_entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
+from redis_entraid.identity_provider import ManagedIdentityType, create_provider_from_managed_identity, \
     create_provider_from_service_principal
 from mock.mock import Mock
 from redis.credentials import CredentialProvider
