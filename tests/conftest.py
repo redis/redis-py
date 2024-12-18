@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import random
 import time
@@ -344,6 +345,13 @@ def _get_client(
         redis_url = request.config.getoption("--redis-url")
     else:
         redis_url = from_url
+
+    endpoints_config = os.getenv("REDIS_ENDPOINTS_CONFIG_PATH", None)
+    if endpoints_config is not None:
+        with open(endpoints_config, 'r') as f:
+            data = json.load(f)
+            db = next(iter(data.values()))
+            redis_url = db['endpoints'][0]
 
     redis_tls_url = request.config.getoption("--redis-ssl-url")
 

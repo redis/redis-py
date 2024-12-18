@@ -573,6 +573,31 @@ class TestEntraIdCredentialsProvider:
 
         assert await pipe.execute() == [True, b'value']
 
+    @pytest.mark.parametrize(
+        "r_credential",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+            },
+        ],
+        indirect=True,
+    )
+    @pytest.mark.asyncio
+    @pytest.mark.onlynoncluster
+    @pytest.mark.cp_integration
+    async def test_async_auth_pubsub_with_credential_provider(self, r_credential: Redis):
+        p = r_credential.pubsub()
+        await p.subscribe("entraid")
+
+        await r_credential.publish('entraid', 'test')
+        await r_credential.publish('entraid', 'test')
+
+        msg1 = await p.get_message()
+        msg2 = await p.get_message()
+
+        assert msg1['type'] == 'subscribe'
+        assert msg2['type'] == 'message'
+
 
 
 @pytest.mark.asyncio

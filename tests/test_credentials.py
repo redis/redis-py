@@ -546,6 +546,27 @@ class TestEntraIdCredentialsProvider:
 
         assert pipe.execute() == [True, b'value']
 
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+            },
+        ],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    @pytest.mark.cp_integration
+    def test_auth_pubsub_with_credential_provider(self, r: redis.Redis):
+        p = r.pubsub()
+        p.subscribe("entraid")
+
+        r.publish('entraid', 'test')
+        r.publish('entraid', 'test')
+
+        assert p.get_message()['type'] == 'subscribe'
+        assert p.get_message()['type'] == 'message'
+
 
 @pytest.mark.onlycluster
 @pytest.mark.cp_integration
