@@ -3,6 +3,7 @@ import os
 import random
 from contextlib import asynccontextmanager as _asynccontextmanager
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Union
 
 import jwt
@@ -10,7 +11,7 @@ import pytest
 import pytest_asyncio
 from redis_entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
 from redis_entraid.identity_provider import ManagedIdentityType, create_provider_from_managed_identity, \
-    create_provider_from_service_principal
+    create_provider_from_service_principal, ManagedIdentityIdType
 from mock.mock import Mock
 from redis.credentials import CredentialProvider
 
@@ -26,6 +27,10 @@ from redis.backoff import NoBackoff
 from tests.conftest import REDIS_INFO
 
 from .compat import mock
+
+class AuthType(Enum):
+    MANAGED_IDENTITY = "managed_identity"
+    SERVICE_PRINCIPAL = "service_principal"
 
 
 async def _get_info(redis_url):
@@ -248,10 +253,15 @@ def mock_identity_provider() -> IdentityProviderInterface:
 
 
 def identity_provider(request) -> IdentityProviderInterface:
-    auth_type = os.getenv("IDP_AUTH_TYPE")
+    if hasattr(request, "param"):
+        kwargs = request.param.get("idp_kwargs", {})
+    else:
+        kwargs = {}
 
     if request.param.get("mock_idp", None) is not None:
         return mock_identity_provider()
+
+    auth_type = kwargs.pop("auth_type", AuthType.SERVICE_PRINCIPAL)
 
     if auth_type == "MANAGED_IDENTITY":
         return _get_managed_identity_provider(request)
@@ -260,12 +270,17 @@ def identity_provider(request) -> IdentityProviderInterface:
 
 
 def _get_managed_identity_provider(request):
-    authority = os.getenv("IDP_AUTHORITY")
-    identity_type = ManagedIdentityType(os.getenv("IDP_IDENTITY_TYPE"))
-    resource = os.getenv("IDP_RESOURCE")
-    id_type = os.getenv("IDP_ID_TYPE", None)
-    id_value = os.getenv("IDP_ID_VALUE", None)
-    kwargs = request.param.get("idp_kwargs", {})
+    authority = os.getenv("AZURE_AUTHORITY")
+    resource = os.getenv("AZURE_RESOURCE")
+    id_value = os.getenv("AZURE_ID_VALUE", None)
+
+    if hasattr(request, "param"):
+        kwargs = request.param.get("idp_kwargs", {})
+    else:
+        kwargs = {}
+
+    identity_type = kwargs.pop("identity_type", ManagedIdentityType.SYSTEM_ASSIGNED)
+    id_type = kwargs.pop("id_type", ManagedIdentityIdType.CLIENT_ID)
 
     return create_provider_from_managed_identity(
         identity_type=identity_type,
@@ -278,17 +293,22 @@ def _get_managed_identity_provider(request):
 
 
 def _get_service_principal_provider(request):
-    client_id = os.getenv("IDP_CLIENT_ID")
-    client_credential = os.getenv("IDP_CLIENT_CREDENTIAL")
-    authority = os.getenv("IDP_AUTHORITY")
-    scopes = os.getenv("IDP_SCOPES", [])
-    kwargs = request.param.get("idp_kwargs", {})
+    client_id = os.getenv("AZURE_CLIENT_ID")
+    client_credential = os.getenv("AZURE_CLIENT_SECRET")
+    authority = os.getenv("AZURE_AUTHORITY")
+    scopes = os.getenv("AZURE_REDIS_SCOPES", [])
+
+    if hasattr(request, "param"):
+        kwargs = request.param.get("idp_kwargs", {})
+        token_kwargs = request.param.get("token_kwargs", {})
+        timeout = request.param.get("timeout", None)
+    else:
+        kwargs = {}
+        token_kwargs = {}
+        timeout = None
 
     if isinstance(scopes, str):
         scopes = scopes.split(',')
-
-    token_kwargs = request.param.get("token_kwargs", {})
-    timeout = request.param.get("timeout", None)
 
     return create_provider_from_service_principal(
         client_id=client_id,
@@ -325,10 +345,10 @@ def get_credential_provider(request) -> CredentialProvider:
     )
 
     auth_config = TokenAuthConfig(idp)
-    auth_config.expiration_refresh_ratio(expiration_refresh_ratio)
-    auth_config.lower_refresh_bound_millis(lower_refresh_bound_millis)
-    auth_config.max_attempts(max_attempts)
-    auth_config.delay_in_ms(delay_in_ms)
+    auth_config.expiration_refresh_ratio = expiration_refresh_ratio
+    auth_config.lower_refresh_bound_millis = lower_refresh_bound_millis
+    auth_config.max_attempts = max_attempts
+    auth_config.delay_in_ms = delay_in_ms
 
     return EntraIdCredentialsProvider(
         config=auth_config,
