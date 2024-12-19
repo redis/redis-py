@@ -1040,7 +1040,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_not(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["a"] = test_str
         r.bitop("not", "r", "a")
@@ -1049,7 +1049,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_not_in_place(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["a"] = test_str
         r.bitop("not", "a", "a")
@@ -1058,7 +1058,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_single_string(self, r):
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         r["a"] = test_str
         r.bitop("and", "res1", "a")
         r.bitop("or", "res2", "a")
@@ -1070,8 +1070,8 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_string_operands(self, r):
-        r["a"] = b"\x01\x02\xFF\xFF"
-        r["b"] = b"\x01\x02\xFF"
+        r["a"] = b"\x01\x02\xff\xff"
+        r["b"] = b"\x01\x02\xff"
         r.bitop("and", "res1", "a", "b")
         r.bitop("or", "res2", "a", "b")
         r.bitop("xor", "res3", "a", "b")
@@ -3214,8 +3214,8 @@ class TestRedisCommands:
     def test_hmset(self, r):
         redis_class = type(r).__name__
         warning_message = (
-            r"^{0}\.hmset\(\) is deprecated\. "
-            r"Use {0}\.hset\(\) instead\.$".format(redis_class)
+            rf"^{redis_class}\.hmset\(\) is deprecated\. "
+            rf"Use {redis_class}\.hset\(\) instead\.$"
         )
         h = {b"a": b"1", b"b": b"2", b"c": b"3"}
         with pytest.warns(DeprecationWarning, match=warning_message):

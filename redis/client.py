@@ -1503,7 +1503,6 @@ class Pipeline(Redis):
             conn.retry_on_error is None
             or isinstance(error, tuple(conn.retry_on_error)) is False
         ):
-
             self.reset()
             raise error
 

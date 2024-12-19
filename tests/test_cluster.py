@@ -1692,7 +1692,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_not(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["{foo}a"] = test_str
         r.bitop("not", "{foo}r", "{foo}a")
@@ -1700,7 +1700,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_not_in_place(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["{foo}a"] = test_str
         r.bitop("not", "{foo}a", "{foo}a")
@@ -1708,7 +1708,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_single_string(self, r):
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         r["{foo}a"] = test_str
         r.bitop("and", "{foo}res1", "{foo}a")
         r.bitop("or", "{foo}res2", "{foo}a")
@@ -1719,8 +1719,8 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_string_operands(self, r):
-        r["{foo}a"] = b"\x01\x02\xFF\xFF"
-        r["{foo}b"] = b"\x01\x02\xFF"
+        r["{foo}a"] = b"\x01\x02\xff\xff"
+        r["{foo}b"] = b"\x01\x02\xff"
         r.bitop("and", "{foo}res1", "{foo}a", "{foo}b")
         r.bitop("or", "{foo}res2", "{foo}a", "{foo}b")
         r.bitop("xor", "{foo}res3", "{foo}a", "{foo}b")
