@@ -2893,12 +2893,11 @@ class TestSSL:
     appropriate port.
     """
 
-    CLIENT_CERT, CLIENT_KEY, CA_CERT = get_tls_certificates("cluster")
-
     @pytest_asyncio.fixture()
     def create_client(self, request: FixtureRequest) -> Callable[..., RedisCluster]:
         ssl_url = request.config.option.redis_ssl_url
         ssl_host, ssl_port = urlparse(ssl_url)[1].split(":")
+        self.client_cert, self.client_key, self.ca_cert = get_tls_certificates("cluster")
 
         async def _create_client(mocked: bool = True, **kwargs: Any) -> RedisCluster:
             if mocked:
@@ -3017,24 +3016,24 @@ class TestSSL:
     ) -> None:
         async with await create_client(
             ssl=True,
-            ssl_ca_certs=self.CA_CERT,
+            ssl_ca_certs=self.ca_cert,
             ssl_cert_reqs="required",
-            ssl_certfile=self.CLIENT_CERT,
-            ssl_keyfile=self.CLIENT_KEY,
+            ssl_certfile=self.client_cert,
+            ssl_keyfile=self.client_key,
         ) as rc:
             assert await rc.ping()
 
     async def test_validating_self_signed_string_certificate(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
-        with open(self.CA_CERT) as f:
+        with open(self.ca_cert) as f:
             cert_data = f.read()
 
         async with await create_client(
             ssl=True,
             ssl_ca_data=cert_data,
             ssl_cert_reqs="required",
-            ssl_certfile=self.CLIENT_CERT,
-            ssl_keyfile=self.CLIENT_KEY,
+            ssl_certfile=self.client_cert,
+            ssl_keyfile=self.client_key,
         ) as rc:
             assert await rc.ping()
