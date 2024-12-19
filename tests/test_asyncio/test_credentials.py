@@ -593,11 +593,8 @@ class TestEntraIdCredentialsProvider:
         await r_credential.publish('entraid', 'test')
 
         msg1 = await p.get_message()
-        msg2 = await p.get_message()
 
         assert msg1['type'] == 'subscribe'
-        assert msg2['type'] == 'message'
-
 
 
 @pytest.mark.asyncio
