@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Awaitable, Optional, Union
 
 from redis.exceptions import LockError, LockNotOwnedError
+from redis.typing import Number
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis, RedisCluster
@@ -82,7 +83,7 @@ class Lock:
         timeout: Optional[float] = None,
         sleep: float = 0.1,
         blocking: bool = True,
-        blocking_timeout: Optional[float] = None,
+        blocking_timeout: Optional[Number] = None,
         thread_local: bool = True,
     ):
         """
@@ -167,7 +168,7 @@ class Lock:
     async def acquire(
         self,
         blocking: Optional[bool] = None,
-        blocking_timeout: Optional[float] = None,
+        blocking_timeout: Optional[Number] = None,
         token: Optional[Union[str, bytes]] = None,
     ):
         """
@@ -262,7 +263,7 @@ class Lock:
             raise LockNotOwnedError("Cannot release a lock that's no longer owned")
 
     def extend(
-        self, additional_time: float, replace_ttl: bool = False
+        self, additional_time: Number, replace_ttl: bool = False
     ) -> Awaitable[bool]:
         """
         Adds more time to an already acquired lock.
