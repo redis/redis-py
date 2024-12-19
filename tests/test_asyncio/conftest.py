@@ -1,6 +1,7 @@
 import random
 from contextlib import asynccontextmanager as _asynccontextmanager
 from typing import Union
+from unittest import mock
 
 import pytest
 import pytest_asyncio
@@ -12,8 +13,6 @@ from redis.asyncio.connection import Connection, parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from tests.conftest import REDIS_INFO
-
-from .compat import mock
 
 
 async def _get_info(redis_url):
