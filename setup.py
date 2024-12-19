@@ -14,6 +14,7 @@ setup(
             "redis",
             "redis._parsers",
             "redis.asyncio",
+            "redis.auth",
             "redis.commands",
             "redis.commands.bf",
             "redis.commands.json",

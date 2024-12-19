@@ -53,6 +53,8 @@ from redis.commands import (
     list_or_args,
 )
 from redis.credentials import CredentialProvider
+from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent, ClientType, \
+    AfterSingleConnectionInstantiationEvent, AfterPubSubConnectionInstantiationEvent
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -233,6 +235,7 @@ class Redis(
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
     ):
         """
         Initialize a new Redis client.
@@ -320,11 +323,22 @@ class Redis(
             # This arg only used if no pool is passed in
             self.auto_close_connection_pool = auto_close_connection_pool
             connection_pool = ConnectionPool(**kwargs)
+            event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
+                [connection_pool],
+                ClientType.ASYNC,
+                credential_provider
+            ))
         else:
             # If a pool is passed in, do not close it
             self.auto_close_connection_pool = False
+            event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
+                [connection_pool],
+                ClientType.ASYNC,
+                credential_provider
+            ))
 
         self.connection_pool = connection_pool
+        self._event_dispatcher = event_dispatcher
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
@@ -354,6 +368,10 @@ class Redis(
             async with self._single_conn_lock:
                 if self.connection is None:
                     self.connection = await self.connection_pool.get_connection("_")
+
+            self._event_dispatcher.dispatch(
+                AfterSingleConnectionInstantiationEvent(self.connection, ClientType.ASYNC, self._single_conn_lock)
+            )
         return self
 
     def set_response_callback(self, command: str, callback: ResponseCallbackT):
@@ -521,7 +539,7 @@ class Redis(
         subscribe to channels and listen for messages that get published to
         them.
         """
-        return PubSub(self.connection_pool, **kwargs)
+        return PubSub(self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs)
 
     def monitor(self) -> "Monitor":
         return Monitor(self.connection_pool)
@@ -759,6 +777,7 @@ class PubSub:
         ignore_subscribe_messages: bool = False,
         encoder=None,
         push_handler_func: Optional[Callable] = None,
+        event_dispatcher: Optional["EventDispatcher"] = EventDispatcher(),
     ):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -786,6 +805,7 @@ class PubSub:
         self.pending_unsubscribe_channels = set()
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
+        self._event_dispatcher = event_dispatcher
         self._lock = asyncio.Lock()
 
     async def __aenter__(self):
@@ -875,6 +895,15 @@ class PubSub:
             await self.connection.connect()
         if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
             self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
+
+        self._event_dispatcher.dispatch(
+            AfterPubSubConnectionInstantiationEvent(
+                self.connection,
+                self.connection_pool,
+                ClientType.ASYNC,
+                self._lock
+            )
+        )
 
     async def _disconnect_raise_connect(self, conn, error):
         """
