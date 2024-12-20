@@ -247,8 +247,10 @@ class RegisterReAuthForPooledConnections(EventListenerInterface):
 
             if event.client_type == ClientType.SYNC:
                 event.credential_provider.on_next(self._re_auth)
+                event.credential_provider.on_error(self._raise_on_error)
             else:
                 event.credential_provider.on_next(self._re_auth_async)
+                event.credential_provider.on_error(self._raise_on_error_async)
 
     def _re_auth(self, token):
         for pool in self._event.connection_pools:
@@ -257,6 +259,12 @@ class RegisterReAuthForPooledConnections(EventListenerInterface):
     async def _re_auth_async(self, token):
         for pool in self._event.connection_pools:
             await pool.re_auth_callback(token)
+
+    def _raise_on_error(self, error: Exception):
+        raise error
+
+    async def _raise_on_error_async(self, error: Exception):
+        raise error
 
 
 class RegisterReAuthForSingleConnection(EventListenerInterface):
@@ -273,8 +281,10 @@ class RegisterReAuthForSingleConnection(EventListenerInterface):
 
             if event.client_type == ClientType.SYNC:
                 event.connection.credential_provider.on_next(self._re_auth)
+                event.connection.credential_provider.on_error(self._raise_on_error)
             else:
                 event.connection.credential_provider.on_next(self._re_auth_async)
+                event.connection.credential_provider.on_error(self._raise_on_error_async)
 
     def _re_auth(self, token):
         with self._event.connection_lock:
@@ -286,6 +296,12 @@ class RegisterReAuthForSingleConnection(EventListenerInterface):
             await self._event.connection.send_command('AUTH', token.try_get('oid'), token.get_value())
             await self._event.connection.read_response()
 
+    def _raise_on_error(self, error: Exception):
+        raise error
+
+    async def _raise_on_error_async(self, error: Exception):
+        raise error
+
 
 class RegisterReAuthForAsyncClusterNodes(EventListenerInterface):
     def __init__(self):
@@ -295,10 +311,14 @@ class RegisterReAuthForAsyncClusterNodes(EventListenerInterface):
         if isinstance(event.credential_provider, StreamingCredentialProvider):
             self._event = event
             event.credential_provider.on_next(self._re_auth)
+            event.credential_provider.on_error(self._raise_on_error)
 
     async def _re_auth(self, token: TokenInterface):
         for key in self._event.nodes:
             await self._event.nodes[key].re_auth_callback(token)
+
+    async def _raise_on_error(self, error: Exception):
+        raise error
 
 
 class RegisterReAuthForPubSub(EventListenerInterface):
@@ -320,8 +340,10 @@ class RegisterReAuthForPubSub(EventListenerInterface):
 
             if self._client_type == ClientType.SYNC:
                 self._connection.credential_provider.on_next(self._re_auth)
+                self._connection.credential_provider.on_error(self._raise_on_error)
             else:
                 self._connection.credential_provider.on_next(self._re_auth_async)
+                self._connection.credential_provider.on_error(self._raise_on_error_async)
 
     def _re_auth(self, token: TokenInterface):
         with self._connection_lock:
@@ -336,3 +358,9 @@ class RegisterReAuthForPubSub(EventListenerInterface):
             await self._connection.read_response()
 
         await self._connection_pool.re_auth_callback(token)
+
+    def _raise_on_error(self, error: Exception):
+        raise error
+
+    async def _raise_on_error_async(self, error: Exception):
+        raise error

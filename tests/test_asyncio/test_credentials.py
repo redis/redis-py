@@ -14,6 +14,7 @@ import redis
 from redis import AuthenticationError, DataError, ResponseError, RedisError
 from redis.asyncio import Redis, Connection, ConnectionPool
 from redis.asyncio.retry import Retry
+from redis.auth.err import RequestTokenErr
 from redis.exceptions import ConnectionError
 from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
@@ -533,6 +534,42 @@ class TestStreamingCredentialProvider:
         mock_another_connection.send_command.assert_has_calls([
             call('AUTH', auth_token.try_get('oid'), auth_token.get_value())
         ])
+
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
+    async def test_fails_on_token_renewal(self, credential_provider):
+        credential_provider._token_mgr._idp.request_token.side_effect = [
+            RequestTokenErr,
+            RequestTokenErr,
+            RequestTokenErr,
+            RequestTokenErr
+        ]
+        mock_connection = Mock(spec=Connection)
+        mock_connection.retry = Retry(NoBackoff(), 0)
+        mock_another_connection = Mock(spec=Connection)
+        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection.return_value = mock_connection
+        mock_pool._available_connections = [mock_connection, mock_another_connection]
+
+        await Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+
+        with pytest.raises(RequestTokenErr):
+            await credential_provider.get_credentials()
 
 
 @pytest.mark.asyncio
