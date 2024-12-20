@@ -332,7 +332,7 @@ class Redis(
             # This arg only used if no pool is passed in
             self.auto_close_connection_pool = auto_close_connection_pool
             connection_pool = ConnectionPool(**kwargs)
-            event_dispatcher.dispatch(
+            self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
                     [connection_pool], ClientType.ASYNC, credential_provider
                 )
@@ -340,7 +340,7 @@ class Redis(
         else:
             # If a pool is passed in, do not close it
             self.auto_close_connection_pool = False
-            event_dispatcher.dispatch(
+            self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
                     [connection_pool], ClientType.ASYNC, credential_provider
                 )
