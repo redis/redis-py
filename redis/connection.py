@@ -26,13 +26,11 @@ from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import (
     CredentialProvider,
-    StreamingCredentialProvider,
     UsernamePasswordCredentialProvider,
 )
 from .event import (
     AfterConnectionReleasedEvent,
     EventDispatcher,
-    EventDispatcherInterface,
 )
 from .exceptions import (
     AuthenticationError,
@@ -790,6 +788,7 @@ class CacheProxyConnection(ConnectionInterface):
         self.retry = self._conn.retry
         self.host = self._conn.host
         self.port = self._conn.port
+        self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
         self._cache = cache
         self._cache_lock = threading.Lock()
@@ -972,6 +971,17 @@ class CacheProxyConnection(ConnectionInterface):
                 self._cache.flush()
             else:
                 self._cache.delete_by_redis_keys(data[1])
+
+    def get_protocol(self):
+        return self._conn.get_protocol()
+
+    @property
+    def set_re_auth_token(self, token: TokenInterface):
+        self._conn.set_re_auth_token(token)
+
+    @property
+    def re_auth(self):
+        self._conn.re_auth()
 
 
 class SSLConnection(Connection):

@@ -17,7 +17,6 @@ from packaging.version import Version
 from redis import Sentinel
 from redis.auth.idp import IdentityProviderInterface
 from redis.auth.token import JWToken
-from redis.auth.token_manager import TokenManager
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
@@ -27,7 +26,7 @@ from redis.cache import (
     EvictionPolicy,
 )
 from redis.connection import Connection, ConnectionInterface, SSLConnection, parse_url
-from redis.credentials import CredentialProvider, StreamingCredentialProvider
+from redis.credentials import CredentialProvider
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
 from redis_entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
@@ -329,7 +328,8 @@ def skip_if_nocryptography() -> _TestDecorator:
     #
     #     return pytest.mark.skipif(False, reason="Cryptography dependency found")
     # except ImportError:
-    # TODO: Because JWT library depends on cryptography, now it's always true and tests should be fixed
+    # TODO: Because JWT library depends on cryptography,
+    #  now it's always true and tests should be fixed
     return pytest.mark.skipif(True, reason="No cryptography dependency")
 
 

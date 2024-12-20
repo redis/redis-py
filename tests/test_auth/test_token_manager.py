@@ -205,7 +205,8 @@ class TestTokenManager:
         config = TokenManagerConfig(1, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         mgr.start(mock_listener, skip_initial=True)
-        # Should be less than a 0.1, or it will be flacky due to additional token renewal.
+        # Should be less than a 0.1, or it will be flacky due to
+        # additional token renewal.
         sleep(0.2)
 
         assert len(tokens) == 2
@@ -246,7 +247,8 @@ class TestTokenManager:
         config = TokenManagerConfig(1, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         await mgr.start_async(mock_listener, skip_initial=True)
-        # Should be less than a 0.1, or it will be flacky due to additional token renewal.
+        # Should be less than a 0.1, or it will be flacky
+        # due to additional token renewal.
         await asyncio.sleep(0.2)
 
         assert len(tokens) == 2
@@ -282,7 +284,8 @@ class TestTokenManager:
         config = TokenManagerConfig(1, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         mgr.start(mock_listener)
-        # Should be less than a 0.1, or it will be flacky due to additional token renewal.
+        # Should be less than a 0.1, or it will be flacky
+        # due to additional token renewal.
         sleep(0.08)
 
         assert mock_provider.request_token.call_count in {3, 4}
@@ -321,7 +324,8 @@ class TestTokenManager:
         config = TokenManagerConfig(1, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         await mgr.start_async(mock_listener, block_for_initial=True)
-        # Should be less than a 0.1, or it will be flacky due to additional token renewal.
+        # Should be less than a 0.1, or it will be flacky
+        # due to additional token renewal.
         await asyncio.sleep(0.08)
 
         assert mock_provider.request_token.call_count in {3, 4}

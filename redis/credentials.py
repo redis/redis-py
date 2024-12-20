@@ -15,7 +15,8 @@ class CredentialProvider:
 
     async def get_credentials_async(self) -> Union[Tuple[str], Tuple[str, str]]:
         logger.warning(
-            "This method is added for backward compatability. Please override it in your implementation."
+            "This method is added for backward compatability. "
+            "Please override it in your implementation."
         )
         return self.get_credentials()
 
@@ -28,7 +29,8 @@ class StreamingCredentialProvider(CredentialProvider, ABC):
     @abstractmethod
     def on_next(self, callback: Callable[[Any], None]):
         """
-        Specifies the callback that should be invoked when the next credentials will be retrieved.
+        Specifies the callback that should be invoked
+        when the next credentials will be retrieved.
 
         :param callback: Callback with
         :return:

@@ -20,7 +20,6 @@ from redis.event import (
     AfterPubSubConnectionInstantiationEvent,
     ClientType,
     EventDispatcher,
-    EventDispatcherInterface,
 )
 from redis.exceptions import (
     AskError,

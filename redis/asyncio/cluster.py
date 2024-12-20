@@ -3,7 +3,6 @@ import collections
 import random
 import socket
 import ssl
-import threading
 import warnings
 from typing import (
     Any,
@@ -49,7 +48,6 @@ from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
 from redis.event import (
     AfterAsyncClusterInstantiationEvent,
-    AsyncAfterConnectionReleasedEvent,
     EventDispatcher,
 )
 from redis.exceptions import (

@@ -17,8 +17,7 @@ from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import ConnectionError
 from redis.utils import str_if_bytes
-from redis_entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
-from redis_entraid.identity_provider import create_provider_from_service_principal
+from redis_entraid.cred_provider import EntraIdCredentialsProvider
 from tests.conftest import get_endpoint, skip_if_redis_enterprise
 from tests.test_asyncio.conftest import get_credential_provider
 

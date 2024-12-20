@@ -3,7 +3,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 from time import sleep
-from typing import Any, Awaitable, Callable, Coroutine, Union
+from typing import Any, Awaitable, Callable, Union
 
 from redis.auth.err import RequestTokenErr, TokenRenewalErr
 from redis.auth.idp import IdentityProviderInterface
@@ -78,9 +78,9 @@ class TokenManagerConfig:
 
     def get_expiration_refresh_ratio(self) -> float:
         """
-        Represents the ratio of a token's lifetime at which a refresh should be triggered.
-        For example, a value of 0.75 means the token should be refreshed when 75% of its
-        lifetime has elapsed (or when 25% of its lifetime remains).
+        Represents the ratio of a token's lifetime at which a refresh should be triggered. # noqa: E501
+        For example, a value of 0.75 means the token should be refreshed
+        when 75% of its lifetime has elapsed (or when 25% of its lifetime remains).
 
         :return: float
         """
@@ -89,9 +89,10 @@ class TokenManagerConfig:
 
     def get_lower_refresh_bound_millis(self) -> int:
         """
-        Represents the minimum time in milliseconds before token expiration to trigger a refresh, in milliseconds.
-        This value sets a fixed lower bound for when a token refresh should occur, regardless
-        of the token's total lifetime.
+        Represents the minimum time in milliseconds before token expiration
+        to trigger a refresh, in milliseconds.
+        This value sets a fixed lower bound for when a token refresh should occur,
+        regardless of the token's total lifetime.
         If set to 0 there will be no lower bound and the refresh will be triggered
         based on the expirationRefreshRatio only.
 
@@ -101,7 +102,8 @@ class TokenManagerConfig:
 
     def get_token_request_execution_timeout_in_ms(self) -> int:
         """
-        Represents the maximum time in milliseconds to wait for a token request to complete.
+        Represents the maximum time in milliseconds to wait
+        for a token request to complete.
 
         :return: int
         """

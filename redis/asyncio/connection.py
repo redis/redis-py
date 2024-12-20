@@ -5,7 +5,6 @@ import inspect
 import socket
 import ssl
 import sys
-import threading
 import warnings
 import weakref
 from abc import abstractmethod
@@ -44,7 +43,6 @@ from redis.backoff import NoBackoff
 from redis.connection import DEFAULT_RESP_VERSION
 from redis.credentials import (
     CredentialProvider,
-    StreamingCredentialProvider,
     UsernamePasswordCredentialProvider,
 )
 from redis.exceptions import (

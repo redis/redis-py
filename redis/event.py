@@ -30,7 +30,8 @@ class AsyncEventListenerInterface(ABC):
 
 class EventDispatcherInterface(ABC):
     """
-    Represents a dispatcher that dispatches events to listeners associated with given event.
+    Represents a dispatcher that dispatches events to listeners
+    associated with given event.
     """
 
     @abstractmethod
@@ -132,7 +133,8 @@ class AfterSingleConnectionInstantiationEvent:
     """
     Event that will be fired after single connection instances was created.
 
-    :param connection_lock: For sync client thread-lock should be provided, for async asyncio.Lock
+    :param connection_lock: For sync client thread-lock should be provided,
+    for async asyncio.Lock
     """
 
     def __init__(
@@ -192,7 +194,8 @@ class AfterAsyncClusterInstantiationEvent:
     """
     Event that will be fired after async cluster instance was created.
 
-    Async cluster doesn't use connection pools, instead ClusterNode object manages connections.
+    Async cluster doesn't use connection pools,
+    instead ClusterNode object manages connections.
     """
 
     def __init__(

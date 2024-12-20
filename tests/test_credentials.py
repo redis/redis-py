@@ -1,11 +1,7 @@
 import functools
-import json
-import os
 import random
 import string
 import threading
-from asyncio import Lock as AsyncioLock
-from asyncio import sleep as asyncio_sleep
 from time import sleep
 from typing import Optional, Tuple, Union
 
@@ -13,19 +9,14 @@ import pytest
 import redis
 from mock.mock import Mock, call
 from redis import AuthenticationError, DataError, Redis, ResponseError, asyncio
-from redis.asyncio import Connection
-from redis.asyncio import ConnectionPool as AsyncConnectionPool
-from redis.asyncio import Redis as AsyncRedis
 from redis.auth.err import RequestTokenErr
-from redis.auth.idp import IdentityProviderInterface
 from redis.backoff import NoBackoff
 from redis.connection import ConnectionInterface, ConnectionPool
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import ConnectionError, RedisError
 from redis.retry import Retry
 from redis.utils import str_if_bytes
-from redis_entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
-from redis_entraid.identity_provider import create_provider_from_service_principal
+from redis_entraid.cred_provider import EntraIdCredentialsProvider
 from tests.conftest import (
     _get_client,
     get_credential_provider,

@@ -9,7 +9,8 @@ This interface is the facade of an identity provider
 
 class IdentityProviderInterface(ABC):
     """
-    Receive a token from the identity provider. Receiving a token only works when being authenticated.
+    Receive a token from the identity provider.
+    Receiving a token only works when being authenticated.
     """
 
     @abstractmethod
