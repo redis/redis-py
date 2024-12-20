@@ -484,7 +484,7 @@ with it in a background mode.
 
 To get `EntraIdCredentialProvider` you need to install following package:
 
-`pip install redispy-entraid-credentials`
+`pip install redis-entraid`
 
 To setup a credential provider, first you have to create and configure an IdentityProvider and provide
 TokenAuthConfig object.
