@@ -273,7 +273,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_ciphers: Optional[str] = None,
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
-        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
+        event_dispatcher: Optional[EventDispatcher] = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -370,12 +370,17 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if host and port:
             startup_nodes.append(ClusterNode(host, port, **self.connection_kwargs))
 
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
+
         self.nodes_manager = NodesManager(
             startup_nodes,
             require_full_coverage,
             kwargs,
             address_remap=address_remap,
-            event_dispatcher=event_dispatcher,
+            event_dispatcher=self._event_dispatcher,
         )
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self.read_from_replicas = read_from_replicas
@@ -1140,7 +1145,7 @@ class NodesManager:
         require_full_coverage: bool,
         connection_kwargs: Dict[str, Any],
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
-        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
+        event_dispatcher: Optional[EventDispatcher] = None,
     ) -> None:
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.require_full_coverage = require_full_coverage
@@ -1152,7 +1157,10 @@ class NodesManager:
         self.slots_cache: Dict[int, List["ClusterNode"]] = {}
         self.read_load_balancer = LoadBalancer()
         self._moved_exception: MovedError = None
-        self._event_dispatcher = event_dispatcher
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
 
     def get_node(
         self,

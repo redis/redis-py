@@ -243,7 +243,7 @@ class AbstractConnection(ConnectionInterface):
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         command_packer: Optional[Callable[[], None]] = None,
-        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
+        event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
         Initialize a new Connection.
@@ -259,6 +259,10 @@ class AbstractConnection(ConnectionInterface):
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self.pid = os.getpid()
         self.db = db
         self.client_name = client_name
@@ -298,7 +302,6 @@ class AbstractConnection(ConnectionInterface):
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
-        self._event_dispatcher = event_dispatcher
         self._re_auth_token: Optional[TokenInterface] = None
         try:
             p = int(protocol)

@@ -150,7 +150,7 @@ class AbstractConnection:
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
+        event_dispatcher: Optional[EventDispatcher] = None,
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -159,6 +159,10 @@ class AbstractConnection:
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self.db = db
         self.client_name = client_name
         self.lib_name = lib_name
@@ -198,7 +202,6 @@ class AbstractConnection:
         self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
-        self._event_dispatcher = event_dispatcher
         self._re_auth_token: Optional[TokenInterface] = None
 
         try:

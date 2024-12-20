@@ -220,7 +220,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         protocol: Optional[int] = 2,
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
-        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
+        event_dispatcher: Optional[EventDispatcher] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -235,6 +235,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if `True`, connection pool is not used. In that case `Redis`
             instance use is not thread safe.
         """
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         if not connection_pool:
             if charset is not None:
                 warnings.warn(
@@ -321,7 +325,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)
-            event_dispatcher.dispatch(
+            self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
                     [connection_pool], ClientType.SYNC, credential_provider
                 )
@@ -329,14 +333,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             self.auto_close_connection_pool = True
         else:
             self.auto_close_connection_pool = False
-            event_dispatcher.dispatch(
+            self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
                     [connection_pool], ClientType.SYNC, credential_provider
                 )
             )
 
         self.connection_pool = connection_pool
-        self._event_dispatcher = event_dispatcher
 
         if (cache_config or cache) and self.connection_pool.get_protocol() not in [
             3,
@@ -724,7 +727,7 @@ class PubSub:
         ignore_subscribe_messages: bool = False,
         encoder: Optional["Encoder"] = None,
         push_handler_func: Union[None, Callable[[str], None]] = None,
-        event_dispatcher: Optional["EventDispatcher"] = EventDispatcher(),
+        event_dispatcher: Optional["EventDispatcher"] = None,
     ):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -735,7 +738,10 @@ class PubSub:
         # to lookup channel and pattern names for callback handlers.
         self.encoder = encoder
         self.push_handler_func = push_handler_func
-        self.event_dispatcher = event_dispatcher
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self._lock = threading.Lock()
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()

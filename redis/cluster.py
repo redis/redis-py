@@ -511,7 +511,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
-        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
+        event_dispatcher: Optional[EventDispatcher] = None,
         **kwargs,
     ):
         """
@@ -645,6 +645,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.read_from_replicas = read_from_replicas
         self.reinitialize_counter = 0
         self.reinitialize_steps = reinitialize_steps
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
             from_url=from_url,
@@ -653,7 +657,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             address_remap=address_remap,
             cache=cache,
             cache_config=cache_config,
-            event_dispatcher=event_dispatcher,
+            event_dispatcher=self._event_dispatcher,
             **kwargs,
         )
 
@@ -1340,7 +1344,7 @@ class NodesManager:
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         cache_factory: Optional[CacheFactoryInterface] = None,
-        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
+        event_dispatcher: Optional[EventDispatcher] = None,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1362,7 +1366,10 @@ class NodesManager:
         if lock is None:
             lock = threading.Lock()
         self._lock = lock
-        self._event_dispatcher = event_dispatcher
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self._credential_provider = self.connection_kwargs.get(
             "credential_provider", None
         )
@@ -1719,7 +1726,7 @@ class ClusterPubSub(PubSub):
         host=None,
         port=None,
         push_handler_func=None,
-        event_dispatcher: Optional["EventDispatcher"] = EventDispatcher(),
+        event_dispatcher: Optional["EventDispatcher"] = None,
         **kwargs,
     ):
         """
@@ -1745,11 +1752,15 @@ class ClusterPubSub(PubSub):
         self.cluster = redis_cluster
         self.node_pubsub_mapping = {}
         self._pubsubs_generator = self._pubsubs_generator()
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         super().__init__(
             connection_pool=connection_pool,
             encoder=redis_cluster.encoder,
             push_handler_func=push_handler_func,
-            event_dispatcher=event_dispatcher,
+            event_dispatcher=self._event_dispatcher,
             **kwargs,
         )
 

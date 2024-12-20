@@ -240,7 +240,7 @@ class Redis(
         redis_connect_func=None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
+        event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
         Initialize a new Redis client.
@@ -250,6 +250,10 @@ class Redis(
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
         """
         kwargs: Dict[str, Any]
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         # auto_close_connection_pool only has an effect if connection_pool is
         # None. It is assumed that if connection_pool is not None, the user
         # wants to manage the connection pool themselves.
@@ -343,7 +347,6 @@ class Redis(
             )
 
         self.connection_pool = connection_pool
-        self._event_dispatcher = event_dispatcher
         self.single_connection_client = single_connection_client
         self.connection: Optional[Connection] = None
 
@@ -786,8 +789,12 @@ class PubSub:
         ignore_subscribe_messages: bool = False,
         encoder=None,
         push_handler_func: Optional[Callable] = None,
-        event_dispatcher: Optional["EventDispatcher"] = EventDispatcher(),
+        event_dispatcher: Optional["EventDispatcher"] = None,
     ):
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
         self.ignore_subscribe_messages = ignore_subscribe_messages
@@ -814,7 +821,6 @@ class PubSub:
         self.pending_unsubscribe_channels = set()
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
-        self._event_dispatcher = event_dispatcher
         self._lock = asyncio.Lock()
 
     async def __aenter__(self):
