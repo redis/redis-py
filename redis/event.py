@@ -43,6 +43,16 @@ class EventDispatcherInterface(ABC):
         pass
 
 
+class EventException(Exception):
+    """
+    Exception wrapper that adds an event object into exception context.
+    """
+    def __init__(self, exception: Exception, event: object):
+        self.exception = exception
+        self.event = event
+        super().__init__(exception)
+
+
 class EventDispatcher(EventDispatcherInterface):
     # TODO: Make dispatcher to accept external mappings.
     def __init__(self):
@@ -262,10 +272,10 @@ class RegisterReAuthForPooledConnections(EventListenerInterface):
             await pool.re_auth_callback(token)
 
     def _raise_on_error(self, error: Exception):
-        raise error
+        raise EventException(error, self._event)
 
     async def _raise_on_error_async(self, error: Exception):
-        raise error
+        raise EventException(error, self._event)
 
 
 class RegisterReAuthForSingleConnection(EventListenerInterface):
@@ -307,10 +317,10 @@ class RegisterReAuthForSingleConnection(EventListenerInterface):
             await self._event.connection.read_response()
 
     def _raise_on_error(self, error: Exception):
-        raise error
+        raise EventException(error, self._event)
 
     async def _raise_on_error_async(self, error: Exception):
-        raise error
+        raise EventException(error, self._event)
 
 
 class RegisterReAuthForAsyncClusterNodes(EventListenerInterface):
@@ -328,7 +338,7 @@ class RegisterReAuthForAsyncClusterNodes(EventListenerInterface):
             await self._event.nodes[key].re_auth_callback(token)
 
     async def _raise_on_error(self, error: Exception):
-        raise error
+        raise EventException(error, self._event)
 
 
 class RegisterReAuthForPubSub(EventListenerInterface):
@@ -337,11 +347,13 @@ class RegisterReAuthForPubSub(EventListenerInterface):
         self._connection_pool = None
         self._client_type = None
         self._connection_lock = None
+        self._event = None
 
     def listen(self, event: AfterPubSubConnectionInstantiationEvent):
         if isinstance(
             event.pubsub_connection.credential_provider, StreamingCredentialProvider
         ) and event.pubsub_connection.get_protocol() in [3, "3"]:
+            self._event = event
             self._connection = event.pubsub_connection
             self._connection_pool = event.connection_pool
             self._client_type = event.client_type
@@ -375,7 +387,7 @@ class RegisterReAuthForPubSub(EventListenerInterface):
         await self._connection_pool.re_auth_callback(token)
 
     def _raise_on_error(self, error: Exception):
-        raise error
+        raise EventException(error, self._event)
 
     async def _raise_on_error_async(self, error: Exception):
-        raise error
+        raise EventException(error, self._event)
