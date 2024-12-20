@@ -352,7 +352,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         self._single_connection_client = single_connection_client
         if self._single_connection_client:
             self.connection = self.connection_pool.get_connection("_")
-            event_dispatcher.dispatch(
+            self._event_dispatcher.dispatch(
                 AfterSingleConnectionInstantiationEvent(
                     self.connection, ClientType.SYNC, self.single_connection_lock
                 )
@@ -833,7 +833,7 @@ class PubSub:
             self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
-            self.event_dispatcher.dispatch(
+            self._event_dispatcher.dispatch(
                 AfterPubSubConnectionInstantiationEvent(
                     self.connection, self.connection_pool, ClientType.SYNC, self._lock
                 )
