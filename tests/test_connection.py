@@ -8,6 +8,8 @@ from unittest import mock
 from unittest.mock import call, patch
 
 import pytest
+from redis.credentials import UsernamePasswordCredentialProvider
+
 import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
@@ -441,6 +443,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         proxy_connection = CacheProxyConnection(
             mock_connection, cache, threading.Lock()
@@ -457,6 +460,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         mock_cache.is_cachable.return_value = True
         mock_cache.get.side_effect = [
@@ -541,6 +545,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         another_conn = copy.deepcopy(mock_connection)
         another_conn.can_read.side_effect = [True, False]

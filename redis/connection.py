@@ -24,14 +24,8 @@ from redis.cache import (
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
-from .credentials import (
-    CredentialProvider,
-    UsernamePasswordCredentialProvider,
-)
-from .event import (
-    AfterConnectionReleasedEvent,
-    EventDispatcher,
-)
+from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from .event import AfterConnectionReleasedEvent, EventDispatcher
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,

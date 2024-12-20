@@ -8,7 +8,7 @@ from typing import Optional, Tuple, Union
 import pytest
 import redis
 from mock.mock import Mock, call
-from redis import AuthenticationError, DataError, Redis, ResponseError, asyncio
+from redis import AuthenticationError, DataError, Redis, ResponseError
 from redis.auth.err import RequestTokenErr
 from redis.backoff import NoBackoff
 from redis.connection import ConnectionInterface, ConnectionPool

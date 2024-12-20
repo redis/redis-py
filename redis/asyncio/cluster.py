@@ -46,10 +46,7 @@ from redis.cluster import (
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
-from redis.event import (
-    AfterAsyncClusterInstantiationEvent,
-    EventDispatcher,
-)
+from redis.event import AfterAsyncClusterInstantiationEvent, EventDispatcher
 from redis.exceptions import (
     AskError,
     BusyLoadingError,
