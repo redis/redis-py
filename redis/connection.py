@@ -214,12 +214,10 @@ class ConnectionInterface:
     def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
         pass
 
-    @property
     @abstractmethod
     def set_re_auth_token(self, token: TokenInterface):
         pass
 
-    @property
     @abstractmethod
     def re_auth(self):
         pass
@@ -975,11 +973,9 @@ class CacheProxyConnection(ConnectionInterface):
     def get_protocol(self):
         return self._conn.get_protocol()
 
-    @property
     def set_re_auth_token(self, token: TokenInterface):
         self._conn.set_re_auth_token(token)
 
-    @property
     def re_auth(self):
         self._conn.re_auth()
 
