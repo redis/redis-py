@@ -1,3 +1,2 @@
 async-timeout>=4.0.3
-redispy-entraid-credentials @ git+https://github.com/redis-developer/redispy-entra-credentials.git/@main
 PyJWT~=2.9.0
