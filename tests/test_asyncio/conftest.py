@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager as _asynccontextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Union
+from unittest import mock
 
 import jwt
 import pytest
@@ -27,8 +28,6 @@ from redis_entraid.identity_provider import (
     create_provider_from_service_principal,
 )
 from tests.conftest import REDIS_INFO
-
-from .compat import mock
 
 
 class AuthType(Enum):
