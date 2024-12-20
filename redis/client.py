@@ -340,12 +340,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ]:
             raise RedisError("Client caching is only supported with RESP version 3")
 
-        self._connection_lock = threading.Lock()
+        self.single_connection_lock = threading.Lock()
         self.connection = None
-        if single_connection_client:
+        self._single_connection_client = single_connection_client
+        if self._single_connection_client:
             self.connection = self.connection_pool.get_connection("_")
             event_dispatcher.dispatch(
-                AfterSingleConnectionInstantiationEvent(self.connection, ClientType.SYNC, self._connection_lock)
+                AfterSingleConnectionInstantiationEvent(self.connection, ClientType.SYNC, self.single_connection_lock)
             )
 
         self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
@@ -582,6 +583,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         pool = self.connection_pool
         command_name = args[0]
         conn = self.connection or pool.get_connection(command_name, **options)
+
+        if self._single_connection_client:
+            self.single_connection_lock.acquire()
         try:
             return conn.retry.call_with_retry(
                 lambda: self._send_command_parse_response(
@@ -590,6 +594,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 lambda error: self._disconnect_raise(conn, error),
             )
         finally:
+            if self._single_connection_client:
+                self.single_connection_lock.release()
             if not self.connection:
                 pool.release(conn)
 
