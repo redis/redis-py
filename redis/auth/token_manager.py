@@ -1,3 +1,4 @@
+import logging
 import threading
 from datetime import datetime, timezone
 from time import sleep
@@ -9,6 +10,7 @@ from redis.auth.err import RequestTokenErr, TokenRenewalErr
 from redis.auth.idp import IdentityProviderInterface
 from redis.auth.token import TokenResponse
 
+logger = logging.getLogger(__name__)
 
 class CredentialsListener:
     """
@@ -121,6 +123,7 @@ class TokenManager:
         self._retries = 0
 
     def __del__(self):
+        logger.info("Token manager are disposed")
         self.stop()
 
     def start(
@@ -150,8 +153,9 @@ class TokenManager:
             skip_initial,
             init_event
         )
+        logger.info("Token manager started")
 
-        # Blocks in thread-safe maner.
+        # Blocks in thread-safe manner.
         asyncio.run_coroutine_threadsafe(init_event.wait(), loop).result()
         return self.stop
 
@@ -170,6 +174,7 @@ class TokenManager:
         # Wraps the async callback with async wrapper to schedule with loop.call_later()
         wrapped = _async_to_sync_wrapper(loop, self._renew_token_async, skip_initial, init_event)
         self._init_timer = loop.call_later(initial_delay_in_ms / 1000, wrapped)
+        logger.info("Token manager started")
 
         if block_for_initial:
             await init_event.wait()
@@ -244,6 +249,7 @@ class TokenManager:
                 raise TokenRenewalErr("Requested token is expired")
 
             if self._listener.on_next is None:
+                logger.warning("No registered callback for token renewal task. Renewal cancelled")
                 return
 
             if not skip_initial:
@@ -257,6 +263,7 @@ class TokenManager:
 
             loop = asyncio.get_running_loop()
             self._next_timer = loop.call_later(delay, self._renew_token)
+            logger.info(f"Next token renewal scheduled in {delay} seconds")
             return token_res
         except Exception as e:
             if self._listener.on_error is None:
@@ -284,6 +291,7 @@ class TokenManager:
                 raise TokenRenewalErr("Requested token is expired")
 
             if self._listener.on_next is None:
+                logger.warning("No registered callback for token renewal task. Renewal cancelled")
                 return
 
             if not skip_initial:
@@ -297,11 +305,9 @@ class TokenManager:
 
             loop = asyncio.get_running_loop()
             wrapped = _async_to_sync_wrapper(loop, self._renew_token_async)
+            logger.info(f"Next token renewal scheduled in {delay} seconds")
             loop.call_later(delay, wrapped)
         except Exception as e:
-            if init_event:
-                init_event.set()
-
             if self._listener.on_error is None:
                 raise e
 
