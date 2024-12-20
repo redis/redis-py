@@ -1,4 +1,6 @@
 import functools
+import json
+import os
 import random
 import string
 import threading
@@ -22,11 +24,23 @@ from redis.connection import ConnectionInterface, ConnectionPool
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.retry import Retry
 from redis.utils import str_if_bytes
-from tests.conftest import _get_client, skip_if_redis_enterprise, get_credential_provider
+from tests.conftest import _get_client, skip_if_redis_enterprise, get_credential_provider, get_endpoint
 
 
 @pytest.fixture()
-def r(request):
+def endpoint(request):
+    endpoint_name = request.config.getoption("--endpoint-name")
+
+    try:
+        return get_endpoint(endpoint_name)
+    except FileNotFoundError as e:
+        pytest.skip(
+            f"Skipping scenario test because endpoints file is missing: {str(e)}"
+        )
+
+
+@pytest.fixture()
+def r_entra(request, endpoint):
     credential_provider = request.param.get("cred_provider_class", None)
     single_connection = request.param.get("single_connection_client", False)
 
@@ -38,6 +52,7 @@ def r(request):
         request,
         credential_provider=credential_provider,
         single_connection_client=single_connection,
+        from_url=endpoint
     ) as client:
         yield client
 
@@ -502,7 +517,7 @@ class TestStreamingCredentialProvider:
 @pytest.mark.cp_integration
 class TestEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
-        "r",
+        "r_entra",
         [
             {
                 "cred_provider_class": EntraIdCredentialsProvider,
@@ -518,8 +533,8 @@ class TestEntraIdCredentialsProvider:
     )
     @pytest.mark.onlynoncluster
     @pytest.mark.cp_integration
-    def test_auth_pool_with_credential_provider(self, r: redis.Redis):
-        assert r.ping() is True
+    def test_auth_pool_with_credential_provider(self, r_entra: redis.Redis):
+        assert r_entra.ping() is True
 
     @pytest.mark.parametrize(
         "r",

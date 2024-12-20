@@ -18,12 +18,23 @@ from redis.exceptions import ConnectionError
 from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.utils import str_if_bytes
-from tests.conftest import skip_if_redis_enterprise
+from tests.conftest import skip_if_redis_enterprise, get_endpoint
 from tests.test_asyncio.conftest import get_credential_provider
 
 
+@pytest.fixture()
+def endpoint(request):
+    endpoint_name = request.config.getoption("--endpoint-name")
+
+    try:
+        return get_endpoint(endpoint_name)
+    except FileNotFoundError as e:
+        pytest.skip(
+            f"Skipping scenario test because endpoints file is missing: {str(e)}"
+        )
+
 @pytest_asyncio.fixture()
-async def r_credential(request, create_redis):
+async def r_credential(request, create_redis, endpoint):
     credential_provider = request.param.get("cred_provider_class", None)
 
     if credential_provider is not None:
@@ -33,7 +44,7 @@ async def r_credential(request, create_redis):
         "credential_provider": credential_provider,
     }
 
-    return await create_redis(**kwargs)
+    return await create_redis(url=endpoint, **kwargs)
 
 
 @pytest_asyncio.fixture()
