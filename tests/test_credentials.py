@@ -537,7 +537,7 @@ class TestEntraIdCredentialsProvider:
         assert r_entra.ping() is True
 
     @pytest.mark.parametrize(
-        "r",
+        "r_entra",
         [
             {
                 "cred_provider_class": EntraIdCredentialsProvider,
@@ -553,8 +553,8 @@ class TestEntraIdCredentialsProvider:
     )
     @pytest.mark.onlynoncluster
     @pytest.mark.cp_integration
-    def test_auth_pipeline_with_credential_provider(self, r: redis.Redis):
-        pipe = r.pipeline()
+    def test_auth_pipeline_with_credential_provider(self, r_entra: redis.Redis):
+        pipe = r_entra.pipeline()
 
         pipe.set('key', 'value')
         pipe.get('key')
@@ -562,7 +562,7 @@ class TestEntraIdCredentialsProvider:
         assert pipe.execute() == [True, b'value']
 
     @pytest.mark.parametrize(
-        "r",
+        "r_entra",
         [
             {
                 "cred_provider_class": EntraIdCredentialsProvider,
@@ -572,12 +572,12 @@ class TestEntraIdCredentialsProvider:
     )
     @pytest.mark.onlynoncluster
     @pytest.mark.cp_integration
-    def test_auth_pubsub_with_credential_provider(self, r: redis.Redis):
-        p = r.pubsub()
+    def test_auth_pubsub_with_credential_provider(self, r_entra: redis.Redis):
+        p = r_entra.pubsub()
         p.subscribe("entraid")
 
-        r.publish('entraid', 'test')
-        r.publish('entraid', 'test')
+        r_entra.publish('entraid', 'test')
+        r_entra.publish('entraid', 'test')
 
         assert p.get_message()['type'] == 'subscribe'
         assert p.get_message()['type'] == 'message'
@@ -587,7 +587,7 @@ class TestEntraIdCredentialsProvider:
 @pytest.mark.cp_integration
 class TestClusterEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
-        "r",
+        "r_entra",
         [
             {
                 "cred_provider_class": EntraIdCredentialsProvider,
@@ -603,5 +603,5 @@ class TestClusterEntraIdCredentialsProvider:
     )
     @pytest.mark.onlycluster
     @pytest.mark.cp_integration
-    def test_auth_pool_with_credential_provider(self, r: redis.Redis):
-        assert r.ping() is True
+    def test_auth_pool_with_credential_provider(self, r_entra: redis.Redis):
+        assert r_entra.ping() is True
