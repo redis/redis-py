@@ -74,13 +74,6 @@ async def create_redis(request):
         if "protocol" not in url and kwargs.get("protocol") is None:
             kwargs["protocol"] = request.config.getoption("--protocol")
 
-        endpoints_config = os.getenv("REDIS_ENDPOINTS_CONFIG_PATH", None)
-        if endpoints_config is not None:
-            with open(endpoints_config, "r") as f:
-                data = json.load(f)
-                db = next(iter(data.values()))
-                url = db["endpoints"][0]
-
         cluster_mode = REDIS_INFO["cluster_enabled"]
         if not cluster_mode:
             single = kwargs.pop("single_connection_client", False) or single_connection
