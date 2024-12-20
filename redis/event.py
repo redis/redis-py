@@ -47,6 +47,7 @@ class EventException(Exception):
     """
     Exception wrapper that adds an event object into exception context.
     """
+
     def __init__(self, exception: Exception, event: object):
         self.exception = exception
         self.event = event
