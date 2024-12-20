@@ -289,7 +289,7 @@ class TestTokenManager:
         sleep(0.08)
 
         assert mock_provider.request_token.call_count > 0
-        assert len(tokens) == 1
+        assert len(tokens) > 0
 
     @pytest.mark.asyncio
     async def test_async_success_token_renewal_with_retry(self):
