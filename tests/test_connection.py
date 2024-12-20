@@ -8,8 +8,6 @@ from unittest import mock
 from unittest.mock import call, patch
 
 import pytest
-from redis.credentials import UsernamePasswordCredentialProvider
-
 import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
@@ -30,6 +28,7 @@ from redis.connection import (
     UnixDomainSocketConnection,
     parse_url,
 )
+from redis.credentials import UsernamePasswordCredentialProvider
 from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
