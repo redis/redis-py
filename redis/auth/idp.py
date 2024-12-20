@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+
 from redis.auth.token import TokenInterface
 
 """
@@ -20,6 +21,7 @@ class IdentityProviderConfigInterface(ABC):
     """
     Configuration class that provides a configured identity provider.
     """
+
     @abstractmethod
     def get_provider(self) -> IdentityProviderInterface:
         pass

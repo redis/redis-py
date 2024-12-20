@@ -47,7 +47,11 @@ from redis.cluster import (
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
-from redis.event import EventDispatcher, AsyncAfterConnectionReleasedEvent, AfterAsyncClusterInstantiationEvent
+from redis.event import (
+    AfterAsyncClusterInstantiationEvent,
+    AsyncAfterConnectionReleasedEvent,
+    EventDispatcher,
+)
 from redis.exceptions import (
     AskError,
     BusyLoadingError,
@@ -60,10 +64,11 @@ from redis.exceptions import (
     MaxConnectionsError,
     MovedError,
     RedisClusterException,
+    RedisError,
     ResponseError,
     SlotNotCoveredError,
     TimeoutError,
-    TryAgainError, RedisError,
+    TryAgainError,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
@@ -1097,12 +1102,13 @@ class ClusterNode:
         while self._free:
             conn = self._free.popleft()
             await conn.retry.call_with_retry(
-                lambda: conn.send_command('AUTH', token.try_get('oid'), token.get_value()),
-                lambda error: self._mock(error)
+                lambda: conn.send_command(
+                    "AUTH", token.try_get("oid"), token.get_value()
+                ),
+                lambda error: self._mock(error),
             )
             await conn.retry.call_with_retry(
-                lambda: conn.read_response(),
-                lambda error: self._mock(error)
+                lambda: conn.read_response(), lambda error: self._mock(error)
             )
             tmp_queue.append(conn)
 
@@ -1272,7 +1278,8 @@ class NodesManager:
                     self._event_dispatcher.dispatch(
                         AfterAsyncClusterInstantiationEvent(
                             self.nodes_cache,
-                            self.connection_kwargs.get("credential_provider", None))
+                            self.connection_kwargs.get("credential_provider", None),
+                        )
                     )
                     cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
                 except ResponseError:

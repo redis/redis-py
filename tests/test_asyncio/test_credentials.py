@@ -1,25 +1,25 @@
 import functools
 import random
 import string
+from asyncio import Lock as AsyncLock
+from asyncio import sleep as async_sleep
 from typing import Optional, Tuple, Union
 
 import pytest
 import pytest_asyncio
-from redis_entraid.cred_provider import TokenAuthConfig, EntraIdCredentialsProvider
-from redis_entraid.identity_provider import create_provider_from_service_principal
-from mock.mock import Mock, call
-from asyncio import Lock as AsyncLock, sleep as async_sleep
-
 import redis
-from redis import AuthenticationError, DataError, ResponseError, RedisError
-from redis.asyncio import Redis, Connection, ConnectionPool
+from mock.mock import Mock, call
+from redis import AuthenticationError, DataError, RedisError, ResponseError
+from redis.asyncio import Connection, ConnectionPool, Redis
 from redis.asyncio.retry import Retry
 from redis.auth.err import RequestTokenErr
-from redis.exceptions import ConnectionError
 from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from redis.exceptions import ConnectionError
 from redis.utils import str_if_bytes
-from tests.conftest import skip_if_redis_enterprise, get_endpoint
+from redis_entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
+from redis_entraid.identity_provider import create_provider_from_service_principal
+from tests.conftest import get_endpoint, skip_if_redis_enterprise
 from tests.test_asyncio.conftest import get_credential_provider
 
 
@@ -33,6 +33,7 @@ def endpoint(request):
         pytest.skip(
             f"Skipping scenario test because endpoints file is missing: {str(e)}"
         )
+
 
 @pytest_asyncio.fixture()
 async def r_credential(request, create_redis, endpoint):
@@ -318,6 +319,7 @@ class TestUsernamePasswordCredentialProvider:
         assert await r2.auth(provider.password) is True
         assert await r2.ping() is True
 
+
 @pytest.mark.asyncio
 @pytest.mark.onlynoncluster
 class TestStreamingCredentialProvider:
@@ -350,7 +352,9 @@ class TestStreamingCredentialProvider:
             auth_token = token
             async with mock_pool._lock:
                 for conn in mock_pool._available_connections:
-                    await conn.send_command('AUTH', token.try_get('oid'), token.get_value())
+                    await conn.send_command(
+                        "AUTH", token.try_get("oid"), token.get_value()
+                    )
                     await conn.read_response()
 
         mock_pool.re_auth_callback = re_auth_callback
@@ -363,12 +367,12 @@ class TestStreamingCredentialProvider:
         await credential_provider.get_credentials_async()
         await async_sleep(0.5)
 
-        mock_connection.send_command.assert_has_calls([
-            call('AUTH', auth_token.try_get('oid'), auth_token.get_value())
-        ])
-        mock_another_connection.send_command.assert_has_calls([
-            call('AUTH', auth_token.try_get('oid'), auth_token.get_value())
-        ])
+        mock_connection.send_command.assert_has_calls(
+            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+        )
+        mock_another_connection.send_command.assert_has_calls(
+            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+        )
 
     @pytest.mark.parametrize(
         "credential_provider",
@@ -387,14 +391,20 @@ class TestStreamingCredentialProvider:
         mock_another_connection = Mock(spec=Connection)
         mock_another_connection.retry = Retry(NoBackoff(), 3)
         mock_failed_connection = Mock(spec=Connection)
-        mock_failed_connection.read_response.side_effect = ConnectionError("Failed auth")
+        mock_failed_connection.read_response.side_effect = ConnectionError(
+            "Failed auth"
+        )
         mock_failed_connection.retry = Retry(NoBackoff(), 3)
         mock_pool = Mock(spec=ConnectionPool)
         mock_pool.connection_kwargs = {
             "credential_provider": credential_provider,
         }
         mock_pool.get_connection.return_value = mock_connection
-        mock_pool._available_connections = [mock_connection, mock_another_connection, mock_failed_connection]
+        mock_pool._available_connections = [
+            mock_connection,
+            mock_another_connection,
+            mock_failed_connection,
+        ]
         mock_pool._lock = AsyncLock()
 
         async def _raise(error: RedisError):
@@ -404,12 +414,13 @@ class TestStreamingCredentialProvider:
             async with mock_pool._lock:
                 for conn in mock_pool._available_connections:
                     await conn.retry.call_with_retry(
-                        lambda: conn.send_command('AUTH', token.try_get('oid'), token.get_value()),
-                        lambda error: _raise(error)
+                        lambda: conn.send_command(
+                            "AUTH", token.try_get("oid"), token.get_value()
+                        ),
+                        lambda error: _raise(error),
                     )
                     await conn.retry.call_with_retry(
-                        lambda: conn.read_response(),
-                        lambda error: _raise(error)
+                        lambda: conn.read_response(), lambda error: _raise(error)
                     )
 
         mock_pool.re_auth_callback = re_auth_callback
@@ -449,7 +460,10 @@ class TestStreamingCredentialProvider:
         mock_pool.connection_kwargs = {
             "credential_provider": credential_provider,
         }
-        mock_pool.get_connection.side_effect = [mock_pubsub_connection, mock_another_connection]
+        mock_pool.get_connection.side_effect = [
+            mock_pubsub_connection,
+            mock_another_connection,
+        ]
         mock_pool._available_connections = [mock_another_connection]
         mock_pool._lock = AsyncLock()
         auth_token = None
@@ -459,7 +473,9 @@ class TestStreamingCredentialProvider:
             auth_token = token
             async with mock_pool._lock:
                 for conn in mock_pool._available_connections:
-                    await conn.send_command('AUTH', token.try_get('oid'), token.get_value())
+                    await conn.send_command(
+                        "AUTH", token.try_get("oid"), token.get_value()
+                    )
                     await conn.read_response()
 
         mock_pool.re_auth_callback = re_auth_callback
@@ -469,17 +485,19 @@ class TestStreamingCredentialProvider:
             credential_provider=credential_provider,
         )
         p = r.pubsub()
-        await p.subscribe('test')
+        await p.subscribe("test")
         await credential_provider.get_credentials_async()
         await async_sleep(0.5)
 
-        mock_pubsub_connection.send_command.assert_has_calls([
-            call('SUBSCRIBE', 'test', check_health=True),
-            call('AUTH', auth_token.try_get('oid'), auth_token.get_value()),
-        ])
-        mock_another_connection.send_command.assert_has_calls([
-            call('AUTH', auth_token.try_get('oid'), auth_token.get_value())
-        ])
+        mock_pubsub_connection.send_command.assert_has_calls(
+            [
+                call("SUBSCRIBE", "test", check_health=True),
+                call("AUTH", auth_token.try_get("oid"), auth_token.get_value()),
+            ]
+        )
+        mock_another_connection.send_command.assert_has_calls(
+            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+        )
 
     @pytest.mark.parametrize(
         "credential_provider",
@@ -504,7 +522,10 @@ class TestStreamingCredentialProvider:
         mock_pool.connection_kwargs = {
             "credential_provider": credential_provider,
         }
-        mock_pool.get_connection.side_effect = [mock_pubsub_connection, mock_another_connection]
+        mock_pool.get_connection.side_effect = [
+            mock_pubsub_connection,
+            mock_another_connection,
+        ]
         mock_pool._available_connections = [mock_another_connection]
         mock_pool._lock = AsyncLock()
         auth_token = None
@@ -514,7 +535,9 @@ class TestStreamingCredentialProvider:
             auth_token = token
             async with mock_pool._lock:
                 for conn in mock_pool._available_connections:
-                    await conn.send_command('AUTH', token.try_get('oid'), token.get_value())
+                    await conn.send_command(
+                        "AUTH", token.try_get("oid"), token.get_value()
+                    )
                     await conn.read_response()
 
         mock_pool.re_auth_callback = re_auth_callback
@@ -524,16 +547,18 @@ class TestStreamingCredentialProvider:
             credential_provider=credential_provider,
         )
         p = r.pubsub()
-        await p.subscribe('test')
+        await p.subscribe("test")
         await credential_provider.get_credentials_async()
         await async_sleep(0.5)
 
-        mock_pubsub_connection.send_command.assert_has_calls([
-            call('SUBSCRIBE', 'test', check_health=True),
-        ])
-        mock_another_connection.send_command.assert_has_calls([
-            call('AUTH', auth_token.try_get('oid'), auth_token.get_value())
-        ])
+        mock_pubsub_connection.send_command.assert_has_calls(
+            [
+                call("SUBSCRIBE", "test", check_health=True),
+            ]
+        )
+        mock_another_connection.send_command.assert_has_calls(
+            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+        )
 
     @pytest.mark.parametrize(
         "credential_provider",
@@ -551,7 +576,7 @@ class TestStreamingCredentialProvider:
             RequestTokenErr,
             RequestTokenErr,
             RequestTokenErr,
-            RequestTokenErr
+            RequestTokenErr,
         ]
         mock_connection = Mock(spec=Connection)
         mock_connection.retry = Retry(NoBackoff(), 0)
@@ -584,7 +609,7 @@ class TestEntraIdCredentialsProvider:
             },
             {
                 "cred_provider_class": EntraIdCredentialsProvider,
-                "cred_provider_kwargs": {"block_for_initial": True}
+                "cred_provider_kwargs": {"block_for_initial": True},
             },
         ],
         ids=["blocked", "non-blocked"],
@@ -604,7 +629,7 @@ class TestEntraIdCredentialsProvider:
             },
             {
                 "cred_provider_class": EntraIdCredentialsProvider,
-                "cred_provider_kwargs": {"block_for_initial": True}
+                "cred_provider_kwargs": {"block_for_initial": True},
             },
         ],
         ids=["blocked", "non-blocked"],
@@ -616,10 +641,10 @@ class TestEntraIdCredentialsProvider:
     async def test_async_pipeline_with_credential_provider(self, r_credential: Redis):
         pipe = r_credential.pipeline()
 
-        await pipe.set('key', 'value')
-        await pipe.get('key')
+        await pipe.set("key", "value")
+        await pipe.get("key")
 
-        assert await pipe.execute() == [True, b'value']
+        assert await pipe.execute() == [True, b"value"]
 
     @pytest.mark.parametrize(
         "r_credential",
@@ -633,16 +658,18 @@ class TestEntraIdCredentialsProvider:
     @pytest.mark.asyncio
     @pytest.mark.onlynoncluster
     @pytest.mark.cp_integration
-    async def test_async_auth_pubsub_with_credential_provider(self, r_credential: Redis):
+    async def test_async_auth_pubsub_with_credential_provider(
+        self, r_credential: Redis
+    ):
         p = r_credential.pubsub()
         await p.subscribe("entraid")
 
-        await r_credential.publish('entraid', 'test')
-        await r_credential.publish('entraid', 'test')
+        await r_credential.publish("entraid", "test")
+        await r_credential.publish("entraid", "test")
 
         msg1 = await p.get_message()
 
-        assert msg1['type'] == 'subscribe'
+        assert msg1["type"] == "subscribe"
 
 
 @pytest.mark.asyncio
@@ -657,7 +684,7 @@ class TestClusterEntraIdCredentialsProvider:
             },
             {
                 "cred_provider_class": EntraIdCredentialsProvider,
-                "cred_provider_kwargs": {"block_for_initial": True}
+                "cred_provider_kwargs": {"block_for_initial": True},
             },
         ],
         ids=["blocked", "non-blocked"],

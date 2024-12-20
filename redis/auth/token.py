@@ -1,8 +1,7 @@
 from abc import ABC, abstractmethod
-
-import jwt
 from datetime import datetime, timezone
 
+import jwt
 from redis.auth.err import InvalidTokenSchemaErr
 
 
@@ -44,7 +43,9 @@ class TokenResponse:
 
 
 class SimpleToken(TokenInterface):
-    def __init__(self, value: str, expires_at_ms: float, received_at_ms: float, claims: dict) -> None:
+    def __init__(
+        self, value: str, expires_at_ms: float, received_at_ms: float, claims: dict
+    ) -> None:
         self.value = value
         self.expires_at = expires_at_ms
         self.received_at = received_at_ms
@@ -77,30 +78,34 @@ class SimpleToken(TokenInterface):
 
 class JWToken(TokenInterface):
 
-    REQUIRED_FIELDS = {'exp'}
+    REQUIRED_FIELDS = {"exp"}
 
     def __init__(self, token: str):
         self._value = token
         self._decoded = jwt.decode(
             self._value,
             options={"verify_signature": False},
-            algorithms=[jwt.get_unverified_header(self._value).get('alg')]
+            algorithms=[jwt.get_unverified_header(self._value).get("alg")],
         )
         self._validate_token()
 
     def is_expired(self) -> bool:
-        exp = self._decoded['exp']
+        exp = self._decoded["exp"]
         if exp == -1:
             return False
 
-        return self._decoded['exp'] * 1000 <= datetime.now(timezone.utc).timestamp() * 1000
+        return (
+            self._decoded["exp"] * 1000 <= datetime.now(timezone.utc).timestamp() * 1000
+        )
 
     def ttl(self) -> float:
-        exp = self._decoded['exp']
+        exp = self._decoded["exp"]
         if exp == -1:
             return -1
 
-        return self._decoded['exp'] * 1000 - datetime.now(timezone.utc).timestamp() * 1000
+        return (
+            self._decoded["exp"] * 1000 - datetime.now(timezone.utc).timestamp() * 1000
+        )
 
     def try_get(self, key: str) -> str:
         return self._decoded.get(key)
@@ -109,7 +114,7 @@ class JWToken(TokenInterface):
         return self._value
 
     def get_expires_at_ms(self) -> float:
-        return float(self._decoded['exp'] * 1000)
+        return float(self._decoded["exp"] * 1000)
 
     def get_received_at_ms(self) -> float:
         return datetime.now(timezone.utc).timestamp() * 1000

@@ -1,10 +1,9 @@
+import asyncio
 import logging
 import threading
 from datetime import datetime, timezone
 from time import sleep
-from typing import Callable, Any, Awaitable, Coroutine, Union
-
-import asyncio
+from typing import Any, Awaitable, Callable, Coroutine, Union
 
 from redis.auth.err import RequestTokenErr, TokenRenewalErr
 from redis.auth.idp import IdentityProviderInterface
@@ -12,11 +11,13 @@ from redis.auth.token import TokenResponse
 
 logger = logging.getLogger(__name__)
 
+
 class CredentialsListener:
     """
     Listeners that will be notified on events related to credentials.
     Accepts callbacks and awaitable callbacks.
     """
+
     def __init__(self):
         self._on_next = None
         self._on_error = None
@@ -62,15 +63,17 @@ class RetryPolicy:
 
 class TokenManagerConfig:
     def __init__(
-            self,
-            expiration_refresh_ratio: float,
-            lower_refresh_bound_millis: int,
-            token_request_execution_timeout_in_ms: int,
-            retry_policy: RetryPolicy,
+        self,
+        expiration_refresh_ratio: float,
+        lower_refresh_bound_millis: int,
+        token_request_execution_timeout_in_ms: int,
+        retry_policy: RetryPolicy,
     ):
         self._expiration_refresh_ratio = expiration_refresh_ratio
         self._lower_refresh_bound_millis = lower_refresh_bound_millis
-        self._token_request_execution_timeout_in_ms = token_request_execution_timeout_in_ms
+        self._token_request_execution_timeout_in_ms = (
+            token_request_execution_timeout_in_ms
+        )
         self._retry_policy = retry_policy
 
     def get_expiration_refresh_ratio(self) -> float:
@@ -114,7 +117,9 @@ class TokenManagerConfig:
 
 
 class TokenManager:
-    def __init__(self, identity_provider: IdentityProviderInterface, config: TokenManagerConfig):
+    def __init__(
+        self, identity_provider: IdentityProviderInterface, config: TokenManagerConfig
+    ):
         self._idp = identity_provider
         self._config = config
         self._next_timer = None
@@ -127,9 +132,9 @@ class TokenManager:
         self.stop()
 
     def start(
-            self,
-            listener: CredentialsListener,
-            skip_initial: bool = False,
+        self,
+        listener: CredentialsListener,
+        skip_initial: bool = False,
     ) -> Callable[[], None]:
         self._listener = listener
 
@@ -139,19 +144,14 @@ class TokenManager:
             # Run loop in a separate thread to unblock main thread.
             loop = asyncio.new_event_loop()
             thread = threading.Thread(
-                target=_start_event_loop_in_thread,
-                args=(loop,),
-                daemon=True
+                target=_start_event_loop_in_thread, args=(loop,), daemon=True
             )
             thread.start()
 
         # Event to block for initial execution.
         init_event = asyncio.Event()
         self._init_timer = loop.call_later(
-            0,
-            self._renew_token,
-            skip_initial,
-            init_event
+            0, self._renew_token, skip_initial, init_event
         )
         logger.info("Token manager started")
 
@@ -160,11 +160,11 @@ class TokenManager:
         return self.stop
 
     async def start_async(
-            self,
-            listener: CredentialsListener,
-            block_for_initial: bool = False,
-            initial_delay_in_ms: float = 0,
-            skip_initial: bool = False,
+        self,
+        listener: CredentialsListener,
+        block_for_initial: bool = False,
+        initial_delay_in_ms: float = 0,
+        skip_initial: bool = False,
     ) -> Callable[[], None]:
         self._listener = listener
 
@@ -172,7 +172,9 @@ class TokenManager:
         init_event = asyncio.Event()
 
         # Wraps the async callback with async wrapper to schedule with loop.call_later()
-        wrapped = _async_to_sync_wrapper(loop, self._renew_token_async, skip_initial, init_event)
+        wrapped = _async_to_sync_wrapper(
+            loop, self._renew_token_async, skip_initial, init_event
+        )
         self._init_timer = loop.call_later(initial_delay_in_ms / 1000, wrapped)
         logger.info("Token manager started")
 
@@ -207,7 +209,9 @@ class TokenManager:
         except RequestTokenErr as e:
             if self._retries < self._config.get_retry_policy().get_max_attempts():
                 self._retries += 1
-                await asyncio.sleep(self._config.get_retry_policy().get_delay_in_ms() / 1000)
+                await asyncio.sleep(
+                    self._config.get_retry_policy().get_delay_in_ms() / 1000
+                )
                 return await self.acquire_token_async(force_refresh)
             else:
                 raise e
@@ -223,16 +227,27 @@ class TokenManager:
         return 0 if delay < 0 else delay / 1000
 
     def _delay_for_lower_refresh(self, expire_date: float):
-        return (expire_date - self._config.get_lower_refresh_bound_millis() -
-                (datetime.now(timezone.utc).timestamp() * 1000))
+        return (
+            expire_date
+            - self._config.get_lower_refresh_bound_millis()
+            - (datetime.now(timezone.utc).timestamp() * 1000)
+        )
 
     def _delay_for_ratio_refresh(self, expire_date: float, issue_date: float):
         token_ttl = expire_date - issue_date
-        refresh_before = token_ttl - (token_ttl * self._config.get_expiration_refresh_ratio())
+        refresh_before = token_ttl - (
+            token_ttl * self._config.get_expiration_refresh_ratio()
+        )
 
-        return expire_date - refresh_before - (datetime.now(timezone.utc).timestamp() * 1000)
+        return (
+            expire_date
+            - refresh_before
+            - (datetime.now(timezone.utc).timestamp() * 1000)
+        )
 
-    def _renew_token(self, skip_initial: bool = False, init_event: asyncio.Event = None):
+    def _renew_token(
+        self, skip_initial: bool = False, init_event: asyncio.Event = None
+    ):
         """
         Task to renew token from identity provider.
         Schedules renewal tasks based on token TTL.
@@ -242,14 +257,16 @@ class TokenManager:
             token_res = self.acquire_token(force_refresh=True)
             delay = self._calculate_renewal_delay(
                 token_res.get_token().get_expires_at_ms(),
-                token_res.get_token().get_received_at_ms()
+                token_res.get_token().get_received_at_ms(),
             )
 
             if token_res.get_token().is_expired():
                 raise TokenRenewalErr("Requested token is expired")
 
             if self._listener.on_next is None:
-                logger.warning("No registered callback for token renewal task. Renewal cancelled")
+                logger.warning(
+                    "No registered callback for token renewal task. Renewal cancelled"
+                )
                 return
 
             if not skip_initial:
@@ -274,7 +291,9 @@ class TokenManager:
             if init_event:
                 init_event.set()
 
-    async def _renew_token_async(self, skip_initial: bool = False, init_event: asyncio.Event = None):
+    async def _renew_token_async(
+        self, skip_initial: bool = False, init_event: asyncio.Event = None
+    ):
         """
         Async task to renew tokens from identity provider.
         Schedules renewal tasks based on token TTL.
@@ -284,14 +303,16 @@ class TokenManager:
             token_res = await self.acquire_token_async(force_refresh=True)
             delay = self._calculate_renewal_delay(
                 token_res.get_token().get_expires_at_ms(),
-                token_res.get_token().get_received_at_ms()
+                token_res.get_token().get_received_at_ms(),
             )
 
             if token_res.get_token().is_expired():
                 raise TokenRenewalErr("Requested token is expired")
 
             if self._listener.on_next is None:
-                logger.warning("No registered callback for token renewal task. Renewal cancelled")
+                logger.warning(
+                    "No registered callback for token renewal task. Renewal cancelled"
+                )
                 return
 
             if not skip_initial:

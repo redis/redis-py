@@ -29,7 +29,7 @@ from typing import (
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
 from ..auth.token import TokenInterface
-from ..event import EventDispatcher, AsyncAfterConnectionReleasedEvent
+from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
 from ..utils import format_error_message
 
 # the functionality is available in 3.11.x but has a major issue before
@@ -42,7 +42,11 @@ else:
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.connection import DEFAULT_RESP_VERSION
-from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider, StreamingCredentialProvider
+from redis.credentials import (
+    CredentialProvider,
+    StreamingCredentialProvider,
+    UsernamePasswordCredentialProvider,
+)
 from redis.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -151,7 +155,7 @@ class AbstractConnection:
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        event_dispatcher: Optional[EventDispatcher] = EventDispatcher()
+        event_dispatcher: Optional[EventDispatcher] = EventDispatcher(),
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -678,9 +682,9 @@ class AbstractConnection:
     async def re_auth(self):
         if self._re_auth_token is not None:
             await self.send_command(
-                'AUTH',
-                self._re_auth_token.try_get('oid'),
-                self._re_auth_token.get_value()
+                "AUTH",
+                self._re_auth_token.try_get("oid"),
+                self._re_auth_token.get_value(),
             )
             await self.read_response()
             self._re_auth_token = None
@@ -1143,7 +1147,9 @@ class ConnectionPool:
         # not doing so is an error that will cause an exception here.
         self._in_use_connections.remove(connection)
         self._available_connections.append(connection)
-        await self._event_dispatcher.dispatch_async(AsyncAfterConnectionReleasedEvent(connection))
+        await self._event_dispatcher.dispatch_async(
+            AsyncAfterConnectionReleasedEvent(connection)
+        )
 
     async def disconnect(self, inuse_connections: bool = True):
         """
@@ -1181,12 +1187,13 @@ class ConnectionPool:
         async with self._lock:
             for conn in self._available_connections:
                 await conn.retry.call_with_retry(
-                    lambda: conn.send_command('AUTH', token.try_get('oid'), token.get_value()),
-                    lambda error: self._mock(error)
+                    lambda: conn.send_command(
+                        "AUTH", token.try_get("oid"), token.get_value()
+                    ),
+                    lambda error: self._mock(error),
                 )
                 await conn.retry.call_with_retry(
-                    lambda: conn.read_response(),
-                    lambda error: self._mock(error)
+                    lambda: conn.read_response(), lambda error: self._mock(error)
                 )
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)

@@ -2,10 +2,10 @@ import asyncio
 import threading
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import List, Union, Optional
+from typing import List, Optional, Union
 
 from redis.auth.token import TokenInterface
-from redis.credentials import StreamingCredentialProvider, CredentialProvider
+from redis.credentials import CredentialProvider, StreamingCredentialProvider
 
 
 class EventListenerInterface(ABC):
@@ -58,12 +58,8 @@ class EventDispatcher(EventDispatcherInterface):
             AfterSingleConnectionInstantiationEvent: [
                 RegisterReAuthForSingleConnection()
             ],
-            AfterPubSubConnectionInstantiationEvent: [
-                RegisterReAuthForPubSub()
-            ],
-            AfterAsyncClusterInstantiationEvent: [
-                RegisterReAuthForAsyncClusterNodes()
-            ],
+            AfterPubSubConnectionInstantiationEvent: [RegisterReAuthForPubSub()],
+            AfterAsyncClusterInstantiationEvent: [RegisterReAuthForAsyncClusterNodes()],
             AsyncAfterConnectionReleasedEvent: [
                 AsyncReAuthConnectionListener(),
             ],
@@ -100,8 +96,8 @@ class AsyncAfterConnectionReleasedEvent(AfterConnectionReleasedEvent):
 
 
 class ClientType(Enum):
-    SYNC = "sync",
-    ASYNC = "async",
+    SYNC = ("sync",)
+    ASYNC = ("async",)
 
 
 class AfterPooledConnectionsInstantiationEvent:
@@ -110,10 +106,10 @@ class AfterPooledConnectionsInstantiationEvent:
     """
 
     def __init__(
-            self,
-            connection_pools: List,
-            client_type: ClientType,
-            credential_provider: Optional[CredentialProvider] = None,
+        self,
+        connection_pools: List,
+        client_type: ClientType,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         self._connection_pools = connection_pools
         self._client_type = client_type
@@ -138,11 +134,12 @@ class AfterSingleConnectionInstantiationEvent:
 
     :param connection_lock: For sync client thread-lock should be provided, for async asyncio.Lock
     """
+
     def __init__(
-            self,
-            connection,
-            client_type: ClientType,
-            connection_lock: Union[threading.Lock, asyncio.Lock]
+        self,
+        connection,
+        client_type: ClientType,
+        connection_lock: Union[threading.Lock, asyncio.Lock],
     ):
         self._connection = connection
         self._client_type = client_type
@@ -163,11 +160,11 @@ class AfterSingleConnectionInstantiationEvent:
 
 class AfterPubSubConnectionInstantiationEvent:
     def __init__(
-            self,
-            pubsub_connection,
-            connection_pool,
-            client_type: ClientType,
-            connection_lock: Union[threading.Lock, asyncio.Lock]
+        self,
+        pubsub_connection,
+        connection_pool,
+        client_type: ClientType,
+        connection_lock: Union[threading.Lock, asyncio.Lock],
     ):
         self._pubsub_connection = pubsub_connection
         self._connection_pool = connection_pool
@@ -197,10 +194,11 @@ class AfterAsyncClusterInstantiationEvent:
 
     Async cluster doesn't use connection pools, instead ClusterNode object manages connections.
     """
+
     def __init__(
-            self,
-            nodes: dict,
-            credential_provider: Optional[CredentialProvider] = None,
+        self,
+        nodes: dict,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         self._nodes = nodes
         self._credential_provider = credential_provider
@@ -272,11 +270,14 @@ class RegisterReAuthForSingleConnection(EventListenerInterface):
     Listener that registers a re-authentication callback for single connection.
     Required by :class:`StreamingCredentialProvider`.
     """
+
     def __init__(self):
         self._event = None
 
     def listen(self, event: AfterSingleConnectionInstantiationEvent):
-        if isinstance(event.connection.credential_provider, StreamingCredentialProvider):
+        if isinstance(
+            event.connection.credential_provider, StreamingCredentialProvider
+        ):
             self._event = event
 
             if event.client_type == ClientType.SYNC:
@@ -284,16 +285,22 @@ class RegisterReAuthForSingleConnection(EventListenerInterface):
                 event.connection.credential_provider.on_error(self._raise_on_error)
             else:
                 event.connection.credential_provider.on_next(self._re_auth_async)
-                event.connection.credential_provider.on_error(self._raise_on_error_async)
+                event.connection.credential_provider.on_error(
+                    self._raise_on_error_async
+                )
 
     def _re_auth(self, token):
         with self._event.connection_lock:
-            self._event.connection.send_command('AUTH', token.try_get('oid'), token.get_value())
+            self._event.connection.send_command(
+                "AUTH", token.try_get("oid"), token.get_value()
+            )
             self._event.connection.read_response()
 
     async def _re_auth_async(self, token):
         async with self._event.connection_lock:
-            await self._event.connection.send_command('AUTH', token.try_get('oid'), token.get_value())
+            await self._event.connection.send_command(
+                "AUTH", token.try_get("oid"), token.get_value()
+            )
             await self._event.connection.read_response()
 
     def _raise_on_error(self, error: Exception):
@@ -329,10 +336,9 @@ class RegisterReAuthForPubSub(EventListenerInterface):
         self._connection_lock = None
 
     def listen(self, event: AfterPubSubConnectionInstantiationEvent):
-        if (
-                isinstance(event.pubsub_connection.credential_provider, StreamingCredentialProvider)
-                and event.pubsub_connection.get_protocol() in [3, "3"]
-        ):
+        if isinstance(
+            event.pubsub_connection.credential_provider, StreamingCredentialProvider
+        ) and event.pubsub_connection.get_protocol() in [3, "3"]:
             self._connection = event.pubsub_connection
             self._connection_pool = event.connection_pool
             self._client_type = event.client_type
@@ -343,18 +349,24 @@ class RegisterReAuthForPubSub(EventListenerInterface):
                 self._connection.credential_provider.on_error(self._raise_on_error)
             else:
                 self._connection.credential_provider.on_next(self._re_auth_async)
-                self._connection.credential_provider.on_error(self._raise_on_error_async)
+                self._connection.credential_provider.on_error(
+                    self._raise_on_error_async
+                )
 
     def _re_auth(self, token: TokenInterface):
         with self._connection_lock:
-            self._connection.send_command('AUTH', token.try_get('oid'), token.get_value())
+            self._connection.send_command(
+                "AUTH", token.try_get("oid"), token.get_value()
+            )
             self._connection.read_response()
 
         self._connection_pool.re_auth_callback(token)
 
     async def _re_auth_async(self, token: TokenInterface):
         async with self._connection_lock:
-            await self._connection.send_command('AUTH', token.try_get('oid'), token.get_value())
+            await self._connection.send_command(
+                "AUTH", token.try_get("oid"), token.get_value()
+            )
             await self._connection.read_response()
 
         await self._connection_pool.re_auth_callback(token)

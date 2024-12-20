@@ -53,8 +53,13 @@ from redis.commands import (
     list_or_args,
 )
 from redis.credentials import CredentialProvider
-from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent, ClientType, \
-    AfterSingleConnectionInstantiationEvent, AfterPubSubConnectionInstantiationEvent
+from redis.event import (
+    AfterPooledConnectionsInstantiationEvent,
+    AfterPubSubConnectionInstantiationEvent,
+    AfterSingleConnectionInstantiationEvent,
+    ClientType,
+    EventDispatcher,
+)
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -323,19 +328,19 @@ class Redis(
             # This arg only used if no pool is passed in
             self.auto_close_connection_pool = auto_close_connection_pool
             connection_pool = ConnectionPool(**kwargs)
-            event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
-                [connection_pool],
-                ClientType.ASYNC,
-                credential_provider
-            ))
+            event_dispatcher.dispatch(
+                AfterPooledConnectionsInstantiationEvent(
+                    [connection_pool], ClientType.ASYNC, credential_provider
+                )
+            )
         else:
             # If a pool is passed in, do not close it
             self.auto_close_connection_pool = False
-            event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
-                [connection_pool],
-                ClientType.ASYNC,
-                credential_provider
-            ))
+            event_dispatcher.dispatch(
+                AfterPooledConnectionsInstantiationEvent(
+                    [connection_pool], ClientType.ASYNC, credential_provider
+                )
+            )
 
         self.connection_pool = connection_pool
         self._event_dispatcher = event_dispatcher
@@ -370,7 +375,9 @@ class Redis(
                     self.connection = await self.connection_pool.get_connection("_")
 
             self._event_dispatcher.dispatch(
-                AfterSingleConnectionInstantiationEvent(self.connection, ClientType.ASYNC, self._single_conn_lock)
+                AfterSingleConnectionInstantiationEvent(
+                    self.connection, ClientType.ASYNC, self._single_conn_lock
+                )
             )
         return self
 
@@ -539,7 +546,9 @@ class Redis(
         subscribe to channels and listen for messages that get published to
         them.
         """
-        return PubSub(self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs)
+        return PubSub(
+            self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs
+        )
 
     def monitor(self) -> "Monitor":
         return Monitor(self.connection_pool)
@@ -898,10 +907,7 @@ class PubSub:
 
         self._event_dispatcher.dispatch(
             AfterPubSubConnectionInstantiationEvent(
-                self.connection,
-                self.connection_pool,
-                ClientType.ASYNC,
-                self._lock
+                self.connection, self.connection_pool, ClientType.ASYNC, self._lock
             )
         )
 

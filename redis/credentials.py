@@ -1,6 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Union, Callable, Any
+from typing import Any, Callable, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,9 @@ class CredentialProvider:
         raise NotImplementedError("get_credentials must be implemented")
 
     async def get_credentials_async(self) -> Union[Tuple[str], Tuple[str, str]]:
-        logger.warning("This method is added for backward compatability. Please override it in your implementation.")
+        logger.warning(
+            "This method is added for backward compatability. Please override it in your implementation."
+        )
         return self.get_credentials()
 
 
@@ -22,6 +24,7 @@ class StreamingCredentialProvider(CredentialProvider, ABC):
     """
     Credential provider that streams credentials in the background.
     """
+
     @abstractmethod
     def on_next(self, callback: Callable[[Any], None]):
         """

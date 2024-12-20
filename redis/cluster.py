@@ -15,8 +15,13 @@ from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
 from redis.connection import ConnectionPool, DefaultParser, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
-from redis.event import EventDispatcher, EventDispatcherInterface, AfterPooledConnectionsInstantiationEvent, ClientType, \
-    AfterPubSubConnectionInstantiationEvent
+from redis.event import (
+    AfterPooledConnectionsInstantiationEvent,
+    AfterPubSubConnectionInstantiationEvent,
+    ClientType,
+    EventDispatcher,
+    EventDispatcherInterface,
+)
 from redis.exceptions import (
     AskError,
     AuthenticationError,
@@ -1359,7 +1364,9 @@ class NodesManager:
             lock = threading.Lock()
         self._lock = lock
         self._event_dispatcher = event_dispatcher
-        self._credential_provider = self.connection_kwargs.get("credential_provider", None)
+        self._credential_provider = self.connection_kwargs.get(
+            "credential_provider", None
+        )
         self.initialize()
 
     def get_node(self, host=None, port=None, node_name=None):
@@ -1496,9 +1503,7 @@ class NodesManager:
 
         self._event_dispatcher.dispatch(
             AfterPooledConnectionsInstantiationEvent(
-                connection_pools,
-                ClientType.SYNC,
-                self._credential_provider
+                connection_pools, ClientType.SYNC, self._credential_provider
             )
         )
 
@@ -1834,10 +1839,7 @@ class ClusterPubSub(PubSub):
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
             self.event_dispatcher.dispatch(
                 AfterPubSubConnectionInstantiationEvent(
-                    self.connection,
-                    self.connection_pool,
-                    ClientType.SYNC,
-                    self._lock
+                    self.connection, self.connection_pool, ClientType.SYNC, self._lock
                 )
             )
         connection = self.connection

@@ -2897,7 +2897,9 @@ class TestSSL:
     def create_client(self, request: FixtureRequest) -> Callable[..., RedisCluster]:
         ssl_url = request.config.option.redis_ssl_url
         ssl_host, ssl_port = urlparse(ssl_url)[1].split(":")
-        self.client_cert, self.client_key, self.ca_cert = get_tls_certificates("cluster")
+        self.client_cert, self.client_key, self.ca_cert = get_tls_certificates(
+            "cluster"
+        )
 
         async def _create_client(mocked: bool = True, **kwargs: Any) -> RedisCluster:
             if mocked:

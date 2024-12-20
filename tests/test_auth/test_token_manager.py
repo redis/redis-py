@@ -1,19 +1,18 @@
+import asyncio
 from datetime import datetime, timezone
 from time import sleep
 from unittest.mock import Mock
 
-import asyncio
 import pytest
-
 from redis.auth.err import RequestTokenErr, TokenRenewalErr
 from redis.auth.idp import IdentityProviderInterface
+from redis.auth.token import SimpleToken
 from redis.auth.token_manager import (
     CredentialsListener,
-    TokenManagerConfig,
     RetryPolicy,
-    TokenManager
+    TokenManager,
+    TokenManagerConfig,
 )
-from redis.auth.token import SimpleToken
 
 
 class TestTokenManager:
@@ -26,32 +25,36 @@ class TestTokenManager:
         ids=[
             "Refresh ratio = 0.9,  2 tokens in 0,1 second",
             "Refresh ratio = 0.28, 4 tokens in 0,1 second",
-        ]
+        ],
     )
     def test_success_token_renewal(self, exp_refresh_ratio, tokens_refreshed):
         tokens = []
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.side_effect = [
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 100,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-            {"oid": 'test'}),
+                {"oid": "test"},
+            ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 130,
                 (datetime.now(timezone.utc).timestamp() * 1000) + 30,
-                {"oid": 'test'}),
+                {"oid": "test"},
+            ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 160,
                 (datetime.now(timezone.utc).timestamp() * 1000) + 60,
-                {"oid": 'test'}),
+                {"oid": "test"},
+            ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 190,
                 (datetime.now(timezone.utc).timestamp() * 1000) + 90,
-                {"oid": 'test'}),
+                {"oid": "test"},
+            ),
         ]
 
         def on_next(token):
@@ -78,33 +81,39 @@ class TestTokenManager:
         ids=[
             "Refresh ratio = 0.9,  2 tokens in 0,1 second",
             "Refresh ratio = 0.28, 4 tokens in 0,1 second",
-        ]
+        ],
     )
     @pytest.mark.asyncio
-    async def test_async_success_token_renewal(self, exp_refresh_ratio, tokens_refreshed):
+    async def test_async_success_token_renewal(
+        self, exp_refresh_ratio, tokens_refreshed
+    ):
         tokens = []
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.side_effect = [
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 100,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-            {"oid": 'test'}),
+                {"oid": "test"},
+            ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 130,
                 (datetime.now(timezone.utc).timestamp() * 1000) + 30,
-                {"oid": 'test'}),
+                {"oid": "test"},
+            ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 160,
                 (datetime.now(timezone.utc).timestamp() * 1000) + 60,
-                {"oid": 'test'}),
+                {"oid": "test"},
+            ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 190,
                 (datetime.now(timezone.utc).timestamp() * 1000) + 90,
-                {"oid": 'test'}),
+                {"oid": "test"},
+            ),
         ]
 
         async def on_next(token):
@@ -131,17 +140,19 @@ class TestTokenManager:
         ids=[
             "Block for initial, callback will triggered once",
             "Non blocked, callback wont be triggered",
-        ]
+        ],
     )
     @pytest.mark.asyncio
-    async def test_async_request_token_blocking_behaviour(self, block_for_initial, tokens_acquired):
+    async def test_async_request_token_blocking_behaviour(
+        self, block_for_initial, tokens_acquired
+    ):
         tokens = []
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.return_value = SimpleToken(
-            'value',
+            "value",
             (datetime.now(timezone.utc).timestamp() * 1000) + 100,
             (datetime.now(timezone.utc).timestamp() * 1000),
-            {"oid": 'test'}
+            {"oid": "test"},
         )
 
         async def on_next(token):
@@ -164,22 +175,22 @@ class TestTokenManager:
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.side_effect = [
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 100,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": 'test'}
+                {"oid": "test"},
             ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 120,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": 'test'}
+                {"oid": "test"},
             ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 140,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": 'test'}
+                {"oid": "test"},
             ),
         ]
 
@@ -205,22 +216,22 @@ class TestTokenManager:
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.side_effect = [
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 100,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": 'test'}
+                {"oid": "test"},
             ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 120,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": 'test'}
+                {"oid": "test"},
             ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 140,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": 'test'}
+                {"oid": "test"},
             ),
         ]
 
@@ -247,17 +258,17 @@ class TestTokenManager:
             RequestTokenErr,
             RequestTokenErr,
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 100,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": 'test'}
+                {"oid": "test"},
             ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 100,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": 'test'}
-            )
+                {"oid": "test"},
+            ),
         ]
 
         def on_next(token):
@@ -285,17 +296,17 @@ class TestTokenManager:
             RequestTokenErr,
             RequestTokenErr,
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 100,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": 'test'}
+                {"oid": "test"},
             ),
             SimpleToken(
-                'value',
+                "value",
                 (datetime.now(timezone.utc).timestamp() * 1000) + 100,
                 (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": 'test'}
-            )
+                {"oid": "test"},
+            ),
         ]
 
         async def on_next(token):
@@ -320,10 +331,10 @@ class TestTokenManager:
         tokens = []
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.return_value = SimpleToken(
-            'value',
+            "value",
             (datetime.now(timezone.utc).timestamp() * 1000) + 1000,
             (datetime.now(timezone.utc).timestamp() * 1000),
-            {"oid": 'test'}
+            {"oid": "test"},
         )
 
         def on_next(token):
@@ -346,10 +357,10 @@ class TestTokenManager:
         tokens = []
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.return_value = SimpleToken(
-            'value',
+            "value",
             (datetime.now(timezone.utc).timestamp() * 1000) + 1000,
             (datetime.now(timezone.utc).timestamp() * 1000),
-            {"oid": 'test'}
+            {"oid": "test"},
         )
 
         async def on_next(token):
@@ -440,10 +451,10 @@ class TestTokenManager:
         errors = []
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.return_value = SimpleToken(
-            'value',
+            "value",
             (datetime.now(timezone.utc).timestamp() * 1000) - 100,
             (datetime.now(timezone.utc).timestamp() * 1000) - 1000,
-            {"oid": 'test'}
+            {"oid": "test"},
         )
 
         def on_error(error: TokenRenewalErr):
@@ -467,10 +478,10 @@ class TestTokenManager:
         errors = []
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.return_value = SimpleToken(
-            'value',
+            "value",
             (datetime.now(timezone.utc).timestamp() * 1000) - 100,
             (datetime.now(timezone.utc).timestamp() * 1000) - 1000,
-            {"oid": 'test'}
+            {"oid": "test"},
         )
 
         async def on_error(error: TokenRenewalErr):
@@ -493,10 +504,10 @@ class TestTokenManager:
         errors = []
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.return_value = SimpleToken(
-            'value',
+            "value",
             (datetime.now(timezone.utc).timestamp() * 1000) + 1000,
             (datetime.now(timezone.utc).timestamp() * 1000),
-            {"oid": 'test'}
+            {"oid": "test"},
         )
 
         def on_next(token):
@@ -524,10 +535,10 @@ class TestTokenManager:
         errors = []
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.return_value = SimpleToken(
-            'value',
+            "value",
             (datetime.now(timezone.utc).timestamp() * 1000) + 1000,
             (datetime.now(timezone.utc).timestamp() * 1000),
-            {"oid": 'test'}
+            {"oid": "test"},
         )
 
         async def on_next(token):

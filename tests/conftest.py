@@ -12,18 +12,12 @@ from urllib.parse import urlparse
 
 import jwt
 import pytest
-from redis_entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
-from redis_entraid.identity_provider import ManagedIdentityType, create_provider_from_managed_identity, \
-    create_provider_from_service_principal, ManagedIdentityIdType
-
-from redis.auth.token import JWToken
-from redis.auth.token_manager import TokenManager
-from redis.credentials import CredentialProvider, StreamingCredentialProvider
-
 import redis
 from packaging.version import Version
 from redis import Sentinel
 from redis.auth.idp import IdentityProviderInterface
+from redis.auth.token import JWToken
+from redis.auth.token_manager import TokenManager
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
@@ -33,8 +27,16 @@ from redis.cache import (
     EvictionPolicy,
 )
 from redis.connection import Connection, ConnectionInterface, SSLConnection, parse_url
+from redis.credentials import CredentialProvider, StreamingCredentialProvider
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
+from redis_entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
+from redis_entraid.identity_provider import (
+    ManagedIdentityIdType,
+    ManagedIdentityType,
+    create_provider_from_managed_identity,
+    create_provider_from_service_principal,
+)
 from tests.ssl_utils import get_tls_certificates
 
 REDIS_INFO = {}
@@ -604,11 +606,8 @@ def cache_key(request) -> CacheKey:
 
 def mock_identity_provider() -> IdentityProviderInterface:
     mock_provider = Mock(spec=IdentityProviderInterface)
-    token = {
-        "exp": datetime.now(timezone.utc).timestamp() + 3600,
-        "oid": "username"
-    }
-    encoded = jwt.encode(token, "secret", algorithm='HS256')
+    token = {"exp": datetime.now(timezone.utc).timestamp() + 3600, "oid": "username"}
+    encoded = jwt.encode(token, "secret", algorithm="HS256")
     jwt_token = JWToken(encoded)
     mock_provider.request_token.return_value = jwt_token
     return mock_provider
@@ -650,7 +649,7 @@ def _get_managed_identity_provider(request):
         id_type=id_type,
         id_value=id_value,
         authority=authority,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -670,7 +669,7 @@ def _get_service_principal_provider(request):
         timeout = None
 
     if isinstance(scopes, str):
-        scopes = scopes.split(',')
+        scopes = scopes.split(",")
 
     return create_provider_from_service_principal(
         client_id=client_id,
@@ -679,7 +678,7 @@ def _get_service_principal_provider(request):
         timeout=timeout,
         token_kwargs=token_kwargs,
         authority=authority,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -728,15 +727,13 @@ def get_endpoint(endpoint_name: str):
     endpoints_config = os.getenv("REDIS_ENDPOINTS_CONFIG_PATH", None)
 
     if not (endpoints_config and os.path.exists(endpoints_config)):
-        raise FileNotFoundError(
-            f"Endpoints config file not found: {endpoints_config}"
-        )
+        raise FileNotFoundError(f"Endpoints config file not found: {endpoints_config}")
 
     try:
-        with open(endpoints_config, 'r') as f:
+        with open(endpoints_config, "r") as f:
             data = json.load(f)
             db = data[endpoint_name]
-            return db['endpoints'][0]
+            return db["endpoints"][0]
     except Exception as e:
         raise ValueError(
             f"Failed to load endpoints config file: {endpoints_config}"

@@ -9,13 +9,8 @@ from typing import Union
 import jwt
 import pytest
 import pytest_asyncio
-from redis_entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
-from redis_entraid.identity_provider import ManagedIdentityType, create_provider_from_managed_identity, \
-    create_provider_from_service_principal, ManagedIdentityIdType
-from mock.mock import Mock
-from redis.credentials import CredentialProvider
-
 import redis.asyncio as redis
+from mock.mock import Mock
 from packaging.version import Version
 from redis.asyncio import Sentinel
 from redis.asyncio.client import Monitor
@@ -24,9 +19,18 @@ from redis.asyncio.retry import Retry
 from redis.auth.idp import IdentityProviderInterface
 from redis.auth.token import JWToken
 from redis.backoff import NoBackoff
+from redis.credentials import CredentialProvider
+from redis_entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
+from redis_entraid.identity_provider import (
+    ManagedIdentityIdType,
+    ManagedIdentityType,
+    create_provider_from_managed_identity,
+    create_provider_from_service_principal,
+)
 from tests.conftest import REDIS_INFO
 
 from .compat import mock
+
 
 class AuthType(Enum):
     MANAGED_IDENTITY = "managed_identity"
@@ -72,10 +76,10 @@ async def create_redis(request):
 
         endpoints_config = os.getenv("REDIS_ENDPOINTS_CONFIG_PATH", None)
         if endpoints_config is not None:
-            with open(endpoints_config, 'r') as f:
+            with open(endpoints_config, "r") as f:
                 data = json.load(f)
                 db = next(iter(data.values()))
-                url = db['endpoints'][0]
+                url = db["endpoints"][0]
 
         cluster_mode = REDIS_INFO["cluster_enabled"]
         if not cluster_mode:
@@ -242,11 +246,8 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
 
 def mock_identity_provider() -> IdentityProviderInterface:
     mock_provider = Mock(spec=IdentityProviderInterface)
-    token = {
-        "exp": datetime.now(timezone.utc).timestamp() + 3600,
-        "oid": "username"
-    }
-    encoded = jwt.encode(token, "secret", algorithm='HS256')
+    token = {"exp": datetime.now(timezone.utc).timestamp() + 3600, "oid": "username"}
+    encoded = jwt.encode(token, "secret", algorithm="HS256")
     jwt_token = JWToken(encoded)
     mock_provider.request_token.return_value = jwt_token
     return mock_provider
@@ -288,7 +289,7 @@ def _get_managed_identity_provider(request):
         id_type=id_type,
         id_value=id_value,
         authority=authority,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -308,7 +309,7 @@ def _get_service_principal_provider(request):
         timeout = None
 
     if isinstance(scopes, str):
-        scopes = scopes.split(',')
+        scopes = scopes.split(",")
 
     return create_provider_from_service_principal(
         client_id=client_id,
@@ -317,7 +318,7 @@ def _get_service_principal_provider(request):
         timeout=timeout,
         token_kwargs=token_kwargs,
         authority=authority,
-        **kwargs
+        **kwargs,
     )
 
 

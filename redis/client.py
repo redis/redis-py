@@ -28,8 +28,13 @@ from redis.connection import (
     UnixDomainSocketConnection,
 )
 from redis.credentials import CredentialProvider
-from redis.event import EventDispatcher, AfterPooledConnectionsInstantiationEvent, ClientType, \
-    AfterSingleConnectionInstantiationEvent, AfterPubSubConnectionInstantiationEvent
+from redis.event import (
+    AfterPooledConnectionsInstantiationEvent,
+    AfterPubSubConnectionInstantiationEvent,
+    AfterSingleConnectionInstantiationEvent,
+    ClientType,
+    EventDispatcher,
+)
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -317,19 +322,19 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)
-            event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
-                [connection_pool],
-                ClientType.SYNC,
-                credential_provider
-            ))
+            event_dispatcher.dispatch(
+                AfterPooledConnectionsInstantiationEvent(
+                    [connection_pool], ClientType.SYNC, credential_provider
+                )
+            )
             self.auto_close_connection_pool = True
         else:
             self.auto_close_connection_pool = False
-            event_dispatcher.dispatch(AfterPooledConnectionsInstantiationEvent(
-                [connection_pool],
-                ClientType.SYNC,
-                credential_provider
-            ))
+            event_dispatcher.dispatch(
+                AfterPooledConnectionsInstantiationEvent(
+                    [connection_pool], ClientType.SYNC, credential_provider
+                )
+            )
 
         self.connection_pool = connection_pool
         self._event_dispatcher = event_dispatcher
@@ -346,7 +351,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if self._single_connection_client:
             self.connection = self.connection_pool.get_connection("_")
             event_dispatcher.dispatch(
-                AfterSingleConnectionInstantiationEvent(self.connection, ClientType.SYNC, self.single_connection_lock)
+                AfterSingleConnectionInstantiationEvent(
+                    self.connection, ClientType.SYNC, self.single_connection_lock
+                )
             )
 
         self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
@@ -520,7 +527,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         subscribe to channels and listen for messages that get published to
         them.
         """
-        return PubSub(self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs)
+        return PubSub(
+            self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs
+        )
 
     def monitor(self):
         return Monitor(self.connection_pool)
@@ -821,10 +830,7 @@ class PubSub:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
             self.event_dispatcher.dispatch(
                 AfterPubSubConnectionInstantiationEvent(
-                    self.connection,
-                    self.connection_pool,
-                    ClientType.SYNC,
-                    self._lock
+                    self.connection, self.connection_pool, ClientType.SYNC, self._lock
                 )
             )
         connection = self.connection
