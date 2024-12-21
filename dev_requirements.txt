@@ -16,4 +16,4 @@ uvloop
 vulture>=2.3.0
 wheel>=0.30.0
 numpy>=1.24.0
-redispy-entraid-credentials @ git+https://github.com/redis-developer/redispy-entra-credentials.git/@main
+redis-entraid @ git+https://github.com/redis-developer/redis-py-entraid.git@main
