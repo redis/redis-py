@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "redis"
+version = "5.3.0b4"
+description = "Python client for Redis database and key-value store"
+readme = "README.md"
+keywords = ["Redis", "key-value store", "database"]
+license = {text = "MIT"}
+authors = [
+    {name = "Redis Inc.", email = "oss@redis.com"}
+]
+requires-python = ">=3.8"
+dependencies = [
+    "async-timeout>=4.0.3; python_full_version < \"3.11.3\"",
+    "PyJWT~=2.9.0"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy"
+]
+
+[project.urls]
+Homepage = "https://github.com/redis/redis-py"
+Documentation = "https://redis.readthedocs.io/en/latest/"
+Repository = "https://github.com/redis/redis-py"
+Issues = "https://github.com/redis/redis-py/issues"
+Changes = "https://github.com/redis/redis-py/releases"
+
+[project.optional-dependencies]
+hiredis = ["hiredis>=3.0.0"]
+ocsp = ["cryptography>=36.0.1", "pyopenssl==23.2.1", "requests>=2.31.0"]
+dev = [
+    "black==24.3.0",
+    "click==8.0.4",
+    "flake8-isort",
+    "flake8",
+    "flynt~=0.69.0",
+    "invoke==2.2.0",
+    "mock",
+    "packaging>=20.4",
+    "pytest",
+    "pytest-asyncio>=0.23.0,<0.24.0",
+    "pytest-cov",
+    "pytest-profiling==1.7.0",
+    "pytest-timeout",
+    "ujson>=4.2.0",
+    "uvloop",
+    "vulture>=2.3.0",
+    "wheel>=0.30.0",
+    "numpy>=1.24.0",
+    "redis-entraid>=0.1.0b1"
+]
+docbuild = [
+    "sphinx>=5.0,<7.0",
+    "docutils<0.18",
+    "nbsphinx",
+    "sphinx_gallery",
+    "ipython",
+    "sphinx-autodoc-typehints",
+    "furo",
+    "pandoc"
+]
+doctest = [
+    "numpy",
+    "pandas",
+    "requests",
+    "sentence_transformers",
+    "tabulate"
+]
+
+[tool.setuptools.packages.find]
+where = ["redis", "tests"]
+
+[tool.setuptools.package-data]
+redis = ["py.typed"]

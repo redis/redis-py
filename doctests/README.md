@@ -13,12 +13,10 @@ See https://github.com/redis-stack/redis-stack-website#readme for more details.
 ## How to test examples
 
 Examples are standalone python scripts, committed to the *doctests* directory. These scripts assume that the
-```requirements.txt``` and ```dev_requirements.txt``` from this repository have been installed, as per below.
+dependencies from this repository have been installed, as per below.
 
 ```bash
-pip install -r requirements.txt
-pip install -r dev_requirements.txt
-pip install -r doctests/requirements.txt
+pip install .[dev,doctest]
 ```
 
 Note - the CI process, runs the basic ```black``` and ```isort``` linters against the examples. Assuming
