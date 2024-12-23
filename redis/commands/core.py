@@ -2496,7 +2496,7 @@ class BasicKeyCommands(CommandsProtocol):
 
     def unwatch(self) -> None:
         """
-        Unwatches the value at key ``name``, or None of the key doesn't exist
+        Unwatches all previously watched keys for a transaction
 
         For more information see https://redis.io/commands/unwatch
         """
