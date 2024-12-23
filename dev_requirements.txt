@@ -16,4 +16,4 @@ uvloop
 vulture>=2.3.0
 wheel>=0.30.0
 numpy>=1.24.0
-redis-entraid @ git+https://github.com/redis-developer/redis-py-entraid.git@main
+redis-entraid==0.1.0b1
