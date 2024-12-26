@@ -2678,7 +2678,10 @@ def test_vector_search_with_default_dialect(client):
     assert 2 in q.get_args()
 
     res = client.ft().search(q, query_params={"vec": "aaaaaaaa"})
-    assert res.total == 2
+    if is_resp2_connection(client):
+        assert res.total == 2
+    else:
+        assert res["total_results"] == 2
 
 
 @pytest.mark.redismod
@@ -2696,13 +2699,19 @@ def test_search_query_with_different_dialects(client):
     query = "@name: James Brown"
     q = Query(query)
     res = client.ft().search(q)
-    assert res.total == 1
+    if is_resp2_connection(client):
+        assert res.total == 1
+    else:
+        assert res["total_results"] == 1
 
     # Query with explicit DIALECT 1
     query = "@name: James Brown"
     q = Query(query).dialect(1)
     res = client.ft().search(q)
-    assert res.total == 0
+    if is_resp2_connection(client):
+        assert res.total == 0
+    else:
+        assert res["total_results"] == 0
 
 
 def _assert_search_result(client, result, expected_doc_ids):
