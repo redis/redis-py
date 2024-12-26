@@ -2507,9 +2507,7 @@ def test_search_missing_fields(client):
     )
 
     with pytest.raises(redis.exceptions.ResponseError) as e:
-        client.ft().search(
-            Query("ismissing(@title)").return_field("id").no_content()
-        )
+        client.ft().search(Query("ismissing(@title)").return_field("id").no_content())
     assert "to be defined with 'INDEXMISSING'" in e.value.args[0]
 
     res = client.ft().search(
@@ -2578,9 +2576,7 @@ def test_search_empty_fields(client):
     )
 
     with pytest.raises(redis.exceptions.ResponseError) as e:
-        client.ft().search(
-            Query("@title:''").return_field("id").no_content()
-        )
+        client.ft().search(Query("@title:''").return_field("id").no_content())
     assert "Use `INDEXEMPTY` in field creation" in e.value.args[0]
 
     res = client.ft().search(
@@ -2595,14 +2591,10 @@ def test_search_empty_fields(client):
     )
     _assert_search_result(client, res, ["property:1", "property:3"])
 
-    res = client.ft().search(
-        Query("@description:''").return_field("id").no_content()
-    )
+    res = client.ft().search(Query("@description:''").return_field("id").no_content())
     _assert_search_result(client, res, ["property:3"])
 
-    res = client.ft().search(
-        Query("-@description:''").return_field("id").no_content()
-    )
+    res = client.ft().search(Query("-@description:''").return_field("id").no_content())
     _assert_search_result(client, res, ["property:1", "property:2"])
 
 
@@ -2649,9 +2641,7 @@ def test_special_characters_in_fields(client):
     _assert_search_result(client, res, ["resource:1"])
 
     # with double quotes exact match no need to escape the - even without params
-    res = client.ft().search(
-        Query('@uuid:{"123e4567-e89b-12d3-a456-426614174000"}')
-    )
+    res = client.ft().search(Query('@uuid:{"123e4567-e89b-12d3-a456-426614174000"}'))
     _assert_search_result(client, res, ["resource:1"])
 
     res = client.ft().search(Query('@tags:{"new-year\'s-resolutions"}'))
@@ -2690,15 +2680,13 @@ def test_vector_search_with_default_dialect(client):
     res = client.ft().search(q, query_params={"vec": "aaaaaaaa"})
     assert res.total == 2
 
+
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 def test_search_query_with_different_dialects(client):
     client.ft().create_index(
-        (
-            TextField("name"),
-            TextField("lastname")
-        ),
-        definition=IndexDefinition(prefix=["test:"])
+        (TextField("name"), TextField("lastname")),
+        definition=IndexDefinition(prefix=["test:"]),
     )
 
     client.hset("test:1", "name", "James")
