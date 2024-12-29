@@ -1,8 +1,10 @@
+from unittest import mock
+
 import pytest
 import redis
 from tests.conftest import skip_if_server_version_lt
 
-from .compat import aclosing, mock
+from .compat import aclosing
 from .conftest import wait_for_command
 
 
