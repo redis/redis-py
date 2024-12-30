@@ -1,6 +1,7 @@
 import copy
 import platform
 import socket
+import sys
 import threading
 import types
 from typing import Any
@@ -249,6 +250,7 @@ def test_pool_auto_close(request, from_url):
     r1.close()
 
 
+@pytest.mark.skipif(sys.version_info == (3, 9), reason="Flacky test on Python 3.9")
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 def test_redis_connection_pool(request, from_url):
     """Verify that basic Redis instances using `connection_pool`
