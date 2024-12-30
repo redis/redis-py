@@ -29,6 +29,7 @@ from redis.asyncio.client import ResponseCallbackT
 from redis.asyncio.connection import Connection, DefaultParser, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
 from redis.asyncio.retry import Retry
+from redis.auth.token import TokenInterface
 from redis.backoff import default_backoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
 from redis.cluster import (
@@ -45,6 +46,7 @@ from redis.cluster import (
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
+from redis.event import AfterAsyncClusterInstantiationEvent, EventDispatcher
 from redis.exceptions import (
     AskError,
     BusyLoadingError,
@@ -57,6 +59,7 @@ from redis.exceptions import (
     MaxConnectionsError,
     MovedError,
     RedisClusterException,
+    RedisError,
     ResponseError,
     SlotNotCoveredError,
     TimeoutError,
@@ -279,6 +282,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_ciphers: Optional[str] = None,
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -375,12 +379,18 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if host and port:
             startup_nodes.append(ClusterNode(host, port, **self.connection_kwargs))
 
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
+
         self.nodes_manager = NodesManager(
             startup_nodes,
             require_full_coverage,
             kwargs,
             dynamic_startup_nodes=dynamic_startup_nodes,
             address_remap=address_remap,
+            event_dispatcher=self._event_dispatcher,
         )
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self.read_from_replicas = read_from_replicas
@@ -939,6 +949,8 @@ class ClusterNode:
     __slots__ = (
         "_connections",
         "_free",
+        "_lock",
+        "_event_dispatcher",
         "connection_class",
         "connection_kwargs",
         "host",
@@ -976,6 +988,9 @@ class ClusterNode:
 
         self._connections: List[Connection] = []
         self._free: Deque[Connection] = collections.deque(maxlen=self.max_connections)
+        self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
+        if self._event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
 
     def __repr__(self) -> str:
         return (
@@ -1092,10 +1107,38 @@ class ClusterNode:
 
         return ret
 
+    async def re_auth_callback(self, token: TokenInterface):
+        tmp_queue = collections.deque()
+        while self._free:
+            conn = self._free.popleft()
+            await conn.retry.call_with_retry(
+                lambda: conn.send_command(
+                    "AUTH", token.try_get("oid"), token.get_value()
+                ),
+                lambda error: self._mock(error),
+            )
+            await conn.retry.call_with_retry(
+                lambda: conn.read_response(), lambda error: self._mock(error)
+            )
+            tmp_queue.append(conn)
+
+        while tmp_queue:
+            conn = tmp_queue.popleft()
+            self._free.append(conn)
+
+    async def _mock(self, error: RedisError):
+        """
+        Dummy functions, needs to be passed as error callback to retry object.
+        :param error:
+        :return:
+        """
+        pass
+
 
 class NodesManager:
     __slots__ = (
         "_moved_exception",
+        "_event_dispatcher",
         "connection_kwargs",
         "default_node",
         "nodes_cache",
@@ -1114,6 +1157,7 @@ class NodesManager:
         connection_kwargs: Dict[str, Any],
         dynamic_startup_nodes: bool = True,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ) -> None:
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.require_full_coverage = require_full_coverage
@@ -1126,6 +1170,10 @@ class NodesManager:
         self.slots_cache: Dict[int, List["ClusterNode"]] = {}
         self.read_load_balancer = LoadBalancer()
         self._moved_exception: MovedError = None
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
 
     def get_node(
         self,
@@ -1243,6 +1291,12 @@ class NodesManager:
             try:
                 # Make sure cluster mode is enabled on this node
                 try:
+                    self._event_dispatcher.dispatch(
+                        AfterAsyncClusterInstantiationEvent(
+                            self.nodes_cache,
+                            self.connection_kwargs.get("credential_provider", None),
+                        )
+                    )
                     cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
                 except ResponseError:
                     raise RedisClusterException(

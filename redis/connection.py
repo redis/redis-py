@@ -22,8 +22,10 @@ from redis.cache import (
 )
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
+from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from .event import AfterConnectionReleasedEvent, EventDispatcher
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -152,6 +154,10 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
+    def get_protocol(self):
+        pass
+
+    @abstractmethod
     def connect(self):
         pass
 
@@ -202,6 +208,14 @@ class ConnectionInterface:
     def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
         pass
 
+    @abstractmethod
+    def set_re_auth_token(self, token: TokenInterface):
+        pass
+
+    @abstractmethod
+    def re_auth(self):
+        pass
+
 
 class AbstractConnection(ConnectionInterface):
     "Manages communication to and from a Redis server"
@@ -229,6 +243,7 @@ class AbstractConnection(ConnectionInterface):
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         command_packer: Optional[Callable[[], None]] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
         Initialize a new Connection.
@@ -244,6 +259,10 @@ class AbstractConnection(ConnectionInterface):
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self.pid = os.getpid()
         self.db = db
         self.client_name = client_name
@@ -283,6 +302,7 @@ class AbstractConnection(ConnectionInterface):
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+        self._re_auth_token: Optional[TokenInterface] = None
         try:
             p = int(protocol)
         except TypeError:
@@ -663,6 +683,19 @@ class AbstractConnection(ConnectionInterface):
     def handshake_metadata(self, value: Union[Dict[bytes, bytes], Dict[str, str]]):
         self._handshake_metadata = value
 
+    def set_re_auth_token(self, token: TokenInterface):
+        self._re_auth_token = token
+
+    def re_auth(self):
+        if self._re_auth_token is not None:
+            self.send_command(
+                "AUTH",
+                self._re_auth_token.try_get("oid"),
+                self._re_auth_token.get_value(),
+            )
+            self.read_response()
+            self._re_auth_token = None
+
 
 class Connection(AbstractConnection):
     "Manages TCP communication to and from a Redis server"
@@ -750,6 +783,7 @@ class CacheProxyConnection(ConnectionInterface):
         self.retry = self._conn.retry
         self.host = self._conn.host
         self.port = self._conn.port
+        self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
         self._cache = cache
         self._cache_lock = threading.Lock()
@@ -932,6 +966,15 @@ class CacheProxyConnection(ConnectionInterface):
                 self._cache.flush()
             else:
                 self._cache.delete_by_redis_keys(data[1])
+
+    def get_protocol(self):
+        return self._conn.get_protocol()
+
+    def set_re_auth_token(self, token: TokenInterface):
+        self._conn.set_re_auth_token(token)
+
+    def re_auth(self):
+        self._conn.re_auth()
 
 
 class SSLConnection(Connection):
@@ -1318,6 +1361,10 @@ class ConnectionPool:
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
 
+        self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
+        if self._event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
         # after a fork. during this time, multiple threads in the child
@@ -1475,6 +1522,9 @@ class ConnectionPool:
 
             if self.owns_connection(connection):
                 self._available_connections.append(connection)
+                self._event_dispatcher.dispatch(
+                    AfterConnectionReleasedEvent(connection)
+                )
             else:
                 # pool doesn't own this connection. do not add it back
                 # to the pool and decrement the count so that another
@@ -1516,6 +1566,29 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
+
+    def re_auth_callback(self, token: TokenInterface):
+        with self._lock:
+            for conn in self._available_connections:
+                conn.retry.call_with_retry(
+                    lambda: conn.send_command(
+                        "AUTH", token.try_get("oid"), token.get_value()
+                    ),
+                    lambda error: self._mock(error),
+                )
+                conn.retry.call_with_retry(
+                    lambda: conn.read_response(), lambda error: self._mock(error)
+                )
+            for conn in self._in_use_connections:
+                conn.set_re_auth_token(token)
+
+    async def _mock(self, error: RedisError):
+        """
+        Dummy functions, needs to be passed as error callback to retry object.
+        :param error:
+        :return:
+        """
+        pass
 
 
 class BlockingConnectionPool(ConnectionPool):

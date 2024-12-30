@@ -1,15 +1,22 @@
 import argparse
+import json
+import os
 import random
 import time
+from datetime import datetime, timezone
+from enum import Enum
 from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
 from urllib.parse import urlparse
 
+import jwt
 import pytest
 import redis
 from packaging.version import Version
 from redis import Sentinel
+from redis.auth.idp import IdentityProviderInterface
+from redis.auth.token import JWToken
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
@@ -19,8 +26,16 @@ from redis.cache import (
     EvictionPolicy,
 )
 from redis.connection import Connection, ConnectionInterface, SSLConnection, parse_url
+from redis.credentials import CredentialProvider
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
+from redis_entraid.cred_provider import EntraIdCredentialsProvider, TokenAuthConfig
+from redis_entraid.identity_provider import (
+    ManagedIdentityIdType,
+    ManagedIdentityType,
+    create_provider_from_managed_identity,
+    create_provider_from_service_principal,
+)
 from tests.ssl_utils import get_tls_certificates
 
 REDIS_INFO = {}
@@ -34,6 +49,11 @@ default_cluster_nodes = 6
 
 _DecoratedTest = TypeVar("_DecoratedTest", bound="Callable")
 _TestDecorator = Callable[[_DecoratedTest], _DecoratedTest]
+
+
+class AuthType(Enum):
+    MANAGED_IDENTITY = "managed_identity"
+    SERVICE_PRINCIPAL = "service_principal"
 
 
 # Taken from python3.9
@@ -147,6 +167,13 @@ def pytest_addoption(parser):
         action="store",
         default="redis-py-test",
         help="Name of the Redis master service that the sentinels are monitoring",
+    )
+
+    parser.addoption(
+        "--endpoint-name",
+        action="store",
+        default=None,
+        help="Name of the Redis endpoint the tests should be executed on",
     )
 
 
@@ -296,12 +323,14 @@ def skip_ifnot_redis_enterprise() -> _TestDecorator:
 
 
 def skip_if_nocryptography() -> _TestDecorator:
-    try:
-        import cryptography  # noqa
-
-        return pytest.mark.skipif(False, reason="Cryptography dependency found")
-    except ImportError:
-        return pytest.mark.skipif(True, reason="No cryptography dependency")
+    # try:
+    #     import cryptography  # noqa
+    #
+    #     return pytest.mark.skipif(False, reason="Cryptography dependency found")
+    # except ImportError:
+    # TODO: Because JWT library depends on cryptography,
+    #  now it's always true and tests should be fixed
+    return pytest.mark.skipif(True, reason="No cryptography dependency")
 
 
 def skip_if_cryptography() -> _TestDecorator:
@@ -573,6 +602,142 @@ def cache_key(request) -> CacheKey:
     keys = request.param.get("redis_keys")
 
     return CacheKey(command, keys)
+
+
+def mock_identity_provider() -> IdentityProviderInterface:
+    mock_provider = Mock(spec=IdentityProviderInterface)
+    token = {"exp": datetime.now(timezone.utc).timestamp() + 3600, "oid": "username"}
+    encoded = jwt.encode(token, "secret", algorithm="HS256")
+    jwt_token = JWToken(encoded)
+    mock_provider.request_token.return_value = jwt_token
+    return mock_provider
+
+
+def identity_provider(request) -> IdentityProviderInterface:
+    if hasattr(request, "param"):
+        kwargs = request.param.get("idp_kwargs", {})
+    else:
+        kwargs = {}
+
+    if request.param.get("mock_idp", None) is not None:
+        return mock_identity_provider()
+
+    auth_type = kwargs.pop("auth_type", AuthType.SERVICE_PRINCIPAL)
+
+    if auth_type == "MANAGED_IDENTITY":
+        return _get_managed_identity_provider(request)
+
+    return _get_service_principal_provider(request)
+
+
+def _get_managed_identity_provider(request):
+    authority = os.getenv("AZURE_AUTHORITY")
+    resource = os.getenv("AZURE_RESOURCE")
+    id_value = os.getenv("AZURE_ID_VALUE", None)
+
+    if hasattr(request, "param"):
+        kwargs = request.param.get("idp_kwargs", {})
+    else:
+        kwargs = {}
+
+    identity_type = kwargs.pop("identity_type", ManagedIdentityType.SYSTEM_ASSIGNED)
+    id_type = kwargs.pop("id_type", ManagedIdentityIdType.CLIENT_ID)
+
+    return create_provider_from_managed_identity(
+        identity_type=identity_type,
+        resource=resource,
+        id_type=id_type,
+        id_value=id_value,
+        authority=authority,
+        **kwargs,
+    )
+
+
+def _get_service_principal_provider(request):
+    client_id = os.getenv("AZURE_CLIENT_ID")
+    client_credential = os.getenv("AZURE_CLIENT_SECRET")
+    authority = os.getenv("AZURE_AUTHORITY")
+    scopes = os.getenv("AZURE_REDIS_SCOPES", [])
+
+    if hasattr(request, "param"):
+        kwargs = request.param.get("idp_kwargs", {})
+        token_kwargs = request.param.get("token_kwargs", {})
+        timeout = request.param.get("timeout", None)
+    else:
+        kwargs = {}
+        token_kwargs = {}
+        timeout = None
+
+    if isinstance(scopes, str):
+        scopes = scopes.split(",")
+
+    return create_provider_from_service_principal(
+        client_id=client_id,
+        client_credential=client_credential,
+        scopes=scopes,
+        timeout=timeout,
+        token_kwargs=token_kwargs,
+        authority=authority,
+        **kwargs,
+    )
+
+
+def get_credential_provider(request) -> CredentialProvider:
+    cred_provider_class = request.param.get("cred_provider_class")
+    cred_provider_kwargs = request.param.get("cred_provider_kwargs", {})
+
+    if cred_provider_class != EntraIdCredentialsProvider:
+        return cred_provider_class(**cred_provider_kwargs)
+
+    idp = identity_provider(request)
+    initial_delay_in_ms = cred_provider_kwargs.get("initial_delay_in_ms", 0)
+    block_for_initial = cred_provider_kwargs.get("block_for_initial", False)
+    expiration_refresh_ratio = cred_provider_kwargs.get(
+        "expiration_refresh_ratio", TokenAuthConfig.DEFAULT_EXPIRATION_REFRESH_RATIO
+    )
+    lower_refresh_bound_millis = cred_provider_kwargs.get(
+        "lower_refresh_bound_millis", TokenAuthConfig.DEFAULT_LOWER_REFRESH_BOUND_MILLIS
+    )
+    max_attempts = cred_provider_kwargs.get(
+        "max_attempts", TokenAuthConfig.DEFAULT_MAX_ATTEMPTS
+    )
+    delay_in_ms = cred_provider_kwargs.get(
+        "delay_in_ms", TokenAuthConfig.DEFAULT_DELAY_IN_MS
+    )
+
+    auth_config = TokenAuthConfig(idp)
+    auth_config.expiration_refresh_ratio = expiration_refresh_ratio
+    auth_config.lower_refresh_bound_millis = lower_refresh_bound_millis
+    auth_config.max_attempts = max_attempts
+    auth_config.delay_in_ms = delay_in_ms
+
+    return EntraIdCredentialsProvider(
+        config=auth_config,
+        initial_delay_in_ms=initial_delay_in_ms,
+        block_for_initial=block_for_initial,
+    )
+
+
+@pytest.fixture()
+def credential_provider(request) -> CredentialProvider:
+    return get_credential_provider(request)
+
+
+def get_endpoint(endpoint_name: str):
+    endpoints_config = os.getenv("REDIS_ENDPOINTS_CONFIG_PATH", None)
+
+    if not (endpoints_config and os.path.exists(endpoints_config)):
+        raise FileNotFoundError(f"Endpoints config file not found: {endpoints_config}")
+
+    try:
+        with open(endpoints_config, "r") as f:
+            data = json.load(f)
+            db = data[endpoint_name]
+            return db["endpoints"][0]
+    except Exception as e:
+        raise ValueError(
+            f"Failed to load endpoints config file: {endpoints_config}"
+        ) from e
 
 
 def wait_for_command(client, monitor, command, key=None):

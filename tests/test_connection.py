@@ -28,6 +28,7 @@ from redis.connection import (
     UnixDomainSocketConnection,
     parse_url,
 )
+from redis.credentials import UsernamePasswordCredentialProvider
 from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
@@ -441,6 +442,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         proxy_connection = CacheProxyConnection(
             mock_connection, cache, threading.Lock()
@@ -457,6 +459,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         mock_cache.is_cachable.return_value = True
         mock_cache.get.side_effect = [
@@ -541,6 +544,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         another_conn = copy.deepcopy(mock_connection)
         another_conn.can_read.side_effect = [True, False]
