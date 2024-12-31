@@ -84,9 +84,7 @@ class TestTokenManager:
         ],
     )
     @pytest.mark.asyncio
-    async def test_async_success_token_renewal(
-        self, exp_refresh_ratio
-    ):
+    async def test_async_success_token_renewal(self, exp_refresh_ratio):
         tokens = []
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.side_effect = [
