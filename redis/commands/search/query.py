@@ -40,7 +40,7 @@ class Query:
         self._highlight_fields: List = []
         self._language: Optional[str] = None
         self._expander: Optional[str] = None
-        self._dialect: Optional[int] = None
+        self._dialect: int = 2
 
     def query_string(self) -> str:
         """Return the query string of this query only."""

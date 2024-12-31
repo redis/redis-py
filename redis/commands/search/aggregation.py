@@ -110,7 +110,7 @@ class AggregateRequest:
         self._with_schema = False
         self._verbatim = False
         self._cursor = []
-        self._dialect = None
+        self._dialect = 2
         self._add_scores = False
         self._scorer = "TFIDF"
 

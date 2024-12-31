@@ -1646,7 +1646,7 @@ async def test_search_commands_in_pipeline(decoded_r: redis.Redis):
 @pytest.mark.redismod
 async def test_query_timeout(decoded_r: redis.Redis):
     q1 = Query("foo").timeout(5000)
-    assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
+    assert q1.get_args() == ["foo", "TIMEOUT", 5000, "DIALECT", 2, "LIMIT", 0, 10]
     q2 = Query("foo").timeout("not_a_number")
     with pytest.raises(redis.ResponseError):
         await decoded_r.ft().search(q2)
