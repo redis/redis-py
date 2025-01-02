@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 Number = Union[int, float]
-EncodedT = Union[bytes, memoryview]
+EncodedT = Union[bytes, bytearray, memoryview]
 DecodedT = Union[str, int, float]
 EncodableT = Union[EncodedT, DecodedT]
 AbsExpiryT = Union[int, datetime]
