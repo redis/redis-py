@@ -7,7 +7,8 @@ from unittest import mock
 
 import pytest
 import redis
-from redis.connection import to_bool
+from redis.cache import CacheConfig
+from redis.connection import to_bool, CacheProxyConnection, Connection
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import _get_client, skip_if_redis_enterprise, skip_if_server_version_lt
@@ -195,6 +196,16 @@ class TestBlockingConnectionPool:
         )
         expected = "path=abc,db=0,client_name=test-client"
         assert expected in repr(pool)
+
+    def test_initialise_pool_with_cache(self, master_host):
+        pool = redis.BlockingConnectionPool(
+            connection_class=Connection,
+            host=master_host[0],
+            port=master_host[1],
+            protocol=3,
+            cache_config=CacheConfig(),
+        )
+        assert isinstance(pool.get_connection("_"), CacheProxyConnection)
 
 
 class TestConnectionPoolURLParsing:
