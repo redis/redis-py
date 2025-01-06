@@ -9,9 +9,14 @@ import pytest
 import redis
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
-from redis.utils import SSL_AVAILABLE
+from redis.utils import HIREDIS_AVAILABLE, SSL_AVAILABLE
 
-from .conftest import _get_client, skip_if_redis_enterprise, skip_if_server_version_lt
+from .conftest import (
+    _get_client,
+    skip_if_redis_enterprise,
+    skip_if_resp_version,
+    skip_if_server_version_lt,
+)
 from .test_pubsub import wait_for_message
 
 
@@ -197,6 +202,10 @@ class TestBlockingConnectionPool:
         expected = "path=abc,db=0,client_name=test-client"
         assert expected in repr(pool)
 
+    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+    @pytest.mark.onlynoncluster
+    @skip_if_resp_version(2)
+    @skip_if_server_version_lt("7.4.0")
     def test_initialise_pool_with_cache(self, master_host):
         pool = redis.BlockingConnectionPool(
             connection_class=Connection,
