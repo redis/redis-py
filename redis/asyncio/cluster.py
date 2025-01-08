@@ -79,20 +79,6 @@ TargetNodesT = TypeVar(
 )
 
 
-class ClusterParser(DefaultParser):
-    EXCEPTION_CLASSES = dict_merge(
-        DefaultParser.EXCEPTION_CLASSES,
-        {
-            "ASK": AskError,
-            "CLUSTERDOWN": ClusterDownError,
-            "CROSSSLOT": ClusterCrossSlotError,
-            "MASTERDOWN": MasterDownError,
-            "MOVED": MovedError,
-            "TRYAGAIN": TryAgainError,
-        },
-    )
-
-
 class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands):
     """
     Create a new RedisCluster client.
@@ -297,7 +283,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         kwargs: Dict[str, Any] = {
             "max_connections": max_connections,
             "connection_class": Connection,
-            "parser_class": ClusterParser,
             # Client related kwargs
             "credential_provider": credential_provider,
             "username": username,

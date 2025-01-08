@@ -193,20 +193,6 @@ def cleanup_kwargs(**kwargs):
     return connection_kwargs
 
 
-class ClusterParser(DefaultParser):
-    EXCEPTION_CLASSES = dict_merge(
-        DefaultParser.EXCEPTION_CLASSES,
-        {
-            "ASK": AskError,
-            "TRYAGAIN": TryAgainError,
-            "MOVED": MovedError,
-            "CLUSTERDOWN": ClusterDownError,
-            "CROSSSLOT": ClusterCrossSlotError,
-            "MASTERDOWN": MasterDownError,
-        },
-    )
-
-
 class AbstractRedisCluster:
     RedisClusterRequestTTL = 16
 
@@ -692,7 +678,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         Initialize the connection, authenticate and select a database and send
          READONLY if it is set during object initialization.
         """
-        connection.set_parser(ClusterParser)
         connection.on_connect()
 
         if self.read_from_replicas:

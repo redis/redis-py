@@ -20,7 +20,7 @@ from ..exceptions import (
     OutOfMemoryError,
     ReadOnlyError,
     RedisError,
-    ResponseError,
+    ResponseError, AskError, TryAgainError, MovedError, ClusterDownError, ClusterCrossSlotError, MasterDownError,
 )
 from ..typing import EncodableT
 from .encoders import Encoder
@@ -72,6 +72,12 @@ class BaseParser(ABC):
         "READONLY": ReadOnlyError,
         "NOAUTH": AuthenticationError,
         "NOPERM": NoPermissionError,
+        "ASK": AskError,
+        "TRYAGAIN": TryAgainError,
+        "MOVED": MovedError,
+        "CLUSTERDOWN": ClusterDownError,
+        "CROSSSLOT": ClusterCrossSlotError,
+        "MASTERDOWN": MasterDownError,
     }
 
     @classmethod
