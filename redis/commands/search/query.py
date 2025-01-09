@@ -1,5 +1,7 @@
 from typing import List, Optional, Union
 
+from redis.commands.search.dialect import DEFAULT_DIALECT
+
 
 class Query:
     """
@@ -40,7 +42,7 @@ class Query:
         self._highlight_fields: List = []
         self._language: Optional[str] = None
         self._expander: Optional[str] = None
-        self._dialect: int = 2
+        self._dialect: int = DEFAULT_DIALECT
 
     def query_string(self) -> str:
         """Return the query string of this query only."""
