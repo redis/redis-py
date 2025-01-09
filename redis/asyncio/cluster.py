@@ -64,12 +64,7 @@ from redis.exceptions import (
     TryAgainError,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
-from redis.utils import (
-    deprecated_function,
-    get_lib_version,
-    safe_str,
-    str_if_bytes,
-)
+from redis.utils import deprecated_function, get_lib_version, safe_str, str_if_bytes
 
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
