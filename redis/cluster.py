@@ -13,7 +13,7 @@ from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheI
 from redis.client import CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
-from redis.connection import ConnectionPool, DefaultParser, parse_url
+from redis.connection import ConnectionPool, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
@@ -24,12 +24,10 @@ from redis.event import (
 from redis.exceptions import (
     AskError,
     AuthenticationError,
-    ClusterCrossSlotError,
     ClusterDownError,
     ClusterError,
     ConnectionError,
     DataError,
-    MasterDownError,
     MovedError,
     RedisClusterException,
     RedisError,
