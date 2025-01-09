@@ -904,9 +904,11 @@ class CacheProxyConnection(ConnectionInterface):
                 and self._cache.get(self._current_command_cache_key).status
                 != CacheEntryStatus.IN_PROGRESS
             ):
-                return copy.deepcopy(
+                res = copy.deepcopy(
                     self._cache.get(self._current_command_cache_key).cache_value
                 )
+                self._current_command_cache_key = None
+                return res
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
@@ -931,6 +933,8 @@ class CacheProxyConnection(ConnectionInterface):
                 cache_entry.status = CacheEntryStatus.VALID
                 cache_entry.cache_value = response
                 self._cache.set(cache_entry)
+
+            self._current_command_cache_key = None
 
         return response
 
@@ -1374,6 +1378,7 @@ class ConnectionPool:
         # will notice the first thread already did the work and simply
         # release the lock.
         self._fork_lock = threading.Lock()
+        self._lock = threading.Lock()
         self.reset()
 
     def __repr__(self) -> (str, str):
@@ -1391,7 +1396,6 @@ class ConnectionPool:
         return self.connection_kwargs.get("protocol", None)
 
     def reset(self) -> None:
-        self._lock = threading.Lock()
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
