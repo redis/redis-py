@@ -2499,9 +2499,8 @@ class TestNodesManager:
     Tests for the NodesManager class
     """
 
-    def test_load_balancer(self, r):
+    async def test_get_node_from_slot(self, r: RedisCluster) -> None:
         n_manager = r.nodes_manager
-        lb = n_manager.read_load_balancer
         slot_1 = 1257
         slot_2 = 8975
         node_1 = ClusterNode(default_host, 6379, PRIMARY)
@@ -2513,23 +2512,59 @@ class TestNodesManager:
             slot_1: [node_1, node_2, node_3],
             slot_2: [node_4, node_5],
         }
-        primary1_name = n_manager.slots_cache[slot_1][0].name
-        primary2_name = n_manager.slots_cache[slot_2][0].name
-        list1_size = len(n_manager.slots_cache[slot_1])
-        list2_size = len(n_manager.slots_cache[slot_2])
         # slot 1
-        assert lb.get_server_index(primary1_name, list1_size) == 0
-        assert lb.get_server_index(primary1_name, list1_size) == 1
-        assert lb.get_server_index(primary1_name, list1_size) == 2
-        assert lb.get_server_index(primary1_name, list1_size) == 0
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_1
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_2
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_3
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_1
         # slot 2
-        assert lb.get_server_index(primary2_name, list2_size) == 0
-        assert lb.get_server_index(primary2_name, list2_size) == 1
-        assert lb.get_server_index(primary2_name, list2_size) == 0
+        assert n_manager.get_node_from_slot(slot_2, read_from_replicas=True) == node_4
+        assert n_manager.get_node_from_slot(slot_2, read_from_replicas=True) == node_5
+        assert n_manager.get_node_from_slot(slot_2, read_from_replicas=True) == node_4
 
-        lb.reset()
-        assert lb.get_server_index(primary1_name, list1_size) == 0
-        assert lb.get_server_index(primary2_name, list2_size) == 0
+        n_manager.read_load_balancer.reset()
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_1
+        assert n_manager.get_node_from_slot(slot_2, read_from_replicas=True) == node_4
+
+    async def test_get_node_from_slot_no_replicas(self, r: RedisCluster) -> None:
+        n_manager = r.nodes_manager
+        slot_1 = 1257
+        slot_2 = 8975
+        node_1 = ClusterNode(default_host, 6379, PRIMARY)
+        node_2 = ClusterNode(default_host, 6378, REPLICA)
+        node_3 = ClusterNode(default_host, 6377, REPLICA)
+        node_4 = ClusterNode(default_host, 6376, PRIMARY)
+        node_5 = ClusterNode(default_host, 6375, REPLICA)
+        n_manager.slots_cache = {
+            slot_1: [node_1, node_2, node_3],
+            slot_2: [node_4, node_5],
+        }
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=False) == node_1
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=False) == node_1
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=False) == node_1
+
+    async def test_get_node_from_slot_changed_slot_replicas(
+        self, r: RedisCluster
+    ) -> None:
+        n_manager = r.nodes_manager
+        slot_1 = 1257
+        node_1 = ClusterNode(default_host, 6379, PRIMARY)
+        node_2 = ClusterNode(default_host, 6378, REPLICA)
+        node_3 = ClusterNode(default_host, 6377, REPLICA)
+        n_manager.slots_cache = {
+            slot_1: [node_1, node_2, node_3],
+        }
+        # slot 1
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_1
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_2
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_3
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_1
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_2
+
+        # adjust lb-size. This can happen during resharding,
+        # see https://github.com/redis/redis-py/issues/2988
+        n_manager.slots_cache[slot_1].pop()
+        assert n_manager.get_node_from_slot(slot_1, read_from_replicas=True) == node_1
 
     def test_init_slots_cache_not_all_slots_covered(self):
         """
