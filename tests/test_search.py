@@ -1584,13 +1584,14 @@ def test_index_definition(client):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_if_redis_enterprise()
+@skip_if_server_version_gte("7.9.0")
 def test_expire(client):
     client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
-    ttl = client.execute_command("_ft.debug", "TTL", "idx")
+    ttl = client.execute_command("ft.debug", "TTL", "idx")
     assert ttl > 2
 
     while ttl > 2:
-        ttl = client.execute_command("_ft.debug", "TTL", "idx")
+        ttl = client.execute_command("ft.debug", "TTL", "idx")
         time.sleep(0.01)
 
 
