@@ -27,7 +27,7 @@ from tests.conftest import (
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,
-    skip_ifmodversion_lt,
+    skip_ifmodversion_lt, skip_if_server_version_gte, skip_if_server_version_lt,
 )
 
 WILL_PLAY_TEXT = os.path.abspath(
@@ -1111,6 +1111,7 @@ async def test_get(decoded_r: redis.Redis):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
+@skip_if_server_version_gte("7.9.0")
 async def test_config(decoded_r: redis.Redis):
     assert await decoded_r.ft().config_set("TIMEOUT", "100")
     with pytest.raises(redis.ResponseError):
@@ -1119,6 +1120,18 @@ async def test_config(decoded_r: redis.Redis):
     assert "100" == res["TIMEOUT"]
     res = await decoded_r.ft().config_get("TIMEOUT")
     assert "100" == res["TIMEOUT"]
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.9.0")
+async def test_config_with_removed_ftconfig(decoded_r: redis.Redis):
+    assert await decoded_r.config_set("timeout", "100")
+    with pytest.raises(redis.ResponseError):
+        await decoded_r.config_set("timeout", "null")
+    res = await decoded_r.config_get("*")
+    assert "100" == res["timeout"]
+    res = await decoded_r.config_get("timeout")
+    assert "100" == res["timeout"]
 
 
 @pytest.mark.redismod

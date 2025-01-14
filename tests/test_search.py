@@ -31,7 +31,7 @@ from .conftest import (
     skip_if_redis_enterprise,
     skip_if_resp_version,
     skip_if_server_version_lt,
-    skip_ifmodversion_lt,
+    skip_ifmodversion_lt, skip_if_server_version_gte,
 )
 
 WILL_PLAY_TEXT = os.path.abspath(
@@ -1007,6 +1007,7 @@ def test_get(client):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
+@skip_if_server_version_gte("7.9.0")
 def test_config(client):
     assert client.ft().config_set("TIMEOUT", "100")
     with pytest.raises(redis.ResponseError):
@@ -1015,6 +1016,18 @@ def test_config(client):
     assert "100" == res["TIMEOUT"]
     res = client.ft().config_get("TIMEOUT")
     assert "100" == res["TIMEOUT"]
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.9.0")
+def test_config_with_removed_ftconfig(client):
+    assert client.config_set("timeout", "100")
+    with pytest.raises(redis.ResponseError):
+        client.config_set("timeout", "null")
+    res = client.config_get("*")
+    assert "100" == res["timeout"]
+    res = client.config_get("timeout")
+    assert "100" == res["timeout"]
 
 
 @pytest.mark.redismod
@@ -1573,11 +1586,11 @@ def test_index_definition(client):
 @skip_if_redis_enterprise()
 def test_expire(client):
     client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
-    ttl = client.execute_command("ft.debug", "TTL", "idx")
+    ttl = client.execute_command("_ft.debug", "TTL", "idx")
     assert ttl > 2
 
     while ttl > 2:
-        ttl = client.execute_command("ft.debug", "TTL", "idx")
+        ttl = client.execute_command("_ft.debug", "TTL", "idx")
         time.sleep(0.01)
 
 
