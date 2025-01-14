@@ -2041,6 +2041,8 @@ def test_json_with_jsonpath(client):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_if_redis_enterprise()
+@skip_if_server_version_gte("7.9.0")
+@skip_if_server_version_lt("6.3.0")
 def test_profile(client):
     client.ft().create_index((TextField("t"),))
     client.ft().client.hset("1", "t", "hello")
@@ -2091,6 +2093,96 @@ def test_profile(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
+@skip_if_server_version_lt("7.9.0")
+def test_profile_with_coordinator(client):
+    client.ft().create_index((TextField("t"),))
+    client.ft().client.hset("1", "t", "hello")
+    client.ft().client.hset("2", "t", "world")
+
+    # check using Query
+    q = Query("hello|world").no_content()
+    if is_resp2_connection(client):
+        res, det = client.ft().profile(q)
+        det = det.info
+        assert det[0] == "Shards"
+        assert det[2] == "Coordinator"
+        assert det[1][0][9][7] == 2.0
+        assert det[1][0][9][1] == "UNION"
+        assert float(det[1][0][3]) < 0.5
+        assert len(res.docs) == 2  # check also the search result
+
+        # check using AggregateRequest
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("t")
+            .apply(prefix="startswith(@t, 'hel')")
+        )
+        res, det = client.ft().profile(req)
+        det = det.info
+        assert det[0] == "Shards"
+        assert det[2] == "Coordinator"
+        assert det[1][0][9][5] == 2
+        assert det[1][0][9][1] == "WILDCARD"
+        assert len(res.rows) == 2  # check also the search result
+    else:
+        res = client.ft().profile(q)
+        res = res.info
+        assert res["Profile"]["Shards"][0]["Iterators profile"]["Counter"] == 2.0
+        assert res["Profile"]["Shards"][0]["Iterators profile"]["Type"] == "UNION"
+        assert res["Profile"]["Shards"][0]["Parsing time"] < 0.5
+        assert len(res["Results"]["results"]) == 2  # check also the search result
+
+        # check using AggregateRequest
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("t")
+            .apply(prefix="startswith(@t, 'hel')")
+        )
+        res = client.ft().profile(req)
+        res = res.info
+        assert res["Profile"]["Shards"][0]["Iterators profile"]["Counter"] == 2
+        assert res["Profile"]["Shards"][0]["Iterators profile"]["Type"] == "WILDCARD"
+        assert isinstance(res["Profile"]["Shards"][0]["Parsing time"], float)
+        assert len(res["Results"]["results"]) == 2  # check also the search result
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
+@skip_if_server_version_gte("6.3.0")
+def test_profile_with_no_warnings(client):
+    client.ft().create_index((TextField("t"),))
+    client.ft().client.hset("1", "t", "hello")
+    client.ft().client.hset("2", "t", "world")
+
+    # check using Query
+    q = Query("hello|world").no_content()
+    res, det = client.ft().profile(q)
+    det = det.info
+    print(det)
+    assert det[3][1][7] == 2.0
+    assert det[3][1][1] == "UNION"
+    assert float(det[1][1]) < 0.5
+    assert len(res.docs) == 2  # check also the search result
+
+    # check using AggregateRequest
+    req = (
+        aggregations.AggregateRequest("*")
+        .load("t")
+        .apply(prefix="startswith(@t, 'hel')")
+    )
+    res, det = client.ft().profile(req)
+    det = det.info
+    assert det[3][1][5] == 2
+    assert det[3][1][1] == "WILDCARD"
+    assert len(res.rows) == 2  # check also the search result
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_gte("7.9.0")
+@skip_if_server_version_lt("6.3.0")
 def test_profile_limited(client):
     client.ft().create_index((TextField("t"),))
     client.ft().client.hset("1", "t", "hello")
@@ -2124,6 +2216,8 @@ def test_profile_limited(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_gte("7.9.0")
+@skip_if_server_version_lt("6.3.0")
 def test_profile_query_params(client):
     client.ft().create_index(
         (
