@@ -27,7 +27,9 @@ from tests.conftest import (
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,
-    skip_ifmodversion_lt, skip_if_server_version_gte, skip_if_server_version_lt,
+    skip_if_server_version_gte,
+    skip_if_server_version_lt,
+    skip_ifmodversion_lt,
 )
 
 WILL_PLAY_TEXT = os.path.abspath(
@@ -1120,6 +1122,7 @@ async def test_config(decoded_r: redis.Redis):
     assert "100" == res["TIMEOUT"]
     res = await decoded_r.ft().config_get("TIMEOUT")
     assert "100" == res["TIMEOUT"]
+
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster

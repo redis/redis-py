@@ -5,12 +5,13 @@ from typing import Dict, List, Optional, Union
 from redis.client import NEVER_DECODE, Pipeline
 from redis.utils import deprecated_function
 
-from ..helpers import get_protocol_version, parse_to_dict
+from ..helpers import get_protocol_version
 from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
 from .document import Document
 from .field import Field
 from .indexDefinition import IndexDefinition
+from .profileInformation import ProfileInformation
 from .query import Query
 from .result import Result
 from .suggestion import SuggestionParser
@@ -66,8 +67,10 @@ class SearchCommands:
     """Search commands."""
 
     def _parse_results(self, cmd, res, **kwargs):
-        if get_protocol_version(self.client) in ["3", 3]:
+        if get_protocol_version(self.client) in ["3", 3] and cmd != "FT.PROFILE":
             return res
+        elif get_protocol_version(self.client) in ["3", 3] and cmd == "FT.PROFILE":
+            return ProfileInformation(res)
         else:
             return self._RESP2_MODULE_CALLBACKS[cmd](res, **kwargs)
 
@@ -101,7 +104,7 @@ class SearchCommands:
                 with_scores=query._with_scores,
             )
 
-        return result, parse_to_dict(res[1])
+        return result, ProfileInformation(res[1])
 
     def _parse_spellcheck(self, res, **kwargs):
         corrections = {}

@@ -30,8 +30,9 @@ from .conftest import (
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,
+    skip_if_server_version_gte,
     skip_if_server_version_lt,
-    skip_ifmodversion_lt, skip_if_server_version_gte,
+    skip_ifmodversion_lt,
 )
 
 WILL_PLAY_TEXT = os.path.abspath(
@@ -1016,6 +1017,7 @@ def test_config(client):
     assert "100" == res["TIMEOUT"]
     res = client.ft().config_get("TIMEOUT")
     assert "100" == res["TIMEOUT"]
+
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
@@ -2048,10 +2050,10 @@ def test_profile(client):
     q = Query("hello|world").no_content()
     if is_resp2_connection(client):
         res, det = client.ft().profile(q)
-        assert det["Iterators profile"]["Counter"] == 2.0
-        assert len(det["Iterators profile"]["Child iterators"]) == 2
-        assert det["Iterators profile"]["Type"] == "UNION"
-        assert det["Parsing time"] < 0.5
+        det = det.info
+        assert det[4][1][7] == 2.0
+        assert det[4][1][1] == "UNION"
+        assert float(det[1][1]) < 0.5
         assert len(res.docs) == 2  # check also the search result
 
         # check using AggregateRequest
@@ -2061,12 +2063,13 @@ def test_profile(client):
             .apply(prefix="startswith(@t, 'hel')")
         )
         res, det = client.ft().profile(req)
-        assert det["Iterators profile"]["Counter"] == 2
-        assert det["Iterators profile"]["Type"] == "WILDCARD"
-        assert isinstance(det["Parsing time"], float)
+        det = det.info
+        assert det[4][1][5] == 2
+        assert det[4][1][1] == "WILDCARD"
         assert len(res.rows) == 2  # check also the search result
     else:
         res = client.ft().profile(q)
+        res = res.info
         assert res["profile"]["Iterators profile"][0]["Counter"] == 2.0
         assert res["profile"]["Iterators profile"][0]["Type"] == "UNION"
         assert res["profile"]["Parsing time"] < 0.5
@@ -2079,6 +2082,7 @@ def test_profile(client):
             .apply(prefix="startswith(@t, 'hel')")
         )
         res = client.ft().profile(req)
+        res = res.info
         assert res["profile"]["Iterators profile"][0]["Counter"] == 2
         assert res["profile"]["Iterators profile"][0]["Type"] == "WILDCARD"
         assert isinstance(res["profile"]["Parsing time"], float)
@@ -2097,18 +2101,14 @@ def test_profile_limited(client):
     q = Query("%hell% hel*")
     if is_resp2_connection(client):
         res, det = client.ft().profile(q, limited=True)
-        assert (
-            det["Iterators profile"]["Child iterators"][0]["Child iterators"]
-            == "The number of iterators in the union is 3"
-        )
-        assert (
-            det["Iterators profile"]["Child iterators"][1]["Child iterators"]
-            == "The number of iterators in the union is 4"
-        )
-        assert det["Iterators profile"]["Type"] == "INTERSECT"
+        det = det.info
+        assert det[4][1][7][9] == "The number of iterators in the union is 3"
+        assert det[4][1][8][9] == "The number of iterators in the union is 4"
+        assert det[4][1][1] == "INTERSECT"
         assert len(res.docs) == 3  # check also the search result
     else:
         res = client.ft().profile(q, limited=True)
+        res = res.info
         iterators_profile = res["profile"]["Iterators profile"]
         assert (
             iterators_profile[0]["Child iterators"][0]["Child iterators"]
@@ -2139,13 +2139,15 @@ def test_profile_query_params(client):
     q = Query(query).return_field("__v_score").sort_by("__v_score", True)
     if is_resp2_connection(client):
         res, det = client.ft().profile(q, query_params={"vec": "aaaaaaaa"})
-        assert det["Iterators profile"]["Counter"] == 2.0
-        assert det["Iterators profile"]["Type"] == "VECTOR"
+        det = det.info
+        assert det[4][1][5] == 2.0
+        assert det[4][1][1] == "VECTOR"
         assert res.total == 2
         assert "a" == res.docs[0].id
         assert "0" == res.docs[0].__getattribute__("__v_score")
     else:
         res = client.ft().profile(q, query_params={"vec": "aaaaaaaa"})
+        res = res.info
         assert res["profile"]["Iterators profile"][0]["Counter"] == 2
         assert res["profile"]["Iterators profile"][0]["Type"] == "VECTOR"
         assert res["total_results"] == 2
