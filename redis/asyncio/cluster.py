@@ -26,7 +26,7 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
 )
 from redis.asyncio.client import ResponseCallbackT
-from redis.asyncio.connection import Connection, DefaultParser, SSLConnection, parse_url
+from redis.asyncio.connection import Connection, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
 from redis.asyncio.retry import Retry
 from redis.auth.token import TokenInterface
@@ -50,12 +50,10 @@ from redis.event import AfterAsyncClusterInstantiationEvent, EventDispatcher
 from redis.exceptions import (
     AskError,
     BusyLoadingError,
-    ClusterCrossSlotError,
     ClusterDownError,
     ClusterError,
     ConnectionError,
     DataError,
-    MasterDownError,
     MaxConnectionsError,
     MovedError,
     RedisClusterException,
@@ -66,31 +64,11 @@ from redis.exceptions import (
     TryAgainError,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
-from redis.utils import (
-    deprecated_function,
-    dict_merge,
-    get_lib_version,
-    safe_str,
-    str_if_bytes,
-)
+from redis.utils import deprecated_function, get_lib_version, safe_str, str_if_bytes
 
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
 )
-
-
-class ClusterParser(DefaultParser):
-    EXCEPTION_CLASSES = dict_merge(
-        DefaultParser.EXCEPTION_CLASSES,
-        {
-            "ASK": AskError,
-            "CLUSTERDOWN": ClusterDownError,
-            "CROSSSLOT": ClusterCrossSlotError,
-            "MASTERDOWN": MasterDownError,
-            "MOVED": MovedError,
-            "TRYAGAIN": TryAgainError,
-        },
-    )
 
 
 class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands):
@@ -306,7 +284,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         kwargs: Dict[str, Any] = {
             "max_connections": max_connections,
             "connection_class": Connection,
-            "parser_class": ClusterParser,
             # Client related kwargs
             "credential_provider": credential_provider,
             "username": username,
