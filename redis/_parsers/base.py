@@ -9,18 +9,24 @@ else:
     from async_timeout import timeout as async_timeout
 
 from ..exceptions import (
+    AskError,
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
     BusyLoadingError,
+    ClusterCrossSlotError,
+    ClusterDownError,
     ConnectionError,
     ExecAbortError,
+    MasterDownError,
     ModuleError,
+    MovedError,
     NoPermissionError,
     NoScriptError,
     OutOfMemoryError,
     ReadOnlyError,
     RedisError,
     ResponseError,
+    TryAgainError,
 )
 from ..typing import EncodableT
 from .encoders import Encoder
@@ -72,6 +78,12 @@ class BaseParser(ABC):
         "READONLY": ReadOnlyError,
         "NOAUTH": AuthenticationError,
         "NOPERM": NoPermissionError,
+        "ASK": AskError,
+        "TRYAGAIN": TryAgainError,
+        "MOVED": MovedError,
+        "CLUSTERDOWN": ClusterDownError,
+        "CROSSSLOT": ClusterCrossSlotError,
+        "MASTERDOWN": MasterDownError,
     }
 
     @classmethod
