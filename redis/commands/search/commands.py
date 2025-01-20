@@ -10,8 +10,8 @@ from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
 from .document import Document
 from .field import Field
-from .indexDefinition import IndexDefinition
-from .profileInformation import ProfileInformation
+from .index_definition import IndexDefinition
+from .profile_information import ProfileInformation
 from .query import Query
 from .result import Result
 from .suggestion import SuggestionParser
@@ -67,10 +67,8 @@ class SearchCommands:
     """Search commands."""
 
     def _parse_results(self, cmd, res, **kwargs):
-        if get_protocol_version(self.client) in ["3", 3] and cmd != "FT.PROFILE":
-            return res
-        elif get_protocol_version(self.client) in ["3", 3] and cmd == "FT.PROFILE":
-            return ProfileInformation(res)
+        if get_protocol_version(self.client) in ["3", 3]:
+            return ProfileInformation(res) if cmd == "FT.PROFILE" else res
         else:
             return self._RESP2_MODULE_CALLBACKS[cmd](res, **kwargs)
 
