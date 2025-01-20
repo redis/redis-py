@@ -27,6 +27,8 @@ from typing import (
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
+from ..auth.token import TokenInterface
+from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
 from ..utils import format_error_message
 
 # the functionality is available in 3.11.x but has a major issue before
@@ -148,6 +150,7 @@ class AbstractConnection:
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -156,6 +159,10 @@ class AbstractConnection:
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self.db = db
         self.client_name = client_name
         self.lib_name = lib_name
@@ -195,6 +202,8 @@ class AbstractConnection:
         self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
+        self._re_auth_token: Optional[TokenInterface] = None
+
         try:
             p = int(protocol)
         except TypeError:
@@ -214,7 +223,13 @@ class AbstractConnection:
             _warnings.warn(
                 f"unclosed Connection {self!r}", ResourceWarning, source=self
             )
-            self._close()
+
+            try:
+                asyncio.get_running_loop()
+                self._close()
+            except RuntimeError:
+                # No actions been taken if pool already closed.
+                pass
 
     def _close(self):
         """
@@ -321,6 +336,9 @@ class AbstractConnection:
     def _error_message(self, exception: BaseException) -> str:
         return format_error_message(self._host_error(), exception)
 
+    def get_protocol(self):
+        return self.protocol
+
     async def on_connect(self) -> None:
         """Initialize the connection, authenticate and select a database"""
         self._parser.on_connect(self)
@@ -333,7 +351,8 @@ class AbstractConnection:
                 self.credential_provider
                 or UsernamePasswordCredentialProvider(self.username, self.password)
             )
-            auth_args = cred_provider.get_credentials()
+            auth_args = await cred_provider.get_credentials_async()
+
             # if resp version is specified and we have auth args,
             # we need to send them via HELLO
         if auth_args and self.protocol not in [2, "2"]:
@@ -654,6 +673,19 @@ class AbstractConnection:
     async def process_invalidation_messages(self):
         while not self._socket_is_empty():
             await self.read_response(push_request=True)
+
+    def set_re_auth_token(self, token: TokenInterface):
+        self._re_auth_token = token
+
+    async def re_auth(self):
+        if self._re_auth_token is not None:
+            await self.send_command(
+                "AUTH",
+                self._re_auth_token.try_get("oid"),
+                self._re_auth_token.get_value(),
+            )
+            await self.read_response()
+            self._re_auth_token = None
 
 
 class Connection(AbstractConnection):
@@ -1033,6 +1065,10 @@ class ConnectionPool:
         self._available_connections: List[AbstractConnection] = []
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
+        self._lock = asyncio.Lock()
+        self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
+        if self._event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
 
     def __repr__(self):
         return (
@@ -1052,13 +1088,14 @@ class ConnectionPool:
         )
 
     async def get_connection(self, command_name, *keys, **options):
-        """Get a connected connection from the pool"""
-        connection = self.get_available_connection()
-        try:
-            await self.ensure_connection(connection)
-        except BaseException:
-            await self.release(connection)
-            raise
+        async with self._lock:
+            """Get a connected connection from the pool"""
+            connection = self.get_available_connection()
+            try:
+                await self.ensure_connection(connection)
+            except BaseException:
+                await self.release(connection)
+                raise
 
         return connection
 
@@ -1108,6 +1145,9 @@ class ConnectionPool:
         # not doing so is an error that will cause an exception here.
         self._in_use_connections.remove(connection)
         self._available_connections.append(connection)
+        await self._event_dispatcher.dispatch_async(
+            AsyncAfterConnectionReleasedEvent(connection)
+        )
 
     async def disconnect(self, inuse_connections: bool = True):
         """
@@ -1140,6 +1180,29 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
+
+    async def re_auth_callback(self, token: TokenInterface):
+        async with self._lock:
+            for conn in self._available_connections:
+                await conn.retry.call_with_retry(
+                    lambda: conn.send_command(
+                        "AUTH", token.try_get("oid"), token.get_value()
+                    ),
+                    lambda error: self._mock(error),
+                )
+                await conn.retry.call_with_retry(
+                    lambda: conn.read_response(), lambda error: self._mock(error)
+                )
+            for conn in self._in_use_connections:
+                conn.set_re_auth_token(token)
+
+    async def _mock(self, error: RedisError):
+        """
+        Dummy functions, needs to be passed as error callback to retry object.
+        :param error:
+        :return:
+        """
+        pass
 
 
 class BlockingConnectionPool(ConnectionPool):

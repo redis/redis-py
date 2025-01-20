@@ -27,6 +27,13 @@ from redis.connection import (
     UnixDomainSocketConnection,
 )
 from redis.credentials import CredentialProvider
+from redis.event import (
+    AfterPooledConnectionsInstantiationEvent,
+    AfterPubSubConnectionInstantiationEvent,
+    AfterSingleConnectionInstantiationEvent,
+    ClientType,
+    EventDispatcher,
+)
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -213,6 +220,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         protocol: Optional[int] = 2,
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -227,6 +235,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if `True`, connection pool is not used. In that case `Redis`
             instance use is not thread safe.
         """
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         if not connection_pool:
             if charset is not None:
                 warnings.warn(
@@ -313,9 +325,19 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)
+            self._event_dispatcher.dispatch(
+                AfterPooledConnectionsInstantiationEvent(
+                    [connection_pool], ClientType.SYNC, credential_provider
+                )
+            )
             self.auto_close_connection_pool = True
         else:
             self.auto_close_connection_pool = False
+            self._event_dispatcher.dispatch(
+                AfterPooledConnectionsInstantiationEvent(
+                    [connection_pool], ClientType.SYNC, credential_provider
+                )
+            )
 
         self.connection_pool = connection_pool
 
@@ -325,9 +347,16 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ]:
             raise RedisError("Client caching is only supported with RESP version 3")
 
+        self.single_connection_lock = threading.Lock()
         self.connection = None
-        if single_connection_client:
+        self._single_connection_client = single_connection_client
+        if self._single_connection_client:
             self.connection = self.connection_pool.get_connection("_")
+            self._event_dispatcher.dispatch(
+                AfterSingleConnectionInstantiationEvent(
+                    self.connection, ClientType.SYNC, self.single_connection_lock
+                )
+            )
 
         self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
 
@@ -500,7 +529,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         subscribe to channels and listen for messages that get published to
         them.
         """
-        return PubSub(self.connection_pool, **kwargs)
+        return PubSub(
+            self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs
+        )
 
     def monitor(self):
         return Monitor(self.connection_pool)
@@ -563,6 +594,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         pool = self.connection_pool
         command_name = args[0]
         conn = self.connection or pool.get_connection(command_name, **options)
+
+        if self._single_connection_client:
+            self.single_connection_lock.acquire()
         try:
             return conn.retry.call_with_retry(
                 lambda: self._send_command_parse_response(
@@ -571,6 +605,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 lambda error: self._disconnect_raise(conn, error),
             )
         finally:
+            if self._single_connection_client:
+                self.single_connection_lock.release()
             if not self.connection:
                 pool.release(conn)
 
@@ -691,6 +727,7 @@ class PubSub:
         ignore_subscribe_messages: bool = False,
         encoder: Optional["Encoder"] = None,
         push_handler_func: Union[None, Callable[[str], None]] = None,
+        event_dispatcher: Optional["EventDispatcher"] = None,
     ):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -701,6 +738,11 @@ class PubSub:
         # to lookup channel and pattern names for callback handlers.
         self.encoder = encoder
         self.push_handler_func = push_handler_func
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
+        self._lock = threading.Lock()
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
         self.health_check_response_b = self.encoder.encode(self.HEALTH_CHECK_MESSAGE)
@@ -791,11 +833,17 @@ class PubSub:
             self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
+            self._event_dispatcher.dispatch(
+                AfterPubSubConnectionInstantiationEvent(
+                    self.connection, self.connection_pool, ClientType.SYNC, self._lock
+                )
+            )
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}
         if not self.subscribed:
             self.clean_health_check_responses()
-        self._execute(connection, connection.send_command, *args, **kwargs)
+        with self._lock:
+            self._execute(connection, connection.send_command, *args, **kwargs)
 
     def clean_health_check_responses(self) -> None:
         """
