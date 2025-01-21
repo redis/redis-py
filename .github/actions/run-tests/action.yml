@@ -115,13 +115,13 @@ runs:
         
           if (( $REDIS_MAJOR_VERSION < 8 )); then
             if [ "$protocol" == "2" ] || [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
-              echo "::group::RESP${protocol} cluster tests"
+              echo "::group::RESP${protocol} cluster tests (no modules)"
               invoke cluster-tests $eventloop --protocol=${protocol} --extra-markers="not redismod"
               echo "::endgroup::"
             fi
           else
             if [ "$protocol" == "2" ] || [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
-              echo "::group::RESP${protocol} cluster tests"
+              echo "::group::RESP${protocol} cluster tests (with modules)"
               invoke cluster-tests --redis-mod-url=${REDIS_CLUSTER_URL} $eventloop --protocol=${protocol}
               echo "::endgroup::"
             fi
