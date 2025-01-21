@@ -69,19 +69,20 @@ def standalone_tests(
 
 
 @task
-def cluster_tests(c, uvloop=False, protocol=2, profile=False, extra_markers=""):
+def cluster_tests(c, uvloop=False, protocol=2, profile=False, redis_mod_url=None, extra_markers=""):
     """Run tests against a redis cluster"""
     profile_arg = "--profile" if profile else ""
+    redis_mod_url = f"--redis-mod-url={redis_mod_url}" if redis_mod_url else ""
     cluster_url = "redis://localhost:16379/0"
     cluster_tls_url = "rediss://localhost:27379/0"
     extra_markers = f" and {extra_markers}" if extra_markers else ""
     if uvloop:
         run(
-            f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster_resp{protocol}_uvloop.xml -m 'not onlynoncluster and not graph{extra_markers}' --redis-url={cluster_url} --redis-ssl-url={cluster_tls_url} --junit-xml=cluster-resp{protocol}-uvloop-results.xml --uvloop"
+            f"pytest {profile_arg} --protocol={protocol} {redis_mod_url} --cov=./ --cov-report=xml:coverage_cluster_resp{protocol}_uvloop.xml -m 'not onlynoncluster and not graph{extra_markers}' --redis-url={cluster_url} --redis-ssl-url={cluster_tls_url} --junit-xml=cluster-resp{protocol}-uvloop-results.xml --uvloop"
         )
     else:
         run(
-            f"pytest  {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster_resp{protocol}.xml -m 'not onlynoncluster and not graph{extra_markers}' --redis-url={cluster_url} --redis-ssl-url={cluster_tls_url} --junit-xml=cluster-resp{protocol}-results.xml"
+            f"pytest  {profile_arg} --protocol={protocol} {redis_mod_url} --cov=./ --cov-report=xml:coverage_cluster_resp{protocol}.xml -m 'not onlynoncluster and not graph{extra_markers}' --redis-url={cluster_url} --redis-ssl-url={cluster_tls_url} --junit-xml=cluster-resp{protocol}-results.xml"
         )
 
 
