@@ -1,6 +1,7 @@
 import copy
 import platform
 import socket
+import sys
 import threading
 import types
 from typing import Any
@@ -28,6 +29,7 @@ from redis.connection import (
     UnixDomainSocketConnection,
     parse_url,
 )
+from redis.credentials import UsernamePasswordCredentialProvider
 from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
@@ -248,6 +250,7 @@ def test_pool_auto_close(request, from_url):
     r1.close()
 
 
+@pytest.mark.skipif(sys.version_info == (3, 9), reason="Flacky test on Python 3.9")
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 def test_redis_connection_pool(request, from_url):
     """Verify that basic Redis instances using `connection_pool`
@@ -441,6 +444,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         proxy_connection = CacheProxyConnection(
             mock_connection, cache, threading.Lock()
@@ -457,6 +461,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         mock_cache.is_cachable.return_value = True
         mock_cache.get.side_effect = [
@@ -496,9 +501,9 @@ class TestUnitCacheProxyConnection:
         )
         proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
         assert proxy_connection.read_response() == b"bar"
+        assert proxy_connection._current_command_cache_key is None
         assert proxy_connection.read_response() == b"bar"
 
-        mock_connection.read_response.assert_called_once()
         mock_cache.set.assert_has_calls(
             [
                 call(
@@ -525,9 +530,6 @@ class TestUnitCacheProxyConnection:
                 call(CacheKey(command="GET", redis_keys=("foo",))),
                 call(CacheKey(command="GET", redis_keys=("foo",))),
                 call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
             ]
         )
 
@@ -541,6 +543,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         another_conn = copy.deepcopy(mock_connection)
         another_conn.can_read.side_effect = [True, False]

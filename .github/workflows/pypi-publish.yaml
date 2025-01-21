@@ -3,6 +3,7 @@ name: Publish tag to Pypi
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read  #  to fetch code (actions/checkout)

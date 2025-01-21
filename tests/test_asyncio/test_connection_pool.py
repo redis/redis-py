@@ -5,6 +5,7 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as redis
 from redis.asyncio.connection import Connection, to_bool
+from redis.auth.token import TokenInterface
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
 from .compat import aclosing, mock
@@ -105,6 +106,12 @@ class DummyConnection(Connection):
 
     async def can_read_destructive(self, timeout: float = 0):
         return False
+
+    def set_re_auth_token(self, token: TokenInterface):
+        pass
+
+    async def re_auth(self):
+        pass
 
 
 class TestConnectionPool:

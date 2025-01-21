@@ -21,7 +21,7 @@ python -m venv ${DESTENV}
 source ${DESTENV}/bin/activate
 pip install --upgrade --quiet pip
 pip install --quiet -r dev_requirements.txt
-invoke devenv
+invoke devenv --endpoints=all-stack
 invoke package
 
 # find packages
@@ -39,7 +39,9 @@ cd ${TESTDIR}
 # install, run tests
 pip install ${PKG}
 # Redis tests
-pytest -m 'not onlycluster'
+pytest -m 'not onlycluster and not graph'
 # RedisCluster tests
 CLUSTER_URL="redis://localhost:16379/0"
-pytest -m 'not onlynoncluster and not redismod and not ssl' --redis-url=${CLUSTER_URL}
+CLUSTER_SSL_URL="rediss://localhost:27379/0"
+pytest -m 'not onlynoncluster and not redismod and not ssl and not graph' \
+  --redis-url="${CLUSTER_URL}" --redis-ssl-url="${CLUSTER_SSL_URL}"

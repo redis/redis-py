@@ -61,3 +61,27 @@ assert res9 == None
 r.delete("myhash")
 # REMOVE_END
 # STEP_END
+
+# STEP_START hgetall
+res10 = r.hset("myhash", mapping={"field1": "Hello", "field2": "World"})
+
+res11 = r.hgetall("myhash")
+print(res11) # >>> { "field1": "Hello", "field2": "World" }
+
+# REMOVE_START
+assert res11 == { "field1": "Hello", "field2": "World" }
+r.delete("myhash")
+# REMOVE_END
+# STEP_END
+
+# STEP_START hvals
+res10 = r.hset("myhash", mapping={"field1": "Hello", "field2": "World"})
+
+res11 = r.hvals("myhash")
+print(res11) # >>> [ "Hello", "World" ]
+
+# REMOVE_START
+assert res11 == [ "Hello", "World" ]
+r.delete("myhash")
+# REMOVE_END
+# STEP_END

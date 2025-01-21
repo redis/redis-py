@@ -1025,6 +1025,8 @@ async def test_phonetic_matcher(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+# NOTE(imalinovskyi): This test contains hardcoded scores valid only for RediSearch 2.8+
+@skip_ifmodversion_lt("2.8.0", "search")
 async def test_scorer(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("description"),))
 
@@ -1644,7 +1646,7 @@ async def test_search_commands_in_pipeline(decoded_r: redis.Redis):
 @pytest.mark.redismod
 async def test_query_timeout(decoded_r: redis.Redis):
     q1 = Query("foo").timeout(5000)
-    assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
+    assert q1.get_args() == ["foo", "TIMEOUT", 5000, "DIALECT", 2, "LIMIT", 0, 10]
     q2 = Query("foo").timeout("not_a_number")
     with pytest.raises(redis.ResponseError):
         await decoded_r.ft().search(q2)
