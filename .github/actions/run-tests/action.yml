@@ -122,6 +122,7 @@ runs:
               invoke cluster-tests $eventloop --protocol=${protocol}
               echo "::endgroup::"
             fi
+          fi
         }
   
         run_tests 2 "${{inputs.event-loop}}"
