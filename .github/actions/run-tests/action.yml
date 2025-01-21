@@ -82,6 +82,8 @@ runs:
           invoke devenv --endpoints all
         fi        
         
+        echo "REDIS_CLUSTER_URL=redis://localhost:16379" >> $GITHUB_ENV
+
         sleep 10 # time to settle
         echo "::endgroup::"
       shell: bash
@@ -100,6 +102,7 @@ runs:
     
           echo "::group::RESP${protocol} standalone tests"
           echo "REDIS_MOD_URL=${REDIS_MOD_URL}"
+          echo "REDIS_CLUSTER_URL=${REDIS_CLUSTER_URL}"
         
           if (( $REDIS_MAJOR_VERSION < 7 )) && [ "$protocol" == "3" ]; then
             echo "Skipping module tests: Modules doesn't support RESP3 for Redis versions < 7"
@@ -109,11 +112,19 @@ runs:
           fi
         
           echo "::endgroup::"
-    
-          if [ "$protocol" == "2" ] || [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
-            echo "::group::RESP${protocol} cluster tests"
-            invoke cluster-tests $eventloop --protocol=${protocol}
-            echo "::endgroup::"
+        
+          if (( $REDIS_MAJOR_VERSION < 8 )); then
+            if [ "$protocol" == "2" ] || [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
+              echo "::group::RESP${protocol} cluster tests (no modules)"
+              invoke cluster-tests $eventloop --protocol=${protocol} --extra-markers="not redismod"
+              echo "::endgroup::"
+            fi
+          else
+            if [ "$protocol" == "2" ] || [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
+              echo "::group::RESP${protocol} cluster tests (with modules)"
+              invoke cluster-tests --redis-mod-url=${REDIS_CLUSTER_URL} $eventloop --protocol=${protocol}
+              echo "::endgroup::"
+            fi
           fi
         }
   
