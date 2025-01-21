@@ -82,7 +82,7 @@ runs:
           invoke devenv --endpoints all
         fi        
         
-        echo "REDIS_CLUSTER_URL="redis://localhost:16379" >> $GITHUB_ENV
+        echo "REDIS_CLUSTER_URL=redis://localhost:16379" >> $GITHUB_ENV
 
         sleep 10 # time to settle
         echo "::endgroup::"
