@@ -20,7 +20,7 @@ from redis.commands.search.field import (
     TextField,
     VectorField,
 )
-from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
@@ -30,6 +30,7 @@ from .conftest import (
     is_resp2_connection,
     skip_if_redis_enterprise,
     skip_if_resp_version,
+    skip_if_server_version_gte,
     skip_if_server_version_lt,
     skip_ifmodversion_lt,
 )
@@ -1007,6 +1008,7 @@ def test_get(client):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
+@skip_if_server_version_gte("7.9.0")
 def test_config(client):
     assert client.ft().config_set("TIMEOUT", "100")
     with pytest.raises(redis.ResponseError):
@@ -1015,6 +1017,19 @@ def test_config(client):
     assert "100" == res["TIMEOUT"]
     res = client.ft().config_get("TIMEOUT")
     assert "100" == res["TIMEOUT"]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.9.0")
+def test_config_with_removed_ftconfig(client):
+    assert client.config_set("timeout", "100")
+    with pytest.raises(redis.ResponseError):
+        client.config_set("timeout", "null")
+    res = client.config_get("*")
+    assert "100" == res["timeout"]
+    res = client.config_get("timeout")
+    assert "100" == res["timeout"]
 
 
 @pytest.mark.redismod
@@ -1571,6 +1586,7 @@ def test_index_definition(client):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_if_redis_enterprise()
+@skip_if_server_version_gte("7.9.0")
 def test_expire(client):
     client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
     ttl = client.execute_command("ft.debug", "TTL", "idx")
@@ -2025,6 +2041,8 @@ def test_json_with_jsonpath(client):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_if_redis_enterprise()
+@skip_if_server_version_gte("7.9.0")
+@skip_if_server_version_lt("6.3.0")
 def test_profile(client):
     client.ft().create_index((TextField("t"),))
     client.ft().client.hset("1", "t", "hello")
@@ -2034,10 +2052,9 @@ def test_profile(client):
     q = Query("hello|world").no_content()
     if is_resp2_connection(client):
         res, det = client.ft().profile(q)
-        assert det["Iterators profile"]["Counter"] == 2.0
-        assert len(det["Iterators profile"]["Child iterators"]) == 2
-        assert det["Iterators profile"]["Type"] == "UNION"
-        assert det["Parsing time"] < 0.5
+        det = det.info
+
+        assert isinstance(det, list)
         assert len(res.docs) == 2  # check also the search result
 
         # check using AggregateRequest
@@ -2047,15 +2064,14 @@ def test_profile(client):
             .apply(prefix="startswith(@t, 'hel')")
         )
         res, det = client.ft().profile(req)
-        assert det["Iterators profile"]["Counter"] == 2
-        assert det["Iterators profile"]["Type"] == "WILDCARD"
-        assert isinstance(det["Parsing time"], float)
+        det = det.info
+        assert isinstance(det, list)
         assert len(res.rows) == 2  # check also the search result
     else:
         res = client.ft().profile(q)
-        assert res["profile"]["Iterators profile"][0]["Counter"] == 2.0
-        assert res["profile"]["Iterators profile"][0]["Type"] == "UNION"
-        assert res["profile"]["Parsing time"] < 0.5
+        res = res.info
+
+        assert isinstance(res, dict)
         assert len(res["results"]) == 2  # check also the search result
 
         # check using AggregateRequest
@@ -2065,14 +2081,97 @@ def test_profile(client):
             .apply(prefix="startswith(@t, 'hel')")
         )
         res = client.ft().profile(req)
-        assert res["profile"]["Iterators profile"][0]["Counter"] == 2
-        assert res["profile"]["Iterators profile"][0]["Type"] == "WILDCARD"
-        assert isinstance(res["profile"]["Parsing time"], float)
+        res = res.info
+
+        assert isinstance(res, dict)
         assert len(res["results"]) == 2  # check also the search result
 
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
+@skip_if_server_version_lt("7.9.0")
+def test_profile_with_coordinator(client):
+    client.ft().create_index((TextField("t"),))
+    client.ft().client.hset("1", "t", "hello")
+    client.ft().client.hset("2", "t", "world")
+
+    # check using Query
+    q = Query("hello|world").no_content()
+    if is_resp2_connection(client):
+        res, det = client.ft().profile(q)
+        det = det.info
+
+        assert isinstance(det, list)
+        assert len(res.docs) == 2  # check also the search result
+
+        # check using AggregateRequest
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("t")
+            .apply(prefix="startswith(@t, 'hel')")
+        )
+        res, det = client.ft().profile(req)
+        det = det.info
+
+        assert isinstance(det, list)
+        assert det[0] == "Shards"
+        assert det[2] == "Coordinator"
+        assert len(res.rows) == 2  # check also the search result
+    else:
+        res = client.ft().profile(q)
+        res = res.info
+
+        assert isinstance(res, dict)
+        assert len(res["Results"]["results"]) == 2  # check also the search result
+
+        # check using AggregateRequest
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("t")
+            .apply(prefix="startswith(@t, 'hel')")
+        )
+        res = client.ft().profile(req)
+        res = res.info
+
+        assert isinstance(res, dict)
+        assert len(res["Results"]["results"]) == 2  # check also the search result
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
+@skip_if_server_version_gte("6.3.0")
+def test_profile_with_no_warnings(client):
+    client.ft().create_index((TextField("t"),))
+    client.ft().client.hset("1", "t", "hello")
+    client.ft().client.hset("2", "t", "world")
+
+    # check using Query
+    q = Query("hello|world").no_content()
+    res, det = client.ft().profile(q)
+    det = det.info
+
+    assert isinstance(det, list)
+    assert len(res.docs) == 2  # check also the search result
+
+    # check using AggregateRequest
+    req = (
+        aggregations.AggregateRequest("*")
+        .load("t")
+        .apply(prefix="startswith(@t, 'hel')")
+    )
+    res, det = client.ft().profile(req)
+    det = det.info
+
+    assert isinstance(det, list)
+    assert len(res.rows) == 2  # check also the search result
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_gte("7.9.0")
+@skip_if_server_version_lt("6.3.0")
 def test_profile_limited(client):
     client.ft().create_index((TextField("t"),))
     client.ft().client.hset("1", "t", "hello")
@@ -2083,18 +2182,14 @@ def test_profile_limited(client):
     q = Query("%hell% hel*")
     if is_resp2_connection(client):
         res, det = client.ft().profile(q, limited=True)
-        assert (
-            det["Iterators profile"]["Child iterators"][0]["Child iterators"]
-            == "The number of iterators in the union is 3"
-        )
-        assert (
-            det["Iterators profile"]["Child iterators"][1]["Child iterators"]
-            == "The number of iterators in the union is 4"
-        )
-        assert det["Iterators profile"]["Type"] == "INTERSECT"
+        det = det.info
+        assert det[4][1][7][9] == "The number of iterators in the union is 3"
+        assert det[4][1][8][9] == "The number of iterators in the union is 4"
+        assert det[4][1][1] == "INTERSECT"
         assert len(res.docs) == 3  # check also the search result
     else:
         res = client.ft().profile(q, limited=True)
+        res = res.info
         iterators_profile = res["profile"]["Iterators profile"]
         assert (
             iterators_profile[0]["Child iterators"][0]["Child iterators"]
@@ -2110,6 +2205,8 @@ def test_profile_limited(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_gte("7.9.0")
+@skip_if_server_version_lt("6.3.0")
 def test_profile_query_params(client):
     client.ft().create_index(
         (
@@ -2125,13 +2222,15 @@ def test_profile_query_params(client):
     q = Query(query).return_field("__v_score").sort_by("__v_score", True)
     if is_resp2_connection(client):
         res, det = client.ft().profile(q, query_params={"vec": "aaaaaaaa"})
-        assert det["Iterators profile"]["Counter"] == 2.0
-        assert det["Iterators profile"]["Type"] == "VECTOR"
+        det = det.info
+        assert det[4][1][5] == 2.0
+        assert det[4][1][1] == "VECTOR"
         assert res.total == 2
         assert "a" == res.docs[0].id
         assert "0" == res.docs[0].__getattribute__("__v_score")
     else:
         res = client.ft().profile(q, query_params={"vec": "aaaaaaaa"})
+        res = res.info
         assert res["profile"]["Iterators profile"][0]["Counter"] == 2
         assert res["profile"]["Iterators profile"][0]["Type"] == "VECTOR"
         assert res["total_results"] == 2

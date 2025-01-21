@@ -1823,6 +1823,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.1.140")
+    @skip_if_server_version_gte("7.9.0")
     def test_tfunction_load_delete(self, stack_r):
         self.try_delete_libs(stack_r, "lib1")
         lib_code = self.generate_lib_code("lib1")
@@ -1831,6 +1832,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.1.140")
+    @skip_if_server_version_gte("7.9.0")
     def test_tfunction_list(self, stack_r):
         self.try_delete_libs(stack_r, "lib1", "lib2", "lib3")
         assert stack_r.tfunction_load(self.generate_lib_code("lib1"))
@@ -1861,6 +1863,7 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.1.140")
+    @skip_if_server_version_gte("7.9.0")
     def test_tfcall(self, stack_r):
         self.try_delete_libs(stack_r, "lib1")
         assert stack_r.tfunction_load(self.generate_lib_code("lib1"))
@@ -4329,6 +4332,7 @@ class TestRedisCommands:
         assert r.xinfo_groups(stream) == expected
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_server_version_gte("7.9.0")
     def test_xgroup_create_entriesread(self, r: redis.Redis):
         stream = "stream"
         group = "group"
@@ -4346,6 +4350,28 @@ class TestRedisCommands:
                 "last-delivered-id": b"0-0",
                 "entries-read": 7,
                 "lag": -6,
+            }
+        ]
+        assert r.xinfo_groups(stream) == expected
+
+    @skip_if_server_version_lt("7.9.0")
+    def test_xgroup_create_entriesread_with_fixed_lag_field(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        r.xadd(stream, {"foo": "bar"})
+
+        # no group is setup yet, no info to obtain
+        assert r.xinfo_groups(stream) == []
+
+        assert r.xgroup_create(stream, group, 0, entries_read=7)
+        expected = [
+            {
+                "name": group.encode(),
+                "consumers": 0,
+                "pending": 0,
+                "last-delivered-id": b"0-0",
+                "entries-read": 7,
+                "lag": 1,
             }
         ]
         assert r.xinfo_groups(stream) == expected
