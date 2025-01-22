@@ -31,7 +31,7 @@ runs:
     - name: Setup Test environment
       env:
         REDIS_VERSION: ${{ inputs.redis-version }}
-        REDIS_IMAGE: "redis:${{ inputs.redis-version }}"
+        REDIS_IMAGE: "redis:8.0-M02"
         CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ inputs.redis-version }}"
       run: |
         set -e
