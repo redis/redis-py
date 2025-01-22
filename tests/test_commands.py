@@ -4331,6 +4331,7 @@ class TestRedisCommands:
         ]
         assert r.xinfo_groups(stream) == expected
 
+    @skip_if_server_version_lt("7.0.0")
     def test_xgroup_create_entriesread(self, r: redis.Redis):
         stream = "stream"
         group = "group"
