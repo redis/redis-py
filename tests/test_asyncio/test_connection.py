@@ -1,6 +1,7 @@
 import asyncio
 import socket
 import types
+from errno import ECONNREFUSED
 from unittest.mock import patch
 
 import pytest
@@ -534,7 +535,8 @@ async def test_network_connection_failure():
     with pytest.raises(ConnectionError) as e:
         redis = Redis(host="127.0.0.1", port=9999)
         await redis.set("a", "b")
-    assert str(e.value).startswith("Error 111 connecting to 127.0.0.1:9999. Connect")
+    expected_err = f"Error {ECONNREFUSED} connecting to 127.0.0.1:9999. Connect"
+    assert str(e.value).startswith(expected_err)
 
 
 async def test_unix_socket_connection_failure():

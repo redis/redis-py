@@ -4,6 +4,7 @@ import socket
 import sys
 import threading
 import types
+from errno import ECONNREFUSED
 from typing import Any
 from unittest import mock
 from unittest.mock import call, patch
@@ -352,7 +353,11 @@ def test_network_connection_failure():
     with pytest.raises(ConnectionError) as e:
         redis = Redis(port=9999)
         redis.set("a", "b")
-    assert str(e.value) == "Error 111 connecting to localhost:9999. Connection refused."
+
+    assert (
+        str(e.value)
+        == f"Error {ECONNREFUSED} connecting to localhost:9999. Connection refused."
+    )
 
 
 def test_unix_socket_connection_failure():
