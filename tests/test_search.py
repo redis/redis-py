@@ -643,6 +643,7 @@ def test_explaincli(client):
 
 
 @pytest.mark.redismod
+@skip_if_server_version_gte("7.9.0")
 def test_summarize(client):
     createIndex(client.ft())
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))

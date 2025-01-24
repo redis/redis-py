@@ -683,6 +683,7 @@ async def test_explaincli(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_if_server_version_gte("7.9.0")
 async def test_summarize(decoded_r: redis.Redis):
     await createIndex(decoded_r.ft())
     await waitForIndex(decoded_r, "idx")
