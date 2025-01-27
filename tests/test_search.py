@@ -647,7 +647,7 @@ def test_summarize(client):
     createIndex(client.ft())
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
 
-    q = Query("\"king henry\"").paging(0, 1)
+    q = Query('"king henry"').paging(0, 1)
     q.highlight(fields=("play", "txt"), tags=("<b>", "</b>"))
     q.summarize("txt")
 
@@ -660,7 +660,7 @@ def test_summarize(client):
             == doc.txt
         )
 
-        q = Query("\"king henry\"").paging(0, 1).summarize().highlight()
+        q = Query('"king henry"').paging(0, 1).summarize().highlight()
 
         doc = sorted(client.ft().search(q).docs)[0]
         assert "<b>Henry</b> ... " == doc.play
@@ -676,7 +676,7 @@ def test_summarize(client):
             == doc["extra_attributes"]["txt"]
         )
 
-        q = Query("\"king henry\"").paging(0, 1).summarize().highlight()
+        q = Query('"king henry"').paging(0, 1).summarize().highlight()
 
         doc = sorted(client.ft().search(q)["results"])[0]
         assert "<b>Henry</b> ... " == doc["extra_attributes"]["play"]

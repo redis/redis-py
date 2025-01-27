@@ -687,7 +687,7 @@ async def test_summarize(decoded_r: redis.Redis):
     await createIndex(decoded_r.ft())
     await waitForIndex(decoded_r, "idx")
 
-    q = Query("\"king henry\"").paging(0, 1)
+    q = Query('"king henry"').paging(0, 1)
     q.highlight(fields=("play", "txt"), tags=("<b>", "</b>"))
     q.summarize("txt")
 
@@ -699,7 +699,7 @@ async def test_summarize(decoded_r: redis.Redis):
             == doc.txt
         )
 
-        q = Query("\"king henry\"").paging(0, 1).summarize().highlight()
+        q = Query('"king henry"').paging(0, 1).summarize().highlight()
 
         doc = sorted((await decoded_r.ft().search(q)).docs)[0]
         assert "<b>Henry</b> ... " == doc.play
@@ -715,7 +715,7 @@ async def test_summarize(decoded_r: redis.Redis):
             == doc["extra_attributes"]["txt"]
         )
 
-        q = Query("\"king henry\"").paging(0, 1).summarize().highlight()
+        q = Query('"king henry"').paging(0, 1).summarize().highlight()
 
         doc = sorted((await decoded_r.ft().search(q))["results"])[0]
         assert "<b>Henry</b> ... " == doc["extra_attributes"]["play"]
