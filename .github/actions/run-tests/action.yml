@@ -31,10 +31,14 @@ runs:
     - name: Setup Test environment
       env:
         REDIS_VERSION: ${{ inputs.redis-version }}
-        REDIS_IMAGE: "redis:8.0-M03"
+        REDIS_IMAGE: "redis:${{ inputs.redis-version }}"
         CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ inputs.redis-version }}"
       run: |
         set -e
+        
+        if [ "${{inputs.redis-version}}" == "8.0-M04-pre" ]; then
+          export REDIS_IMAGE=redis:8.0-M03
+        fi
                 
         echo "::group::Installing dependencies"
         pip install -U setuptools wheel
