@@ -532,11 +532,10 @@ async def test_format_error_message(conn, error, expected_message):
 
 
 async def test_network_connection_failure():
-    with pytest.raises(ConnectionError) as e:
+    exp_err = fr"^Error {ECONNREFUSED} connecting to 127.0.0.1:9999.(.+)$"
+    with pytest.raises(ConnectionError, match=exp_err):
         redis = Redis(host="127.0.0.1", port=9999)
         await redis.set("a", "b")
-    expected_err = f"Error {ECONNREFUSED} connecting to 127.0.0.1:9999. Connect"
-    assert str(e.value).startswith(expected_err)
 
 
 async def test_unix_socket_connection_failure():

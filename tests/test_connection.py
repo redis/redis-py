@@ -350,14 +350,10 @@ def test_format_error_message(conn, error, expected_message):
 
 
 def test_network_connection_failure():
-    with pytest.raises(ConnectionError) as e:
+    exp_err = f"Error {ECONNREFUSED} connecting to localhost:9999. Connection refused."
+    with pytest.raises(ConnectionError, match=exp_err):
         redis = Redis(port=9999)
         redis.set("a", "b")
-
-    assert (
-        str(e.value)
-        == f"Error {ECONNREFUSED} connecting to localhost:9999. Connection refused."
-    )
 
 
 def test_unix_socket_connection_failure():
