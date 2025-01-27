@@ -652,7 +652,6 @@ def test_summarize(client):
     q.summarize("txt")
 
     if is_resp2_connection(client):
-        print(client.ft().search(q).docs)
         doc = sorted(client.ft().search(q).docs)[0]
         assert "<b>Henry</b> IV" == doc.play
         assert (
@@ -2885,6 +2884,12 @@ def test_search_query_with_different_dialects(client):
         assert res.total == 0
     else:
         assert res["total_results"] == 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("7.9.0")
+def test_info_exposes_search_info(client):
+    assert len(client.info("search")) > 0
 
 
 def _assert_search_result(client, result, expected_doc_ids):
