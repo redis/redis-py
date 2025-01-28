@@ -672,7 +672,7 @@ class AbstractConnection(ConnectionInterface):
             output.append(SYM_EMPTY.join(pieces))
         return output
 
-    def get_protocol(self) -> int or str:
+    def get_protocol(self) -> Union[int, str]:
         return self.protocol
 
     @property
