@@ -35,6 +35,10 @@ runs:
         CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ inputs.redis-version }}"
       run: |
         set -e
+        
+        if [ "${{inputs.redis-version}}" == "8.0-M04-pre" ]; then
+          export REDIS_IMAGE=redis:8.0-M03
+        fi
                 
         echo "::group::Installing dependencies"
         pip install -U setuptools wheel
@@ -56,9 +60,9 @@ runs:
         
           # Mapping of redis version to stack version  
           declare -A redis_stack_version_mapping=(
-            ["7.4.1"]="7.4.0-v1"
-            ["7.2.6"]="7.2.0-v13"
-            ["6.2.16"]="6.2.6-v17"
+            ["7.4.2"]="7.4.0-v2"
+            ["7.2.7"]="7.2.0-v14"
+            ["6.2.17"]="6.2.6-v18"
           )
                   
           if [[ -v redis_stack_version_mapping[$REDIS_VERSION] ]]; then
