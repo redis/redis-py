@@ -1,5 +1,6 @@
 import contextlib
 import multiprocessing
+import sys
 
 import pytest
 import redis
@@ -7,6 +8,9 @@ from redis.connection import Connection, ConnectionPool
 from redis.exceptions import ConnectionError
 
 from .conftest import _get_client
+
+if sys.platform == "darwin":
+    multiprocessing.set_start_method("fork", force=True)
 
 
 @contextlib.contextmanager

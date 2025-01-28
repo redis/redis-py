@@ -103,7 +103,7 @@ services:
       - all
 
   redis-stack:
-    image: ${REDIS_STACK_IMAGE:-redis/redis-stack-server:edge}
+    image: ${REDIS_STACK_IMAGE:-redis/redis-stack-server:latest}
     container_name: redis-stack
     ports:
       - 6479:6379
@@ -112,6 +112,7 @@ services:
     profiles:
       - standalone
       - all-stack
+      - all
 
   redis-stack-graph:
     image: redis/redis-stack-server:6.2.6-v15
