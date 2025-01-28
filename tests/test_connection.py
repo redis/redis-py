@@ -45,9 +45,8 @@ def test_invalid_response(r):
     raw = b"x"
     parser = r.connection._parser
     with mock.patch.object(parser._buffer, "readline", return_value=raw):
-        with pytest.raises(InvalidResponse) as cm:
+        with pytest.raises(InvalidResponse, match=f"Protocol Error: {raw!r}"):
             parser.read_response()
-    assert str(cm.value) == f"Protocol Error: {raw!r}"
 
 
 @skip_if_server_version_lt("4.0.0")
@@ -142,10 +141,9 @@ class TestConnection:
         conn._connect = mock.Mock()
         conn._connect.side_effect = socket.timeout
 
-        with pytest.raises(TimeoutError) as e:
+        with pytest.raises(TimeoutError, match="Timeout connecting to server"):
             conn.connect()
         assert conn._connect.call_count == 1
-        assert str(e.value) == "Timeout connecting to server"
         self.clear(conn)
 
 
@@ -357,13 +355,10 @@ def test_network_connection_failure():
 
 
 def test_unix_socket_connection_failure():
-    with pytest.raises(ConnectionError) as e:
+    exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
+    with pytest.raises(ConnectionError, match=exp_err):
         redis = Redis(unix_socket_path="unix:///tmp/a.sock")
         redis.set("a", "b")
-    assert (
-        str(e.value)
-        == "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
-    )
 
 
 class TestUnitConnectionPool:
