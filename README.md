@@ -19,7 +19,7 @@ The Python interface to the Redis key-value store.
 
 ## How do I Redis?
 
-[Learn for free at Redis University](https://redis.io/university/)
+[Learn for free at Redis University](https://redis.io/learn/university)
 
 [Try the Redis Cloud](https://redis.io/try-free/)
 
