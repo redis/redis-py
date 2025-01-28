@@ -1,6 +1,7 @@
 import asyncio
 import socket
 import types
+from unittest import mock
 from unittest.mock import patch
 
 import pytest
@@ -24,7 +25,6 @@ from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
-from .compat import mock
 from .mocks import MockStream
 
 
