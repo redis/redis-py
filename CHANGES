@@ -1,4 +1,4 @@
-    * Add dynamic_startup_nodes parameter to async RedisCluster (#2472)
+    * Update URL in the readme linking to Redis University
     * Move doctests (doc code examples) to main branch
     * Update `ResponseT` type hint
     * Allow to control the minimum SSL version
