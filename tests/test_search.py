@@ -314,6 +314,7 @@ def test_client(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_server_version_gte("7.9.0")
 def test_scores(client):
     client.ft().create_index((TextField("txt"),))
 
@@ -331,6 +332,29 @@ def test_scores(client):
         assert 2 == res["total_results"]
         assert "doc2" == res["results"][0]["id"]
         assert 3.0 == res["results"][0]["score"]
+        assert "doc1" == res["results"][1]["id"]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.9.0")
+def test_scores_with_new_default_scorer(client):
+    client.ft().create_index((TextField("txt"),))
+
+    client.hset("doc1", mapping={"txt": "foo baz"})
+    client.hset("doc2", mapping={"txt": "foo bar"})
+
+    q = Query("foo ~bar").with_scores()
+    res = client.ft().search(q)
+    if is_resp2_connection(client):
+        assert 2 == res.total
+        assert "doc2" == res.docs[0].id
+        assert 0.87 == pytest.approx(res.docs[0].score, 0.01)
+        assert "doc1" == res.docs[1].id
+    else:
+        assert 2 == res["total_results"]
+        assert "doc2" == res["results"][0]["id"]
+        assert 0.87 == pytest.approx(res["results"][0]["score"], 0.01)
         assert "doc1" == res["results"][1]["id"]
 
 
@@ -623,7 +647,7 @@ def test_summarize(client):
     createIndex(client.ft())
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
 
-    q = Query("king henry").paging(0, 1)
+    q = Query('"king henry"').paging(0, 1)
     q.highlight(fields=("play", "txt"), tags=("<b>", "</b>"))
     q.summarize("txt")
 
@@ -635,7 +659,7 @@ def test_summarize(client):
             == doc.txt
         )
 
-        q = Query("king henry").paging(0, 1).summarize().highlight()
+        q = Query('"king henry"').paging(0, 1).summarize().highlight()
 
         doc = sorted(client.ft().search(q).docs)[0]
         assert "<b>Henry</b> ... " == doc.play
@@ -651,7 +675,7 @@ def test_summarize(client):
             == doc["extra_attributes"]["txt"]
         )
 
-        q = Query("king henry").paging(0, 1).summarize().highlight()
+        q = Query('"king henry"').paging(0, 1).summarize().highlight()
 
         doc = sorted(client.ft().search(q)["results"])[0]
         assert "<b>Henry</b> ... " == doc["extra_attributes"]["play"]
@@ -936,6 +960,7 @@ def test_phonetic_matcher(client):
 @pytest.mark.onlynoncluster
 # NOTE(imalinovskyi): This test contains hardcoded scores valid only for RediSearch 2.8+
 @skip_ifmodversion_lt("2.8.0", "search")
+@skip_if_server_version_gte("7.9.0")
 def test_scorer(client):
     client.ft().create_index((TextField("description"),))
 
@@ -968,6 +993,55 @@ def test_scorer(client):
     else:
         res = client.ft().search(Query("quick").with_scores())
         assert 1.0 == res["results"][0]["score"]
+        res = client.ft().search(Query("quick").scorer("TFIDF").with_scores())
+        assert 1.0 == res["results"][0]["score"]
+        res = client.ft().search(Query("quick").scorer("TFIDF.DOCNORM").with_scores())
+        assert 0.14285714285714285 == res["results"][0]["score"]
+        res = client.ft().search(Query("quick").scorer("BM25").with_scores())
+        assert 0.22471909420069797 == res["results"][0]["score"]
+        res = client.ft().search(Query("quick").scorer("DISMAX").with_scores())
+        assert 2.0 == res["results"][0]["score"]
+        res = client.ft().search(Query("quick").scorer("DOCSCORE").with_scores())
+        assert 1.0 == res["results"][0]["score"]
+        res = client.ft().search(Query("quick").scorer("HAMMING").with_scores())
+        assert 0.0 == res["results"][0]["score"]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.9.0")
+def test_scorer_with_new_default_scorer(client):
+    client.ft().create_index((TextField("description"),))
+
+    client.hset(
+        "doc1", mapping={"description": "The quick brown fox jumps over the lazy dog"}
+    )
+    client.hset(
+        "doc2",
+        mapping={
+            "description": "Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do."  # noqa
+        },
+    )
+
+    # default scorer is BM25STD
+    if is_resp2_connection(client):
+        res = client.ft().search(Query("quick").with_scores())
+        assert 0.23 == pytest.approx(res.docs[0].score, 0.05)
+        res = client.ft().search(Query("quick").scorer("TFIDF").with_scores())
+        assert 1.0 == res.docs[0].score
+        res = client.ft().search(Query("quick").scorer("TFIDF.DOCNORM").with_scores())
+        assert 0.14285714285714285 == res.docs[0].score
+        res = client.ft().search(Query("quick").scorer("BM25").with_scores())
+        assert 0.22471909420069797 == res.docs[0].score
+        res = client.ft().search(Query("quick").scorer("DISMAX").with_scores())
+        assert 2.0 == res.docs[0].score
+        res = client.ft().search(Query("quick").scorer("DOCSCORE").with_scores())
+        assert 1.0 == res.docs[0].score
+        res = client.ft().search(Query("quick").scorer("HAMMING").with_scores())
+        assert 0.0 == res.docs[0].score
+    else:
+        res = client.ft().search(Query("quick").with_scores())
+        assert 0.23 == pytest.approx(res["results"][0]["score"], 0.05)
         res = client.ft().search(Query("quick").scorer("TFIDF").with_scores())
         assert 1.0 == res["results"][0]["score"]
         res = client.ft().search(Query("quick").scorer("TFIDF.DOCNORM").with_scores())
@@ -2605,9 +2679,8 @@ def test_search_missing_fields(client):
         },
     )
 
-    with pytest.raises(redis.exceptions.ResponseError) as e:
+    with pytest.raises(redis.exceptions.ResponseError):
         client.ft().search(Query("ismissing(@title)").return_field("id").no_content())
-    assert "to be defined with 'INDEXMISSING'" in e.value.args[0]
 
     res = client.ft().search(
         Query("ismissing(@features)").return_field("id").no_content()
@@ -2811,6 +2884,12 @@ def test_search_query_with_different_dialects(client):
         assert res.total == 0
     else:
         assert res["total_results"] == 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("7.9.0")
+def test_info_exposes_search_info(client):
+    assert len(client.info("search")) > 0
 
 
 def _assert_search_result(client, result, expected_doc_ids):

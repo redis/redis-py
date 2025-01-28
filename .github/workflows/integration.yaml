@@ -29,7 +29,7 @@ env:
   COVERAGE_CORE: sysmon
   REDIS_IMAGE: redis:latest
   REDIS_STACK_IMAGE: redis/redis-stack-server:latest
-  CURRENT_REDIS_VERSION: '7.4.1'
+  CURRENT_REDIS_VERSION: '7.4.2'
 
 jobs:
   dependency-audit:
@@ -74,7 +74,7 @@ jobs:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: ['8.0-M02', '${{ needs.redis_version.outputs.CURRENT }}', '7.2.6', '6.2.16']
+        redis-version: ['8.0-M04-pre', '${{ needs.redis_version.outputs.CURRENT }}', '7.2.7', '6.2.17']
         python-version: ['3.8', '3.12']
         parser-backend: ['plain']
         event-loop: ['asyncio']
