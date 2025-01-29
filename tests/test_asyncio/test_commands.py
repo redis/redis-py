@@ -53,10 +53,10 @@ async def r_teardown(r: redis.Redis):
 
     yield factory
     try:
-        current_user = await r.client_info()
+        client_info = await r.client_info()
     except exceptions.NoPermissionError:
-        current_user = {}
-    if "default" != current_user.get("user"):
+        client_info = {}
+    if "default" != client_info.get("user", ""):
         await r.auth("", "default")
     for username in usernames:
         await r.acl_deluser(username)
@@ -691,28 +691,34 @@ class TestRedisCommands:
         assert "search-timeout" in search_module_configs
 
         ts_module_configs = await r.config_get("ts-*")
-        assert "ts-num-threads" in ts_module_configs
+        assert "ts-retention-policy" in ts_module_configs
 
         bf_module_configs = await r.config_get("bf-*")
-        assert "bf-initial-size" in bf_module_configs
+        assert "bf-error-rate" in bf_module_configs
 
         cf_module_configs = await r.config_get("cf-*")
-        assert "cf-max-iterations" in cf_module_configs
+        assert "cf-initial-size" in cf_module_configs
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
     async def test_config_set_for_search_module(self, r: redis.Redis):
-        search_timeout_initial = (await r.config_get())["search-timeout"]
-        search_timeout_new = int(search_timeout_initial) + 100
-
-        assert await r.config_set("search-timeout", search_timeout_new)
-        assert (
-            int((await r.config_get("search-*"))["search-timeout"])
-            == search_timeout_new
-        )
-        assert (
-            int((await r.ft().config_get("TIMEOUT"))[b"TIMEOUT"]) == search_timeout_new
-        )
+        config = await r.config_get("*")
+        initial_default_search_dialect = config["search-default-dialect"]
+        try:
+            default_dialect_new = "3"
+            assert await r.config_set("search-default-dialect", default_dialect_new)
+            assert (await r.config_get("*"))[
+                "search-default-dialect"
+            ] == default_dialect_new
+            assert (
+                (await r.ft().config_get("*"))[b"DEFAULT_DIALECT"]
+            ).decode() == default_dialect_new
+        except AssertionError as ex:
+            raise ex
+        finally:
+            assert await r.config_set(
+                "search-default-dialect", initial_default_search_dialect
+            )
         with pytest.raises(exceptions.ResponseError):
             await r.config_set("search-max-doctablesize", 2000000)
 

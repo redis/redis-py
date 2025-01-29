@@ -1004,23 +1004,32 @@ class TestRedisCommands:
         assert "search-timeout" in search_module_configs
 
         ts_module_configs = r.config_get("ts-*")
-        assert "ts-num-threads" in ts_module_configs
+        assert "ts-retention-policy" in ts_module_configs
 
         bf_module_configs = r.config_get("bf-*")
-        assert "bf-initial-size" in bf_module_configs
+        assert "bf-error-rate" in bf_module_configs
 
         cf_module_configs = r.config_get("cf-*")
-        assert "cf-max-iterations" in cf_module_configs
+        assert "cf-initial-size" in cf_module_configs
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("7.9.0")
     def test_config_set_for_search_module(self, r: redis.Redis):
-        search_timeout_initial = r.config_get()["search-timeout"]
-        search_timeout_new = int(search_timeout_initial) + 100
+        initial_default_search_dialect = r.config_get("*")["search-default-dialect"]
+        try:
+            default_dialect_new = "3"
+            assert r.config_set("search-default-dialect", default_dialect_new)
+            assert r.config_get("*")["search-default-dialect"] == default_dialect_new
+            assert (
+                r.ft().config_get("*")[b"DEFAULT_DIALECT"]
+            ).decode() == default_dialect_new
+        except AssertionError as ex:
+            raise ex
+        finally:
+            assert r.config_set(
+                "search-default-dialect", initial_default_search_dialect
+            )
 
-        assert r.config_set("search-timeout", search_timeout_new)
-        assert int(r.config_get("search-*")["search-timeout"]) == search_timeout_new
-        assert int(r.ft().config_get("TIMEOUT")[b"TIMEOUT"]) == search_timeout_new
         with pytest.raises(exceptions.ResponseError):
             r.config_set("search-max-doctablesize", 2000000)
 
