@@ -1551,11 +1551,10 @@ class Pipeline(Redis):
             conn.retry_on_error is None
             or isinstance(error, tuple(conn.retry_on_error)) is False
         ):
-
             self.reset()
             raise error
 
-    def execute(self, raise_on_error=True):
+    def execute(self, raise_on_error: bool = True) -> List[Any]:
         """Execute all the commands in the current pipeline"""
         stack = self.command_stack
         if not stack and not self.watching:
