@@ -191,7 +191,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         errors: Optional[str] = None,
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
-        retry_on_error: Optional[list] = None,
+        retry_on_error: Optional[List[Type[Exception]]] = None,
         ssl: bool = False,
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
