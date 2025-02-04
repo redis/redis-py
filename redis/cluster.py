@@ -1244,7 +1244,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
 
         raise ClusterError("TTL exhausted.")
 
-    def close(self):
+    def close(self) -> None:
         try:
             with self._lock:
                 if self.nodes_manager:
@@ -1686,7 +1686,7 @@ class NodesManager:
         # If initialize was called after a MovedError, clear it
         self._moved_exception = None
 
-    def close(self):
+    def close(self) -> None:
         self.default_node = None
         for node in self.nodes_cache.values():
             if node.redis_connection:
