@@ -214,7 +214,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         lib_name: Optional[str] = "redis-py",
         lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
-        retry: Union[Any, None] = None,
+        retry: Optional[Retry] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
