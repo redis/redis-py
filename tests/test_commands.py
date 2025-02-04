@@ -18,6 +18,9 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis.commands.json.path import Path
+from redis.commands.search.field import TextField
+from redis.commands.search.query import Query
 
 from .conftest import (
     _get_client,
@@ -144,11 +147,64 @@ class TestRedisCommands:
         assert isinstance(categories, list)
         assert "read" in categories or b"read" in categories
 
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_acl_cat_contain_modules_no_category(self, r):
+        modules_list = [
+            "search",
+            "bloom",
+            "json",
+            "cuckoo",
+            "timeseries",
+            "cms",
+            "topk",
+            "tdigest",
+        ]
+        categories = r.acl_cat()
+        assert isinstance(categories, list)
+        for module_cat in modules_list:
+            assert module_cat in categories or module_cat.encode() in categories
+
     @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_with_category(self, r):
         commands = r.acl_cat("read")
         assert isinstance(commands, list)
         assert "get" in commands or b"get" in commands
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_acl_modules_cat_with_category(self, r):
+        search_commands = r.acl_cat("search")
+        assert isinstance(search_commands, list)
+        assert "FT.SEARCH" in search_commands or b"FT.SEARCH" in search_commands
+
+        bloom_commands = r.acl_cat("bloom")
+        assert isinstance(bloom_commands, list)
+        assert "bf.add" in bloom_commands or b"bf.add" in bloom_commands
+
+        json_commands = r.acl_cat("json")
+        assert isinstance(json_commands, list)
+        assert "json.get" in json_commands or b"json.get" in json_commands
+
+        cuckoo_commands = r.acl_cat("cuckoo")
+        assert isinstance(cuckoo_commands, list)
+        assert "cf.insert" in cuckoo_commands or b"cf.insert" in cuckoo_commands
+
+        cms_commands = r.acl_cat("cms")
+        assert isinstance(cms_commands, list)
+        assert "cms.query" in cms_commands or b"cms.query" in cms_commands
+
+        topk_commands = r.acl_cat("topk")
+        assert isinstance(topk_commands, list)
+        assert "topk.list" in topk_commands or b"topk.list" in topk_commands
+
+        tdigest_commands = r.acl_cat("tdigest")
+        assert isinstance(tdigest_commands, list)
+        assert "tdigest.rank" in tdigest_commands or b"tdigest.rank" in tdigest_commands
+
+        timeseries_commands = r.acl_cat("timeseries")
+        assert isinstance(timeseries_commands, list)
+        assert "ts.range" in timeseries_commands or b"ts.range" in timeseries_commands
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
@@ -457,6 +513,123 @@ class TestRedisCommands:
     def test_acl_whoami(self, r):
         username = r.acl_whoami()
         assert isinstance(username, (str, bytes))
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_acl_modules_commands(self, r, request):
+        default_username = "default"
+        username = "redis-py-user"
+        password = "pass-for-test-user"
+
+        def teardown():
+            r.auth("", default_username)
+            r.acl_deluser(username)
+
+        request.addfinalizer(teardown)
+
+        r.ft().create_index((TextField("txt"),))
+        r.hset("doc1", mapping={"txt": "foo baz"})
+        r.hset("doc2", mapping={"txt": "foo bar"})
+
+        r.acl_setuser(
+            username,
+            enabled=True,
+            reset=True,
+            passwords=[f"+{password}"],
+            categories=["-all"],
+            commands=[
+                "+FT.SEARCH",
+                "-FT.DROPINDEX",
+                "+json.set",
+                "+json.get",
+                "-json.clear",
+                "+bf.reserve",
+                "-bf.info",
+                "+cf.reserve",
+                "+cms.initbydim",
+                "+topk.reserve",
+                "+tdigest.create",
+                "+ts.create",
+                "-ts.info",
+            ],
+            keys=["*"],
+        )
+        r.auth(password, username)
+
+        assert r.ft().search(Query("foo ~bar"))
+        with pytest.raises(exceptions.NoPermissionError):
+            r.ft().dropindex()
+
+        r.json().set("foo", Path.root_path(), "bar")
+        assert r.json().get("foo") == "bar"
+        with pytest.raises(exceptions.NoPermissionError):
+            r.json().clear("foo")
+
+        assert r.bf().create("bloom", 0.01, 1000)
+        assert r.cf().create("cuckoo", 1000)
+        assert r.cms().initbydim("cmsDim", 100, 5)
+        assert r.topk().reserve("topk", 5, 100, 5, 0.9)
+        assert r.tdigest().create("to-tDigest", 10)
+        with pytest.raises(exceptions.NoPermissionError):
+            r.bf().info("bloom")
+
+        assert r.ts().create(1, labels={"Redis": "Labs"})
+        with pytest.raises(exceptions.NoPermissionError):
+            r.ts().info(1)
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_acl_modules_category_commands(self, r, request):
+        default_username = "default"
+        username = "redis-py-user"
+        password = "pass-for-test-user"
+
+        def teardown():
+            r.auth("", default_username)
+            r.acl_deluser(username)
+
+        request.addfinalizer(teardown)
+
+        # validate modules categories acl config
+        r.acl_setuser(
+            username,
+            enabled=True,
+            reset=True,
+            passwords=[f"+{password}"],
+            categories=[
+                "-all",
+                "+@search",
+                "+@json",
+                "+@bloom",
+                "+@cuckoo",
+                "+@topk",
+                "+@cms",
+                "+@timeseries",
+                "+@tdigest",
+            ],
+            keys=["*"],
+        )
+        r.ft().create_index((TextField("txt"),))
+        r.hset("doc1", mapping={"txt": "foo baz"})
+        r.hset("doc2", mapping={"txt": "foo bar"})
+
+        r.auth(password, username)
+
+        assert r.ft().search(Query("foo ~bar"))
+        assert r.ft().dropindex()
+
+        assert r.json().set("foo", Path.root_path(), "bar")
+        assert r.json().get("foo") == "bar"
+
+        assert r.bf().create("bloom", 0.01, 1000)
+        assert r.bf().info("bloom")
+        assert r.cf().create("cuckoo", 1000)
+        assert r.cms().initbydim("cmsDim", 100, 5)
+        assert r.topk().reserve("topk", 5, 100, 5, 0.9)
+        assert r.tdigest().create("to-tDigest", 10)
+
+        assert r.ts().create(1, labels={"Redis": "Labs"})
+        assert r.ts().info(1)
 
     @pytest.mark.onlynoncluster
     def test_client_list(self, r):
@@ -823,6 +996,42 @@ class TestRedisCommands:
         assert r.config_set("timeout", 0, "maxmemory", 0)
         assert r.config_get()["timeout"] == "0"
         assert r.config_get()["maxmemory"] == "0"
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_config_get_for_modules(self, r: redis.Redis):
+        search_module_configs = r.config_get("search-*")
+        assert "search-timeout" in search_module_configs
+
+        ts_module_configs = r.config_get("ts-*")
+        assert "ts-retention-policy" in ts_module_configs
+
+        bf_module_configs = r.config_get("bf-*")
+        assert "bf-error-rate" in bf_module_configs
+
+        cf_module_configs = r.config_get("cf-*")
+        assert "cf-initial-size" in cf_module_configs
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_config_set_for_search_module(self, r: redis.Redis):
+        initial_default_search_dialect = r.config_get("*")["search-default-dialect"]
+        try:
+            default_dialect_new = "3"
+            assert r.config_set("search-default-dialect", default_dialect_new)
+            assert r.config_get("*")["search-default-dialect"] == default_dialect_new
+            assert (
+                r.ft().config_get("*")[b"DEFAULT_DIALECT"]
+            ).decode() == default_dialect_new
+        except AssertionError as ex:
+            raise ex
+        finally:
+            assert r.config_set(
+                "search-default-dialect", initial_default_search_dialect
+            )
+
+        with pytest.raises(exceptions.ResponseError):
+            r.config_set("search-max-doctablesize", 2000000)
 
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
