@@ -550,7 +550,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     def __del__(self):
         self.close()
 
-    def close(self):
+    def close(self) -> None:
         # In case a connection property does not yet exist
         # (due to a crash earlier in the Redis() constructor), return
         # immediately as there is nothing to clean-up.
