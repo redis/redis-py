@@ -4,7 +4,17 @@ import threading
 import time
 import warnings
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Type, Union, Mapping
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Type,
+    Union,
+)
 
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import (
@@ -52,6 +62,11 @@ from redis.utils import (
     safe_str,
     str_if_bytes,
 )
+
+if TYPE_CHECKING:
+    import ssl
+
+    import OpenSSL
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
