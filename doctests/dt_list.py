@@ -165,20 +165,20 @@ assert res26 is None
 # REMOVE_END
 
 # STEP_START ltrim
-res27 = r.lpush("bikes:repairs", "bike:1", "bike:2", "bike:3", "bike:4", "bike:5")
+res27 = r.rpush("bikes:repairs", "bike:1", "bike:2", "bike:3", "bike:4", "bike:5")
 print(res27)  # >>> 5
 
 res28 = r.ltrim("bikes:repairs", 0, 2)
 print(res28)  # >>> True
 
 res29 = r.lrange("bikes:repairs", 0, -1)
-print(res29)  # >>> ['bike:5', 'bike:4', 'bike:3']
+print(res29)  # >>> ['bike:1', 'bike:2', 'bike:3']
 # STEP_END
 
 # REMOVE_START
 assert res27 == 5
 assert res28 is True
-assert res29 == ["bike:5", "bike:4", "bike:3"]
+assert res29 == ["bike:1", "bike:2", "bike:3"]
 r.delete("bikes:repairs")
 # REMOVE_END
 
