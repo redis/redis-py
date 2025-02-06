@@ -2067,7 +2067,7 @@ class ClusterPipeline(RedisCluster):
         )
         exception.args = (msg,) + exception.args[1:]
 
-    def execute(self, raise_on_error=True):
+    def execute(self, raise_on_error: bool = True) -> List[Any]:
         """
         Execute all the commands in the current pipeline
         """
