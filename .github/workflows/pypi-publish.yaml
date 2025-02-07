@@ -20,13 +20,12 @@ jobs:
           python-version: 3.9
       - name: Install dev tools
         run: |
-          pip install -r dev_requirements.txt
-          pip install twine wheel
+          pip install .[dev]
+          pip install twine wheel build
 
       - name: Build package
         run: |
-          python setup.py build
-          python setup.py sdist bdist_wheel
+          python -m build
 
       - name: Basic package test prior to upload
         run: |
