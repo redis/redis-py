@@ -1113,6 +1113,7 @@ class NodesManager:
         "require_full_coverage",
         "slots_cache",
         "startup_nodes",
+        "_initial_startup_nodes",
         "address_remap",
     )
 
@@ -1125,6 +1126,7 @@ class NodesManager:
         event_dispatcher: Optional[EventDispatcher] = None,
     ) -> None:
         self.startup_nodes = {node.name: node for node in startup_nodes}
+        self._initial_startup_nodes = copy.deepcopy(startup_nodes)
         self.require_full_coverage = require_full_coverage
         self.connection_kwargs = connection_kwargs
         self.address_remap = address_remap
@@ -1251,7 +1253,7 @@ class NodesManager:
         startup_nodes_reachable = False
         fully_covered = False
         exception = None
-        for startup_node in self.startup_nodes.values():
+        for startup_node in self.startup_nodes.values() or self._initial_startup_nodes.values():
             try:
                 # Make sure cluster mode is enabled on this node
                 try:
