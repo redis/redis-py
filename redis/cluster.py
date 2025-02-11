@@ -13,7 +13,7 @@ from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheI
 from redis.client import CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
-from redis.connection import ConnectionPool, DefaultParser, parse_url
+from redis.connection import ConnectionPool, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
@@ -24,12 +24,10 @@ from redis.event import (
 from redis.exceptions import (
     AskError,
     AuthenticationError,
-    ClusterCrossSlotError,
     ClusterDownError,
     ClusterError,
     ConnectionError,
     DataError,
-    MasterDownError,
     MovedError,
     RedisClusterException,
     RedisError,
@@ -191,20 +189,6 @@ def cleanup_kwargs(**kwargs):
     }
 
     return connection_kwargs
-
-
-class ClusterParser(DefaultParser):
-    EXCEPTION_CLASSES = dict_merge(
-        DefaultParser.EXCEPTION_CLASSES,
-        {
-            "ASK": AskError,
-            "TRYAGAIN": TryAgainError,
-            "MOVED": MovedError,
-            "CLUSTERDOWN": ClusterDownError,
-            "CROSSSLOT": ClusterCrossSlotError,
-            "MASTERDOWN": MasterDownError,
-        },
-    )
 
 
 class AbstractRedisCluster:
@@ -692,7 +676,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         Initialize the connection, authenticate and select a database and send
          READONLY if it is set during object initialization.
         """
-        connection.set_parser(ClusterParser)
         connection.on_connect()
 
         if self.read_from_replicas:
@@ -1244,7 +1227,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
 
         raise ClusterError("TTL exhausted.")
 
-    def close(self):
+    def close(self) -> None:
         try:
             with self._lock:
                 if self.nodes_manager:
@@ -1686,7 +1669,7 @@ class NodesManager:
         # If initialize was called after a MovedError, clear it
         self._moved_exception = None
 
-    def close(self):
+    def close(self) -> None:
         self.default_node = None
         for node in self.nodes_cache.values():
             if node.redis_connection:
@@ -2067,7 +2050,7 @@ class ClusterPipeline(RedisCluster):
         )
         exception.args = (msg,) + exception.args[1:]
 
-    def execute(self, raise_on_error=True):
+    def execute(self, raise_on_error: bool = True) -> List[Any]:
         """
         Execute all the commands in the current pipeline
         """
