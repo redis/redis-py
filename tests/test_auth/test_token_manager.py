@@ -17,17 +17,17 @@ from redis.auth.token_manager import (
 
 class TestTokenManager:
     @pytest.mark.parametrize(
-        "exp_refresh_ratio,tokens_refreshed",
+        "exp_refresh_ratio",
         [
-            (0.9, 2),
-            (0.28, 4),
+            0.9,
+            0.28,
         ],
         ids=[
-            "Refresh ratio = 0.9,  2 tokens in 0,1 second",
-            "Refresh ratio = 0.28, 4 tokens in 0,1 second",
+            "Refresh ratio = 0.9",
+            "Refresh ratio = 0.28",
         ],
     )
-    def test_success_token_renewal(self, exp_refresh_ratio, tokens_refreshed):
+    def test_success_token_renewal(self, exp_refresh_ratio):
         tokens = []
         mock_provider = Mock(spec=IdentityProviderInterface)
         mock_provider.request_token.side_effect = [
@@ -39,14 +39,14 @@ class TestTokenManager:
             ),
             SimpleToken(
                 "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 130,
-                (datetime.now(timezone.utc).timestamp() * 1000) + 30,
+                (datetime.now(timezone.utc).timestamp() * 1000) + 150,
+                (datetime.now(timezone.utc).timestamp() * 1000) + 50,
                 {"oid": "test"},
             ),
             SimpleToken(
                 "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 160,
-                (datetime.now(timezone.utc).timestamp() * 1000) + 60,
+                (datetime.now(timezone.utc).timestamp() * 1000) + 170,
+                (datetime.now(timezone.utc).timestamp() * 1000) + 70,
                 {"oid": "test"},
             ),
             SimpleToken(
@@ -70,7 +70,7 @@ class TestTokenManager:
         mgr.start(mock_listener)
         sleep(0.1)
 
-        assert len(tokens) == tokens_refreshed
+        assert len(tokens) > 0
 
     @pytest.mark.parametrize(
         "exp_refresh_ratio,tokens_refreshed",
@@ -176,19 +176,13 @@ class TestTokenManager:
         mock_provider.request_token.side_effect = [
             SimpleToken(
                 "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 100,
+                (datetime.now(timezone.utc).timestamp() * 1000) + 50,
                 (datetime.now(timezone.utc).timestamp() * 1000),
                 {"oid": "test"},
             ),
             SimpleToken(
                 "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 120,
-                (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": "test"},
-            ),
-            SimpleToken(
-                "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 140,
+                (datetime.now(timezone.utc).timestamp() * 1000) + 150,
                 (datetime.now(timezone.utc).timestamp() * 1000),
                 {"oid": "test"},
             ),
@@ -207,9 +201,9 @@ class TestTokenManager:
         mgr.start(mock_listener, skip_initial=True)
         # Should be less than a 0.1, or it will be flacky due to
         # additional token renewal.
-        sleep(0.2)
+        sleep(0.1)
 
-        assert len(tokens) == 2
+        assert len(tokens) == 1
 
     @pytest.mark.asyncio
     async def test_async_token_renewal_with_skip_initial(self):

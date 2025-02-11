@@ -9,7 +9,7 @@ from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
@@ -904,9 +904,11 @@ class CacheProxyConnection(ConnectionInterface):
                 and self._cache.get(self._current_command_cache_key).status
                 != CacheEntryStatus.IN_PROGRESS
             ):
-                return copy.deepcopy(
+                res = copy.deepcopy(
                     self._cache.get(self._current_command_cache_key).cache_value
                 )
+                self._current_command_cache_key = None
+                return res
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
@@ -931,6 +933,8 @@ class CacheProxyConnection(ConnectionInterface):
                 cache_entry.status = CacheEntryStatus.VALID
                 cache_entry.cache_value = response
                 self._cache.set(cache_entry)
+
+            self._current_command_cache_key = None
 
         return response
 
@@ -1259,6 +1263,9 @@ def parse_url(url):
     return kwargs
 
 
+_CP = TypeVar("_CP", bound="ConnectionPool")
+
+
 class ConnectionPool:
     """
     Create a connection pool. ``If max_connections`` is set, then this
@@ -1274,7 +1281,7 @@ class ConnectionPool:
     """
 
     @classmethod
-    def from_url(cls, url, **kwargs):
+    def from_url(cls: Type[_CP], url: str, **kwargs) -> _CP:
         """
         Return a connection pool configured from the given URL.
 
@@ -1374,6 +1381,7 @@ class ConnectionPool:
         # will notice the first thread already did the work and simply
         # release the lock.
         self._fork_lock = threading.Lock()
+        self._lock = threading.Lock()
         self.reset()
 
     def __repr__(self) -> (str, str):
@@ -1391,7 +1399,6 @@ class ConnectionPool:
         return self.connection_kwargs.get("protocol", None)
 
     def reset(self) -> None:
-        self._lock = threading.Lock()
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()

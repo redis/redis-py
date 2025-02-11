@@ -1244,7 +1244,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
 
         raise ClusterError("TTL exhausted.")
 
-    def close(self):
+    def close(self) -> None:
         try:
             with self._lock:
                 if self.nodes_manager:
@@ -1686,7 +1686,7 @@ class NodesManager:
         # If initialize was called after a MovedError, clear it
         self._moved_exception = None
 
-    def close(self):
+    def close(self) -> None:
         self.default_node = None
         for node in self.nodes_cache.values():
             if node.redis_connection:
@@ -2067,7 +2067,7 @@ class ClusterPipeline(RedisCluster):
         )
         exception.args = (msg,) + exception.args[1:]
 
-    def execute(self, raise_on_error=True):
+    def execute(self, raise_on_error: bool = True) -> List[Any]:
         """
         Execute all the commands in the current pipeline
         """
