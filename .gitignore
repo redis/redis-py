@@ -23,3 +23,5 @@ docker/stunnel/keys
 /dockers/*/tls/*
 /dockers/standalone/
 /dockers/cluster/
+/dockers/replica/
+/dockers/sentinel/
