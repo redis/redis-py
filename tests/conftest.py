@@ -729,7 +729,7 @@ def get_credential_provider(request) -> CredentialProvider:
     token_mgr_config = TokenManagerConfig(
         expiration_refresh_ratio=expiration_refresh_ratio,
         lower_refresh_bound_millis=lower_refresh_bound_millis,
-        token_request_execution_timeout_in_ms=DEFAULT_TOKEN_REQUEST_EXECUTION_TIMEOUT_IN_MS, # noqa
+        token_request_execution_timeout_in_ms=DEFAULT_TOKEN_REQUEST_EXECUTION_TIMEOUT_IN_MS,  # noqa
         retry_policy=RetryPolicy(
             max_attempts=max_attempts,
             delay_in_ms=delay_in_ms,
