@@ -25,6 +25,7 @@ from redis_entraid.cred_provider import (
     DEFAULT_EXPIRATION_REFRESH_RATIO,
     DEFAULT_LOWER_REFRESH_BOUND_MILLIS,
     DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_TOKEN_REQUEST_EXECUTION_TIMEOUT_IN_MS,
     EntraIdCredentialsProvider,
 )
 from redis_entraid.identity_provider import (
