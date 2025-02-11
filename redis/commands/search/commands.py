@@ -442,10 +442,6 @@ class SearchCommands:
 
         return self.execute_command(MGET_CMD, self.index_name, *ids)
 
-    @deprecated_function(
-        version="8.0.0",
-        reason="deprecated since Redis 8.0, call info from core module instead",
-    )
     def info(self):
         """
         Get info an stats about the the current index, including the number of
@@ -916,10 +912,6 @@ class SearchCommands:
 
 
 class AsyncSearchCommands(SearchCommands):
-    @deprecated_function(
-        version="8.0.0",
-        reason="deprecated since Redis 8.0, call info from core module instead",
-    )
     async def info(self):
         """
         Get info an stats about the the current index, including the number of
