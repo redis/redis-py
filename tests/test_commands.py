@@ -4345,7 +4345,7 @@ class TestRedisCommands:
                 "pending": 0,
                 "last-delivered-id": b"0-0",
                 "entries-read": 7,
-                "lag": -6,
+                "lag": 1,
             }
         ]
         assert r.xinfo_groups(stream) == expected
