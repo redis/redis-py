@@ -116,6 +116,12 @@ class _RESP3Parser(_RESPBase):
             response = self.handle_push_response(
                 response, disable_decoding, push_request
             )
+            if not push_request:
+                return self._read_response(
+                    disable_decoding=disable_decoding, push_request=push_request
+                )
+            else:
+                return response
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
 
@@ -124,19 +130,10 @@ class _RESP3Parser(_RESPBase):
         return response
 
     def handle_push_response(self, response, disable_decoding, push_request):
-        if response[0] in _INVALIDATION_MESSAGE:
-            if self.invalidation_push_handler_func:
-                res = self.invalidation_push_handler_func(response)
-            else:
-                res = None
-        else:
-            res = self.pubsub_push_handler_func(response)
-        if not push_request:
-            return self._read_response(
-                disable_decoding=disable_decoding, push_request=push_request
-            )
-        else:
-            return res
+        if response[0] not in _INVALIDATION_MESSAGE:
+            return self.pubsub_push_handler_func(response)
+        if self.invalidation_push_handler_func:
+            return self.invalidation_push_handler_func(response)
 
     def set_pubsub_push_handler(self, pubsub_push_handler_func):
         self.pubsub_push_handler_func = pubsub_push_handler_func
@@ -151,7 +148,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
         self.invalidation_push_handler_func = None
 
-    def handle_pubsub_push_response(self, response):
+    async def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
         logger.info("Push response: " + str(response))
         return response
@@ -259,6 +256,12 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
             response = await self.handle_push_response(
                 response, disable_decoding, push_request
             )
+            if not push_request:
+                return await self._read_response(
+                    disable_decoding=disable_decoding, push_request=push_request
+                )
+            else:
+                return response
         else:
             raise InvalidResponse(f"Protocol Error: {raw!r}")
 
@@ -267,19 +270,10 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
         return response
 
     async def handle_push_response(self, response, disable_decoding, push_request):
-        if response[0] in _INVALIDATION_MESSAGE:
-            if self.invalidation_push_handler_func:
-                res = self.invalidation_push_handler_func(response)
-            else:
-                res = None
-        else:
-            res = self.pubsub_push_handler_func(response)
-        if not push_request:
-            return await self._read_response(
-                disable_decoding=disable_decoding, push_request=push_request
-            )
-        else:
-            return res
+        if response[0] not in _INVALIDATION_MESSAGE:
+            return await self.pubsub_push_handler_func(response)
+        if self.invalidation_push_handler_func:
+            return await self.invalidation_push_handler_func(response)
 
     def set_pubsub_push_handler(self, pubsub_push_handler_func):
         self.pubsub_push_handler_func = pubsub_push_handler_func

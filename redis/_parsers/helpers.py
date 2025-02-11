@@ -396,13 +396,20 @@ def parse_slowlog_get(response, **options):
         # an O(N) complexity) instead of the command.
         if isinstance(item[3], list):
             result["command"] = space.join(item[3])
-            result["client_address"] = item[4]
-            result["client_name"] = item[5]
+
+            # These fields are optional, depends on environment.
+            if len(item) >= 6:
+                result["client_address"] = item[4]
+                result["client_name"] = item[5]
         else:
             result["complexity"] = item[3]
             result["command"] = space.join(item[4])
-            result["client_address"] = item[5]
-            result["client_name"] = item[6]
+
+            # These fields are optional, depends on environment.
+            if len(item) >= 7:
+                result["client_address"] = item[5]
+                result["client_name"] = item[6]
+
         return result
 
     return [parse_item(item) for item in response]
@@ -445,9 +452,11 @@ def parse_cluster_info(response, **options):
 def _parse_node_line(line):
     line_items = line.split(" ")
     node_id, addr, flags, master_id, ping, pong, epoch, connected = line.split(" ")[:8]
-    addr = addr.split("@")[0]
+    ip = addr.split("@")[0]
+    hostname = addr.split("@")[1].split(",")[1] if "@" in addr and "," in addr else ""
     node_dict = {
         "node_id": node_id,
+        "hostname": hostname,
         "flags": flags,
         "master_id": master_id,
         "last_ping_sent": ping,
@@ -460,7 +469,7 @@ def _parse_node_line(line):
     if len(line_items) >= 9:
         slots, migrations = _parse_slots(line_items[8:])
         node_dict["slots"], node_dict["migrations"] = slots, migrations
-    return addr, node_dict
+    return ip, node_dict
 
 
 def _parse_slots(slot_ranges):
@@ -784,6 +793,9 @@ _RedisCallbacks = {
 
 _RedisCallbacksRESP2 = {
     **string_keys_to_dict(
+        "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
+    ),
+    **string_keys_to_dict(
         "ZDIFF ZINTER ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZRANK ZREVRANGE "
         "ZREVRANGEBYSCORE ZREVRANK ZUNION",
         zset_score_pairs,
@@ -827,6 +839,9 @@ _RedisCallbacksRESP2 = {
 
 
 _RedisCallbacksRESP3 = {
+    **string_keys_to_dict(
+        "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
+    ),
     **string_keys_to_dict(
         "ZRANGE ZINTER ZPOPMAX ZPOPMIN ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE "
         "ZUNION HGETALL XREADGROUP",

@@ -29,11 +29,7 @@ class SentinelManagedConnection(Connection):
         super().__init__(**kwargs)
 
     def __repr__(self):
-        pool = self.connection_pool
-        s = (
-            f"<{self.__class__.__module__}.{self.__class__.__name__}"
-            f"(service={pool.service_name}"
-        )
+        s = f"<{self.__class__.__module__}.{self.__class__.__name__}"
         if self.host:
             host_info = f",host={self.host},port={self.port}"
             s += host_info
@@ -225,7 +221,6 @@ class Sentinel(AsyncSentinelCommands):
         once - If set to True, then execute the resulting command on a single
                node at random, rather than across the entire sentinel cluster.
         """
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
         once = bool(kwargs.get("once", False))
         if "once" in kwargs.keys():
             kwargs.pop("once")

@@ -208,7 +208,6 @@ def get_mocked_redis_client(
 def mock_node_resp(node, response):
     connection = Mock()
     connection.read_response.return_value = response
-    connection._get_from_local_cache.return_value = None
     node.redis_connection.connection = connection
     return node
 
@@ -216,7 +215,6 @@ def mock_node_resp(node, response):
 def mock_node_resp_func(node, func):
     connection = Mock()
     connection.read_response.side_effect = func
-    connection._get_from_local_cache.return_value = None
     node.redis_connection.connection = connection
     return node
 
@@ -485,7 +483,6 @@ class TestRedisClusterObj:
         redis_mock_node.execute_command.side_effect = mock_execute_command
         # Mock response value for all other commands
         redis_mock_node.parse_response.return_value = "MOCK_OK"
-        redis_mock_node.connection._get_from_local_cache.return_value = None
         for node in r.get_nodes():
             if node.port != primary.port:
                 node.redis_connection = redis_mock_node
@@ -646,10 +643,10 @@ class TestRedisClusterObj:
                 mocks["send_command"].assert_has_calls(
                     [
                         call("READONLY"),
-                        call("GET", "foo"),
+                        call("GET", "foo", keys=["foo"]),
                         call("READONLY"),
-                        call("GET", "foo"),
-                        call("GET", "foo"),
+                        call("GET", "foo", keys=["foo"]),
+                        call("GET", "foo", keys=["foo"]),
                     ]
                 )
 
@@ -865,21 +862,22 @@ class TestRedisClusterObj:
 
     def test_cluster_retry_object(self, r) -> None:
         # Test default retry
+        # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
+        host = r.get_default_node().host
+
         retry = r.get_connection_kwargs().get("retry")
         assert isinstance(retry, Retry)
         assert retry._retries == 0
         assert isinstance(retry._backoff, type(default_backoff()))
-        node1 = r.get_node("127.0.0.1", 16379).redis_connection
-        node2 = r.get_node("127.0.0.1", 16380).redis_connection
+        node1 = r.get_node(host, 16379).redis_connection
+        node2 = r.get_node(host, 16380).redis_connection
         assert node1.get_retry()._retries == node2.get_retry()._retries
 
         # Test custom retry
         retry = Retry(ExponentialBackoff(10, 5), 5)
-        rc_custom_retry = RedisCluster("127.0.0.1", 16379, retry=retry)
+        rc_custom_retry = RedisCluster(host, 16379, retry=retry)
         assert (
-            rc_custom_retry.get_node("127.0.0.1", 16379)
-            .redis_connection.get_retry()
-            ._retries
+            rc_custom_retry.get_node(host, 16379).redis_connection.get_retry()._retries
             == retry._retries
         )
 
@@ -1868,49 +1866,49 @@ class TestClusterRedisCommands:
 
     def test_cluster_sdiff(self, r):
         r.sadd("{foo}a", "1", "2", "3")
-        assert set(r.sdiff("{foo}a", "{foo}b")) == {b"1", b"2", b"3"}
+        assert r.sdiff("{foo}a", "{foo}b") == {b"1", b"2", b"3"}
         r.sadd("{foo}b", "2", "3")
-        assert r.sdiff("{foo}a", "{foo}b") == [b"1"]
+        assert r.sdiff("{foo}a", "{foo}b") == {b"1"}
 
     def test_cluster_sdiffstore(self, r):
         r.sadd("{foo}a", "1", "2", "3")
         assert r.sdiffstore("{foo}c", "{foo}a", "{foo}b") == 3
-        assert set(r.smembers("{foo}c")) == {b"1", b"2", b"3"}
+        assert r.smembers("{foo}c") == {b"1", b"2", b"3"}
         r.sadd("{foo}b", "2", "3")
         assert r.sdiffstore("{foo}c", "{foo}a", "{foo}b") == 1
-        assert r.smembers("{foo}c") == [b"1"]
+        assert r.smembers("{foo}c") == {b"1"}
 
     def test_cluster_sinter(self, r):
         r.sadd("{foo}a", "1", "2", "3")
-        assert r.sinter("{foo}a", "{foo}b") == []
+        assert r.sinter("{foo}a", "{foo}b") == set()
         r.sadd("{foo}b", "2", "3")
-        assert set(r.sinter("{foo}a", "{foo}b")) == {b"2", b"3"}
+        assert r.sinter("{foo}a", "{foo}b") == {b"2", b"3"}
 
     def test_cluster_sinterstore(self, r):
         r.sadd("{foo}a", "1", "2", "3")
         assert r.sinterstore("{foo}c", "{foo}a", "{foo}b") == 0
-        assert r.smembers("{foo}c") == []
+        assert r.smembers("{foo}c") == set()
         r.sadd("{foo}b", "2", "3")
         assert r.sinterstore("{foo}c", "{foo}a", "{foo}b") == 2
-        assert set(r.smembers("{foo}c")) == {b"2", b"3"}
+        assert r.smembers("{foo}c") == {b"2", b"3"}
 
     def test_cluster_smove(self, r):
         r.sadd("{foo}a", "a1", "a2")
         r.sadd("{foo}b", "b1", "b2")
         assert r.smove("{foo}a", "{foo}b", "a1")
-        assert r.smembers("{foo}a") == [b"a2"]
-        assert set(r.smembers("{foo}b")) == {b"b1", b"b2", b"a1"}
+        assert r.smembers("{foo}a") == {b"a2"}
+        assert r.smembers("{foo}b") == {b"b1", b"b2", b"a1"}
 
     def test_cluster_sunion(self, r):
         r.sadd("{foo}a", "1", "2")
         r.sadd("{foo}b", "2", "3")
-        assert set(r.sunion("{foo}a", "{foo}b")) == {b"1", b"2", b"3"}
+        assert r.sunion("{foo}a", "{foo}b") == {b"1", b"2", b"3"}
 
     def test_cluster_sunionstore(self, r):
         r.sadd("{foo}a", "1", "2")
         r.sadd("{foo}b", "2", "3")
         assert r.sunionstore("{foo}c", "{foo}a", "{foo}b") == 3
-        assert set(r.smembers("{foo}c")) == {b"1", b"2", b"3"}
+        assert r.smembers("{foo}c") == {b"1", b"2", b"3"}
 
     @skip_if_server_version_lt("6.2.0")
     def test_cluster_zdiff(self, r):
@@ -2695,7 +2693,7 @@ class TestNodesManager:
 
             def create_mocked_redis_node(host, port, **kwargs):
                 """
-                Helper function to return custom slots cache data from
+                Helper function to return custom slots cache_data data from
                 different redis nodes
                 """
                 if port == 7000:

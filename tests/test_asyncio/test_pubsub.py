@@ -461,7 +461,7 @@ class TestPubSubMessages:
 
 @pytest.mark.onlynoncluster
 class TestPubSubRESP3Handler:
-    def my_handler(self, message):
+    async def my_handler(self, message):
         self.message = ["my handler", message]
 
     @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
