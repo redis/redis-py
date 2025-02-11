@@ -471,31 +471,30 @@ command is received.
 Token-based authentication
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Since redis-py version 5.3.0 new StreamableCredentialProvider interface was introduced.
-This interface describes a CredentialProvider with an ability to stream an events that will be handled by listener.
+Since redis-py version 5.3.0 new `StreamableCredentialProvider` interface was introduced.
+This interface describes a `CredentialProvider` with an ability to stream an events that will be handled by listener.
 
-To keep redis-py with minimal dependencies needed to run it, we decided to separate StreamableCredentialProvider
+To keep redis-py with minimal dependencies needed to run it, we decided to separate `StreamableCredentialProvider`
 implementations in a separate packages. So If you're interested to try this feature please add them as a separate
 dependency to your project.
 
 `EntraIdCredentialProvider` is a first implementation that allows you to integrate redis-py with Azure Cache for Redis
-service. It will allows you to obtain a tokens from Microsoft EntraID and authenticate/re-authenticate your connections
+service. It will allows you to obtain a tokens from `Microsoft EntraID` and authenticate/re-authenticate your connections
 with it in a background mode.
 
 To get `EntraIdCredentialProvider` you need to install following package:
 
 `pip install redis-entraid`
 
-To setup a credential provider, first you have to create and configure an IdentityProvider and provide
-TokenAuthConfig object.
+To setup a credential provider, please use one of the factory methods bundled with package.
 `Here's a quick guide how to do this
-<https://github.com/redis-developer/redispy-entra-credentials?tab=readme-ov-file#usage>`_
+<https://github.com/redis/redis-py-entraid/blob/main/README.md>`_
 
 Now all you have to do is to pass an instance of `EntraIdCredentialProvider` via constructor,
 available for sync and async clients:
 
 .. code:: python
 
-   >>> cred_provider = EntraIdCredentialProvider(auth_config)
+   >>> cred_provider = create_from_service_principal(CLIENT_ID, CLIENT_SECRET, TENANT_ID)
    >>> r = Redis(credential_provider=cred_provider)
    >>> r.ping()
