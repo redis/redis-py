@@ -27,8 +27,7 @@ env:
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   # this speeds up coverage with Python 3.12: https://github.com/nedbat/coveragepy/issues/1665
   COVERAGE_CORE: sysmon
-  REDIS_IMAGE: redis:latest
-  REDIS_STACK_IMAGE: redis/redis-stack-server:latest
+  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: 'rs-7.4.0-v2'
   CURRENT_REDIS_VERSION: '7.4.2'
 
 jobs:
@@ -180,9 +179,8 @@ jobs:
           python-version: 3.9
       - name: Run installed unit tests
         env:
-          REDIS_VERSION: ${{ env.CURRENT_REDIS_VERSION }}
-          REDIS_IMAGE: "redis:${{ env.CURRENT_REDIS_VERSION }}"
-          CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ env.CURRENT_REDIS_VERSION }}"
+          CLIENT_LIBS_TEST_IMAGE_TAG: ${{ env.CURRENT_REDIS_VERSION }}
+          CLIENT_LIBS_TEST_STACK_IMAGE_TAG: ${{ env.CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG }}
         run: |
           bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
 
