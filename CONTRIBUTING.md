@@ -81,6 +81,12 @@ using `invoke standalone-tests`; similarly, RedisCluster tests can be run by usi
 Each run of tests starts and stops the various dockers required. Sometimes
 things get stuck, an `invoke clean` can help.
 
+## Linting and Formatting
+
+Call `invoke linters` to run linters without also running tests. This command will
+only report issues, not fix them automatically. Run `invoke formatters` to
+automatically format your code.
+
 ## Documentation
 
 If relevant, update the code documentation, via docstrings, or in `/docs`.

@@ -33,6 +33,12 @@ def linters(c):
     run("vulture redis whitelist.py --min-confidence 80")
     run("flynt --fail-on-change --dry-run tests redis")
 
+@task
+def formatters(c):
+    """Format code"""
+    run("black --target-version py37 tests redis")
+    run("isort tests redis")
+
 
 @task
 def all_tests(c):
