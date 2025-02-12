@@ -25,3 +25,4 @@ docker/stunnel/keys
 /dockers/cluster/
 /dockers/replica/
 /dockers/sentinel/
+/dockers/redis-stack/
