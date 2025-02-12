@@ -574,7 +574,6 @@ class Redis(
         """
         async with self._usage_lock:
             self._usage_counter += 1
-            current_usage = self._usage_counter
         try:
             # Initialize the client (i.e. establish connection, etc.)
             return await self.initialize()
