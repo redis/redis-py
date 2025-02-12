@@ -362,6 +362,12 @@ class Redis(
         # on a set of redis commands
         self._single_conn_lock = asyncio.Lock()
 
+        # When used as an async context manager, we need to increment and decrement
+        # a usage counter so that we can close the connection pool when no one is
+        # using the client.
+        self._usage_counter = 0
+        self._usage_lock = asyncio.Lock()
+
     def __repr__(self):
         return (
             f"<{self.__class__.__module__}.{self.__class__.__name__}"
@@ -562,10 +568,40 @@ class Redis(
         )
 
     async def __aenter__(self: _RedisT) -> _RedisT:
-        return await self.initialize()
+        """
+        Async context manager entry. Increments a usage counter so that the
+        connection pool is only closed (via aclose()) when no one is using the client.
+        """
+        async with self._usage_lock:
+            self._usage_counter += 1
+            current_usage = self._usage_counter
+        try:
+            # Initialize the client (i.e. establish connection, etc.)
+            return await self.initialize()
+        except Exception:
+            # If initialization fails, decrement the counter to keep it in sync
+            async with self._usage_lock:
+                self._usage_counter -= 1
+            raise
+
+    async def _decrement_usage(self) -> int:
+        """
+        Helper coroutine to decrement the usage counter while holding the lock.
+        Returns the new value of the usage counter.
+        """
+        async with self._usage_lock:
+            self._usage_counter -= 1
+            return self._usage_counter
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.aclose()
+        """
+        Async context manager exit. Decrements a usage counter. If this is the
+        last exit (counter becomes zero), the client closes its connection pool.
+        """
+        current_usage = await asyncio.shield(self._decrement_usage())
+        if current_usage == 0:
+            # This was the last active context, so disconnect the pool.
+            await asyncio.shield(self.aclose())
 
     _DEL_MESSAGE = "Unclosed Redis client"
 
@@ -1347,9 +1383,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         # indicates the user should retry this transaction.
         if self.watching:
             await self.aclose()
-            raise WatchError(
-                "A ConnectionError occurred on while watching one or more keys"
-            )
+            raise
         # if retry_on_error is not set or the error is not one
         # of the specified error types, raise it
         if (
