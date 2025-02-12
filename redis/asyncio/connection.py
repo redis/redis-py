@@ -1157,20 +1157,19 @@ class ConnectionPool:
         current in use, potentially by other tasks. Otherwise only disconnect
         connections that are idle in the pool.
         """
-        async with self._lock:
-            if inuse_connections:
-                connections: Iterable[AbstractConnection] = chain(
-                    self._available_connections, self._in_use_connections
-                )
-            else:
-                connections = self._available_connections
-            resp = await asyncio.gather(
-                *(connection.disconnect() for connection in connections),
-                return_exceptions=True,
+        if inuse_connections:
+            connections: Iterable[AbstractConnection] = chain(
+                self._available_connections, self._in_use_connections
             )
-            exc = next((r for r in resp if isinstance(r, BaseException)), None)
-            if exc:
-                raise exc
+        else:
+            connections = self._available_connections
+        resp = await asyncio.gather(
+            *(connection.disconnect() for connection in connections),
+            return_exceptions=True,
+        )
+        exc = next((r for r in resp if isinstance(r, BaseException)), None)
+        if exc:
+            raise exc
 
     async def aclose(self) -> None:
         """Close the pool, disconnecting all connections"""

@@ -1383,7 +1383,9 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         # indicates the user should retry this transaction.
         if self.watching:
             await self.aclose()
-            raise
+            raise WatchError(
+                "A ConnectionError occurred on while watching one or more keys"
+            )
         # if retry_on_error is not set or the error is not one
         # of the specified error types, raise it
         if (
