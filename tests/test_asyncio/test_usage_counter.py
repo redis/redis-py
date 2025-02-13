@@ -1,12 +1,11 @@
 import asyncio
 
 import pytest
+import redis
 
 
 @pytest.mark.asyncio
-async def test_usage_counter(create_redis):
-    r = await create_redis(decode_responses=True)
-
+async def test_usage_counter(r):
     async def dummy_task():
         async with r:
             await asyncio.sleep(0.01)

@@ -570,7 +570,8 @@ class Redis(
     async def __aenter__(self: _RedisT) -> _RedisT:
         """
         Async context manager entry. Increments a usage counter so that the
-        connection pool is only closed (via aclose()) when no one is using the client.
+        connection pool is only closed (via aclose()) when no context is using
+        the client.
         """
         async with self._usage_lock:
             self._usage_counter += 1
