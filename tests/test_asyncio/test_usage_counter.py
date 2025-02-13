@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-import redis
 
 
 @pytest.mark.asyncio
