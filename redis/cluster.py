@@ -2185,7 +2185,7 @@ class ClusterPipeline(RedisCluster):
                     redis_node = self.get_redis_connection(node)
                     try:
                         connection = get_connection(redis_node, c.args)
-                    except ConnectionError:
+                    except (ConnectionError, TimeoutError):
                         for n in nodes.values():
                             n.connection_pool.release(n.connection)
                         # Connection retries are being handled in the node's
