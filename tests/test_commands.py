@@ -1066,6 +1066,21 @@ class TestRedisCommands:
         assert "redis_version" in res
         assert "connected_clients" in res
 
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_info_with_modules(self, r: redis.Redis):
+        res = r.info(section="everything")
+        assert "modules" in res
+        assert "search_number_of_indexes" in res
+
+        res = r.info(section="modules")
+        assert "modules" in res
+        assert "search_number_of_indexes" in res
+
+        res = r.info(section="search")
+        assert "modules" not in res
+        assert "search_number_of_indexes" in res
+
     @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
     def test_lastsave(self, r):
