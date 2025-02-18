@@ -1540,10 +1540,10 @@ class ConnectionPool:
                     AfterConnectionReleasedEvent(connection)
                 )
             else:
-                # pool doesn't own this connection. do not add it back
-                # to the pool and decrement the count so that another
-                # connection can take its place if needed
-                self._created_connections -= 1
+                # Pool doesn't own this connection, do not add it back
+                # to the pool.
+                # The created connections count shouls not be changed,
+                # because the connection was not created by the pool.
                 connection.disconnect()
                 return
 
