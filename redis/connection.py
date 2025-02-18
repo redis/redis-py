@@ -9,7 +9,7 @@ from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
@@ -1263,6 +1263,9 @@ def parse_url(url):
     return kwargs
 
 
+_CP = TypeVar("_CP", bound="ConnectionPool")
+
+
 class ConnectionPool:
     """
     Create a connection pool. ``If max_connections`` is set, then this
@@ -1278,7 +1281,7 @@ class ConnectionPool:
     """
 
     @classmethod
-    def from_url(cls, url, **kwargs):
+    def from_url(cls: Type[_CP], url: str, **kwargs) -> _CP:
         """
         Return a connection pool configured from the given URL.
 

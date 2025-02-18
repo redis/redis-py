@@ -692,6 +692,10 @@ class SearchCommands:
         cmd = [DICT_DUMP_CMD, name]
         return self.execute_command(*cmd)
 
+    @deprecated_function(
+        version="8.0.0",
+        reason="deprecated since Redis 8.0, call config_set from core module instead",
+    )
     def config_set(self, option: str, value: str) -> bool:
         """Set runtime configuration option.
 
@@ -706,6 +710,10 @@ class SearchCommands:
         raw = self.execute_command(*cmd)
         return raw == "OK"
 
+    @deprecated_function(
+        version="8.0.0",
+        reason="deprecated since Redis 8.0, call config_get from core module instead",
+    )
     def config_get(self, option: str) -> str:
         """Get runtime configuration option value.
 
@@ -1007,6 +1015,10 @@ class AsyncSearchCommands(SearchCommands):
 
         return self._parse_results(SPELLCHECK_CMD, res)
 
+    @deprecated_function(
+        version="8.0.0",
+        reason="deprecated since Redis 8.0, call config_set from core module instead",
+    )
     async def config_set(self, option: str, value: str) -> bool:
         """Set runtime configuration option.
 
@@ -1021,6 +1033,10 @@ class AsyncSearchCommands(SearchCommands):
         raw = await self.execute_command(*cmd)
         return raw == "OK"
 
+    @deprecated_function(
+        version="8.0.0",
+        reason="deprecated since Redis 8.0, call config_get from core module instead",
+    )
     async def config_get(self, option: str) -> str:
         """Get runtime configuration option value.
 

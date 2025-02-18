@@ -31,8 +31,7 @@ runs:
     - name: Setup Test environment
       env:
         REDIS_VERSION: ${{ inputs.redis-version }}
-        REDIS_IMAGE: "redis:${{ inputs.redis-version }}"
-        CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ inputs.redis-version }}"
+        CLIENT_LIBS_TEST_IMAGE_TAG: ${{ inputs.redis-version }}
       run: |
         set -e
                 
@@ -56,13 +55,13 @@ runs:
         
           # Mapping of redis version to stack version  
           declare -A redis_stack_version_mapping=(
-            ["7.4.1"]="7.4.0-v1"
-            ["7.2.6"]="7.2.0-v13"
-            ["6.2.16"]="6.2.6-v17"
+            ["7.4.2"]="rs-7.4.0-v2"
+            ["7.2.7"]="rs-7.2.0-v14"
+            ["6.2.17"]="rs-6.2.6-v18"
           )
                   
           if [[ -v redis_stack_version_mapping[$REDIS_VERSION] ]]; then
-            export REDIS_STACK_IMAGE="redis/redis-stack-server:${redis_stack_version_mapping[$REDIS_VERSION]}"
+            export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=${redis_stack_version_mapping[$REDIS_VERSION]}
             echo "REDIS_MOD_URL=redis://127.0.0.1:6479/0" >> $GITHUB_ENV
           else
             echo "Version not found in the mapping."
