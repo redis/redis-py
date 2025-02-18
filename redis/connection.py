@@ -1532,7 +1532,7 @@ class ConnectionPool:
             except KeyError:
                 # Gracefully fail when a connection is returned to this pool
                 # that the pool doesn't actually own
-                pass
+                return
 
             if self.owns_connection(connection):
                 self._available_connections.append(connection)
