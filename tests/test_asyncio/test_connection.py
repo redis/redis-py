@@ -78,7 +78,7 @@ async def test_single_connection():
     mock_conn = mock.AsyncMock(spec=Connection)
     mock_conn.retry = Retry_()
 
-    async def get_conn(_):
+    async def get_conn():
         # Validate only one client is created in single-client mode when
         # concurrent requests are made
         nonlocal init_call_count
