@@ -381,7 +381,7 @@ class Redis(
         if self.single_connection_client:
             async with self._single_conn_lock:
                 if self.connection is None:
-                    self.connection = await self.connection_pool.get_connection("_")
+                    self.connection = await self.connection_pool.get_connection()
 
             self._event_dispatcher.dispatch(
                 AfterSingleConnectionInstantiationEvent(
@@ -674,7 +674,7 @@ class Redis(
         await self.initialize()
         pool = self.connection_pool
         command_name = args[0]
-        conn = self.connection or await pool.get_connection(command_name, **options)
+        conn = self.connection or await pool.get_connection()
 
         if self.single_connection_client:
             await self._single_conn_lock.acquire()
@@ -748,7 +748,7 @@ class Monitor:
 
     async def connect(self):
         if self.connection is None:
-            self.connection = await self.connection_pool.get_connection("MONITOR")
+            self.connection = await self.connection_pool.get_connection()
 
     async def __aenter__(self):
         await self.connect()
@@ -936,9 +936,7 @@ class PubSub:
         Ensure that the PubSub is connected
         """
         if self.connection is None:
-            self.connection = await self.connection_pool.get_connection(
-                "pubsub", self.shard_hint
-            )
+            self.connection = await self.connection_pool.get_connection()
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
@@ -1406,9 +1404,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         conn = self.connection
         # if this is the first call, we need a connection
         if not conn:
-            conn = await self.connection_pool.get_connection(
-                command_name, self.shard_hint
-            )
+            conn = await self.connection_pool.get_connection()
             self.connection = conn
 
         return await conn.retry.call_with_retry(
@@ -1604,7 +1600,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
 
         conn = self.connection
         if not conn:
-            conn = await self.connection_pool.get_connection("MULTI", self.shard_hint)
+            conn = await self.connection_pool.get_connection()
             # assign to self.connection so reset() releases the connection
             # back to the pool after we're done
             self.connection = conn

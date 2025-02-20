@@ -252,7 +252,7 @@ class TestCredentialsProvider:
             redis.Redis, request, flushdb=False, username=username, password=password
         )
         assert r2.ping() is True
-        conn = r2.connection_pool.get_connection("_")
+        conn = r2.connection_pool.get_connection()
         conn.send_command("PING")
         assert str_if_bytes(conn.read_response()) == "PONG"
         assert conn.username == username

@@ -29,7 +29,7 @@ from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
 from ..auth.token import TokenInterface
 from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
-from ..utils import format_error_message
+from ..utils import deprecated_args, format_error_message
 
 # the functionality is available in 3.11.x but has a major issue before
 # 3.11.3. See https://github.com/redis/redis-py/issues/2633
@@ -1087,7 +1087,12 @@ class ConnectionPool:
             or len(self._in_use_connections) < self.max_connections
         )
 
-    async def get_connection(self, command_name, *keys, **options):
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    async def get_connection(self, command_name=None, *keys, **options):
         async with self._lock:
             """Get a connected connection from the pool"""
             connection = self.get_available_connection()
@@ -1255,7 +1260,12 @@ class BlockingConnectionPool(ConnectionPool):
         self._condition = asyncio.Condition()
         self.timeout = timeout
 
-    async def get_connection(self, command_name, *keys, **options):
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    async def get_connection(self, command_name=None, *keys, **options):
         """Gets a connection from the pool, blocking until one is available"""
         try:
             async with self._condition:

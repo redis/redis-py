@@ -366,7 +366,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         self.connection = None
         self._single_connection_client = single_connection_client
         if self._single_connection_client:
-            self.connection = self.connection_pool.get_connection("_")
+            self.connection = self.connection_pool.get_connection()
             self._event_dispatcher.dispatch(
                 AfterSingleConnectionInstantiationEvent(
                     self.connection, ClientType.SYNC, self.single_connection_lock
@@ -608,7 +608,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """Execute a command and return a parsed response"""
         pool = self.connection_pool
         command_name = args[0]
-        conn = self.connection or pool.get_connection(command_name, **options)
+        conn = self.connection or pool.get_connection()
 
         if self._single_connection_client:
             self.single_connection_lock.acquire()
@@ -667,7 +667,7 @@ class Monitor:
 
     def __init__(self, connection_pool):
         self.connection_pool = connection_pool
-        self.connection = self.connection_pool.get_connection("MONITOR")
+        self.connection = self.connection_pool.get_connection()
 
     def __enter__(self):
         self.connection.send_command("MONITOR")
@@ -840,9 +840,7 @@ class PubSub:
         # subscribed to one or more channels
 
         if self.connection is None:
-            self.connection = self.connection_pool.get_connection(
-                "pubsub", self.shard_hint
-            )
+            self.connection = self.connection_pool.get_connection()
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
@@ -1397,7 +1395,7 @@ class Pipeline(Redis):
         conn = self.connection
         # if this is the first call, we need a connection
         if not conn:
-            conn = self.connection_pool.get_connection(command_name, self.shard_hint)
+            conn = self.connection_pool.get_connection()
             self.connection = conn
 
         return conn.retry.call_with_retry(
@@ -1583,7 +1581,7 @@ class Pipeline(Redis):
 
         conn = self.connection
         if not conn:
-            conn = self.connection_pool.get_connection("MULTI", self.shard_hint)
+            conn = self.connection_pool.get_connection()
             # assign to self.connection so reset() releases the connection
             # back to the pool after we're done
             self.connection = conn

@@ -42,6 +42,7 @@ from .utils import (
     HIREDIS_AVAILABLE,
     SSL_AVAILABLE,
     compare_versions,
+    deprecated_args,
     ensure_string,
     format_error_message,
     get_lib_version,
@@ -672,7 +673,7 @@ class AbstractConnection(ConnectionInterface):
             output.append(SYM_EMPTY.join(pieces))
         return output
 
-    def get_protocol(self) -> int or str:
+    def get_protocol(self) -> Union[int, str]:
         return self.protocol
 
     @property
@@ -1461,8 +1462,14 @@ class ConnectionPool:
             finally:
                 self._fork_lock.release()
 
-    def get_connection(self, command_name: str, *keys, **options) -> "Connection":
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    def get_connection(self, command_name=None, *keys, **options) -> "Connection":
         "Get a connection from the pool"
+
         self._checkpid()
         with self._lock:
             try:
@@ -1683,7 +1690,12 @@ class BlockingConnectionPool(ConnectionPool):
         self._connections.append(connection)
         return connection
 
-    def get_connection(self, command_name, *keys, **options):
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    def get_connection(self, command_name=None, *keys, **options):
         """
         Get a connection, blocking for ``self.timeout`` until a connection
         is available from the pool.
