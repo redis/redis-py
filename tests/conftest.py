@@ -10,7 +10,6 @@ from unittest import mock
 from unittest.mock import Mock
 from urllib.parse import urlparse
 
-import jwt
 import pytest
 import redis
 from packaging.version import Version
@@ -615,6 +614,7 @@ def cache_key(request) -> CacheKey:
 
 
 def mock_identity_provider() -> IdentityProviderInterface:
+    jwt = pytest.importorskip("jwt")
     mock_provider = Mock(spec=IdentityProviderInterface)
     token = {"exp": datetime.now(timezone.utc).timestamp() + 3600, "oid": "username"}
     encoded = jwt.encode(token, "secret", algorithm="HS256")
