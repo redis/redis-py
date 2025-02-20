@@ -274,7 +274,7 @@ class TestCredentialsProvider:
         await init_acl_user(r, username, password)
         r2 = await create_redis(flushdb=False, username=username, password=password)
         assert await r2.ping() is True
-        conn = await r2.connection_pool.get_connection("_")
+        conn = await r2.connection_pool.get_connection()
         await conn.send_command("PING")
         assert str_if_bytes(await conn.read_response()) == "PONG"
         assert conn.username == username

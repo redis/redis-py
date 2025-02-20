@@ -40,6 +40,7 @@ from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import (
     HIREDIS_AVAILABLE,
+    deprecated_args,
     dict_merge,
     list_keys_to_dict,
     merge_result,
@@ -52,10 +53,13 @@ def get_node_name(host: str, port: Union[str, int]) -> str:
     return f"{host}:{port}"
 
 
+@deprecated_args(
+    allowed_args=["redis_node"],
+    reason="Use get_connection(redis_node) instead",
+    version="5.0.3",
+)
 def get_connection(redis_node, *args, **options):
-    return redis_node.connection or redis_node.connection_pool.get_connection(
-        args[0], **options
-    )
+    return redis_node.connection or redis_node.connection_pool.get_connection()
 
 
 def parse_scan_result(command, res, **options):
@@ -1151,7 +1155,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     moved = False
 
                 redis_node = self.get_redis_connection(target_node)
-                connection = get_connection(redis_node, *args, **kwargs)
+                connection = get_connection(redis_node)
                 if asking:
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
@@ -1822,9 +1826,7 @@ class ClusterPubSub(PubSub):
                 self.node = node
                 redis_connection = self.cluster.get_redis_connection(node)
                 self.connection_pool = redis_connection.connection_pool
-            self.connection = self.connection_pool.get_connection(
-                "pubsub", self.shard_hint
-            )
+            self.connection = self.connection_pool.get_connection()
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
@@ -2184,7 +2186,7 @@ class ClusterPipeline(RedisCluster):
                 if node_name not in nodes:
                     redis_node = self.get_redis_connection(node)
                     try:
-                        connection = get_connection(redis_node, c.args)
+                        connection = get_connection(redis_node)
                     except (ConnectionError, TimeoutError):
                         for n in nodes.values():
                             n.connection_pool.release(n.connection)
