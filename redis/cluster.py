@@ -42,6 +42,7 @@ from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import (
     HIREDIS_AVAILABLE,
+    deprecated_args,
     dict_merge,
     list_keys_to_dict,
     merge_result,
@@ -54,10 +55,13 @@ def get_node_name(host: str, port: Union[str, int]) -> str:
     return f"{host}:{port}"
 
 
+@deprecated_args(
+    allowed_args=["redis_node"],
+    reason="Use get_connection(redis_node) instead",
+    version="5.0.3",
+)
 def get_connection(redis_node, *args, **options):
-    return redis_node.connection or redis_node.connection_pool.get_connection(
-        args[0], **options
-    )
+    return redis_node.connection or redis_node.connection_pool.get_connection()
 
 
 def parse_scan_result(command, res, **options):
@@ -1173,7 +1177,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     moved = False
 
                 redis_node = self.get_redis_connection(target_node)
-                connection = get_connection(redis_node, *args, **kwargs)
+                connection = get_connection(redis_node)
                 if asking:
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
@@ -1652,7 +1656,7 @@ class NodesManager:
                             if len(disagreements) > 5:
                                 raise RedisClusterException(
                                     f"startup_nodes could not agree on a valid "
-                                    f'slots cache: {", ".join(disagreements)}'
+                                    f"slots cache: {', '.join(disagreements)}"
                                 )
 
             fully_covered = self.check_slots_coverage(tmp_slots)
@@ -1850,9 +1854,7 @@ class ClusterPubSub(PubSub):
                 self.node = node
                 redis_connection = self.cluster.get_redis_connection(node)
                 self.connection_pool = redis_connection.connection_pool
-            self.connection = self.connection_pool.get_connection(
-                "pubsub", self.shard_hint
-            )
+            self.connection = self.connection_pool.get_connection()
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
@@ -2073,8 +2075,7 @@ class ClusterPipeline(RedisCluster):
         """
         cmd = " ".join(map(safe_str, command))
         msg = (
-            f"Command # {number} ({cmd}) of pipeline "
-            f"caused error: {exception.args[0]}"
+            f"Command # {number} ({cmd}) of pipeline caused error: {exception.args[0]}"
         )
         exception.args = (msg,) + exception.args[1:]
 
@@ -2212,8 +2213,8 @@ class ClusterPipeline(RedisCluster):
                 if node_name not in nodes:
                     redis_node = self.get_redis_connection(node)
                     try:
-                        connection = get_connection(redis_node, c.args)
-                    except ConnectionError:
+                        connection = get_connection(redis_node)
+                    except (ConnectionError, TimeoutError):
                         for n in nodes.values():
                             n.connection_pool.release(n.connection)
                         # Connection retries are being handled in the node's
