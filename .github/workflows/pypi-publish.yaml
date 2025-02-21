@@ -21,6 +21,7 @@ jobs:
       - name: Install dev tools
         run: |
           pip install -r dev_requirements.txt
+          pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
           pip install build twine wheel
 
       - name: Build package

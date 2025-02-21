@@ -54,6 +54,7 @@ jobs:
       - name: run code linters
         run: |
           pip install -r dev_requirements.txt
+          pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
           invoke linters
 
   redis_version:
