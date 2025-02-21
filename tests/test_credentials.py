@@ -16,13 +16,17 @@ from redis.credentials import CredentialProvider, UsernamePasswordCredentialProv
 from redis.exceptions import ConnectionError, RedisError
 from redis.retry import Retry
 from redis.utils import str_if_bytes
-from redis_entraid.cred_provider import EntraIdCredentialsProvider
 from tests.conftest import (
     _get_client,
     get_credential_provider,
     get_endpoint,
     skip_if_redis_enterprise,
 )
+
+try:
+    from redis_entraid.cred_provider import EntraIdCredentialsProvider
+except ImportError:
+    EntraIdCredentialsProvider = None
 
 
 @pytest.fixture()
