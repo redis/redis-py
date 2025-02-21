@@ -352,7 +352,9 @@ class TestRedisClusterObj:
         Test command execution with nodes flag PRIMARIES
         """
         primaries = r.get_primaries()
+        assert primaries
         replicas = r.get_replicas()
+        assert replicas
         mock_all_nodes_resp(r, "PONG")
         assert r.ping(target_nodes=RedisCluster.PRIMARIES) is True
         for primary in primaries:
@@ -1345,6 +1347,7 @@ class TestClusterRedisCommands:
     def test_cluster_replicate(self, r):
         node = r.get_random_node()
         all_replicas = r.get_replicas()
+        assert all_replicas
         mock_all_nodes_resp(r, "OK")
         assert r.cluster_replicate(node, "c8253bae761cb61857d") is True
         results = r.cluster_replicate(all_replicas, "c8253bae761cb61857d")
