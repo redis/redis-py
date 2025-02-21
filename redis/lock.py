@@ -264,7 +264,7 @@ class Lock:
                 lock_name=self.name,
             )
 
-    def extend(self, additional_time: int, replace_ttl: bool = False) -> bool:
+    def extend(self, additional_time: Number, replace_ttl: bool = False) -> bool:
         """
         Adds more time to an already acquired lock.
 
@@ -281,7 +281,7 @@ class Lock:
             raise LockError("Cannot extend a lock with no timeout", lock_name=self.name)
         return self.do_extend(additional_time, replace_ttl)
 
-    def do_extend(self, additional_time: int, replace_ttl: bool) -> bool:
+    def do_extend(self, additional_time: Number, replace_ttl: bool) -> bool:
         additional_time = int(additional_time * 1000)
         if not bool(
             self.lua_extend(
