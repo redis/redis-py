@@ -586,7 +586,7 @@ class SearchCommands:
 
     def profile(
         self,
-        query: Union[str, Query, AggregateRequest],
+        query: Union[Query, AggregateRequest],
         limited: bool = False,
         query_params: Optional[Dict[str, Union[str, int, float]]] = None,
     ):
@@ -596,7 +596,7 @@ class SearchCommands:
 
         ### Parameters
 
-        **query**: This can be either an `AggregateRequest`, `Query` or string.
+        **query**: This can be either an `AggregateRequest` or `Query`.
         **limited**: If set to True, removes details of reader iterator.
         **query_params**: Define one or more value parameters.
         Each parameter has a name and a value.

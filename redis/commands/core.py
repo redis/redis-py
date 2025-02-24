@@ -35,6 +35,7 @@ from redis.typing import (
     GroupT,
     KeysT,
     KeyT,
+    Number,
     PatternT,
     ResponseT,
     ScriptTextT,
@@ -2567,7 +2568,7 @@ class ListCommands(CommandsProtocol):
     """
 
     def blpop(
-        self, keys: List, timeout: Optional[int] = 0
+        self, keys: List, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[list], list]:
         """
         LPOP a value off of the first non-empty list
@@ -2588,7 +2589,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("BLPOP", *keys)
 
     def brpop(
-        self, keys: List, timeout: Optional[int] = 0
+        self, keys: List, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[list], list]:
         """
         RPOP a value off of the first non-empty list
@@ -2609,7 +2610,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("BRPOP", *keys)
 
     def brpoplpush(
-        self, src: str, dst: str, timeout: Optional[int] = 0
+        self, src: str, dst: str, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
