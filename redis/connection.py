@@ -1542,7 +1542,7 @@ class ConnectionPool:
             else:
                 # Pool doesn't own this connection, do not add it back
                 # to the pool.
-                # The created connections count shouls not be changed,
+                # The created connections count should not be changed,
                 # because the connection was not created by the pool.
                 connection.disconnect()
                 return
