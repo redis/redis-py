@@ -91,6 +91,21 @@ class TestConnectionPool:
         c2 = pool.get_connection()
         assert c1 == c2
 
+    def test_release_not_owned_connection(self, master_host):
+        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
+        pool1 = self.get_pool(connection_kwargs=connection_kwargs)
+        c1 = pool1.get_connection("_")
+        pool2 = self.get_pool(
+            connection_kwargs={"host": master_host[0], "port": master_host[1]}
+        )
+        c2 = pool2.get_connection("_")
+        pool2.release(c2)
+
+        assert len(pool2._available_connections) == 1
+
+        pool2.release(c1)
+        assert len(pool2._available_connections) == 1
+
     def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {
             "host": "localhost",
