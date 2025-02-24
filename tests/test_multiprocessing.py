@@ -22,16 +22,6 @@ def exit_callback(callback, *args):
 
 
 class TestMultiprocessing:
-    # On macOS and newly non-macOS POSIX systems (since Python 3.14),
-    # the default method has been changed to forkserver.
-    # The code in this module does not work with it,
-    # hence the explicit change to 'fork'
-    # See https://github.com/python/cpython/issues/125714
-    if multiprocessing.get_start_method() in ["forkserver", "spawn"]:
-        _mp_context = multiprocessing.get_context(method="fork")
-    else:
-        _mp_context = multiprocessing.get_context()
-
     # Test connection sharing between forks.
     # See issue #1085 for details.
 
@@ -123,7 +113,7 @@ class TestMultiprocessing:
                 assert child_conn in pool._available_connections
                 assert parent_conn not in pool._available_connections
 
-        proc = self._mp_context.Process(target=target, args=(pool, parent_conn))
+        proc = multiprocessing.Process(target=target, args=(pool, parent_conn))
         proc.start()
         proc.join(3)
         assert proc.exitcode == 0
