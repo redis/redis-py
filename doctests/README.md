@@ -13,11 +13,11 @@ See https://github.com/redis-stack/redis-stack-website#readme for more details.
 ## How to test examples
 
 Examples are standalone python scripts, committed to the *doctests* directory. These scripts assume that the
-```requirements.txt``` and ```dev_requirements.txt``` from this repository have been installed, as per below.
+```doctests/requirements.txt``` and ```dev_requirements.txt``` from this repository have been installed, as per below.
 
 ```bash
-pip install -r requirements.txt
 pip install -r dev_requirements.txt
+pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
 pip install -r doctests/requirements.txt
 ```
 
