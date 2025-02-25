@@ -1,5 +1,3 @@
-from importlib import metadata
-
 from redis import asyncio  # noqa
 from redis.backoff import default_backoff
 from redis.client import Redis, StrictRedis
@@ -44,16 +42,9 @@ def int_or_str(value):
         return value
 
 
-try:
-    __version__ = metadata.version("redis")
-except metadata.PackageNotFoundError:
-    __version__ = "99.99.99"
+__version__ = "5.2.1"
+VERSION = tuple(map(int_or_str, __version__.split(".")))
 
-
-try:
-    VERSION = tuple(map(int_or_str, __version__.split(".")))
-except AttributeError:
-    VERSION = tuple([99, 99, 99])
 
 __all__ = [
     "AuthenticationError",
