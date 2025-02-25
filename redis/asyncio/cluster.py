@@ -1154,9 +1154,7 @@ class NodesManager:
             return self.nodes_cache.get(node_name)
         else:
             raise DataError(
-                "get_node requires one of the following: "
-                "1. node name "
-                "2. host and port"
+                "get_node requires one of the following: 1. node name 2. host and port"
             )
 
     def set_nodes(
@@ -1338,7 +1336,7 @@ class NodesManager:
                             if len(disagreements) > 5:
                                 raise RedisClusterException(
                                     f"startup_nodes could not agree on a valid "
-                                    f'slots cache: {", ".join(disagreements)}'
+                                    f"slots cache: {', '.join(disagreements)}"
                                 )
 
             # Validate if all slots are covered or if we should try next startup node
@@ -1593,8 +1591,9 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                     if isinstance(result, Exception):
                         command = " ".join(map(safe_str, cmd.args))
                         msg = (
-                            f"Command # {cmd.position + 1} ({command}) of pipeline "
-                            f"caused error: {result.args}"
+                            f"Command # {cmd.position + 1} "
+                            f"({self._truncate_command(command)}) "
+                            f"of pipeline caused error: {result.args}"
                         )
                         result.args = (msg,) + result.args[1:]
                         raise result
@@ -1636,6 +1635,11 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             self.execute_command("MSET", *pairs)
 
         return self
+
+    def _truncate_command(self, command, max_length=100):
+        if len(command) > max_length:
+            return command[: max_length - 3] + "..."
+        return command
 
 
 for command in PIPELINE_BLOCKED_COMMANDS:

@@ -1628,7 +1628,7 @@ class NodesManager:
                             if len(disagreements) > 5:
                                 raise RedisClusterException(
                                     f"startup_nodes could not agree on a valid "
-                                    f'slots cache: {", ".join(disagreements)}'
+                                    f"slots cache: {', '.join(disagreements)}"
                                 )
 
             fully_covered = self.check_slots_coverage(tmp_slots)
@@ -2047,10 +2047,15 @@ class ClusterPipeline(RedisCluster):
         """
         cmd = " ".join(map(safe_str, command))
         msg = (
-            f"Command # {number} ({cmd}) of pipeline "
+            f"Command # {number} ({self._truncate_command(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"
         )
         exception.args = (msg,) + exception.args[1:]
+
+    def _truncate_command(self, command, max_length=100):
+        if len(command) > max_length:
+            return command[: max_length - 3] + "x.."
+        return command
 
     def execute(self, raise_on_error: bool = True) -> List[Any]:
         """
