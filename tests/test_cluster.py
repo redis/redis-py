@@ -3260,6 +3260,25 @@ class TestClusterPipeline:
             assert ask_node.redis_connection.connection.read_response.called
             assert res == ["MOCK_OK"]
 
+    def test_error_is_truncated(self, r):
+        """
+        Test that an error from the pipeline is truncated correctly.
+        """
+        key = "a" * 5000
+
+        with r.pipeline() as pipe:
+            pipe.set(key, 1)
+            pipe.llen(key)
+            pipe.expire(key, 100)
+
+            with pytest.raises(Exception) as ex:
+                pipe.execute()
+
+            expected = (
+                "Command # 2 (LLEN " + ("a" * 92) + "...) of pipeline caused error: "
+            )
+            assert str(ex.value).startswith(expected)
+
     def test_return_previously_acquired_connections(self, r):
         # in order to ensure that a pipeline will make use of connections
         #   from different nodes

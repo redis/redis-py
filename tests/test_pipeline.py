@@ -369,6 +369,21 @@ class TestPipeline:
 
         assert r[key] == b"1"
 
+    def test_exec_error_in_pipeline_truncated(self, r):
+        key = "a" * 5000
+        r[key] = 1
+        with r.pipeline(transaction=False) as pipe:
+            pipe.llen(key)
+            pipe.expire(key, 100)
+
+            with pytest.raises(redis.ResponseError) as ex:
+                pipe.execute()
+
+            expected = (
+                "Command # 1 (LLEN " + ("a" * 92) + "...) of pipeline caused error: "
+            )
+            assert str(ex.value).startswith(expected)
+
     def test_pipeline_with_bitfield(self, r):
         with r.pipeline() as pipe:
             pipe.set("a", "1")

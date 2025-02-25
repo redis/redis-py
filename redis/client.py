@@ -1521,9 +1521,15 @@ class Pipeline(Redis):
     def annotate_exception(self, exception, number, command):
         cmd = " ".join(map(safe_str, command))
         msg = (
-            f"Command # {number} ({cmd}) of pipeline caused error: {exception.args[0]}"
+            f"Command # {number} ({self._truncate_command(cmd)}) of pipeline "
+            f"caused error: {exception.args[0]}"
         )
         exception.args = (msg,) + exception.args[1:]
+
+    def _truncate_command(self, command, max_length=100):
+        if len(command) > max_length:
+            return command[: max_length - 3] + "..."
+        return command
 
     def parse_response(self, connection, command_name, **options):
         result = Redis.parse_response(self, connection, command_name, **options)

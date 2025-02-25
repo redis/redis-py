@@ -2802,6 +2802,25 @@ class TestClusterPipeline:
             assert ask_node._free.pop().read_response.await_count
             assert res == ["MOCK_OK"]
 
+    async def test_error_is_truncated(self, r) -> None:
+        """
+        Test that an error from the pipeline is truncated correctly.
+        """
+        key = "a" * 5000
+
+        async with r.pipeline() as pipe:
+            pipe.set(key, 1)
+            pipe.llen(key)
+            pipe.expire(key, 100)
+
+            with pytest.raises(Exception) as ex:
+                await pipe.execute()
+
+            expected = (
+                "Command # 2 (LLEN " + ("a" * 92) + "...) of pipeline caused error: "
+            )
+            assert str(ex.value).startswith(expected)
+
     async def test_moved_redirection_on_slave_with_default(
         self, r: RedisCluster
     ) -> None:
