@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pypa/gh-action-pip-audit@v1.0.8
         with:
-          inputs: requirements.txt dev_requirements.txt
+          inputs: dev_requirements.txt
           ignore-vulns: |
             GHSA-w596-4wvx-j9j6  # subversion related git pull, dependency for pytest. There is no impact here.
 
@@ -54,6 +54,7 @@ jobs:
       - name: run code linters
         run: |
           pip install -r dev_requirements.txt
+          pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
           invoke linters
 
   redis_version:
