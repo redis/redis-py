@@ -63,6 +63,13 @@ path = "redis/__init__.py"
 [tool.hatch.build.targets.sdist]
 include = [
     "/redis",
+    "/tests",
+    "dev_requirements.txt",
+]
+
+[tool.hatch.build.targets.wheel]
+include = [
+    "/redis",
 ]
 
 [tool.pytest.ini_options]
