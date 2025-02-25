@@ -18,11 +18,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: 3.9
-      - name: Install dev tools
-        run: |
-          pip install -r dev_requirements.txt
-          pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
-          pip install build twine wheel
+      - run: pip install build twine
 
       - name: Build package
         run: python -m build .
