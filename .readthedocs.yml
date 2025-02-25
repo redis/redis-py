@@ -2,7 +2,10 @@ version: 2
 
 python:
   install:
-    - requirements: ./docs/requirements.txt
+    - method: pip
+      path: .
+    - method: pip
+      requirements: ./docs/requirements.txt
 
 build:
   os: ubuntu-20.04
