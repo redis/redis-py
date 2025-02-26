@@ -9,7 +9,7 @@ from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
@@ -22,8 +22,10 @@ from redis.cache import (
 )
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
+from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from .event import AfterConnectionReleasedEvent, EventDispatcher
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -40,6 +42,7 @@ from .utils import (
     HIREDIS_AVAILABLE,
     SSL_AVAILABLE,
     compare_versions,
+    deprecated_args,
     ensure_string,
     format_error_message,
     get_lib_version,
@@ -152,6 +155,10 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
+    def get_protocol(self):
+        pass
+
+    @abstractmethod
     def connect(self):
         pass
 
@@ -202,6 +209,14 @@ class ConnectionInterface:
     def handshake_metadata(self) -> Union[Dict[bytes, bytes], Dict[str, str]]:
         pass
 
+    @abstractmethod
+    def set_re_auth_token(self, token: TokenInterface):
+        pass
+
+    @abstractmethod
+    def re_auth(self):
+        pass
+
 
 class AbstractConnection(ConnectionInterface):
     "Manages communication to and from a Redis server"
@@ -229,6 +244,7 @@ class AbstractConnection(ConnectionInterface):
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
         command_packer: Optional[Callable[[], None]] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
         Initialize a new Connection.
@@ -244,6 +260,10 @@ class AbstractConnection(ConnectionInterface):
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self.pid = os.getpid()
         self.db = db
         self.client_name = client_name
@@ -283,6 +303,7 @@ class AbstractConnection(ConnectionInterface):
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+        self._re_auth_token: Optional[TokenInterface] = None
         try:
             p = int(protocol)
         except TypeError:
@@ -652,7 +673,7 @@ class AbstractConnection(ConnectionInterface):
             output.append(SYM_EMPTY.join(pieces))
         return output
 
-    def get_protocol(self) -> int or str:
+    def get_protocol(self) -> Union[int, str]:
         return self.protocol
 
     @property
@@ -662,6 +683,19 @@ class AbstractConnection(ConnectionInterface):
     @handshake_metadata.setter
     def handshake_metadata(self, value: Union[Dict[bytes, bytes], Dict[str, str]]):
         self._handshake_metadata = value
+
+    def set_re_auth_token(self, token: TokenInterface):
+        self._re_auth_token = token
+
+    def re_auth(self):
+        if self._re_auth_token is not None:
+            self.send_command(
+                "AUTH",
+                self._re_auth_token.try_get("oid"),
+                self._re_auth_token.get_value(),
+            )
+            self.read_response()
+            self._re_auth_token = None
 
 
 class Connection(AbstractConnection):
@@ -750,6 +784,7 @@ class CacheProxyConnection(ConnectionInterface):
         self.retry = self._conn.retry
         self.host = self._conn.host
         self.port = self._conn.port
+        self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
         self._cache = cache
         self._cache_lock = threading.Lock()
@@ -870,9 +905,11 @@ class CacheProxyConnection(ConnectionInterface):
                 and self._cache.get(self._current_command_cache_key).status
                 != CacheEntryStatus.IN_PROGRESS
             ):
-                return copy.deepcopy(
+                res = copy.deepcopy(
                     self._cache.get(self._current_command_cache_key).cache_value
                 )
+                self._current_command_cache_key = None
+                return res
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
@@ -897,6 +934,8 @@ class CacheProxyConnection(ConnectionInterface):
                 cache_entry.status = CacheEntryStatus.VALID
                 cache_entry.cache_value = response
                 self._cache.set(cache_entry)
+
+            self._current_command_cache_key = None
 
         return response
 
@@ -932,6 +971,15 @@ class CacheProxyConnection(ConnectionInterface):
                 self._cache.flush()
             else:
                 self._cache.delete_by_redis_keys(data[1])
+
+    def get_protocol(self):
+        return self._conn.get_protocol()
+
+    def set_re_auth_token(self, token: TokenInterface):
+        self._conn.set_re_auth_token(token)
+
+    def re_auth(self):
+        self._conn.re_auth()
 
 
 class SSLConnection(Connection):
@@ -1216,6 +1264,9 @@ def parse_url(url):
     return kwargs
 
 
+_CP = TypeVar("_CP", bound="ConnectionPool")
+
+
 class ConnectionPool:
     """
     Create a connection pool. ``If max_connections`` is set, then this
@@ -1231,7 +1282,7 @@ class ConnectionPool:
     """
 
     @classmethod
-    def from_url(cls, url, **kwargs):
+    def from_url(cls: Type[_CP], url: str, **kwargs) -> _CP:
         """
         Return a connection pool configured from the given URL.
 
@@ -1318,6 +1369,10 @@ class ConnectionPool:
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
 
+        self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
+        if self._event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
         # after a fork. during this time, multiple threads in the child
@@ -1327,6 +1382,7 @@ class ConnectionPool:
         # will notice the first thread already did the work and simply
         # release the lock.
         self._fork_lock = threading.Lock()
+        self._lock = threading.Lock()
         self.reset()
 
     def __repr__(self) -> (str, str):
@@ -1344,7 +1400,6 @@ class ConnectionPool:
         return self.connection_kwargs.get("protocol", None)
 
     def reset(self) -> None:
-        self._lock = threading.Lock()
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
@@ -1407,8 +1462,14 @@ class ConnectionPool:
             finally:
                 self._fork_lock.release()
 
-    def get_connection(self, command_name: str, *keys, **options) -> "Connection":
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    def get_connection(self, command_name=None, *keys, **options) -> "Connection":
         "Get a connection from the pool"
+
         self._checkpid()
         with self._lock:
             try:
@@ -1471,15 +1532,18 @@ class ConnectionPool:
             except KeyError:
                 # Gracefully fail when a connection is returned to this pool
                 # that the pool doesn't actually own
-                pass
+                return
 
             if self.owns_connection(connection):
                 self._available_connections.append(connection)
+                self._event_dispatcher.dispatch(
+                    AfterConnectionReleasedEvent(connection)
+                )
             else:
-                # pool doesn't own this connection. do not add it back
-                # to the pool and decrement the count so that another
-                # connection can take its place if needed
-                self._created_connections -= 1
+                # Pool doesn't own this connection, do not add it back
+                # to the pool.
+                # The created connections count should not be changed,
+                # because the connection was not created by the pool.
                 connection.disconnect()
                 return
 
@@ -1516,6 +1580,29 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
+
+    def re_auth_callback(self, token: TokenInterface):
+        with self._lock:
+            for conn in self._available_connections:
+                conn.retry.call_with_retry(
+                    lambda: conn.send_command(
+                        "AUTH", token.try_get("oid"), token.get_value()
+                    ),
+                    lambda error: self._mock(error),
+                )
+                conn.retry.call_with_retry(
+                    lambda: conn.read_response(), lambda error: self._mock(error)
+                )
+            for conn in self._in_use_connections:
+                conn.set_re_auth_token(token)
+
+    async def _mock(self, error: RedisError):
+        """
+        Dummy functions, needs to be passed as error callback to retry object.
+        :param error:
+        :return:
+        """
+        pass
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -1603,7 +1690,12 @@ class BlockingConnectionPool(ConnectionPool):
         self._connections.append(connection)
         return connection
 
-    def get_connection(self, command_name, *keys, **options):
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    def get_connection(self, command_name=None, *keys, **options):
         """
         Get a connection, blocking for ``self.timeout`` until a connection
         is available from the pool.

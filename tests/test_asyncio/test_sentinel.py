@@ -269,7 +269,7 @@ async def test_auto_close_pool(cluster, sentinel, method_name):
 @pytest.mark.onlynoncluster
 async def test_repr_correctly_represents_connection_object(sentinel):
     pool = SentinelConnectionPool("mymaster", sentinel)
-    connection = await pool.get_connection("PING")
+    connection = await pool.get_connection()
 
     assert (
         str(connection)

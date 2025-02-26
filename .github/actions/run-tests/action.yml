@@ -31,15 +31,14 @@ runs:
     - name: Setup Test environment
       env:
         REDIS_VERSION: ${{ inputs.redis-version }}
-        REDIS_IMAGE: "redis:${{ inputs.redis-version }}"
-        CLIENT_LIBS_TEST_IMAGE: "redislabs/client-libs-test:${{ inputs.redis-version }}"
+        CLIENT_LIBS_TEST_IMAGE_TAG: ${{ inputs.redis-version }}
       run: |
         set -e
                 
         echo "::group::Installing dependencies"
-        pip install -U setuptools wheel
-        pip install -r requirements.txt
         pip install -r dev_requirements.txt
+        pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
+        pip install -e .  # install the working copy
         if [ "${{inputs.parser-backend}}" == "hiredis" ]; then
           pip install "hiredis${{inputs.hiredis-version}}"
           echo "PARSER_BACKEND=$(echo "${{inputs.parser-backend}}_${{inputs.hiredis-version}}" | sed 's/[^a-zA-Z0-9]/_/g')" >> $GITHUB_ENV        
@@ -56,13 +55,13 @@ runs:
         
           # Mapping of redis version to stack version  
           declare -A redis_stack_version_mapping=(
-            ["7.4.1"]="7.4.0-v1"
-            ["7.2.6"]="7.2.0-v13"
-            ["6.2.16"]="6.2.6-v17"
+            ["7.4.2"]="rs-7.4.0-v2"
+            ["7.2.7"]="rs-7.2.0-v14"
+            ["6.2.17"]="rs-6.2.6-v18"
           )
                   
           if [[ -v redis_stack_version_mapping[$REDIS_VERSION] ]]; then
-            export REDIS_STACK_IMAGE="redis/redis-stack-server:${redis_stack_version_mapping[$REDIS_VERSION]}"
+            export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=${redis_stack_version_mapping[$REDIS_VERSION]}
             echo "REDIS_MOD_URL=redis://127.0.0.1:6479/0" >> $GITHUB_ENV
           else
             echo "Version not found in the mapping."
@@ -103,7 +102,7 @@ runs:
         
           if (( $REDIS_MAJOR_VERSION < 7 )) && [ "$protocol" == "3" ]; then
             echo "Skipping module tests: Modules doesn't support RESP3 for Redis versions < 7"
-            invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}" --extra-markers="not redismod"
+            invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}" --extra-markers="not redismod and not cp_integration"
           else        
             invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}"
           fi

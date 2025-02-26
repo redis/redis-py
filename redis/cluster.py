@@ -13,17 +13,21 @@ from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheI
 from redis.client import CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
-from redis.connection import ConnectionPool, DefaultParser, parse_url
+from redis.connection import ConnectionPool, parse_url
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
+from redis.event import (
+    AfterPooledConnectionsInstantiationEvent,
+    AfterPubSubConnectionInstantiationEvent,
+    ClientType,
+    EventDispatcher,
+)
 from redis.exceptions import (
     AskError,
     AuthenticationError,
-    ClusterCrossSlotError,
     ClusterDownError,
     ClusterError,
     ConnectionError,
     DataError,
-    MasterDownError,
     MovedError,
     RedisClusterException,
     RedisError,
@@ -36,6 +40,7 @@ from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import (
     HIREDIS_AVAILABLE,
+    deprecated_args,
     dict_merge,
     list_keys_to_dict,
     merge_result,
@@ -48,10 +53,13 @@ def get_node_name(host: str, port: Union[str, int]) -> str:
     return f"{host}:{port}"
 
 
+@deprecated_args(
+    allowed_args=["redis_node"],
+    reason="Use get_connection(redis_node) instead",
+    version="5.0.3",
+)
 def get_connection(redis_node, *args, **options):
-    return redis_node.connection or redis_node.connection_pool.get_connection(
-        args[0], **options
-    )
+    return redis_node.connection or redis_node.connection_pool.get_connection()
 
 
 def parse_scan_result(command, res, **options):
@@ -185,20 +193,6 @@ def cleanup_kwargs(**kwargs):
     }
 
     return connection_kwargs
-
-
-class ClusterParser(DefaultParser):
-    EXCEPTION_CLASSES = dict_merge(
-        DefaultParser.EXCEPTION_CLASSES,
-        {
-            "ASK": AskError,
-            "TRYAGAIN": TryAgainError,
-            "MOVED": MovedError,
-            "CLUSTERDOWN": ClusterDownError,
-            "CROSSSLOT": ClusterCrossSlotError,
-            "MASTERDOWN": MasterDownError,
-        },
-    )
 
 
 class AbstractRedisCluster:
@@ -505,6 +499,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
         **kwargs,
     ):
         """
@@ -638,6 +633,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.read_from_replicas = read_from_replicas
         self.reinitialize_counter = 0
         self.reinitialize_steps = reinitialize_steps
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
             from_url=from_url,
@@ -646,6 +645,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             address_remap=address_remap,
             cache=cache,
             cache_config=cache_config,
+            event_dispatcher=self._event_dispatcher,
             **kwargs,
         )
 
@@ -680,7 +680,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         Initialize the connection, authenticate and select a database and send
          READONLY if it is set during object initialization.
         """
-        connection.set_parser(ClusterParser)
         connection.on_connect()
 
         if self.read_from_replicas:
@@ -1156,7 +1155,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     moved = False
 
                 redis_node = self.get_redis_connection(target_node)
-                connection = get_connection(redis_node, *args, **kwargs)
+                connection = get_connection(redis_node)
                 if asking:
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
@@ -1232,7 +1231,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
 
         raise ClusterError("TTL exhausted.")
 
-    def close(self):
+    def close(self) -> None:
         try:
             with self._lock:
                 if self.nodes_manager:
@@ -1332,6 +1331,7 @@ class NodesManager:
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         cache_factory: Optional[CacheFactoryInterface] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
         **kwargs,
     ):
         self.nodes_cache = {}
@@ -1353,6 +1353,13 @@ class NodesManager:
         if lock is None:
             lock = threading.Lock()
         self._lock = lock
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
+        self._credential_provider = self.connection_kwargs.get(
+            "credential_provider", None
+        )
         self.initialize()
 
     def get_node(self, host=None, port=None, node_name=None):
@@ -1479,11 +1486,19 @@ class NodesManager:
         """
         This function will create a redis connection to all nodes in :nodes:
         """
+        connection_pools = []
         for node in nodes:
             if node.redis_connection is None:
                 node.redis_connection = self.create_redis_node(
                     host=node.host, port=node.port, **self.connection_kwargs
                 )
+                connection_pools.append(node.redis_connection.connection_pool)
+
+        self._event_dispatcher.dispatch(
+            AfterPooledConnectionsInstantiationEvent(
+                connection_pools, ClientType.SYNC, self._credential_provider
+            )
+        )
 
     def create_redis_node(self, host, port, **kwargs):
         if self.from_url:
@@ -1658,7 +1673,7 @@ class NodesManager:
         # If initialize was called after a MovedError, clear it
         self._moved_exception = None
 
-    def close(self):
+    def close(self) -> None:
         self.default_node = None
         for node in self.nodes_cache.values():
             if node.redis_connection:
@@ -1698,6 +1713,7 @@ class ClusterPubSub(PubSub):
         host=None,
         port=None,
         push_handler_func=None,
+        event_dispatcher: Optional["EventDispatcher"] = None,
         **kwargs,
     ):
         """
@@ -1723,10 +1739,15 @@ class ClusterPubSub(PubSub):
         self.cluster = redis_cluster
         self.node_pubsub_mapping = {}
         self._pubsubs_generator = self._pubsubs_generator()
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         super().__init__(
             connection_pool=connection_pool,
             encoder=redis_cluster.encoder,
             push_handler_func=push_handler_func,
+            event_dispatcher=self._event_dispatcher,
             **kwargs,
         )
 
@@ -1805,14 +1826,17 @@ class ClusterPubSub(PubSub):
                 self.node = node
                 redis_connection = self.cluster.get_redis_connection(node)
                 self.connection_pool = redis_connection.connection_pool
-            self.connection = self.connection_pool.get_connection(
-                "pubsub", self.shard_hint
-            )
+            self.connection = self.connection_pool.get_connection()
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
+            self._event_dispatcher.dispatch(
+                AfterPubSubConnectionInstantiationEvent(
+                    self.connection, self.connection_pool, ClientType.SYNC, self._lock
+                )
+            )
         connection = self.connection
         self._execute(connection, connection.send_command, *args)
 
@@ -2028,7 +2052,7 @@ class ClusterPipeline(RedisCluster):
         )
         exception.args = (msg,) + exception.args[1:]
 
-    def execute(self, raise_on_error=True):
+    def execute(self, raise_on_error: bool = True) -> List[Any]:
         """
         Execute all the commands in the current pipeline
         """
@@ -2162,8 +2186,8 @@ class ClusterPipeline(RedisCluster):
                 if node_name not in nodes:
                     redis_node = self.get_redis_connection(node)
                     try:
-                        connection = get_connection(redis_node, c.args)
-                    except ConnectionError:
+                        connection = get_connection(redis_node)
+                    except (ConnectionError, TimeoutError):
                         for n in nodes.values():
                             n.connection_pool.release(n.connection)
                         # Connection retries are being handled in the node's
