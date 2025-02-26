@@ -2122,7 +2122,7 @@ class ClusterPipeline(RedisCluster):
                     raise_on_error=raise_on_error,
                     allow_redirections=allow_redirections,
                 )
-            except (ClusterDownError, ConnectionError) as e:
+            except RedisCluster.ERRORS_ALLOW_RETRY as e:
                 if retry_attempts > 0:
                     # Try again with the new cluster setup. All other errors
                     # should be raised.
