@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 
 import jwt
+
 from redis.auth.err import InvalidTokenSchemaErr
 
 
@@ -77,7 +78,6 @@ class SimpleToken(TokenInterface):
 
 
 class JWToken(TokenInterface):
-
     REQUIRED_FIELDS = {"exp"}
 
     def __init__(self, token: str):

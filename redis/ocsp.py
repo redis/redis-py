@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from cryptography.hazmat.primitives.hashes import SHA1, Hash
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.x509 import ocsp
+
 from redis.exceptions import AuthorizationError, ConnectionError
 
 
@@ -56,7 +57,7 @@ def _check_certificate(issuer_cert, ocsp_bytes, validate=True):
     if ocsp_response.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL:
         if ocsp_response.certificate_status != ocsp.OCSPCertStatus.GOOD:
             raise ConnectionError(
-                f'Received an {str(ocsp_response.certificate_status).split(".")[1]} '
+                f"Received an {str(ocsp_response.certificate_status).split('.')[1]} "
                 "ocsp certificate status"
             )
     else:
