@@ -1635,7 +1635,7 @@ class NodesManager:
                             if len(disagreements) > 5:
                                 raise RedisClusterException(
                                     f"startup_nodes could not agree on a valid "
-                                    f"slots cache: {', '.join(disagreements)}"
+                                    f'slots cache: {", ".join(disagreements)}'
                                 )
 
             fully_covered = self.check_slots_coverage(tmp_slots)
