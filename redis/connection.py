@@ -42,6 +42,7 @@ from .utils import (
     HIREDIS_AVAILABLE,
     SSL_AVAILABLE,
     compare_versions,
+    deprecated_args,
     ensure_string,
     format_error_message,
     get_lib_version,
@@ -1461,8 +1462,14 @@ class ConnectionPool:
             finally:
                 self._fork_lock.release()
 
-    def get_connection(self, command_name: str, *keys, **options) -> "Connection":
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    def get_connection(self, command_name=None, *keys, **options) -> "Connection":
         "Get a connection from the pool"
+
         self._checkpid()
         with self._lock:
             try:
@@ -1525,7 +1532,7 @@ class ConnectionPool:
             except KeyError:
                 # Gracefully fail when a connection is returned to this pool
                 # that the pool doesn't actually own
-                pass
+                return
 
             if self.owns_connection(connection):
                 self._available_connections.append(connection)
@@ -1533,10 +1540,10 @@ class ConnectionPool:
                     AfterConnectionReleasedEvent(connection)
                 )
             else:
-                # pool doesn't own this connection. do not add it back
-                # to the pool and decrement the count so that another
-                # connection can take its place if needed
-                self._created_connections -= 1
+                # Pool doesn't own this connection, do not add it back
+                # to the pool.
+                # The created connections count should not be changed,
+                # because the connection was not created by the pool.
                 connection.disconnect()
                 return
 
@@ -1683,7 +1690,12 @@ class BlockingConnectionPool(ConnectionPool):
         self._connections.append(connection)
         return connection
 
-    def get_connection(self, command_name, *keys, **options):
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    def get_connection(self, command_name=None, *keys, **options):
         """
         Get a connection, blocking for ``self.timeout`` until a connection
         is available from the pool.
