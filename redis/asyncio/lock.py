@@ -177,7 +177,7 @@ class Lock:
             await self.release()
         except LockNotOwnedError as e:
             if self.raise_on_release_error:
-                raise e
+                raise
             logger.warning("Lock was no longer owned when exiting context manager.")
 
 
