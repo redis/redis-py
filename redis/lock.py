@@ -1,11 +1,14 @@
 import threading
 import time as mod_time
 import uuid
+import logging
 from types import SimpleNamespace, TracebackType
 from typing import Optional, Type
 
 from redis.exceptions import LockError, LockNotOwnedError
 from redis.typing import Number
+
+logger = logging.getLogger(__name__)
 
 
 class Lock:
@@ -82,6 +85,7 @@ class Lock:
         blocking: bool = True,
         blocking_timeout: Optional[Number] = None,
         thread_local: bool = True,
+        raise_on_release_error: bool = True,
     ):
         """
         Create a new Lock instance named ``name`` using the Redis client
@@ -125,6 +129,11 @@ class Lock:
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
 
+        ``raise_on_release_error`` indicates whether to raise an exception when
+        the lock is no longer owned when exiting the context manager. By default,
+        this is True, meaning an exception will be raised. If False, the warning
+        will be logged and the exception will be suppressed.
+
         In some use cases it's necessary to disable thread local storage. For
         example, if you have code where one thread acquires a lock and passes
         that lock instance to a worker thread to release later. If thread
@@ -140,6 +149,7 @@ class Lock:
         self.blocking = blocking
         self.blocking_timeout = blocking_timeout
         self.thread_local = bool(thread_local)
+        self.raise_on_release_error = raise_on_release_error
         self.local = threading.local() if self.thread_local else SimpleNamespace()
         self.local.token = None
         self.register_scripts()
@@ -168,7 +178,12 @@ class Lock:
         exc_value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None:
-        self.release()
+        try:
+            self.release()
+        except LockNotOwnedError as e:
+            if self.raise_on_release_error:
+                raise e
+            logger.warning("Lock was no longer owned when exiting context manager.")
 
     def acquire(
         self,

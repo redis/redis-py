@@ -133,6 +133,21 @@ class TestLock:
             with self.get_lock(r, "foo", blocking_timeout=0.1):
                 pass
 
+    def test_context_manager_not_raise_on_release_error(self, r):
+        try:
+            with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=False
+            ):
+                time.sleep(0.15)
+        except LockNotOwnedError:
+            pytest.fail("LockNotOwnedError should not have been raised")
+
+        with pytest.raises(LockNotOwnedError):
+            with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=True
+            ):
+                time.sleep(0.15)
+
     def test_high_sleep_small_blocking_timeout(self, r):
         lock1 = self.get_lock(r, "foo")
         assert lock1.acquire(blocking=False)
