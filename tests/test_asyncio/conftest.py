@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Union
 
-import jwt
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
@@ -249,6 +248,7 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
 
 
 def mock_identity_provider() -> IdentityProviderInterface:
+    jwt = pytest.importorskip("jwt")
     mock_provider = Mock(spec=IdentityProviderInterface)
     token = {"exp": datetime.now(timezone.utc).timestamp() + 3600, "oid": "username"}
     encoded = jwt.encode(token, "secret", algorithm="HS256")
