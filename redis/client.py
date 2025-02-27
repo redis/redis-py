@@ -473,6 +473,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         blocking_timeout: Optional[float] = None,
         lock_class: Union[None, Any] = None,
         thread_local: bool = True,
+        raise_on_release_error: bool = True,
     ):
         """
         Return a new Lock object using key ``name`` that mimics
@@ -519,6 +520,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
 
+        ``raise_on_release_error`` indicates whether to raise an exception when
+        the lock is no longer owned when exiting the context manager. By default,
+        this is True, meaning an exception will be raised. If False, the warning
+        will be logged and the exception will be suppressed.
+
         In some use cases it's necessary to disable thread local storage. For
         example, if you have code where one thread acquires a lock and passes
         that lock instance to a worker thread to release later. If thread
@@ -536,6 +542,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
+            raise_on_release_error=raise_on_release_error,
         )
 
     def pubsub(self, **kwargs):
