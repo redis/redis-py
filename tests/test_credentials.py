@@ -4,10 +4,10 @@ import string
 import threading
 from time import sleep
 from typing import Optional, Tuple, Union
+from unittest.mock import Mock, call
 
 import pytest
 import redis
-from mock.mock import Mock, call
 from redis import AuthenticationError, DataError, Redis, ResponseError
 from redis.auth.err import RequestTokenErr
 from redis.backoff import NoBackoff
