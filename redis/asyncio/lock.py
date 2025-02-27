@@ -131,7 +131,7 @@ class Lock:
                      token is *not* stored in thread local storage, then
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
-        
+
         ``raise_on_release_error`` indicates whether to raise an exception when
         the lock is no longer owned when exiting the context manager. By default,
         this is True, meaning an exception will be raised. If False, the warning
@@ -175,11 +175,10 @@ class Lock:
     async def __aexit__(self, exc_type, exc_value, traceback):
         try:
             await self.release()
-        except LockNotOwnedError as e:
+        except LockNotOwnedError:
             if self.raise_on_release_error:
                 raise
             logger.warning("Lock was no longer owned when exiting context manager.")
-
 
     async def acquire(
         self,
