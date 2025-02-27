@@ -1,5 +1,6 @@
 import asyncio
 import re
+from contextlib import asynccontextmanager
 
 import pytest
 import pytest_asyncio
@@ -9,7 +10,6 @@ from redis.auth.token import TokenInterface
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
 from .compat import aclosing, mock
-from .conftest import asynccontextmanager
 from .test_pubsub import wait_for_message
 
 
