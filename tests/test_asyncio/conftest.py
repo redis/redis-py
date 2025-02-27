@@ -151,8 +151,10 @@ async def sentinel_setup(local_cache, request):
         for ip, port in (endpoint.split(":") for endpoint in sentinel_ips.split(","))
     ]
     kwargs = request.param.get("kwargs", {}) if hasattr(request, "param") else {}
+    force_master_ip = request.param.get("force_master_ip", None)
     sentinel = Sentinel(
         sentinel_endpoints,
+        force_master_ip=force_master_ip,
         socket_timeout=0.1,
         client_cache=local_cache,
         protocol=3,
