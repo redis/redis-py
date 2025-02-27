@@ -989,9 +989,6 @@ class TestPubSubAutoReconnect:
 
 @pytest.mark.onlynoncluster
 class TestBaseException:
-    @pytest.mark.skipif(
-        sys.version_info < (3, 8), reason="requires python 3.8 or higher"
-    )
     async def test_outer_timeout(self, r: redis.Redis):
         """
         Using asyncio_timeout manually outside the inner method timeouts works.
@@ -1023,9 +1020,6 @@ class TestBaseException:
         # the timeout on the read should not cause disconnect
         assert pubsub.connection.is_connected
 
-    @pytest.mark.skipif(
-        sys.version_info < (3, 8), reason="requires python 3.8 or higher"
-    )
     async def test_base_exception(self, r: redis.Redis):
         """
         Manually trigger a BaseException inside the parser's .read_response method
