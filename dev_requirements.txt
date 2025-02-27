@@ -5,7 +5,6 @@ flake8-isort
 flake8
 flynt~=0.69.0
 invoke==2.2.0
-mock
 packaging>=20.4
 pytest
 pytest-asyncio>=0.23.0,<0.24.0

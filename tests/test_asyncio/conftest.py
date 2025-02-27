@@ -3,11 +3,12 @@ import random
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Union
+from unittest import mock
+from unittest.mock import Mock
 
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
-from mock.mock import Mock
 from packaging.version import Version
 from redis.asyncio import Sentinel
 from redis.asyncio.client import Monitor
@@ -35,8 +36,6 @@ from redis_entraid.identity_provider import (
     _create_provider_from_service_principal,
 )
 from tests.conftest import REDIS_INFO
-
-from .compat import mock
 
 
 class AuthType(Enum):

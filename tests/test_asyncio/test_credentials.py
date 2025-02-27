@@ -4,11 +4,11 @@ import string
 from asyncio import Lock as AsyncLock
 from asyncio import sleep as async_sleep
 from typing import Optional, Tuple, Union
+from unittest.mock import Mock, call
 
 import pytest
 import pytest_asyncio
 import redis
-from mock.mock import Mock, call
 from redis import AuthenticationError, DataError, RedisError, ResponseError
 from redis.asyncio import Connection, ConnectionPool, Redis
 from redis.asyncio.retry import Retry
