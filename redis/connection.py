@@ -1734,8 +1734,8 @@ class BlockingConnectionPool(ConnectionPool):
             # closed. either way, reconnect and verify everything is good.
             try:
                 if connection.can_read():
-                    raise ConnectionError("Connection has data")
-            except (ConnectionError, OSError):
+                    raise ConnectionError('Connection has data')
+            except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
                 connection.connect()
                 if connection.can_read():
