@@ -5,6 +5,7 @@ import hashlib
 import warnings
 from typing import (
     TYPE_CHECKING,
+    Any,
     AsyncIterator,
     Awaitable,
     Callable,
@@ -18,7 +19,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    Union, Any,
+    Union,
 )
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
