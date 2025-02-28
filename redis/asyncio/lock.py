@@ -1,7 +1,7 @@
 import asyncio
+import logging
 import threading
 import uuid
-import logging
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Awaitable, Optional, Union
 
