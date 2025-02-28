@@ -3,7 +3,8 @@ import functools
 import socket
 import sys
 from typing import Optional
-from unittest.mock import patch
+
+from mock.mock import patch
 
 # the functionality is available in 3.11.x but has a major issue before
 # 3.11.3. See https://github.com/redis/redis-py/issues/2633
@@ -20,7 +21,7 @@ from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import get_protocol_version, skip_if_server_version_lt
 
-from .compat import aclosing, create_task, mock
+from .compat import aclosing
 
 
 def with_timeout(t):
@@ -733,7 +734,7 @@ class TestPubSubReconnect:
                 await messages.put(message)
                 break
 
-        task = asyncio.get_running_loop().create_task(loop())
+        task = asyncio.create_task(loop())
         # get the initial connect message
         async with async_timeout(1):
             message = await messages.get()
@@ -782,7 +783,7 @@ class TestPubSubRun:
         messages = asyncio.Queue()
         p = pubsub
         await self._subscribe(p, foo=callback)
-        task = asyncio.get_running_loop().create_task(p.run())
+        task = asyncio.create_task(p.run())
         await r.publish("foo", "bar")
         message = await messages.get()
         task.cancel()
@@ -805,8 +806,8 @@ class TestPubSubRun:
         exceptions = asyncio.Queue()
         p = pubsub
         await self._subscribe(p, foo=lambda x: None)
-        with mock.patch.object(p, "get_message", side_effect=Exception("error")):
-            task = asyncio.get_running_loop().create_task(
+        with patch.object(p, "get_message", side_effect=Exception("error")):
+            task = asyncio.create_task(
                 p.run(exception_handler=exception_handler_callback)
             )
             e = await exceptions.get()
@@ -823,7 +824,7 @@ class TestPubSubRun:
 
         messages = asyncio.Queue()
         p = pubsub
-        task = asyncio.get_running_loop().create_task(p.run())
+        task = asyncio.create_task(p.run())
         # wait until loop gets settled.  Add a subscription
         await asyncio.sleep(0.1)
         await p.subscribe(foo=callback)
@@ -867,7 +868,7 @@ class TestPubSubAutoReconnect:
         else:
             self.get_message = self.loop_step_listen
 
-        self.task = create_task(self.loop())
+        self.task = asyncio.create_task(self.loop())
         # get the initial connect message
         message = await self.messages.get()
         assert message == {
@@ -903,7 +904,7 @@ class TestPubSubAutoReconnect:
                 async with self.cond:
                     assert self.state == 0
                     self.state = 1
-                    with mock.patch.object(self.pubsub.connection, "_parser") as m:
+                    with patch.object(self.pubsub.connection, "_parser") as m:
                         m.read_response.side_effect = socket.error
                         m.can_read_destructive.side_effect = socket.error
                         # wait until task noticies the disconnect until we

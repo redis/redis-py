@@ -1,8 +1,8 @@
 from contextlib import closing
-from unittest import mock
 
 import pytest
 import redis
+from mock.mock import patch
 
 from .conftest import skip_if_server_version_lt, wait_for_command
 
@@ -296,7 +296,7 @@ class TestPipeline:
                 nonlocal called
                 called += 1
 
-            with mock.patch.object(pipe, "reset", mock_reset):
+            with patch.object(pipe, "reset", mock_reset):
                 pipe.close()
                 assert called == 1
 

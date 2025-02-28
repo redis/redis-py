@@ -7,7 +7,7 @@ from typing import Union
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
-from mock.mock import Mock
+from mock.mock import AsyncMock, Mock, patch
 from packaging.version import Version
 from redis.asyncio import Sentinel
 from redis.asyncio.client import Monitor
@@ -35,8 +35,6 @@ from redis_entraid.identity_provider import (
     _create_provider_from_service_principal,
 )
 from tests.conftest import REDIS_INFO
-
-from .compat import mock
 
 
 class AuthType(Enum):
@@ -171,10 +169,10 @@ async def master(request, sentinel_setup):
 
 
 def _gen_cluster_mock_resp(r, response):
-    connection = mock.AsyncMock(spec=Connection)
+    connection = AsyncMock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
-    with mock.patch.object(r, "connection", connection):
+    with patch.object(r, "connection", connection):
         yield r
 
 

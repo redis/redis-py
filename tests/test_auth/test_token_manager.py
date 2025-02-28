@@ -1,9 +1,9 @@
 import asyncio
 from datetime import datetime, timezone
 from time import sleep
-from unittest.mock import Mock
 
 import pytest
+from mock.mock import Mock
 from redis.auth.err import RequestTokenErr, TokenRenewalErr
 from redis.auth.idp import IdentityProviderInterface
 from redis.auth.token import SimpleToken

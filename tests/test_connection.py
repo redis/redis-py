@@ -6,11 +6,10 @@ import threading
 import types
 from errno import ECONNREFUSED
 from typing import Any
-from unittest import mock
-from unittest.mock import call, patch
 
 import pytest
 import redis
+from mock.mock import Mock, call, patch
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
 from redis.backoff import NoBackoff
@@ -44,7 +43,7 @@ from .mocks import MockSocket
 def test_invalid_response(r):
     raw = b"x"
     parser = r.connection._parser
-    with mock.patch.object(parser._buffer, "readline", return_value=raw):
+    with patch.object(parser._buffer, "readline", return_value=raw):
         with pytest.raises(InvalidResponse, match=f"Protocol Error: {raw!r}"):
             parser.read_response()
 
@@ -74,7 +73,7 @@ def test_loading_external_modules(r):
 class TestConnection:
     def test_disconnect(self):
         conn = Connection()
-        mock_sock = mock.Mock()
+        mock_sock = Mock()
         conn._sock = mock_sock
         conn.disconnect()
         mock_sock.shutdown.assert_called_once()
@@ -84,7 +83,7 @@ class TestConnection:
     def test_disconnect__shutdown_OSError(self):
         """An OSError on socket shutdown will still close the socket."""
         conn = Connection()
-        mock_sock = mock.Mock()
+        mock_sock = Mock()
         conn._sock = mock_sock
         conn._sock.shutdown.side_effect = OSError
         conn.disconnect()
@@ -95,7 +94,7 @@ class TestConnection:
     def test_disconnect__close_OSError(self):
         """An OSError on socket close will still clear out the socket."""
         conn = Connection()
-        mock_sock = mock.Mock()
+        mock_sock = Mock()
         conn._sock = mock_sock
         conn._sock.close.side_effect = OSError
         conn.disconnect()
@@ -110,7 +109,7 @@ class TestConnection:
         """Test that the _connect function is retried in case of a timeout"""
         conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 3))
         origin_connect = conn._connect
-        conn._connect = mock.Mock()
+        conn._connect = Mock()
 
         def mock_connect():
             # connect only on the last retry
@@ -138,7 +137,7 @@ class TestConnection:
         """Test that the _connect function is not being retried if retry_on_timeout is
         set to False"""
         conn = Connection(retry_on_timeout=False)
-        conn._connect = mock.Mock()
+        conn._connect = Mock()
         conn._connect.side_effect = socket.timeout
 
         with pytest.raises(TimeoutError, match="Timeout connecting to server"):

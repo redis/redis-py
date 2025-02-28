@@ -4,11 +4,10 @@ import socket
 import threading
 import time
 from collections import defaultdict
-from unittest import mock
-from unittest.mock import patch
 
 import pytest
 import redis
+from mock.mock import patch
 from redis.exceptions import ConnectionError
 from redis.utils import HIREDIS_AVAILABLE
 
@@ -964,7 +963,7 @@ class TestPubSubWorkerThread:
 
         p = r.pubsub()
         p.subscribe(**{"foo": lambda m: m})
-        with mock.patch.object(p, "get_message", side_effect=Exception("error")):
+        with patch.object(p, "get_message", side_effect=Exception("error")):
             pubsub_thread = p.run_in_thread(
                 daemon=True, exception_handler=exception_handler
             )
@@ -1041,7 +1040,7 @@ class TestPubSubAutoReconnect:
             # now, disconnect the connection, and wait for it to be re-established
             with self.cond:
                 self.state = 1
-                with mock.patch.object(self.pubsub.connection, "_parser") as mockobj:
+                with patch.object(self.pubsub.connection, "_parser") as mockobj:
                     mockobj.read_response.side_effect = socket.error
                     mockobj.can_read.side_effect = socket.error
                     # wait until thread notices the disconnect until we undo the patch

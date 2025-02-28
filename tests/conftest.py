@@ -6,12 +6,11 @@ import time
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Callable, TypeVar, Union
-from unittest import mock
-from unittest.mock import Mock
 from urllib.parse import urlparse
 
 import pytest
 import redis
+from mock.mock import Mock, patch
 from packaging.version import Version
 from redis import Sentinel
 from redis.auth.idp import IdentityProviderInterface
@@ -510,7 +509,7 @@ def _gen_cluster_mock_resp(r, response):
     connection = Mock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
-    with mock.patch.object(r, "connection", connection):
+    with patch.object(r, "connection", connection):
         yield r
 
 
