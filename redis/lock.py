@@ -1,7 +1,7 @@
+import logging
 import threading
 import time as mod_time
 import uuid
-import logging
 from types import SimpleNamespace, TracebackType
 from typing import Optional, Type
 
