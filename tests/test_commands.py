@@ -5,11 +5,10 @@ import threading
 import time
 from asyncio import CancelledError
 from string import ascii_letters
-from unittest import mock
-from unittest.mock import patch
 
 import pytest
 import redis
+from mock.mock import MagicMock, patch
 from redis import exceptions
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -5341,13 +5340,13 @@ class TestRedisCommands:
         assert r.replicaof("NO", "ONE")
 
     def test_shutdown(self, r: redis.Redis):
-        r.execute_command = mock.MagicMock()
+        r.execute_command = MagicMock()
         r.execute_command("SHUTDOWN", "NOSAVE")
         r.execute_command.assert_called_once_with("SHUTDOWN", "NOSAVE")
 
     @skip_if_server_version_lt("7.0.0")
     def test_shutdown_with_params(self, r: redis.Redis):
-        r.execute_command = mock.MagicMock()
+        r.execute_command = MagicMock()
         r.execute_command("SHUTDOWN", "SAVE", "NOW", "FORCE")
         r.execute_command.assert_called_once_with("SHUTDOWN", "SAVE", "NOW", "FORCE")
         r.execute_command("SHUTDOWN", "ABORT")

@@ -1,6 +1,5 @@
-from unittest.mock import patch
-
 import pytest
+from mock.mock import patch
 from redis.backoff import AbstractBackoff, ExponentialBackoff, NoBackoff
 from redis.client import Redis
 from redis.connection import Connection, UnixDomainSocketConnection

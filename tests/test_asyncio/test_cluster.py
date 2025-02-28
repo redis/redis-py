@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import pytest
 import pytest_asyncio
 from _pytest.fixtures import FixtureRequest
+from mock import mock
 from redis._parsers import AsyncCommandsParser
 from redis.asyncio.cluster import ClusterNode, NodesManager, RedisCluster
 from redis.asyncio.connection import Connection, SSLConnection, async_timeout
@@ -38,7 +39,7 @@ from tests.conftest import (
 )
 
 from ..ssl_utils import get_tls_certificates
-from .compat import aclosing, mock
+from .compat import aclosing
 
 pytestmark = pytest.mark.onlycluster
 

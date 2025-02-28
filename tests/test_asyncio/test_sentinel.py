@@ -1,9 +1,9 @@
 import socket
-from unittest import mock
 
 import pytest
 import pytest_asyncio
 import redis.asyncio.sentinel
+from mock.mock import patch
 from redis import exceptions
 from redis.asyncio.sentinel import (
     MasterNotFoundError,
@@ -259,7 +259,7 @@ async def test_auto_close_pool(cluster, sentinel, method_name):
         nonlocal calls
         calls += 1
 
-    with mock.patch.object(pool, "disconnect", mock_disconnect):
+    with patch.object(pool, "disconnect", mock_disconnect):
         await client.aclose()
 
     assert calls == 1
