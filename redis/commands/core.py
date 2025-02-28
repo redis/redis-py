@@ -18,7 +18,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    Union,
+    Union, Any,
 )
 
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
@@ -6397,12 +6397,12 @@ class FunctionCommands:
         return self.execute_command("FUNCTION LIST", *args)
 
     def _fcall(
-        self, command: str, function, numkeys: int, *keys_and_args: Optional[List]
+        self, command: str, function, numkeys: int, *keys_and_args: Any
     ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, function, numkeys, *keys_and_args)
 
     def fcall(
-        self, function, numkeys: int, *keys_and_args: Optional[List]
+        self, function, numkeys: int, *keys_and_args: Any
     ) -> Union[Awaitable[str], str]:
         """
         Invoke a function.
@@ -6412,7 +6412,7 @@ class FunctionCommands:
         return self._fcall("FCALL", function, numkeys, *keys_and_args)
 
     def fcall_ro(
-        self, function, numkeys: int, *keys_and_args: Optional[List]
+        self, function, numkeys: int, *keys_and_args: Any
     ) -> Union[Awaitable[str], str]:
         """
         This is a read-only variant of the FCALL command that cannot
