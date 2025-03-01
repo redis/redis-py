@@ -251,13 +251,7 @@ class Lock:
         """
         expected_token = self.local.token
         if expected_token is None:
-            if self.owned():
-                raise LockError("Cannot release an unlocked lock", lock_name=self.name)
-            else:
-                raise LockNotOwnedError(
-                    "Cannot release a lock that's no longer owned",
-                    lock_name=self.name,
-                )
+            raise LockError("Cannot release a lock that's not owned or is already unlocked.", lock_name=self.name)
         self.local.token = None
         self.do_release(expected_token)
 
