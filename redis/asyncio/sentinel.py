@@ -198,6 +198,7 @@ class Sentinel(AsyncSentinelCommands):
         sentinels,
         min_other_sentinels=0,
         sentinel_kwargs=None,
+        force_master_ip=None,
         **connection_kwargs,
     ):
         # if sentinel_kwargs isn't defined, use the socket_* options from
@@ -214,6 +215,7 @@ class Sentinel(AsyncSentinelCommands):
         ]
         self.min_other_sentinels = min_other_sentinels
         self.connection_kwargs = connection_kwargs
+        self._force_master_ip = force_master_ip
 
     async def execute_command(self, *args, **kwargs):
         """
@@ -277,7 +279,13 @@ class Sentinel(AsyncSentinelCommands):
                     sentinel,
                     self.sentinels[0],
                 )
-                return state["ip"], state["port"]
+
+                ip = (
+                    self._force_master_ip
+                    if self._force_master_ip is not None
+                    else state["ip"]
+                )
+                return ip, state["port"]
 
         error_info = ""
         if len(collected_errors) > 0:
