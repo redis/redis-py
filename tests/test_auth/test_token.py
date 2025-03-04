@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 
-import jwt
 import pytest
 from redis.auth.err import InvalidTokenSchemaErr
 from redis.auth.token import JWToken, SimpleToken
@@ -39,6 +38,8 @@ class TestToken:
         assert token.get_expires_at_ms() == -1
 
     def test_jwt_token(self):
+        jwt = pytest.importorskip("jwt")
+
         token = {
             "exp": datetime.now(timezone.utc).timestamp() + 100,
             "iat": datetime.now(timezone.utc).timestamp(),
