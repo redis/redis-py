@@ -440,7 +440,9 @@ class AbstractConnection(ConnectionInterface):
                 self._parser.on_connect(self)
             if len(auth_args) == 1:
                 auth_args = ["default", auth_args[0]]
-            self.send_command("HELLO", self.protocol, "AUTH", *auth_args, check_health=False)
+            self.send_command(
+                "HELLO", self.protocol, "AUTH", *auth_args, check_health=False
+            )
             self.handshake_metadata = self.read_response()
             # if response.get(b"proto") != self.protocol and response.get(
             #     "proto"

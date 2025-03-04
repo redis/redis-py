@@ -365,7 +365,9 @@ class AbstractConnection:
                 auth_args = ["default", auth_args[0]]
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
-            await self.send_command("HELLO", self.protocol, "AUTH", *auth_args, check_health=False)
+            await self.send_command(
+                "HELLO", self.protocol, "AUTH", *auth_args, check_health=False
+            )
             response = await self.read_response()
             if response.get(b"proto") != int(self.protocol) and response.get(
                 "proto"
