@@ -3,10 +3,10 @@ import re
 import time
 from contextlib import closing
 from threading import Thread
-from unittest import mock
 
 import pytest
 import redis
+from mock.mock import patch
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
 from redis.utils import HIREDIS_AVAILABLE, SSL_AVAILABLE
@@ -691,7 +691,7 @@ class TestHealthCheck:
         # invoke a command to make sure the connection is entirely setup
         r.get("foo")
         r.connection.next_health_check = time.time()
-        with mock.patch.object(
+        with patch.object(
             r.connection, "send_command", wraps=r.connection.send_command
         ) as m:
             r.get("foo")
@@ -707,7 +707,7 @@ class TestHealthCheck:
 
     def test_health_check_not_invoked_within_interval(self, r):
         r.get("foo")
-        with mock.patch.object(
+        with patch.object(
             r.connection, "send_command", wraps=r.connection.send_command
         ) as m:
             r.get("foo")
@@ -718,7 +718,7 @@ class TestHealthCheck:
         with r.pipeline(transaction=False) as pipe:
             pipe.connection = pipe.connection_pool.get_connection()
             pipe.connection.next_health_check = 0
-            with mock.patch.object(
+            with patch.object(
                 pipe.connection, "send_command", wraps=pipe.connection.send_command
             ) as m:
                 responses = pipe.set("foo", "bar").get("foo").execute()
@@ -729,7 +729,7 @@ class TestHealthCheck:
         with r.pipeline(transaction=True) as pipe:
             pipe.connection = pipe.connection_pool.get_connection()
             pipe.connection.next_health_check = 0
-            with mock.patch.object(
+            with patch.object(
                 pipe.connection, "send_command", wraps=pipe.connection.send_command
             ) as m:
                 responses = pipe.set("foo", "bar").get("foo").execute()
@@ -741,7 +741,7 @@ class TestHealthCheck:
         with r.pipeline(transaction=False) as pipe:
             pipe.connection = pipe.connection_pool.get_connection()
             pipe.connection.next_health_check = 0
-            with mock.patch.object(
+            with patch.object(
                 pipe.connection, "send_command", wraps=pipe.connection.send_command
             ) as m:
                 pipe.watch("foo")
@@ -765,7 +765,7 @@ class TestHealthCheck:
         p = r.pubsub()
         p.connection = p.connection_pool.get_connection()
         p.connection.next_health_check = 0
-        with mock.patch.object(
+        with patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
             assert not p.subscribed
@@ -787,7 +787,7 @@ class TestHealthCheck:
         p = r.pubsub()
         p.connection = p.connection_pool.get_connection()
         p.connection.next_health_check = 0
-        with mock.patch.object(
+        with patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
             p.subscribe("foo")
@@ -826,7 +826,7 @@ class TestHealthCheck:
         """
         p = r.pubsub()
         p.connection = p.connection_pool.get_connection()
-        with mock.patch.object(
+        with patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
         ) as m:
             p.subscribe("foo")

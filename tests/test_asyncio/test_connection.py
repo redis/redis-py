@@ -2,10 +2,10 @@ import asyncio
 import socket
 import types
 from errno import ECONNREFUSED
-from unittest.mock import patch
 
 import pytest
 import redis
+from mock import mock
 from redis._parsers import (
     _AsyncHiredisParser,
     _AsyncRESP2Parser,
@@ -25,7 +25,6 @@ from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
 
-from .compat import mock
 from .mocks import MockStream
 
 
@@ -43,7 +42,7 @@ async def test_invalid_response(create_redis):
     else:
         exp_err = f'Protocol error, got "{raw.decode()}" as reply type byte'
 
-    with mock.patch.object(parser, "_stream", fake_stream):
+    with mock.mock.patch.object(parser, "_stream", fake_stream):
         with pytest.raises(InvalidResponse, match=exp_err):
             await parser.read_response()
 
@@ -86,8 +85,8 @@ async def test_single_connection():
         init_call_count += 1
         return mock_conn
 
-    with mock.patch.object(r.connection_pool, "get_connection", get_conn):
-        with mock.patch.object(r.connection_pool, "release"):
+    with mock.mock.patch.object(r.connection_pool, "get_connection", get_conn):
+        with mock.mock.patch.object(r.connection_pool, "release"):
             await asyncio.gather(r.set("a", "b"), r.set("c", "d"))
 
     assert init_call_count == 1
@@ -157,7 +156,7 @@ async def test_connect_retry_on_timeout_error(connect_args):
 
 async def test_connect_without_retry_on_os_error():
     """Test that the _connect function is not being retried in case of a OSError"""
-    with patch.object(Connection, "_connect") as _connect:
+    with mock.patch.object(Connection, "_connect") as _connect:
         _connect.side_effect = OSError("")
         conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 2))
         with pytest.raises(ConnectionError):
@@ -281,9 +280,9 @@ async def test_connection_disconect_race(parser_class, connect_args):
         pass
 
     # get dummy stream objects for the connection
-    with patch.object(asyncio, "open_connection", open_connection):
+    with mock.patch.object(asyncio, "open_connection", open_connection):
         # disable the initial version handshake
-        with patch.multiple(
+        with mock.patch.multiple(
             conn, send_command=dummy_method, read_response=dummy_method
         ):
             await conn.connect()
@@ -325,7 +324,7 @@ async def test_close_is_aclose(request):
 
     url: str = request.config.getoption("--redis-url")
     r1 = await Redis.from_url(url)
-    with patch.object(r1, "aclose", mock_aclose):
+    with mock.patch.object(r1, "aclose", mock_aclose):
         with pytest.deprecated_call():
             await r1.close()
         assert calls == 1
@@ -382,7 +381,7 @@ async def test_redis_connection_pool(request, from_url):
         nonlocal called
         called += 1
 
-    with patch.object(ConnectionPool, "disconnect", mock_disconnect):
+    with mock.patch.object(ConnectionPool, "disconnect", mock_disconnect):
         async with await get_redis_connection() as r1:
             assert r1.auto_close_connection_pool is False
 
@@ -414,7 +413,7 @@ async def test_redis_from_pool(request, from_url):
         nonlocal called
         called += 1
 
-    with patch.object(ConnectionPool, "disconnect", mock_disconnect):
+    with mock.patch.object(ConnectionPool, "disconnect", mock_disconnect):
         async with await get_redis_connection() as r1:
             assert r1.auto_close_connection_pool is True
 
@@ -441,7 +440,7 @@ async def test_redis_pool_auto_close_arg(request, auto_close):
         nonlocal called
         called += 1
 
-    with patch.object(ConnectionPool, "disconnect", mock_disconnect):
+    with mock.patch.object(ConnectionPool, "disconnect", mock_disconnect):
         async with await get_redis_connection() as r1:
             assert r1.auto_close_connection_pool is False
 
@@ -461,7 +460,7 @@ async def test_client_garbage_collection(request):
     # create a client with a connection from the pool
     client = Redis(connection_pool=pool, single_connection_client=True)
     await client.initialize()
-    with mock.patch.object(client, "connection") as a:
+    with mock.mock.patch.object(client, "connection") as a:
         # we cannot, in unittests, or from asyncio, reliably trigger garbage collection
         # so we must just invoke the handler
         with pytest.warns(ResourceWarning):
@@ -486,8 +485,8 @@ async def test_connection_garbage_collection(request):
     await client.initialize()
     conn = client.connection
 
-    with mock.patch.object(conn, "_reader"):
-        with mock.patch.object(conn, "_writer") as a:
+    with mock.mock.patch.object(conn, "_reader"):
+        with mock.mock.patch.object(conn, "_writer") as a:
             # we cannot, in unittests, or from asyncio, reliably trigger
             # garbage collection so we must just invoke the handler
             with pytest.warns(ResourceWarning):

@@ -1,6 +1,5 @@
 import os
 import random
-from contextlib import asynccontextmanager as _asynccontextmanager
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Union
@@ -8,7 +7,7 @@ from typing import Union
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
-from mock.mock import Mock
+from mock.mock import AsyncMock, Mock, patch
 from packaging.version import Version
 from redis.asyncio import Sentinel
 from redis.asyncio.client import Monitor
@@ -36,8 +35,6 @@ from redis_entraid.identity_provider import (
     _create_provider_from_service_principal,
 )
 from tests.conftest import REDIS_INFO
-
-from .compat import mock
 
 
 class AuthType(Enum):
@@ -174,10 +171,10 @@ async def master(request, sentinel_setup):
 
 
 def _gen_cluster_mock_resp(r, response):
-    connection = mock.AsyncMock(spec=Connection)
+    connection = AsyncMock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
-    with mock.patch.object(r, "connection", connection):
+    with patch.object(r, "connection", connection):
         yield r
 
 
@@ -403,32 +400,6 @@ async def wait_for_command(
             return monitor_response
         if key in monitor_response["command"]:
             return None
-
-
-# python 3.6 doesn't have the asynccontextmanager decorator.  Provide it here.
-class AsyncContextManager:
-    def __init__(self, async_generator):
-        self.gen = async_generator
-
-    async def __aenter__(self):
-        try:
-            return await self.gen.__anext__()
-        except StopAsyncIteration as err:
-            raise RuntimeError("Pickles") from err
-
-    async def __aexit__(self, exc_type, exc_inst, tb):
-        if exc_type:
-            await self.gen.athrow(exc_type, exc_inst, tb)
-            return True
-        try:
-            await self.gen.__anext__()
-        except StopAsyncIteration:
-            return
-        raise RuntimeError("More pickles")
-
-
-def asynccontextmanager(func):
-    return _asynccontextmanager(func)
 
 
 # helpers to get the connection arguments for this run

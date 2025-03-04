@@ -7,10 +7,10 @@ import threading
 import warnings
 from queue import LifoQueue, Queue
 from time import sleep
-from unittest.mock import DEFAULT, Mock, call, patch
 
 import pytest
 import redis
+from mock.mock import DEFAULT, Mock, call, patch
 from redis import Redis
 from redis._parsers import CommandsParser
 from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
