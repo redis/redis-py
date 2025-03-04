@@ -45,7 +45,7 @@ hiredis = [
 ]
 ocsp = [
     "cryptography>=36.0.1",
-    "pyopenssl==20.0.1",
+    "pyopenssl>=20.0.1",
     "requests>=2.31.0",
 ]
 jwt = [
