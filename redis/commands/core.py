@@ -530,7 +530,7 @@ class ManagementCommands(CommandsProtocol):
             raise DataError("client_id must be a list")
         if client_id:
             args.append(b"ID")
-            args.append(" ".join(client_id))
+            args += client_id
         return self.execute_command("CLIENT LIST", *args, **kwargs)
 
     def client_getname(self, **kwargs) -> ResponseT:
