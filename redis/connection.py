@@ -622,9 +622,7 @@ class AbstractConnection(ConnectionInterface):
         except OSError as e:
             if disconnect_on_error:
                 self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {host_error}" f" : {e.args}"
-            )
+            raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
         except BaseException:
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.
@@ -1040,7 +1038,7 @@ class SSLConnection(Connection):
         if ssl_cert_reqs is None:
             ssl_cert_reqs = ssl.CERT_NONE
         elif isinstance(ssl_cert_reqs, str):
-            CERT_REQS = {
+            CERT_REQS = {  # noqa: N806
                 "none": ssl.CERT_NONE,
                 "optional": ssl.CERT_OPTIONAL,
                 "required": ssl.CERT_REQUIRED,
