@@ -1,0 +1,98 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "redis"
+dynamic = ["version"]
+description = "Python client for Redis database and key-value store"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+authors = [
+    { name = "Redis Inc.", email = "oss@redis.com" },
+]
+keywords = [
+    "Redis",
+    "database",
+    "key-value-store",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+    'async-timeout>=4.0.3; python_full_version<"3.11.3"',
+]
+
+[project.optional-dependencies]
+hiredis = [
+    "hiredis>=3.0.0",
+]
+ocsp = [
+    "cryptography>=36.0.1",
+    "pyopenssl==20.0.1",
+    "requests>=2.31.0",
+]
+jwt = [
+    "PyJWT~=2.9.0",
+]
+
+[project.urls]
+Changes = "https://github.com/redis/redis-py/releases"
+Code = "https://github.com/redis/redis-py"
+Documentation = "https://redis.readthedocs.io/en/latest/"
+Homepage = "https://github.com/redis/redis-py"
+"Issue tracker" = "https://github.com/redis/redis-py/issues"
+
+[tool.hatch.version]
+path = "redis/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/redis",
+    "/tests",
+    "dev_requirements.txt",
+]
+
+[tool.hatch.build.targets.wheel]
+include = [
+    "/redis",
+]
+
+[tool.pytest.ini_options]
+addopts = "-s"
+markers = [
+    "redismod: run only the redis module tests",
+    "graph: run only the redisgraph tests",
+    "pipeline: pipeline tests",
+    "onlycluster: marks tests to be run only with cluster mode redis",
+    "onlynoncluster: marks tests to be run only with standalone redis",
+    "ssl: marker for only the ssl tests",
+    "asyncio: marker for async tests",
+    "replica: replica tests",
+    "experimental: run only experimental tests",
+    "cp_integration: credential provider integration tests",
+]
+asyncio_mode = "auto"
+timeout = 30
+filterwarnings = [
+    "always",
+    "ignore:RedisGraph support is deprecated as of Redis Stack 7.2:DeprecationWarning",
+    # Ignore a coverage warning when COVERAGE_CORE=sysmon for Pythons < 3.12.
+    "ignore:sys.monitoring isn't available:coverage.exceptions.CoverageWarning",
+]

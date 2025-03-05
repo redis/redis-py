@@ -5,6 +5,7 @@ import hashlib
 import warnings
 from typing import (
     TYPE_CHECKING,
+    Any,
     AsyncIterator,
     Awaitable,
     Callable,
@@ -35,6 +36,7 @@ from redis.typing import (
     GroupT,
     KeysT,
     KeyT,
+    Number,
     PatternT,
     ResponseT,
     ScriptTextT,
@@ -528,7 +530,7 @@ class ManagementCommands(CommandsProtocol):
             raise DataError("client_id must be a list")
         if client_id:
             args.append(b"ID")
-            args.append(" ".join(client_id))
+            args += client_id
         return self.execute_command("CLIENT LIST", *args, **kwargs)
 
     def client_getname(self, **kwargs) -> ResponseT:
@@ -2496,7 +2498,7 @@ class BasicKeyCommands(CommandsProtocol):
 
     def unwatch(self) -> None:
         """
-        Unwatches the value at key ``name``, or None of the key doesn't exist
+        Unwatches all previously watched keys for a transaction
 
         For more information see https://redis.io/commands/unwatch
         """
@@ -2567,7 +2569,7 @@ class ListCommands(CommandsProtocol):
     """
 
     def blpop(
-        self, keys: List, timeout: Optional[int] = 0
+        self, keys: List, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[list], list]:
         """
         LPOP a value off of the first non-empty list
@@ -2588,7 +2590,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("BLPOP", *keys)
 
     def brpop(
-        self, keys: List, timeout: Optional[int] = 0
+        self, keys: List, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[list], list]:
         """
         RPOP a value off of the first non-empty list
@@ -2609,7 +2611,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("BRPOP", *keys)
 
     def brpoplpush(
-        self, src: str, dst: str, timeout: Optional[int] = 0
+        self, src: str, dst: str, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
@@ -6396,12 +6398,12 @@ class FunctionCommands:
         return self.execute_command("FUNCTION LIST", *args)
 
     def _fcall(
-        self, command: str, function, numkeys: int, *keys_and_args: Optional[List]
+        self, command: str, function, numkeys: int, *keys_and_args: Any
     ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, function, numkeys, *keys_and_args)
 
     def fcall(
-        self, function, numkeys: int, *keys_and_args: Optional[List]
+        self, function, numkeys: int, *keys_and_args: Any
     ) -> Union[Awaitable[str], str]:
         """
         Invoke a function.
@@ -6411,7 +6413,7 @@ class FunctionCommands:
         return self._fcall("FCALL", function, numkeys, *keys_and_args)
 
     def fcall_ro(
-        self, function, numkeys: int, *keys_and_args: Optional[List]
+        self, function, numkeys: int, *keys_and_args: Any
     ) -> Union[Awaitable[str], str]:
         """
         This is a read-only variant of the FCALL command that cannot

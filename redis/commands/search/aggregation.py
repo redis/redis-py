@@ -1,5 +1,7 @@
 from typing import List, Union
 
+from redis.commands.search.dialect import DEFAULT_DIALECT
+
 FIELDNAME = object()
 
 
@@ -110,7 +112,7 @@ class AggregateRequest:
         self._with_schema = False
         self._verbatim = False
         self._cursor = []
-        self._dialect = None
+        self._dialect = DEFAULT_DIALECT
         self._add_scores = False
         self._scorer = "TFIDF"
 

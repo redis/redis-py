@@ -845,7 +845,7 @@ class TestRedisClusterObj:
             assert node.redis_connection.get_retry()._retries == retry._retries
             assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
         rand_node = r.get_random_node()
-        existing_conn = rand_node.redis_connection.connection_pool.get_connection("_")
+        existing_conn = rand_node.redis_connection.connection_pool.get_connection()
         # Change retry policy
         new_retry = Retry(ExponentialBackoff(), 3)
         r.set_retry(new_retry)
@@ -857,26 +857,27 @@ class TestRedisClusterObj:
                 node.redis_connection.get_retry()._backoff, ExponentialBackoff
             )
         assert existing_conn.retry._retries == new_retry._retries
-        new_conn = rand_node.redis_connection.connection_pool.get_connection("_")
+        new_conn = rand_node.redis_connection.connection_pool.get_connection()
         assert new_conn.retry._retries == new_retry._retries
 
     def test_cluster_retry_object(self, r) -> None:
         # Test default retry
+        # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
+        host = r.get_default_node().host
+
         retry = r.get_connection_kwargs().get("retry")
         assert isinstance(retry, Retry)
         assert retry._retries == 0
         assert isinstance(retry._backoff, type(default_backoff()))
-        node1 = r.get_node("127.0.0.1", 16379).redis_connection
-        node2 = r.get_node("127.0.0.1", 16380).redis_connection
+        node1 = r.get_node(host, 16379).redis_connection
+        node2 = r.get_node(host, 16380).redis_connection
         assert node1.get_retry()._retries == node2.get_retry()._retries
 
         # Test custom retry
         retry = Retry(ExponentialBackoff(10, 5), 5)
-        rc_custom_retry = RedisCluster("127.0.0.1", 16379, retry=retry)
+        rc_custom_retry = RedisCluster(host, 16379, retry=retry)
         assert (
-            rc_custom_retry.get_node("127.0.0.1", 16379)
-            .redis_connection.get_retry()
-            ._retries
+            rc_custom_retry.get_node(host, 16379).redis_connection.get_retry()._retries
             == retry._retries
         )
 
