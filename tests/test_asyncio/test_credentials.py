@@ -17,9 +17,13 @@ from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import ConnectionError
 from redis.utils import str_if_bytes
-from redis_entraid.cred_provider import EntraIdCredentialsProvider
 from tests.conftest import get_endpoint, skip_if_redis_enterprise
 from tests.test_asyncio.conftest import get_credential_provider
+
+try:
+    from redis_entraid.cred_provider import EntraIdCredentialsProvider
+except ImportError:
+    EntraIdCredentialsProvider = None
 
 
 @pytest.fixture()
@@ -321,6 +325,7 @@ class TestUsernamePasswordCredentialProvider:
 
 @pytest.mark.asyncio
 @pytest.mark.onlynoncluster
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
 class TestStreamingCredentialProvider:
     @pytest.mark.parametrize(
         "credential_provider",
@@ -599,6 +604,7 @@ class TestStreamingCredentialProvider:
 @pytest.mark.asyncio
 @pytest.mark.onlynoncluster
 @pytest.mark.cp_integration
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
 class TestEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
         "r_credential",
@@ -674,6 +680,7 @@ class TestEntraIdCredentialsProvider:
 @pytest.mark.asyncio
 @pytest.mark.onlycluster
 @pytest.mark.cp_integration
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
 class TestClusterEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
         "r_credential",
