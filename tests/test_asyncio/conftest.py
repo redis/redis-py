@@ -242,7 +242,7 @@ async def wait_for_command(
         if Version(redis_version) >= Version("5.0.0"):
             id_str = str(await client.client_id())
         else:
-            id_str = f"{random.randrange(2 ** 32):08x}"
+            id_str = f"{random.randrange(2**32):08x}"
         key = f"__REDIS-PY-{id_str}__"
     await client.get(key)
     while True:

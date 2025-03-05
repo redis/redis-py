@@ -97,3 +97,53 @@ filterwarnings = [
     # Ignore a coverage warning when COVERAGE_CORE=sysmon for Pythons < 3.12.
     "ignore:sys.monitoring isn't available:coverage.exceptions.CoverageWarning",
 ]
+
+[tool.ruff]
+target-version = "py38"
+line-length = 88
+exclude = [
+    "*.egg-info",
+    "*.pyc",
+    ".git",
+    ".venv*",
+    "build",
+    "dist",
+    "docker",
+    "docs/*",
+    "doctests/*",
+    "tasks.py",
+    "venv*",
+    "whitelist.py",
+]
+
+[tool.ruff.lint]
+ignore = [
+    "E501",  # line too long (taken care of with ruff format)
+    "E741",  # ambiguous variable name
+    "N818",  # Errors should have Error suffix
+]
+
+select = [
+    "E",
+    "F",
+    "FLY",
+    "I",
+    "N",
+    "W",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"redis/commands/bf/*" = [
+    # the `bf` module uses star imports, so this is required there.
+    "F405",  # name may be undefined, or defined from star imports
+]
+"redis/commands/{bf,timeseries,json,search}/*" = [
+    "N",
+]
+"tests/*" = [
+    "I",  # TODO: could be enabled, plenty of changes
+    "N801",  # class name should use CapWords convention
+    "N803",  # argument name should be lowercase
+    "N802",  # function name should be lowercase
+    "N806",  # variable name should be lowercase
+]
