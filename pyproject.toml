@@ -88,6 +88,7 @@ markers = [
     "experimental: run only experimental tests",
     "cp_integration: credential provider integration tests",
 ]
+asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
 timeout = 30
 filterwarnings = [
