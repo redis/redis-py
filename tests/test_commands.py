@@ -667,11 +667,15 @@ class TestRedisCommands:
         assert "addr" in clients[0]
 
         # testing multiple client ids
-        _get_client(redis.Redis, request, flushdb=False)
-        _get_client(redis.Redis, request, flushdb=False)
-        _get_client(redis.Redis, request, flushdb=False)
-        clients_listed = r.client_list(client_id=clients[:-1])
-        assert len(clients_listed) > 1
+        client_list = list()
+        client_count = 3
+        for i in range(client_count):
+            client = _get_client(redis.Redis, request, flushdb=False)
+            client_list.append(client)
+
+        multiple_client_ids = [str(client.client_id()) for client in client_list]
+        clients_listed = r.client_list(client_id=multiple_client_ids)
+        assert len(clients_listed) == len(multiple_client_ids)
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("5.0.0")
