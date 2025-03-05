@@ -74,7 +74,7 @@ class TestMemoryviewsAreNotPacked:
     async def test_memoryviews_are_not_packed(self, r):
         arg = memoryview(b"some_arg")
         arg_list = ["SOME_COMMAND", arg]
-        c = r.connection or await r.connection_pool.get_connection("_")
+        c = r.connection or await r.connection_pool.get_connection()
         cmd = c.pack_command(*arg_list)
         assert cmd[1] is arg
         cmds = c.pack_commands([arg_list, arg_list])

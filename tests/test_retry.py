@@ -206,7 +206,7 @@ class TestRedisClientRetry:
     def test_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
         r = _get_client(Redis, request, retry_on_timeout=True, retry=retry)
-        exist_conn = r.connection_pool.get_connection("_")
+        exist_conn = r.connection_pool.get_connection()
         assert r.get_retry()._retries == retry._retries
         assert isinstance(r.get_retry()._backoff, NoBackoff)
         new_retry_policy = Retry(ExponentialBackoff(), 3)
@@ -214,5 +214,5 @@ class TestRedisClientRetry:
         assert r.get_retry()._retries == new_retry_policy._retries
         assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
         assert exist_conn.retry._retries == new_retry_policy._retries
-        new_conn = r.connection_pool.get_connection("_")
+        new_conn = r.connection_pool.get_connection()
         assert new_conn.retry._retries == new_retry_policy._retries

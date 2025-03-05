@@ -1,5 +1,6 @@
 import random
 from contextlib import asynccontextmanager as _asynccontextmanager
+from enum import Enum
 from typing import Union
 
 import pytest
@@ -11,9 +12,15 @@ from redis.asyncio.client import Monitor
 from redis.asyncio.connection import Connection, parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from tests.conftest import REDIS_INFO
+from redis.credentials import CredentialProvider
+from tests.conftest import REDIS_INFO, get_credential_provider
 
 from .compat import mock
+
+
+class AuthType(Enum):
+    MANAGED_IDENTITY = "managed_identity"
+    SERVICE_PRINCIPAL = "service_principal"
 
 
 async def _get_info(redis_url):
@@ -122,8 +129,10 @@ async def sentinel_setup(local_cache, request):
         for ip, port in (endpoint.split(":") for endpoint in sentinel_ips.split(","))
     ]
     kwargs = request.param.get("kwargs", {}) if hasattr(request, "param") else {}
+    force_master_ip = request.param.get("force_master_ip", None)
     sentinel = Sentinel(
         sentinel_endpoints,
+        force_master_ip=force_master_ip,
         socket_timeout=0.1,
         client_cache=local_cache,
         protocol=3,
@@ -214,6 +223,11 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
     )
     for mocked in _gen_cluster_mock_resp(r, response):
         yield mocked
+
+
+@pytest_asyncio.fixture()
+async def credential_provider(request) -> CredentialProvider:
+    return get_credential_provider(request)
 
 
 async def wait_for_command(

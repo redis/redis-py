@@ -1,4 +1,5 @@
     * Fix lock.extend() typedef to accept float TTL extension
+    * Update URL in the readme linking to Redis University
     * Move doctests (doc code examples) to main branch
     * Update `ResponseT` type hint
     * Allow to control the minimum SSL version
