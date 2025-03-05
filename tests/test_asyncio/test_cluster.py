@@ -146,7 +146,6 @@ async def get_mocked_redis_client(
     with mock.patch.object(ClusterNode, "execute_command") as execute_command_mock:
 
         async def execute_command(*_args, **_kwargs):
-
             if _args[0] == "CLUSTER SLOTS":
                 if cluster_slots_raise_error:
                     raise ResponseError()
@@ -1577,7 +1576,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_not(self, r: RedisCluster) -> None:
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         await r.set("{foo}a", test_str)
         await r.bitop("not", "{foo}r", "{foo}a")
@@ -1585,7 +1584,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_not_in_place(self, r: RedisCluster) -> None:
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         await r.set("{foo}a", test_str)
         await r.bitop("not", "{foo}a", "{foo}a")
@@ -1593,7 +1592,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_single_string(self, r: RedisCluster) -> None:
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         await r.set("{foo}a", test_str)
         await r.bitop("and", "{foo}res1", "{foo}a")
         await r.bitop("or", "{foo}res2", "{foo}a")
@@ -1604,8 +1603,8 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_string_operands(self, r: RedisCluster) -> None:
-        await r.set("{foo}a", b"\x01\x02\xFF\xFF")
-        await r.set("{foo}b", b"\x01\x02\xFF")
+        await r.set("{foo}a", b"\x01\x02\xff\xff")
+        await r.set("{foo}b", b"\x01\x02\xff")
         await r.bitop("and", "{foo}res1", "{foo}a", "{foo}b")
         await r.bitop("or", "{foo}res2", "{foo}a", "{foo}b")
         await r.bitop("xor", "{foo}res3", "{foo}a", "{foo}b")

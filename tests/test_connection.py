@@ -362,7 +362,6 @@ def test_unix_socket_connection_failure():
 
 
 class TestUnitConnectionPool:
-
     @pytest.mark.parametrize(
         "max_conn", (-1, "str"), ids=("non-positive", "wrong type")
     )

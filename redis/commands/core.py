@@ -3415,7 +3415,9 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMEMBERS", name, keys=[name])
 
-    def smismember(self, name: str, values: List, *args: List) -> Union[
+    def smismember(
+        self, name: str, values: List, *args: List
+    ) -> Union[
         Awaitable[List[Union[Literal[0], Literal[1]]]],
         List[Union[Literal[0], Literal[1]]],
     ]:
@@ -4162,8 +4164,7 @@ class SortedSetCommands(CommandsProtocol):
             raise DataError("ZADD allows either 'gt' or 'lt', not both")
         if incr and len(mapping) != 1:
             raise DataError(
-                "ZADD option 'incr' only works when passing a "
-                "single element/score pair"
+                "ZADD option 'incr' only works when passing a single element/score pair"
             )
         if nx and (gt or lt):
             raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
