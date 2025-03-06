@@ -18,6 +18,7 @@ from redis.credentials import CredentialProvider, UsernamePasswordCredentialProv
 from redis.exceptions import ConnectionError
 from redis.utils import str_if_bytes
 from tests.conftest import get_endpoint, skip_if_redis_enterprise
+from tests.entraid_utils import AuthType
 from tests.test_asyncio.conftest import get_credential_provider
 
 try:
@@ -616,8 +617,12 @@ class TestEntraIdCredentialsProvider:
                 "cred_provider_class": EntraIdCredentialsProvider,
                 "cred_provider_kwargs": {"block_for_initial": True},
             },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "idp_kwargs": {"auth_type": AuthType.DEFAULT_AZURE_CREDENTIAL},
+            },
         ],
-        ids=["blocked", "non-blocked"],
+        ids=["blocked", "non-blocked", "DefaultAzureCredential"],
         indirect=True,
     )
     @pytest.mark.asyncio
@@ -692,8 +697,12 @@ class TestClusterEntraIdCredentialsProvider:
                 "cred_provider_class": EntraIdCredentialsProvider,
                 "cred_provider_kwargs": {"block_for_initial": True},
             },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "idp_kwargs": {"auth_type": AuthType.DEFAULT_AZURE_CREDENTIAL},
+            },
         ],
-        ids=["blocked", "non-blocked"],
+        ids=["blocked", "non-blocked", "DefaultAzureCredential"],
         indirect=True,
     )
     @pytest.mark.asyncio
