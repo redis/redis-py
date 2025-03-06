@@ -1797,10 +1797,10 @@ async def test_binary_and_text_fields(decoded_r: redis.Redis):
         docs[0]["vector_emb"], dtype=np.float32
     )
 
-    assert np.array_equal(
-        decoded_vec_from_search_results, fake_vec
-    ), "The vectors are not equal"
+    assert np.array_equal(decoded_vec_from_search_results, fake_vec), (
+        "The vectors are not equal"
+    )
 
-    assert (
-        docs[0]["first_name"] == mixed_data["first_name"]
-    ), "The text field is not decoded correctly"
+    assert docs[0]["first_name"] == mixed_data["first_name"], (
+        "The text field is not decoded correctly"
+    )

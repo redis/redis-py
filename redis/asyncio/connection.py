@@ -842,7 +842,7 @@ class RedisSSLContext:
         if cert_reqs is None:
             self.cert_reqs = ssl.CERT_NONE
         elif isinstance(cert_reqs, str):
-            CERT_REQS = {
+            CERT_REQS = {  # noqa: N806
                 "none": ssl.CERT_NONE,
                 "optional": ssl.CERT_OPTIONAL,
                 "required": ssl.CERT_REQUIRED,
