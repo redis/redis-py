@@ -1509,7 +1509,9 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             return []
 
         try:
-            for _ in range(self._client.cluster_error_retry_attempts):
+            # Add one for the first execution
+            execute_attempts = 1 + self._client.cluster_error_retry_attempts
+            for _ in range(execute_attempts):
                 if self._client._initialize:
                     await self._client.initialize()
 
