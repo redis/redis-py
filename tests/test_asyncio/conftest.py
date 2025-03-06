@@ -18,11 +18,6 @@ from tests.conftest import REDIS_INFO, get_credential_provider
 from .compat import mock
 
 
-class AuthType(Enum):
-    MANAGED_IDENTITY = "managed_identity"
-    SERVICE_PRINCIPAL = "service_principal"
-
-
 async def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = await client.info()

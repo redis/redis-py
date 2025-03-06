@@ -18,7 +18,8 @@ from redis_entraid.identity_provider import (
     ManagedIdentityType,
     ServicePrincipalIdentityProviderConfig,
     _create_provider_from_managed_identity,
-    _create_provider_from_service_principal, DefaultAzureCredentialIdentityProviderConfig,
+    _create_provider_from_service_principal,
+    DefaultAzureCredentialIdentityProviderConfig,
     _create_provider_from_default_azure_credential,
 )
 from tests.conftest import mock_identity_provider
@@ -51,10 +52,12 @@ def identity_provider(request) -> IdentityProviderInterface:
     return _create_provider_from_service_principal(config)
 
 
-def get_identity_provider_config(request) -> Union[
+def get_identity_provider_config(
+    request,
+) -> Union[
     ManagedIdentityProviderConfig,
     ServicePrincipalIdentityProviderConfig,
-    DefaultAzureCredentialIdentityProviderConfig
+    DefaultAzureCredentialIdentityProviderConfig,
 ]:
     if hasattr(request, "param"):
         kwargs = request.param.get("idp_kwargs", {})
@@ -123,7 +126,10 @@ def _get_service_principal_provider_config(
         app_kwargs=kwargs,
     )
 
-def _get_default_azure_credential_provider_config(request) -> DefaultAzureCredentialIdentityProviderConfig:
+
+def _get_default_azure_credential_provider_config(
+    request,
+) -> DefaultAzureCredentialIdentityProviderConfig:
     scopes = os.getenv("AZURE_REDIS_SCOPES", ())
 
     if hasattr(request, "param"):
@@ -134,12 +140,10 @@ def _get_default_azure_credential_provider_config(request) -> DefaultAzureCreden
         token_kwargs = {}
 
     if isinstance(scopes, str):
-        scopes = scopes.split(',')
+        scopes = scopes.split(",")
 
     return DefaultAzureCredentialIdentityProviderConfig(
-        scopes=scopes,
-        app_kwargs=kwargs,
-        token_kwargs=token_kwargs
+        scopes=scopes, app_kwargs=kwargs, token_kwargs=token_kwargs
     )
 
 
