@@ -18,7 +18,8 @@ from redis_entraid.identity_provider import (
     ManagedIdentityType,
     ServicePrincipalIdentityProviderConfig,
     _create_provider_from_managed_identity,
-    _create_provider_from_service_principal,
+    _create_provider_from_service_principal, DefaultAzureCredentialIdentityProviderConfig,
+    _create_provider_from_default_azure_credential,
 )
 from tests.conftest import mock_identity_provider
 
@@ -26,6 +27,7 @@ from tests.conftest import mock_identity_provider
 class AuthType(Enum):
     MANAGED_IDENTITY = "managed_identity"
     SERVICE_PRINCIPAL = "service_principal"
+    DEFAULT_AZURE_CREDENTIAL = "default_azure_credential"
 
 
 def identity_provider(request) -> IdentityProviderInterface:
@@ -37,18 +39,23 @@ def identity_provider(request) -> IdentityProviderInterface:
     if request.param.get("mock_idp", None) is not None:
         return mock_identity_provider()
 
-    auth_type = kwargs.pop("auth_type", AuthType.SERVICE_PRINCIPAL)
+    auth_type = kwargs.get("auth_type", AuthType.SERVICE_PRINCIPAL)
     config = get_identity_provider_config(request=request)
 
-    if auth_type == "MANAGED_IDENTITY":
+    if auth_type == AuthType.MANAGED_IDENTITY:
         return _create_provider_from_managed_identity(config)
+
+    if auth_type == AuthType.DEFAULT_AZURE_CREDENTIAL:
+        return _create_provider_from_default_azure_credential(config)
 
     return _create_provider_from_service_principal(config)
 
 
-def get_identity_provider_config(
-    request,
-) -> Union[ManagedIdentityProviderConfig, ServicePrincipalIdentityProviderConfig]:
+def get_identity_provider_config(request) -> Union[
+    ManagedIdentityProviderConfig,
+    ServicePrincipalIdentityProviderConfig,
+    DefaultAzureCredentialIdentityProviderConfig
+]:
     if hasattr(request, "param"):
         kwargs = request.param.get("idp_kwargs", {})
     else:
@@ -58,6 +65,9 @@ def get_identity_provider_config(
 
     if auth_type == AuthType.MANAGED_IDENTITY:
         return _get_managed_identity_provider_config(request)
+
+    if auth_type == AuthType.DEFAULT_AZURE_CREDENTIAL:
+        return _get_default_azure_credential_provider_config(request)
 
     return _get_service_principal_provider_config(request)
 
@@ -111,6 +121,25 @@ def _get_service_principal_provider_config(
         token_kwargs=token_kwargs,
         tenant_id=tenant_id,
         app_kwargs=kwargs,
+    )
+
+def _get_default_azure_credential_provider_config(request) -> DefaultAzureCredentialIdentityProviderConfig:
+    scopes = os.getenv("AZURE_REDIS_SCOPES", ())
+
+    if hasattr(request, "param"):
+        kwargs = request.param.get("idp_kwargs", {})
+        token_kwargs = request.param.get("token_kwargs", {})
+    else:
+        kwargs = {}
+        token_kwargs = {}
+
+    if isinstance(scopes, str):
+        scopes = scopes.split(',')
+
+    return DefaultAzureCredentialIdentityProviderConfig(
+        scopes=scopes,
+        app_kwargs=kwargs,
+        token_kwargs=token_kwargs
     )
 
 
