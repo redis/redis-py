@@ -1509,29 +1509,28 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             return []
 
         try:
-            for _ in range(self._client.cluster_error_retry_attempts):
-                if self._client._initialize:
-                    await self._client.initialize()
-
+            retry_attempts = self._client.cluster_error_retry_attempts
+            while True:
                 try:
+                    if self._client._initialize:
+                        await self._client.initialize()
                     return await self._execute(
                         self._client,
                         self._command_stack,
                         raise_on_error=raise_on_error,
                         allow_redirections=allow_redirections,
                     )
-                except BaseException as e:
-                    if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
-                        # Try again with the new cluster setup.
-                        exception = e
+
+                except self.__class__.ERRORS_ALLOW_RETRY as e:
+                    if retry_attempts > 0:
+                        # Try again with the new cluster setup. All other errors
+                        # should be raised.
+                        retry_attempts -= 1
                         await self._client.aclose()
                         await asyncio.sleep(0.25)
                     else:
                         # All other errors should be raised.
-                        raise
-
-            # If it fails the configured number of times then raise an exception
-            raise exception
+                        raise e
         finally:
             self._command_stack = []
 
