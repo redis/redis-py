@@ -1,6 +1,5 @@
 import random
 from contextlib import asynccontextmanager as _asynccontextmanager
-from enum import Enum
 from typing import Union
 
 import pytest
