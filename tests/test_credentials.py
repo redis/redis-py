@@ -22,6 +22,7 @@ from tests.conftest import (
     get_endpoint,
     skip_if_redis_enterprise,
 )
+from tests.entraid_utils import AuthType
 
 try:
     from redis_entraid.cred_provider import EntraIdCredentialsProvider
@@ -585,8 +586,12 @@ class TestEntraIdCredentialsProvider:
                 "cred_provider_class": EntraIdCredentialsProvider,
                 "single_connection_client": True,
             },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "idp_kwargs": {"auth_type": AuthType.DEFAULT_AZURE_CREDENTIAL},
+            },
         ],
-        ids=["pool", "single"],
+        ids=["pool", "single", "DefaultAzureCredential"],
         indirect=True,
     )
     @pytest.mark.onlynoncluster
@@ -656,8 +661,12 @@ class TestClusterEntraIdCredentialsProvider:
                 "cred_provider_class": EntraIdCredentialsProvider,
                 "single_connection_client": True,
             },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "idp_kwargs": {"auth_type": AuthType.DEFAULT_AZURE_CREDENTIAL},
+            },
         ],
-        ids=["pool", "single"],
+        ids=["pool", "single", "DefaultAzureCredential"],
         indirect=True,
     )
     @pytest.mark.onlycluster
