@@ -304,3 +304,9 @@ def extract_expire_flags(
         exp_options.extend(["PXAT", pxat])
 
     return exp_options
+
+
+def truncate_command_for_exception(self, command, max_length=100):
+    if len(command) > max_length:
+        return command[: max_length - 3] + "..."
+    return command
