@@ -288,7 +288,6 @@ class AbstractRedisCluster:
                 "TFUNCTION LIST",
                 "TFCALL",
                 "TFCALLASYNC",
-                "GRAPH.CONFIG",
                 "LATENCY HISTORY",
                 "LATENCY LATEST",
                 "LATENCY RESET",
