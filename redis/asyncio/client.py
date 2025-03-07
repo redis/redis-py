@@ -77,6 +77,7 @@ from redis.utils import (
     get_lib_version,
     safe_str,
     str_if_bytes,
+    truncate_command_for_exception,
 )
 
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
@@ -1509,15 +1510,10 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
     ) -> None:
         cmd = " ".join(map(safe_str, command))
         msg = (
-            f"Command # {number} ({self._truncate_command(cmd)}) "
+            f"Command # {number} ({truncate_command_for_exception(cmd)}) "
             "of pipeline caused error: {exception.args}"
         )
         exception.args = (msg,) + exception.args[1:]
-
-    def _truncate_command(self, command, max_length=100):
-        if len(command) > max_length:
-            return command[: max_length - 3] + "..."
-        return command
 
     async def parse_response(
         self, connection: Connection, command_name: Union[str, bytes], **options

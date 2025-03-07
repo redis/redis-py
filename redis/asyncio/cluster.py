@@ -64,7 +64,7 @@ from redis.exceptions import (
     TryAgainError,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
-from redis.utils import deprecated_function, get_lib_version, safe_str, str_if_bytes
+from redis.utils import deprecated_function, get_lib_version, safe_str, str_if_bytes, truncate_command_for_exception
 
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
@@ -1601,7 +1601,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         command = " ".join(map(safe_str, cmd.args))
                         msg = (
                             f"Command # {cmd.position + 1} "
-                            f"({self._truncate_command(command)}) "
+                            f"({truncate_command_for_exception(command)}) "
                             f"of pipeline caused error: {result.args}"
                         )
                         result.args = (msg,) + result.args[1:]
@@ -1650,11 +1650,6 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             self.execute_command("MSET", *pairs)
 
         return self
-
-    def _truncate_command(self, command, max_length=100):
-        if len(command) > max_length:
-            return command[: max_length - 3] + "..."
-        return command
 
 
 for command in PIPELINE_BLOCKED_COMMANDS:

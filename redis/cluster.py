@@ -46,6 +46,7 @@ from redis.utils import (
     merge_result,
     safe_str,
     str_if_bytes,
+    truncate_command_for_exception,
 )
 
 
@@ -2054,15 +2055,10 @@ class ClusterPipeline(RedisCluster):
         """
         cmd = " ".join(map(safe_str, command))
         msg = (
-            f"Command # {number} ({self._truncate_command(cmd)}) of pipeline "
+            f"Command # {number} ({truncate_command_for_exception(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"
         )
         exception.args = (msg,) + exception.args[1:]
-
-    def _truncate_command(self, command, max_length=100):
-        if len(command) > max_length:
-            return command[: max_length - 3] + "x.."
-        return command
 
     def execute(self, raise_on_error: bool = True) -> List[Any]:
         """
