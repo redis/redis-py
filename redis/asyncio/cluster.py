@@ -1569,9 +1569,11 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         raise result
 
             default_cluster_node = client.get_default_node()
+
+            # Check whether the default node was used. In some cases,
+            # 'client.get_default_node()' may return None. The check below
+            # prevents a potential AttributeError.
             if default_cluster_node is not None:
-                # Not sure why default_cluster_node is sometimes None; maybe if the object is being
-                # closed during an execution? Either way, this avoids a potential AttributeError
                 default_node = nodes.get(default_cluster_node.name)
                 if default_node is not None:
                     # This pipeline execution used the default node, check if we need
