@@ -24,7 +24,7 @@ source .venv/bin/active
 **Step 3**. Install dependencies:
 
 ```shell
-pip install -r requirements.txt
+pip install -e .
 ```
 
 **Step 4**. Start the services using Docker and make sure Uptrace is running:

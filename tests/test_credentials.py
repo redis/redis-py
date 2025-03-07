@@ -1,14 +1,63 @@
 import functools
 import random
 import string
+import threading
+from time import sleep
 from typing import Optional, Tuple, Union
 
 import pytest
 import redis
-from redis import AuthenticationError, DataError, ResponseError
+from mock.mock import Mock, call
+from redis import AuthenticationError, DataError, Redis, ResponseError
+from redis.auth.err import RequestTokenErr
+from redis.backoff import NoBackoff
+from redis.connection import ConnectionInterface, ConnectionPool
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from redis.exceptions import ConnectionError, RedisError
+from redis.retry import Retry
 from redis.utils import str_if_bytes
-from tests.conftest import _get_client, skip_if_redis_enterprise
+from tests.conftest import (
+    _get_client,
+    get_credential_provider,
+    get_endpoint,
+    skip_if_redis_enterprise,
+)
+from tests.entraid_utils import AuthType
+
+try:
+    from redis_entraid.cred_provider import EntraIdCredentialsProvider
+except ImportError:
+    EntraIdCredentialsProvider = None
+
+
+@pytest.fixture()
+def endpoint(request):
+    endpoint_name = request.config.getoption("--endpoint-name")
+
+    try:
+        return get_endpoint(endpoint_name)
+    except FileNotFoundError as e:
+        pytest.skip(
+            f"Skipping scenario test because endpoints file is missing: {str(e)}"
+        )
+
+
+@pytest.fixture()
+def r_entra(request, endpoint):
+    credential_provider = request.param.get("cred_provider_class", None)
+    single_connection = request.param.get("single_connection_client", False)
+
+    if credential_provider is not None:
+        credential_provider = get_credential_provider(request)
+
+    with _get_client(
+        redis.Redis,
+        request,
+        credential_provider=credential_provider,
+        single_connection_client=single_connection,
+        from_url=endpoint,
+    ) as client:
+        yield client
 
 
 class NoPassCredProvider(CredentialProvider):
@@ -208,7 +257,7 @@ class TestCredentialsProvider:
             redis.Redis, request, flushdb=False, username=username, password=password
         )
         assert r2.ping() is True
-        conn = r2.connection_pool.get_connection("_")
+        conn = r2.connection_pool.get_connection()
         conn.send_command("PING")
         assert str_if_bytes(conn.read_response()) == "PONG"
         assert conn.username == username
@@ -248,3 +297,379 @@ class TestUsernamePasswordCredentialProvider:
         )
         assert r2.auth(provider.password) is True
         assert r2.ping() is True
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
+class TestStreamingCredentialProvider:
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
+    def test_re_auth_all_connections(self, credential_provider):
+        mock_connection = Mock(spec=ConnectionInterface)
+        mock_connection.retry = Retry(NoBackoff(), 0)
+        mock_another_connection = Mock(spec=ConnectionInterface)
+        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection.return_value = mock_connection
+        mock_pool._available_connections = [mock_connection, mock_another_connection]
+        mock_pool._lock = threading.Lock()
+        auth_token = None
+
+        def re_auth_callback(token):
+            nonlocal auth_token
+            auth_token = token
+            with mock_pool._lock:
+                for conn in mock_pool._available_connections:
+                    conn.send_command("AUTH", token.try_get("oid"), token.get_value())
+                    conn.read_response()
+
+        mock_pool.re_auth_callback = re_auth_callback
+
+        Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+
+        credential_provider.get_credentials()
+        sleep(0.5)
+
+        mock_connection.send_command.assert_has_calls(
+            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+        )
+        mock_another_connection.send_command.assert_has_calls(
+            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+        )
+
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
+    def test_re_auth_partial_connections(self, credential_provider):
+        mock_connection = Mock(spec=ConnectionInterface)
+        mock_connection.retry = Retry(NoBackoff(), 3)
+        mock_another_connection = Mock(spec=ConnectionInterface)
+        mock_another_connection.retry = Retry(NoBackoff(), 3)
+        mock_failed_connection = Mock(spec=ConnectionInterface)
+        mock_failed_connection.read_response.side_effect = ConnectionError(
+            "Failed auth"
+        )
+        mock_failed_connection.retry = Retry(NoBackoff(), 3)
+        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection.return_value = mock_connection
+        mock_pool._available_connections = [
+            mock_connection,
+            mock_another_connection,
+            mock_failed_connection,
+        ]
+        mock_pool._lock = threading.Lock()
+
+        def _raise(error: RedisError):
+            pass
+
+        def re_auth_callback(token):
+            with mock_pool._lock:
+                for conn in mock_pool._available_connections:
+                    conn.retry.call_with_retry(
+                        lambda: conn.send_command(
+                            "AUTH", token.try_get("oid"), token.get_value()
+                        ),
+                        lambda error: _raise(error),
+                    )
+                    conn.retry.call_with_retry(
+                        lambda: conn.read_response(), lambda error: _raise(error)
+                    )
+
+        mock_pool.re_auth_callback = re_auth_callback
+
+        Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+
+        credential_provider.get_credentials()
+        sleep(0.5)
+
+        mock_connection.read_response.assert_has_calls([call()])
+        mock_another_connection.read_response.assert_has_calls([call()])
+        mock_failed_connection.read_response.assert_has_calls([call(), call(), call()])
+
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
+    def test_re_auth_pub_sub_in_resp3(self, credential_provider):
+        mock_pubsub_connection = Mock(spec=ConnectionInterface)
+        mock_pubsub_connection.get_protocol.return_value = 3
+        mock_pubsub_connection.credential_provider = credential_provider
+        mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
+        mock_another_connection = Mock(spec=ConnectionInterface)
+        mock_another_connection.retry = Retry(NoBackoff(), 3)
+
+        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection.side_effect = [
+            mock_pubsub_connection,
+            mock_another_connection,
+        ]
+        mock_pool._available_connections = [mock_another_connection]
+        mock_pool._lock = threading.Lock()
+        auth_token = None
+
+        def re_auth_callback(token):
+            nonlocal auth_token
+            auth_token = token
+            with mock_pool._lock:
+                for conn in mock_pool._available_connections:
+                    conn.send_command("AUTH", token.try_get("oid"), token.get_value())
+                    conn.read_response()
+
+        mock_pool.re_auth_callback = re_auth_callback
+
+        r = Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+        p = r.pubsub()
+        p.subscribe("test")
+        credential_provider.get_credentials()
+        sleep(0.5)
+
+        mock_pubsub_connection.send_command.assert_has_calls(
+            [
+                call("SUBSCRIBE", "test", check_health=True),
+                call("AUTH", auth_token.try_get("oid"), auth_token.get_value()),
+            ]
+        )
+        mock_another_connection.send_command.assert_has_calls(
+            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+        )
+
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
+    def test_do_not_re_auth_pub_sub_in_resp2(self, credential_provider):
+        mock_pubsub_connection = Mock(spec=ConnectionInterface)
+        mock_pubsub_connection.get_protocol.return_value = 2
+        mock_pubsub_connection.credential_provider = credential_provider
+        mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
+        mock_another_connection = Mock(spec=ConnectionInterface)
+        mock_another_connection.retry = Retry(NoBackoff(), 3)
+
+        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection.side_effect = [
+            mock_pubsub_connection,
+            mock_another_connection,
+        ]
+        mock_pool._available_connections = [mock_another_connection]
+        mock_pool._lock = threading.Lock()
+        auth_token = None
+
+        def re_auth_callback(token):
+            nonlocal auth_token
+            auth_token = token
+            with mock_pool._lock:
+                for conn in mock_pool._available_connections:
+                    conn.send_command("AUTH", token.try_get("oid"), token.get_value())
+                    conn.read_response()
+
+        mock_pool.re_auth_callback = re_auth_callback
+
+        r = Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+        p = r.pubsub()
+        p.subscribe("test")
+        credential_provider.get_credentials()
+        sleep(0.5)
+
+        mock_pubsub_connection.send_command.assert_has_calls(
+            [
+                call("SUBSCRIBE", "test", check_health=True),
+            ]
+        )
+        mock_another_connection.send_command.assert_has_calls(
+            [call("AUTH", auth_token.try_get("oid"), auth_token.get_value())]
+        )
+
+    @pytest.mark.parametrize(
+        "credential_provider",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "cred_provider_kwargs": {"expiration_refresh_ratio": 0.00005},
+                "mock_idp": True,
+            }
+        ],
+        indirect=True,
+    )
+    def test_fails_on_token_renewal(self, credential_provider):
+        credential_provider._token_mgr._idp.request_token.side_effect = [
+            RequestTokenErr,
+            RequestTokenErr,
+            RequestTokenErr,
+            RequestTokenErr,
+        ]
+        mock_connection = Mock(spec=ConnectionInterface)
+        mock_connection.retry = Retry(NoBackoff(), 0)
+        mock_another_connection = Mock(spec=ConnectionInterface)
+        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool.connection_kwargs = {
+            "credential_provider": credential_provider,
+        }
+        mock_pool.get_connection.return_value = mock_connection
+        mock_pool._available_connections = [mock_connection, mock_another_connection]
+        mock_pool._lock = threading.Lock()
+
+        Redis(
+            connection_pool=mock_pool,
+            credential_provider=credential_provider,
+        )
+
+        with pytest.raises(RequestTokenErr):
+            credential_provider.get_credentials()
+
+
+@pytest.mark.onlynoncluster
+@pytest.mark.cp_integration
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
+class TestEntraIdCredentialsProvider:
+    @pytest.mark.parametrize(
+        "r_entra",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "single_connection_client": False,
+            },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "single_connection_client": True,
+            },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "idp_kwargs": {"auth_type": AuthType.DEFAULT_AZURE_CREDENTIAL},
+            },
+        ],
+        ids=["pool", "single", "DefaultAzureCredential"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    @pytest.mark.cp_integration
+    def test_auth_pool_with_credential_provider(self, r_entra: redis.Redis):
+        assert r_entra.ping() is True
+
+    @pytest.mark.parametrize(
+        "r_entra",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "single_connection_client": False,
+            },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "single_connection_client": True,
+            },
+        ],
+        ids=["pool", "single"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    @pytest.mark.cp_integration
+    def test_auth_pipeline_with_credential_provider(self, r_entra: redis.Redis):
+        pipe = r_entra.pipeline()
+
+        pipe.set("key", "value")
+        pipe.get("key")
+
+        assert pipe.execute() == [True, b"value"]
+
+    @pytest.mark.parametrize(
+        "r_entra",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+            },
+        ],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    @pytest.mark.cp_integration
+    def test_auth_pubsub_with_credential_provider(self, r_entra: redis.Redis):
+        p = r_entra.pubsub()
+        p.subscribe("entraid")
+
+        r_entra.publish("entraid", "test")
+        r_entra.publish("entraid", "test")
+
+        assert p.get_message()["type"] == "subscribe"
+        assert p.get_message()["type"] == "message"
+
+
+@pytest.mark.onlycluster
+@pytest.mark.cp_integration
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
+class TestClusterEntraIdCredentialsProvider:
+    @pytest.mark.parametrize(
+        "r_entra",
+        [
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "single_connection_client": False,
+            },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "single_connection_client": True,
+            },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "idp_kwargs": {"auth_type": AuthType.DEFAULT_AZURE_CREDENTIAL},
+            },
+        ],
+        ids=["pool", "single", "DefaultAzureCredential"],
+        indirect=True,
+    )
+    @pytest.mark.onlycluster
+    @pytest.mark.cp_integration
+    def test_auth_pool_with_credential_provider(self, r_entra: redis.Redis):
+        assert r_entra.ping() is True

@@ -101,7 +101,7 @@ def test_discover_master_error(sentinel):
 @pytest.mark.onlynoncluster
 def test_dead_pool(sentinel):
     master = sentinel.master_for("mymaster", db=9)
-    conn = master.connection_pool.get_connection("_")
+    conn = master.connection_pool.get_connection()
     conn.disconnect()
     del master
     conn.connect()

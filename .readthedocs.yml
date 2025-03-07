@@ -2,8 +2,9 @@ version: 2
 
 python:
   install:
-    - requirements: ./docs/requirements.txt
-    - requirements: requirements.txt
+    - requirements: docs/requirements.txt
+    - method: pip
+      path: .
 
 build:
   os: ubuntu-20.04

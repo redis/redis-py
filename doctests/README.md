@@ -13,16 +13,16 @@ See https://github.com/redis-stack/redis-stack-website#readme for more details.
 ## How to test examples
 
 Examples are standalone python scripts, committed to the *doctests* directory. These scripts assume that the
-```requirements.txt``` and ```dev_requirements.txt``` from this repository have been installed, as per below.
+```doctests/requirements.txt``` and ```dev_requirements.txt``` from this repository have been installed, as per below.
 
 ```bash
-pip install -r requirements.txt
 pip install -r dev_requirements.txt
+pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
 pip install -r doctests/requirements.txt
 ```
 
-Note - the CI process, runs the basic ```black``` and ```isort``` linters against the examples. Assuming
-the requirements above have been installed you can run ```black yourfile.py``` and ```isort yourfile.py```
+Note - the CI process, runs linters against the examples. Assuming
+the requirements above have been installed you can run ```ruff check yourfile.py``` and ```ruff format yourfile.py```
 locally to validate the linting, prior to CI.
 
 Just include necessary assertions in the example file and run

@@ -146,7 +146,6 @@ async def get_mocked_redis_client(
     with mock.patch.object(ClusterNode, "execute_command") as execute_command_mock:
 
         async def execute_command(*_args, **_kwargs):
-
             if _args[0] == "CLUSTER SLOTS":
                 if cluster_slots_raise_error:
                     raise ResponseError()
@@ -1577,7 +1576,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_not(self, r: RedisCluster) -> None:
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         await r.set("{foo}a", test_str)
         await r.bitop("not", "{foo}r", "{foo}a")
@@ -1585,7 +1584,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_not_in_place(self, r: RedisCluster) -> None:
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         await r.set("{foo}a", test_str)
         await r.bitop("not", "{foo}a", "{foo}a")
@@ -1593,7 +1592,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_single_string(self, r: RedisCluster) -> None:
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         await r.set("{foo}a", test_str)
         await r.bitop("and", "{foo}res1", "{foo}a")
         await r.bitop("or", "{foo}res2", "{foo}a")
@@ -1604,8 +1603,8 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_string_operands(self, r: RedisCluster) -> None:
-        await r.set("{foo}a", b"\x01\x02\xFF\xFF")
-        await r.set("{foo}b", b"\x01\x02\xFF")
+        await r.set("{foo}a", b"\x01\x02\xff\xff")
+        await r.set("{foo}b", b"\x01\x02\xff")
         await r.bitop("and", "{foo}res1", "{foo}a", "{foo}b")
         await r.bitop("or", "{foo}res2", "{foo}a", "{foo}b")
         await r.bitop("xor", "{foo}res3", "{foo}a", "{foo}b")
@@ -2893,12 +2892,13 @@ class TestSSL:
     appropriate port.
     """
 
-    CLIENT_CERT, CLIENT_KEY, CA_CERT = get_tls_certificates("cluster")
-
     @pytest_asyncio.fixture()
     def create_client(self, request: FixtureRequest) -> Callable[..., RedisCluster]:
         ssl_url = request.config.option.redis_ssl_url
         ssl_host, ssl_port = urlparse(ssl_url)[1].split(":")
+        self.client_cert, self.client_key, self.ca_cert = get_tls_certificates(
+            "cluster"
+        )
 
         async def _create_client(mocked: bool = True, **kwargs: Any) -> RedisCluster:
             if mocked:
@@ -3017,24 +3017,24 @@ class TestSSL:
     ) -> None:
         async with await create_client(
             ssl=True,
-            ssl_ca_certs=self.CA_CERT,
+            ssl_ca_certs=self.ca_cert,
             ssl_cert_reqs="required",
-            ssl_certfile=self.CLIENT_CERT,
-            ssl_keyfile=self.CLIENT_KEY,
+            ssl_certfile=self.client_cert,
+            ssl_keyfile=self.client_key,
         ) as rc:
             assert await rc.ping()
 
     async def test_validating_self_signed_string_certificate(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
-        with open(self.CA_CERT) as f:
+        with open(self.ca_cert) as f:
             cert_data = f.read()
 
         async with await create_client(
             ssl=True,
             ssl_ca_data=cert_data,
             ssl_cert_reqs="required",
-            ssl_certfile=self.CLIENT_CERT,
-            ssl_keyfile=self.CLIENT_KEY,
+            ssl_certfile=self.client_cert,
+            ssl_keyfile=self.client_key,
         ) as rc:
             assert await rc.ping()

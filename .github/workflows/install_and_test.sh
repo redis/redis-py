@@ -21,6 +21,7 @@ python -m venv ${DESTENV}
 source ${DESTENV}/bin/activate
 pip install --upgrade --quiet pip
 pip install --quiet -r dev_requirements.txt
+pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
 invoke devenv --endpoints=all-stack
 invoke package
 

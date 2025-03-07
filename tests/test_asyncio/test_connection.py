@@ -1,6 +1,7 @@
 import asyncio
 import socket
 import types
+from errno import ECONNREFUSED
 from unittest.mock import patch
 
 import pytest
@@ -36,15 +37,16 @@ async def test_invalid_response(create_redis):
     fake_stream = MockStream(raw + b"\r\n")
 
     parser: _AsyncRESPBase = r.connection._parser
-    with mock.patch.object(parser, "_stream", fake_stream):
-        with pytest.raises(InvalidResponse) as cm:
-            await parser.read_response()
+
     if isinstance(parser, _AsyncRESPBase):
-        assert str(cm.value) == f"Protocol Error: {raw!r}"
+        exp_err = f"Protocol Error: {raw!r}"
     else:
-        assert (
-            str(cm.value) == f'Protocol error, got "{raw.decode()}" as reply type byte'
-        )
+        exp_err = f'Protocol error, got "{raw.decode()}" as reply type byte'
+
+    with mock.patch.object(parser, "_stream", fake_stream):
+        with pytest.raises(InvalidResponse, match=exp_err):
+            await parser.read_response()
+
     await r.connection.disconnect()
 
 
@@ -76,7 +78,7 @@ async def test_single_connection():
     mock_conn = mock.AsyncMock(spec=Connection)
     mock_conn.retry = Retry_()
 
-    async def get_conn(_):
+    async def get_conn():
         # Validate only one client is created in single-client mode when
         # concurrent requests are made
         nonlocal init_call_count
@@ -170,10 +172,9 @@ async def test_connect_timeout_error_without_retry():
     conn._connect = mock.AsyncMock()
     conn._connect.side_effect = socket.timeout
 
-    with pytest.raises(TimeoutError) as e:
+    with pytest.raises(TimeoutError, match="Timeout connecting to server"):
         await conn.connect()
     assert conn._connect.call_count == 1
-    assert str(e.value) == "Timeout connecting to server"
 
 
 @pytest.mark.onlynoncluster
@@ -531,17 +532,14 @@ async def test_format_error_message(conn, error, expected_message):
 
 
 async def test_network_connection_failure():
-    with pytest.raises(ConnectionError) as e:
+    exp_err = rf"^Error {ECONNREFUSED} connecting to 127.0.0.1:9999.(.+)$"
+    with pytest.raises(ConnectionError, match=exp_err):
         redis = Redis(host="127.0.0.1", port=9999)
         await redis.set("a", "b")
-    assert str(e.value).startswith("Error 111 connecting to 127.0.0.1:9999. Connect")
 
 
 async def test_unix_socket_connection_failure():
-    with pytest.raises(ConnectionError) as e:
+    exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
+    with pytest.raises(ConnectionError, match=exp_err):
         redis = Redis(unix_socket_path="unix:///tmp/a.sock")
         await redis.set("a", "b")
-    assert (
-        str(e.value)
-        == "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
-    )

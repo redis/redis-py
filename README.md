@@ -13,13 +13,13 @@ The Python interface to the Redis key-value store.
 
 ---------------------------------------------
 
-**Note: ** redis-py 5.0 will be the last version of redis-py to support Python 3.7, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 5.1 will support Python 3.8+.
+**Note:** redis-py 5.0 will be the last version of redis-py to support Python 3.7, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 5.1 will support Python 3.8+.
 
 ---------------------------------------------
 
 ## How do I Redis?
 
-[Learn for free at Redis University](https://redis.io/university/)
+[Learn for free at Redis University](https://redis.io/learn/university)
 
 [Try the Redis Cloud](https://redis.io/try-free/)
 

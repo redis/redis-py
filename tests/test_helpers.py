@@ -4,7 +4,6 @@ from redis.commands.helpers import (
     delist,
     list_or_args,
     nativestr,
-    parse_to_dict,
     parse_to_list,
     quote_string,
     random_string,
@@ -24,40 +23,6 @@ def test_parse_to_list():
     assert parse_to_list(None) == []
     r = ["hello", b"my name", "45", "555.55", "is simon!", None]
     assert parse_to_list(r) == ["hello", "my name", 45, 555.55, "is simon!", None]
-
-
-def test_parse_to_dict():
-    assert parse_to_dict(None) == {}
-    r = [
-        ["Some number", "1.0345"],
-        ["Some string", "hello"],
-        [
-            "Child iterators",
-            [
-                "Time",
-                "0.2089",
-                "Counter",
-                3,
-                "Child iterators",
-                ["Type", "bar", "Time", "0.0729", "Counter", 3],
-                ["Type", "barbar", "Time", "0.058", "Counter", 3],
-                ["Type", "barbarbar", "Time", "0.0234", "Counter", 3],
-            ],
-        ],
-    ]
-    assert parse_to_dict(r) == {
-        "Child iterators": {
-            "Child iterators": [
-                {"Counter": 3.0, "Time": 0.0729, "Type": "bar"},
-                {"Counter": 3.0, "Time": 0.058, "Type": "barbar"},
-                {"Counter": 3.0, "Time": 0.0234, "Type": "barbarbar"},
-            ],
-            "Counter": 3.0,
-            "Time": 0.2089,
-        },
-        "Some number": 1.0345,
-        "Some string": "hello",
-    }
 
 
 def test_nativestr():

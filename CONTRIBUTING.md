@@ -32,13 +32,13 @@ Here's how to get started with your code contribution:
 
 1.  Create your own fork of redis-py
 2.  Do the changes in your fork
-3.
-    *Create a virtualenv and install the development dependencies from the dev_requirements.txt file:*
-
-        a.  python -m venv .venv
-        b.  source .venv/bin/activate
-        c.  pip install -r dev_requirements.txt
-        c.  pip install -r requirements.txt
+3.  Create a virtualenv and install the development dependencies from the dev_requirements.txt file:
+    ```
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -r dev_requirements.txt
+    pip install -e .[jwt]
+    ```
 
 4.  If you need a development environment, run `invoke devenv`. Note: this relies on docker-compose to build environments, and assumes that you have a version supporting [docker profiles](https://docs.docker.com/compose/profiles/).
 5.  While developing, make sure the tests pass by running `invoke tests`

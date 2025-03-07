@@ -79,29 +79,6 @@ def parse_list_to_dict(response):
     return res
 
 
-def parse_to_dict(response):
-    if response is None:
-        return {}
-
-    res = {}
-    for det in response:
-        if not isinstance(det, list) or not det:
-            continue
-        if len(det) == 1:
-            res[det[0]] = True
-        elif isinstance(det[1], list):
-            res[det[0]] = parse_list_to_dict(det[1])
-        else:
-            try:  # try to set the attribute. may be provided without value
-                try:  # try to convert the value to float
-                    res[det[0]] = float(det[1])
-                except (TypeError, ValueError):
-                    res[det[0]] = det[1]
-            except IndexError:
-                pass
-    return res
-
-
 def random_string(length=10):
     """
     Returns a random N character long string.
@@ -161,9 +138,9 @@ def stringify_param_value(value):
     elif value is None:
         return "null"
     elif isinstance(value, (list, tuple)):
-        return f'[{",".join(map(stringify_param_value, value))}]'
+        return f"[{','.join(map(stringify_param_value, value))}]"
     elif isinstance(value, dict):
-        return f'{{{",".join(f"{k}:{stringify_param_value(v)}" for k, v in value.items())}}}'  # noqa
+        return f"{{{','.join(f'{k}:{stringify_param_value(v)}' for k, v in value.items())}}}"  # noqa
     else:
         return str(value)
 
