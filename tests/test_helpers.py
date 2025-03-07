@@ -5,7 +5,6 @@ from redis.commands.helpers import (
     list_or_args,
     nativestr,
     parse_to_list,
-    quote_string,
     random_string,
 )
 
@@ -41,15 +40,3 @@ def test_random_string():
     assert len(random_string(15)) == 15
     for a in random_string():
         assert a in string.ascii_lowercase
-
-
-def test_quote_string():
-    assert quote_string("hello world!") == '"hello world!"'
-    assert quote_string("") == '""'
-    assert quote_string("hello world!") == '"hello world!"'
-    assert quote_string("abc") == '"abc"'
-    assert quote_string("") == '""'
-    assert quote_string('"') == r'"\""'
-    assert quote_string(r"foo \ bar") == r'"foo \\ bar"'
-    assert quote_string(r"foo \" bar") == r'"foo \\\" bar"'
-    assert quote_string('a"a') == r'"a\"a"'

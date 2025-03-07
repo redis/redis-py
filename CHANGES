@@ -1,3 +1,4 @@
+    * Removing support for RedisGraph module. RedisGraph support is deprecated since Redis Stack 7.2 (https://redis.com/blog/redisgraph-eol/)
     * Fix lock.extend() typedef to accept float TTL extension
     * Update URL in the readme linking to Redis University
     * Move doctests (doc code examples) to main branch
