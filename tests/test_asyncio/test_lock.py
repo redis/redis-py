@@ -129,7 +129,7 @@ class TestLock:
             async with self.get_lock(r, "foo", blocking_timeout=0.1):
                 pass
 
-    async def test_context_manager_not_raise_on_release_error(self, r):
+    async def test_context_manager_not_raise_on_release_lock_not_owned_error(self, r):
         try:
             async with self.get_lock(
                 r, "foo", timeout=0.1, raise_on_release_error=False
@@ -143,6 +143,21 @@ class TestLock:
                 r, "foo", timeout=0.1, raise_on_release_error=True
             ):
                 await asyncio.sleep(0.15)
+
+    async def test_context_manager_not_raise_on_release_lock_error(self, r):
+        try:
+            async with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=False
+            ) as lock:
+                lock.release()
+        except LockError:
+            pytest.fail("LockError should not have been raised")
+
+        with pytest.raises(LockError):
+            async with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=True
+            ) as lock:
+                lock.release()
 
     async def test_high_sleep_small_blocking_timeout(self, r):
         lock1 = self.get_lock(r, "foo")
