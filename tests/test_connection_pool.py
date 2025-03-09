@@ -167,11 +167,11 @@ class TestBlockingConnectionPool:
         )
         pool.get_connection()
 
-        start = time.time()
+        start = time.monotonic()
         with pytest.raises(redis.ConnectionError):
             pool.get_connection()
         # we should have waited at least 0.1 seconds
-        assert time.time() - start >= 0.1
+        assert time.monotonic() - start >= 0.1
 
     def test_connection_pool_blocks_until_conn_available(self, master_host):
         """
@@ -188,10 +188,10 @@ class TestBlockingConnectionPool:
             time.sleep(0.1)
             pool.release(c1)
 
-        start = time.time()
+        start = time.monotonic()
         Thread(target=target).start()
         pool.get_connection()
-        assert time.time() - start >= 0.1
+        assert time.monotonic() - start >= 0.1
 
     def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
@@ -679,18 +679,18 @@ class TestHealthCheck:
         return _get_client(redis.Redis, request, health_check_interval=self.interval)
 
     def assert_interval_advanced(self, connection):
-        diff = connection.next_health_check - time.time()
+        diff = connection.next_health_check - time.monotonic()
         assert self.interval > diff > (self.interval - 1)
 
     def test_health_check_runs(self, r):
-        r.connection.next_health_check = time.time() - 1
+        r.connection.next_health_check = time.monotonic() - 1
         r.connection.check_health()
         self.assert_interval_advanced(r.connection)
 
     def test_arbitrary_command_invokes_health_check(self, r):
         # invoke a command to make sure the connection is entirely setup
         r.get("foo")
-        r.connection.next_health_check = time.time()
+        r.connection.next_health_check = time.monotonic()
         with mock.patch.object(
             r.connection, "send_command", wraps=r.connection.send_command
         ) as m:

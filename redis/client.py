@@ -950,7 +950,7 @@ class PubSub:
                 "did you forget to call subscribe() or psubscribe()?"
             )
 
-        if conn.health_check_interval and time.time() > conn.next_health_check:
+        if conn.health_check_interval and time.monotonic() > conn.next_health_check:
             conn.send_command("PING", self.HEALTH_CHECK_MESSAGE, check_health=False)
             self.health_check_response_counter += 1
 
@@ -1100,12 +1100,12 @@ class PubSub:
         """
         if not self.subscribed:
             # Wait for subscription
-            start_time = time.time()
+            start_time = time.monotonic()
             if self.subscribed_event.wait(timeout) is True:
                 # The connection was subscribed during the timeout time frame.
                 # The timeout should be adjusted based on the time spent
                 # waiting for the subscription
-                time_spent = time.time() - start_time
+                time_spent = time.monotonic() - start_time
                 timeout = max(0.0, timeout - time_spent)
             else:
                 # The connection isn't subscribed to any channels or patterns,
