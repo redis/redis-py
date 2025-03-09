@@ -4,11 +4,11 @@ import socket
 import ssl
 import sys
 import threading
+import time
 import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from time import time
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -542,7 +542,7 @@ class AbstractConnection(ConnectionInterface):
 
     def check_health(self):
         """Check the health of the connection with a PING/PONG"""
-        if self.health_check_interval and time() > self.next_health_check:
+        if self.health_check_interval and time.monotonic() > self.next_health_check:
             self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
     def send_packed_command(self, command, check_health=True):
@@ -632,7 +632,7 @@ class AbstractConnection(ConnectionInterface):
             raise
 
         if self.health_check_interval:
-            self.next_health_check = time() + self.health_check_interval
+            self.next_health_check = time.monotonic() + self.health_check_interval
 
         if isinstance(response, ResponseError):
             try:
