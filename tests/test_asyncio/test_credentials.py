@@ -17,9 +17,14 @@ from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from redis.exceptions import ConnectionError
 from redis.utils import str_if_bytes
-from redis_entraid.cred_provider import EntraIdCredentialsProvider
 from tests.conftest import get_endpoint, skip_if_redis_enterprise
+from tests.entraid_utils import AuthType
 from tests.test_asyncio.conftest import get_credential_provider
+
+try:
+    from redis_entraid.cred_provider import EntraIdCredentialsProvider
+except ImportError:
+    EntraIdCredentialsProvider = None
 
 
 @pytest.fixture()
@@ -274,7 +279,7 @@ class TestCredentialsProvider:
         await init_acl_user(r, username, password)
         r2 = await create_redis(flushdb=False, username=username, password=password)
         assert await r2.ping() is True
-        conn = await r2.connection_pool.get_connection("_")
+        conn = await r2.connection_pool.get_connection()
         await conn.send_command("PING")
         assert str_if_bytes(await conn.read_response()) == "PONG"
         assert conn.username == username
@@ -321,6 +326,7 @@ class TestUsernamePasswordCredentialProvider:
 
 @pytest.mark.asyncio
 @pytest.mark.onlynoncluster
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
 class TestStreamingCredentialProvider:
     @pytest.mark.parametrize(
         "credential_provider",
@@ -599,6 +605,7 @@ class TestStreamingCredentialProvider:
 @pytest.mark.asyncio
 @pytest.mark.onlynoncluster
 @pytest.mark.cp_integration
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
 class TestEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
         "r_credential",
@@ -610,8 +617,12 @@ class TestEntraIdCredentialsProvider:
                 "cred_provider_class": EntraIdCredentialsProvider,
                 "cred_provider_kwargs": {"block_for_initial": True},
             },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "idp_kwargs": {"auth_type": AuthType.DEFAULT_AZURE_CREDENTIAL},
+            },
         ],
-        ids=["blocked", "non-blocked"],
+        ids=["blocked", "non-blocked", "DefaultAzureCredential"],
         indirect=True,
     )
     @pytest.mark.asyncio
@@ -674,6 +685,7 @@ class TestEntraIdCredentialsProvider:
 @pytest.mark.asyncio
 @pytest.mark.onlycluster
 @pytest.mark.cp_integration
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
 class TestClusterEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
         "r_credential",
@@ -685,8 +697,12 @@ class TestClusterEntraIdCredentialsProvider:
                 "cred_provider_class": EntraIdCredentialsProvider,
                 "cred_provider_kwargs": {"block_for_initial": True},
             },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "idp_kwargs": {"auth_type": AuthType.DEFAULT_AZURE_CREDENTIAL},
+            },
         ],
-        ids=["blocked", "non-blocked"],
+        ids=["blocked", "non-blocked", "DefaultAzureCredential"],
         indirect=True,
     )
     @pytest.mark.asyncio

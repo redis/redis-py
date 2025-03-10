@@ -36,9 +36,9 @@ runs:
         set -e
                 
         echo "::group::Installing dependencies"
-        pip install -U setuptools wheel
-        pip install -r requirements.txt
         pip install -r dev_requirements.txt
+        pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
+        pip install -e .[jwt]  # install the working copy
         if [ "${{inputs.parser-backend}}" == "hiredis" ]; then
           pip install "hiredis${{inputs.hiredis-version}}"
           echo "PARSER_BACKEND=$(echo "${{inputs.parser-backend}}_${{inputs.hiredis-version}}" | sed 's/[^a-zA-Z0-9]/_/g')" >> $GITHUB_ENV        

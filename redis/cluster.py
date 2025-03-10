@@ -40,6 +40,7 @@ from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import (
     HIREDIS_AVAILABLE,
+    deprecated_args,
     dict_merge,
     list_keys_to_dict,
     merge_result,
@@ -52,10 +53,13 @@ def get_node_name(host: str, port: Union[str, int]) -> str:
     return f"{host}:{port}"
 
 
+@deprecated_args(
+    allowed_args=["redis_node"],
+    reason="Use get_connection(redis_node) instead",
+    version="5.0.3",
+)
 def get_connection(redis_node, *args, **options):
-    return redis_node.connection or redis_node.connection_pool.get_connection(
-        args[0], **options
-    )
+    return redis_node.connection or redis_node.connection_pool.get_connection()
 
 
 def parse_scan_result(command, res, **options):
@@ -818,6 +822,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         blocking_timeout=None,
         lock_class=None,
         thread_local=True,
+        raise_on_release_error: bool = True,
     ):
         """
         Return a new Lock object using key ``name`` that mimics
@@ -864,6 +869,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
 
+        ``raise_on_release_error`` indicates whether to raise an exception when
+        the lock is no longer owned when exiting the context manager. By default,
+        this is True, meaning an exception will be raised. If False, the warning
+        will be logged and the exception will be suppressed.
+
         In some use cases it's necessary to disable thread local storage. For
         example, if you have code where one thread acquires a lock and passes
         that lock instance to a worker thread to release later. If thread
@@ -881,6 +891,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
+            raise_on_release_error=raise_on_release_error,
         )
 
     def set_response_callback(self, command, callback):
@@ -1151,7 +1162,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     moved = False
 
                 redis_node = self.get_redis_connection(target_node)
-                connection = get_connection(redis_node, *args, **kwargs)
+                connection = get_connection(redis_node)
                 if asking:
                     connection.send_command("ASKING")
                     redis_node.parse_response(connection, "ASKING", **kwargs)
@@ -1624,7 +1635,7 @@ class NodesManager:
                             if len(disagreements) > 5:
                                 raise RedisClusterException(
                                     f"startup_nodes could not agree on a valid "
-                                    f'slots cache: {", ".join(disagreements)}'
+                                    f"slots cache: {', '.join(disagreements)}"
                                 )
 
             fully_covered = self.check_slots_coverage(tmp_slots)
@@ -1822,9 +1833,7 @@ class ClusterPubSub(PubSub):
                 self.node = node
                 redis_connection = self.cluster.get_redis_connection(node)
                 self.connection_pool = redis_connection.connection_pool
-            self.connection = self.connection_pool.get_connection(
-                "pubsub", self.shard_hint
-            )
+            self.connection = self.connection_pool.get_connection()
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
@@ -2045,8 +2054,7 @@ class ClusterPipeline(RedisCluster):
         """
         cmd = " ".join(map(safe_str, command))
         msg = (
-            f"Command # {number} ({cmd}) of pipeline "
-            f"caused error: {exception.args[0]}"
+            f"Command # {number} ({cmd}) of pipeline caused error: {exception.args[0]}"
         )
         exception.args = (msg,) + exception.args[1:]
 
@@ -2120,7 +2128,7 @@ class ClusterPipeline(RedisCluster):
                     raise_on_error=raise_on_error,
                     allow_redirections=allow_redirections,
                 )
-            except (ClusterDownError, ConnectionError) as e:
+            except RedisCluster.ERRORS_ALLOW_RETRY as e:
                 if retry_attempts > 0:
                     # Try again with the new cluster setup. All other errors
                     # should be raised.
@@ -2184,7 +2192,7 @@ class ClusterPipeline(RedisCluster):
                 if node_name not in nodes:
                     redis_node = self.get_redis_connection(node)
                     try:
-                        connection = get_connection(redis_node, c.args)
+                        connection = get_connection(redis_node)
                     except (ConnectionError, TimeoutError):
                         for n in nodes.values():
                             n.connection_pool.release(n.connection)

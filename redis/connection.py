@@ -4,11 +4,11 @@ import socket
 import ssl
 import sys
 import threading
+import time
 import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from time import time
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -42,6 +42,7 @@ from .utils import (
     HIREDIS_AVAILABLE,
     SSL_AVAILABLE,
     compare_versions,
+    deprecated_args,
     ensure_string,
     format_error_message,
     get_lib_version,
@@ -439,7 +440,11 @@ class AbstractConnection(ConnectionInterface):
                 self._parser.on_connect(self)
             if len(auth_args) == 1:
                 auth_args = ["default", auth_args[0]]
-            self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
+            # avoid checking health here -- PING will fail if we try
+            # to check the health prior to the AUTH
+            self.send_command(
+                "HELLO", self.protocol, "AUTH", *auth_args, check_health=False
+            )
             self.handshake_metadata = self.read_response()
             # if response.get(b"proto") != self.protocol and response.get(
             #     "proto"
@@ -537,7 +542,7 @@ class AbstractConnection(ConnectionInterface):
 
     def check_health(self):
         """Check the health of the connection with a PING/PONG"""
-        if self.health_check_interval and time() > self.next_health_check:
+        if self.health_check_interval and time.monotonic() > self.next_health_check:
             self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
     def send_packed_command(self, command, check_health=True):
@@ -617,9 +622,7 @@ class AbstractConnection(ConnectionInterface):
         except OSError as e:
             if disconnect_on_error:
                 self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {host_error}" f" : {e.args}"
-            )
+            raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
         except BaseException:
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.
@@ -629,7 +632,7 @@ class AbstractConnection(ConnectionInterface):
             raise
 
         if self.health_check_interval:
-            self.next_health_check = time() + self.health_check_interval
+            self.next_health_check = time.monotonic() + self.health_check_interval
 
         if isinstance(response, ResponseError):
             try:
@@ -672,7 +675,7 @@ class AbstractConnection(ConnectionInterface):
             output.append(SYM_EMPTY.join(pieces))
         return output
 
-    def get_protocol(self) -> int or str:
+    def get_protocol(self) -> Union[int, str]:
         return self.protocol
 
     @property
@@ -1035,7 +1038,7 @@ class SSLConnection(Connection):
         if ssl_cert_reqs is None:
             ssl_cert_reqs = ssl.CERT_NONE
         elif isinstance(ssl_cert_reqs, str):
-            CERT_REQS = {
+            CERT_REQS = {  # noqa: N806
                 "none": ssl.CERT_NONE,
                 "optional": ssl.CERT_OPTIONAL,
                 "required": ssl.CERT_REQUIRED,
@@ -1461,8 +1464,14 @@ class ConnectionPool:
             finally:
                 self._fork_lock.release()
 
-    def get_connection(self, command_name: str, *keys, **options) -> "Connection":
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    def get_connection(self, command_name=None, *keys, **options) -> "Connection":
         "Get a connection from the pool"
+
         self._checkpid()
         with self._lock:
             try:
@@ -1525,7 +1534,7 @@ class ConnectionPool:
             except KeyError:
                 # Gracefully fail when a connection is returned to this pool
                 # that the pool doesn't actually own
-                pass
+                return
 
             if self.owns_connection(connection):
                 self._available_connections.append(connection)
@@ -1533,10 +1542,10 @@ class ConnectionPool:
                     AfterConnectionReleasedEvent(connection)
                 )
             else:
-                # pool doesn't own this connection. do not add it back
-                # to the pool and decrement the count so that another
-                # connection can take its place if needed
-                self._created_connections -= 1
+                # Pool doesn't own this connection, do not add it back
+                # to the pool.
+                # The created connections count should not be changed,
+                # because the connection was not created by the pool.
                 connection.disconnect()
                 return
 
@@ -1683,7 +1692,12 @@ class BlockingConnectionPool(ConnectionPool):
         self._connections.append(connection)
         return connection
 
-    def get_connection(self, command_name, *keys, **options):
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    def get_connection(self, command_name=None, *keys, **options):
         """
         Get a connection, blocking for ``self.timeout`` until a connection
         is available from the pool.

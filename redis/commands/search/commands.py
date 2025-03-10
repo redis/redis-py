@@ -500,7 +500,7 @@ class SearchCommands:
         For more information see `FT.SEARCH <https://redis.io/commands/ft.search>`_.
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
-        st = time.time()
+        st = time.monotonic()
 
         options = {}
         if get_protocol_version(self.client) not in ["3", 3]:
@@ -512,7 +512,7 @@ class SearchCommands:
             return res
 
         return self._parse_results(
-            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+            SEARCH_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
     def explain(
@@ -586,7 +586,7 @@ class SearchCommands:
 
     def profile(
         self,
-        query: Union[str, Query, AggregateRequest],
+        query: Union[Query, AggregateRequest],
         limited: bool = False,
         query_params: Optional[Dict[str, Union[str, int, float]]] = None,
     ):
@@ -596,13 +596,13 @@ class SearchCommands:
 
         ### Parameters
 
-        **query**: This can be either an `AggregateRequest`, `Query` or string.
+        **query**: This can be either an `AggregateRequest` or `Query`.
         **limited**: If set to True, removes details of reader iterator.
         **query_params**: Define one or more value parameters.
         Each parameter has a name and a value.
 
         """
-        st = time.time()
+        st = time.monotonic()
         cmd = [PROFILE_CMD, self.index_name, ""]
         if limited:
             cmd.append("LIMITED")
@@ -621,7 +621,7 @@ class SearchCommands:
         res = self.execute_command(*cmd)
 
         return self._parse_results(
-            PROFILE_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+            PROFILE_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
     def spellcheck(self, query, distance=None, include=None, exclude=None):
@@ -940,7 +940,7 @@ class AsyncSearchCommands(SearchCommands):
         For more information see `FT.SEARCH <https://redis.io/commands/ft.search>`_.
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
-        st = time.time()
+        st = time.monotonic()
 
         options = {}
         if get_protocol_version(self.client) not in ["3", 3]:
@@ -952,7 +952,7 @@ class AsyncSearchCommands(SearchCommands):
             return res
 
         return self._parse_results(
-            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+            SEARCH_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
     async def aggregate(

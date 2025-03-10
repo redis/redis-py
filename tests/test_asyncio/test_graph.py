@@ -44,8 +44,7 @@ async def test_graph_creation(decoded_r: redis.Redis):
     await graph.commit()
 
     query = (
-        'MATCH (p:person)-[v:visited {purpose:"pleasure"}]->(c:country) '
-        "RETURN p, v, c"
+        'MATCH (p:person)-[v:visited {purpose:"pleasure"}]->(c:country) RETURN p, v, c'
     )
 
     result = await graph.query(query)

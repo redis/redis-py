@@ -73,8 +73,7 @@ def test_graph_creation(client):
     graph.commit()
 
     query = (
-        'MATCH (p:person)-[v:visited {purpose:"pleasure"}]->(c:country) '
-        "RETURN p, v, c"
+        'MATCH (p:person)-[v:visited {purpose:"pleasure"}]->(c:country) RETURN p, v, c'
     )
 
     result = graph.query(query)

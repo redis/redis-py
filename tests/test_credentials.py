@@ -16,13 +16,18 @@ from redis.credentials import CredentialProvider, UsernamePasswordCredentialProv
 from redis.exceptions import ConnectionError, RedisError
 from redis.retry import Retry
 from redis.utils import str_if_bytes
-from redis_entraid.cred_provider import EntraIdCredentialsProvider
 from tests.conftest import (
     _get_client,
     get_credential_provider,
     get_endpoint,
     skip_if_redis_enterprise,
 )
+from tests.entraid_utils import AuthType
+
+try:
+    from redis_entraid.cred_provider import EntraIdCredentialsProvider
+except ImportError:
+    EntraIdCredentialsProvider = None
 
 
 @pytest.fixture()
@@ -252,7 +257,7 @@ class TestCredentialsProvider:
             redis.Redis, request, flushdb=False, username=username, password=password
         )
         assert r2.ping() is True
-        conn = r2.connection_pool.get_connection("_")
+        conn = r2.connection_pool.get_connection()
         conn.send_command("PING")
         assert str_if_bytes(conn.read_response()) == "PONG"
         assert conn.username == username
@@ -295,6 +300,7 @@ class TestUsernamePasswordCredentialProvider:
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
 class TestStreamingCredentialProvider:
     @pytest.mark.parametrize(
         "credential_provider",
@@ -567,6 +573,7 @@ class TestStreamingCredentialProvider:
 
 @pytest.mark.onlynoncluster
 @pytest.mark.cp_integration
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
 class TestEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
         "r_entra",
@@ -579,8 +586,12 @@ class TestEntraIdCredentialsProvider:
                 "cred_provider_class": EntraIdCredentialsProvider,
                 "single_connection_client": True,
             },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "idp_kwargs": {"auth_type": AuthType.DEFAULT_AZURE_CREDENTIAL},
+            },
         ],
-        ids=["pool", "single"],
+        ids=["pool", "single", "DefaultAzureCredential"],
         indirect=True,
     )
     @pytest.mark.onlynoncluster
@@ -637,6 +648,7 @@ class TestEntraIdCredentialsProvider:
 
 @pytest.mark.onlycluster
 @pytest.mark.cp_integration
+@pytest.mark.skipif(not EntraIdCredentialsProvider, reason="requires redis-entraid")
 class TestClusterEntraIdCredentialsProvider:
     @pytest.mark.parametrize(
         "r_entra",
@@ -649,8 +661,12 @@ class TestClusterEntraIdCredentialsProvider:
                 "cred_provider_class": EntraIdCredentialsProvider,
                 "single_connection_client": True,
             },
+            {
+                "cred_provider_class": EntraIdCredentialsProvider,
+                "idp_kwargs": {"auth_type": AuthType.DEFAULT_AZURE_CREDENTIAL},
+            },
         ],
-        ids=["pool", "single"],
+        ids=["pool", "single", "DefaultAzureCredential"],
         indirect=True,
     )
     @pytest.mark.onlycluster

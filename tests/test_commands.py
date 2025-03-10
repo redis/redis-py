@@ -667,11 +667,15 @@ class TestRedisCommands:
         assert "addr" in clients[0]
 
         # testing multiple client ids
-        _get_client(redis.Redis, request, flushdb=False)
-        _get_client(redis.Redis, request, flushdb=False)
-        _get_client(redis.Redis, request, flushdb=False)
-        clients_listed = r.client_list(client_id=clients[:-1])
-        assert len(clients_listed) > 1
+        client_list = list()
+        client_count = 3
+        for i in range(client_count):
+            client = _get_client(redis.Redis, request, flushdb=False)
+            client_list.append(client)
+
+        multiple_client_ids = [str(client.client_id()) for client in client_list]
+        clients_listed = r.client_list(client_id=multiple_client_ids)
+        assert len(clients_listed) == len(multiple_client_ids)
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("5.0.0")
@@ -1021,8 +1025,9 @@ class TestRedisCommands:
             assert r.config_set("search-default-dialect", default_dialect_new)
             assert r.config_get("*")["search-default-dialect"] == default_dialect_new
             assert (
-                r.ft().config_get("*")[b"DEFAULT_DIALECT"]
-            ).decode() == default_dialect_new
+                (r.ft().config_get("*")[b"DEFAULT_DIALECT"]).decode()
+                == default_dialect_new
+            )
         except AssertionError as ex:
             raise ex
         finally:
@@ -1264,7 +1269,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_not(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["a"] = test_str
         r.bitop("not", "r", "a")
@@ -1273,7 +1278,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_not_in_place(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["a"] = test_str
         r.bitop("not", "a", "a")
@@ -1282,7 +1287,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_single_string(self, r):
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         r["a"] = test_str
         r.bitop("and", "res1", "a")
         r.bitop("or", "res2", "a")
@@ -1294,8 +1299,8 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_string_operands(self, r):
-        r["a"] = b"\x01\x02\xFF\xFF"
-        r["b"] = b"\x01\x02\xFF"
+        r["a"] = b"\x01\x02\xff\xff"
+        r["b"] = b"\x01\x02\xff"
         r.bitop("and", "res1", "a", "b")
         r.bitop("or", "res2", "a", "b")
         r.bitop("xor", "res3", "a", "b")

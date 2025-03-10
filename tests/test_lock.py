@@ -133,6 +133,32 @@ class TestLock:
             with self.get_lock(r, "foo", blocking_timeout=0.1):
                 pass
 
+    def test_context_manager_not_raise_on_release_lock_not_owned_error(self, r):
+        try:
+            with self.get_lock(r, "foo", timeout=0.1, raise_on_release_error=False):
+                time.sleep(0.15)
+        except LockNotOwnedError:
+            pytest.fail("LockNotOwnedError should not have been raised")
+
+        with pytest.raises(LockNotOwnedError):
+            with self.get_lock(r, "foo", timeout=0.1, raise_on_release_error=True):
+                time.sleep(0.15)
+
+    def test_context_manager_not_raise_on_release_lock_error(self, r):
+        try:
+            with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=False
+            ) as lock:
+                lock.release()
+        except LockError:
+            pytest.fail("LockError should not have been raised")
+
+        with pytest.raises(LockError):
+            with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=True
+            ) as lock:
+                lock.release()
+
     def test_high_sleep_small_blocking_timeout(self, r):
         lock1 = self.get_lock(r, "foo")
         assert lock1.acquire(blocking=False)
@@ -178,11 +204,12 @@ class TestLock:
         lock.release()
 
     def test_extend_lock_float(self, r):
-        lock = self.get_lock(r, "foo", timeout=10.0)
+        lock = self.get_lock(r, "foo", timeout=10.5)
         assert lock.acquire(blocking=False)
-        assert 8000 < r.pttl("foo") <= 10000
-        assert lock.extend(10.0)
-        assert 16000 < r.pttl("foo") <= 20000
+        assert 10400 < r.pttl("foo") <= 10500
+        old_ttl = r.pttl("foo")
+        assert lock.extend(10.5)
+        assert old_ttl + 10400 < r.pttl("foo") <= old_ttl + 10500
         lock.release()
 
     def test_extending_unlocked_lock_raises_error(self, r):
