@@ -51,39 +51,6 @@ These are the commands for interacting with the `RedisBloom module <https://redi
 
 ------
 
-RedisGraph Commands
-*******************
-
-These are the commands for interacting with the `RedisGraph module <https://redisgraph.io>`_. Below is a brief example, as well as documentation on the commands themselves.
-
-**Create a graph, adding two nodes**
-
-.. code-block:: python
-
-    import redis
-    from redis.graph.node import Node
-
-    john = Node(label="person", properties={"name": "John Doe", "age": 33}
-    jane = Node(label="person", properties={"name": "Jane Doe", "age": 34}
-
-    r = redis.Redis()
-    graph = r.graph()
-    graph.add_node(john)
-    graph.add_node(jane)
-    graph.add_node(pat)
-    graph.commit()
-
-.. automodule:: redis.commands.graph.node
-    :members: Node
-
-.. automodule:: redis.commands.graph.edge
-    :members: Edge
-
-.. automodule:: redis.commands.graph.commands
-    :members: GraphCommands
-
-------
-
 RedisJSON Commands
 ******************
 
