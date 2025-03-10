@@ -839,6 +839,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         blocking_timeout: Optional[float] = None,
         lock_class: Optional[Type[Lock]] = None,
         thread_local: bool = True,
+        raise_on_release_error: bool = True,
     ) -> Lock:
         """
         Return a new Lock object using key ``name`` that mimics
@@ -885,6 +886,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
 
+        ``raise_on_release_error`` indicates whether to raise an exception when
+        the lock is no longer owned when exiting the context manager. By default,
+        this is True, meaning an exception will be raised. If False, the warning
+        will be logged and the exception will be suppressed.
+
         In some use cases it's necessary to disable thread local storage. For
         example, if you have code where one thread acquires a lock and passes
         that lock instance to a worker thread to release later. If thread
@@ -902,6 +908,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
+            raise_on_release_error=raise_on_release_error,
         )
 
 
@@ -1596,18 +1603,24 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         result.args = (msg,) + result.args[1:]
                         raise result
 
-            default_node = nodes.get(client.get_default_node().name)
-            if default_node is not None:
-                # This pipeline execution used the default node, check if we need
-                # to replace it.
-                # Note: when the error is raised we'll reset the default node in the
-                # caller function.
-                for cmd in default_node[1]:
-                    # Check if it has a command that failed with a relevant
-                    # exception
-                    if type(cmd.result) in self.__class__.ERRORS_ALLOW_RETRY:
-                        client.replace_default_node()
-                        break
+            default_cluster_node = client.get_default_node()
+
+            # Check whether the default node was used. In some cases,
+            # 'client.get_default_node()' may return None. The check below
+            # prevents a potential AttributeError.
+            if default_cluster_node is not None:
+                default_node = nodes.get(default_cluster_node.name)
+                if default_node is not None:
+                    # This pipeline execution used the default node, check if we need
+                    # to replace it.
+                    # Note: when the error is raised we'll reset the default node in the
+                    # caller function.
+                    for cmd in default_node[1]:
+                        # Check if it has a command that failed with a relevant
+                        # exception
+                        if type(cmd.result) in self.__class__.ERRORS_ALLOW_RETRY:
+                            client.replace_default_node()
+                            break
 
         return [cmd.result for cmd in stack]
 
