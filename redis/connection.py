@@ -4,11 +4,11 @@ import socket
 import ssl
 import sys
 import threading
+import time
 import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from time import time
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -542,7 +542,7 @@ class AbstractConnection(ConnectionInterface):
 
     def check_health(self):
         """Check the health of the connection with a PING/PONG"""
-        if self.health_check_interval and time() > self.next_health_check:
+        if self.health_check_interval and time.monotonic() > self.next_health_check:
             self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
     def send_packed_command(self, command, check_health=True):
@@ -622,9 +622,7 @@ class AbstractConnection(ConnectionInterface):
         except OSError as e:
             if disconnect_on_error:
                 self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {host_error}" f" : {e.args}"
-            )
+            raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
         except BaseException:
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.
@@ -634,7 +632,7 @@ class AbstractConnection(ConnectionInterface):
             raise
 
         if self.health_check_interval:
-            self.next_health_check = time() + self.health_check_interval
+            self.next_health_check = time.monotonic() + self.health_check_interval
 
         if isinstance(response, ResponseError):
             try:
@@ -1040,7 +1038,7 @@ class SSLConnection(Connection):
         if ssl_cert_reqs is None:
             ssl_cert_reqs = ssl.CERT_NONE
         elif isinstance(ssl_cert_reqs, str):
-            CERT_REQS = {
+            CERT_REQS = {  # noqa: N806
                 "none": ssl.CERT_NONE,
                 "optional": ssl.CERT_OPTIONAL,
                 "required": ssl.CERT_REQUIRED,

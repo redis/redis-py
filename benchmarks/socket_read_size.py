@@ -4,7 +4,6 @@ from redis.connection import PythonParser, _HiredisParser
 
 
 class SocketReadBenchmark(Benchmark):
-
     ARGUMENTS = (
         {"name": "parser", "values": [PythonParser, _HiredisParser]},
         {
