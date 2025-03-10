@@ -595,7 +595,7 @@ class ClusterManagementCommands(ManagementCommands):
                 "CLUSTER SETSLOT", slot_id, state, node_id, target_nodes=target_node
             )
         elif state.upper() == "STABLE":
-            raise RedisError('For "stable" state please use ' "cluster_setslot_stable")
+            raise RedisError('For "stable" state please use cluster_setslot_stable')
         else:
             raise RedisError(f"Invalid slot state: {state}")
 
