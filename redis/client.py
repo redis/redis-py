@@ -61,6 +61,7 @@ from redis.utils import (
     get_lib_version,
     safe_str,
     str_if_bytes,
+    truncate_command_for_exception,
 )
 
 if TYPE_CHECKING:
@@ -1521,7 +1522,8 @@ class Pipeline(Redis):
     def annotate_exception(self, exception, number, command):
         cmd = " ".join(map(safe_str, command))
         msg = (
-            f"Command # {number} ({cmd}) of pipeline caused error: {exception.args[0]}"
+            f"Command # {number} ({truncate_command_for_exception(cmd)}) of pipeline "
+            f"caused error: {exception.args[0]}"
         )
         exception.args = (msg,) + exception.args[1:]
 
