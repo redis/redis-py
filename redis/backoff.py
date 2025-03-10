@@ -109,6 +109,7 @@ class DecorrelatedJitterBackoff(AbstractBackoff):
         self._previous_backoff = min(self._cap, temp)
         return self._previous_backoff
 
+
 class ExponentialWithJitterBackoff(AbstractBackoff):
     """Exponential backoff upon failure, with jitter"""
 
