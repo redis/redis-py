@@ -180,14 +180,10 @@ class Lock:
     ) -> None:
         try:
             self.release()
-        except LockNotOwnedError:
-            if self.raise_on_release_error:
-                raise
-            logger.warning("Lock was no longer owned when exiting context manager.")
         except LockError:
             if self.raise_on_release_error:
                 raise
-            logger.warning("Lock was unlocked when exiting context manager.")
+            logger.warning("Lock was unlocked or no longer owned when exiting context manager.")
 
     def acquire(
         self,
