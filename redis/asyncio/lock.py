@@ -178,7 +178,9 @@ class Lock:
         except LockError:
             if self.raise_on_release_error:
                 raise
-            logger.warning("Lock was unlocked or no longer owned when exiting context manager.")
+            logger.warning(
+                "Lock was unlocked or no longer owned when exiting context manager."
+            )
 
     async def acquire(
         self,
