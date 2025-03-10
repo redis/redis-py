@@ -237,7 +237,7 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=60):
     :param cluster_nodes: The number of nodes in the cluster
     :param timeout: the amount of time to wait (in seconds)
     """
-    now = time.time()
+    now = time.monotonic()
     end_time = now + timeout
     client = None
     print(f"Waiting for {cluster_nodes} cluster nodes to become available")
@@ -250,7 +250,7 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=60):
         except RedisClusterException:
             pass
         time.sleep(1)
-        now = time.time()
+        now = time.monotonic()
     if now >= end_time:
         available_nodes = 0 if client is None else len(client.get_nodes())
         raise RedisClusterException(
