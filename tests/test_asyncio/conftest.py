@@ -11,7 +11,8 @@ from redis.asyncio.client import Monitor
 from redis.asyncio.connection import Connection, parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from tests.conftest import REDIS_INFO
+from redis.credentials import CredentialProvider
+from tests.conftest import REDIS_INFO, get_credential_provider
 
 from .compat import mock
 
@@ -122,8 +123,10 @@ async def sentinel_setup(local_cache, request):
         for ip, port in (endpoint.split(":") for endpoint in sentinel_ips.split(","))
     ]
     kwargs = request.param.get("kwargs", {}) if hasattr(request, "param") else {}
+    force_master_ip = request.param.get("force_master_ip", None)
     sentinel = Sentinel(
         sentinel_endpoints,
+        force_master_ip=force_master_ip,
         socket_timeout=0.1,
         client_cache=local_cache,
         protocol=3,
@@ -216,6 +219,11 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
         yield mocked
 
 
+@pytest_asyncio.fixture()
+async def credential_provider(request) -> CredentialProvider:
+    return get_credential_provider(request)
+
+
 async def wait_for_command(
     client: redis.Redis, monitor: Monitor, command: str, key: Union[str, None] = None
 ):
@@ -228,7 +236,7 @@ async def wait_for_command(
         if Version(redis_version) >= Version("5.0.0"):
             id_str = str(await client.client_id())
         else:
-            id_str = f"{random.randrange(2 ** 32):08x}"
+            id_str = f"{random.randrange(2**32):08x}"
         key = f"__REDIS-PY-{id_str}__"
     await client.get(key)
     while True:

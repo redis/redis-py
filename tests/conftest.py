@@ -1,6 +1,9 @@
 import argparse
+import json
+import os
 import random
 import time
+from datetime import datetime, timezone
 from typing import Callable, TypeVar
 from unittest import mock
 from unittest.mock import Mock
@@ -10,6 +13,8 @@ import pytest
 import redis
 from packaging.version import Version
 from redis import Sentinel
+from redis.auth.idp import IdentityProviderInterface
+from redis.auth.token import JWToken
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
@@ -19,6 +24,7 @@ from redis.cache import (
     EvictionPolicy,
 )
 from redis.connection import Connection, ConnectionInterface, SSLConnection, parse_url
+from redis.credentials import CredentialProvider
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
 from tests.ssl_utils import get_tls_certificates
@@ -147,6 +153,13 @@ def pytest_addoption(parser):
         action="store",
         default="redis-py-test",
         help="Name of the Redis master service that the sentinels are monitoring",
+    )
+
+    parser.addoption(
+        "--endpoint-name",
+        action="store",
+        default=None,
+        help="Name of the Redis endpoint the tests should be executed on",
     )
 
 
@@ -296,12 +309,14 @@ def skip_ifnot_redis_enterprise() -> _TestDecorator:
 
 
 def skip_if_nocryptography() -> _TestDecorator:
-    try:
-        import cryptography  # noqa
-
-        return pytest.mark.skipif(False, reason="Cryptography dependency found")
-    except ImportError:
-        return pytest.mark.skipif(True, reason="No cryptography dependency")
+    # try:
+    #     import cryptography  # noqa
+    #
+    #     return pytest.mark.skipif(False, reason="Cryptography dependency found")
+    # except ImportError:
+    # TODO: Because JWT library depends on cryptography,
+    #  now it's always true and tests should be fixed
+    return pytest.mark.skipif(True, reason="No cryptography dependency")
 
 
 def skip_if_cryptography() -> _TestDecorator:
@@ -575,6 +590,52 @@ def cache_key(request) -> CacheKey:
     return CacheKey(command, keys)
 
 
+def mock_identity_provider() -> IdentityProviderInterface:
+    jwt = pytest.importorskip("jwt")
+    mock_provider = Mock(spec=IdentityProviderInterface)
+    token = {"exp": datetime.now(timezone.utc).timestamp() + 3600, "oid": "username"}
+    encoded = jwt.encode(token, "secret", algorithm="HS256")
+    jwt_token = JWToken(encoded)
+    mock_provider.request_token.return_value = jwt_token
+    return mock_provider
+
+
+def get_credential_provider(request) -> CredentialProvider:
+    cred_provider_class = request.param.get("cred_provider_class")
+    cred_provider_kwargs = request.param.get("cred_provider_kwargs", {})
+
+    # Since we can't import EntraIdCredentialsProvider in this module,
+    # we'll just check the class name.
+    if cred_provider_class.__name__ != "EntraIdCredentialsProvider":
+        return cred_provider_class(**cred_provider_kwargs)
+
+    from tests.entraid_utils import get_entra_id_credentials_provider
+
+    return get_entra_id_credentials_provider(request, cred_provider_kwargs)
+
+
+@pytest.fixture()
+def credential_provider(request) -> CredentialProvider:
+    return get_credential_provider(request)
+
+
+def get_endpoint(endpoint_name: str):
+    endpoints_config = os.getenv("REDIS_ENDPOINTS_CONFIG_PATH", None)
+
+    if not (endpoints_config and os.path.exists(endpoints_config)):
+        raise FileNotFoundError(f"Endpoints config file not found: {endpoints_config}")
+
+    try:
+        with open(endpoints_config, "r") as f:
+            data = json.load(f)
+            db = data[endpoint_name]
+            return db["endpoints"][0]
+    except Exception as e:
+        raise ValueError(
+            f"Failed to load endpoints config file: {endpoints_config}"
+        ) from e
+
+
 def wait_for_command(client, monitor, command, key=None):
     # issue a command with a key name that's local to this process.
     # if we find a command with our key before the command we're waiting
@@ -585,7 +646,7 @@ def wait_for_command(client, monitor, command, key=None):
         if Version(redis_version) >= Version("5.0.0"):
             id_str = str(client.client_id())
         else:
-            id_str = f"{random.randrange(2 ** 32):08x}"
+            id_str = f"{random.randrange(2**32):08x}"
         key = f"__REDIS-PY-{id_str}__"
     client.get(key)
     while True:

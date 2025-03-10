@@ -845,7 +845,7 @@ class TestRedisClusterObj:
             assert node.redis_connection.get_retry()._retries == retry._retries
             assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
         rand_node = r.get_random_node()
-        existing_conn = rand_node.redis_connection.connection_pool.get_connection("_")
+        existing_conn = rand_node.redis_connection.connection_pool.get_connection()
         # Change retry policy
         new_retry = Retry(ExponentialBackoff(), 3)
         r.set_retry(new_retry)
@@ -857,7 +857,7 @@ class TestRedisClusterObj:
                 node.redis_connection.get_retry()._backoff, ExponentialBackoff
             )
         assert existing_conn.retry._retries == new_retry._retries
-        new_conn = rand_node.redis_connection.connection_pool.get_connection("_")
+        new_conn = rand_node.redis_connection.connection_pool.get_connection()
         assert new_conn.retry._retries == new_retry._retries
 
     def test_cluster_retry_object(self, r) -> None:
@@ -1692,7 +1692,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_not(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["{foo}a"] = test_str
         r.bitop("not", "{foo}r", "{foo}a")
@@ -1700,7 +1700,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_not_in_place(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["{foo}a"] = test_str
         r.bitop("not", "{foo}a", "{foo}a")
@@ -1708,7 +1708,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_single_string(self, r):
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         r["{foo}a"] = test_str
         r.bitop("and", "{foo}res1", "{foo}a")
         r.bitop("or", "{foo}res2", "{foo}a")
@@ -1719,8 +1719,8 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_string_operands(self, r):
-        r["{foo}a"] = b"\x01\x02\xFF\xFF"
-        r["{foo}b"] = b"\x01\x02\xFF"
+        r["{foo}a"] = b"\x01\x02\xff\xff"
+        r["{foo}b"] = b"\x01\x02\xff"
         r.bitop("and", "{foo}res1", "{foo}a", "{foo}b")
         r.bitop("or", "{foo}res2", "{foo}a", "{foo}b")
         r.bitop("xor", "{foo}res3", "{foo}a", "{foo}b")
