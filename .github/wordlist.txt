@@ -12,7 +12,6 @@ ConnectionPool
 CoreCommands
 EVAL
 EVALSHA
-GraphCommands
 Grokzen's
 INCR
 IOError
@@ -39,7 +38,6 @@ RedisCluster
 RedisClusterCommands
 RedisClusterException
 RedisClusters
-RedisGraph
 RedisInstrumentor
 RedisJSON
 RedisTimeSeries
