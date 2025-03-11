@@ -23,7 +23,7 @@ from .conftest import (
 def wait_for_message(
     pubsub, timeout=0.5, ignore_subscribe_messages=False, node=None, func=None
 ):
-    now = time.time()
+    now = time.monotonic()
     timeout = now + timeout
     while now < timeout:
         if node:
@@ -39,7 +39,7 @@ def wait_for_message(
         if message is not None:
             return message
         time.sleep(0.01)
-        now = time.time()
+        now = time.monotonic()
     return None
 
 

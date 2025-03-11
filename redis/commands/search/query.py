@@ -1,5 +1,7 @@
 from typing import List, Optional, Union
 
+from redis.commands.search.dialect import DEFAULT_DIALECT
+
 
 class Query:
     """
@@ -35,11 +37,12 @@ class Query:
         self._in_order: bool = False
         self._sortby: Optional[SortbyField] = None
         self._return_fields: List = []
+        self._return_fields_decode_as: dict = {}
         self._summarize_fields: List = []
         self._highlight_fields: List = []
         self._language: Optional[str] = None
         self._expander: Optional[str] = None
-        self._dialect: Optional[int] = None
+        self._dialect: int = DEFAULT_DIALECT
 
     def query_string(self) -> str:
         """Return the query string of this query only."""
@@ -53,13 +56,27 @@ class Query:
 
     def return_fields(self, *fields) -> "Query":
         """Add fields to return fields."""
-        self._return_fields += fields
+        for field in fields:
+            self.return_field(field)
         return self
 
-    def return_field(self, field: str, as_field: Optional[str] = None) -> "Query":
-        """Add field to return fields (Optional: add 'AS' name
-        to the field)."""
+    def return_field(
+        self,
+        field: str,
+        as_field: Optional[str] = None,
+        decode_field: Optional[bool] = True,
+        encoding: Optional[str] = "utf8",
+    ) -> "Query":
+        """
+        Add a field to the list of fields to return.
+
+        - **field**: The field to include in query results
+        - **as_field**: The alias for the field
+        - **decode_field**: Whether to decode the field from bytes to string
+        - **encoding**: The encoding to use when decoding the field
+        """
         self._return_fields.append(field)
+        self._return_fields_decode_as[field] = encoding if decode_field else None
         if as_field is not None:
             self._return_fields += ("AS", as_field)
         return self
@@ -161,6 +178,8 @@ class Query:
         """
         Use a different scoring function to evaluate document relevance.
         Default is `TFIDF`.
+
+        Since Redis 8.0 default was changed to BM25STD.
 
         :param scorer: The scoring function to use
                        (e.g. `TFIDF.DOCNORM` or `BM25`)

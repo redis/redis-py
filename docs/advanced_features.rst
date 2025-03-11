@@ -346,7 +346,7 @@ running.
 
 The third option runs an event loop in a separate thread.
 pubsub.run_in_thread() creates a new thread and starts the event loop.
-The thread object is returned to the caller of [un_in_thread(). The
+The thread object is returned to the caller of run_in_thread(). The
 caller can use the thread.stop() method to shut down the event loop and
 thread. Behind the scenes, this is simply a wrapper around get_message()
 that runs in a separate thread, essentially creating a tiny non-blocking
@@ -380,8 +380,6 @@ run_in_thread.
    >>> def exception_handler(ex, pubsub, thread):
    >>>     print(ex)
    >>>     thread.stop()
-   >>>     thread.join(timeout=1.0)
-   >>>     pubsub.close()
    >>> thread = p.run_in_thread(exception_handler=exception_handler)
 
 A PubSub object adheres to the same encoding semantics as the client

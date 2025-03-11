@@ -78,7 +78,6 @@ class ListJoiningConnection(Connection):
 
 
 class CommandPackerBenchmark(Benchmark):
-
     ARGUMENTS = (
         {
             "name": "connection_class",

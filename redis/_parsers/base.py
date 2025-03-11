@@ -9,26 +9,32 @@ else:
     from async_timeout import timeout as async_timeout
 
 from ..exceptions import (
+    AskError,
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
     BusyLoadingError,
+    ClusterCrossSlotError,
+    ClusterDownError,
     ConnectionError,
     ExecAbortError,
+    MasterDownError,
     ModuleError,
+    MovedError,
     NoPermissionError,
     NoScriptError,
     OutOfMemoryError,
     ReadOnlyError,
     RedisError,
     ResponseError,
+    TryAgainError,
 )
 from ..typing import EncodableT
 from .encoders import Encoder
 from .socket import SERVER_CLOSED_CONNECTION_ERROR, SocketBuffer
 
-MODULE_LOAD_ERROR = "Error loading the extension. " "Please check the server logs."
+MODULE_LOAD_ERROR = "Error loading the extension. Please check the server logs."
 NO_SUCH_MODULE_ERROR = "Error unloading module: no such module with that name"
-MODULE_UNLOAD_NOT_POSSIBLE_ERROR = "Error unloading module: operation not " "possible."
+MODULE_UNLOAD_NOT_POSSIBLE_ERROR = "Error unloading module: operation not possible."
 MODULE_EXPORTS_DATA_TYPES_ERROR = (
     "Error unloading module: the module "
     "exports one or more module-side data "
@@ -72,6 +78,12 @@ class BaseParser(ABC):
         "READONLY": ReadOnlyError,
         "NOAUTH": AuthenticationError,
         "NOPERM": NoPermissionError,
+        "ASK": AskError,
+        "TRYAGAIN": TryAgainError,
+        "MOVED": MovedError,
+        "CLUSTERDOWN": ClusterDownError,
+        "CROSSSLOT": ClusterCrossSlotError,
+        "MASTERDOWN": MasterDownError,
     }
 
     @classmethod
@@ -182,7 +194,7 @@ class _AsyncRESPBase(AsyncBaseParser):
             return True
         try:
             async with async_timeout(0):
-                return await self._stream.read(1)
+                return self._stream.at_eof()
         except TimeoutError:
             return False
 

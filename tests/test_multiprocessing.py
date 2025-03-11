@@ -1,5 +1,6 @@
 import contextlib
 import multiprocessing
+import sys
 
 import pytest
 import redis
@@ -7,6 +8,9 @@ from redis.connection import Connection, ConnectionPool
 from redis.exceptions import ConnectionError
 
 from .conftest import _get_client
+
+if sys.platform == "darwin":
+    multiprocessing.set_start_method("fork", force=True)
 
 
 @contextlib.contextmanager
@@ -80,6 +84,40 @@ class TestMultiprocessing:
         proc.join(3)
         assert proc.exitcode == 0
 
+    @pytest.mark.parametrize("max_connections", [2, None])
+    def test_release_parent_connection_from_pool_in_child_process(
+        self, max_connections, master_host
+    ):
+        """
+        A connection owned by a parent should not decrease the _created_connections
+        counter in child when released - when the child process starts to use the
+        pool it resets all the counters that have been set in the parent process.
+        """
+
+        pool = ConnectionPool.from_url(
+            f"redis://{master_host[0]}:{master_host[1]}",
+            max_connections=max_connections,
+        )
+
+        parent_conn = pool.get_connection("ping")
+
+        def target(pool, parent_conn):
+            with exit_callback(pool.disconnect):
+                child_conn = pool.get_connection("ping")
+                assert child_conn.pid != parent_conn.pid
+                pool.release(child_conn)
+                assert pool._created_connections == 1
+                assert child_conn in pool._available_connections
+                pool.release(parent_conn)
+                assert pool._created_connections == 1
+                assert child_conn in pool._available_connections
+                assert parent_conn not in pool._available_connections
+
+        proc = multiprocessing.Process(target=target, args=(pool, parent_conn))
+        proc.start()
+        proc.join(3)
+        assert proc.exitcode == 0
+
     @pytest.mark.parametrize("max_connections", [1, 2, None])
     def test_pool(self, max_connections, master_host):
         """
@@ -91,7 +129,7 @@ class TestMultiprocessing:
             max_connections=max_connections,
         )
 
-        conn = pool.get_connection("ping")
+        conn = pool.get_connection()
         main_conn_pid = conn.pid
         with exit_callback(pool.release, conn):
             conn.send_command("ping")
@@ -99,7 +137,7 @@ class TestMultiprocessing:
 
         def target(pool):
             with exit_callback(pool.disconnect):
-                conn = pool.get_connection("ping")
+                conn = pool.get_connection()
                 assert conn.pid != main_conn_pid
                 with exit_callback(pool.release, conn):
                     assert conn.send_command("ping") is None
@@ -112,7 +150,7 @@ class TestMultiprocessing:
 
         # Check that connection is still alive after fork process has exited
         # and disconnected the connections in its pool
-        conn = pool.get_connection("ping")
+        conn = pool.get_connection()
         with exit_callback(pool.release, conn):
             assert conn.send_command("ping") is None
             assert conn.read_response() == b"PONG"
@@ -128,12 +166,12 @@ class TestMultiprocessing:
             max_connections=max_connections,
         )
 
-        conn = pool.get_connection("ping")
+        conn = pool.get_connection()
         assert conn.send_command("ping") is None
         assert conn.read_response() == b"PONG"
 
         def target(pool, disconnect_event):
-            conn = pool.get_connection("ping")
+            conn = pool.get_connection()
             with exit_callback(pool.release, conn):
                 assert conn.send_command("ping") is None
                 assert conn.read_response() == b"PONG"

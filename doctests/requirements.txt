@@ -1,0 +1,6 @@
+numpy
+pandas
+requests
+sentence_transformers
+tabulate
+redis #install latest stable version

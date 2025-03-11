@@ -208,7 +208,7 @@ async def test_cluster(master_host):
         port = cluster_port + i
         remapped = remap_base + i
         forward_addr = hostname, port
-        proxy = DelayProxy(addr=("127.0.0.1", remapped), redis_addr=forward_addr)
+        proxy = DelayProxy(addr=(hostname, remapped), redis_addr=forward_addr)
         proxies.append(proxy)
 
     def all_clear():
@@ -233,7 +233,7 @@ async def test_cluster(master_host):
             await stack.enter_async_context(p)
 
         r = RedisCluster.from_url(
-            f"redis://127.0.0.1:{remap_base}", address_remap=remap
+            f"redis://{hostname}:{remap_base}", address_remap=remap
         )
         try:
             await r.initialize()
@@ -253,7 +253,7 @@ async def test_cluster(master_host):
             with pytest.raises(asyncio.CancelledError):
                 await t
 
-            # try a number of requests to excercise all the connections
+            # try a number of requests to exercise all the connections
             async def doit():
                 assert await r.get("bar") == b"bar"
                 assert await r.ping()
@@ -261,4 +261,4 @@ async def test_cluster(master_host):
 
             await asyncio.gather(*[doit() for _ in range(10)])
         finally:
-            await r.close()
+            await r.aclose()

@@ -7,12 +7,11 @@ from typing import (
     Awaitable,
     Iterable,
     Mapping,
+    Protocol,
     Type,
     TypeVar,
     Union,
 )
-
-from redis.compat import Protocol
 
 if TYPE_CHECKING:
     from redis._parsers import Encoder
@@ -21,7 +20,7 @@ if TYPE_CHECKING:
 
 
 Number = Union[int, float]
-EncodedT = Union[bytes, memoryview]
+EncodedT = Union[bytes, bytearray, memoryview]
 DecodedT = Union[str, int, float]
 EncodableT = Union[EncodedT, DecodedT]
 AbsExpiryT = Union[int, datetime]
@@ -33,6 +32,7 @@ KeyT = _StringLikeT  # Main redis key space
 PatternT = _StringLikeT  # Patterns matched against keys, fields etc
 FieldT = EncodableT  # Fields within hash tables, streams and geo commands
 KeysT = Union[KeyT, Iterable[KeyT]]
+ResponseT = Union[Awaitable[Any], Any]
 ChannelT = _StringLikeT
 GroupT = _StringLikeT  # Consumer group
 ConsumerT = _StringLikeT  # Consumer name
@@ -54,12 +54,8 @@ ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Except
 class CommandsProtocol(Protocol):
     connection_pool: Union["AsyncConnectionPool", "ConnectionPool"]
 
-    def execute_command(self, *args, **options):
-        ...
+    def execute_command(self, *args, **options) -> ResponseT: ...
 
 
-class ClusterCommandsProtocol(CommandsProtocol, Protocol):
+class ClusterCommandsProtocol(CommandsProtocol):
     encoder: "Encoder"
-
-    def execute_command(self, *args, **options) -> Union[Any, Awaitable]:
-        ...

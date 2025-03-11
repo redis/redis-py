@@ -54,7 +54,7 @@ def timer(func):
             count = args[1]
         print(f"{func.__name__} - {count} Requests")
         print(f"Duration  = {duration}")
-        print(f"Rate = {count/duration}")
+        print(f"Rate = {count / duration}")
         print()
         return ret
 

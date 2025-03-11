@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from cryptography.hazmat.primitives.hashes import SHA1, Hash
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.x509 import ocsp
+
 from redis.exceptions import AuthorizationError, ConnectionError
 
 
@@ -56,12 +57,12 @@ def _check_certificate(issuer_cert, ocsp_bytes, validate=True):
     if ocsp_response.response_status == ocsp.OCSPResponseStatus.SUCCESSFUL:
         if ocsp_response.certificate_status != ocsp.OCSPCertStatus.GOOD:
             raise ConnectionError(
-                f'Received an {str(ocsp_response.certificate_status).split(".")[1]} '
+                f"Received an {str(ocsp_response.certificate_status).split('.')[1]} "
                 "ocsp certificate status"
             )
     else:
         raise ConnectionError(
-            "failed to retrieve a sucessful response from the ocsp responder"
+            "failed to retrieve a successful response from the ocsp responder"
         )
 
     if ocsp_response.this_update >= datetime.datetime.now():
@@ -139,7 +140,7 @@ def _get_pubkey_hash(certificate):
 
 
 def ocsp_staple_verifier(con, ocsp_bytes, expected=None):
-    """An implemention of a function for set_ocsp_client_callback in PyOpenSSL.
+    """An implementation of a function for set_ocsp_client_callback in PyOpenSSL.
 
     This function validates that the provide ocsp_bytes response is valid,
     and matches the expected, stapled responses.
@@ -266,7 +267,7 @@ class OCSPVerifier:
         return url
 
     def check_certificate(self, server, cert, issuer_url):
-        """Checks the validitity of an ocsp server for an issuer"""
+        """Checks the validity of an ocsp server for an issuer"""
 
         r = requests.get(issuer_url)
         if not r.ok:

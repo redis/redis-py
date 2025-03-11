@@ -17,8 +17,8 @@ Nodes <#specifying-target-nodes>`__ \| `Multi-key
 Commands <#multi-key-commands>`__ \| `Known PubSub
 Limitations <#known-pubsub-limitations>`__
 
-Creating clusters
------------------
+Connecting to cluster
+---------------------
 
 Connecting redis-py to a Redis Cluster instance(s) requires at a minimum
 a single node for cluster discovery. There are multiple ways in which a
@@ -92,7 +92,7 @@ The ‘target_nodes’ parameter is explained in the following section,
    >>> # target-node: default-node
    >>> rc.ping()
 
-Specfiying Target Nodes
+Specifying Target Nodes
 -----------------------
 
 As mentioned above, all non key-based RedisCluster commands accept the

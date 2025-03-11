@@ -10,10 +10,10 @@ if not hasattr(inspect, "getargspec"):
 
 
 @task
-def devenv(c):
+def devenv(c, endpoints="all"):
     """Brings up the test environment, by wrapping docker compose."""
     clean(c)
-    cmd = "docker-compose --profile all up -d"
+    cmd = f"docker compose --profile {endpoints} up -d --build"
     run(cmd)
 
 
@@ -27,11 +27,9 @@ def build_docs(c):
 @task
 def linters(c):
     """Run code linters"""
-    run("flake8 tests redis")
-    run("black --target-version py37 --check --diff tests redis")
-    run("isort --check-only --diff tests redis")
+    run("ruff check tests redis")
+    run("ruff format --check --diff tests redis")
     run("vulture redis whitelist.py --min-confidence 80")
-    run("flynt --fail-on-change --dry-run tests redis")
 
 
 @task
@@ -42,39 +40,45 @@ def all_tests(c):
 
 
 @task
-def tests(c, uvloop=False, protocol=2):
-    """Run the redis-py test suite against the current python,
-    with and without hiredis.
-    """
+def tests(c, uvloop=False, protocol=2, profile=False):
+    """Run the redis-py test suite against the current python."""
     print("Starting Redis tests")
-    standalone_tests(c, uvloop=uvloop, protocol=protocol)
-    cluster_tests(c, uvloop=uvloop, protocol=protocol)
+    standalone_tests(c, uvloop=uvloop, protocol=protocol, profile=profile)
+    cluster_tests(c, uvloop=uvloop, protocol=protocol, profile=profile)
 
 
 @task
-def standalone_tests(c, uvloop=False, protocol=2):
+def standalone_tests(
+    c, uvloop=False, protocol=2, profile=False, redis_mod_url=None, extra_markers=""
+):
     """Run tests against a standalone redis instance"""
+    profile_arg = "--profile" if profile else ""
+    redis_mod_url = f"--redis-mod-url={redis_mod_url}" if redis_mod_url else ""
+    extra_markers = f" and {extra_markers}" if extra_markers else ""
+
     if uvloop:
         run(
-            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --uvloop --junit-xml=standalone-uvloop-results.xml"
+            f"pytest {profile_arg} --protocol={protocol} {redis_mod_url} --cov=./ --cov-report=xml:coverage_resp{protocol}_uvloop.xml -m 'not onlycluster{extra_markers}' --uvloop --junit-xml=standalone-resp{protocol}-uvloop-results.xml"
         )
     else:
         run(
-            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_redis.xml -W always -m 'not onlycluster' --junit-xml=standalone-results.xml"
+            f"pytest {profile_arg} --protocol={protocol} {redis_mod_url} --cov=./ --cov-report=xml:coverage_resp{protocol}.xml -m 'not onlycluster{extra_markers}' --junit-xml=standalone-resp{protocol}-results.xml"
         )
 
 
 @task
-def cluster_tests(c, uvloop=False, protocol=2):
+def cluster_tests(c, uvloop=False, protocol=2, profile=False):
     """Run tests against a redis cluster"""
+    profile_arg = "--profile" if profile else ""
     cluster_url = "redis://localhost:16379/0"
+    cluster_tls_url = "rediss://localhost:27379/0"
     if uvloop:
         run(
-            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-uvloop-results.xml --uvloop"
+            f"pytest {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster_resp{protocol}_uvloop.xml -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --redis-ssl-url={cluster_tls_url} --junit-xml=cluster-resp{protocol}-uvloop-results.xml --uvloop"
         )
     else:
         run(
-            f"pytest --protocol={protocol} --cov=./ --cov-report=xml:coverage_clusteclient.xml -W always -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --junit-xml=cluster-results.xml"
+            f"pytest  {profile_arg} --protocol={protocol} --cov=./ --cov-report=xml:coverage_cluster_resp{protocol}.xml -m 'not onlynoncluster and not redismod' --redis-url={cluster_url} --redis-ssl-url={cluster_tls_url} --junit-xml=cluster-resp{protocol}-results.xml"
         )
 
 
@@ -85,10 +89,10 @@ def clean(c):
         shutil.rmtree("build")
     if os.path.isdir("dist"):
         shutil.rmtree("dist")
-    run("docker-compose --profile all rm -s -f")
+    run("docker compose --profile all rm -s -f")
 
 
 @task
 def package(c):
     """Create the python packages"""
-    run("python setup.py sdist bdist_wheel")
+    run("python -m build .")
