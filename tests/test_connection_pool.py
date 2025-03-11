@@ -7,10 +7,16 @@ from unittest import mock
 
 import pytest
 import redis
-from redis.connection import to_bool
-from redis.utils import SSL_AVAILABLE
+from redis.cache import CacheConfig
+from redis.connection import CacheProxyConnection, Connection, to_bool
+from redis.utils import HIREDIS_AVAILABLE, SSL_AVAILABLE
 
-from .conftest import _get_client, skip_if_redis_enterprise, skip_if_server_version_lt
+from .conftest import (
+    _get_client,
+    skip_if_redis_enterprise,
+    skip_if_resp_version,
+    skip_if_server_version_lt,
+)
 from .test_pubsub import wait_for_message
 
 
@@ -48,7 +54,7 @@ class TestConnectionPool:
         pool = self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=DummyConnection
         )
-        connection = pool.get_connection("_")
+        connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
 
@@ -65,25 +71,40 @@ class TestConnectionPool:
     def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
-        c1 = pool.get_connection("_")
-        c2 = pool.get_connection("_")
+        c1 = pool.get_connection()
+        c2 = pool.get_connection()
         assert c1 != c2
 
     def test_max_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
         pool = self.get_pool(max_connections=2, connection_kwargs=connection_kwargs)
-        pool.get_connection("_")
-        pool.get_connection("_")
+        pool.get_connection()
+        pool.get_connection()
         with pytest.raises(redis.ConnectionError):
-            pool.get_connection("_")
+            pool.get_connection()
 
     def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
-        c1 = pool.get_connection("_")
+        c1 = pool.get_connection()
         pool.release(c1)
-        c2 = pool.get_connection("_")
+        c2 = pool.get_connection()
         assert c1 == c2
+
+    def test_release_not_owned_connection(self, master_host):
+        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
+        pool1 = self.get_pool(connection_kwargs=connection_kwargs)
+        c1 = pool1.get_connection("_")
+        pool2 = self.get_pool(
+            connection_kwargs={"host": master_host[0], "port": master_host[1]}
+        )
+        c2 = pool2.get_connection("_")
+        pool2.release(c2)
+
+        assert len(pool2._available_connections) == 1
+
+        pool2.release(c1)
+        assert len(pool2._available_connections) == 1
 
     def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {
@@ -95,11 +116,8 @@ class TestConnectionPool:
         pool = self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=redis.Connection
         )
-        expected = (
-            "ConnectionPool<Connection<"
-            "host=localhost,port=6379,db=1,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "host=localhost,port=6379,db=1,client_name=test-client"
+        assert expected in repr(pool)
 
     def test_repr_contains_db_info_unix(self):
         connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
@@ -107,11 +125,8 @@ class TestConnectionPool:
             connection_kwargs=connection_kwargs,
             connection_class=redis.UnixDomainSocketConnection,
         )
-        expected = (
-            "ConnectionPool<UnixDomainSocketConnection<"
-            "path=/abc,db=1,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "path=/abc,db=1,client_name=test-client"
+        assert expected in repr(pool)
 
 
 class TestBlockingConnectionPool:
@@ -133,15 +148,15 @@ class TestBlockingConnectionPool:
             "port": master_host[1],
         }
         pool = self.get_pool(connection_kwargs=connection_kwargs)
-        connection = pool.get_connection("_")
+        connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
 
     def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
-        c1 = pool.get_connection("_")
-        c2 = pool.get_connection("_")
+        c1 = pool.get_connection()
+        c2 = pool.get_connection()
         assert c1 != c2
 
     def test_connection_pool_blocks_until_timeout(self, master_host):
@@ -150,13 +165,13 @@ class TestBlockingConnectionPool:
         pool = self.get_pool(
             max_connections=1, timeout=0.1, connection_kwargs=connection_kwargs
         )
-        pool.get_connection("_")
+        pool.get_connection()
 
-        start = time.time()
+        start = time.monotonic()
         with pytest.raises(redis.ConnectionError):
-            pool.get_connection("_")
+            pool.get_connection()
         # we should have waited at least 0.1 seconds
-        assert time.time() - start >= 0.1
+        assert time.monotonic() - start >= 0.1
 
     def test_connection_pool_blocks_until_conn_available(self, master_host):
         """
@@ -167,34 +182,31 @@ class TestBlockingConnectionPool:
         pool = self.get_pool(
             max_connections=1, timeout=2, connection_kwargs=connection_kwargs
         )
-        c1 = pool.get_connection("_")
+        c1 = pool.get_connection()
 
         def target():
             time.sleep(0.1)
             pool.release(c1)
 
-        start = time.time()
+        start = time.monotonic()
         Thread(target=target).start()
-        pool.get_connection("_")
-        assert time.time() - start >= 0.1
+        pool.get_connection()
+        assert time.monotonic() - start >= 0.1
 
     def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
         pool = self.get_pool(connection_kwargs=connection_kwargs)
-        c1 = pool.get_connection("_")
+        c1 = pool.get_connection()
         pool.release(c1)
-        c2 = pool.get_connection("_")
+        c2 = pool.get_connection()
         assert c1 == c2
 
     def test_repr_contains_db_info_tcp(self):
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
         )
-        expected = (
-            "ConnectionPool<Connection<"
-            "host=localhost,port=6379,db=0,client_name=test-client>>"
-        )
-        assert repr(pool) == expected
+        expected = "host=localhost,port=6379,db=0,client_name=test-client"
+        assert expected in repr(pool)
 
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
@@ -202,11 +214,22 @@ class TestBlockingConnectionPool:
             path="abc",
             client_name="test-client",
         )
-        expected = (
-            "ConnectionPool<UnixDomainSocketConnection<"
-            "path=abc,db=0,client_name=test-client>>"
+        expected = "path=abc,db=0,client_name=test-client"
+        assert expected in repr(pool)
+
+    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
+    @pytest.mark.onlynoncluster
+    @skip_if_resp_version(2)
+    @skip_if_server_version_lt("7.4.0")
+    def test_initialise_pool_with_cache(self, master_host):
+        pool = redis.BlockingConnectionPool(
+            connection_class=Connection,
+            host=master_host[0],
+            port=master_host[1],
+            protocol=3,
+            cache_config=CacheConfig(),
         )
-        assert repr(pool) == expected
+        assert isinstance(pool.get_connection(), CacheProxyConnection)
 
 
 class TestConnectionPoolURLParsing:
@@ -481,23 +504,23 @@ class TestSSLConnectionURLParsing:
         import ssl
 
         class DummyConnectionPool(redis.ConnectionPool):
-            def get_connection(self, *args, **kwargs):
+            def get_connection(self):
                 return self.make_connection()
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_cert_reqs=none")
-        assert pool.get_connection("_").cert_reqs == ssl.CERT_NONE
+        assert pool.get_connection().cert_reqs == ssl.CERT_NONE
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_cert_reqs=optional")
-        assert pool.get_connection("_").cert_reqs == ssl.CERT_OPTIONAL
+        assert pool.get_connection().cert_reqs == ssl.CERT_OPTIONAL
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_cert_reqs=required")
-        assert pool.get_connection("_").cert_reqs == ssl.CERT_REQUIRED
+        assert pool.get_connection().cert_reqs == ssl.CERT_REQUIRED
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_check_hostname=False")
-        assert pool.get_connection("_").check_hostname is False
+        assert pool.get_connection().check_hostname is False
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_check_hostname=True")
-        assert pool.get_connection("_").check_hostname is True
+        assert pool.get_connection().check_hostname is True
 
 
 class TestConnection:
@@ -579,7 +602,9 @@ class TestConnection:
         connection = redis.Redis.from_url("redis://localhost")
         pool = connection.connection_pool
 
-        assert re.match("(.*)<(.*)<(.*)>>", repr(pool)).groups() == (
+        assert re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
+        ).groups() == (
             "ConnectionPool",
             "Connection",
             "host=localhost,port=6379,db=0",
@@ -589,7 +614,9 @@ class TestConnection:
         connection = redis.Redis.from_url("unix:///path/to/socket")
         pool = connection.connection_pool
 
-        assert re.match("(.*)<(.*)<(.*)>>", repr(pool)).groups() == (
+        assert re.match(
+            r"< .*?([^\.]+) \( < .*?([^\.]+) \( (.+) \) > \) >", repr(pool), re.VERBOSE
+        ).groups() == (
             "ConnectionPool",
             "UnixDomainSocketConnection",
             "path=/path/to/socket,db=0",
@@ -652,18 +679,18 @@ class TestHealthCheck:
         return _get_client(redis.Redis, request, health_check_interval=self.interval)
 
     def assert_interval_advanced(self, connection):
-        diff = connection.next_health_check - time.time()
+        diff = connection.next_health_check - time.monotonic()
         assert self.interval > diff > (self.interval - 1)
 
     def test_health_check_runs(self, r):
-        r.connection.next_health_check = time.time() - 1
+        r.connection.next_health_check = time.monotonic() - 1
         r.connection.check_health()
         self.assert_interval_advanced(r.connection)
 
     def test_arbitrary_command_invokes_health_check(self, r):
         # invoke a command to make sure the connection is entirely setup
         r.get("foo")
-        r.connection.next_health_check = time.time()
+        r.connection.next_health_check = time.monotonic()
         with mock.patch.object(
             r.connection, "send_command", wraps=r.connection.send_command
         ) as m:
@@ -689,7 +716,7 @@ class TestHealthCheck:
 
     def test_health_check_in_pipeline(self, r):
         with r.pipeline(transaction=False) as pipe:
-            pipe.connection = pipe.connection_pool.get_connection("_")
+            pipe.connection = pipe.connection_pool.get_connection()
             pipe.connection.next_health_check = 0
             with mock.patch.object(
                 pipe.connection, "send_command", wraps=pipe.connection.send_command
@@ -700,7 +727,7 @@ class TestHealthCheck:
 
     def test_health_check_in_transaction(self, r):
         with r.pipeline(transaction=True) as pipe:
-            pipe.connection = pipe.connection_pool.get_connection("_")
+            pipe.connection = pipe.connection_pool.get_connection()
             pipe.connection.next_health_check = 0
             with mock.patch.object(
                 pipe.connection, "send_command", wraps=pipe.connection.send_command
@@ -712,7 +739,7 @@ class TestHealthCheck:
     def test_health_check_in_watched_pipeline(self, r):
         r.set("foo", "bar")
         with r.pipeline(transaction=False) as pipe:
-            pipe.connection = pipe.connection_pool.get_connection("_")
+            pipe.connection = pipe.connection_pool.get_connection()
             pipe.connection.next_health_check = 0
             with mock.patch.object(
                 pipe.connection, "send_command", wraps=pipe.connection.send_command
@@ -736,7 +763,7 @@ class TestHealthCheck:
     def test_health_check_in_pubsub_before_subscribe(self, r):
         "A health check happens before the first [p]subscribe"
         p = r.pubsub()
-        p.connection = p.connection_pool.get_connection("_")
+        p.connection = p.connection_pool.get_connection()
         p.connection.next_health_check = 0
         with mock.patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
@@ -758,7 +785,7 @@ class TestHealthCheck:
         connection health
         """
         p = r.pubsub()
-        p.connection = p.connection_pool.get_connection("_")
+        p.connection = p.connection_pool.get_connection()
         p.connection.next_health_check = 0
         with mock.patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
@@ -798,7 +825,7 @@ class TestHealthCheck:
         check the connection's health.
         """
         p = r.pubsub()
-        p.connection = p.connection_pool.get_connection("_")
+        p.connection = p.connection_pool.get_connection()
         with mock.patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
         ) as m:

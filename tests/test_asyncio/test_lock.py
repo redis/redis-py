@@ -104,16 +104,16 @@ class TestLock:
         lock_2 = self.get_lock(r, "foo")
         assert lock_2.blocking
 
-    async def test_blocking_timeout(self, r, event_loop):
+    async def test_blocking_timeout(self, r):
         lock1 = self.get_lock(r, "foo")
         assert await lock1.acquire(blocking=False)
         bt = 0.2
         sleep = 0.05
         lock2 = self.get_lock(r, "foo", sleep=sleep, blocking_timeout=bt)
-        start = event_loop.time()
+        start = asyncio.get_running_loop().time()
         assert not await lock2.acquire()
         # The elapsed duration should be less than the total blocking_timeout
-        assert bt >= (event_loop.time() - start) > bt - sleep
+        assert bt >= (asyncio.get_running_loop().time() - start) > bt - sleep
         await lock1.release()
 
     async def test_context_manager(self, r):
@@ -128,6 +128,36 @@ class TestLock:
         with pytest.raises(LockError):
             async with self.get_lock(r, "foo", blocking_timeout=0.1):
                 pass
+
+    async def test_context_manager_not_raise_on_release_lock_not_owned_error(self, r):
+        try:
+            async with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=False
+            ):
+                await asyncio.sleep(0.15)
+        except LockNotOwnedError:
+            pytest.fail("LockNotOwnedError should not have been raised")
+
+        with pytest.raises(LockNotOwnedError):
+            async with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=True
+            ):
+                await asyncio.sleep(0.15)
+
+    async def test_context_manager_not_raise_on_release_lock_error(self, r):
+        try:
+            async with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=False
+            ) as lock:
+                lock.release()
+        except LockError:
+            pytest.fail("LockError should not have been raised")
+
+        with pytest.raises(LockError):
+            async with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=True
+            ) as lock:
+                lock.release()
 
     async def test_high_sleep_small_blocking_timeout(self, r):
         lock1 = self.get_lock(r, "foo")
@@ -174,11 +204,12 @@ class TestLock:
         await lock.release()
 
     async def test_extend_lock_float(self, r):
-        lock = self.get_lock(r, "foo", timeout=10.0)
+        lock = self.get_lock(r, "foo", timeout=10.5)
         assert await lock.acquire(blocking=False)
-        assert 8000 < (await r.pttl("foo")) <= 10000
-        assert await lock.extend(10.0)
-        assert 16000 < (await r.pttl("foo")) <= 20000
+        assert 10400 < (await r.pttl("foo")) <= 10500
+        old_ttl = await r.pttl("foo")
+        assert await lock.extend(10.5)
+        assert old_ttl + 10400 < (await r.pttl("foo")) <= old_ttl + 10500
         await lock.release()
 
     async def test_extending_unlocked_lock_raises_error(self, r):
@@ -237,4 +268,4 @@ class TestLockClassSelection:
                 pass
 
         lock = r.lock("foo", lock_class=MyLock)
-        assert type(lock) == MyLock
+        assert isinstance(lock, MyLock)

@@ -38,7 +38,7 @@ def parse_info(response):
     response = str_if_bytes(response)
 
     def get_value(value):
-        if "," not in value or "=" not in value:
+        if "," not in value and "=" not in value:
             try:
                 if "." in value:
                     return float(value)
@@ -46,11 +46,18 @@ def parse_info(response):
                     return int(value)
             except ValueError:
                 return value
+        elif "=" not in value:
+            return [get_value(v) for v in value.split(",") if v]
         else:
             sub_dict = {}
             for item in value.split(","):
-                k, v = item.rsplit("=", 1)
-                sub_dict[k] = get_value(v)
+                if not item:
+                    continue
+                if "=" in item:
+                    k, v = item.rsplit("=", 1)
+                    sub_dict[k] = get_value(v)
+                else:
+                    sub_dict[item] = True
             return sub_dict
 
     for line in response.splitlines():
@@ -80,7 +87,7 @@ def parse_memory_stats(response, **kwargs):
     """Parse the results of MEMORY STATS"""
     stats = pairs_to_dict(response, decode_keys=True, decode_string_values=True)
     for key, value in stats.items():
-        if key.startswith("db."):
+        if key.startswith("db.") and isinstance(value, list):
             stats[key] = pairs_to_dict(
                 value, decode_keys=True, decode_string_values=True
             )
@@ -268,17 +275,22 @@ def parse_xinfo_stream(response, **options):
         data = {str_if_bytes(k): v for k, v in response.items()}
     if not options.get("full", False):
         first = data.get("first-entry")
-        if first is not None:
+        if first is not None and first[0] is not None:
             data["first-entry"] = (first[0], pairs_to_dict(first[1]))
         last = data["last-entry"]
-        if last is not None:
+        if last is not None and last[0] is not None:
             data["last-entry"] = (last[0], pairs_to_dict(last[1]))
     else:
         data["entries"] = {_id: pairs_to_dict(entry) for _id, entry in data["entries"]}
-        if isinstance(data["groups"][0], list):
+        if len(data["groups"]) > 0 and isinstance(data["groups"][0], list):
             data["groups"] = [
                 pairs_to_dict(group, decode_keys=True) for group in data["groups"]
             ]
+            for g in data["groups"]:
+                if g["consumers"] and g["consumers"][0] is not None:
+                    g["consumers"] = [
+                        pairs_to_dict(c, decode_keys=True) for c in g["consumers"]
+                    ]
         else:
             data["groups"] = [
                 {str_if_bytes(k): v for k, v in group.items()}
@@ -322,7 +334,7 @@ def float_or_none(response):
     return float(response)
 
 
-def bool_ok(response):
+def bool_ok(response, **options):
     return str_if_bytes(response) == "OK"
 
 
@@ -354,7 +366,12 @@ def parse_scan(response, **options):
 
 def parse_hscan(response, **options):
     cursor, r = response
-    return int(cursor), r and pairs_to_dict(r) or {}
+    no_values = options.get("no_values", False)
+    if no_values:
+        payload = r or []
+    else:
+        payload = r and pairs_to_dict(r) or {}
+    return int(cursor), payload
 
 
 def parse_zscan(response, **options):
@@ -379,13 +396,20 @@ def parse_slowlog_get(response, **options):
         # an O(N) complexity) instead of the command.
         if isinstance(item[3], list):
             result["command"] = space.join(item[3])
-            result["client_address"] = item[4]
-            result["client_name"] = item[5]
+
+            # These fields are optional, depends on environment.
+            if len(item) >= 6:
+                result["client_address"] = item[4]
+                result["client_name"] = item[5]
         else:
             result["complexity"] = item[3]
             result["command"] = space.join(item[4])
-            result["client_address"] = item[5]
-            result["client_name"] = item[6]
+
+            # These fields are optional, depends on environment.
+            if len(item) >= 7:
+                result["client_address"] = item[5]
+                result["client_name"] = item[6]
+
         return result
 
     return [parse_item(item) for item in response]
@@ -428,9 +452,11 @@ def parse_cluster_info(response, **options):
 def _parse_node_line(line):
     line_items = line.split(" ")
     node_id, addr, flags, master_id, ping, pong, epoch, connected = line.split(" ")[:8]
-    addr = addr.split("@")[0]
+    ip = addr.split("@")[0]
+    hostname = addr.split("@")[1].split(",")[1] if "@" in addr and "," in addr else ""
     node_dict = {
         "node_id": node_id,
+        "hostname": hostname,
         "flags": flags,
         "master_id": master_id,
         "last_ping_sent": ping,
@@ -443,7 +469,7 @@ def _parse_node_line(line):
     if len(line_items) >= 9:
         slots, migrations = _parse_slots(line_items[8:])
         node_dict["slots"], node_dict["migrations"] = slots, migrations
-    return addr, node_dict
+    return ip, node_dict
 
 
 def _parse_slots(slot_ranges):
@@ -490,7 +516,7 @@ def parse_geosearch_generic(response, **options):
     except KeyError:  # it means the command was sent via execute_command
         return response
 
-    if type(response) != list:
+    if not isinstance(response, list):
         response_list = [response]
     else:
         response_list = response
@@ -814,23 +840,27 @@ _RedisCallbacksRESP2 = {
 
 _RedisCallbacksRESP3 = {
     **string_keys_to_dict(
+        "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
+    ),
+    **string_keys_to_dict(
         "ZRANGE ZINTER ZPOPMAX ZPOPMIN ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE "
         "ZUNION HGETALL XREADGROUP",
         lambda r, **kwargs: r,
     ),
     **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
-    "ACL LOG": lambda r: [
-        {str_if_bytes(key): str_if_bytes(value) for key, value in x.items()} for x in r
-    ]
-    if isinstance(r, list)
-    else bool_ok(r),
+    "ACL LOG": lambda r: (
+        [
+            {str_if_bytes(key): str_if_bytes(value) for key, value in x.items()}
+            for x in r
+        ]
+        if isinstance(r, list)
+        else bool_ok(r)
+    ),
     "COMMAND": parse_command_resp3,
     "CONFIG GET": lambda r: {
-        str_if_bytes(key)
-        if key is not None
-        else None: str_if_bytes(value)
-        if value is not None
-        else None
+        str_if_bytes(key) if key is not None else None: (
+            str_if_bytes(value) if value is not None else None
+        )
         for key, value in r.items()
     },
     "MEMORY STATS": lambda r: {str_if_bytes(key): value for key, value in r.items()},
@@ -838,11 +868,11 @@ _RedisCallbacksRESP3 = {
     "SENTINEL MASTERS": parse_sentinel_masters_resp3,
     "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_resp3,
     "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels_resp3,
-    "STRALGO": lambda r, **options: {
-        str_if_bytes(key): str_if_bytes(value) for key, value in r.items()
-    }
-    if isinstance(r, dict)
-    else str_if_bytes(r),
+    "STRALGO": lambda r, **options: (
+        {str_if_bytes(key): str_if_bytes(value) for key, value in r.items()}
+        if isinstance(r, dict)
+        else str_if_bytes(r)
+    ),
     "XINFO CONSUMERS": lambda r: [
         {str_if_bytes(key): value for key, value in x.items()} for x in r
     ],

@@ -1,6 +1,5 @@
 from redis.client import NEVER_DECODE
-from redis.exceptions import ModuleError
-from redis.utils import HIREDIS_AVAILABLE, deprecated_function
+from redis.utils import deprecated_function
 
 BF_RESERVE = "BF.RESERVE"
 BF_ADD = "BF.ADD"
@@ -139,9 +138,6 @@ class BFCommands:
         This command will return successive (iter, data) pairs until (0, NULL) to indicate completion.
         For more information see `BF.SCANDUMP <https://redis.io/commands/bf.scandump>`_.
         """  # noqa
-        if HIREDIS_AVAILABLE:
-            raise ModuleError("This command cannot be used when hiredis is available.")
-
         params = [key, iter]
         options = {}
         options[NEVER_DECODE] = []

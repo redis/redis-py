@@ -1,109 +1,107 @@
 ---
+x-client-libs-stack-image: &client-libs-stack-image
+  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_STACK_IMAGE_TAG:-rs-7.4.0-v2}"
 
-version: "3.8"
+x-client-libs-image: &client-libs-image
+  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-7.4.2}"
 
 services:
 
   redis:
-    image: redis/redis-stack-server:edge
+    <<: *client-libs-image
     container_name: redis-standalone
+    environment:
+      - TLS_ENABLED=yes
+      - REDIS_CLUSTER=no
+      - PORT=6379
+      - TLS_PORT=6666
+    command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --tls-auth-clients optional --save ""}
     ports:
       - 6379:6379
-    environment:
-      - "REDIS_ARGS=--enable-debug-command yes --enable-module-command yes"
+      - 6666:6666 # TLS port
+    volumes:
+      - "./dockers/standalone:/redis/work"
     profiles:
       - standalone
       - sentinel
       - replica
+      - all-stack
       - all
 
   replica:
-    image: redis/redis-stack-server:edge
+    <<: *client-libs-image
     container_name: redis-replica
     depends_on:
       - redis
     environment:
-      - "REDIS_ARGS=--replicaof redis 6379"
+      - TLS_ENABLED=no
+      - REDIS_CLUSTER=no
+      - PORT=6380
+    command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --replicaof redis 6379 --protected-mode no --save ""}
     ports:
-      - 6380:6379
+      - 6380:6380
+    volumes:
+      - "./dockers/replica:/redis/work"
     profiles:
       - replica
+      - all-stack
       - all
 
   cluster:
+    <<: *client-libs-image
     container_name: redis-cluster
-    build:
-      context: .
-      dockerfile: dockers/Dockerfile.cluster
+    environment:
+      - REDIS_CLUSTER=yes
+      - NODES=6
+      - REPLICAS=1
+      - TLS_ENABLED=yes
+      - PORT=16379
+      - TLS_PORT=27379
+    command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --tls-auth-clients optional --save ""}
     ports:
-      - 16379:16379
-      - 16380:16380
-      - 16381:16381
-      - 16382:16382
-      - 16383:16383
-      - 16384:16384
+      - "16379-16384:16379-16384"
+      - "27379-27384:27379-27384"
     volumes:
-      - "./dockers/cluster.redis.conf:/redis.conf:ro"
+      - "./dockers/cluster:/redis/work"
     profiles:
       - cluster
+      - all-stack
       - all
-
-  stunnel:
-    image: redisfab/stunnel:latest
-    depends_on:
-      - redis
-    ports:
-      - 6666:6666
-    profiles:
-      - all
-      - standalone
-      - ssl
-    volumes:
-      - "./dockers/stunnel/conf:/etc/stunnel/conf.d:ro"
-      - "./dockers/stunnel/keys:/etc/stunnel/keys:ro"
 
   sentinel:
-    image: redis/redis-stack-server:edge
+    <<: *client-libs-image
     container_name: redis-sentinel
     depends_on:
       - redis
     environment:
-      - "REDIS_ARGS=--port 26379"
-    entrypoint: "/opt/redis-stack/bin/redis-sentinel /redis.conf --port 26379"
+      - REDIS_CLUSTER=no
+      - NODES=3
+      - PORT=26379
+    command: ${REDIS_EXTRA_ARGS:---sentinel}
     ports:
       - 26379:26379
-    volumes:
-      - "./dockers/sentinel.conf:/redis.conf"
-    profiles:
-      - sentinel
-      - all
-
-  sentinel2:
-    image: redis/redis-stack-server:edge
-    container_name: redis-sentinel2
-    depends_on:
-      - redis
-    environment:
-      - "REDIS_ARGS=--port 26380"
-    entrypoint: "/opt/redis-stack/bin/redis-sentinel /redis.conf --port 26380"
-    ports:
       - 26380:26380
-    volumes:
-      - "./dockers/sentinel.conf:/redis.conf"
-    profiles:
-      - sentinel
-      - all
-
-  sentinel3:
-    image: redis/redis-stack-server:edge
-    container_name: redis-sentinel3
-    depends_on:
-      - redis
-    entrypoint: "/opt/redis-stack/bin/redis-sentinel /redis.conf --port 26381"
-    ports:
       - 26381:26381
     volumes:
-      - "./dockers/sentinel.conf:/redis.conf"
+      - "./dockers/sentinel.conf:/redis/config-default/redis.conf"
+      - "./dockers/sentinel:/redis/work"
     profiles:
       - sentinel
+      - all-stack
+      - all
+
+  redis-stack:
+    <<: *client-libs-stack-image
+    container_name: redis-stack
+    environment:
+      - REDIS_CLUSTER=no
+      - PORT=6379
+    command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --save ""}
+    ports:
+      - 6479:6379
+    volumes:
+      - "./dockers/redis-stack:/redis/work"
+    profiles:
+      - standalone
+      - all-stack
       - all

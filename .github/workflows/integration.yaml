@@ -17,153 +17,184 @@ on:
     - cron: '0 1 * * *' # nightly build
 
 concurrency:
-  group: ${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.event.pull_request.number || github.ref }}-integration
   cancel-in-progress: true
 
 permissions:
   contents: read  #  to fetch code (actions/checkout)
 
+env:
+  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  # this speeds up coverage with Python 3.12: https://github.com/nedbat/coveragepy/issues/1665
+  COVERAGE_CORE: sysmon
+  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: 'rs-7.4.0-v2'
+  CURRENT_REDIS_VERSION: '7.4.2'
+
 jobs:
-
-   dependency-audit:
-     name: Dependency audit
-     runs-on: ubuntu-latest
-     steps:
-       - uses: actions/checkout@v4
-       - uses: pypa/gh-action-pip-audit@v1.0.8
-         with:
-           inputs: requirements.txt dev_requirements.txt
-           ignore-vulns: |
-             GHSA-w596-4wvx-j9j6  # subversion related git pull, dependency for pytest. There is no impact here.
-
-   lint:
-     name: Code linters
-     runs-on: ubuntu-latest
-     steps:
-       - uses: actions/checkout@v4
-       - uses: actions/setup-python@v4
-         with:
-           python-version: 3.9
-           cache: 'pip'
-       - name: run code linters
-         run: |
-           pip install -r dev_requirements.txt
-           invoke linters
-
-   run-tests:
-     runs-on: ubuntu-latest
-     timeout-minutes: 60
-     strategy:
-       max-parallel: 15
-       fail-fast: false
-       matrix:
-         python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
-         test-type: ['standalone', 'cluster']
-         connection-type: ['hiredis', 'plain']
-     env:
-       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-     name: Python ${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}} tests
-     steps:
-       - uses: actions/checkout@v4
-       - uses: actions/setup-python@v4
-         with:
-           python-version: ${{ matrix.python-version }}
-           cache: 'pip'
-       - name: run tests
-         run: |
-           pip install -U setuptools wheel
-           pip install -r requirements.txt
-           pip install -r dev_requirements.txt
-           if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-            pip install hiredis
-           fi
-           invoke devenv
-           sleep 10 # time to settle
-           invoke ${{matrix.test-type}}-tests
-
-       - uses: actions/upload-artifact@v3
-         if: success() || failure()
-         with:
-           name: pytest-results-${{matrix.test-type}}-${{matrix.connection-type}}-${{matrix.python-version}}
-           path: '${{matrix.test-type}}*results.xml'
-
-       - name: Upload codecov coverage
-         uses: codecov/codecov-action@v3
-         if: ${{matrix.python-version == '3.11'}}
-         with:
-           fail_ci_if_error: false
-
-       - name: View Test Results
-         uses: dorny/test-reporter@v1
-         if: success() || failure()
-         continue-on-error: true
-         with:
-           name: Test Results ${{matrix.python-version}} ${{matrix.test-type}}-${{matrix.connection-type}}
-           path: '*.xml'
-           reporter: java-junit
-           list-suites: all
-           list-tests: all
-           max-annotations: 10
-           fail-on-error: 'false'
-
-   resp3_tests:
+  dependency-audit:
+    name: Dependency audit
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.7', '3.11']
-        test-type: ['standalone', 'cluster']
-        connection-type: ['hiredis', 'plain']
-        protocol: ['3']
-    env:
-       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-    name: RESP3 [${{ matrix.python-version }} ${{matrix.test-type}}-${{matrix.connection-type}}]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: pypa/gh-action-pip-audit@v1.0.8
+        with:
+          inputs: dev_requirements.txt
+          ignore-vulns: |
+            GHSA-w596-4wvx-j9j6  # subversion related git pull, dependency for pytest. There is no impact here.
+
+  lint:
+    name: Code linters
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+          cache: 'pip'
+      - name: run code linters
+        run: |
+          pip install -r dev_requirements.txt
+          pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
+          invoke linters
+
+  redis_version:
+    runs-on: ubuntu-latest
+    outputs:
+      CURRENT: ${{ env.CURRENT_REDIS_VERSION }}
+    steps:
+      - name: Compute outputs
+        run: |
+          echo "CURRENT=${{ env.CURRENT_REDIS_VERSION }}" >> $GITHUB_OUTPUT
+
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: redis_version
+    strategy:
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        redis-version: ['8.0-M04-pre', '${{ needs.redis_version.outputs.CURRENT }}', '7.2.7', '6.2.17']
+        python-version: ['3.8', '3.13']
+        parser-backend: ['plain']
+        event-loop: ['asyncio']
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        uses: ./.github/actions/run-tests
+        with:
+            python-version: ${{ matrix.python-version }}
+            parser-backend: ${{ matrix.parser-backend }}
+            redis-version: ${{ matrix.redis-version }}
+
+  python-compatibility-tests:
+    runs-on: ubuntu-latest
+    needs: [ redis_version, tests ]
+    timeout-minutes: 60
+    strategy:
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
+        python-version: ['3.9', '3.10', '3.11', '3.12', 'pypy-3.9', 'pypy-3.10']
+        parser-backend: [ 'plain' ]
+        event-loop: [ 'asyncio' ]
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        uses: ./.github/actions/run-tests
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-      - name: run tests
-        run: |
-          pip install -U setuptools wheel
-          pip install -r requirements.txt
-          pip install -r dev_requirements.txt
-          if [ "${{matrix.connection-type}}" == "hiredis" ]; then
-            pip install hiredis
-          fi
-          invoke devenv
-          sleep 5 # time to settle
-          invoke ${{matrix.test-type}}-tests
-          invoke ${{matrix.test-type}}-tests --uvloop
+          parser-backend: ${{ matrix.parser-backend }}
+          redis-version: ${{ matrix.redis-version }}
 
-   build_and_test_package:
+  hiredis-tests:
+    runs-on: ubuntu-latest
+    needs: [redis_version, tests]
+    timeout-minutes: 60
+    strategy:
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
+        python-version: [ '3.8', '3.13']
+        parser-backend: [ 'hiredis' ]
+        hiredis-version: [ '>=3.0.0', '<3.0.0' ]
+        event-loop: [ 'asyncio' ]
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        uses: ./.github/actions/run-tests
+        with:
+          python-version: ${{ matrix.python-version }}
+          parser-backend: ${{ matrix.parser-backend }}
+          redis-version: ${{ matrix.redis-version }}
+          hiredis-version: ${{ matrix.hiredis-version }}
+
+  uvloop-tests:
+    runs-on: ubuntu-latest
+    needs: [redis_version, tests]
+    timeout-minutes: 60
+    strategy:
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
+        python-version: [ '3.8', '3.13' ]
+        parser-backend: [ 'plain' ]
+        event-loop: [ 'uvloop' ]
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        uses: ./.github/actions/run-tests
+        with:
+          python-version: ${{ matrix.python-version }}
+          parser-backend: ${{ matrix.parser-backend }}
+          redis-version: ${{ matrix.redis-version }}
+          event-loop: ${{ matrix.event-loop }}
+
+  build-and-test-package:
     name: Validate building and installing the package
     runs-on: ubuntu-latest
-    needs: [run-tests]
+    needs: [tests]
     strategy:
       fail-fast: false
       matrix:
         extension: ['tar.gz', 'whl']
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: 3.9
       - name: Run installed unit tests
+        env:
+          CLIENT_LIBS_TEST_IMAGE_TAG: ${{ env.CURRENT_REDIS_VERSION }}
+          CLIENT_LIBS_TEST_STACK_IMAGE_TAG: ${{ env.CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG }}
         run: |
           bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
 
-   install_package_from_commit:
+  install-package-from-commit:
     name: Install package from commit hash
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', 'pypy-3.7', 'pypy-3.8', 'pypy-3.9']
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13', 'pypy-3.9', 'pypy-3.10']
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'

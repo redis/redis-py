@@ -6,7 +6,7 @@ class TSInfo:
     """
     Hold information and statistics on the time-series.
     Can be created using ``tsinfo`` command
-    https://oss.redis.com/redistimeseries/commands/#tsinfo.
+    https://redis.io/docs/latest/commands/ts.info/
     """
 
     rules = []
@@ -57,7 +57,7 @@ class TSInfo:
             Policy that will define handling of duplicate samples.
 
         Can read more about on
-        https://oss.redis.com/redistimeseries/configuration/#duplicate_policy
+        https://redis.io/docs/latest/develop/data-types/timeseries/configuration/#duplicate_policy
         """
         response = dict(zip(map(nativestr, args[::2]), args[1::2]))
         self.rules = response.get("rules")
@@ -78,7 +78,7 @@ class TSInfo:
             self.chunk_size = response["chunkSize"]
         if "duplicatePolicy" in response:
             self.duplicate_policy = response["duplicatePolicy"]
-            if type(self.duplicate_policy) == bytes:
+            if isinstance(self.duplicate_policy, bytes):
                 self.duplicate_policy = self.duplicate_policy.decode()
 
     def get(self, item):

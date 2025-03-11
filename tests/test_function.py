@@ -68,7 +68,7 @@ class TestFunction:
                 b"library_name": b"mylib",
                 b"engine": b"LUA",
                 b"functions": [
-                    {b"name": b"myfunc", b"description": None, b"flags": {b"no-writes"}}
+                    {b"name": b"myfunc", b"description": None, b"flags": [b"no-writes"]}
                 ],
             }
         ]
@@ -98,7 +98,7 @@ class TestFunction:
                 b"library_name": b"mylib",
                 b"engine": b"LUA",
                 b"functions": [
-                    {b"name": b"myfunc", b"description": None, b"flags": {b"no-writes"}}
+                    {b"name": b"myfunc", b"description": None, b"flags": [b"no-writes"]}
                 ],
             }
         ]

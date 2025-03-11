@@ -1,0 +1,124 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "redis"
+dynamic = ["version"]
+description = "Python client for Redis database and key-value store"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+authors = [{ name = "Redis Inc.", email = "oss@redis.com" }]
+keywords = ["Redis", "database", "key-value-store"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = ['async-timeout>=4.0.3; python_full_version<"3.11.3"']
+
+[project.optional-dependencies]
+hiredis = [
+    "hiredis>=3.0.0",
+]
+ocsp = [
+    "cryptography>=36.0.1",
+    "pyopenssl>=20.0.1",
+    "requests>=2.31.0",
+]
+jwt = [
+    "PyJWT~=2.9.0",
+]
+
+[project.urls]
+Changes = "https://github.com/redis/redis-py/releases"
+Code = "https://github.com/redis/redis-py"
+Documentation = "https://redis.readthedocs.io/en/latest/"
+Homepage = "https://github.com/redis/redis-py"
+"Issue tracker" = "https://github.com/redis/redis-py/issues"
+
+[tool.hatch.version]
+path = "redis/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["/redis", "/tests", "dev_requirements.txt"]
+
+[tool.hatch.build.targets.wheel]
+include = ["/redis"]
+
+[tool.pytest.ini_options]
+addopts = "-s"
+markers = [
+    "redismod: run only the redis module tests",
+    "pipeline: pipeline tests",
+    "onlycluster: marks tests to be run only with cluster mode redis",
+    "onlynoncluster: marks tests to be run only with standalone redis",
+    "ssl: marker for only the ssl tests",
+    "asyncio: marker for async tests",
+    "replica: replica tests",
+    "experimental: run only experimental tests",
+    "cp_integration: credential provider integration tests",
+]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+timeout = 30
+filterwarnings = [
+    "always",
+    # Ignore a coverage warning when COVERAGE_CORE=sysmon for Pythons < 3.12.
+    "ignore:sys.monitoring isn't available:coverage.exceptions.CoverageWarning",
+]
+
+[tool.ruff]
+target-version = "py38"
+line-length = 88
+exclude = [
+    "*.egg-info",
+    "*.pyc",
+    ".git",
+    ".venv*",
+    "build",
+    "dist",
+    "docker",
+    "docs/*",
+    "doctests/*",
+    "tasks.py",
+    "venv*",
+    "whitelist.py",
+]
+
+[tool.ruff.lint]
+ignore = [
+    "E501", # line too long (taken care of with ruff format)
+    "E741", # ambiguous variable name
+    "N818", # Errors should have Error suffix
+]
+
+select = ["E", "F", "FLY", "I", "N", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"redis/commands/bf/*" = [
+    # the `bf` module uses star imports, so this is required there.
+    "F405", # name may be undefined, or defined from star imports
+]
+"redis/commands/{bf,timeseries,json,search}/*" = ["N"]
+"tests/*" = [
+    "I",    # TODO: could be enabled, plenty of changes
+    "N801", # class name should use CapWords convention
+    "N803", # argument name should be lowercase
+    "N802", # function name should be lowercase
+    "N806", # variable name should be lowercase
+]

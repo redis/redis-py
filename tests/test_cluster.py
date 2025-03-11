@@ -10,6 +10,7 @@ from time import sleep
 from unittest.mock import DEFAULT, Mock, call, patch
 
 import pytest
+import redis
 from redis import Redis
 from redis._parsers import CommandsParser
 from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
@@ -150,7 +151,9 @@ def slowlog(request, r):
     r.config_set("slowlog-max-len", 128)
 
 
-def get_mocked_redis_client(func=None, *args, **kwargs):
+def get_mocked_redis_client(
+    func=None, cluster_slots_raise_error=False, *args, **kwargs
+):
     """
     Return a stable RedisCluster object that have deterministic
     nodes and slots setup to remove the problem of different IP addresses
@@ -163,8 +166,11 @@ def get_mocked_redis_client(func=None, *args, **kwargs):
 
         def execute_command(*_args, **_kwargs):
             if _args[0] == "CLUSTER SLOTS":
-                mock_cluster_slots = cluster_slots
-                return mock_cluster_slots
+                if cluster_slots_raise_error:
+                    raise ResponseError()
+                else:
+                    mock_cluster_slots = cluster_slots
+                    return mock_cluster_slots
             elif _args[0] == "COMMAND":
                 return {"get": [], "set": []}
             elif _args[0] == "INFO":
@@ -637,10 +643,10 @@ class TestRedisClusterObj:
                 mocks["send_command"].assert_has_calls(
                     [
                         call("READONLY"),
-                        call("GET", "foo"),
+                        call("GET", "foo", keys=["foo"]),
                         call("READONLY"),
-                        call("GET", "foo"),
-                        call("GET", "foo"),
+                        call("GET", "foo", keys=["foo"]),
+                        call("GET", "foo", keys=["foo"]),
                     ]
                 )
 
@@ -839,7 +845,7 @@ class TestRedisClusterObj:
             assert node.redis_connection.get_retry()._retries == retry._retries
             assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
         rand_node = r.get_random_node()
-        existing_conn = rand_node.redis_connection.connection_pool.get_connection("_")
+        existing_conn = rand_node.redis_connection.connection_pool.get_connection()
         # Change retry policy
         new_retry = Retry(ExponentialBackoff(), 3)
         r.set_retry(new_retry)
@@ -851,26 +857,27 @@ class TestRedisClusterObj:
                 node.redis_connection.get_retry()._backoff, ExponentialBackoff
             )
         assert existing_conn.retry._retries == new_retry._retries
-        new_conn = rand_node.redis_connection.connection_pool.get_connection("_")
+        new_conn = rand_node.redis_connection.connection_pool.get_connection()
         assert new_conn.retry._retries == new_retry._retries
 
     def test_cluster_retry_object(self, r) -> None:
         # Test default retry
+        # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
+        host = r.get_default_node().host
+
         retry = r.get_connection_kwargs().get("retry")
         assert isinstance(retry, Retry)
         assert retry._retries == 0
         assert isinstance(retry._backoff, type(default_backoff()))
-        node1 = r.get_node("127.0.0.1", 16379).redis_connection
-        node2 = r.get_node("127.0.0.1", 16380).redis_connection
+        node1 = r.get_node(host, 16379).redis_connection
+        node2 = r.get_node(host, 16380).redis_connection
         assert node1.get_retry()._retries == node2.get_retry()._retries
 
         # Test custom retry
         retry = Retry(ExponentialBackoff(10, 5), 5)
-        rc_custom_retry = RedisCluster("127.0.0.1", 16379, retry=retry)
+        rc_custom_retry = RedisCluster(host, 16379, retry=retry)
         assert (
-            rc_custom_retry.get_node("127.0.0.1", 16379)
-            .redis_connection.get_retry()
-            ._retries
+            rc_custom_retry.get_node(host, 16379).redis_connection.get_retry()._retries
             == retry._retries
         )
 
@@ -1568,7 +1575,7 @@ class TestClusterRedisCommands:
         assert isinstance(stats, dict)
         for key, value in stats.items():
             if key.startswith("db."):
-                assert isinstance(value, dict)
+                assert not isinstance(value, list)
 
     @skip_if_server_version_lt("4.0.0")
     def test_memory_help(self, r):
@@ -1685,7 +1692,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_not(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["{foo}a"] = test_str
         r.bitop("not", "{foo}r", "{foo}a")
@@ -1693,7 +1700,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_not_in_place(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["{foo}a"] = test_str
         r.bitop("not", "{foo}a", "{foo}a")
@@ -1701,7 +1708,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_single_string(self, r):
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         r["{foo}a"] = test_str
         r.bitop("and", "{foo}res1", "{foo}a")
         r.bitop("or", "{foo}res2", "{foo}a")
@@ -1712,8 +1719,8 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_string_operands(self, r):
-        r["{foo}a"] = b"\x01\x02\xFF\xFF"
-        r["{foo}b"] = b"\x01\x02\xFF"
+        r["{foo}a"] = b"\x01\x02\xff\xff"
+        r["{foo}b"] = b"\x01\x02\xff"
         r.bitop("and", "{foo}res1", "{foo}a", "{foo}b")
         r.bitop("or", "{foo}res2", "{foo}a", "{foo}b")
         r.bitop("xor", "{foo}res3", "{foo}a", "{foo}b")
@@ -2441,6 +2448,7 @@ class TestClusterRedisCommands:
             except Exception:
                 pass
 
+    @pytest.mark.redismod
     @skip_if_server_version_lt("7.1.140")
     def test_tfunction_load_delete(self, r):
         r.gears_refresh_cluster()
@@ -2449,6 +2457,7 @@ class TestClusterRedisCommands:
         assert r.tfunction_load(lib_code)
         assert r.tfunction_delete("lib1")
 
+    @pytest.mark.redismod
     @skip_if_server_version_lt("7.1.140")
     def test_tfunction_list(self, r):
         r.gears_refresh_cluster()
@@ -2472,6 +2481,7 @@ class TestClusterRedisCommands:
         assert r.tfunction_delete("lib2")
         assert r.tfunction_delete("lib3")
 
+    @pytest.mark.redismod
     @skip_if_server_version_lt("7.1.140")
     def test_tfcall(self, r):
         r.gears_refresh_cluster()
@@ -2650,7 +2660,10 @@ class TestNodesManager:
         """
         with pytest.raises(RedisClusterException) as e:
             get_mocked_redis_client(
-                host=default_host, port=default_port, cluster_enabled=False
+                cluster_slots_raise_error=True,
+                host=default_host,
+                port=default_port,
+                cluster_enabled=False,
             )
             assert "Cluster mode is not enabled on this node" in str(e.value)
 
@@ -2680,7 +2693,7 @@ class TestNodesManager:
 
             def create_mocked_redis_node(host, port, **kwargs):
                 """
-                Helper function to return custom slots cache data from
+                Helper function to return custom slots cache_data data from
                 different redis nodes
                 """
                 if port == 7000:
@@ -3246,6 +3259,31 @@ class TestClusterPipeline:
             assert first_node.redis_connection.connection.read_response.called
             assert ask_node.redis_connection.connection.read_response.called
             assert res == ["MOCK_OK"]
+
+    def test_return_previously_acquired_connections(self, r):
+        # in order to ensure that a pipeline will make use of connections
+        #   from different nodes
+        assert r.keyslot("a") != r.keyslot("b")
+
+        orig_func = redis.cluster.get_connection
+        with patch("redis.cluster.get_connection") as get_connection:
+
+            def raise_error(target_node, *args, **kwargs):
+                if get_connection.call_count == 2:
+                    raise ConnectionError("mocked error")
+                else:
+                    return orig_func(target_node, *args, **kwargs)
+
+            get_connection.side_effect = raise_error
+
+            r.pipeline().get("a").get("b").execute()
+
+        # 4 = 2 get_connections per execution * 2 executions
+        assert get_connection.call_count == 4
+        for cluster_node in r.nodes_manager.nodes_cache.values():
+            connection_pool = cluster_node.redis_connection.connection_pool
+            num_of_conns = len(connection_pool._available_connections)
+            assert num_of_conns == connection_pool._created_connections
 
     def test_empty_stack(self, r):
         """

@@ -64,6 +64,11 @@ def parse_list_to_dict(response):
     for i in range(0, len(response), 2):
         if isinstance(response[i], list):
             res["Child iterators"].append(parse_list_to_dict(response[i]))
+            try:
+                if isinstance(response[i + 1], list):
+                    res["Child iterators"].append(parse_list_to_dict(response[i + 1]))
+            except IndexError:
+                pass
         elif isinstance(response[i + 1], list):
             res["Child iterators"] = [parse_list_to_dict(response[i + 1])]
         else:
@@ -71,25 +76,6 @@ def parse_list_to_dict(response):
                 res[response[i]] = float(response[i + 1])
             except (TypeError, ValueError):
                 res[response[i]] = response[i + 1]
-    return res
-
-
-def parse_to_dict(response):
-    if response is None:
-        return {}
-
-    res = {}
-    for det in response:
-        if isinstance(det[1], list):
-            res[det[0]] = parse_list_to_dict(det[1])
-        else:
-            try:  # try to set the attribute. may be provided without value
-                try:  # try to convert the value to float
-                    res[det[0]] = float(det[1])
-                except (TypeError, ValueError):
-                    res[det[0]] = det[1]
-            except IndexError:
-                pass
     return res
 
 
@@ -102,26 +88,6 @@ def random_string(length=10):
     )
 
 
-def quote_string(v):
-    """
-    RedisGraph strings must be quoted,
-    quote_string wraps given v with quotes incase
-    v is a string.
-    """
-
-    if isinstance(v, bytes):
-        v = v.decode()
-    elif not isinstance(v, str):
-        return v
-    if len(v) == 0:
-        return '""'
-
-    v = v.replace("\\", "\\\\")
-    v = v.replace('"', '\\"')
-
-    return f'"{v}"'
-
-
 def decode_dict_keys(obj):
     """Decode the keys of the given dictionary with utf-8."""
     newobj = copy.copy(obj)
@@ -130,33 +96,6 @@ def decode_dict_keys(obj):
             newobj[k.decode("utf-8")] = newobj[k]
             newobj.pop(k)
     return newobj
-
-
-def stringify_param_value(value):
-    """
-    Turn a parameter value into a string suitable for the params header of
-    a Cypher command.
-    You may pass any value that would be accepted by `json.dumps()`.
-
-    Ways in which output differs from that of `str()`:
-        * Strings are quoted.
-        * None --> "null".
-        * In dictionaries, keys are _not_ quoted.
-
-    :param value: The parameter value to be turned into a string.
-    :return: string
-    """
-
-    if isinstance(value, str):
-        return quote_string(value)
-    elif value is None:
-        return "null"
-    elif isinstance(value, (list, tuple)):
-        return f'[{",".join(map(stringify_param_value, value))}]'
-    elif isinstance(value, dict):
-        return f'{{{",".join(f"{k}:{stringify_param_value(v)}" for k, v in value.items())}}}'  # noqa
-    else:
-        return str(value)
 
 
 def get_protocol_version(client):

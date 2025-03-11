@@ -7,7 +7,6 @@ from .conftest import wait_for_command
 
 
 class TestPipeline:
-    @pytest.mark.onlynoncluster
     async def test_pipeline_is_true(self, r):
         """Ensure pipeline instances are not false-y"""
         async with r.pipeline() as pipe:
@@ -418,3 +417,13 @@ class TestPipeline:
             response = await pipe.execute()
         assert response[0]
         assert await r.get("foo") == b"bar"
+
+    @pytest.mark.onlynoncluster
+    async def test_send_set_commands_over_async_pipeline(self, r: redis.asyncio.Redis):
+        pipe = r.pipeline()
+        pipe.hset("hash:1", "foo", "bar")
+        pipe.hset("hash:1", "bar", "foo")
+        pipe.hset("hash:1", "baz", "bar")
+        pipe.hgetall("hash:1")
+        resp = await pipe.execute()
+        assert resp == [1, 1, 1, {b"bar": b"foo", b"baz": b"bar", b"foo": b"bar"}]

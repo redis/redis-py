@@ -2,12 +2,18 @@ import time
 from time import sleep
 
 import pytest
+import pytest_asyncio
 import redis.asyncio as redis
 from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
     skip_ifmodversion_lt,
 )
+
+
+@pytest_asyncio.fixture()
+async def decoded_r(create_redis, stack_url):
+    return await create_redis(decode_responses=True, url=stack_url)
 
 
 @pytest.mark.redismod
@@ -69,7 +75,7 @@ async def test_alter(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-async def test_alter_diplicate_policy(decoded_r: redis.Redis):
+async def test_alter_duplicate_policy(decoded_r: redis.Redis):
     assert await decoded_r.ts().create(1)
     info = await decoded_r.ts().info(1)
     assert_resp_response(
@@ -107,42 +113,44 @@ async def test_add(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-async def test_add_duplicate_policy(r: redis.Redis):
+async def test_add_duplicate_policy(decoded_r: redis.Redis):
     # Test for duplicate policy BLOCK
-    assert 1 == await r.ts().add("time-serie-add-ooo-block", 1, 5.0)
+    assert 1 == await decoded_r.ts().add("time-serie-add-ooo-block", 1, 5.0)
     with pytest.raises(Exception):
-        await r.ts().add("time-serie-add-ooo-block", 1, 5.0, duplicate_policy="block")
+        await decoded_r.ts().add(
+            "time-serie-add-ooo-block", 1, 5.0, on_duplicate="block"
+        )
 
     # Test for duplicate policy LAST
-    assert 1 == await r.ts().add("time-serie-add-ooo-last", 1, 5.0)
-    assert 1 == await r.ts().add(
-        "time-serie-add-ooo-last", 1, 10.0, duplicate_policy="last"
+    assert 1 == await decoded_r.ts().add("time-serie-add-ooo-last", 1, 5.0)
+    assert 1 == await decoded_r.ts().add(
+        "time-serie-add-ooo-last", 1, 10.0, on_duplicate="last"
     )
-    res = await r.ts().get("time-serie-add-ooo-last")
+    res = await decoded_r.ts().get("time-serie-add-ooo-last")
     assert 10.0 == res[1]
 
     # Test for duplicate policy FIRST
-    assert 1 == await r.ts().add("time-serie-add-ooo-first", 1, 5.0)
-    assert 1 == await r.ts().add(
-        "time-serie-add-ooo-first", 1, 10.0, duplicate_policy="first"
+    assert 1 == await decoded_r.ts().add("time-serie-add-ooo-first", 1, 5.0)
+    assert 1 == await decoded_r.ts().add(
+        "time-serie-add-ooo-first", 1, 10.0, on_duplicate="first"
     )
-    res = await r.ts().get("time-serie-add-ooo-first")
+    res = await decoded_r.ts().get("time-serie-add-ooo-first")
     assert 5.0 == res[1]
 
     # Test for duplicate policy MAX
-    assert 1 == await r.ts().add("time-serie-add-ooo-max", 1, 5.0)
-    assert 1 == await r.ts().add(
-        "time-serie-add-ooo-max", 1, 10.0, duplicate_policy="max"
+    assert 1 == await decoded_r.ts().add("time-serie-add-ooo-max", 1, 5.0)
+    assert 1 == await decoded_r.ts().add(
+        "time-serie-add-ooo-max", 1, 10.0, on_duplicate="max"
     )
-    res = await r.ts().get("time-serie-add-ooo-max")
+    res = await decoded_r.ts().get("time-serie-add-ooo-max")
     assert 10.0 == res[1]
 
     # Test for duplicate policy MIN
-    assert 1 == await r.ts().add("time-serie-add-ooo-min", 1, 5.0)
-    assert 1 == await r.ts().add(
-        "time-serie-add-ooo-min", 1, 10.0, duplicate_policy="min"
+    assert 1 == await decoded_r.ts().add("time-serie-add-ooo-min", 1, 5.0)
+    assert 1 == await decoded_r.ts().add(
+        "time-serie-add-ooo-min", 1, 10.0, on_duplicate="min"
     )
-    res = await r.ts().get("time-serie-add-ooo-min")
+    res = await decoded_r.ts().get("time-serie-add-ooo-min")
     assert 5.0 == res[1]
 
 
@@ -208,7 +216,7 @@ async def test_create_and_delete_rule(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
-@skip_ifmodversion_lt("99.99.99", "timeseries")
+@skip_ifmodversion_lt("1.10.0", "timeseries")
 async def test_del_range(decoded_r: redis.Redis):
     try:
         await decoded_r.ts().delete("test", 0, 100)
@@ -225,22 +233,24 @@ async def test_del_range(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
-async def test_range(r: redis.Redis):
+async def test_range(decoded_r: redis.Redis):
     for i in range(100):
-        await r.ts().add(1, i, i % 7)
-    assert 100 == len(await r.ts().range(1, 0, 200))
+        await decoded_r.ts().add(1, i, i % 7)
+    assert 100 == len(await decoded_r.ts().range(1, 0, 200))
     for i in range(100):
-        await r.ts().add(1, i + 200, i % 7)
-    assert 200 == len(await r.ts().range(1, 0, 500))
+        await decoded_r.ts().add(1, i + 200, i % 7)
+    assert 200 == len(await decoded_r.ts().range(1, 0, 500))
     # last sample isn't returned
     assert 20 == len(
-        await r.ts().range(1, 0, 500, aggregation_type="avg", bucket_size_msec=10)
+        await decoded_r.ts().range(
+            1, 0, 500, aggregation_type="avg", bucket_size_msec=10
+        )
     )
-    assert 10 == len(await r.ts().range(1, 0, 500, count=10))
+    assert 10 == len(await decoded_r.ts().range(1, 0, 500, count=10))
 
 
 @pytest.mark.redismod
-@skip_ifmodversion_lt("99.99.99", "timeseries")
+@skip_ifmodversion_lt("1.10.0", "timeseries")
 async def test_range_advanced(decoded_r: redis.Redis):
     for i in range(100):
         await decoded_r.ts().add(1, i, i % 7)
@@ -271,7 +281,7 @@ async def test_range_advanced(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
-@skip_ifmodversion_lt("99.99.99", "timeseries")
+@skip_ifmodversion_lt("1.10.0", "timeseries")
 async def test_rev_range(decoded_r: redis.Redis):
     for i in range(100):
         await decoded_r.ts().add(1, i, i % 7)
@@ -314,8 +324,8 @@ async def test_rev_range(decoded_r: redis.Redis):
     )
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 async def test_multi_range(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This", "team": "ny"})
     await decoded_r.ts().create(
@@ -369,9 +379,9 @@ async def test_multi_range(decoded_r: redis.Redis):
         assert {"Test": "This", "team": "ny"} == res["1"][0]
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
-@skip_ifmodversion_lt("99.99.99", "timeseries")
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.10.0", "timeseries")
 async def test_multi_range_advanced(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This", "team": "ny"})
     await decoded_r.ts().create(
@@ -487,9 +497,9 @@ async def test_multi_range_advanced(decoded_r: redis.Redis):
         assert [[0, 5.0], [5, 6.0]] == res["1"][2]
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
-@skip_ifmodversion_lt("99.99.99", "timeseries")
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.10.0", "timeseries")
 async def test_multi_reverse_range(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This", "team": "ny"})
     await decoded_r.ts().create(
@@ -662,8 +672,8 @@ async def test_get(decoded_r: redis.Redis):
     assert 4 == (await decoded_r.ts().get(name))[1]
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 async def test_mget(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This"})
     await decoded_r.ts().create(2, labels={"Test": "This", "Taste": "That"})
@@ -712,7 +722,7 @@ async def test_info(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-async def testInfoDuplicatePolicy(decoded_r: redis.Redis):
+async def test_info_duplicate_policy(decoded_r: redis.Redis):
     await decoded_r.ts().create(
         1, retention_msecs=5, labels={"currentLabel": "currentData"}
     )
@@ -728,39 +738,141 @@ async def testInfoDuplicatePolicy(decoded_r: redis.Redis):
     )
 
 
-@pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@pytest.mark.redismod
 async def test_query_index(decoded_r: redis.Redis):
     await decoded_r.ts().create(1, labels={"Test": "This"})
     await decoded_r.ts().create(2, labels={"Test": "This", "Taste": "That"})
     assert 2 == len(await decoded_r.ts().queryindex(["Test=This"]))
     assert 1 == len(await decoded_r.ts().queryindex(["Taste=That"]))
     assert_resp_response(
-        decoded_r, await decoded_r.ts().queryindex(["Taste=That"]), [2], {"2"}
+        decoded_r, await decoded_r.ts().queryindex(["Taste=That"]), [2], ["2"]
     )
-
-
-# @pytest.mark.redismod
-# async def test_pipeline(r: redis.Redis):
-#     pipeline = await r.ts().pipeline()
-#     pipeline.create("with_pipeline")
-#     for i in range(100):
-#         pipeline.add("with_pipeline", i, 1.1 * i)
-#     pipeline.execute()
-
-#     info = await r.ts().info("with_pipeline")
-#     assert info.lastTimeStamp == 99
-#     assert info.total_samples == 100
-#     assert await r.ts().get("with_pipeline")[1] == 99 * 1.1
 
 
 @pytest.mark.redismod
 async def test_uncompressed(decoded_r: redis.Redis):
     await decoded_r.ts().create("compressed")
     await decoded_r.ts().create("uncompressed", uncompressed=True)
+    for i in range(1000):
+        await decoded_r.ts().add("compressed", i, i)
+        await decoded_r.ts().add("uncompressed", i, i)
     compressed_info = await decoded_r.ts().info("compressed")
     uncompressed_info = await decoded_r.ts().info("uncompressed")
     if is_resp2_connection(decoded_r):
         assert compressed_info.memory_usage != uncompressed_info.memory_usage
     else:
         assert compressed_info["memoryUsage"] != uncompressed_info["memoryUsage"]
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+async def test_create_with_insertion_filters(decoded_r: redis.Redis):
+    await decoded_r.ts().create(
+        "time-series-1",
+        duplicate_policy="last",
+        ignore_max_time_diff=5,
+        ignore_max_val_diff=10.0,
+    )
+    assert 1000 == await decoded_r.ts().add("time-series-1", 1000, 1.0)
+    assert 1010 == await decoded_r.ts().add("time-series-1", 1010, 11.0)
+    assert 1010 == await decoded_r.ts().add("time-series-1", 1013, 10.0)
+    assert 1020 == await decoded_r.ts().add("time-series-1", 1020, 11.5)
+    assert 1021 == await decoded_r.ts().add("time-series-1", 1021, 22.0)
+
+    data_points = await decoded_r.ts().range("time-series-1", "-", "+")
+    assert_resp_response(
+        decoded_r,
+        data_points,
+        [(1000, 1.0), (1010, 11.0), (1020, 11.5), (1021, 22.0)],
+        [[1000, 1.0], [1010, 11.0], [1020, 11.5], [1021, 22.0]],
+    )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+async def test_alter_with_insertion_filters(decoded_r: redis.Redis):
+    assert 1000 == await decoded_r.ts().add("time-series-1", 1000, 1.0)
+    assert 1010 == await decoded_r.ts().add("time-series-1", 1010, 11.0)
+    assert 1013 == await decoded_r.ts().add("time-series-1", 1013, 10.0)
+
+    await decoded_r.ts().alter(
+        "time-series-1",
+        duplicate_policy="last",
+        ignore_max_time_diff=5,
+        ignore_max_val_diff=10.0,
+    )
+
+    assert 1013 == await decoded_r.ts().add("time-series-1", 1015, 11.5)
+
+    data_points = await decoded_r.ts().range("time-series-1", "-", "+")
+    assert_resp_response(
+        decoded_r,
+        data_points,
+        [(1000, 1.0), (1010, 11.0), (1013, 10.0)],
+        [[1000, 1.0], [1010, 11.0], [1013, 10.0]],
+    )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+async def test_add_with_insertion_filters(decoded_r: redis.Redis):
+    assert 1000 == await decoded_r.ts().add(
+        "time-series-1",
+        1000,
+        1.0,
+        duplicate_policy="last",
+        ignore_max_time_diff=5,
+        ignore_max_val_diff=10.0,
+    )
+
+    assert 1000 == await decoded_r.ts().add("time-series-1", 1004, 3.0)
+
+    data_points = await decoded_r.ts().range("time-series-1", "-", "+")
+    assert_resp_response(decoded_r, data_points, [(1000, 1.0)], [[1000, 1.0]])
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+async def test_incrby_with_insertion_filters(decoded_r: redis.Redis):
+    assert 1000 == await decoded_r.ts().incrby(
+        "time-series-1",
+        1.0,
+        timestamp=1000,
+        duplicate_policy="last",
+        ignore_max_time_diff=5,
+        ignore_max_val_diff=10.0,
+    )
+
+    assert 1000 == await decoded_r.ts().incrby("time-series-1", 3.0, timestamp=1000)
+
+    data_points = await decoded_r.ts().range("time-series-1", "-", "+")
+    assert_resp_response(decoded_r, data_points, [(1000, 1.0)], [[1000, 1.0]])
+
+    assert 1000 == await decoded_r.ts().incrby("time-series-1", 10.1, timestamp=1000)
+
+    data_points = await decoded_r.ts().range("time-series-1", "-", "+")
+    assert_resp_response(decoded_r, data_points, [(1000, 11.1)], [[1000, 11.1]])
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.12.0", "timeseries")
+async def test_decrby_with_insertion_filters(decoded_r: redis.Redis):
+    assert 1000 == await decoded_r.ts().decrby(
+        "time-series-1",
+        1.0,
+        timestamp=1000,
+        duplicate_policy="last",
+        ignore_max_time_diff=5,
+        ignore_max_val_diff=10.0,
+    )
+
+    assert 1000 == await decoded_r.ts().decrby("time-series-1", 3.0, timestamp=1000)
+
+    data_points = await decoded_r.ts().range("time-series-1", "-", "+")
+    assert_resp_response(decoded_r, data_points, [(1000, -1.0)], [[1000, -1.0]])
+
+    assert 1000 == await decoded_r.ts().decrby("time-series-1", 10.1, timestamp=1000)
+
+    data_points = await decoded_r.ts().range("time-series-1", "-", "+")
+    assert_resp_response(decoded_r, data_points, [(1000, -11.1)], [[1000, -11.1]])

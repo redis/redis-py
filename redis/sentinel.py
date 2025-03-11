@@ -24,7 +24,10 @@ class SentinelManagedConnection(Connection):
 
     def __repr__(self):
         pool = self.connection_pool
-        s = f"{type(self).__name__}<service={pool.service_name}%s>"
+        s = (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"(service={pool.service_name}%s)>"
+        )
         if self.host:
             host_info = f",host={self.host},port={self.port}"
             s = s % host_info
@@ -142,9 +145,11 @@ class SentinelConnectionPool(ConnectionPool):
     def __init__(self, service_name, sentinel_manager, **kwargs):
         kwargs["connection_class"] = kwargs.get(
             "connection_class",
-            SentinelManagedSSLConnection
-            if kwargs.pop("ssl", False)
-            else SentinelManagedConnection,
+            (
+                SentinelManagedSSLConnection
+                if kwargs.pop("ssl", False)
+                else SentinelManagedConnection
+            ),
         )
         self.is_master = kwargs.pop("is_master", True)
         self.check_connection = kwargs.pop("check_connection", False)
@@ -162,7 +167,10 @@ class SentinelConnectionPool(ConnectionPool):
 
     def __repr__(self):
         role = "master" if self.is_master else "slave"
-        return f"{type(self).__name__}<service={self.service_name}({role})"
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"(service={self.service_name}({role}))>"
+        )
 
     def reset(self):
         super().reset()
@@ -221,6 +229,7 @@ class Sentinel(SentinelCommands):
         sentinels,
         min_other_sentinels=0,
         sentinel_kwargs=None,
+        force_master_ip=None,
         **connection_kwargs,
     ):
         # if sentinel_kwargs isn't defined, use the socket_* options from
@@ -237,6 +246,7 @@ class Sentinel(SentinelCommands):
         ]
         self.min_other_sentinels = min_other_sentinels
         self.connection_kwargs = connection_kwargs
+        self._force_master_ip = force_master_ip
 
     def execute_command(self, *args, **kwargs):
         """
@@ -244,7 +254,6 @@ class Sentinel(SentinelCommands):
         once - If set to True, then execute the resulting command on a single
         node at random, rather than across the entire sentinel cluster.
         """
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
         once = bool(kwargs.get("once", False))
         if "once" in kwargs.keys():
             kwargs.pop("once")
@@ -262,7 +271,10 @@ class Sentinel(SentinelCommands):
             sentinel_addresses.append(
                 "{host}:{port}".format_map(sentinel.connection_pool.connection_kwargs)
             )
-        return f'{type(self).__name__}<sentinels=[{",".join(sentinel_addresses)}]>'
+        return (
+            f"<{type(self).__module__}.{type(self).__name__}"
+            f"(sentinels=[{','.join(sentinel_addresses)}])>"
+        )
 
     def check_master_state(self, state, service_name):
         if not state["is_master"] or state["is_sdown"] or state["is_odown"]:
@@ -294,7 +306,13 @@ class Sentinel(SentinelCommands):
                     sentinel,
                     self.sentinels[0],
                 )
-                return state["ip"], state["port"]
+
+                ip = (
+                    self._force_master_ip
+                    if self._force_master_ip is not None
+                    else state["ip"]
+                )
+                return ip, state["port"]
 
         error_info = ""
         if len(collected_errors) > 0:

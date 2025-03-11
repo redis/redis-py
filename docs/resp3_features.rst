@@ -67,3 +67,35 @@ This means that should you want to perform something, on a given push notificati
     >> p = r.pubsub(push_handler_func=our_func)
 
 In the example above, upon receipt of a push notification, rather than log the message, in the case where specific text occurs, an IOError is raised. This example, highlights how one could start implementing a customized message handler.
+
+Client-side caching
+-------------------
+
+Client-side caching is a technique used to create high performance services.
+It utilizes the memory on application servers, typically separate from the database nodes, to cache a subset of the data directly on the application side.
+For more information please check `official Redis documentation <https://redis.io/docs/latest/develop/use/client-side-caching/>`_.
+Please notice that this feature only available with RESP3 protocol enabled in sync client only. Supported in standalone, Cluster and Sentinel clients.
+
+Basic usage:
+
+Enable caching with default configuration:
+
+.. code:: python
+
+    >>> import redis
+    >>> from redis.cache import CacheConfig
+    >>> r = redis.Redis(host='localhost', port=6379, protocol=3, cache_config=CacheConfig())
+
+The same interface applies to Redis Cluster and Sentinel.
+
+Enable caching with custom cache implementation:
+
+.. code:: python
+
+    >>> import redis
+    >>> from foo.bar import CacheImpl
+    >>> r = redis.Redis(host='localhost', port=6379, protocol=3, cache=CacheImpl())
+
+CacheImpl should implement a `CacheInterface` specified in `redis.cache` package.
+
+More comprehensive documentation soon will be available at `official Redis documentation <https://redis.io/docs/latest/>`_.

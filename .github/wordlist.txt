@@ -1,6 +1,7 @@
 APM
 ARGV
 BFCommands
+CacheImpl
 CFCommands
 CMSCommands
 ClusterNode
@@ -11,7 +12,6 @@ ConnectionPool
 CoreCommands
 EVAL
 EVALSHA
-GraphCommands
 Grokzen's
 INCR
 IOError
@@ -38,7 +38,6 @@ RedisCluster
 RedisClusterCommands
 RedisClusterException
 RedisClusters
-RedisGraph
 RedisInstrumentor
 RedisJSON
 RedisTimeSeries
@@ -74,6 +73,8 @@ bysource
 charset
 del
 dev
+docstring
+docstrings
 eg
 exc
 firsttimersonly
@@ -139,3 +140,4 @@ unicode
 url
 virtualenv
 www
+yaml

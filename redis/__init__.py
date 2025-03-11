@@ -1,8 +1,5 @@
-import sys
-
 from redis import asyncio  # noqa
 from redis.backoff import default_backoff
-from redis.cache import _LocalChace
 from redis.client import Redis, StrictRedis
 from redis.cluster import RedisCluster
 from redis.connection import (
@@ -37,11 +34,6 @@ from redis.sentinel import (
 )
 from redis.utils import from_url
 
-if sys.version_info >= (3, 8):
-    from importlib import metadata
-else:
-    import importlib_metadata as metadata
-
 
 def int_or_str(value):
     try:
@@ -50,19 +42,11 @@ def int_or_str(value):
         return value
 
 
-try:
-    __version__ = metadata.version("redis")
-except metadata.PackageNotFoundError:
-    __version__ = "99.99.99"
+__version__ = "5.2.1"
+VERSION = tuple(map(int_or_str, __version__.split(".")))
 
-
-try:
-    VERSION = tuple(map(int_or_str, __version__.split(".")))
-except AttributeError:
-    VERSION = tuple([99, 99, 99])
 
 __all__ = [
-    "_LocalChace",
     "AuthenticationError",
     "AuthenticationWrongNumberOfArgsError",
     "BlockingConnectionPool",
