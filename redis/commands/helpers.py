@@ -138,9 +138,9 @@ def stringify_param_value(value):
     elif value is None:
         return "null"
     elif isinstance(value, (list, tuple)):
-        return f'[{",".join(map(stringify_param_value, value))}]'
+        return f"[{','.join(map(stringify_param_value, value))}]"
     elif isinstance(value, dict):
-        return f'{{{",".join(f"{k}:{stringify_param_value(v)}" for k, v in value.items())}}}'  # noqa
+        return f"{{{','.join(f'{k}:{stringify_param_value(v)}' for k, v in value.items())}}}"  # noqa
     else:
         return str(value)
 
