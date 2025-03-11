@@ -380,8 +380,6 @@ run_in_thread.
    >>> def exception_handler(ex, pubsub, thread):
    >>>     print(ex)
    >>>     thread.stop()
-   >>>     thread.join(timeout=1.0)
-   >>>     pubsub.close()
    >>> thread = p.run_in_thread(exception_handler=exception_handler)
 
 A PubSub object adheres to the same encoding semantics as the client

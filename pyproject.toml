@@ -32,9 +32,17 @@ classifiers = [
 dependencies = ['async-timeout>=4.0.3; python_full_version<"3.11.3"']
 
 [project.optional-dependencies]
-hiredis = ["hiredis>=3.0.0"]
-ocsp = ["cryptography>=36.0.1", "pyopenssl==20.0.1", "requests>=2.31.0"]
-jwt = ["PyJWT~=2.9.0"]
+hiredis = [
+    "hiredis>=3.0.0",
+]
+ocsp = [
+    "cryptography>=36.0.1",
+    "pyopenssl>=20.0.1",
+    "requests>=2.31.0",
+]
+jwt = [
+    "PyJWT~=2.9.0",
+]
 
 [project.urls]
 Changes = "https://github.com/redis/redis-py/releases"
