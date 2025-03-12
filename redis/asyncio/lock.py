@@ -1,13 +1,17 @@
 import asyncio
+import logging
 import threading
 import uuid
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Awaitable, Optional, Union
 
 from redis.exceptions import LockError, LockNotOwnedError
+from redis.typing import Number
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis, RedisCluster
+
+logger = logging.getLogger(__name__)
 
 
 class Lock:
@@ -82,8 +86,9 @@ class Lock:
         timeout: Optional[float] = None,
         sleep: float = 0.1,
         blocking: bool = True,
-        blocking_timeout: Optional[float] = None,
+        blocking_timeout: Optional[Number] = None,
         thread_local: bool = True,
+        raise_on_release_error: bool = True,
     ):
         """
         Create a new Lock instance named ``name`` using the Redis client
@@ -127,6 +132,11 @@ class Lock:
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
 
+        ``raise_on_release_error`` indicates whether to raise an exception when
+        the lock is no longer owned when exiting the context manager. By default,
+        this is True, meaning an exception will be raised. If False, the warning
+        will be logged and the exception will be suppressed.
+
         In some use cases it's necessary to disable thread local storage. For
         example, if you have code where one thread acquires a lock and passes
         that lock instance to a worker thread to release later. If thread
@@ -143,6 +153,7 @@ class Lock:
         self.blocking_timeout = blocking_timeout
         self.thread_local = bool(thread_local)
         self.local = threading.local() if self.thread_local else SimpleNamespace()
+        self.raise_on_release_error = raise_on_release_error
         self.local.token = None
         self.register_scripts()
 
@@ -162,12 +173,19 @@ class Lock:
         raise LockError("Unable to acquire lock within the time specified")
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        await self.release()
+        try:
+            await self.release()
+        except LockError:
+            if self.raise_on_release_error:
+                raise
+            logger.warning(
+                "Lock was unlocked or no longer owned when exiting context manager."
+            )
 
     async def acquire(
         self,
         blocking: Optional[bool] = None,
-        blocking_timeout: Optional[float] = None,
+        blocking_timeout: Optional[Number] = None,
         token: Optional[Union[str, bytes]] = None,
     ):
         """
@@ -249,7 +267,10 @@ class Lock:
         """Releases the already acquired lock"""
         expected_token = self.local.token
         if expected_token is None:
-            raise LockError("Cannot release an unlocked lock")
+            raise LockError(
+                "Cannot release a lock that's not owned or is already unlocked.",
+                lock_name=self.name,
+            )
         self.local.token = None
         return self.do_release(expected_token)
 
@@ -262,7 +283,7 @@ class Lock:
             raise LockNotOwnedError("Cannot release a lock that's no longer owned")
 
     def extend(
-        self, additional_time: float, replace_ttl: bool = False
+        self, additional_time: Number, replace_ttl: bool = False
     ) -> Awaitable[bool]:
         """
         Adds more time to an already acquired lock.

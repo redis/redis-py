@@ -1,3 +1,4 @@
+import math
 import time
 from datetime import datetime, timedelta
 
@@ -147,9 +148,9 @@ def test_hpexpire_multiple_condition_flags_error(r):
 def test_hexpireat_basic(r):
     r.delete("test:hash")
     r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
-    exp_time = int((datetime.now() + timedelta(seconds=1)).timestamp())
+    exp_time = math.ceil((datetime.now() + timedelta(seconds=1)).timestamp())
     assert r.hexpireat("test:hash", exp_time, "field1") == [1]
-    time.sleep(1.1)
+    time.sleep(2.1)
     assert r.hexists("test:hash", "field1") is False
     assert r.hexists("test:hash", "field2") is True
 
@@ -158,9 +159,9 @@ def test_hexpireat_basic(r):
 def test_hexpireat_with_datetime(r):
     r.delete("test:hash")
     r.hset("test:hash", mapping={"field1": "value1", "field2": "value2"})
-    exp_time = datetime.now() + timedelta(seconds=1)
+    exp_time = (datetime.now() + timedelta(seconds=2)).replace(microsecond=0)
     assert r.hexpireat("test:hash", exp_time, "field1") == [1]
-    time.sleep(1.1)
+    time.sleep(2.1)
     assert r.hexists("test:hash", "field1") is False
     assert r.hexists("test:hash", "field2") is True
 
@@ -194,9 +195,9 @@ def test_hexpireat_multiple_fields(r):
         "test:hash",
         mapping={"field1": "value1", "field2": "value2", "field3": "value3"},
     )
-    exp_time = int((datetime.now() + timedelta(seconds=1)).timestamp())
+    exp_time = math.ceil((datetime.now() + timedelta(seconds=1)).timestamp())
     assert r.hexpireat("test:hash", exp_time, "field1", "field2") == [1, 1]
-    time.sleep(1.1)
+    time.sleep(2.1)
     assert r.hexists("test:hash", "field1") is False
     assert r.hexists("test:hash", "field2") is False
     assert r.hexists("test:hash", "field3") is True

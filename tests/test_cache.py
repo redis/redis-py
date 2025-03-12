@@ -41,7 +41,7 @@ def r(request):
 
 @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
-# @skip_if_resp_version(2)
+@skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
 class TestCache:
     @pytest.mark.parametrize(
@@ -159,7 +159,7 @@ class TestCache:
             == b"bar"
         )
         # Force disconnection
-        r.connection_pool.get_connection("_").disconnect()
+        r.connection_pool.get_connection().disconnect()
         # Make sure cache is empty
         assert cache.size == 0
 
@@ -429,7 +429,7 @@ class TestClusterCache:
         # Force disconnection
         r.nodes_manager.get_node_from_slot(
             12000
-        ).redis_connection.connection_pool.get_connection("_").disconnect()
+        ).redis_connection.connection_pool.get_connection().disconnect()
         # Make sure cache is empty
         assert cache.size == 0
 
@@ -667,7 +667,7 @@ class TestSentinelCache:
             == b"bar"
         )
         # Force disconnection
-        master.connection_pool.get_connection("_").disconnect()
+        master.connection_pool.get_connection().disconnect()
         # Make sure cache_data is empty
         assert cache.size == 0
 

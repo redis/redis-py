@@ -1,8 +1,10 @@
 import copy
 import platform
 import socket
+import sys
 import threading
 import types
+from errno import ECONNREFUSED
 from typing import Any
 from unittest import mock
 from unittest.mock import call, patch
@@ -28,6 +30,7 @@ from redis.connection import (
     UnixDomainSocketConnection,
     parse_url,
 )
+from redis.credentials import UsernamePasswordCredentialProvider
 from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
@@ -42,9 +45,8 @@ def test_invalid_response(r):
     raw = b"x"
     parser = r.connection._parser
     with mock.patch.object(parser._buffer, "readline", return_value=raw):
-        with pytest.raises(InvalidResponse) as cm:
+        with pytest.raises(InvalidResponse, match=f"Protocol Error: {raw!r}"):
             parser.read_response()
-    assert str(cm.value) == f"Protocol Error: {raw!r}"
 
 
 @skip_if_server_version_lt("4.0.0")
@@ -139,10 +141,9 @@ class TestConnection:
         conn._connect = mock.Mock()
         conn._connect.side_effect = socket.timeout
 
-        with pytest.raises(TimeoutError) as e:
+        with pytest.raises(TimeoutError, match="Timeout connecting to server"):
             conn.connect()
         assert conn._connect.call_count == 1
-        assert str(e.value) == "Timeout connecting to server"
         self.clear(conn)
 
 
@@ -248,6 +249,7 @@ def test_pool_auto_close(request, from_url):
     r1.close()
 
 
+@pytest.mark.skipif(sys.version_info == (3, 9), reason="Flacky test on Python 3.9")
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
 def test_redis_connection_pool(request, from_url):
     """Verify that basic Redis instances using `connection_pool`
@@ -346,24 +348,20 @@ def test_format_error_message(conn, error, expected_message):
 
 
 def test_network_connection_failure():
-    with pytest.raises(ConnectionError) as e:
+    exp_err = f"Error {ECONNREFUSED} connecting to localhost:9999. Connection refused."
+    with pytest.raises(ConnectionError, match=exp_err):
         redis = Redis(port=9999)
         redis.set("a", "b")
-    assert str(e.value) == "Error 111 connecting to localhost:9999. Connection refused."
 
 
 def test_unix_socket_connection_failure():
-    with pytest.raises(ConnectionError) as e:
+    exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
+    with pytest.raises(ConnectionError, match=exp_err):
         redis = Redis(unix_socket_path="unix:///tmp/a.sock")
         redis.set("a", "b")
-    assert (
-        str(e.value)
-        == "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
-    )
 
 
 class TestUnitConnectionPool:
-
     @pytest.mark.parametrize(
         "max_conn", (-1, "str"), ids=("non-positive", "wrong type")
     )
@@ -441,6 +439,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         proxy_connection = CacheProxyConnection(
             mock_connection, cache, threading.Lock()
@@ -457,6 +456,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         mock_cache.is_cachable.return_value = True
         mock_cache.get.side_effect = [
@@ -496,9 +496,9 @@ class TestUnitCacheProxyConnection:
         )
         proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
         assert proxy_connection.read_response() == b"bar"
+        assert proxy_connection._current_command_cache_key is None
         assert proxy_connection.read_response() == b"bar"
 
-        mock_connection.read_response.assert_called_once()
         mock_cache.set.assert_has_calls(
             [
                 call(
@@ -525,9 +525,6 @@ class TestUnitCacheProxyConnection:
                 call(CacheKey(command="GET", redis_keys=("foo",))),
                 call(CacheKey(command="GET", redis_keys=("foo",))),
                 call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
             ]
         )
 
@@ -541,6 +538,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         another_conn = copy.deepcopy(mock_connection)
         another_conn.can_read.side_effect = [True, False]

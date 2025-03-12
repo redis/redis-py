@@ -8,10 +8,10 @@ try:
 
     # Only support Hiredis >= 3.0:
     HIREDIS_AVAILABLE = int(hiredis.__version__.split(".")[0]) >= 3
-    HIREDIS_PACK_AVAILABLE = hasattr(hiredis, "pack_command")
+    if not HIREDIS_AVAILABLE:
+        raise ImportError("hiredis package should be >= 3.0.0")
 except ImportError:
     HIREDIS_AVAILABLE = False
-    HIREDIS_PACK_AVAILABLE = False
 
 try:
     import ssl  # noqa
@@ -115,6 +115,71 @@ def deprecated_function(reason="", version="", name=None):
         @wraps(func)
         def wrapper(*args, **kwargs):
             warn_deprecated(name or func.__name__, reason, version, stacklevel=3)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def warn_deprecated_arg_usage(
+    arg_name: Union[list, str],
+    function_name: str,
+    reason: str = "",
+    version: str = "",
+    stacklevel: int = 2,
+):
+    import warnings
+
+    msg = (
+        f"Call to '{function_name}' function with deprecated"
+        f" usage of input argument/s '{arg_name}'."
+    )
+    if reason:
+        msg += f" ({reason})"
+    if version:
+        msg += f" -- Deprecated since version {version}."
+    warnings.warn(msg, category=DeprecationWarning, stacklevel=stacklevel)
+
+
+def deprecated_args(
+    args_to_warn: list = ["*"],
+    allowed_args: list = [],
+    reason: str = "",
+    version: str = "",
+):
+    """
+    Decorator to mark specified args of a function as deprecated.
+    If '*' is in args_to_warn, all arguments will be marked as deprecated.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get function argument names
+            arg_names = func.__code__.co_varnames[: func.__code__.co_argcount]
+
+            provided_args = dict(zip(arg_names, args))
+            provided_args.update(kwargs)
+
+            provided_args.pop("self", None)
+            for allowed_arg in allowed_args:
+                provided_args.pop(allowed_arg, None)
+
+            for arg in args_to_warn:
+                if arg == "*" and len(provided_args) > 0:
+                    warn_deprecated_arg_usage(
+                        list(provided_args.keys()),
+                        func.__name__,
+                        reason,
+                        version,
+                        stacklevel=3,
+                    )
+                elif arg in provided_args:
+                    warn_deprecated_arg_usage(
+                        arg, func.__name__, reason, version, stacklevel=3
+                    )
+
             return func(*args, **kwargs)
 
         return wrapper
