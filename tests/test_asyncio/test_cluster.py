@@ -2694,6 +2694,17 @@ class TestClusterPipeline:
         )
         assert result == [True, b"1", 1, {b"F": b"V"}, True, True, b"2", b"3", 1, 1, 1]
 
+    async def test_cluster_pipeline_execution_zero_cluster_err_retries(
+        self, r: RedisCluster
+    ) -> None:
+        """
+        Test that we can run successfully cluster pipeline execute at least once when
+        cluster_error_retry_attempts is set to 0
+        """
+        r.cluster_error_retry_attempts = 0
+        result = await r.pipeline().set("A", 1).get("A").delete("A").execute()
+        assert result == [True, b"1", 1]
+
     async def test_multi_key_operation_with_a_single_slot(
         self, r: RedisCluster
     ) -> None:
@@ -2754,7 +2765,7 @@ class TestClusterPipeline:
                     await pipe.get(key).execute()
                 assert (
                     node.parse_response.await_count
-                    == 3 * r.cluster_error_retry_attempts - 2
+                    == 3 * r.cluster_error_retry_attempts + 1
                 )
 
     async def test_connection_error_not_raised(self, r: RedisCluster) -> None:
