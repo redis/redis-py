@@ -99,11 +99,11 @@ class TestMultiprocessing:
             max_connections=max_connections,
         )
 
-        parent_conn = pool.get_connection("ping")
+        parent_conn = pool.get_connection()
 
         def target(pool, parent_conn):
             with exit_callback(pool.disconnect):
-                child_conn = pool.get_connection("ping")
+                child_conn = pool.get_connection()
                 assert child_conn.pid != parent_conn.pid
                 pool.release(child_conn)
                 assert pool._created_connections == 1
