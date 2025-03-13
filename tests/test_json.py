@@ -130,7 +130,7 @@ def test_mset(client):
 def test_clear(client):
     client.json().set("arr", Path.root_path(), [0, 1, 2, 3, 4])
     assert 1 == client.json().clear("arr", Path.root_path())
-    assert_resp_response(client, client.json().get("arr"), [], [[[]]])
+    assert_resp_response(client, client.json().get("arr"), [], [])
 
 
 @pytest.mark.redismod
@@ -446,7 +446,6 @@ def test_json_forget_with_dollar(client):
     client.json().forget("not_a_document", "..a")
 
 
-@pytest.mark.onlynoncluster
 @pytest.mark.redismod
 def test_json_mget_dollar(client):
     # Test mget with multi paths
@@ -1522,8 +1521,8 @@ def test_set_path(client):
 
     root = tempfile.mkdtemp()
     sub = tempfile.mkdtemp(dir=root)
-    jsonfile = tempfile.mktemp(suffix=".json", dir=sub)
-    nojsonfile = tempfile.mktemp(dir=root)
+    jsonfile = tempfile.mkstemp(suffix=".json", dir=sub)[1]
+    nojsonfile = tempfile.mkstemp(dir=root)[1]
 
     with open(jsonfile, "w+") as fp:
         fp.write(json.dumps({"hello": "world"}))

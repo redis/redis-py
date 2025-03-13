@@ -13,13 +13,13 @@ The Python interface to the Redis key-value store.
 
 ---------------------------------------------
 
-**Note: ** redis-py 5.0 will be the last version of redis-py to support Python 3.7, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 5.1 will support Python 3.8+.
+**Note:** redis-py 5.0 will be the last version of redis-py to support Python 3.7, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 5.1 will support Python 3.8+.
 
 ---------------------------------------------
 
 ## How do I Redis?
 
-[Learn for free at Redis University](https://redis.io/university/)
+[Learn for free at Redis University](https://redis.io/learn/university)
 
 [Try the Redis Cloud](https://redis.io/try-free/)
 
@@ -54,7 +54,7 @@ Looking for a high-level library to handle object mapping? See [redis-om-python]
 
 ## Supported Redis Versions
 
-The most recent version of this library supports redis version [5.0](https://github.com/redis/redis/blob/5.0/00-RELEASENOTES), [6.0](https://github.com/redis/redis/blob/6.0/00-RELEASENOTES), [6.2](https://github.com/redis/redis/blob/6.2/00-RELEASENOTES), [7.0](https://github.com/redis/redis/blob/7.0/00-RELEASENOTES) and [7.2](https://github.com/redis/redis/blob/7.2/00-RELEASENOTES).
+The most recent version of this library supports redis version [5.0](https://github.com/redis/redis/blob/5.0/00-RELEASENOTES), [6.0](https://github.com/redis/redis/blob/6.0/00-RELEASENOTES), [6.2](https://github.com/redis/redis/blob/6.2/00-RELEASENOTES), [7.0](https://github.com/redis/redis/blob/7.0/00-RELEASENOTES), [7.2](https://github.com/redis/redis/blob/7.2/00-RELEASENOTES) and [7.4](https://github.com/redis/redis/blob/7.4/00-RELEASENOTES).
 
 The table below highlights version compatibility of the most-recent library versions and redis versions.
 

@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import re
 import socket
 import ssl
@@ -12,10 +11,7 @@ from redis.asyncio.connection import (
 )
 from redis.exceptions import ConnectionError
 
-from ..ssl_utils import get_ssl_filename
-
-_logger = logging.getLogger(__name__)
-
+from ..ssl_utils import CertificateType, get_tls_certificates
 
 _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"
@@ -61,19 +57,21 @@ async def test_uds_connect(uds_address):
 )
 async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
     host, port = tcp_address
-    certfile = get_ssl_filename("client-cert.pem")
-    keyfile = get_ssl_filename("client-key.pem")
-    ca_certfile = get_ssl_filename("ca-cert.pem")
+
+    server_certs = get_tls_certificates(cert_type=CertificateType.server)
+
     conn = SSLConnection(
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
-        ssl_ca_certs=ca_certfile,
+        ssl_ca_certs=server_certs.ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl.TLSVersion.TLSv1_2,
         ssl_ciphers=ssl_ciphers,
     )
-    await _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    await _assert_connect(
+        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+    )
     await conn.disconnect()
 
 
@@ -90,18 +88,20 @@ async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
 )
 async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     host, port = tcp_address
-    certfile = get_ssl_filename("client-cert.pem")
-    keyfile = get_ssl_filename("client-key.pem")
-    ca_certfile = get_ssl_filename("ca-cert.pem")
+
+    server_certs = get_tls_certificates(cert_type=CertificateType.server)
+
     conn = SSLConnection(
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
-        ssl_ca_certs=ca_certfile,
+        ssl_ca_certs=server_certs.ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl_min_version,
     )
-    await _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    await _assert_connect(
+        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+    )
     await conn.disconnect()
 
 
@@ -109,8 +109,7 @@ async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
 @pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3")
 async def test_tcp_ssl_version_mismatch(tcp_address):
     host, port = tcp_address
-    certfile = get_ssl_filename("server-cert.pem")
-    keyfile = get_ssl_filename("server-key.pem")
+    certfile, keyfile, _ = get_tls_certificates(cert_type=CertificateType.server)
     conn = SSLConnection(
         host=host,
         port=port,
@@ -125,7 +124,7 @@ async def test_tcp_ssl_version_mismatch(tcp_address):
             tcp_address,
             certfile=certfile,
             keyfile=keyfile,
-            ssl_version=ssl.TLSVersion.TLSv1_2,
+            maximum_ssl_version=ssl.TLSVersion.TLSv1_2,
         )
     await conn.disconnect()
 
@@ -135,7 +134,8 @@ async def _assert_connect(
     server_address,
     certfile=None,
     keyfile=None,
-    ssl_version=None,
+    minimum_ssl_version=ssl.TLSVersion.TLSv1_2,
+    maximum_ssl_version=ssl.TLSVersion.TLSv1_3,
 ):
     stop_event = asyncio.Event()
     finished = asyncio.Event()
@@ -153,9 +153,8 @@ async def _assert_connect(
     elif certfile:
         host, port = server_address
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        if ssl_version is not None:
-            context.minimum_version = ssl_version
-            context.maximum_version = ssl_version
+        context.minimum_version = minimum_ssl_version
+        context.maximum_version = maximum_ssl_version
         context.load_cert_chain(certfile=certfile, keyfile=keyfile)
         server = await asyncio.start_server(_handler, host=host, port=port, ssl=context)
     else:
@@ -178,23 +177,18 @@ async def _assert_connect(
 
 
 async def _redis_request_handler(reader, writer, stop_event):
-    buffer = b""
     command = None
     command_ptr = None
     fragment_length = None
-    while not stop_event.is_set() or buffer:
-        _logger.info(str(stop_event.is_set()))
-        try:
-            buffer += await asyncio.wait_for(reader.read(1024), timeout=0.5)
-        except TimeoutError:
-            continue
+    while not stop_event.is_set():
+        buffer = await reader.read(1024)
         if not buffer:
-            continue
+            break
         parts = re.split(_CMD_SEP, buffer)
-        buffer = parts[-1]
-        for fragment in parts[:-1]:
+        for fragment in parts:
             fragment = fragment.decode()
-            _logger.info("Command fragment: %s", fragment)
+            if not fragment:
+                continue
 
             if fragment.startswith("*") and command is None:
                 command = [None for _ in range(int(fragment[1:]))]
@@ -214,10 +208,7 @@ async def _redis_request_handler(reader, writer, stop_event):
                 continue
 
             command = " ".join(command)
-            _logger.info("Command %s", command)
             resp = _SUPPORTED_CMDS.get(command, _ERROR_RESP)
-            _logger.info("Response from %s", resp)
             writer.write(resp)
             await writer.drain()
             command = None
-    _logger.info("Exit handler")

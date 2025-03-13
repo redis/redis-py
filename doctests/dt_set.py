@@ -88,7 +88,7 @@ print(res10)  # >>> {'bike:1', 'bike:2', 'bike:3'}
 
 # REMOVE_START
 assert res9 == 3
-assert res10 == {"bike:1", "bike:2", "bike:3"}
+assert res10 == {'bike:1', 'bike:2', 'bike:3'}
 # REMOVE_END
 
 # STEP_START smismember
@@ -113,7 +113,7 @@ print(res13)  # >>> {'bike:2', 'bike:3'}
 # STEP_END
 
 # REMOVE_START
-assert res13 == {"bike:2", "bike:3"}
+assert res13 == {'bike:2', 'bike:3'}
 r.delete("bikes:racing:france")
 r.delete("bikes:racing:usa")
 # REMOVE_END
@@ -130,7 +130,7 @@ res14 = r.sunion("bikes:racing:france", "bikes:racing:usa", "bikes:racing:italy"
 print(res14)  # >>> {'bike:1', 'bike:2', 'bike:3', 'bike:4'}
 
 res15 = r.sdiff("bikes:racing:france", "bikes:racing:usa", "bikes:racing:italy")
-print(res15)  # >>> set()
+print(res15)  # >>> {}
 
 res16 = r.sdiff("bikes:racing:usa", "bikes:racing:france")
 print(res16)  # >>> {'bike:4'}
@@ -140,11 +140,11 @@ print(res17)  # >>> {'bike:2', 'bike:3'}
 # STEP_END
 
 # REMOVE_START
-assert res13 == {"bike:1"}
-assert res14 == {"bike:1", "bike:2", "bike:3", "bike:4"}
-assert res15 == set()
-assert res16 == {"bike:4"}
-assert res17 == {"bike:2", "bike:3"}
+assert res13 == {'bike:1'}
+assert res14 == {'bike:1', 'bike:2', 'bike:3', 'bike:4'}
+assert res15 == {}
+assert res16 == {'bike:4'}
+assert res17 == {'bike:2', 'bike:3'}
 r.delete("bikes:racing:france")
 r.delete("bikes:racing:usa")
 r.delete("bikes:racing:italy")

@@ -4,14 +4,18 @@ import threading
 import time
 import warnings
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Type, Union
-
-from redis._cache import (
-    DEFAULT_ALLOW_LIST,
-    DEFAULT_DENY_LIST,
-    DEFAULT_EVICTION_POLICY,
-    AbstractCache,
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Type,
+    Union,
 )
+
 from redis._parsers.encoders import Encoder
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -19,6 +23,7 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
     bool_ok,
 )
+from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
     CoreCommands,
     RedisModuleCommands,
@@ -32,6 +37,13 @@ from redis.connection import (
     UnixDomainSocketConnection,
 )
 from redis.credentials import CredentialProvider
+from redis.event import (
+    AfterPooledConnectionsInstantiationEvent,
+    AfterPubSubConnectionInstantiationEvent,
+    AfterSingleConnectionInstantiationEvent,
+    ClientType,
+    EventDispatcher,
+)
 from redis.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -50,6 +62,11 @@ from redis.utils import (
     safe_str,
     str_if_bytes,
 )
+
+if TYPE_CHECKING:
+    import ssl
+
+    import OpenSSL
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
@@ -173,56 +190,52 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     def __init__(
         self,
-        host="localhost",
-        port=6379,
-        db=0,
-        password=None,
-        socket_timeout=None,
-        socket_connect_timeout=None,
-        socket_keepalive=None,
-        socket_keepalive_options=None,
-        connection_pool=None,
-        unix_socket_path=None,
-        encoding="utf-8",
-        encoding_errors="strict",
-        charset=None,
-        errors=None,
-        decode_responses=False,
-        retry_on_timeout=False,
-        retry_on_error=None,
-        ssl=False,
-        ssl_keyfile=None,
-        ssl_certfile=None,
-        ssl_cert_reqs="required",
-        ssl_ca_certs=None,
-        ssl_ca_path=None,
-        ssl_ca_data=None,
-        ssl_check_hostname=False,
-        ssl_password=None,
-        ssl_validate_ocsp=False,
-        ssl_validate_ocsp_stapled=False,
-        ssl_ocsp_context=None,
-        ssl_ocsp_expected_cert=None,
-        ssl_min_version=None,
-        ssl_ciphers=None,
-        max_connections=None,
-        single_connection_client=False,
-        health_check_interval=0,
-        client_name=None,
-        lib_name="redis-py",
-        lib_version=get_lib_version(),
-        username=None,
-        retry=None,
-        redis_connect_func=None,
+        host: str = "localhost",
+        port: int = 6379,
+        db: int = 0,
+        password: Optional[str] = None,
+        socket_timeout: Optional[float] = None,
+        socket_connect_timeout: Optional[float] = None,
+        socket_keepalive: Optional[bool] = None,
+        socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
+        connection_pool: Optional[ConnectionPool] = None,
+        unix_socket_path: Optional[str] = None,
+        encoding: str = "utf-8",
+        encoding_errors: str = "strict",
+        charset: Optional[str] = None,
+        errors: Optional[str] = None,
+        decode_responses: bool = False,
+        retry_on_timeout: bool = False,
+        retry_on_error: Optional[List[Type[Exception]]] = None,
+        ssl: bool = False,
+        ssl_keyfile: Optional[str] = None,
+        ssl_certfile: Optional[str] = None,
+        ssl_cert_reqs: str = "required",
+        ssl_ca_certs: Optional[str] = None,
+        ssl_ca_path: Optional[str] = None,
+        ssl_ca_data: Optional[str] = None,
+        ssl_check_hostname: bool = False,
+        ssl_password: Optional[str] = None,
+        ssl_validate_ocsp: bool = False,
+        ssl_validate_ocsp_stapled: bool = False,
+        ssl_ocsp_context: Optional["OpenSSL.SSL.Context"] = None,
+        ssl_ocsp_expected_cert: Optional[str] = None,
+        ssl_min_version: Optional["ssl.TLSVersion"] = None,
+        ssl_ciphers: Optional[str] = None,
+        max_connections: Optional[int] = None,
+        single_connection_client: bool = False,
+        health_check_interval: int = 0,
+        client_name: Optional[str] = None,
+        lib_name: Optional[str] = "redis-py",
+        lib_version: Optional[str] = get_lib_version(),
+        username: Optional[str] = None,
+        retry: Optional[Retry] = None,
+        redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        cache_enabled: bool = False,
-        client_cache: Optional[AbstractCache] = None,
-        cache_max_size: int = 10000,
-        cache_ttl: int = 0,
-        cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
-        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
+        cache: Optional[CacheInterface] = None,
+        cache_config: Optional[CacheConfig] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -237,6 +250,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if `True`, connection pool is not used. In that case `Redis`
             instance use is not thread safe.
         """
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         if not connection_pool:
             if charset is not None:
                 warnings.warn(
@@ -274,13 +291,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,
-                "cache_enabled": cache_enabled,
-                "client_cache": client_cache,
-                "cache_max_size": cache_max_size,
-                "cache_ttl": cache_ttl,
-                "cache_policy": cache_policy,
-                "cache_deny_list": cache_deny_list,
-                "cache_allow_list": cache_allow_list,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -322,15 +332,46 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
+                if (cache_config or cache) and protocol in [3, "3"]:
+                    kwargs.update(
+                        {
+                            "cache": cache,
+                            "cache_config": cache_config,
+                        }
+                    )
             connection_pool = ConnectionPool(**kwargs)
+            self._event_dispatcher.dispatch(
+                AfterPooledConnectionsInstantiationEvent(
+                    [connection_pool], ClientType.SYNC, credential_provider
+                )
+            )
             self.auto_close_connection_pool = True
         else:
             self.auto_close_connection_pool = False
+            self._event_dispatcher.dispatch(
+                AfterPooledConnectionsInstantiationEvent(
+                    [connection_pool], ClientType.SYNC, credential_provider
+                )
+            )
 
         self.connection_pool = connection_pool
+
+        if (cache_config or cache) and self.connection_pool.get_protocol() not in [
+            3,
+            "3",
+        ]:
+            raise RedisError("Client caching is only supported with RESP version 3")
+
+        self.single_connection_lock = threading.Lock()
         self.connection = None
-        if single_connection_client:
-            self.connection = self.connection_pool.get_connection("_")
+        self._single_connection_client = single_connection_client
+        if self._single_connection_client:
+            self.connection = self.connection_pool.get_connection()
+            self._event_dispatcher.dispatch(
+                AfterSingleConnectionInstantiationEvent(
+                    self.connection, ClientType.SYNC, self.single_connection_lock
+                )
+            )
 
         self.response_callbacks = CaseInsensitiveDict(_RedisCallbacks)
 
@@ -432,6 +473,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         blocking_timeout: Optional[float] = None,
         lock_class: Union[None, Any] = None,
         thread_local: bool = True,
+        raise_on_release_error: bool = True,
     ):
         """
         Return a new Lock object using key ``name`` that mimics
@@ -478,6 +520,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
 
+        ``raise_on_release_error`` indicates whether to raise an exception when
+        the lock is no longer owned when exiting the context manager. By default,
+        this is True, meaning an exception will be raised. If False, the warning
+        will be logged and the exception will be suppressed.
+
         In some use cases it's necessary to disable thread local storage. For
         example, if you have code where one thread acquires a lock and passes
         that lock instance to a worker thread to release later. If thread
@@ -495,6 +542,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
+            raise_on_release_error=raise_on_release_error,
         )
 
     def pubsub(self, **kwargs):
@@ -503,7 +551,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         subscribe to channels and listen for messages that get published to
         them.
         """
-        return PubSub(self.connection_pool, **kwargs)
+        return PubSub(
+            self.connection_pool, event_dispatcher=self._event_dispatcher, **kwargs
+        )
 
     def monitor(self):
         return Monitor(self.connection_pool)
@@ -520,9 +570,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         self.close()
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
-    def close(self):
+    def close(self) -> None:
         # In case a connection property does not yet exist
         # (due to a crash earlier in the Redis() constructor), return
         # immediately as there is nothing to clean-up.
@@ -541,7 +594,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         Send a command and parse the response
         """
-        conn.send_command(*args)
+        conn.send_command(*args, **options)
         return self.parse_response(conn, command_name, **options)
 
     def _disconnect_raise(self, conn, error):
@@ -559,26 +612,26 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
+        return self._execute_command(*args, **options)
+
+    def _execute_command(self, *args, **options):
         """Execute a command and return a parsed response"""
-        command_name = args[0]
-        keys = options.pop("keys", None)
         pool = self.connection_pool
-        conn = self.connection or pool.get_connection(command_name, **options)
-        response_from_cache = conn._get_from_local_cache(args)
+        command_name = args[0]
+        conn = self.connection or pool.get_connection()
+
+        if self._single_connection_client:
+            self.single_connection_lock.acquire()
         try:
-            if response_from_cache is not None:
-                return response_from_cache
-            else:
-                response = conn.retry.call_with_retry(
-                    lambda: self._send_command_parse_response(
-                        conn, command_name, *args, **options
-                    ),
-                    lambda error: self._disconnect_raise(conn, error),
-                )
-                if keys:
-                    conn._add_to_local_cache(args, response, keys)
-                return response
+            return conn.retry.call_with_retry(
+                lambda: self._send_command_parse_response(
+                    conn, command_name, *args, **options
+                ),
+                lambda error: self._disconnect_raise(conn, error),
+            )
         finally:
+            if self._single_connection_client:
+                self.single_connection_lock.release()
             if not self.connection:
                 pool.release(conn)
 
@@ -598,27 +651,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if EMPTY_RESPONSE in options:
             options.pop(EMPTY_RESPONSE)
 
+        # Remove keys entry, it needs only for cache.
+        options.pop("keys", None)
+
         if command_name in self.response_callbacks:
             return self.response_callbacks[command_name](response, **options)
         return response
 
-    def flush_cache(self):
-        if self.connection:
-            self.connection.flush_cache()
-        else:
-            self.connection_pool.flush_cache()
-
-    def delete_command_from_cache(self, command):
-        if self.connection:
-            self.connection.delete_command_from_cache(command)
-        else:
-            self.connection_pool.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key):
-        if self.connection:
-            self.connection.invalidate_key_from_cache(key)
-        else:
-            self.connection_pool.invalidate_key_from_cache(key)
+    def get_cache(self) -> Optional[CacheInterface]:
+        return self.connection_pool.cache
 
 
 StrictRedis = Redis
@@ -636,7 +677,7 @@ class Monitor:
 
     def __init__(self, connection_pool):
         self.connection_pool = connection_pool
-        self.connection = self.connection_pool.get_connection("MONITOR")
+        self.connection = self.connection_pool.get_connection()
 
     def __enter__(self):
         self.connection.send_command("MONITOR")
@@ -711,6 +752,7 @@ class PubSub:
         ignore_subscribe_messages: bool = False,
         encoder: Optional["Encoder"] = None,
         push_handler_func: Union[None, Callable[[str], None]] = None,
+        event_dispatcher: Optional["EventDispatcher"] = None,
     ):
         self.connection_pool = connection_pool
         self.shard_hint = shard_hint
@@ -721,6 +763,11 @@ class PubSub:
         # to lookup channel and pattern names for callback handlers.
         self.encoder = encoder
         self.push_handler_func = push_handler_func
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
+        self._lock = threading.Lock()
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
         self.health_check_response_b = self.encoder.encode(self.HEALTH_CHECK_MESSAGE)
@@ -803,19 +850,23 @@ class PubSub:
         # subscribed to one or more channels
 
         if self.connection is None:
-            self.connection = self.connection_pool.get_connection(
-                "pubsub", self.shard_hint
-            )
+            self.connection = self.connection_pool.get_connection()
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
             if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
+            self._event_dispatcher.dispatch(
+                AfterPubSubConnectionInstantiationEvent(
+                    self.connection, self.connection_pool, ClientType.SYNC, self._lock
+                )
+            )
         connection = self.connection
         kwargs = {"check_health": not self.subscribed}
         if not self.subscribed:
             self.clean_health_check_responses()
-        self._execute(connection, connection.send_command, *args, **kwargs)
+        with self._lock:
+            self._execute(connection, connection.send_command, *args, **kwargs)
 
     def clean_health_check_responses(self) -> None:
         """
@@ -909,7 +960,7 @@ class PubSub:
                 "did you forget to call subscribe() or psubscribe()?"
             )
 
-        if conn.health_check_interval and time.time() > conn.next_health_check:
+        if conn.health_check_interval and time.monotonic() > conn.next_health_check:
             conn.send_command("PING", self.HEALTH_CHECK_MESSAGE, check_health=False)
             self.health_check_response_counter += 1
 
@@ -1059,12 +1110,12 @@ class PubSub:
         """
         if not self.subscribed:
             # Wait for subscription
-            start_time = time.time()
+            start_time = time.monotonic()
             if self.subscribed_event.wait(timeout) is True:
                 # The connection was subscribed during the timeout time frame.
                 # The timeout should be adjusted based on the time spent
                 # waiting for the subscription
-                time_spent = time.time() - start_time
+                time_spent = time.monotonic() - start_time
                 timeout = max(0.0, timeout - time_spent)
             else:
                 # The connection isn't subscribed to any channels or patterns,
@@ -1314,7 +1365,6 @@ class Pipeline(Redis):
         self.explicit_transaction = True
 
     def execute_command(self, *args, **kwargs):
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
         if (self.watching or args[0] == "WATCH") and not self.explicit_transaction:
             return self.immediate_execute_command(*args, **kwargs)
         return self.pipeline_execute_command(*args, **kwargs)
@@ -1355,7 +1405,7 @@ class Pipeline(Redis):
         conn = self.connection
         # if this is the first call, we need a connection
         if not conn:
-            conn = self.connection_pool.get_connection(command_name, self.shard_hint)
+            conn = self.connection_pool.get_connection()
             self.connection = conn
 
         return conn.retry.call_with_retry(
@@ -1441,6 +1491,8 @@ class Pipeline(Redis):
         for r, cmd in zip(response, commands):
             if not isinstance(r, Exception):
                 args, options = cmd
+                # Remove keys entry, it needs only for cache.
+                options.pop("keys", None)
                 command_name = args[0]
                 if command_name in self.response_callbacks:
                     r = self.response_callbacks[command_name](r, **options)
@@ -1472,8 +1524,7 @@ class Pipeline(Redis):
     def annotate_exception(self, exception, number, command):
         cmd = " ".join(map(safe_str, command))
         msg = (
-            f"Command # {number} ({cmd}) of pipeline "
-            f"caused error: {exception.args[0]}"
+            f"Command # {number} ({cmd}) of pipeline caused error: {exception.args[0]}"
         )
         exception.args = (msg,) + exception.args[1:]
 
@@ -1522,11 +1573,10 @@ class Pipeline(Redis):
             conn.retry_on_error is None
             or isinstance(error, tuple(conn.retry_on_error)) is False
         ):
-
             self.reset()
             raise error
 
-    def execute(self, raise_on_error=True):
+    def execute(self, raise_on_error: bool = True) -> List[Any]:
         """Execute all the commands in the current pipeline"""
         stack = self.command_stack
         if not stack and not self.watching:
@@ -1540,7 +1590,7 @@ class Pipeline(Redis):
 
         conn = self.connection
         if not conn:
-            conn = self.connection_pool.get_connection("MULTI", self.shard_hint)
+            conn = self.connection_pool.get_connection()
             # assign to self.connection so reset() releases the connection
             # back to the pool after we're done
             self.connection = conn

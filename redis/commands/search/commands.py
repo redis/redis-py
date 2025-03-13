@@ -2,15 +2,16 @@ import itertools
 import time
 from typing import Dict, List, Optional, Union
 
-from redis.client import Pipeline
+from redis.client import NEVER_DECODE, Pipeline
 from redis.utils import deprecated_function
 
-from ..helpers import get_protocol_version, parse_to_dict
+from ..helpers import get_protocol_version
 from ._util import to_string
 from .aggregation import AggregateRequest, AggregateResult, Cursor
 from .document import Document
 from .field import Field
-from .indexDefinition import IndexDefinition
+from .index_definition import IndexDefinition
+from .profile_information import ProfileInformation
 from .query import Query
 from .result import Result
 from .suggestion import SuggestionParser
@@ -67,7 +68,7 @@ class SearchCommands:
 
     def _parse_results(self, cmd, res, **kwargs):
         if get_protocol_version(self.client) in ["3", 3]:
-            return res
+            return ProfileInformation(res) if cmd == "FT.PROFILE" else res
         else:
             return self._RESP2_MODULE_CALLBACKS[cmd](res, **kwargs)
 
@@ -82,6 +83,7 @@ class SearchCommands:
             duration=kwargs["duration"],
             has_payload=kwargs["query"]._with_payloads,
             with_scores=kwargs["query"]._with_scores,
+            field_encodings=kwargs["query"]._return_fields_decode_as,
         )
 
     def _parse_aggregate(self, res, **kwargs):
@@ -100,7 +102,7 @@ class SearchCommands:
                 with_scores=query._with_scores,
             )
 
-        return result, parse_to_dict(res[1])
+        return result, ProfileInformation(res[1])
 
     def _parse_spellcheck(self, res, **kwargs):
         corrections = {}
@@ -336,30 +338,30 @@ class SearchCommands:
         """
         Add a single document to the index.
 
-        ### Parameters
+        Args:
 
-        - **doc_id**: the id of the saved document.
-        - **nosave**: if set to true, we just index the document, and don't
+            doc_id: the id of the saved document.
+            nosave: if set to true, we just index the document, and don't
                       save a copy of it. This means that searches will just
                       return ids.
-        - **score**: the document ranking, between 0.0 and 1.0
-        - **payload**: optional inner-index payload we can save for fast
-        i              access in scoring functions
-        - **replace**: if True, and the document already is in the index,
-        we perform an update and reindex the document
-        - **partial**: if True, the fields specified will be added to the
+            score: the document ranking, between 0.0 and 1.0
+            payload: optional inner-index payload we can save for fast
+                     access in scoring functions
+            replace: if True, and the document already is in the index,
+                     we perform an update and reindex the document
+            partial: if True, the fields specified will be added to the
                        existing document.
                        This has the added benefit that any fields specified
                        with `no_index`
                        will not be reindexed again. Implies `replace`
-        - **language**: Specify the language used for document tokenization.
-        - **no_create**: if True, the document is only updated and reindexed
+            language: Specify the language used for document tokenization.
+            no_create: if True, the document is only updated and reindexed
                          if it already exists.
                          If the document does not exist, an error will be
                          returned. Implies `replace`
-        - **fields** kwargs dictionary of the document fields to be saved
-                         and/or indexed.
-                     NOTE: Geo points shoule be encoded as strings of "lon,lat"
+            fields: kwargs dictionary of the document fields to be saved
+                    and/or indexed.
+                    NOTE: Geo points shoule be encoded as strings of "lon,lat"
         """  # noqa
         return self._add_document(
             doc_id,
@@ -498,14 +500,19 @@ class SearchCommands:
         For more information see `FT.SEARCH <https://redis.io/commands/ft.search>`_.
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
-        st = time.time()
-        res = self.execute_command(SEARCH_CMD, *args)
+        st = time.monotonic()
+
+        options = {}
+        if get_protocol_version(self.client) not in ["3", 3]:
+            options[NEVER_DECODE] = True
+
+        res = self.execute_command(SEARCH_CMD, *args, **options)
 
         if isinstance(res, Pipeline):
             return res
 
         return self._parse_results(
-            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+            SEARCH_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
     def explain(
@@ -579,7 +586,7 @@ class SearchCommands:
 
     def profile(
         self,
-        query: Union[str, Query, AggregateRequest],
+        query: Union[Query, AggregateRequest],
         limited: bool = False,
         query_params: Optional[Dict[str, Union[str, int, float]]] = None,
     ):
@@ -589,13 +596,13 @@ class SearchCommands:
 
         ### Parameters
 
-        **query**: This can be either an `AggregateRequest`, `Query` or string.
+        **query**: This can be either an `AggregateRequest` or `Query`.
         **limited**: If set to True, removes details of reader iterator.
         **query_params**: Define one or more value parameters.
         Each parameter has a name and a value.
 
         """
-        st = time.time()
+        st = time.monotonic()
         cmd = [PROFILE_CMD, self.index_name, ""]
         if limited:
             cmd.append("LIMITED")
@@ -614,20 +621,20 @@ class SearchCommands:
         res = self.execute_command(*cmd)
 
         return self._parse_results(
-            PROFILE_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+            PROFILE_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
     def spellcheck(self, query, distance=None, include=None, exclude=None):
         """
         Issue a spellcheck query
 
-        ### Parameters
+        Args:
 
-        **query**: search query.
-        **distance***: the maximal Levenshtein distance for spelling
+            query: search query.
+            distance: the maximal Levenshtein distance for spelling
                        suggestions (default: 1, max: 4).
-        **include**: specifies an inclusion custom dictionary.
-        **exclude**: specifies an exclusion custom dictionary.
+            include: specifies an inclusion custom dictionary.
+            exclude: specifies an exclusion custom dictionary.
 
         For more information see `FT.SPELLCHECK <https://redis.io/commands/ft.spellcheck>`_.
         """  # noqa
@@ -685,6 +692,10 @@ class SearchCommands:
         cmd = [DICT_DUMP_CMD, name]
         return self.execute_command(*cmd)
 
+    @deprecated_function(
+        version="8.0.0",
+        reason="deprecated since Redis 8.0, call config_set from core module instead",
+    )
     def config_set(self, option: str, value: str) -> bool:
         """Set runtime configuration option.
 
@@ -699,6 +710,10 @@ class SearchCommands:
         raw = self.execute_command(*cmd)
         return raw == "OK"
 
+    @deprecated_function(
+        version="8.0.0",
+        reason="deprecated since Redis 8.0, call config_get from core module instead",
+    )
     def config_get(self, option: str) -> str:
         """Get runtime configuration option value.
 
@@ -925,14 +940,19 @@ class AsyncSearchCommands(SearchCommands):
         For more information see `FT.SEARCH <https://redis.io/commands/ft.search>`_.
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
-        st = time.time()
-        res = await self.execute_command(SEARCH_CMD, *args)
+        st = time.monotonic()
+
+        options = {}
+        if get_protocol_version(self.client) not in ["3", 3]:
+            options[NEVER_DECODE] = True
+
+        res = await self.execute_command(SEARCH_CMD, *args, **options)
 
         if isinstance(res, Pipeline):
             return res
 
         return self._parse_results(
-            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+            SEARCH_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
     async def aggregate(
@@ -995,6 +1015,10 @@ class AsyncSearchCommands(SearchCommands):
 
         return self._parse_results(SPELLCHECK_CMD, res)
 
+    @deprecated_function(
+        version="8.0.0",
+        reason="deprecated since Redis 8.0, call config_set from core module instead",
+    )
     async def config_set(self, option: str, value: str) -> bool:
         """Set runtime configuration option.
 
@@ -1009,6 +1033,10 @@ class AsyncSearchCommands(SearchCommands):
         raw = await self.execute_command(*cmd)
         return raw == "OK"
 
+    @deprecated_function(
+        version="8.0.0",
+        reason="deprecated since Redis 8.0, call config_get from core module instead",
+    )
     async def config_get(self, option: str) -> str:
         """Get runtime configuration option value.
 

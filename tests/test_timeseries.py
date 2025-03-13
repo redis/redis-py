@@ -988,7 +988,7 @@ def test_query_index(client):
     client.ts().create(2, labels={"Test": "This", "Taste": "That"})
     assert 2 == len(client.ts().queryindex(["Test=This"]))
     assert 1 == len(client.ts().queryindex(["Taste=That"]))
-    assert_resp_response(client, client.ts().queryindex(["Taste=That"]), [2], {"2"})
+    assert_resp_response(client, client.ts().queryindex(["Taste=That"]), [2], ["2"])
 
 
 @pytest.mark.redismod

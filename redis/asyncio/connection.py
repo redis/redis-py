@@ -27,6 +27,10 @@ from typing import (
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
+from ..auth.token import TokenInterface
+from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
+from ..utils import deprecated_args, format_error_message
+
 # the functionality is available in 3.11.x but has a major issue before
 # 3.11.3. See https://github.com/redis/redis-py/issues/2633
 if sys.version_info >= (3, 11, 3):
@@ -47,16 +51,9 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
-from redis.typing import EncodableT, KeysT, ResponseT
+from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, get_lib_version, str_if_bytes
 
-from .._cache import (
-    DEFAULT_ALLOW_LIST,
-    DEFAULT_DENY_LIST,
-    DEFAULT_EVICTION_POLICY,
-    AbstractCache,
-    _LocalCache,
-)
 from .._parsers import (
     BaseParser,
     Encoder,
@@ -119,9 +116,6 @@ class AbstractConnection:
         "encoder",
         "ssl_context",
         "protocol",
-        "client_cache",
-        "cache_deny_list",
-        "cache_allow_list",
         "_reader",
         "_writer",
         "_parser",
@@ -156,13 +150,7 @@ class AbstractConnection:
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
-        cache_enabled: bool = False,
-        client_cache: Optional[AbstractCache] = None,
-        cache_max_size: int = 10000,
-        cache_ttl: int = 0,
-        cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
-        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -171,6 +159,10 @@ class AbstractConnection:
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self.db = db
         self.client_name = client_name
         self.lib_name = lib_name
@@ -210,6 +202,8 @@ class AbstractConnection:
         self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
+        self._re_auth_token: Optional[TokenInterface] = None
+
         try:
             p = int(protocol)
         except TypeError:
@@ -220,18 +214,6 @@ class AbstractConnection:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
             self.protocol = protocol
-        if cache_enabled:
-            _cache = _LocalCache(cache_max_size, cache_ttl, cache_policy)
-        else:
-            _cache = None
-        self.client_cache = client_cache if client_cache is not None else _cache
-        if self.client_cache is not None:
-            if self.protocol not in [3, "3"]:
-                raise RedisError(
-                    "client caching is only supported with protocol version 3 or higher"
-                )
-            self.cache_deny_list = cache_deny_list
-            self.cache_allow_list = cache_allow_list
 
     def __del__(self, _warnings: Any = warnings):
         # For some reason, the individual streams don't get properly garbage
@@ -241,7 +223,13 @@ class AbstractConnection:
             _warnings.warn(
                 f"unclosed Connection {self!r}", ResourceWarning, source=self
             )
-            self._close()
+
+            try:
+                asyncio.get_running_loop()
+                self._close()
+            except RuntimeError:
+                # No actions been taken if pool already closed.
+                pass
 
     def _close(self):
         """
@@ -345,9 +333,11 @@ class AbstractConnection:
     def _host_error(self) -> str:
         pass
 
-    @abstractmethod
     def _error_message(self, exception: BaseException) -> str:
-        pass
+        return format_error_message(self._host_error(), exception)
+
+    def get_protocol(self):
+        return self.protocol
 
     async def on_connect(self) -> None:
         """Initialize the connection, authenticate and select a database"""
@@ -361,7 +351,8 @@ class AbstractConnection:
                 self.credential_provider
                 or UsernamePasswordCredentialProvider(self.username, self.password)
             )
-            auth_args = cred_provider.get_credentials()
+            auth_args = await cred_provider.get_credentials_async()
+
             # if resp version is specified and we have auth args,
             # we need to send them via HELLO
         if auth_args and self.protocol not in [2, "2"]:
@@ -372,7 +363,11 @@ class AbstractConnection:
                 self._parser.on_connect(self)
             if len(auth_args) == 1:
                 auth_args = ["default", auth_args[0]]
-            await self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
+            # avoid checking health here -- PING will fail if we try
+            # to check the health prior to the AUTH
+            await self.send_command(
+                "HELLO", self.protocol, "AUTH", *auth_args, check_health=False
+            )
             response = await self.read_response()
             if response.get(b"proto") != int(self.protocol) and response.get(
                 "proto"
@@ -424,11 +419,6 @@ class AbstractConnection:
         # if a database is specified, switch to it. Also pipeline this
         if self.db:
             await self.send_command("SELECT", self.db)
-        # if client caching is enabled, start tracking
-        if self.client_cache:
-            await self.send_command("CLIENT", "TRACKING", "ON")
-            await self.read_response()
-            self._parser.set_invalidation_push_handler(self._cache_invalidation_process)
 
         # read responses from pipeline
         for _ in (sent for sent in (self.lib_name, self.lib_version) if sent):
@@ -463,9 +453,6 @@ class AbstractConnection:
             raise TimeoutError(
                 f"Timed out closing connection after {self.socket_connect_timeout}"
             ) from None
-        finally:
-            if self.client_cache:
-                self.client_cache.flush()
 
     async def _send_ping(self):
         """Send PING, expect PONG in return"""
@@ -687,60 +674,22 @@ class AbstractConnection:
         """Check if the socket is empty"""
         return len(self._reader._buffer) == 0
 
-    def _cache_invalidation_process(
-        self, data: List[Union[str, Optional[List[str]]]]
-    ) -> None:
-        """
-        Invalidate (delete) all redis commands associated with a specific key.
-        `data` is a list of strings, where the first string is the invalidation message
-        and the second string is the list of keys to invalidate.
-        (if the list of keys is None, then all keys are invalidated)
-        """
-        if data[1] is None:
-            self.client_cache.flush()
-        else:
-            for key in data[1]:
-                self.client_cache.invalidate_key(str_if_bytes(key))
-
-    async def _get_from_local_cache(self, command: str):
-        """
-        If the command is in the local cache, return the response
-        """
-        if (
-            self.client_cache is None
-            or command[0] in self.cache_deny_list
-            or command[0] not in self.cache_allow_list
-        ):
-            return None
+    async def process_invalidation_messages(self):
         while not self._socket_is_empty():
             await self.read_response(push_request=True)
-        return self.client_cache.get(command)
 
-    def _add_to_local_cache(
-        self, command: Tuple[str], response: ResponseT, keys: List[KeysT]
-    ):
-        """
-        Add the command and response to the local cache if the command
-        is allowed to be cached
-        """
-        if (
-            self.client_cache is not None
-            and (self.cache_deny_list == [] or command[0] not in self.cache_deny_list)
-            and (self.cache_allow_list == [] or command[0] in self.cache_allow_list)
-        ):
-            self.client_cache.set(command, response, keys)
+    def set_re_auth_token(self, token: TokenInterface):
+        self._re_auth_token = token
 
-    def flush_cache(self):
-        if self.client_cache:
-            self.client_cache.flush()
-
-    def delete_command_from_cache(self, command):
-        if self.client_cache:
-            self.client_cache.delete_command(command)
-
-    def invalidate_key_from_cache(self, key):
-        if self.client_cache:
-            self.client_cache.invalidate_key(key)
+    async def re_auth(self):
+        if self._re_auth_token is not None:
+            await self.send_command(
+                "AUTH",
+                self._re_auth_token.try_get("oid"),
+                self._re_auth_token.get_value(),
+            )
+            await self.read_response()
+            self._re_auth_token = None
 
 
 class Connection(AbstractConnection):
@@ -798,27 +747,6 @@ class Connection(AbstractConnection):
 
     def _host_error(self) -> str:
         return f"{self.host}:{self.port}"
-
-    def _error_message(self, exception: BaseException) -> str:
-        # args for socket.error can either be (errno, "message")
-        # or just "message"
-
-        host_error = self._host_error()
-
-        if not exception.args:
-            # asyncio has a bug where on Connection reset by peer, the
-            # exception is not instanciated, so args is empty. This is the
-            # workaround.
-            # See: https://github.com/redis/redis-py/issues/2237
-            # See: https://github.com/python/cpython/issues/94061
-            return f"Error connecting to {host_error}. Connection reset by peer"
-        elif len(exception.args) == 1:
-            return f"Error connecting to {host_error}. {exception.args[0]}."
-        else:
-            return (
-                f"Error {exception.args[0]} connecting to {host_error}. "
-                f"{exception.args[0]}."
-            )
 
 
 class SSLConnection(Connection):
@@ -914,7 +842,7 @@ class RedisSSLContext:
         if cert_reqs is None:
             self.cert_reqs = ssl.CERT_NONE
         elif isinstance(cert_reqs, str):
-            CERT_REQS = {
+            CERT_REQS = {  # noqa: N806
                 "none": ssl.CERT_NONE,
                 "optional": ssl.CERT_OPTIONAL,
                 "required": ssl.CERT_REQUIRED,
@@ -971,20 +899,6 @@ class UnixDomainSocketConnection(AbstractConnection):
     def _host_error(self) -> str:
         return self.path
 
-    def _error_message(self, exception: BaseException) -> str:
-        # args for socket.error can either be (errno, "message")
-        # or just "message"
-        host_error = self._host_error()
-        if len(exception.args) == 1:
-            return (
-                f"Error connecting to unix socket: {host_error}. {exception.args[0]}."
-            )
-        else:
-            return (
-                f"Error {exception.args[0]} connecting to unix socket: "
-                f"{host_error}. {exception.args[1]}."
-            )
-
 
 FALSE_STRINGS = ("0", "F", "FALSE", "N", "NO")
 
@@ -1034,7 +948,7 @@ def parse_url(url: str) -> ConnectKwargs:
                 try:
                     kwargs[name] = parser(value)
                 except (TypeError, ValueError):
-                    raise ValueError(f"Invalid value for `{name}` in connection URL.")
+                    raise ValueError(f"Invalid value for '{name}' in connection URL.")
             else:
                 kwargs[name] = value
 
@@ -1155,6 +1069,10 @@ class ConnectionPool:
         self._available_connections: List[AbstractConnection] = []
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
+        self._lock = asyncio.Lock()
+        self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
+        if self._event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
 
     def __repr__(self):
         return (
@@ -1173,14 +1091,20 @@ class ConnectionPool:
             or len(self._in_use_connections) < self.max_connections
         )
 
-    async def get_connection(self, command_name, *keys, **options):
-        """Get a connected connection from the pool"""
-        connection = self.get_available_connection()
-        try:
-            await self.ensure_connection(connection)
-        except BaseException:
-            await self.release(connection)
-            raise
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    async def get_connection(self, command_name=None, *keys, **options):
+        async with self._lock:
+            """Get a connected connection from the pool"""
+            connection = self.get_available_connection()
+            try:
+                await self.ensure_connection(connection)
+            except BaseException:
+                await self.release(connection)
+                raise
 
         return connection
 
@@ -1211,18 +1135,12 @@ class ConnectionPool:
     async def ensure_connection(self, connection: AbstractConnection):
         """Ensure that the connection object is connected and valid"""
         await connection.connect()
-        # if client caching is not enabled connections that the pool
-        # provides should be ready to send a command.
-        # if not, the connection was either returned to the
+        # connections that the pool provides should be ready to send
+        # a command. if not, the connection was either returned to the
         # pool before all data has been read or the socket has been
         # closed. either way, reconnect and verify everything is good.
-        # (if caching enabled the connection will not always be ready
-        # to send a command because it may contain invalidation messages)
         try:
-            if (
-                await connection.can_read_destructive()
-                and connection.client_cache is None
-            ):
+            if await connection.can_read_destructive():
                 raise ConnectionError("Connection has data") from None
         except (ConnectionError, OSError):
             await connection.disconnect()
@@ -1236,6 +1154,9 @@ class ConnectionPool:
         # not doing so is an error that will cause an exception here.
         self._in_use_connections.remove(connection)
         self._available_connections.append(connection)
+        await self._event_dispatcher.dispatch_async(
+            AsyncAfterConnectionReleasedEvent(connection)
+        )
 
     async def disconnect(self, inuse_connections: bool = True):
         """
@@ -1269,20 +1190,28 @@ class ConnectionPool:
         for conn in self._in_use_connections:
             conn.retry = retry
 
-    def flush_cache(self):
-        connections = chain(self._available_connections, self._in_use_connections)
-        for connection in connections:
-            connection.flush_cache()
+    async def re_auth_callback(self, token: TokenInterface):
+        async with self._lock:
+            for conn in self._available_connections:
+                await conn.retry.call_with_retry(
+                    lambda: conn.send_command(
+                        "AUTH", token.try_get("oid"), token.get_value()
+                    ),
+                    lambda error: self._mock(error),
+                )
+                await conn.retry.call_with_retry(
+                    lambda: conn.read_response(), lambda error: self._mock(error)
+                )
+            for conn in self._in_use_connections:
+                conn.set_re_auth_token(token)
 
-    def delete_command_from_cache(self, command: str):
-        connections = chain(self._available_connections, self._in_use_connections)
-        for connection in connections:
-            connection.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key: str):
-        connections = chain(self._available_connections, self._in_use_connections)
-        for connection in connections:
-            connection.invalidate_key_from_cache(key)
+    async def _mock(self, error: RedisError):
+        """
+        Dummy functions, needs to be passed as error callback to retry object.
+        :param error:
+        :return:
+        """
+        pass
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -1335,7 +1264,12 @@ class BlockingConnectionPool(ConnectionPool):
         self._condition = asyncio.Condition()
         self.timeout = timeout
 
-    async def get_connection(self, command_name, *keys, **options):
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    async def get_connection(self, command_name=None, *keys, **options):
         """Gets a connection from the pool, blocking until one is available"""
         try:
             async with self._condition:

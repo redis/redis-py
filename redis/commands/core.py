@@ -5,6 +5,7 @@ import hashlib
 import warnings
 from typing import (
     TYPE_CHECKING,
+    Any,
     AsyncIterator,
     Awaitable,
     Callable,
@@ -35,6 +36,7 @@ from redis.typing import (
     GroupT,
     KeysT,
     KeyT,
+    Number,
     PatternT,
     ResponseT,
     ScriptTextT,
@@ -46,8 +48,8 @@ from redis.typing import (
 from .helpers import list_or_args
 
 if TYPE_CHECKING:
-    from redis.asyncio.client import Redis as AsyncRedis
-    from redis.client import Redis
+    import redis.asyncio.client
+    import redis.client
 
 
 class ACLCommands(CommandsProtocol):
@@ -79,7 +81,7 @@ class ACLCommands(CommandsProtocol):
 
     def acl_deluser(self, *username: str, **kwargs) -> ResponseT:
         """
-        Delete the ACL for the specified ``username``s
+        Delete the ACL for the specified ``username``\\s
 
         For more information see https://redis.io/commands/acl-deluser
         """
@@ -227,9 +229,10 @@ class ACLCommands(CommandsProtocol):
                       must be prefixed with either a '+' to add the command permission
                       or a '-' to remove the command permission.
             keys: A list of key patterns to grant the user access to. Key patterns allow
-                  '*' to support wildcard matching. For example, '*' grants access to
-                  all keys while 'cache:*' grants access to all keys that are prefixed
-                  with 'cache:'. `keys` should not be prefixed with a '~'.
+                  ``'*'`` to support wildcard matching. For example, ``'*'`` grants
+                  access to all keys while ``'cache:*'`` grants access to all keys that
+                  are prefixed with ``cache:``.
+                  `keys` should not be prefixed with a ``'~'``.
             reset: Indicates whether the user should be fully reset prior to applying
                    the new ACL. Setting this to `True` will remove all existing
                    passwords, flags, and privileges from the user and then apply the
@@ -527,7 +530,7 @@ class ManagementCommands(CommandsProtocol):
             raise DataError("client_id must be a list")
         if client_id:
             args.append(b"ID")
-            args.append(" ".join(client_id))
+            args += client_id
         return self.execute_command("CLIENT LIST", *args, **kwargs)
 
     def client_getname(self, **kwargs) -> ResponseT:
@@ -730,16 +733,19 @@ class ManagementCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/client-pause
 
-        :param timeout: milliseconds to pause clients
-        :param all: If true (default) all client commands are blocked.
-        otherwise, clients are only blocked if they attempt to execute
-        a write command.
+        Args:
+            timeout: milliseconds to pause clients
+            all: If true (default) all client commands are blocked.
+                 otherwise, clients are only blocked if they attempt to execute
+                 a write command.
+
         For the WRITE mode, some commands have special behavior:
-        EVAL/EVALSHA: Will block client for all scripts.
-        PUBLISH: Will block client.
-        PFCOUNT: Will block client.
-        WAIT: Acknowledgments will be delayed, so this command will
-        appear blocked.
+
+        * EVAL/EVALSHA: Will block client for all scripts.
+        * PUBLISH: Will block client.
+        * PFCOUNT: Will block client.
+        * WAIT: Acknowledgments will be delayed, so this command will
+            appear blocked.
         """
         args = ["CLIENT PAUSE", str(timeout)]
         if not isinstance(timeout, int):
@@ -1380,9 +1386,6 @@ class ManagementCommands(CommandsProtocol):
         )
 
 
-AsyncManagementCommands = ManagementCommands
-
-
 class AsyncManagementCommands(ManagementCommands):
     async def command_info(self, **kwargs) -> None:
         return super().command_info(**kwargs)
@@ -1441,7 +1444,7 @@ class BitFieldOperation:
 
     def __init__(
         self,
-        client: Union["Redis", "AsyncRedis"],
+        client: Union["redis.client.Redis", "redis.asyncio.client.Redis"],
         key: str,
         default_overflow: Union[str, None] = None,
     ):
@@ -1585,7 +1588,7 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("BITCOUNT", *params, keys=[key])
 
     def bitfield(
-        self: Union["Redis", "AsyncRedis"],
+        self: Union["redis.client.Redis", "redis.asyncio.client.Redis"],
         key: KeyT,
         default_overflow: Union[str, None] = None,
     ) -> BitFieldOperation:
@@ -1598,7 +1601,7 @@ class BasicKeyCommands(CommandsProtocol):
         return BitFieldOperation(self, key, default_overflow=default_overflow)
 
     def bitfield_ro(
-        self: Union["Redis", "AsyncRedis"],
+        self: Union["redis.client.Redis", "redis.asyncio.client.Redis"],
         key: KeyT,
         encoding: str,
         offset: BitfieldOffsetT,
@@ -2495,7 +2498,7 @@ class BasicKeyCommands(CommandsProtocol):
 
     def unwatch(self) -> None:
         """
-        Unwatches the value at key ``name``, or None of the key doesn't exist
+        Unwatches all previously watched keys for a transaction
 
         For more information see https://redis.io/commands/unwatch
         """
@@ -2566,7 +2569,7 @@ class ListCommands(CommandsProtocol):
     """
 
     def blpop(
-        self, keys: List, timeout: Optional[int] = 0
+        self, keys: List, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[list], list]:
         """
         LPOP a value off of the first non-empty list
@@ -2587,7 +2590,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("BLPOP", *keys)
 
     def brpop(
-        self, keys: List, timeout: Optional[int] = 0
+        self, keys: List, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[list], list]:
         """
         RPOP a value off of the first non-empty list
@@ -2608,7 +2611,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("BRPOP", *keys)
 
     def brpoplpush(
-        self, src: str, dst: str, timeout: Optional[int] = 0
+        self, src: str, dst: str, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
@@ -3369,7 +3372,7 @@ class SetCommands(CommandsProtocol):
         self, numkeys: int, keys: List[str], limit: int = 0
     ) -> Union[Awaitable[int], int]:
         """
-        Return the cardinality of the intersect of multiple sets specified by ``keys`.
+        Return the cardinality of the intersect of multiple sets specified by ``keys``.
 
         When LIMIT provided (defaults to 0 and means unlimited), if the intersection
         cardinality reaches limit partway through the computation, the algorithm will
@@ -3412,7 +3415,9 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMEMBERS", name, keys=[name])
 
-    def smismember(self, name: str, values: List, *args: List) -> Union[
+    def smismember(
+        self, name: str, values: List, *args: List
+    ) -> Union[
         Awaitable[List[Union[Literal[0], Literal[1]]]],
         List[Union[Literal[0], Literal[1]]],
     ]:
@@ -3501,9 +3506,11 @@ class StreamCommands(CommandsProtocol):
     def xack(self, name: KeyT, groupname: GroupT, *ids: StreamIdT) -> ResponseT:
         """
         Acknowledges the successful processing of one or more messages.
-        name: name of the stream.
-        groupname: name of the consumer group.
-        *ids: message ids to acknowledge.
+
+        Args:
+            name: name of the stream.
+            groupname: name of the consumer group.
+            *ids: message ids to acknowledge.
 
         For more information see https://redis.io/commands/xack
         """
@@ -3699,8 +3706,10 @@ class StreamCommands(CommandsProtocol):
     def xdel(self, name: KeyT, *ids: StreamIdT) -> ResponseT:
         """
         Deletes one or more messages from a stream.
-        name: name of the stream.
-        *ids: message ids to delete.
+
+        Args:
+            name: name of the stream.
+            *ids: message ids to delete.
 
         For more information see https://redis.io/commands/xdel
         """
@@ -4155,8 +4164,7 @@ class SortedSetCommands(CommandsProtocol):
             raise DataError("ZADD allows either 'gt' or 'lt', not both")
         if incr and len(mapping) != 1:
             raise DataError(
-                "ZADD option 'incr' only works when passing a "
-                "single element/score pair"
+                "ZADD option 'incr' only works when passing a single element/score pair"
             )
         if nx and (gt or lt):
             raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
@@ -4268,7 +4276,7 @@ class SortedSetCommands(CommandsProtocol):
     ) -> Union[Awaitable[int], int]:
         """
         Return the cardinality of the intersect of multiple sorted sets
-        specified by ``keys`.
+        specified by ``keys``.
         When LIMIT provided (defaults to 0 and means unlimited), if the intersection
         cardinality reaches limit partway through the computation, the algorithm will
         exit and yield limit as the cardinality
@@ -5126,9 +5134,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
                 - `2` if the field was deleted because the specified expiration time is
@@ -5187,9 +5194,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
                 - `2` if the field was deleted because the specified expiration time is
@@ -5248,9 +5254,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
                 - `2` if the field was deleted because the specified expiration time is
@@ -5315,9 +5320,8 @@ class HashCommands(CommandsProtocol):
             lt: Set expiry only when the new expiry is less than the current one.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `0` if the specified NX | XX | GT | LT condition was not met.
                 - `1` if the expiration time was set or updated.
                 - `2` if the field was deleted because the specified expiration time is
@@ -5362,9 +5366,8 @@ class HashCommands(CommandsProtocol):
                     expiration time.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `-1` if the field exists but has no associated expiration time.
                 - `1` if the expiration time was successfully removed from the field.
         """
@@ -5382,9 +5385,8 @@ class HashCommands(CommandsProtocol):
                     time.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the expiration Unix timestamp in
                   seconds, if the field has an associated expiration time.
@@ -5405,9 +5407,8 @@ class HashCommands(CommandsProtocol):
                     time.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the expiration Unix timestamp in
                   milliseconds, if the field has an associated expiration time.
@@ -5428,9 +5429,8 @@ class HashCommands(CommandsProtocol):
             fields: A list of fields within the hash for which to get the TTL.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the TTL in seconds if the field has
                   an associated expiration time.
@@ -5451,9 +5451,8 @@ class HashCommands(CommandsProtocol):
             fields: A list of fields within the hash for which to get the TTL.
 
         Returns:
-            If the key does not exist, returns an empty list. If the key exists, returns
-            a list which contains for each field in the request:
-                - `-2` if the field does not exist.
+            Returns a list which contains for each field in the request:
+                - `-2` if the field does not exist, or if the key does not exist.
                 - `-1` if the field exists but has no associated expire time.
                 - A positive integer representing the TTL in milliseconds if the field
                   has an associated expiration time.
@@ -5471,7 +5470,7 @@ class Script:
     An executable Lua script object returned by ``register_script``
     """
 
-    def __init__(self, registered_client: "Redis", script: ScriptTextT):
+    def __init__(self, registered_client: "redis.client.Redis", script: ScriptTextT):
         self.registered_client = registered_client
         self.script = script
         # Precalculate and store the SHA1 hex digest of the script.
@@ -5479,11 +5478,7 @@ class Script:
         if isinstance(script, str):
             # We need the encoding from the client in order to generate an
             # accurate byte representation of the script
-            try:
-                encoder = registered_client.connection_pool.get_encoder()
-            except AttributeError:
-                # Cluster
-                encoder = registered_client.get_encoder()
+            encoder = self.get_encoder()
             script = encoder.encode(script)
         self.sha = hashlib.sha1(script).hexdigest()
 
@@ -5491,7 +5486,7 @@ class Script:
         self,
         keys: Union[Sequence[KeyT], None] = None,
         args: Union[Iterable[EncodableT], None] = None,
-        client: Union["Redis", None] = None,
+        client: Union["redis.client.Redis", None] = None,
     ):
         """Execute the script, passing any required ``args``"""
         keys = keys or []
@@ -5514,13 +5509,35 @@ class Script:
             self.sha = client.script_load(self.script)
             return client.evalsha(self.sha, len(keys), *args)
 
+    def get_encoder(self):
+        """Get the encoder to encode string scripts into bytes."""
+        try:
+            return self.registered_client.get_encoder()
+        except AttributeError:
+            # DEPRECATED
+            # In version <=4.1.2, this was the code we used to get the encoder.
+            # However, after 4.1.2 we added support for scripting in clustered
+            # redis. ClusteredRedis doesn't have a `.connection_pool` attribute
+            # so we changed the Script class to use
+            # `self.registered_client.get_encoder` (see above).
+            # However, that is technically a breaking change, as consumers who
+            # use Scripts directly might inject a `registered_client` that
+            # doesn't have a `.get_encoder` field. This try/except prevents us
+            # from breaking backward-compatibility. Ideally, it would be
+            # removed in the next major release.
+            return self.registered_client.connection_pool.get_encoder()
+
 
 class AsyncScript:
     """
     An executable Lua script object returned by ``register_script``
     """
 
-    def __init__(self, registered_client: "AsyncRedis", script: ScriptTextT):
+    def __init__(
+        self,
+        registered_client: "redis.asyncio.client.Redis",
+        script: ScriptTextT,
+    ):
         self.registered_client = registered_client
         self.script = script
         # Precalculate and store the SHA1 hex digest of the script.
@@ -5540,7 +5557,7 @@ class AsyncScript:
         self,
         keys: Union[Sequence[KeyT], None] = None,
         args: Union[Iterable[EncodableT], None] = None,
-        client: Union["AsyncRedis", None] = None,
+        client: Union["redis.asyncio.client.Redis", None] = None,
     ):
         """Execute the script, passing any required ``args``"""
         keys = keys or []
@@ -5714,7 +5731,7 @@ class ScriptCommands(CommandsProtocol):
         """
         Check if a script exists in the script cache by specifying the SHAs of
         each script as ``args``. Returns a list of boolean values indicating if
-        if each already script exists in the cache.
+        if each already script exists in the cache_data.
 
         For more information see  https://redis.io/commands/script-exists
         """
@@ -5728,7 +5745,7 @@ class ScriptCommands(CommandsProtocol):
     def script_flush(
         self, sync_type: Union[Literal["SYNC"], Literal["ASYNC"]] = None
     ) -> ResponseT:
-        """Flush all scripts from the script cache.
+        """Flush all scripts from the script cache_data.
 
         ``sync_type`` is by default SYNC (synchronous) but it can also be
                       ASYNC.
@@ -5759,13 +5776,13 @@ class ScriptCommands(CommandsProtocol):
 
     def script_load(self, script: ScriptTextT) -> ResponseT:
         """
-        Load a Lua ``script`` into the script cache. Returns the SHA.
+        Load a Lua ``script`` into the script cache_data. Returns the SHA.
 
         For more information see https://redis.io/commands/script-load
         """
         return self.execute_command("SCRIPT LOAD", script)
 
-    def register_script(self: "Redis", script: ScriptTextT) -> Script:
+    def register_script(self: "redis.client.Redis", script: ScriptTextT) -> Script:
         """
         Register a Lua ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
@@ -5779,7 +5796,10 @@ class AsyncScriptCommands(ScriptCommands):
     async def script_debug(self, *args) -> None:
         return super().script_debug()
 
-    def register_script(self: "AsyncRedis", script: ScriptTextT) -> AsyncScript:
+    def register_script(
+        self: "redis.asyncio.client.Redis",
+        script: ScriptTextT,
+    ) -> AsyncScript:
         """
         Register a Lua ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
@@ -6290,62 +6310,6 @@ class ModuleCommands(CommandsProtocol):
         return self.execute_command("COMMAND")
 
 
-class Script:
-    """
-    An executable Lua script object returned by ``register_script``
-    """
-
-    def __init__(self, registered_client, script):
-        self.registered_client = registered_client
-        self.script = script
-        # Precalculate and store the SHA1 hex digest of the script.
-
-        if isinstance(script, str):
-            # We need the encoding from the client in order to generate an
-            # accurate byte representation of the script
-            encoder = self.get_encoder()
-            script = encoder.encode(script)
-        self.sha = hashlib.sha1(script).hexdigest()
-
-    def __call__(self, keys=[], args=[], client=None):
-        "Execute the script, passing any required ``args``"
-        if client is None:
-            client = self.registered_client
-        args = tuple(keys) + tuple(args)
-        # make sure the Redis server knows about the script
-        from redis.client import Pipeline
-
-        if isinstance(client, Pipeline):
-            # Make sure the pipeline can register the script before executing.
-            client.scripts.add(self)
-        try:
-            return client.evalsha(self.sha, len(keys), *args)
-        except NoScriptError:
-            # Maybe the client is pointed to a different server than the client
-            # that created this instance?
-            # Overwrite the sha just in case there was a discrepancy.
-            self.sha = client.script_load(self.script)
-            return client.evalsha(self.sha, len(keys), *args)
-
-    def get_encoder(self):
-        """Get the encoder to encode string scripts into bytes."""
-        try:
-            return self.registered_client.get_encoder()
-        except AttributeError:
-            # DEPRECATED
-            # In version <=4.1.2, this was the code we used to get the encoder.
-            # However, after 4.1.2 we added support for scripting in clustered
-            # redis. ClusteredRedis doesn't have a `.connection_pool` attribute
-            # so we changed the Script class to use
-            # `self.registered_client.get_encoder` (see above).
-            # However, that is technically a breaking change, as consumers who
-            # use Scripts directly might inject a `registered_client` that
-            # doesn't have a `.get_encoder` field. This try/except prevents us
-            # from breaking backward-compatibility. Ideally, it would be
-            # removed in the next major release.
-            return self.registered_client.connection_pool.get_encoder()
-
-
 class AsyncModuleCommands(ModuleCommands):
     async def command_info(self) -> None:
         return super().command_info()
@@ -6422,9 +6386,12 @@ class FunctionCommands:
     ) -> Union[Awaitable[List], List]:
         """
         Return information about the functions and libraries.
-        :param library: pecify a pattern for matching library names
-        :param withcode: cause the server to include the libraries source
-         implementation in the reply
+
+        Args:
+
+            library: specify a pattern for matching library names
+            withcode: cause the server to include the libraries source implementation
+                in the reply
         """
         args = ["LIBRARYNAME", library]
         if withcode:
@@ -6432,12 +6399,12 @@ class FunctionCommands:
         return self.execute_command("FUNCTION LIST", *args)
 
     def _fcall(
-        self, command: str, function, numkeys: int, *keys_and_args: Optional[List]
+        self, command: str, function, numkeys: int, *keys_and_args: Any
     ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, function, numkeys, *keys_and_args)
 
     def fcall(
-        self, function, numkeys: int, *keys_and_args: Optional[List]
+        self, function, numkeys: int, *keys_and_args: Any
     ) -> Union[Awaitable[str], str]:
         """
         Invoke a function.
@@ -6447,7 +6414,7 @@ class FunctionCommands:
         return self._fcall("FCALL", function, numkeys, *keys_and_args)
 
     def fcall_ro(
-        self, function, numkeys: int, *keys_and_args: Optional[List]
+        self, function, numkeys: int, *keys_and_args: Any
     ) -> Union[Awaitable[str], str]:
         """
         This is a read-only variant of the FCALL command that cannot
@@ -6503,131 +6470,6 @@ class FunctionCommands:
 AsyncFunctionCommands = FunctionCommands
 
 
-class GearsCommands:
-    def tfunction_load(
-        self, lib_code: str, replace: bool = False, config: Union[str, None] = None
-    ) -> ResponseT:
-        """
-        Load a new library to RedisGears.
-
-        ``lib_code`` - the library code.
-        ``config`` - a string representation of a JSON object
-        that will be provided to the library on load time,
-        for more information refer to
-        https://github.com/RedisGears/RedisGears/blob/master/docs/function_advance_topics.md#library-configuration
-        ``replace`` - an optional argument, instructs RedisGears to replace the
-        function if its already exists
-
-        For more information see https://redis.io/commands/tfunction-load/
-        """
-        pieces = []
-        if replace:
-            pieces.append("REPLACE")
-        if config is not None:
-            pieces.extend(["CONFIG", config])
-        pieces.append(lib_code)
-        return self.execute_command("TFUNCTION LOAD", *pieces)
-
-    def tfunction_delete(self, lib_name: str) -> ResponseT:
-        """
-        Delete a library from RedisGears.
-
-        ``lib_name`` the library name to delete.
-
-        For more information see https://redis.io/commands/tfunction-delete/
-        """
-        return self.execute_command("TFUNCTION DELETE", lib_name)
-
-    def tfunction_list(
-        self,
-        with_code: bool = False,
-        verbose: int = 0,
-        lib_name: Union[str, None] = None,
-    ) -> ResponseT:
-        """
-        List the functions with additional information about each function.
-
-        ``with_code`` Show libraries code.
-        ``verbose`` output verbosity level, higher number will increase verbosity level
-        ``lib_name`` specifying a library name (can be used multiple times to show multiple libraries in a single command) # noqa
-
-        For more information see https://redis.io/commands/tfunction-list/
-        """
-        pieces = []
-        if with_code:
-            pieces.append("WITHCODE")
-        if verbose >= 1 and verbose <= 3:
-            pieces.append("v" * verbose)
-        else:
-            raise DataError("verbose can be 1, 2 or 3")
-        if lib_name is not None:
-            pieces.append("LIBRARY")
-            pieces.append(lib_name)
-
-        return self.execute_command("TFUNCTION LIST", *pieces)
-
-    def _tfcall(
-        self,
-        lib_name: str,
-        func_name: str,
-        keys: KeysT = None,
-        _async: bool = False,
-        *args: List,
-    ) -> ResponseT:
-        pieces = [f"{lib_name}.{func_name}"]
-        if keys is not None:
-            pieces.append(len(keys))
-            pieces.extend(keys)
-        else:
-            pieces.append(0)
-        if args is not None:
-            pieces.extend(args)
-        if _async:
-            return self.execute_command("TFCALLASYNC", *pieces)
-        return self.execute_command("TFCALL", *pieces)
-
-    def tfcall(
-        self,
-        lib_name: str,
-        func_name: str,
-        keys: KeysT = None,
-        *args: List,
-    ) -> ResponseT:
-        """
-        Invoke a function.
-
-        ``lib_name`` - the library name contains the function.
-        ``func_name`` - the function name to run.
-        ``keys`` - the keys that will be touched by the function.
-        ``args`` - Additional argument to pass to the function.
-
-        For more information see https://redis.io/commands/tfcall/
-        """
-        return self._tfcall(lib_name, func_name, keys, False, *args)
-
-    def tfcall_async(
-        self,
-        lib_name: str,
-        func_name: str,
-        keys: KeysT = None,
-        *args: List,
-    ) -> ResponseT:
-        """
-        Invoke an async function (coroutine).
-
-        ``lib_name`` - the library name contains the function.
-        ``func_name`` - the function name to run.
-        ``keys`` - the keys that will be touched by the function.
-        ``args`` - Additional argument to pass to the function.
-
-        For more information see https://redis.io/commands/tfcall/
-        """
-        return self._tfcall(lib_name, func_name, keys, True, *args)
-
-
-AsyncGearsCommands = GearsCommands
-
-
 class DataAccessCommands(
     BasicKeyCommands,
     HyperlogCommands,
@@ -6671,7 +6513,6 @@ class CoreCommands(
     PubSubCommands,
     ScriptCommands,
     FunctionCommands,
-    GearsCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is
@@ -6688,7 +6529,6 @@ class AsyncCoreCommands(
     AsyncPubSubCommands,
     AsyncScriptCommands,
     AsyncFunctionCommands,
-    AsyncGearsCommands,
 ):
     """
     A class containing all of the implemented redis commands. This class is

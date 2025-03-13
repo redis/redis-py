@@ -18,7 +18,9 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
-from redis.utils import HIREDIS_AVAILABLE
+from redis.commands.json.path import Path
+from redis.commands.search.field import TextField
+from redis.commands.search.query import Query
 
 from .conftest import (
     _get_client,
@@ -145,11 +147,64 @@ class TestRedisCommands:
         assert isinstance(categories, list)
         assert "read" in categories or b"read" in categories
 
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_acl_cat_contain_modules_no_category(self, r):
+        modules_list = [
+            "search",
+            "bloom",
+            "json",
+            "cuckoo",
+            "timeseries",
+            "cms",
+            "topk",
+            "tdigest",
+        ]
+        categories = r.acl_cat()
+        assert isinstance(categories, list)
+        for module_cat in modules_list:
+            assert module_cat in categories or module_cat.encode() in categories
+
     @skip_if_server_version_lt("6.0.0")
     def test_acl_cat_with_category(self, r):
         commands = r.acl_cat("read")
         assert isinstance(commands, list)
         assert "get" in commands or b"get" in commands
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_acl_modules_cat_with_category(self, r):
+        search_commands = r.acl_cat("search")
+        assert isinstance(search_commands, list)
+        assert "FT.SEARCH" in search_commands or b"FT.SEARCH" in search_commands
+
+        bloom_commands = r.acl_cat("bloom")
+        assert isinstance(bloom_commands, list)
+        assert "bf.add" in bloom_commands or b"bf.add" in bloom_commands
+
+        json_commands = r.acl_cat("json")
+        assert isinstance(json_commands, list)
+        assert "json.get" in json_commands or b"json.get" in json_commands
+
+        cuckoo_commands = r.acl_cat("cuckoo")
+        assert isinstance(cuckoo_commands, list)
+        assert "cf.insert" in cuckoo_commands or b"cf.insert" in cuckoo_commands
+
+        cms_commands = r.acl_cat("cms")
+        assert isinstance(cms_commands, list)
+        assert "cms.query" in cms_commands or b"cms.query" in cms_commands
+
+        topk_commands = r.acl_cat("topk")
+        assert isinstance(topk_commands, list)
+        assert "topk.list" in topk_commands or b"topk.list" in topk_commands
+
+        tdigest_commands = r.acl_cat("tdigest")
+        assert isinstance(tdigest_commands, list)
+        assert "tdigest.rank" in tdigest_commands or b"tdigest.rank" in tdigest_commands
+
+        timeseries_commands = r.acl_cat("timeseries")
+        assert isinstance(timeseries_commands, list)
+        assert "ts.range" in timeseries_commands or b"ts.range" in timeseries_commands
 
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
@@ -459,6 +514,123 @@ class TestRedisCommands:
         username = r.acl_whoami()
         assert isinstance(username, (str, bytes))
 
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_acl_modules_commands(self, r, request):
+        default_username = "default"
+        username = "redis-py-user"
+        password = "pass-for-test-user"
+
+        def teardown():
+            r.auth("", default_username)
+            r.acl_deluser(username)
+
+        request.addfinalizer(teardown)
+
+        r.ft().create_index((TextField("txt"),))
+        r.hset("doc1", mapping={"txt": "foo baz"})
+        r.hset("doc2", mapping={"txt": "foo bar"})
+
+        r.acl_setuser(
+            username,
+            enabled=True,
+            reset=True,
+            passwords=[f"+{password}"],
+            categories=["-all"],
+            commands=[
+                "+FT.SEARCH",
+                "-FT.DROPINDEX",
+                "+json.set",
+                "+json.get",
+                "-json.clear",
+                "+bf.reserve",
+                "-bf.info",
+                "+cf.reserve",
+                "+cms.initbydim",
+                "+topk.reserve",
+                "+tdigest.create",
+                "+ts.create",
+                "-ts.info",
+            ],
+            keys=["*"],
+        )
+        r.auth(password, username)
+
+        assert r.ft().search(Query("foo ~bar"))
+        with pytest.raises(exceptions.NoPermissionError):
+            r.ft().dropindex()
+
+        r.json().set("foo", Path.root_path(), "bar")
+        assert r.json().get("foo") == "bar"
+        with pytest.raises(exceptions.NoPermissionError):
+            r.json().clear("foo")
+
+        assert r.bf().create("bloom", 0.01, 1000)
+        assert r.cf().create("cuckoo", 1000)
+        assert r.cms().initbydim("cmsDim", 100, 5)
+        assert r.topk().reserve("topk", 5, 100, 5, 0.9)
+        assert r.tdigest().create("to-tDigest", 10)
+        with pytest.raises(exceptions.NoPermissionError):
+            r.bf().info("bloom")
+
+        assert r.ts().create(1, labels={"Redis": "Labs"})
+        with pytest.raises(exceptions.NoPermissionError):
+            r.ts().info(1)
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_acl_modules_category_commands(self, r, request):
+        default_username = "default"
+        username = "redis-py-user"
+        password = "pass-for-test-user"
+
+        def teardown():
+            r.auth("", default_username)
+            r.acl_deluser(username)
+
+        request.addfinalizer(teardown)
+
+        # validate modules categories acl config
+        r.acl_setuser(
+            username,
+            enabled=True,
+            reset=True,
+            passwords=[f"+{password}"],
+            categories=[
+                "-all",
+                "+@search",
+                "+@json",
+                "+@bloom",
+                "+@cuckoo",
+                "+@topk",
+                "+@cms",
+                "+@timeseries",
+                "+@tdigest",
+            ],
+            keys=["*"],
+        )
+        r.ft().create_index((TextField("txt"),))
+        r.hset("doc1", mapping={"txt": "foo baz"})
+        r.hset("doc2", mapping={"txt": "foo bar"})
+
+        r.auth(password, username)
+
+        assert r.ft().search(Query("foo ~bar"))
+        assert r.ft().dropindex()
+
+        assert r.json().set("foo", Path.root_path(), "bar")
+        assert r.json().get("foo") == "bar"
+
+        assert r.bf().create("bloom", 0.01, 1000)
+        assert r.bf().info("bloom")
+        assert r.cf().create("cuckoo", 1000)
+        assert r.cms().initbydim("cmsDim", 100, 5)
+        assert r.topk().reserve("topk", 5, 100, 5, 0.9)
+        assert r.tdigest().create("to-tDigest", 10)
+
+        assert r.ts().create(1, labels={"Redis": "Labs"})
+        assert r.ts().info(1)
+
     @pytest.mark.onlynoncluster
     def test_client_list(self, r):
         clients = r.client_list()
@@ -495,11 +667,15 @@ class TestRedisCommands:
         assert "addr" in clients[0]
 
         # testing multiple client ids
-        _get_client(redis.Redis, request, flushdb=False)
-        _get_client(redis.Redis, request, flushdb=False)
-        _get_client(redis.Redis, request, flushdb=False)
-        clients_listed = r.client_list(client_id=clients[:-1])
-        assert len(clients_listed) > 1
+        client_list = list()
+        client_count = 3
+        for i in range(client_count):
+            client = _get_client(redis.Redis, request, flushdb=False)
+            client_list.append(client)
+
+        multiple_client_ids = [str(client.client_id()) for client in client_list]
+        clients_listed = r.client_list(client_id=multiple_client_ids)
+        assert len(clients_listed) == len(multiple_client_ids)
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("5.0.0")
@@ -825,6 +1001,43 @@ class TestRedisCommands:
         assert r.config_get()["timeout"] == "0"
         assert r.config_get()["maxmemory"] == "0"
 
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_config_get_for_modules(self, r: redis.Redis):
+        search_module_configs = r.config_get("search-*")
+        assert "search-timeout" in search_module_configs
+
+        ts_module_configs = r.config_get("ts-*")
+        assert "ts-retention-policy" in ts_module_configs
+
+        bf_module_configs = r.config_get("bf-*")
+        assert "bf-error-rate" in bf_module_configs
+
+        cf_module_configs = r.config_get("cf-*")
+        assert "cf-initial-size" in cf_module_configs
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_config_set_for_search_module(self, r: redis.Redis):
+        initial_default_search_dialect = r.config_get("*")["search-default-dialect"]
+        try:
+            default_dialect_new = "3"
+            assert r.config_set("search-default-dialect", default_dialect_new)
+            assert r.config_get("*")["search-default-dialect"] == default_dialect_new
+            assert (
+                (r.ft().config_get("*")[b"DEFAULT_DIALECT"]).decode()
+                == default_dialect_new
+            )
+        except AssertionError as ex:
+            raise ex
+        finally:
+            assert r.config_set(
+                "search-default-dialect", initial_default_search_dialect
+            )
+
+        with pytest.raises(exceptions.ResponseError):
+            r.config_set("search-max-doctablesize", 2000000)
+
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
     def test_failover(self, r):
@@ -857,6 +1070,21 @@ class TestRedisCommands:
         assert isinstance(res, dict)
         assert "redis_version" in res
         assert "connected_clients" in res
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    def test_info_with_modules(self, r: redis.Redis):
+        res = r.info(section="everything")
+        assert "modules" in res
+        assert "search_number_of_indexes" in res
+
+        res = r.info(section="modules")
+        assert "modules" in res
+        assert "search_number_of_indexes" in res
+
+        res = r.info(section="search")
+        assert "modules" not in res
+        assert "search_number_of_indexes" in res
 
     @pytest.mark.onlynoncluster
     @skip_if_redis_enterprise()
@@ -1041,7 +1269,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_not(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["a"] = test_str
         r.bitop("not", "r", "a")
@@ -1050,7 +1278,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_not_in_place(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["a"] = test_str
         r.bitop("not", "a", "a")
@@ -1059,7 +1287,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_single_string(self, r):
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         r["a"] = test_str
         r.bitop("and", "res1", "a")
         r.bitop("or", "res2", "a")
@@ -1071,8 +1299,8 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_string_operands(self, r):
-        r["a"] = b"\x01\x02\xFF\xFF"
-        r["b"] = b"\x01\x02\xFF"
+        r["a"] = b"\x01\x02\xff\xff"
+        r["b"] = b"\x01\x02\xff"
         r.bitop("and", "res1", "a", "b")
         r.bitop("or", "res2", "a", "b")
         r.bitop("xor", "res3", "a", "b")
@@ -1822,54 +2050,6 @@ class TestRedisCommands:
             except Exception:
                 pass
 
-    @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("7.1.140")
-    def test_tfunction_load_delete(self, stack_r):
-        self.try_delete_libs(stack_r, "lib1")
-        lib_code = self.generate_lib_code("lib1")
-        assert stack_r.tfunction_load(lib_code)
-        assert stack_r.tfunction_delete("lib1")
-
-    @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("7.1.140")
-    def test_tfunction_list(self, stack_r):
-        self.try_delete_libs(stack_r, "lib1", "lib2", "lib3")
-        assert stack_r.tfunction_load(self.generate_lib_code("lib1"))
-        assert stack_r.tfunction_load(self.generate_lib_code("lib2"))
-        assert stack_r.tfunction_load(self.generate_lib_code("lib3"))
-
-        # test error thrown when verbose > 4
-        with pytest.raises(redis.exceptions.DataError):
-            assert stack_r.tfunction_list(verbose=8)
-
-        functions = stack_r.tfunction_list(verbose=1)
-        assert len(functions) == 3
-
-        expected_names = [b"lib1", b"lib2", b"lib3"]
-        if is_resp2_connection(stack_r):
-            actual_names = [functions[0][13], functions[1][13], functions[2][13]]
-        else:
-            actual_names = [
-                functions[0][b"name"],
-                functions[1][b"name"],
-                functions[2][b"name"],
-            ]
-
-        assert sorted(expected_names) == sorted(actual_names)
-        assert stack_r.tfunction_delete("lib1")
-        assert stack_r.tfunction_delete("lib2")
-        assert stack_r.tfunction_delete("lib3")
-
-    @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("7.1.140")
-    def test_tfcall(self, stack_r):
-        self.try_delete_libs(stack_r, "lib1")
-        assert stack_r.tfunction_load(self.generate_lib_code("lib1"))
-        assert stack_r.tfcall("lib1", "foo") == b"bar"
-        assert stack_r.tfcall_async("lib1", "foo") == b"bar"
-
-        assert stack_r.tfunction_delete("lib1")
-
     def test_ttl(self, r):
         r["a"] = "1"
         assert r.expire("a", 10)
@@ -2239,7 +2419,7 @@ class TestRedisCommands:
     def test_sadd(self, r):
         members = {b"1", b"2", b"3"}
         r.sadd("a", *members)
-        assert r.smembers("a") == members
+        assert set(r.smembers("a")) == members
 
     def test_scard(self, r):
         r.sadd("a", "1", "2", "3")
@@ -2295,7 +2475,7 @@ class TestRedisCommands:
 
     def test_smembers(self, r):
         r.sadd("a", "1", "2", "3")
-        assert r.smembers("a") == {b"1", b"2", b"3"}
+        assert set(r.smembers("a")) == {b"1", b"2", b"3"}
 
     @skip_if_server_version_lt("6.2.0")
     def test_smismember(self, r):
@@ -2317,7 +2497,7 @@ class TestRedisCommands:
         r.sadd("a", *s)
         value = r.spop("a")
         assert value in s
-        assert r.smembers("a") == set(s) - {value}
+        assert set(r.smembers("a")) == set(s) - {value}
 
     @skip_if_server_version_lt("3.2.0")
     def test_spop_multi_value(self, r):
@@ -2328,12 +2508,7 @@ class TestRedisCommands:
 
         for value in values:
             assert value in s
-        assert_resp_response(
-            r,
-            r.spop("a", 1),
-            list(set(s) - set(values)),
-            set(s) - set(values),
-        )
+        assert set(r.spop("a", 1)) == set(s) - set(values)
 
     def test_srandmember(self, r):
         s = [b"1", b"2", b"3"]
@@ -2352,20 +2527,20 @@ class TestRedisCommands:
         r.sadd("a", "1", "2", "3", "4")
         assert r.srem("a", "5") == 0
         assert r.srem("a", "2", "4") == 2
-        assert r.smembers("a") == {b"1", b"3"}
+        assert set(r.smembers("a")) == {b"1", b"3"}
 
     @pytest.mark.onlynoncluster
     def test_sunion(self, r):
         r.sadd("a", "1", "2")
         r.sadd("b", "2", "3")
-        assert r.sunion("a", "b") == {b"1", b"2", b"3"}
+        assert set(r.sunion("a", "b")) == {b"1", b"2", b"3"}
 
     @pytest.mark.onlynoncluster
     def test_sunionstore(self, r):
         r.sadd("a", "1", "2")
         r.sadd("b", "2", "3")
         assert r.sunionstore("c", "a", "b") == 3
-        assert r.smembers("c") == {b"1", b"2", b"3"}
+        assert set(r.smembers("c")) == {b"1", b"2", b"3"}
 
     @skip_if_server_version_lt("1.0.0")
     @skip_if_redis_enterprise()
@@ -4351,7 +4526,7 @@ class TestRedisCommands:
                 "pending": 0,
                 "last-delivered-id": b"0-0",
                 "entries-read": 7,
-                "lag": -6,
+                "lag": 1,
             }
         ]
         assert r.xinfo_groups(stream) == expected
@@ -4970,6 +5145,7 @@ class TestRedisCommands:
     def test_latency_reset(self, r: redis.Redis):
         assert r.latency_reset() == 0
 
+    @pytest.mark.redismod
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
     def test_module_list(self, r):
@@ -5021,9 +5197,6 @@ class TestRedisCommands:
             r, res, ["key1", "key2", "key3"], [b"key1", b"key2", b"key3"]
         )
 
-    # The response to COMMAND contains maps inside sets, which are not handled
-    # by the hiredis-py parser (see https://github.com/redis/hiredis-py/issues/188)
-    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
     @skip_if_server_version_lt("2.8.13")
     def test_command(self, r):
         res = r.command()
@@ -5036,19 +5209,13 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()
     def test_command_getkeysandflags(self, r: redis.Redis):
-        assert_resp_response(
-            r,
-            r.command_getkeysandflags("LMOVE", "mylist1", "mylist2", "left", "left"),
-            [
-                [b"mylist1", [b"RW", b"access", b"delete"]],
-                [b"mylist2", [b"RW", b"insert"]],
-            ],
-            [
-                [b"mylist1", {b"RW", b"access", b"delete"}],
-                [b"mylist2", {b"RW", b"insert"}],
-            ],
-        )
+        res = r.command_getkeysandflags("LMOVE", "mylist1", "mylist2", "left", "left")
+        assert res == [
+            [b"mylist1", [b"RW", b"access", b"delete"]],
+            [b"mylist2", [b"RW", b"insert"]],
+        ]
 
+    @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("4.0.0")
     @skip_if_redis_enterprise()
@@ -5061,6 +5228,7 @@ class TestRedisCommands:
             stack_r.module_load("/some/fake/path", "arg1", "arg2", "arg3", "arg4")
             assert "Error loading the extension." in str(excinfo.value)
 
+    @pytest.mark.redismod
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("7.0.0")
     @skip_if_redis_enterprise()

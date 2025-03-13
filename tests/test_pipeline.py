@@ -412,3 +412,13 @@ class TestPipeline:
             response = pipe.execute()
         assert response[0]
         assert r.get("foo") == b"bar"
+
+    @pytest.mark.onlynoncluster
+    def test_send_set_commands_over_pipeline(self, r: redis.Redis):
+        pipe = r.pipeline()
+        pipe.hset("hash:1", "foo", "bar")
+        pipe.hset("hash:1", "bar", "foo")
+        pipe.hset("hash:1", "baz", "bar")
+        pipe.hgetall("hash:1")
+        resp = pipe.execute()
+        assert resp == [1, 1, 1, {b"bar": b"foo", b"baz": b"bar", b"foo": b"bar"}]
