@@ -284,6 +284,9 @@ class AbstractConnection:
 
     async def connect(self):
         """Connects to the Redis server if not already connected"""
+        await self.connect_check_health(check_health=True)
+
+    async def connect_check_health(self, check_health: bool = True):
         if self.is_connected:
             return
         try:
@@ -302,7 +305,7 @@ class AbstractConnection:
         try:
             if not self.redis_connect_func:
                 # Use the default on_connect function
-                await self.on_connect()
+                await self.on_connect_check_health(check_health=check_health)
             else:
                 # Use the passed function redis_connect_func
                 (
@@ -341,6 +344,9 @@ class AbstractConnection:
 
     async def on_connect(self) -> None:
         """Initialize the connection, authenticate and select a database"""
+        await self.on_connect_check_health(check_health=True)
+
+    async def on_connect_check_health(self, check_health: bool = True) -> None:
         self._parser.on_connect(self)
         parser = self._parser
 
@@ -398,7 +404,7 @@ class AbstractConnection:
                 # update cluster exception classes
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
-            await self.send_command("HELLO", self.protocol)
+            await self.send_command("HELLO", self.protocol, check_health=check_health)
             response = await self.read_response()
             # if response.get(b"proto") != self.protocol and response.get(
             #     "proto"
@@ -407,18 +413,35 @@ class AbstractConnection:
 
         # if a client_name is given, set it
         if self.client_name:
-            await self.send_command("CLIENT", "SETNAME", self.client_name)
+            await self.send_command(
+                "CLIENT",
+                "SETNAME",
+                self.client_name,
+                check_health=check_health,
+            )
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
         # set the library name and version, pipeline for lower startup latency
         if self.lib_name:
-            await self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
+            await self.send_command(
+                "CLIENT",
+                "SETINFO",
+                "LIB-NAME",
+                self.lib_name,
+                check_health=check_health,
+            )
         if self.lib_version:
-            await self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
+            await self.send_command(
+                "CLIENT",
+                "SETINFO",
+                "LIB-VER",
+                self.lib_version,
+                check_health=check_health,
+            )
         # if a database is specified, switch to it. Also pipeline this
         if self.db:
-            await self.send_command("SELECT", self.db)
+            await self.send_command("SELECT", self.db, check_health=check_health)
 
         # read responses from pipeline
         for _ in (sent for sent in (self.lib_name, self.lib_version) if sent):
@@ -480,8 +503,8 @@ class AbstractConnection:
         self, command: Union[bytes, str, Iterable[bytes]], check_health: bool = True
     ) -> None:
         if not self.is_connected:
-            await self.connect()
-        elif check_health:
+            await self.connect_check_health(check_health=False)
+        if check_health:
             await self.check_health()
 
         try:
