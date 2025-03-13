@@ -473,6 +473,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         blocking_timeout: Optional[float] = None,
         lock_class: Union[None, Any] = None,
         thread_local: bool = True,
+        raise_on_release_error: bool = True,
     ):
         """
         Return a new Lock object using key ``name`` that mimics
@@ -519,6 +520,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
 
+        ``raise_on_release_error`` indicates whether to raise an exception when
+        the lock is no longer owned when exiting the context manager. By default,
+        this is True, meaning an exception will be raised. If False, the warning
+        will be logged and the exception will be suppressed.
+
         In some use cases it's necessary to disable thread local storage. For
         example, if you have code where one thread acquires a lock and passes
         that lock instance to a worker thread to release later. If thread
@@ -536,6 +542,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
+            raise_on_release_error=raise_on_release_error,
         )
 
     def pubsub(self, **kwargs):
@@ -563,7 +570,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         self.close()
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def close(self) -> None:
         # In case a connection property does not yet exist
@@ -950,7 +960,7 @@ class PubSub:
                 "did you forget to call subscribe() or psubscribe()?"
             )
 
-        if conn.health_check_interval and time.time() > conn.next_health_check:
+        if conn.health_check_interval and time.monotonic() > conn.next_health_check:
             conn.send_command("PING", self.HEALTH_CHECK_MESSAGE, check_health=False)
             self.health_check_response_counter += 1
 
@@ -1100,12 +1110,12 @@ class PubSub:
         """
         if not self.subscribed:
             # Wait for subscription
-            start_time = time.time()
+            start_time = time.monotonic()
             if self.subscribed_event.wait(timeout) is True:
                 # The connection was subscribed during the timeout time frame.
                 # The timeout should be adjusted based on the time spent
                 # waiting for the subscription
-                time_spent = time.time() - start_time
+                time_spent = time.monotonic() - start_time
                 timeout = max(0.0, timeout - time_spent)
             else:
                 # The connection isn't subscribed to any channels or patterns,

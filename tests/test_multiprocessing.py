@@ -1,6 +1,5 @@
 import contextlib
 import multiprocessing
-import sys
 
 import pytest
 import redis
@@ -8,9 +7,6 @@ from redis.connection import Connection, ConnectionPool
 from redis.exceptions import ConnectionError
 
 from .conftest import _get_client
-
-if sys.platform == "darwin":
-    multiprocessing.set_start_method("fork", force=True)
 
 
 @contextlib.contextmanager
@@ -22,6 +18,16 @@ def exit_callback(callback, *args):
 
 
 class TestMultiprocessing:
+    # On macOS and newly non-macOS POSIX systems (since Python 3.14),
+    # the default method has been changed to forkserver.
+    # The code in this module does not work with it,
+    # hence the explicit change to 'fork'
+    # See https://github.com/python/cpython/issues/125714
+    if multiprocessing.get_start_method() == "forkserver":
+        _mp_context = multiprocessing.get_context(method="fork")
+    else:
+        _mp_context = multiprocessing.get_context()
+
     # Test connection sharing between forks.
     # See issue #1085 for details.
 
@@ -45,7 +51,7 @@ class TestMultiprocessing:
             assert conn.read_response() == b"PONG"
             conn.disconnect()
 
-        proc = multiprocessing.Process(target=target, args=(conn,))
+        proc = self._mp_context.Process(target=target, args=(conn,))
         proc.start()
         proc.join(3)
         assert proc.exitcode == 0
@@ -75,7 +81,7 @@ class TestMultiprocessing:
                 conn.send_command("ping")
 
         ev = multiprocessing.Event()
-        proc = multiprocessing.Process(target=target, args=(conn, ev))
+        proc = self._mp_context.Process(target=target, args=(conn, ev))
         proc.start()
 
         conn.disconnect()
@@ -143,7 +149,7 @@ class TestMultiprocessing:
                     assert conn.send_command("ping") is None
                     assert conn.read_response() == b"PONG"
 
-        proc = multiprocessing.Process(target=target, args=(pool,))
+        proc = self._mp_context.Process(target=target, args=(pool,))
         proc.start()
         proc.join(3)
         assert proc.exitcode == 0
@@ -181,7 +187,7 @@ class TestMultiprocessing:
 
         ev = multiprocessing.Event()
 
-        proc = multiprocessing.Process(target=target, args=(pool, ev))
+        proc = self._mp_context.Process(target=target, args=(pool, ev))
         proc.start()
 
         pool.disconnect()
@@ -197,7 +203,7 @@ class TestMultiprocessing:
             assert client.ping() is True
             del client
 
-        proc = multiprocessing.Process(target=target, args=(r,))
+        proc = self._mp_context.Process(target=target, args=(r,))
         proc.start()
         proc.join(3)
         assert proc.exitcode == 0
