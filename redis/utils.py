@@ -257,3 +257,9 @@ def ensure_string(key):
         return key
     else:
         raise TypeError("Key must be either a string or bytes")
+
+
+def truncate_command_for_exception(self, command, max_length=100):
+    if len(command) > max_length:
+        return command[: max_length - 3] + "..."
+    return command
