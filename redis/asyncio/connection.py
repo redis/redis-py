@@ -10,7 +10,6 @@ from abc import abstractmethod
 from itertools import chain
 from types import MappingProxyType
 from typing import (
-    TYPE_CHECKING,
     Any,
     Callable,
     Iterable,
@@ -29,7 +28,7 @@ from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
 from ..utils import SSL_AVAILABLE
 
-if TYPE_CHECKING and SSL_AVAILABLE:
+if SSL_AVAILABLE:
     import ssl
     from ssl import SSLContext, TLSVersion
 else:
