@@ -68,14 +68,12 @@ from redis.utils import (
     deprecated_function,
     get_lib_version,
     safe_str,
-    str_if_bytes
+    str_if_bytes,
 )
 
 if SSL_AVAILABLE:
-    import ssl
     from ssl import TLSVersion
 else:
-    ssl = None
     TLSVersion = None
 
 TargetNodesT = TypeVar(

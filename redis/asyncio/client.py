@@ -80,10 +80,8 @@ from redis.utils import (
 )
 
 if TYPE_CHECKING and SSL_AVAILABLE:
-    import ssl
     from ssl import TLSVersion
 else:
-    ssl = None
     TLSVersion = None
 
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]

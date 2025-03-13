@@ -31,7 +31,7 @@ from ..utils import SSL_AVAILABLE
 
 if TYPE_CHECKING and SSL_AVAILABLE:
     import ssl
-    from ssl import TLSVersion, SSLContext
+    from ssl import SSLContext, TLSVersion
 else:
     ssl = None
     TLSVersion = None
