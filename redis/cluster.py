@@ -662,7 +662,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.close()
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def disconnect_connection_pools(self):
         for node in self.get_nodes():
