@@ -590,13 +590,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if self.auto_close_connection_pool:
             self.connection_pool.disconnect()
 
-    def _send_command_parse_response(self, conn, command_name, *args, **options):
-        """
-        Send a command and parse the response
-        """
-        conn.send_command(*args, **options)
-        return self.parse_response(conn, command_name, **options)
-
     def _disconnect_raise(self, conn, error):
         """
         Close the connection and raise an exception
@@ -623,10 +616,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if self._single_connection_client:
             self.single_connection_lock.acquire()
         try:
+            conn.retry.call_with_retry(
+                lambda: conn.send_command(*args, **options),
+                lambda error: self._disconnect_raise(conn, error),
+            )
             return conn.retry.call_with_retry(
-                lambda: self._send_command_parse_response(
-                    conn, command_name, *args, **options
-                ),
+                lambda: self.parse_response(conn, command_name, **options),
                 lambda error: self._disconnect_raise(conn, error),
             )
         finally:
@@ -1408,11 +1403,13 @@ class Pipeline(Redis):
             conn = self.connection_pool.get_connection()
             self.connection = conn
 
+        conn.retry.call_with_retry(
+            lambda: conn.send_command(*args, **options),
+            lambda error: self._disconnect_raise(conn, error),
+        )
         return conn.retry.call_with_retry(
-            lambda: self._send_command_parse_response(
-                conn, command_name, *args, **options
-            ),
-            lambda error: self._disconnect_reset_raise(conn, error),
+            lambda: self.parse_response(conn, command_name, **options),
+            lambda error: self._disconnect_raise(conn, error),
         )
 
     def pipeline_execute_command(self, *args, **options) -> "Pipeline":

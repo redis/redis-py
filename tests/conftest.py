@@ -23,7 +23,13 @@ from redis.cache import (
     CacheKey,
     EvictionPolicy,
 )
-from redis.connection import Connection, ConnectionInterface, SSLConnection, parse_url
+from redis.connection import (
+    Connection,
+    ConnectionInterface,
+    SSLConnection,
+    parse_url,
+    ConnectionPool,
+)
 from redis.credentials import CredentialProvider
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
@@ -580,6 +586,12 @@ def mock_cache() -> CacheInterface:
 def mock_connection() -> ConnectionInterface:
     mock_connection = Mock(spec=ConnectionInterface)
     return mock_connection
+
+
+@pytest.fixture()
+def mock_pool() -> ConnectionPool:
+    mock_pool = Mock(spec=ConnectionPool)
+    return mock_pool
 
 
 @pytest.fixture()

@@ -1,6 +1,7 @@
 import random
 from contextlib import asynccontextmanager as _asynccontextmanager
 from typing import Union
+from unittest.mock import Mock
 
 import pytest
 import pytest_asyncio
@@ -8,7 +9,7 @@ import redis.asyncio as redis
 from packaging.version import Version
 from redis.asyncio import Sentinel
 from redis.asyncio.client import Monitor
-from redis.asyncio.connection import Connection, parse_url
+from redis.asyncio.connection import Connection, parse_url, ConnectionPool
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.credentials import CredentialProvider
@@ -217,6 +218,18 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
     )
     for mocked in _gen_cluster_mock_resp(r, response):
         yield mocked
+
+
+@pytest_asyncio.fixture()
+def mock_connection() -> Connection:
+    mock_connection = Mock(spec=Connection)
+    return mock_connection
+
+
+@pytest_asyncio.fixture()
+def mock_pool() -> ConnectionPool:
+    mock_pool = Mock(spec=ConnectionPool)
+    return mock_pool
 
 
 @pytest_asyncio.fixture()

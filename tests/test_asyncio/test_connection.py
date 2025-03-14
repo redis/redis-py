@@ -2,7 +2,7 @@ import asyncio
 import socket
 import types
 from errno import ECONNREFUSED
-from unittest.mock import patch
+from unittest.mock import patch, call
 
 import pytest
 import redis
@@ -20,7 +20,7 @@ from redis.asyncio.connection import (
     parse_url,
 )
 from redis.asyncio.retry import Retry
-from redis.backoff import NoBackoff
+from redis.backoff import NoBackoff, ExponentialBackoff
 from redis.exceptions import ConnectionError, InvalidResponse, TimeoutError
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import skip_if_server_version_lt
@@ -313,6 +313,57 @@ async def test_pool_auto_close(request, from_url):
     r1 = await get_redis_connection()
     assert r1.auto_close_connection_pool is True
     await r1.aclose()
+
+
+@pytest.mark.onlynoncluster
+async def test_client_do_not_retry_write_on_read_failure(mock_connection, mock_pool):
+    mock_connection.send_command.return_value = True
+    mock_connection.read_response.side_effect = [
+        ConnectionError,
+        ConnectionError,
+        b"OK",
+    ]
+    mock_connection.retry = Retry(ExponentialBackoff(), 3)
+    mock_connection.retry_on_error = (ConnectionError,)
+    mock_pool.get_connection.return_value = mock_connection
+    mock_pool.connection_kwargs = {}
+
+    r = Redis(connection_pool=mock_pool, retry=Retry(ExponentialBackoff(), 3))
+    await r.set("key", "value")
+
+    # If read from socket fails, writes won't be executed.
+    mock_connection.send_command.assert_has_calls(
+        [
+            call("SET", "key", "value"),
+        ]
+    )
+
+
+@pytest.mark.onlynoncluster
+async def test_pipeline_immediate_do_not_retry_write_on_read_failure(
+    mock_connection, mock_pool
+):
+    mock_connection.send_command.return_value = True
+    mock_connection.read_response.side_effect = [
+        ConnectionError,
+        ConnectionError,
+        b"OK",
+    ]
+    mock_connection.retry = Retry(ExponentialBackoff(), 3)
+    mock_connection.retry_on_error = (ConnectionError,)
+    mock_pool.get_connection.return_value = mock_connection
+    mock_pool.connection_kwargs = {}
+
+    r = Redis(connection_pool=mock_pool, retry=Retry(ExponentialBackoff(), 3))
+    pipe = r.pipeline(transaction=False)
+    await pipe.immediate_execute_command("SET", "key", "value")
+
+    # If read from socket fails, writes won't be executed.
+    mock_connection.send_command.assert_has_calls(
+        [
+            call("SET", "key", "value"),
+        ]
+    )
 
 
 async def test_close_is_aclose(request):
