@@ -2,7 +2,6 @@ import asyncio
 import copy
 import inspect
 import re
-import ssl
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -72,6 +71,7 @@ from redis.exceptions import (
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import (
     HIREDIS_AVAILABLE,
+    SSL_AVAILABLE,
     _set_info_logger,
     deprecated_function,
     get_lib_version,
@@ -79,6 +79,11 @@ from redis.utils import (
     str_if_bytes,
     truncate_command_for_exception,
 )
+
+if TYPE_CHECKING and SSL_AVAILABLE:
+    from ssl import TLSVersion
+else:
+    TLSVersion = None
 
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
 _KeyT = TypeVar("_KeyT", bound=KeyT)
@@ -227,7 +232,7 @@ class Redis(
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
-        ssl_min_version: Optional[ssl.TLSVersion] = None,
+        ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
         max_connections: Optional[int] = None,
         single_connection_client: bool = False,
