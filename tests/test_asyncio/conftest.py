@@ -18,6 +18,11 @@ from tests.conftest import REDIS_INFO, get_credential_provider
 from .compat import mock
 
 
+class AwaitableMock(AsyncMock):
+    def __await__(self):
+        pass
+
+
 async def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
     info = await client.info()
@@ -222,19 +227,14 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
 
 @pytest_asyncio.fixture()
 def mock_connection() -> Connection:
-    mock_connection = AsyncMock(spec=Connection)
-    mock_connection.__await__ = dummy_awaitable
+    mock_connection = AwaitableMock(spec=Connection)
     return mock_connection
 
 
 @pytest_asyncio.fixture()
 def mock_pool() -> ConnectionPool:
-    mock_pool = AsyncMock(spec=ConnectionPool)
-    mock_pool.__await__ = dummy_awaitable
+    mock_pool = AwaitableMock(spec=ConnectionPool)
     return mock_pool
-
-def dummy_awaitable():
-    pass
 
 
 @pytest_asyncio.fixture()
