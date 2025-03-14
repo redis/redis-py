@@ -336,11 +336,7 @@ async def test_client_do_not_retry_write_on_read_failure(mock_connection, mock_p
     await r.set("key", "value")
 
     # If read from socket fails, writes won't be executed.
-    mock_connection.send_command.assert_has_calls(
-        [
-            call("SET", "key", "value"),
-        ]
-    )
+    mock_connection.send_command.assert_called_once_with("SET", "key", "value")
 
 
 @pytest.mark.onlynoncluster
@@ -367,11 +363,7 @@ async def test_pipeline_immediate_do_not_retry_write_on_read_failure(
     await pipe.immediate_execute_command("SET", "key", "value")
 
     # If read from socket fails, writes won't be executed.
-    mock_connection.send_command.assert_has_calls(
-        [
-            call("SET", "key", "value"),
-        ]
-    )
+    mock_connection.send_command.assert_called_once_with("SET", "key", "value")
 
 
 async def test_close_is_aclose(request):
