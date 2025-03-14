@@ -328,7 +328,11 @@ async def test_client_do_not_retry_write_on_read_failure(mock_connection, mock_p
     mock_pool.get_connection.return_value = mock_connection
     mock_pool.connection_kwargs = {}
 
-    r = Redis(connection_pool=mock_pool, retry=Retry(ExponentialBackoff(), 3))
+    r = Redis(
+        connection_pool=mock_pool,
+        retry=Retry(ExponentialBackoff(), 3),
+        single_connection_client=True,
+    )
     await r.set("key", "value")
 
     # If read from socket fails, writes won't be executed.
@@ -354,7 +358,11 @@ async def test_pipeline_immediate_do_not_retry_write_on_read_failure(
     mock_pool.get_connection.return_value = mock_connection
     mock_pool.connection_kwargs = {}
 
-    r = Redis(connection_pool=mock_pool, retry=Retry(ExponentialBackoff(), 3))
+    r = Redis(
+        connection_pool=mock_pool,
+        retry=Retry(ExponentialBackoff(), 3),
+        single_connection_client=True,
+    )
     pipe = r.pipeline(transaction=False)
     await pipe.immediate_execute_command("SET", "key", "value")
 
