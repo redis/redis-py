@@ -2,7 +2,7 @@ import asyncio
 import socket
 import types
 from errno import ECONNREFUSED
-from unittest.mock import patch, call
+from unittest.mock import patch
 
 import pytest
 import redis
