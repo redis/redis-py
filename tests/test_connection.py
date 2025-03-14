@@ -10,7 +10,6 @@ from unittest import mock
 from unittest.mock import call, patch
 
 import pytest
-from requests.cookies import MockResponse
 
 import redis
 from redis import ConnectionPool, Redis
