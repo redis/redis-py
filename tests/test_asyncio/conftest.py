@@ -1,6 +1,6 @@
 import random
 from contextlib import asynccontextmanager as _asynccontextmanager
-from typing import Union, Iterator, Any
+from typing import Union
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,12 +16,6 @@ from redis.credentials import CredentialProvider
 from tests.conftest import REDIS_INFO, get_credential_provider
 
 from .compat import mock
-
-
-class AwaitableMock(AsyncMock):
-    def __await__(self) -> Iterator[Any]:
-        self.await_count += 1
-        return iter([])
 
 
 async def _get_info(redis_url):
@@ -228,13 +222,13 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
 
 @pytest_asyncio.fixture()
 def mock_connection() -> Connection:
-    mock_connection = AwaitableMock(spec=Connection)
+    mock_connection = AsyncMock(spec=Connection)
     return mock_connection
 
 
 @pytest_asyncio.fixture()
 def mock_pool() -> ConnectionPool:
-    mock_pool = AwaitableMock(spec=ConnectionPool)
+    mock_pool = AsyncMock(spec=ConnectionPool)
     return mock_pool
 
 
