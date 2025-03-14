@@ -1,6 +1,6 @@
 import random
 from contextlib import asynccontextmanager as _asynccontextmanager
-from typing import Union
+from typing import Union, Iterator, Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -19,8 +19,9 @@ from .compat import mock
 
 
 class AwaitableMock(AsyncMock):
-    def __await__(self):
-        pass
+    def __await__(self) -> Iterator[Any]:
+        self.await_count += 1
+        return iter([])
 
 
 async def _get_info(redis_url):

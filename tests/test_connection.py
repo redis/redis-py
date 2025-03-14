@@ -268,6 +268,7 @@ def test_client_do_not_retry_write_on_read_failure(mock_connection, mock_pool):
 
     # If read from socket fails, writes won't be executed.
     mock_connection.send_command.assert_called_once_with("SET", "key", "value")
+    mock_connection.read_response.call_count = 3
 
 
 @pytest.mark.onlynoncluster
@@ -291,6 +292,7 @@ def test_pipeline_immediate_do_not_retry_write_on_read_failure(
 
     # If read from socket fails, writes won't be executed.
     mock_connection.send_command.assert_called_once_with("SET", "key", "value")
+    mock_connection.read_response.call_count = 3
 
 
 @pytest.mark.skipif(sys.version_info == (3, 9), reason="Flacky test on Python 3.9")
