@@ -624,13 +624,6 @@ class Redis(
         """
         await self.aclose(close_connection_pool)
 
-    async def _send_command_parse_response(self, conn, command_name, *args, **options):
-        """
-        Send a command and parse the response
-        """
-        await conn.send_command(*args)
-        return await self.parse_response(conn, command_name, **options)
-
     async def _disconnect_raise(self, conn: Connection, error: Exception):
         """
         Close the connection and raise an exception
@@ -655,10 +648,12 @@ class Redis(
         if self.single_connection_client:
             await self._single_conn_lock.acquire()
         try:
+            await conn.retry.call_with_retry(
+                lambda: conn.send_command(*args),
+                lambda error: self._disconnect_raise(conn, error),
+            )
             return await conn.retry.call_with_retry(
-                lambda: self._send_command_parse_response(
-                    conn, command_name, *args, **options
-                ),
+                lambda: self.parse_response(conn, command_name, **options),
                 lambda error: self._disconnect_raise(conn, error),
             )
         finally:
@@ -1383,10 +1378,12 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             conn = await self.connection_pool.get_connection()
             self.connection = conn
 
+        await conn.retry.call_with_retry(
+            lambda: conn.send_command(*args),
+            lambda error: self._disconnect_reset_raise(conn, error),
+        )
         return await conn.retry.call_with_retry(
-            lambda: self._send_command_parse_response(
-                conn, command_name, *args, **options
-            ),
+            lambda: self.parse_response(conn, command_name, **options),
             lambda error: self._disconnect_reset_raise(conn, error),
         )
 
