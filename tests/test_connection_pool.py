@@ -94,11 +94,11 @@ class TestConnectionPool:
     def test_release_not_owned_connection(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
         pool1 = self.get_pool(connection_kwargs=connection_kwargs)
-        c1 = pool1.get_connection("_")
+        c1 = pool1.get_connection()
         pool2 = self.get_pool(
             connection_kwargs={"host": master_host[0], "port": master_host[1]}
         )
-        c2 = pool2.get_connection("_")
+        c2 = pool2.get_connection()
         pool2.release(c2)
 
         assert len(pool2._available_connections) == 1
