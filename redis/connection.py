@@ -1,7 +1,6 @@
 import copy
 import os
 import socket
-import ssl
 import sys
 import threading
 import time
@@ -48,6 +47,11 @@ from .utils import (
     get_lib_version,
     str_if_bytes,
 )
+
+if SSL_AVAILABLE:
+    import ssl
+else:
+    ssl = None
 
 if HIREDIS_AVAILABLE:
     import hiredis
