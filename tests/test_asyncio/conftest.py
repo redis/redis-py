@@ -1,7 +1,7 @@
 import random
 from contextlib import asynccontextmanager as _asynccontextmanager
 from typing import Union
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
