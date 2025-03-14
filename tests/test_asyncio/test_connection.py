@@ -91,7 +91,7 @@ async def test_single_connection():
             await asyncio.gather(r.set("a", "b"), r.set("c", "d"))
 
     assert init_call_count == 1
-    assert command_call_count == 2
+    assert command_call_count == 4
     r.connection = None  # it was a Mock
     await r.aclose()
 

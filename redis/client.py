@@ -1405,11 +1405,11 @@ class Pipeline(Redis):
 
         conn.retry.call_with_retry(
             lambda: conn.send_command(*args, **options),
-            lambda error: self._disconnect_raise(conn, error),
+            lambda error: self._disconnect_reset_raise(conn, error),
         )
         return conn.retry.call_with_retry(
             lambda: self.parse_response(conn, command_name, **options),
-            lambda error: self._disconnect_raise(conn, error),
+            lambda error: self._disconnect_reset_raise(conn, error),
         )
 
     def pipeline_execute_command(self, *args, **options) -> "Pipeline":

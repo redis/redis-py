@@ -644,7 +644,7 @@ class Redis(
             await self._single_conn_lock.acquire()
         try:
             await conn.retry.call_with_retry(
-                lambda: conn.send_command(*args, **options),
+                lambda: conn.send_command(*args),
                 lambda error: self._disconnect_raise(conn, error),
             )
             return await conn.retry.call_with_retry(
@@ -1374,12 +1374,12 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             self.connection = conn
 
         await conn.retry.call_with_retry(
-            lambda: conn.send_command(*args, **options),
-            lambda error: self._disconnect_raise(conn, error),
+            lambda: conn.send_command(*args),
+            lambda error: self._disconnect_reset_raise(conn, error),
         )
         return await conn.retry.call_with_retry(
             lambda: self.parse_response(conn, command_name, **options),
-            lambda error: self._disconnect_raise(conn, error),
+            lambda error: self._disconnect_reset_raise(conn, error),
         )
 
     def pipeline_execute_command(self, *args, **options):
