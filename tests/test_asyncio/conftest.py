@@ -223,13 +223,18 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
 @pytest_asyncio.fixture()
 def mock_connection() -> Connection:
     mock_connection = AsyncMock(spec=Connection)
+    mock_connection.__await__ = dummy_awaitable
     return mock_connection
 
 
 @pytest_asyncio.fixture()
 def mock_pool() -> ConnectionPool:
     mock_pool = AsyncMock(spec=ConnectionPool)
+    mock_pool.__await__ = dummy_awaitable
     return mock_pool
+
+def dummy_awaitable():
+    pass
 
 
 @pytest_asyncio.fixture()
