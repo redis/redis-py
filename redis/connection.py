@@ -735,8 +735,17 @@ class Connection(AbstractConnection):
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
         err = None
+        try:
+            ip = ipaddress.ip_address(self.host)
+            is_ipv6 = isinstance(ip, ipaddress.IPv6Address)
+        except ValueError:
+            is_ipv6 = False
+            for info in socket.getaddrinfo(self.host, self.port, socket.AF_UNSPEC, socket.SOCK_STREAM):
+                if info[0] == socket.AF_INET6:
+                    is_ipv6 = True
+                    break
         for res in socket.getaddrinfo(
-            self.host, self.port, self.socket_type, socket.SOCK_STREAM
+            self.host, self.port, socket.AF_INET6 if is_ipv6 else socket.AF_INET, socket.SOCK_STREAM
         ):
             family, socktype, proto, canonname, socket_address = res
             sock = None
@@ -744,6 +753,8 @@ class Connection(AbstractConnection):
                 sock = socket.socket(family, socktype, proto)
                 # TCP_NODELAY
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                if family == socket.AF_INET6:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
 
                 # TCP_KEEPALIVE
                 if self.socket_keepalive:
