@@ -1,7 +1,7 @@
 import random
 from contextlib import asynccontextmanager as _asynccontextmanager
 from typing import Union
-from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
 import pytest
 import pytest_asyncio
@@ -222,13 +222,13 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
 
 @pytest_asyncio.fixture()
 def mock_connection() -> Connection:
-    mock_connection = AsyncMock(spec=Connection)
+    mock_connection = Mock(spec=Connection)
     return mock_connection
 
 
 @pytest_asyncio.fixture()
 def mock_pool() -> ConnectionPool:
-    mock_pool = AsyncMock(spec=ConnectionPool)
+    mock_pool = Mock(spec=ConnectionPool)
     return mock_pool
 
 

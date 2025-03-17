@@ -3,7 +3,7 @@ import socket
 import sys
 import types
 from errno import ECONNREFUSED
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import pytest
 import redis
@@ -317,7 +317,6 @@ async def test_pool_auto_close(request, from_url):
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.skipif(sys.version_info < (3, 9), reason="requires python > 3.8")
 async def test_client_do_not_retry_write_on_read_failure(mock_connection, mock_pool):
     mock_connection.send_command.return_value = True
     mock_connection.read_response.side_effect = [
@@ -327,7 +326,7 @@ async def test_client_do_not_retry_write_on_read_failure(mock_connection, mock_p
     ]
     mock_connection.retry = Retry(ExponentialBackoff(), 3)
     mock_connection.retry_on_error = (ConnectionError,)
-    mock_pool.get_connection.return_value = mock_connection
+    mock_pool.get_connection = AsyncMock(return_value=mock_connection)
     mock_pool.connection_kwargs = {}
 
     r = Redis(
@@ -343,7 +342,6 @@ async def test_client_do_not_retry_write_on_read_failure(mock_connection, mock_p
 
 
 @pytest.mark.onlynoncluster
-@pytest.mark.skipif(sys.version_info < (3, 9), reason="requires python > 3.8")
 async def test_pipeline_immediate_do_not_retry_write_on_read_failure(
     mock_connection, mock_pool
 ):
@@ -355,7 +353,7 @@ async def test_pipeline_immediate_do_not_retry_write_on_read_failure(
     ]
     mock_connection.retry = Retry(ExponentialBackoff(), 3)
     mock_connection.retry_on_error = (ConnectionError,)
-    mock_pool.get_connection.return_value = mock_connection
+    mock_pool.get_connection = AsyncMock(return_value=mock_connection)
     mock_pool.connection_kwargs = {}
 
     r = Redis(
