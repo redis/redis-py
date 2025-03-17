@@ -1,10 +1,10 @@
-from enum import Enum
 import random
 import socket
 import sys
 import threading
 import time
 from collections import OrderedDict
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from redis._parsers import CommandsParser, Encoder
