@@ -4,6 +4,7 @@ import select
 import socket
 import socketserver
 import threading
+from typing import List
 import warnings
 from queue import LifoQueue, Queue
 from time import sleep
@@ -19,6 +20,7 @@ from redis.cluster import (
     REDIS_CLUSTER_HASH_SLOTS,
     REPLICA,
     ClusterNode,
+    LoadBalancingStrategy,
     NodesManager,
     RedisCluster,
     get_node_name,
@@ -202,7 +204,18 @@ def get_mocked_redis_client(
 
             cmd_parser_initialize.side_effect = cmd_init_mock
 
-            return RedisCluster(*args, **kwargs)
+            # Create a subclass of RedisCluster that overrides __del__
+            class MockedRedisCluster(RedisCluster):
+                def __del__(self):
+                    # Override to prevent connection cleanup attempts
+                    pass
+
+                @property
+                def connection_pool(self):
+                    # Required abstract property implementation
+                    return self.nodes_manager.get_default_node().redis_connection.connection_pool
+
+            return MockedRedisCluster(*args, **kwargs)
 
 
 def mock_node_resp(node, response):
@@ -590,7 +603,24 @@ class TestRedisClusterObj:
                         assert parse_response.failed_calls == 1
                         assert parse_response.successful_calls == 1
 
-    def test_reading_from_replicas_in_round_robin(self):
+    @pytest.mark.parametrize(
+        "read_from_replicas,load_balancing_strategy,mocks_srv_ports",
+        [
+            (True, None, [7001, 7002, 7001]),
+            (True, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
+            (True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (True, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
+            (False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
+        ],
+    )
+    def test_reading_from_replicas_in_round_robin(
+        self,
+        read_from_replicas: bool,
+        load_balancing_strategy: LoadBalancingStrategy,
+        mocks_srv_ports: List[int],
+    ):
         with patch.multiple(
             Connection,
             send_command=DEFAULT,
@@ -603,19 +633,19 @@ class TestRedisClusterObj:
 
                 def parse_response_mock_first(connection, *args, **options):
                     # Primary
-                    assert connection.port == 7001
+                    assert connection.port == mocks_srv_ports[0]
                     parse_response.side_effect = parse_response_mock_second
                     return "MOCK_OK"
 
                 def parse_response_mock_second(connection, *args, **options):
                     # Replica
-                    assert connection.port == 7002
+                    assert connection.port == mocks_srv_ports[1]
                     parse_response.side_effect = parse_response_mock_third
                     return "MOCK_OK"
 
                 def parse_response_mock_third(connection, *args, **options):
                     # Primary
-                    assert connection.port == 7001
+                    assert connection.port == mocks_srv_ports[2]
                     return "MOCK_OK"
 
                 # We don't need to create a real cluster connection but we
@@ -630,9 +660,13 @@ class TestRedisClusterObj:
 
                 # Create a cluster with reading from replications
                 read_cluster = get_mocked_redis_client(
-                    host=default_host, port=default_port, read_from_replicas=True
+                    host=default_host,
+                    port=default_port,
+                    read_from_replicas=read_from_replicas,
+                    load_balancing_strategy=load_balancing_strategy,
                 )
-                assert read_cluster.read_from_replicas is True
+                assert read_cluster.read_from_replicas is read_from_replicas
+                assert read_cluster.load_balancing_strategy is load_balancing_strategy
                 # Check that we read from the slot's nodes in a round robin
                 # matter.
                 # 'foo' belongs to slot 12182 and the slot's nodes are:
@@ -640,15 +674,26 @@ class TestRedisClusterObj:
                 read_cluster.get("foo")
                 read_cluster.get("foo")
                 read_cluster.get("foo")
-                mocks["send_command"].assert_has_calls(
+                expected_calls_list = []
+                expected_calls_list.append(call("READONLY"))
+                expected_calls_list.append(call("GET", "foo", keys=["foo"]))
+
+                if (
+                    load_balancing_strategy is None
+                    or load_balancing_strategy == LoadBalancingStrategy.ROUND_ROBIN
+                ):
+                    # in the round robin strategy the primary node can also receive read
+                    # requests and this means that there will be second node connected
+                    expected_calls_list.append(call("READONLY"))
+
+                expected_calls_list.extend(
                     [
-                        call("READONLY"),
-                        call("GET", "foo", keys=["foo"]),
-                        call("READONLY"),
                         call("GET", "foo", keys=["foo"]),
                         call("GET", "foo", keys=["foo"]),
                     ]
                 )
+
+                mocks["send_command"].assert_has_calls(expected_calls_list)
 
     def test_keyslot(self, r):
         """
@@ -2473,6 +2518,8 @@ class TestNodesManager:
         primary2_name = n_manager.slots_cache[slot_2][0].name
         list1_size = len(n_manager.slots_cache[slot_1])
         list2_size = len(n_manager.slots_cache[slot_2])
+
+        # default load balancer strategy: LoadBalancerStrategy.ROUND_ROBIN
         # slot 1
         assert lb.get_server_index(primary1_name, list1_size) == 0
         assert lb.get_server_index(primary1_name, list1_size) == 1
@@ -2486,6 +2533,29 @@ class TestNodesManager:
         lb.reset()
         assert lb.get_server_index(primary1_name, list1_size) == 0
         assert lb.get_server_index(primary2_name, list2_size) == 0
+
+        # reset the indexes before load balancing strategy test
+        lb.reset()
+        # load balancer strategy: LoadBalancerStrategy.ROUND_ROBIN_REPLICAS
+        for i in [1, 2, 1]:
+            srv_index = lb.get_server_index(
+                primary1_name,
+                list1_size,
+                load_balancing_strategy=LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            )
+            assert srv_index == i
+
+        # reset the indexes before load balancing strategy test
+        lb.reset()  # reset the indexes
+        # load balancer strategy: LoadBalancerStrategy.RANDOM_REPLICA
+        for i in range(5):
+            srv_index = lb.get_server_index(
+                primary1_name,
+                list1_size,
+                load_balancing_strategy=LoadBalancingStrategy.RANDOM_REPLICA,
+            )
+
+            assert srv_index > 0 and srv_index <= 2
 
     def test_init_slots_cache_not_all_slots_covered(self):
         """
@@ -3332,6 +3402,45 @@ class TestReadOnlyPipeline:
                         if executed_on_replica:
                             break
                 assert executed_on_replica is True
+
+    @pytest.mark.parametrize(
+        "load_balancing_strategy",
+        [
+            LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM_REPLICA,
+        ],
+    )
+    def test_readonly_pipeline_with_reading_from_replicas_strategies(
+        self, request, load_balancing_strategy: LoadBalancingStrategy
+    ) -> None:
+        """
+        Test that the pipeline uses replicas for different replica-based
+        load balancing strategies.
+        """
+        ro = _get_client(
+            RedisCluster,
+            request,
+            load_balancing_strategy=load_balancing_strategy,
+        )
+        key = "bar"
+        ro.set(key, "foo")
+        import time
+
+        time.sleep(0.2)
+
+        with ro.pipeline() as readonly_pipe:
+            mock_all_nodes_resp(ro, "MOCK_OK")
+            assert readonly_pipe.load_balancing_strategy == load_balancing_strategy
+            assert readonly_pipe.get(key).get(key).execute() == ["MOCK_OK", "MOCK_OK"]
+            slot_nodes = ro.nodes_manager.slots_cache[ro.keyslot(key)]
+            executed_on_replicas_only = True
+            for node in slot_nodes:
+                if node.server_type == PRIMARY:
+                    conn = node.redis_connection.connection
+                    if conn.read_response.called:
+                        executed_on_replicas_only = False
+                        break
+            assert executed_on_replicas_only
 
 
 @pytest.mark.onlycluster
