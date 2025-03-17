@@ -257,7 +257,11 @@ class SearchCommands:
         """  # noqa
         args = [DROPINDEX_CMD, self.index_name]
 
-        delete_str = "DD" if delete_documents == True else ""
+        delete_str = (
+            "DD"
+            if isinstance(delete_documents, bool) and delete_documents is True
+            else ""
+        )
 
         if delete_str:
             args.append(delete_str)
