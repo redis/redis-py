@@ -1,6 +1,5 @@
 import asyncio
 import socket
-import sys
 import types
 from errno import ECONNREFUSED
 from unittest.mock import patch, AsyncMock
