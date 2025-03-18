@@ -615,7 +615,7 @@ class TestRedisClusterObj:
             (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
         ],
     )
-    def test_reading_from_replicas_in_round_robin(
+    def test_reading_with_load_balancing_strategies(
         self,
         read_from_replicas: bool,
         load_balancing_strategy: LoadBalancingStrategy,
@@ -1019,6 +1019,35 @@ class TestClusterRedisCommands:
         assert r.get("byte_string") == byte_string
         assert r.get("integer") == str(integer).encode()
         assert r.get("unicode_string").decode("utf-8") == unicode_string
+
+    @pytest.mark.parametrize(
+        "load_balancing_strategy",
+        [
+            LoadBalancingStrategy.ROUND_ROBIN,
+            LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM_REPLICA,
+        ],
+    )
+    def test_get_and_set_with_load_balanced_client(
+        self, request, load_balancing_strategy: LoadBalancingStrategy
+    ) -> None:
+        r = _get_client(
+            cls=RedisCluster,
+            request=request,
+            load_balancing_strategy=load_balancing_strategy
+        )
+
+        # get and set can't be tested independently of each other
+        assert r.get("a") is None
+
+        byte_string = b"value"
+        assert r.set("byte_string", byte_string)
+
+        # run the get command for the same key several times
+        # to iterate over the read nodes
+        assert r.get("byte_string") == byte_string
+        assert r.get("byte_string") == byte_string
+        assert r.get("byte_string") == byte_string
 
     def test_mget_nonatomic(self, r):
         assert r.mget_nonatomic([]) == []

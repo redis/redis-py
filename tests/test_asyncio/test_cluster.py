@@ -35,6 +35,9 @@ from redis.exceptions import (
     ResponseError,
 )
 from redis.utils import str_if_bytes
+from tests.test_asyncio.conftest import (
+    create_redis,
+)
 from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
@@ -706,7 +709,7 @@ class TestRedisClusterObj:
             (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
         ],
     )
-    async def test_reading_from_replicas_in_round_robin(
+    async def test_reading_with_load_balancing_strategies(
         self,
         read_from_replicas: bool,
         load_balancing_strategy: LoadBalancingStrategy,
@@ -1007,6 +1010,31 @@ class TestClusterRedisCommands:
         assert await r.get("byte_string") == byte_string
         assert await r.get("integer") == str(integer).encode()
         assert (await r.get("unicode_string")).decode("utf-8") == unicode_string
+
+    @pytest.mark.parametrize(
+        "load_balancing_strategy",
+        [
+            LoadBalancingStrategy.ROUND_ROBIN,
+            LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM_REPLICA,
+        ],
+    )
+    async def test_get_and_set_with_load_balanced_client(
+        self, create_redis, load_balancing_strategy: LoadBalancingStrategy
+    ) -> None:
+        r = await create_redis(cls=RedisCluster, load_balancing_strategy=load_balancing_strategy)
+
+        # get and set can't be tested independently of each other
+        assert await r.get("a") is None
+
+        byte_string = b"value"
+        assert await r.set("byte_string", byte_string)
+
+        # run the get command for the same key several times
+        # to iterate over the read nodes
+        assert await r.get("byte_string") == byte_string
+        assert await r.get("byte_string") == byte_string
+        assert await r.get("byte_string") == byte_string
 
     async def test_mget_nonatomic(self, r: RedisCluster) -> None:
         assert await r.mget_nonatomic([]) == []
