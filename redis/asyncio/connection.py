@@ -1157,7 +1157,7 @@ class ConnectionPool:
         try:
             if await connection.can_read_destructive():
                 raise ConnectionError("Connection has data") from None
-        except (ConnectionError, OSError):
+        except (ConnectionError, TimeoutError, OSError):
             await connection.disconnect()
             await connection.connect()
             if await connection.can_read_destructive():

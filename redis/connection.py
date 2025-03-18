@@ -1494,7 +1494,7 @@ class ConnectionPool:
             try:
                 if connection.can_read() and self.cache is None:
                     raise ConnectionError("Connection has data")
-            except (ConnectionError, OSError):
+            except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
                 connection.connect()
                 if connection.can_read():
@@ -1741,7 +1741,7 @@ class BlockingConnectionPool(ConnectionPool):
             try:
                 if connection.can_read():
                     raise ConnectionError("Connection has data")
-            except (ConnectionError, OSError):
+            except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
                 connection.connect()
                 if connection.can_read():
