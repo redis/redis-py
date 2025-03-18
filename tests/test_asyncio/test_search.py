@@ -1603,14 +1603,14 @@ async def test_withsuffixtrie(decoded_r: redis.Redis):
     if is_resp2_connection(decoded_r):
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]
-        assert await decoded_r.ft().dropindex("idx")
+        assert await decoded_r.ft().dropindex()
 
         # create withsuffixtrie index (text field)
         assert await decoded_r.ft().create_index(TextField("t", withsuffixtrie=True))
         await waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]
-        assert await decoded_r.ft().dropindex("idx")
+        assert await decoded_r.ft().dropindex()
 
         # create withsuffixtrie index (tag field)
         assert await decoded_r.ft().create_index(TagField("t", withsuffixtrie=True))
@@ -1620,14 +1620,14 @@ async def test_withsuffixtrie(decoded_r: redis.Redis):
     else:
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]["flags"]
-        assert await decoded_r.ft().dropindex("idx")
+        assert await decoded_r.ft().dropindex()
 
         # create withsuffixtrie index (text fields)
         assert await decoded_r.ft().create_index(TextField("t", withsuffixtrie=True))
         await waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
-        assert await decoded_r.ft().dropindex("idx")
+        assert await decoded_r.ft().dropindex()
 
         # create withsuffixtrie index (tag field)
         assert await decoded_r.ft().create_index(TagField("t", withsuffixtrie=True))
