@@ -1711,7 +1711,7 @@ def test_max_text_fields(client):
     with pytest.raises(redis.ResponseError):
         client.ft().alter_schema_add((TextField(f"f{x}"),))
 
-    client.ft().dropindex("idx")
+    client.ft().dropindex()
     # Creating the index definition
     client.ft().create_index((TextField("f0"),), max_text_fields=True)
     # Fill the index with fields
@@ -2575,14 +2575,14 @@ def test_withsuffixtrie(client: redis.Redis):
     if is_resp2_connection(client):
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]
-        assert client.ft().dropindex("idx")
+        assert client.ft().dropindex()
 
         # create withsuffixtrie index (text fields)
         assert client.ft().create_index(TextField("t", withsuffixtrie=True))
         waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]
-        assert client.ft().dropindex("idx")
+        assert client.ft().dropindex()
 
         # create withsuffixtrie index (tag field)
         assert client.ft().create_index(TagField("t", withsuffixtrie=True))
@@ -2592,14 +2592,14 @@ def test_withsuffixtrie(client: redis.Redis):
     else:
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]["flags"]
-        assert client.ft().dropindex("idx")
+        assert client.ft().dropindex()
 
         # create withsuffixtrie index (text fields)
         assert client.ft().create_index(TextField("t", withsuffixtrie=True))
         waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
-        assert client.ft().dropindex("idx")
+        assert client.ft().dropindex()
 
         # create withsuffixtrie index (tag field)
         assert client.ft().create_index(TagField("t", withsuffixtrie=True))
