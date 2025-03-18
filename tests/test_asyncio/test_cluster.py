@@ -35,9 +35,6 @@ from redis.exceptions import (
     ResponseError,
 )
 from redis.utils import str_if_bytes
-from tests.test_asyncio.conftest import (
-    create_redis,
-)
 from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
@@ -1022,7 +1019,10 @@ class TestClusterRedisCommands:
     async def test_get_and_set_with_load_balanced_client(
         self, create_redis, load_balancing_strategy: LoadBalancingStrategy
     ) -> None:
-        r = await create_redis(cls=RedisCluster, load_balancing_strategy=load_balancing_strategy)
+        r = await create_redis(
+            cls=RedisCluster,
+            load_balancing_strategy=load_balancing_strategy,
+        )
 
         # get and set can't be tested independently of each other
         assert await r.get("a") is None

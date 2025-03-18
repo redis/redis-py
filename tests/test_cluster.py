@@ -1034,7 +1034,7 @@ class TestClusterRedisCommands:
         r = _get_client(
             cls=RedisCluster,
             request=request,
-            load_balancing_strategy=load_balancing_strategy
+            load_balancing_strategy=load_balancing_strategy,
         )
 
         # get and set can't be tested independently of each other
