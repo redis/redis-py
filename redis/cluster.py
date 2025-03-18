@@ -498,7 +498,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         require_full_coverage: bool = False,
         reinitialize_steps: int = 5,
         read_from_replicas: bool = False,
-        load_balancing_strategy: Union["LoadBalancingStrategy", None] = None,
+        load_balancing_strategy: Optional["LoadBalancingStrategy"] = None,
         dynamic_startup_nodes: bool = True,
         url: Optional[str] = None,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
@@ -535,7 +535,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         :param load_balancing_strategy:
              Enable read from replicas in READONLY mode and defines the load balancing
              strategy that will be used for cluster node selection.
-             You can read possibly stale data (when reading from replicas).
+             The data read from replicas is eventually consistent with the data in primary nodes.
         :param dynamic_startup_nodes:
              Set the RedisCluster's startup nodes to all of the discovered nodes.
              If true (default value), the cluster's discovered nodes will be used to

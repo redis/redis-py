@@ -124,13 +124,14 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
           https://redis.io/docs/manual/scaling/#redis-cluster-configuration-parameters
     :param read_from_replicas:
         | @deprecated - please use load_balancing_strategy instead
-        | Enable read from replicas in READONLY mode. You can read possibly stale data.
+        | Enable read from replicas in READONLY mode.
           When set to true, read commands will be assigned between the primary and
           its replications in a Round-Robin manner.
+          The data read from replicas is eventually consistent with the data in primary nodes.
     :param load_balancing_strategy:
         | Enable read from replicas in READONLY mode and defines the load balancing
           strategy that will be used for cluster node selection.
-          You can read possibly stale data (when reading from replicas).
+          The data read from replicas is eventually consistent with the data in primary nodes.
     :param reinitialize_steps:
         | Specifies the number of MOVED errors that need to occur before reinitializing
           the whole cluster topology. If a MOVED error occurs and the cluster does not
@@ -236,7 +237,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         startup_nodes: Optional[List["ClusterNode"]] = None,
         require_full_coverage: bool = True,
         read_from_replicas: bool = False,
-        load_balancing_strategy: Union[LoadBalancingStrategy, None] = None,
+        load_balancing_strategy: Optional[LoadBalancingStrategy] = None,
         reinitialize_steps: int = 5,
         cluster_error_retry_attempts: int = 3,
         connection_error_retry_attempts: int = 3,
