@@ -255,8 +255,18 @@ class SearchCommands:
 
         For more information see `FT.DROPINDEX <https://redis.io/commands/ft.dropindex>`_.
         """  # noqa
-        delete_str = "DD" if delete_documents else ""
-        return self.execute_command(DROPINDEX_CMD, self.index_name, delete_str)
+        args = [DROPINDEX_CMD, self.index_name]
+
+        delete_str = (
+            "DD"
+            if isinstance(delete_documents, bool) and delete_documents is True
+            else ""
+        )
+
+        if delete_str:
+            args.append(delete_str)
+
+        return self.execute_command(*args)
 
     def _add_document(
         self,
