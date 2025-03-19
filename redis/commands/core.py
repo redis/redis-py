@@ -44,6 +44,10 @@ from redis.typing import (
     TimeoutSecT,
     ZScoreBoundT,
 )
+from redis.utils import (
+    deprecated_function,
+    extract_expire_flags,
+)
 
 from .helpers import list_or_args
 
@@ -1837,10 +1841,10 @@ class BasicKeyCommands(CommandsProtocol):
     def getex(
         self,
         name: KeyT,
-        ex: Union[ExpiryT, None] = None,
-        px: Union[ExpiryT, None] = None,
-        exat: Union[AbsExpiryT, None] = None,
-        pxat: Union[AbsExpiryT, None] = None,
+        ex: Optional[ExpiryT] = None,
+        px: Optional[ExpiryT] = None,
+        exat: Optional[AbsExpiryT] = None,
+        pxat: Optional[AbsExpiryT] = None,
         persist: bool = False,
     ) -> ResponseT:
         """
@@ -1863,7 +1867,6 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/getex
         """
-
         opset = {ex, px, exat, pxat}
         if len(opset) > 2 or len(opset) > 1 and persist:
             raise DataError(
@@ -1871,33 +1874,12 @@ class BasicKeyCommands(CommandsProtocol):
                 "and ``persist`` are mutually exclusive."
             )
 
-        pieces: list[EncodableT] = []
-        # similar to set command
-        if ex is not None:
-            pieces.append("EX")
-            if isinstance(ex, datetime.timedelta):
-                ex = int(ex.total_seconds())
-            pieces.append(ex)
-        if px is not None:
-            pieces.append("PX")
-            if isinstance(px, datetime.timedelta):
-                px = int(px.total_seconds() * 1000)
-            pieces.append(px)
-        # similar to pexpireat command
-        if exat is not None:
-            pieces.append("EXAT")
-            if isinstance(exat, datetime.datetime):
-                exat = int(exat.timestamp())
-            pieces.append(exat)
-        if pxat is not None:
-            pieces.append("PXAT")
-            if isinstance(pxat, datetime.datetime):
-                pxat = int(pxat.timestamp() * 1000)
-            pieces.append(pxat)
-        if persist:
-            pieces.append("PERSIST")
+        exp_options: list[EncodableT] = extract_expire_flags(ex, px, exat, pxat)
 
-        return self.execute_command("GETEX", name, *pieces)
+        if persist:
+            exp_options.append("PERSIST")
+
+        return self.execute_command("GETEX", name, *exp_options)
 
     def __getitem__(self, name: KeyT):
         """
@@ -2255,14 +2237,14 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         name: KeyT,
         value: EncodableT,
-        ex: Union[ExpiryT, None] = None,
-        px: Union[ExpiryT, None] = None,
+        ex: Optional[ExpiryT] = None,
+        px: Optional[ExpiryT] = None,
         nx: bool = False,
         xx: bool = False,
         keepttl: bool = False,
         get: bool = False,
-        exat: Union[AbsExpiryT, None] = None,
-        pxat: Union[AbsExpiryT, None] = None,
+        exat: Optional[AbsExpiryT] = None,
+        pxat: Optional[AbsExpiryT] = None,
     ) -> ResponseT:
         """
         Set the value at key ``name`` to ``value``
@@ -2292,36 +2274,21 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/set
         """
+        opset = {ex, px, exat, pxat}
+        if len(opset) > 2 or len(opset) > 1 and keepttl:
+            raise DataError(
+                "``ex``, ``px``, ``exat``, ``pxat``, "
+                "and ``keepttl`` are mutually exclusive."
+            )
+
+        if nx and xx:
+            raise DataError("``nx`` and ``xx`` are mutually exclusive.")
+
         pieces: list[EncodableT] = [name, value]
         options = {}
-        if ex is not None:
-            pieces.append("EX")
-            if isinstance(ex, datetime.timedelta):
-                pieces.append(int(ex.total_seconds()))
-            elif isinstance(ex, int):
-                pieces.append(ex)
-            elif isinstance(ex, str) and ex.isdigit():
-                pieces.append(int(ex))
-            else:
-                raise DataError("ex must be datetime.timedelta or int")
-        if px is not None:
-            pieces.append("PX")
-            if isinstance(px, datetime.timedelta):
-                pieces.append(int(px.total_seconds() * 1000))
-            elif isinstance(px, int):
-                pieces.append(px)
-            else:
-                raise DataError("px must be datetime.timedelta or int")
-        if exat is not None:
-            pieces.append("EXAT")
-            if isinstance(exat, datetime.datetime):
-                exat = int(exat.timestamp())
-            pieces.append(exat)
-        if pxat is not None:
-            pieces.append("PXAT")
-            if isinstance(pxat, datetime.datetime):
-                pxat = int(pxat.timestamp() * 1000)
-            pieces.append(pxat)
+
+        pieces.extend(extract_expire_flags(ex, px, exat, pxat))
+
         if keepttl:
             pieces.append("KEEPTTL")
 
@@ -4980,6 +4947,65 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HGETALL", name, keys=[name])
 
+    def hgetdel(
+        self, name: str, *keys: str
+    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+        """
+        Return the value of ``key`` within the hash ``name`` and
+        delete the field in the hash.
+        This command is similar to HGET, except for the fact that it also deletes
+        the key on success from the hash with the provided ```name```.
+
+        Available since Redis 8.0
+        For more information see https://redis.io/commands/hgetdel
+        """
+        return self.execute_command("HGETDEL", name, "FIELDS", len(keys), *keys)
+
+    def hgetex(
+        self,
+        name: KeyT,
+        *keys: str,
+        ex: Optional[ExpiryT] = None,
+        px: Optional[ExpiryT] = None,
+        exat: Optional[AbsExpiryT] = None,
+        pxat: Optional[AbsExpiryT] = None,
+        persist: bool = False,
+    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+        """
+        Return the values of ``keys`` within the hash ``name``
+        and optionally set their expiration.
+
+        ``ex`` sets an expire flag on ``kyes`` for ``ex`` seconds.
+
+        ``px`` sets an expire flag on ``keys`` for ``px`` milliseconds.
+
+        ``exat`` sets an expire flag on ``keys`` for ``ex`` seconds,
+        specified in unix time.
+
+        ``pxat`` sets an expire flag on ``keys`` for ``ex`` milliseconds,
+        specified in unix time.
+
+        ``persist`` remove the time to live associated with the ``keys``.
+
+        Available since Redis 8.0
+        For more information see https://redis.io/commands/hgetex
+        """
+        opset = {ex, px, exat, pxat}
+        if len(opset) > 2 or len(opset) > 1 and persist:
+            raise DataError(
+                "``ex``, ``px``, ``exat``, ``pxat``, "
+                "and ``persist`` are mutually exclusive."
+            )
+
+        exp_options: list[EncodableT] = extract_expire_flags(ex, px, exat, pxat)
+
+        if persist:
+            exp_options.append("PERSIST")
+
+        return self.execute_command(
+            "HGETEX", name, *exp_options, "FIELDS", len(keys), *keys
+        )
+
     def hincrby(
         self, name: str, key: str, amount: int = 1
     ) -> Union[Awaitable[int], int]:
@@ -5047,6 +5073,87 @@ class HashCommands(CommandsProtocol):
 
         return self.execute_command("HSET", name, *pieces)
 
+    def hsetex(
+        self,
+        name: str,
+        key: Optional[str] = None,
+        value: Optional[str] = None,
+        mapping: Optional[dict] = None,
+        items: Optional[list] = None,
+        ex: Optional[ExpiryT] = None,
+        px: Optional[ExpiryT] = None,
+        exat: Optional[AbsExpiryT] = None,
+        pxat: Optional[AbsExpiryT] = None,
+        fnx: bool = False,
+        fxx: bool = False,
+        keepttl: bool = False,
+    ) -> Union[Awaitable[int], int]:
+        """
+        Set ``key`` to ``value`` within hash ``name``
+
+        ``mapping`` accepts a dict of key/value pairs that will be
+        added to hash ``name``.
+
+        ``items`` accepts a list of key/value pairs that will be
+        added to hash ``name``.
+
+        ``ex`` sets an expire flag on ``keys`` for ``ex`` seconds.
+
+        ``px`` sets an expire flag on ``keys`` for ``px`` milliseconds.
+
+        ``exat`` sets an expire flag on ``keys`` for ``ex`` seconds,
+            specified in unix time.
+
+        ``pxat`` sets an expire flag on ``keys`` for ``ex`` milliseconds,
+            specified in unix time.
+
+        ``fnx`` if set to True, set the value for each provided key to each
+            provided value only if all do not already exist.
+
+        ``fxx`` if set to True, set the value for each provided key to each
+            provided value only if all already exist.
+
+        ``keepttl`` if True, retain the time to live associated with the keys.
+
+        Returns the number of fields that were added.
+
+        Available since Redis 8.0
+        For more information see https://redis.io/commands/hsetex
+        """
+        if key is None and not mapping and not items:
+            raise DataError("'hsetex' with no key value pairs")
+
+        opset = {ex, px, exat, pxat}
+        if len(opset) > 2 or len(opset) > 1 and keepttl:
+            raise DataError(
+                "``ex``, ``px``, ``exat``, ``pxat``, "
+                "and ``keepttl`` are mutually exclusive."
+            )
+
+        if fnx and fxx:
+            raise DataError("``fnx`` and ``fxx`` are mutually exclusive.")
+
+        exp_options: list[EncodableT] = extract_expire_flags(ex, px, exat, pxat)
+        if fnx:
+            exp_options.append("FNX")
+        if fxx:
+            exp_options.append("FXX")
+        if keepttl:
+            exp_options.append("KEEPTTL")
+
+        pieces = []
+        if items:
+            pieces.extend(items)
+        if key is not None:
+            pieces.extend((key, value))
+        if mapping:
+            for pair in mapping.items():
+                pieces.extend(pair)
+
+        return self.execute_command(
+            "HSETEX", name, *exp_options, "FIELDS", int(len(pieces) / 2), *pieces
+        )
+
     def hsetnx(self, name: str, key: str, value: str) -> Union[Awaitable[bool], bool]:
         """
         Set ``key`` to ``value`` within hash ``name`` if ``key`` does not
@@ -5056,6 +5163,11 @@ class HashCommands(CommandsProtocol):
         """
         return self.execute_command("HSETNX", name, key, value)
 
+    @deprecated_function(
+        version="4.0.0",
+        reason="Use 'hset' instead.",
+        name="hmset",
+    )
     def hmset(self, name: str, mapping: dict) -> Union[Awaitable[str], str]:
         """
         Set key to value within hash ``name`` for each corresponding
@@ -5063,12 +5175,6 @@ class HashCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/hmset
         """
-        warnings.warn(
-            f"{self.__class__.__name__}.hmset() is deprecated. "
-            f"Use {self.__class__.__name__}.hset() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         if not mapping:
             raise DataError("'hmset' with 'mapping' of length 0")
         items = []
