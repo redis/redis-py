@@ -1014,19 +1014,11 @@ class ClusterNode:
                 break
 
     async def disconnect(self) -> None:
-        exc = None
-
-        async def _disconnect(connection: Connection) -> None:
-            try:
-                return await connection.disconnect()
-            except Exception as e:
-                nonlocal exc
-                if exc is None:
-                    exc = e
-
-        async with anyio.create_task_group() as tg:
-            for connection in self._connections:
-                tg.start_soon(_disconnect, connection)
+        ret = await anyio_gather(
+            *(connection.disconnect() for connection in self._connections),
+            return_exceptions=True,
+        )
+        exc = next((res for res in ret if isinstance(res, Exception)), None)
 
         if exc:
             raise exc
@@ -1413,14 +1405,9 @@ class NodesManager:
 
     async def aclose(self, attr: str = "nodes_cache") -> None:
         self.default_node = None
-
-        async def _disconnect(node: "ClusterNode") -> None:
-            with anyio.CancelScope(shield=True):
-                await node.disconnect()
-
-        async with anyio.create_task_group() as tg:
-            for node in getattr(self, attr).values():
-                tg.start_soon(_disconnect, node)
+        await anyio_gather(
+            *(node.disconnect() for node in getattr(self, attr).values())
+        )
 
     def remap_host_port(self, host: str, port: int) -> Tuple[str, int]:
         """

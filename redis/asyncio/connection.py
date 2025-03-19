@@ -232,21 +232,6 @@ class AbstractConnection:
                 f"unclosed Connection {self!r}", ResourceWarning, source=self
             )
 
-    #         try:
-    #             asyncio.get_running_loop()
-    #             self._close()
-    #         except RuntimeError:
-    #             # No actions been taken if pool already closed.
-    #             pass
-
-    # def _close(self):
-    #     """
-    #     Internal method to silently close the connection without waiting
-    #     """
-    #     if self._writer:
-    #         self._writer.close()
-    #         self._writer = self._reader = None
-
     def __repr__(self):
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
         return f"<{self.__class__.__module__}.{self.__class__.__name__}({repr_args})>"
