@@ -39,6 +39,7 @@ from redis.cluster import (
     SLOT_ID,
     AbstractRedisCluster,
     LoadBalancer,
+    LoadBalancingStrategy,
     block_pipeline_command,
     get_node_name,
     parse_cluster_slots,
@@ -67,6 +68,7 @@ from redis.exceptions import (
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
+    deprecated_args,
     deprecated_function,
     dict_merge,
     get_lib_version,
@@ -133,9 +135,15 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         | See:
           https://redis.io/docs/manual/scaling/#redis-cluster-configuration-parameters
     :param read_from_replicas:
-        | Enable read from replicas in READONLY mode. You can read possibly stale data.
+        | @deprecated - please use load_balancing_strategy instead
+        | Enable read from replicas in READONLY mode.
           When set to true, read commands will be assigned between the primary and
           its replications in a Round-Robin manner.
+          The data read from replicas is eventually consistent with the data in primary nodes.
+    :param load_balancing_strategy:
+        | Enable read from replicas in READONLY mode and defines the load balancing
+          strategy that will be used for cluster node selection.
+          The data read from replicas is eventually consistent with the data in primary nodes.
     :param reinitialize_steps:
         | Specifies the number of MOVED errors that need to occur before reinitializing
           the whole cluster topology. If a MOVED error occurs and the cluster does not
@@ -228,6 +236,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         "result_callbacks",
     )
 
+    @deprecated_args(
+        args_to_warn=["read_from_replicas"],
+        reason="Please configure the 'load_balancing_strategy' instead",
+        version="5.0.3",
+    )
     def __init__(
         self,
         host: Optional[str] = None,
@@ -236,6 +249,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         startup_nodes: Optional[List["ClusterNode"]] = None,
         require_full_coverage: bool = True,
         read_from_replicas: bool = False,
+        load_balancing_strategy: Optional[LoadBalancingStrategy] = None,
         reinitialize_steps: int = 5,
         cluster_error_retry_attempts: int = 3,
         connection_error_retry_attempts: int = 3,
@@ -335,7 +349,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 }
             )
 
-        if read_from_replicas:
+        if read_from_replicas or load_balancing_strategy:
             # Call our on_connect function to configure READONLY mode
             kwargs["redis_connect_func"] = self.on_connect
 
@@ -384,6 +398,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         )
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self.read_from_replicas = read_from_replicas
+        self.load_balancing_strategy = load_balancing_strategy
         self.reinitialize_steps = reinitialize_steps
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
         self.connection_error_retry_attempts = connection_error_retry_attempts
@@ -602,6 +617,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             self.nodes_manager.get_node_from_slot(
                 await self._determine_slot(command, *args),
                 self.read_from_replicas and command in READ_COMMANDS,
+                self.load_balancing_strategy if command in READ_COMMANDS else None,
             )
         ]
 
@@ -782,7 +798,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     # refresh the target node
                     slot = await self._determine_slot(*args)
                     target_node = self.nodes_manager.get_node_from_slot(
-                        slot, self.read_from_replicas and args[0] in READ_COMMANDS
+                        slot,
+                        self.read_from_replicas and args[0] in READ_COMMANDS,
+                        self.load_balancing_strategy
+                        if args[0] in READ_COMMANDS
+                        else None,
                     )
                     moved = False
 
@@ -1183,9 +1203,7 @@ class NodesManager:
             return self.nodes_cache.get(node_name)
         else:
             raise DataError(
-                "get_node requires one of the following: "
-                "1. node name "
-                "2. host and port"
+                "get_node requires one of the following: 1. node name 2. host and port"
             )
 
     def set_nodes(
@@ -1245,17 +1263,23 @@ class NodesManager:
         self._moved_exception = None
 
     def get_node_from_slot(
-        self, slot: int, read_from_replicas: bool = False
+        self,
+        slot: int,
+        read_from_replicas: bool = False,
+        load_balancing_strategy=None,
     ) -> "ClusterNode":
         if self._moved_exception:
             self._update_moved_slots()
 
+        if read_from_replicas is True and load_balancing_strategy is None:
+            load_balancing_strategy = LoadBalancingStrategy.ROUND_ROBIN
+
         try:
-            if read_from_replicas:
-                # get the server index in a Round-Robin manner
+            if len(self.slots_cache[slot]) > 1 and load_balancing_strategy:
+                # get the server index using the strategy defined in load_balancing_strategy
                 primary_name = self.slots_cache[slot][0].name
                 node_idx = self.read_load_balancer.get_server_index(
-                    primary_name, len(self.slots_cache[slot])
+                    primary_name, len(self.slots_cache[slot]), load_balancing_strategy
                 )
                 return self.slots_cache[slot][node_idx]
             return self.slots_cache[slot][0]
@@ -1367,7 +1391,7 @@ class NodesManager:
                             if len(disagreements) > 5:
                                 raise RedisClusterException(
                                     f"startup_nodes could not agree on a valid "
-                                    f'slots cache: {", ".join(disagreements)}'
+                                    f"slots cache: {', '.join(disagreements)}"
                                 )
 
             # Validate if all slots are covered or if we should try next startup node
