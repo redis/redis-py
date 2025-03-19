@@ -29,7 +29,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = ['async-timeout>=4.0.3; python_full_version<"3.11.3"']
+dependencies = ['anyio>=4,<4.6']
 
 [project.optional-dependencies]
 hiredis = [

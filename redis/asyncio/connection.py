@@ -1,9 +1,7 @@
-import asyncio
 import copy
 import enum
 import inspect
 import socket
-import sys
 import warnings
 import weakref
 from abc import abstractmethod
@@ -26,6 +24,13 @@ from typing import (
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
+import anyio
+from anyio.abc import ByteStream, SocketStream
+from anyio.streams.buffered import BufferedByteReceiveStream
+from anyio.streams.tls import TLSStream
+
+from redis.asyncio.utils import anyio_condition_wait_for, anyio_gather
+
 from ..utils import SSL_AVAILABLE
 
 if SSL_AVAILABLE:
@@ -36,16 +41,7 @@ else:
     TLSVersion = None
     SSLContext = None
 
-from ..auth.token import TokenInterface
-from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
-from ..utils import deprecated_args, format_error_message
-
-# the functionality is available in 3.11.x but has a major issue before
-# 3.11.3. See https://github.com/redis/redis-py/issues/2633
-if sys.version_info >= (3, 11, 3):
-    from asyncio import timeout as async_timeout
-else:
-    from async_timeout import timeout as async_timeout
+from builtins import TimeoutError as PyTimeoutError
 
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
@@ -70,6 +66,9 @@ from .._parsers import (
     _AsyncRESP2Parser,
     _AsyncRESP3Parser,
 )
+from ..auth.token import TokenInterface
+from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
+from ..utils import deprecated_args, format_error_message
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
@@ -189,7 +188,7 @@ class AbstractConnection:
         if retry_on_timeout:
             retry_on_error.append(TimeoutError)
             retry_on_error.append(socket.timeout)
-            retry_on_error.append(asyncio.TimeoutError)
+            retry_on_error.append(PyTimeoutError)
         self.retry_on_error = retry_on_error
         if retry or retry_on_error:
             if not retry:
@@ -205,8 +204,8 @@ class AbstractConnection:
         self.next_health_check: float = -1
         self.encoder = encoder_class(encoding, encoding_errors, decode_responses)
         self.redis_connect_func = redis_connect_func
-        self._reader: Optional[asyncio.StreamReader] = None
-        self._writer: Optional[asyncio.StreamWriter] = None
+        self._reader: Optional[BufferedByteReceiveStream] = None
+        self._writer: Optional[ByteStream] = None
         self._socket_read_size = socket_read_size
         self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
@@ -233,20 +232,20 @@ class AbstractConnection:
                 f"unclosed Connection {self!r}", ResourceWarning, source=self
             )
 
-            try:
-                asyncio.get_running_loop()
-                self._close()
-            except RuntimeError:
-                # No actions been taken if pool already closed.
-                pass
+    #         try:
+    #             asyncio.get_running_loop()
+    #             self._close()
+    #         except RuntimeError:
+    #             # No actions been taken if pool already closed.
+    #             pass
 
-    def _close(self):
-        """
-        Internal method to silently close the connection without waiting
-        """
-        if self._writer:
-            self._writer.close()
-            self._writer = self._reader = None
+    # def _close(self):
+    #     """
+    #     Internal method to silently close the connection without waiting
+    #     """
+    #     if self._writer:
+    #         self._writer.close()
+    #         self._writer = self._reader = None
 
     def __repr__(self):
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
@@ -299,9 +298,9 @@ class AbstractConnection:
             await self.retry.call_with_retry(
                 lambda: self._connect(), lambda error: self.disconnect()
             )
-        except asyncio.CancelledError:
+        except anyio.get_cancelled_exc_class():
             raise  # in 3.7 and earlier, this is an Exception, not BaseException
-        except (socket.timeout, asyncio.TimeoutError):
+        except (socket.timeout, PyTimeoutError):
             raise TimeoutError("Timeout connecting to server")
         except OSError as e:
             raise ConnectionError(self._error_message(e))
@@ -316,7 +315,7 @@ class AbstractConnection:
                 # Use the passed function redis_connect_func
                 (
                     await self.redis_connect_func(self)
-                    if asyncio.iscoroutinefunction(self.redis_connect_func)
+                    if inspect.iscoroutinefunction(self.redis_connect_func)
                     else self.redis_connect_func(self)
                 )
         except RedisError:
@@ -443,22 +442,23 @@ class AbstractConnection:
     async def disconnect(self, nowait: bool = False) -> None:
         """Disconnects from the Redis server"""
         try:
-            async with async_timeout(self.socket_connect_timeout):
+            with anyio.fail_after(self.socket_connect_timeout):
                 self._parser.on_disconnect()
                 if not self.is_connected:
                     return
                 try:
-                    self._writer.close()  # type: ignore[union-attr]
                     # wait for close to finish, except when handling errors and
                     # forcefully disconnecting.
-                    if not nowait:
-                        await self._writer.wait_closed()  # type: ignore[union-attr]
+                    if nowait:
+                        await anyio.aclose_forcefully(self._writer)
+                    else:
+                        await self._writer.aclose()
                 except OSError:
                     pass
                 finally:
                     self._reader = None
                     self._writer = None
-        except asyncio.TimeoutError:
+        except PyTimeoutError:
             raise TimeoutError(
                 f"Timed out closing connection after {self.socket_connect_timeout}"
             ) from None
@@ -475,10 +475,7 @@ class AbstractConnection:
 
     async def check_health(self):
         """Check the health of the connection with a PING/PONG"""
-        if (
-            self.health_check_interval
-            and asyncio.get_running_loop().time() > self.next_health_check
-        ):
+        if self.health_check_interval and anyio.current_time() > self.next_health_check:
             await self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:
@@ -499,13 +496,12 @@ class AbstractConnection:
             if isinstance(command, bytes):
                 command = [command]
             if self.socket_timeout:
-                await asyncio.wait_for(
-                    self._send_packed_command(command), self.socket_timeout
-                )
+                with anyio.fail_after(self.socket_timeout):
+                    await self._send_packed_command(command)
             else:
                 self._writer.writelines(command)
                 await self._writer.drain()
-        except asyncio.TimeoutError:
+        except PyTimeoutError:
             await self.disconnect(nowait=True)
             raise TimeoutError("Timeout writing to socket") from None
         except OSError as e:
@@ -558,12 +554,12 @@ class AbstractConnection:
                 and self.protocol in ["3", 3]
                 and not HIREDIS_AVAILABLE
             ):
-                async with async_timeout(read_timeout):
+                with anyio.fail_after(read_timeout):
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding, push_request=push_request
                     )
             elif read_timeout is not None:
-                async with async_timeout(read_timeout):
+                with anyio.fail_after(read_timeout):
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding
                     )
@@ -575,7 +571,7 @@ class AbstractConnection:
                 response = await self._parser.read_response(
                     disable_decoding=disable_decoding
                 )
-        except asyncio.TimeoutError:
+        except PyTimeoutError:
             if timeout is not None:
                 # user requested timeout, return None. Operation can be retried
                 return None
@@ -596,7 +592,7 @@ class AbstractConnection:
             raise
 
         if self.health_check_interval:
-            next_time = asyncio.get_running_loop().time() + self.health_check_interval
+            next_time = anyio.current_time() + self.health_check_interval
             self.next_health_check = next_time
 
         if isinstance(response, ResponseError):
@@ -681,7 +677,7 @@ class AbstractConnection:
 
     def _socket_is_empty(self):
         """Check if the socket is empty"""
-        return len(self._reader._buffer) == 0
+        return len(self._reader.buffer) == 0
 
     async def process_invalidation_messages(self):
         while not self._socket_is_empty():
@@ -728,17 +724,21 @@ class Connection(AbstractConnection):
         return pieces
 
     def _connection_arguments(self) -> Mapping:
-        return {"host": self.host, "port": self.port}
+        return {"remote_host": self.host, "remote_port": self.port}
 
     async def _connect(self):
         """Create a TCP socket connection"""
-        async with async_timeout(self.socket_connect_timeout):
-            reader, writer = await asyncio.open_connection(
+        with anyio.fail_after(self.socket_connect_timeout):
+            stream: Union[SocketStream, TLSStream] = await anyio.connect_tcp(
                 **self._connection_arguments()
             )
-        self._reader = reader
-        self._writer = writer
-        sock = writer.transport.get_extra_info("socket")
+        self._reader = BufferedByteReceiveStream(stream)
+        self._writer = stream
+        sock = (
+            stream.transport_stream._raw_socket
+            if isinstance(stream, TLSStream)
+            else stream._raw_socket
+        )
         if sock:
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             try:
@@ -751,7 +751,7 @@ class Connection(AbstractConnection):
             except (OSError, TypeError):
                 # `socket_keepalive_options` might contain invalid options
                 # causing an error. Do not leave the connection open.
-                writer.close()
+                await stream.aclose()
                 raise
 
     def _host_error(self) -> str:
@@ -793,7 +793,7 @@ class SSLConnection(Connection):
 
     def _connection_arguments(self) -> Mapping:
         kwargs = super()._connection_arguments()
-        kwargs["ssl"] = self.ssl_context.get()
+        kwargs["ssl_context"] = self.ssl_context.get()
         return kwargs
 
     @property
@@ -905,10 +905,10 @@ class UnixDomainSocketConnection(AbstractConnection):
         return pieces
 
     async def _connect(self):
-        async with async_timeout(self.socket_connect_timeout):
-            reader, writer = await asyncio.open_unix_connection(path=self.path)
-        self._reader = reader
-        self._writer = writer
+        with anyio.fail_after(self.socket_connect_timeout):
+            stream = await anyio.connect_unix(path=self.path)
+        self._reader = BufferedByteReceiveStream(stream)
+        self._writer = stream
         await self.on_connect()
 
     def _host_error(self) -> str:
@@ -1084,7 +1084,7 @@ class ConnectionPool:
         self._available_connections: List[AbstractConnection] = []
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
-        self._lock = asyncio.Lock()
+        self._lock = anyio.Lock()
         self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -1187,7 +1187,7 @@ class ConnectionPool:
             )
         else:
             connections = self._available_connections
-        resp = await asyncio.gather(
+        resp = await anyio_gather(
             *(connection.disconnect() for connection in connections),
             return_exceptions=True,
         )
@@ -1268,7 +1268,7 @@ class BlockingConnectionPool(ConnectionPool):
         max_connections: int = 50,
         timeout: Optional[int] = 20,
         connection_class: Type[AbstractConnection] = Connection,
-        queue_class: Type[asyncio.Queue] = asyncio.LifoQueue,  # deprecated
+        queue_class: Any = None,  # deprecated
         **connection_kwargs,
     ):
         super().__init__(
@@ -1276,7 +1276,7 @@ class BlockingConnectionPool(ConnectionPool):
             max_connections=max_connections,
             **connection_kwargs,
         )
-        self._condition = asyncio.Condition()
+        self._condition = anyio.Condition()
         self.timeout = timeout
 
     @deprecated_args(
@@ -1288,10 +1288,12 @@ class BlockingConnectionPool(ConnectionPool):
         """Gets a connection from the pool, blocking until one is available"""
         try:
             async with self._condition:
-                async with async_timeout(self.timeout):
-                    await self._condition.wait_for(self.can_get_connection)
+                with anyio.fail_after(self.timeout):
+                    await anyio_condition_wait_for(
+                        self._condition, self.can_get_connection
+                    )
                     connection = super().get_available_connection()
-        except asyncio.TimeoutError as err:
+        except PyTimeoutError as err:
             raise ConnectionError("No connection available.") from err
 
         # We now perform the connection check outside of the lock.

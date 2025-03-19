@@ -25,6 +25,9 @@ from typing import (
     cast,
 )
 
+import anyio
+import sniffio
+
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,
@@ -365,7 +368,7 @@ class Redis(
         # If using a single connection client, we need to lock creation-of and use-of
         # the client in order to avoid race conditions such as using asyncio.gather
         # on a set of redis commands
-        self._single_conn_lock = asyncio.Lock()
+        self._single_conn_lock = anyio.Lock()
 
     def __repr__(self):
         return (
@@ -471,7 +474,7 @@ class Redis(
                     return func_value if value_from_callable else exec_value
                 except WatchError:
                     if watch_delay is not None and watch_delay > 0:
-                        await asyncio.sleep(watch_delay)
+                        await anyio.sleep(watch_delay)
                     continue
 
     def lock(
@@ -587,12 +590,16 @@ class Redis(
         self,
         _warn: Any = warnings.warn,
         _grl: Any = asyncio.get_running_loop,
+        _sniff: Any = sniffio.current_async_library,
     ) -> None:
         if hasattr(self, "connection") and (self.connection is not None):
             _warn(f"Unclosed client session {self!r}", ResourceWarning, source=self)
             try:
-                context = {"client": self, "message": self._DEL_MESSAGE}
-                _grl().call_exception_handler(context)
+                # trio does not have a concept of a global exception handler since tasks
+                # are intended to be managed within specific structured contexts
+                if _sniff() == "asyncio":
+                    context = {"client": self, "message": self._DEL_MESSAGE}
+                    _grl().call_exception_handler(context)
             except RuntimeError:
                 pass
             self.connection._close()
@@ -833,7 +840,7 @@ class PubSub:
         self.pending_unsubscribe_channels = set()
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
-        self._lock = asyncio.Lock()
+        self._lock = anyio.Lock()
 
     async def __aenter__(self):
         return self
@@ -991,10 +998,7 @@ class PubSub:
                 "did you forget to call subscribe() or psubscribe()?"
             )
 
-        if (
-            conn.health_check_interval
-            and asyncio.get_running_loop().time() > conn.next_health_check
-        ):
+        if conn.health_check_interval and anyio.current_time() > conn.next_health_check:
             await conn.send_command(
                 "PING", self.HEALTH_CHECK_MESSAGE, check_health=False
             )
@@ -1185,12 +1189,11 @@ class PubSub:
 
         This is the equivalent of :py:meth:`redis.PubSub.run_in_thread` in
         redis-py, but it is a coroutine. To launch it as a separate task, use
-        ``asyncio.create_task``:
+        your async backend's task creation and cancellation pattern (e.g. ``asyncio.create_task`` and ``task.cancel``).
+
+        Example:
 
             >>> task = asyncio.create_task(pubsub.run())
-
-        To shut it down, use asyncio cancellation:
-
             >>> task.cancel()
             >>> await task
         """
@@ -1207,7 +1210,7 @@ class PubSub:
                 await self.get_message(
                     ignore_subscribe_messages=True, timeout=poll_timeout
                 )
-            except asyncio.CancelledError:
+            except anyio.get_cancelled_exc_class():
                 raise
             except BaseException as e:
                 if exception_handler is None:
@@ -1217,7 +1220,7 @@ class PubSub:
                     await res
             # Ensure that other tasks on the event loop get a chance to run
             # if we didn't have to block for I/O anywhere.
-            await asyncio.sleep(0)
+            await anyio.lowlevel.checkpoint()
 
 
 class PubsubWorkerExceptionHandler(Protocol):

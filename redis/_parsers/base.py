@@ -1,12 +1,9 @@
-import sys
 from abc import ABC
-from asyncio import IncompleteReadError, StreamReader, TimeoutError
 from typing import List, Optional, Union
 
-if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
-    from asyncio import timeout as async_timeout
-else:
-    from async_timeout import timeout as async_timeout
+import anyio
+from anyio import ClosedResourceError, EndOfStream, IncompleteRead
+from anyio.streams.buffered import BufferedByteReceiveStream
 
 from ..exceptions import (
     AskError,
@@ -146,7 +143,7 @@ class AsyncBaseParser(BaseParser):
     __slots__ = "_stream", "_read_size"
 
     def __init__(self, socket_read_size: int):
-        self._stream: Optional[StreamReader] = None
+        self._stream: Optional[BufferedByteReceiveStream] = None
         self._read_size = socket_read_size
 
     async def can_read_destructive(self) -> bool:
@@ -190,12 +187,13 @@ class _AsyncRESPBase(AsyncBaseParser):
     async def can_read_destructive(self) -> bool:
         if not self._connected:
             raise RedisError("Buffer is closed.")
-        if self._buffer:
+        if self._buffer or self._stream.buffer:
             return True
         try:
-            async with async_timeout(0):
-                return self._stream.at_eof()
-        except TimeoutError:
+            with anyio.fail_after(0):
+                await self._stream.receive(0)
+                return True
+        except (EndOfStream, TimeoutError, ClosedResourceError):
             return False
 
     async def _read(self, length: int) -> bytes:
@@ -210,8 +208,8 @@ class _AsyncRESPBase(AsyncBaseParser):
         else:
             tail = self._buffer[self._pos :]
             try:
-                data = await self._stream.readexactly(want - len(tail))
-            except IncompleteReadError as error:
+                data = await self._stream.receive_exactly(want - len(tail))
+            except IncompleteRead as error:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
             result = (tail + data)[:-2]
             self._chunks.append(data)

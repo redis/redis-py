@@ -18,6 +18,9 @@ from typing import (
     Union,
 )
 
+import anyio
+import sniffio
+
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -28,6 +31,7 @@ from redis.asyncio.client import ResponseCallbackT
 from redis.asyncio.connection import Connection, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
 from redis.asyncio.retry import Retry
+from redis.asyncio.utils import anyio_gather
 from redis.auth.token import TokenInterface
 from redis.backoff import default_backoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
@@ -387,13 +391,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         )
 
         self._initialize = True
-        self._lock: Optional[asyncio.Lock] = None
+        self._lock: Optional[anyio.Lock] = None
 
     async def initialize(self) -> "RedisCluster":
         """Get all nodes from startup nodes & creates connections if not initialized."""
         if self._initialize:
             if not self._lock:
-                self._lock = asyncio.Lock()
+                self._lock = anyio.Lock()
             async with self._lock:
                 if self._initialize:
                     try:
@@ -412,7 +416,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         """Close all connections & client if initialized."""
         if not self._initialize:
             if not self._lock:
-                self._lock = asyncio.Lock()
+                self._lock = anyio.Lock()
             async with self._lock:
                 if not self._initialize:
                     self._initialize = True
@@ -439,12 +443,16 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self,
         _warn: Any = warnings.warn,
         _grl: Any = asyncio.get_running_loop,
+        _sniff: Any = sniffio.current_async_library,
     ) -> None:
         if hasattr(self, "_initialize") and not self._initialize:
             _warn(f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self)
             try:
-                context = {"client": self, "message": self._DEL_MESSAGE}
-                _grl().call_exception_handler(context)
+                # trio does not have a concept of a global exception handler since tasks
+                # are intended to be managed within specific structured contexts
+                if _sniff() == "asyncio":
+                    context = {"client": self, "message": self._DEL_MESSAGE}
+                    _grl().call_exception_handler(context)
             except RuntimeError:
                 pass
 
@@ -586,7 +594,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         # get the node that holds the key's slot
         return [
-            self.nodes_manager.get_node_from_slot(
+            await self.nodes_manager.get_node_from_slot(
                 await self._determine_slot(command, *args),
                 self.read_from_replicas and command in READ_COMMANDS,
             )
@@ -727,11 +735,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     return ret
                 else:
                     keys = [node.name for node in target_nodes]
-                    values = await asyncio.gather(
+                    values = await anyio_gather(
                         *(
-                            asyncio.create_task(
-                                self._execute_command(node, *args, **kwargs)
-                            )
+                            self._execute_command(node, *args, **kwargs)
                             for node in target_nodes
                         )
                     )
@@ -768,7 +774,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     # MOVED occurred and the slots cache was updated,
                     # refresh the target node
                     slot = await self._determine_slot(*args)
-                    target_node = self.nodes_manager.get_node_from_slot(
+                    target_node = await self.nodes_manager.get_node_from_slot(
                         slot, self.read_from_replicas and args[0] in READ_COMMANDS
                     )
                     moved = False
@@ -791,7 +797,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
                 await self.aclose()
-                await asyncio.sleep(0.25)
+                await anyio.sleep(0.25)
                 raise
             except MovedError as e:
                 # First, we will try to patch the slots/nodes cache with the
@@ -818,7 +824,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 asking = True
             except TryAgainError:
                 if ttl < self.RedisClusterRequestTTL / 2:
-                    await asyncio.sleep(0.05)
+                    await anyio.sleep(0.05)
 
         raise ClusterError("TTL exhausted.")
 
@@ -991,27 +997,37 @@ class ClusterNode:
         self,
         _warn: Any = warnings.warn,
         _grl: Any = asyncio.get_running_loop,
+        _sniff: Any = sniffio.current_async_library,
     ) -> None:
         for connection in self._connections:
             if connection.is_connected:
                 _warn(f"{self._DEL_MESSAGE} {self!r}", ResourceWarning, source=self)
-
                 try:
-                    context = {"client": self, "message": self._DEL_MESSAGE}
-                    _grl().call_exception_handler(context)
+                    # trio does not have a concept of a global exception handler since
+                    # tasks are intended to be managed within specific structured
+                    # contexts
+                    if _sniff() == "asyncio":
+                        context = {"client": self, "message": self._DEL_MESSAGE}
+                        _grl().call_exception_handler(context)
                 except RuntimeError:
                     pass
                 break
 
     async def disconnect(self) -> None:
-        ret = await asyncio.gather(
-            *(
-                asyncio.create_task(connection.disconnect())
-                for connection in self._connections
-            ),
-            return_exceptions=True,
-        )
-        exc = next((res for res in ret if isinstance(res, Exception)), None)
+        exc = None
+
+        async def _disconnect(connection: Connection) -> None:
+            try:
+                return await connection.disconnect()
+            except Exception as e:
+                nonlocal exc
+                if exc is None:
+                    exc = e
+
+        async with anyio.create_task_group() as tg:
+            for connection in self._connections:
+                tg.start_soon(_disconnect, connection)
+
         if exc:
             raise exc
 
@@ -1174,25 +1190,26 @@ class NodesManager:
                 "get_node requires one of the following: 1. node name 2. host and port"
             )
 
-    def set_nodes(
+    async def set_nodes(
         self,
         old: Dict[str, "ClusterNode"],
         new: Dict[str, "ClusterNode"],
         remove_old: bool = False,
     ) -> None:
-        if remove_old:
-            for name in list(old.keys()):
-                if name not in new:
-                    task = asyncio.create_task(old.pop(name).disconnect())  # noqa
+        async with anyio.create_task_group() as tg:
+            if remove_old:
+                for name in list(old.keys()):
+                    if name not in new:
+                        tg.start_soon(old.pop(name).disconnect)
 
-        for name, node in new.items():
-            if name in old:
-                if old[name] is node:
-                    continue
-                task = asyncio.create_task(old[name].disconnect())  # noqa
-            old[name] = node
+            for name, node in new.items():
+                if name in old:
+                    if old[name] is node:
+                        continue
+                    tg.start_soon(old[name].disconnect)
+                old[name] = node
 
-    def _update_moved_slots(self) -> None:
+    async def _update_moved_slots(self) -> None:
         e = self._moved_exception
         redirected_node = self.get_node(host=e.host, port=e.port)
         if redirected_node:
@@ -1205,7 +1222,9 @@ class NodesManager:
             redirected_node = ClusterNode(
                 e.host, e.port, PRIMARY, **self.connection_kwargs
             )
-            self.set_nodes(self.nodes_cache, {redirected_node.name: redirected_node})
+            await self.set_nodes(
+                self.nodes_cache, {redirected_node.name: redirected_node}
+            )
         if redirected_node in self.slots_cache[e.slot_id]:
             # The MOVED error resulted from a failover, and the new slot owner
             # had previously been a replica.
@@ -1230,11 +1249,11 @@ class NodesManager:
         # Reset moved_exception
         self._moved_exception = None
 
-    def get_node_from_slot(
+    async def get_node_from_slot(
         self, slot: int, read_from_replicas: bool = False
     ) -> "ClusterNode":
         if self._moved_exception:
-            self._update_moved_slots()
+            await self._update_moved_slots()
 
         try:
             if read_from_replicas:
@@ -1383,9 +1402,9 @@ class NodesManager:
 
         # Set the tmp variables to the real variables
         self.slots_cache = tmp_slots
-        self.set_nodes(self.nodes_cache, tmp_nodes_cache, remove_old=True)
+        await self.set_nodes(self.nodes_cache, tmp_nodes_cache, remove_old=True)
         # Populate the startup nodes with all discovered nodes
-        self.set_nodes(self.startup_nodes, self.nodes_cache, remove_old=True)
+        await self.set_nodes(self.startup_nodes, self.nodes_cache, remove_old=True)
 
         # Set the default node
         self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
@@ -1394,12 +1413,14 @@ class NodesManager:
 
     async def aclose(self, attr: str = "nodes_cache") -> None:
         self.default_node = None
-        await asyncio.gather(
-            *(
-                asyncio.create_task(node.disconnect())
-                for node in getattr(self, attr).values()
-            )
-        )
+
+        async def _disconnect(node: "ClusterNode") -> None:
+            with anyio.CancelScope(shield=True):
+                await node.disconnect()
+
+        async with anyio.create_task_group() as tg:
+            for node in getattr(self, attr).values():
+                tg.start_soon(_disconnect, node)
 
     def remap_host_port(self, host: str, port: int) -> Tuple[str, int]:
         """
@@ -1544,7 +1565,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         # should be raised.
                         retry_attempts -= 1
                         await self._client.aclose()
-                        await asyncio.sleep(0.25)
+                        await anyio.sleep(0.25)
                     else:
                         # All other errors should be raised.
                         raise e
@@ -1582,11 +1603,8 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                 nodes[node.name] = (node, [])
             nodes[node.name][1].append(cmd)
 
-        errors = await asyncio.gather(
-            *(
-                asyncio.create_task(node[0].execute_pipeline(node[1]))
-                for node in nodes.values()
-            )
+        errors = await anyio_gather(
+            *(node[0].execute_pipeline(node[1]) for node in nodes.values())
         )
 
         if any(errors):

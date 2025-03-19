@@ -1,9 +1,10 @@
-import asyncio
 import logging
 import threading
 import uuid
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Awaitable, Optional, Union
+
+import anyio
 
 from redis.exceptions import LockError, LockNotOwnedError
 from redis.typing import Number
@@ -219,17 +220,17 @@ class Lock:
             blocking_timeout = self.blocking_timeout
         stop_trying_at = None
         if blocking_timeout is not None:
-            stop_trying_at = asyncio.get_running_loop().time() + blocking_timeout
+            stop_trying_at = anyio.current_time() + blocking_timeout
         while True:
             if await self.do_acquire(token):
                 self.local.token = token
                 return True
             if not blocking:
                 return False
-            next_try_at = asyncio.get_running_loop().time() + sleep
+            next_try_at = anyio.current_time() + sleep
             if stop_trying_at is not None and next_try_at > stop_trying_at:
                 return False
-            await asyncio.sleep(sleep)
+            await anyio.sleep(sleep)
 
     async def do_acquire(self, token: Union[str, bytes]) -> bool:
         if self.timeout:
