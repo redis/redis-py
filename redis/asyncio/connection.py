@@ -479,8 +479,7 @@ class AbstractConnection:
             await self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:
-        self._writer.writelines(command)
-        await self._writer.drain()
+        await self._writer.send(b"".join(command))
 
     async def send_packed_command(
         self, command: Union[bytes, str, Iterable[bytes]], check_health: bool = True
@@ -499,8 +498,7 @@ class AbstractConnection:
                 with anyio.fail_after(self.socket_timeout):
                     await self._send_packed_command(command)
             else:
-                self._writer.writelines(command)
-                await self._writer.drain()
+                await self._send_packed_command(command)
         except PyTimeoutError:
             await self.disconnect(nowait=True)
             raise TimeoutError("Timeout writing to socket") from None
