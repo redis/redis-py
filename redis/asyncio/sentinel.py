@@ -1,7 +1,8 @@
-import asyncio
 import random
 import weakref
 from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type
+
+import anyio
 
 from redis.asyncio.client import Redis
 from redis.asyncio.connection import (
@@ -10,6 +11,7 @@ from redis.asyncio.connection import (
     EncodableT,
     SSLConnection,
 )
+from redis.asyncio.utils import anyio_gather
 from redis.commands import AsyncSentinelCommands
 from redis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
 from redis.utils import str_if_bytes
@@ -59,7 +61,7 @@ class SentinelManagedConnection(Connection):
     async def connect(self):
         return await self.retry.call_with_retry(
             self._connect_retry,
-            lambda error: asyncio.sleep(0),
+            lambda error: anyio.lowlevel.checkpoint(),
         )
 
     async def read_response(
@@ -230,11 +232,12 @@ class Sentinel(AsyncSentinelCommands):
         if once:
             await random.choice(self.sentinels).execute_command(*args, **kwargs)
         else:
-            tasks = [
-                asyncio.Task(sentinel.execute_command(*args, **kwargs))
-                for sentinel in self.sentinels
-            ]
-            await asyncio.gather(*tasks)
+            await anyio_gather(
+                *(
+                    sentinel.execute_command(*args, **kwargs)
+                    for sentinel in self.sentinels
+                )
+            )
         return True
 
     def __repr__(self):

@@ -1,8 +1,9 @@
-import asyncio
 import threading
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import List, Optional, Union
+
+import anyio
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
@@ -152,7 +153,7 @@ class AfterSingleConnectionInstantiationEvent:
         self,
         connection,
         client_type: ClientType,
-        connection_lock: Union[threading.Lock, asyncio.Lock],
+        connection_lock: Union[threading.Lock, anyio.Lock],
     ):
         self._connection = connection
         self._client_type = client_type
@@ -167,7 +168,7 @@ class AfterSingleConnectionInstantiationEvent:
         return self._client_type
 
     @property
-    def connection_lock(self) -> Union[threading.Lock, asyncio.Lock]:
+    def connection_lock(self) -> Union[threading.Lock, anyio.Lock]:
         return self._connection_lock
 
 
@@ -177,7 +178,7 @@ class AfterPubSubConnectionInstantiationEvent:
         pubsub_connection,
         connection_pool,
         client_type: ClientType,
-        connection_lock: Union[threading.Lock, asyncio.Lock],
+        connection_lock: Union[threading.Lock, anyio.Lock],
     ):
         self._pubsub_connection = pubsub_connection
         self._connection_pool = connection_pool
@@ -197,7 +198,7 @@ class AfterPubSubConnectionInstantiationEvent:
         return self._client_type
 
     @property
-    def connection_lock(self) -> Union[threading.Lock, asyncio.Lock]:
+    def connection_lock(self) -> Union[threading.Lock, anyio.Lock]:
         return self._connection_lock
 
 

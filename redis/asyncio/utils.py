@@ -1,6 +1,10 @@
 from typing import TYPE_CHECKING
 
+import anyio
+
 if TYPE_CHECKING:
+    from typing import Any, Awaitable, Callable, List
+
     from redis.asyncio.client import Pipeline, Redis
 
 
@@ -26,3 +30,41 @@ class pipeline:  # noqa: N801
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self.p.execute()
         del self.p
+
+
+async def anyio_gather(
+    *tasks: "Awaitable[Any]", return_exceptions: bool = False
+) -> "List[Any]":
+    results = [None] * len(tasks)
+
+    async def _wrapper(idx: int, task: "Awaitable[Any]") -> "Any":
+        with anyio.CancelScope(shield=True):
+            try:
+                results[idx] = await task
+            except Exception as e:
+                if return_exceptions:
+                    results[idx] = e
+                else:
+                    raise
+
+    async with anyio.create_task_group() as tg:
+        for task in tasks:
+            tg.start_soon(_wrapper, task)
+
+    return results
+
+
+async def anyio_condition_wait_for(
+    condition: anyio.Condition, predicate: "Callable[[], bool]"
+):
+    """Wait until a predicate becomes true.
+
+    The predicate should be a callable which result will be
+    interpreted as a boolean value.  The final predicate value is
+    the return value.
+    """
+    result = predicate()
+    while not result:
+        await condition.wait()
+        result = predicate()
+    return result

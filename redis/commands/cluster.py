@@ -1,4 +1,3 @@
-import asyncio
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -14,6 +13,7 @@ from typing import (
     Union,
 )
 
+from redis.asyncio.utils import anyio_gather
 from redis.crc import key_slot
 from redis.exceptions import RedisClusterException, RedisError
 from redis.typing import (
@@ -711,11 +711,8 @@ class AsyncClusterManagementCommands(
 
         For more information see https://redis.io/commands/cluster-delslots
         """
-        return await asyncio.gather(
-            *(
-                asyncio.create_task(self.execute_command("CLUSTER DELSLOTS", slot))
-                for slot in slots
-            )
+        return await anyio_gather(
+            *(self.execute_command("CLUSTER DELSLOTS", slot) for slot in slots)
         )
 
 
