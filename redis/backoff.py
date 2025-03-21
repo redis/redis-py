@@ -110,5 +110,20 @@ class DecorrelatedJitterBackoff(AbstractBackoff):
         return self._previous_backoff
 
 
+class ExponentialWithJitterBackoff(AbstractBackoff):
+    """Exponential backoff upon failure, with jitter"""
+
+    def __init__(self, cap: float = DEFAULT_CAP, base: float = DEFAULT_BASE) -> None:
+        """
+        `cap`: maximum backoff time in seconds
+        `base`: base backoff time in seconds
+        """
+        self._cap = cap
+        self._base = base
+
+    def compute(self, failures: int) -> float:
+        return min(self._cap, random.random() * self._base * 2**failures)
+
+
 def default_backoff():
     return EqualJitterBackoff()
