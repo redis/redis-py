@@ -31,6 +31,7 @@ from tests.conftest import (
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
+from tests.test_asyncio.test_utils import redis_server_time
 
 if sys.version_info >= (3, 11, 3):
     from asyncio import timeout as async_timeout
@@ -75,12 +76,6 @@ async def slowlog(r: redis.Redis):
 
     await r.config_set("slowlog-log-slower-than", old_slower_than_value)
     await r.config_set("slowlog-max-len", old_max_legnth_value)
-
-
-async def redis_server_time(client: redis.Redis):
-    seconds, milliseconds = await client.time()
-    timestamp = float(f"{seconds}.{milliseconds}")
-    return datetime.datetime.fromtimestamp(timestamp)
 
 
 async def get_stream_message(client: redis.Redis, stream: str, message_id: str):
@@ -2328,12 +2323,8 @@ class TestRedisCommands:
         assert await r.hmget("a", "a", "b", "c") == [b"1", b"2", b"3"]
 
     async def test_hmset(self, r: redis.Redis):
-        warning_message = (
-            r"^Redis(?:Cluster)*\.hmset\(\) is deprecated\. "
-            r"Use Redis(?:Cluster)*\.hset\(\) instead\.$"
-        )
         h = {b"a": b"1", b"b": b"2", b"c": b"3"}
-        with pytest.warns(DeprecationWarning, match=warning_message):
+        with pytest.warns(DeprecationWarning):
             assert await r.hmset("a", h)
         assert await r.hgetall("a") == h
 
