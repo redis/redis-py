@@ -23,7 +23,7 @@ class TestMultiprocessing:
     # The code in this module does not work with it,
     # hence the explicit change to 'fork'
     # See https://github.com/python/cpython/issues/125714
-    if multiprocessing.get_start_method() == "forkserver":
+    if multiprocessing.get_start_method() in ["forkserver", "spawn"]:
         _mp_context = multiprocessing.get_context(method="fork")
     else:
         _mp_context = multiprocessing.get_context()
@@ -105,11 +105,11 @@ class TestMultiprocessing:
             max_connections=max_connections,
         )
 
-        parent_conn = pool.get_connection("ping")
+        parent_conn = pool.get_connection()
 
         def target(pool, parent_conn):
             with exit_callback(pool.disconnect):
-                child_conn = pool.get_connection("ping")
+                child_conn = pool.get_connection()
                 assert child_conn.pid != parent_conn.pid
                 pool.release(child_conn)
                 assert pool._created_connections == 1
@@ -119,7 +119,7 @@ class TestMultiprocessing:
                 assert child_conn in pool._available_connections
                 assert parent_conn not in pool._available_connections
 
-        proc = multiprocessing.Process(target=target, args=(pool, parent_conn))
+        proc = self._mp_context.Process(target=target, args=(pool, parent_conn))
         proc.start()
         proc.join(3)
         assert proc.exitcode == 0

@@ -1,7 +1,6 @@
 import copy
 import os
 import socket
-import ssl
 import sys
 import threading
 import time
@@ -48,6 +47,11 @@ from .utils import (
     get_lib_version,
     str_if_bytes,
 )
+
+if SSL_AVAILABLE:
+    import ssl
+else:
+    ssl = None
 
 if HIREDIS_AVAILABLE:
     import hiredis
@@ -1490,7 +1494,7 @@ class ConnectionPool:
             try:
                 if connection.can_read() and self.cache is None:
                     raise ConnectionError("Connection has data")
-            except (ConnectionError, OSError):
+            except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
                 connection.connect()
                 if connection.can_read():
@@ -1737,7 +1741,7 @@ class BlockingConnectionPool(ConnectionPool):
             try:
                 if connection.can_read():
                     raise ConnectionError("Connection has data")
-            except (ConnectionError, OSError):
+            except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
                 connection.connect()
                 if connection.can_read():

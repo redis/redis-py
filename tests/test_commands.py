@@ -2050,57 +2050,6 @@ class TestRedisCommands:
             except Exception:
                 pass
 
-    @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("7.1.140")
-    @skip_if_server_version_gte("7.9.0")
-    def test_tfunction_load_delete(self, stack_r):
-        self.try_delete_libs(stack_r, "lib1")
-        lib_code = self.generate_lib_code("lib1")
-        assert stack_r.tfunction_load(lib_code)
-        assert stack_r.tfunction_delete("lib1")
-
-    @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("7.1.140")
-    @skip_if_server_version_gte("7.9.0")
-    def test_tfunction_list(self, stack_r):
-        self.try_delete_libs(stack_r, "lib1", "lib2", "lib3")
-        assert stack_r.tfunction_load(self.generate_lib_code("lib1"))
-        assert stack_r.tfunction_load(self.generate_lib_code("lib2"))
-        assert stack_r.tfunction_load(self.generate_lib_code("lib3"))
-
-        # test error thrown when verbose > 4
-        with pytest.raises(redis.exceptions.DataError):
-            assert stack_r.tfunction_list(verbose=8)
-
-        functions = stack_r.tfunction_list(verbose=1)
-        assert len(functions) == 3
-
-        expected_names = [b"lib1", b"lib2", b"lib3"]
-        if is_resp2_connection(stack_r):
-            actual_names = [functions[0][13], functions[1][13], functions[2][13]]
-        else:
-            actual_names = [
-                functions[0][b"name"],
-                functions[1][b"name"],
-                functions[2][b"name"],
-            ]
-
-        assert sorted(expected_names) == sorted(actual_names)
-        assert stack_r.tfunction_delete("lib1")
-        assert stack_r.tfunction_delete("lib2")
-        assert stack_r.tfunction_delete("lib3")
-
-    @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("7.1.140")
-    @skip_if_server_version_gte("7.9.0")
-    def test_tfcall(self, stack_r):
-        self.try_delete_libs(stack_r, "lib1")
-        assert stack_r.tfunction_load(self.generate_lib_code("lib1"))
-        assert stack_r.tfcall("lib1", "foo") == b"bar"
-        assert stack_r.tfcall_async("lib1", "foo") == b"bar"
-
-        assert stack_r.tfunction_delete("lib1")
-
     def test_ttl(self, r):
         r["a"] = "1"
         assert r.expire("a", 10)
