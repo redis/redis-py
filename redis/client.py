@@ -570,7 +570,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         self.close()
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def close(self) -> None:
         # In case a connection property does not yet exist

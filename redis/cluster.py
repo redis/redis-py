@@ -4,6 +4,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from redis._parsers import CommandsParser, Encoder
@@ -307,7 +308,6 @@ class AbstractRedisCluster:
                 "FUNCTION LIST",
                 "FUNCTION LOAD",
                 "FUNCTION RESTORE",
-                "REDISGEARS_2.REFRESHCLUSTER",
                 "SCAN",
                 "SCRIPT EXISTS",
                 "SCRIPT FLUSH",
@@ -483,6 +483,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """
         return cls(url=url, **kwargs)
 
+    @deprecated_args(
+        args_to_warn=["read_from_replicas"],
+        reason="Please configure the 'load_balancing_strategy' instead",
+        version="5.0.3",
+    )
     def __init__(
         self,
         host: Optional[str] = None,
@@ -493,6 +498,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         require_full_coverage: bool = False,
         reinitialize_steps: int = 5,
         read_from_replicas: bool = False,
+        load_balancing_strategy: Optional["LoadBalancingStrategy"] = None,
         dynamic_startup_nodes: bool = True,
         url: Optional[str] = None,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
@@ -521,11 +527,16 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             cluster client. If not all slots are covered, RedisClusterException
             will be thrown.
         :param read_from_replicas:
+             @deprecated - please use load_balancing_strategy instead
              Enable read from replicas in READONLY mode. You can read possibly
              stale data.
              When set to true, read commands will be assigned between the
              primary and its replications in a Round-Robin manner.
-         :param dynamic_startup_nodes:
+        :param load_balancing_strategy:
+             Enable read from replicas in READONLY mode and defines the load balancing
+             strategy that will be used for cluster node selection.
+             The data read from replicas is eventually consistent with the data in primary nodes.
+        :param dynamic_startup_nodes:
              Set the RedisCluster's startup nodes to all of the discovered nodes.
              If true (default value), the cluster's discovered nodes will be used to
              determine the cluster nodes-slots mapping in the next topology refresh.
@@ -630,6 +641,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.read_from_replicas = read_from_replicas
+        self.load_balancing_strategy = load_balancing_strategy
         self.reinitialize_counter = 0
         self.reinitialize_steps = reinitialize_steps
         if event_dispatcher is None:
@@ -663,7 +675,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.close()
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def disconnect_connection_pools(self):
         for node in self.get_nodes():
@@ -681,7 +696,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """
         connection.on_connect()
 
-        if self.read_from_replicas:
+        if self.read_from_replicas or self.load_balancing_strategy:
             # Sending READONLY command to server to configure connection as
             # readonly. Since each cluster node may change its server type due
             # to a failover, we should establish a READONLY connection
@@ -808,6 +823,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             cluster_response_callbacks=self.cluster_response_callbacks,
             cluster_error_retry_attempts=self.cluster_error_retry_attempts,
             read_from_replicas=self.read_from_replicas,
+            load_balancing_strategy=self.load_balancing_strategy,
             reinitialize_steps=self.reinitialize_steps,
             lock=self._lock,
         )
@@ -932,7 +948,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             # get the node that holds the key's slot
             slot = self.determine_slot(*args)
             node = self.nodes_manager.get_node_from_slot(
-                slot, self.read_from_replicas and command in READ_COMMANDS
+                slot,
+                self.read_from_replicas and command in READ_COMMANDS,
+                self.load_balancing_strategy if command in READ_COMMANDS else None,
             )
             return [node]
 
@@ -1156,7 +1174,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     # refresh the target node
                     slot = self.determine_slot(*args)
                     target_node = self.nodes_manager.get_node_from_slot(
-                        slot, self.read_from_replicas and command in READ_COMMANDS
+                        slot,
+                        self.read_from_replicas and command in READ_COMMANDS,
+                        self.load_balancing_strategy
+                        if command in READ_COMMANDS
+                        else None,
                     )
                     moved = False
 
@@ -1305,6 +1327,12 @@ class ClusterNode:
             self.redis_connection.close()
 
 
+class LoadBalancingStrategy(Enum):
+    ROUND_ROBIN = "round_robin"
+    ROUND_ROBIN_REPLICAS = "round_robin_replicas"
+    RANDOM_REPLICA = "random_replica"
+
+
 class LoadBalancer:
     """
     Round-Robin Load Balancing
@@ -1314,14 +1342,37 @@ class LoadBalancer:
         self.primary_to_idx = {}
         self.start_index = start_index
 
-    def get_server_index(self, primary: str, list_size: int) -> int:
-        server_index = self.primary_to_idx.setdefault(primary, self.start_index)
-        # Update the index
-        self.primary_to_idx[primary] = (server_index + 1) % list_size
-        return server_index
+    def get_server_index(
+        self,
+        primary: str,
+        list_size: int,
+        load_balancing_strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN,
+    ) -> int:
+        if load_balancing_strategy == LoadBalancingStrategy.RANDOM_REPLICA:
+            return self._get_random_replica_index(list_size)
+        else:
+            return self._get_round_robin_index(
+                primary,
+                list_size,
+                load_balancing_strategy == LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            )
 
     def reset(self) -> None:
         self.primary_to_idx.clear()
+
+    def _get_random_replica_index(self, list_size: int) -> int:
+        return random.randint(1, list_size - 1)
+
+    def _get_round_robin_index(
+        self, primary: str, list_size: int, replicas_only: bool
+    ) -> int:
+        server_index = self.primary_to_idx.setdefault(primary, self.start_index)
+        if replicas_only and server_index == 0:
+            # skip the primary node index
+            server_index = 1
+        # Update the index for the next round
+        self.primary_to_idx[primary] = (server_index + 1) % list_size
+        return server_index
 
 
 class NodesManager:
@@ -1426,7 +1477,21 @@ class NodesManager:
         # Reset moved_exception
         self._moved_exception = None
 
-    def get_node_from_slot(self, slot, read_from_replicas=False, server_type=None):
+    @deprecated_args(
+        args_to_warn=["server_type"],
+        reason=(
+            "In case you need select some load balancing strategy "
+            "that will use replicas, please set it through 'load_balancing_strategy'"
+        ),
+        version="5.0.3",
+    )
+    def get_node_from_slot(
+        self,
+        slot,
+        read_from_replicas=False,
+        load_balancing_strategy=None,
+        server_type=None,
+    ):
         """
         Gets a node that servers this hash slot
         """
@@ -1441,11 +1506,14 @@ class NodesManager:
                 f'"require_full_coverage={self._require_full_coverage}"'
             )
 
-        if read_from_replicas is True:
-            # get the server index in a Round-Robin manner
+        if read_from_replicas is True and load_balancing_strategy is None:
+            load_balancing_strategy = LoadBalancingStrategy.ROUND_ROBIN
+
+        if len(self.slots_cache[slot]) > 1 and load_balancing_strategy:
+            # get the server index using the strategy defined in load_balancing_strategy
             primary_name = self.slots_cache[slot][0].name
             node_idx = self.read_load_balancer.get_server_index(
-                primary_name, len(self.slots_cache[slot])
+                primary_name, len(self.slots_cache[slot]), load_balancing_strategy
             )
         elif (
             server_type is None
@@ -1728,7 +1796,7 @@ class ClusterPubSub(PubSub):
         first command execution. The node will be determined by:
          1. Hashing the channel name in the request to find its keyslot
          2. Selecting a node that handles the keyslot: If read_from_replicas is
-            set to true, a replica can be selected.
+            set to true or load_balancing_strategy is set, a replica can be selected.
 
         :type redis_cluster: RedisCluster
         :type node: ClusterNode
@@ -1824,7 +1892,9 @@ class ClusterPubSub(PubSub):
                     channel = args[1]
                     slot = self.cluster.keyslot(channel)
                     node = self.cluster.nodes_manager.get_node_from_slot(
-                        slot, self.cluster.read_from_replicas
+                        slot,
+                        self.cluster.read_from_replicas,
+                        self.cluster.load_balancing_strategy,
                     )
                 else:
                     # Get a random node
@@ -1967,6 +2037,7 @@ class ClusterPipeline(RedisCluster):
         cluster_response_callbacks: Optional[Dict[str, Callable]] = None,
         startup_nodes: Optional[List["ClusterNode"]] = None,
         read_from_replicas: bool = False,
+        load_balancing_strategy: Optional[LoadBalancingStrategy] = None,
         cluster_error_retry_attempts: int = 3,
         reinitialize_steps: int = 5,
         lock=None,
@@ -1982,6 +2053,7 @@ class ClusterPipeline(RedisCluster):
         )
         self.startup_nodes = startup_nodes if startup_nodes else []
         self.read_from_replicas = read_from_replicas
+        self.load_balancing_strategy = load_balancing_strategy
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.cluster_response_callbacks = cluster_response_callbacks
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
