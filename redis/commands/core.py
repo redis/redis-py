@@ -3,6 +3,7 @@
 import datetime
 import hashlib
 import warnings
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -4907,6 +4908,16 @@ class HyperlogCommands(CommandsProtocol):
 AsyncHyperlogCommands = HyperlogCommands
 
 
+class HashDataPersistOptions(Enum):
+    # set the value for each provided key to each
+    # provided value only if all do not already exist.
+    FNX = "FNX"
+
+    # set the value for each provided key to each
+    # provided value only if all already exist.
+    FXX = "FXX"
+
+
 class HashCommands(CommandsProtocol):
     """
     Redis commands for Hash data type.
@@ -4949,7 +4960,9 @@ class HashCommands(CommandsProtocol):
 
     def hgetdel(
         self, name: str, *keys: str
-    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+    ) -> Union[
+        Awaitable[Optional[List[Union[str, bytes]]]], Optional[List[Union[str, bytes]]]
+    ]:
         """
         Return the value of ``key`` within the hash ``name`` and
         delete the field in the hash.
@@ -4967,15 +4980,18 @@ class HashCommands(CommandsProtocol):
     def hgetex(
         self,
         name: KeyT,
-        *keys: str,
+        key: Optional[str] = None,
+        keys: Optional[list] = None,
         ex: Optional[ExpiryT] = None,
         px: Optional[ExpiryT] = None,
         exat: Optional[AbsExpiryT] = None,
         pxat: Optional[AbsExpiryT] = None,
         persist: bool = False,
-    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+    ) -> Union[
+        Awaitable[Optional[List[Union[str, bytes]]]], Optional[List[Union[str, bytes]]]
+    ]:
         """
-        Return the values of ``keys`` within the hash ``name``
+        Return the values of ``key`` and ``keys`` within the hash ``name``
         and optionally set their expiration.
 
         ``ex`` sets an expire flag on ``kyes`` for ``ex`` seconds.
@@ -4993,8 +5009,7 @@ class HashCommands(CommandsProtocol):
         Available since Redis 8.0
         For more information see https://redis.io/commands/hgetex
         """
-
-        if len(keys) == 0:
+        if key is None and not keys:
             raise DataError("'hgetex' should have at least one key provided")
 
         opset = {ex, px, exat, pxat}
@@ -5003,6 +5018,11 @@ class HashCommands(CommandsProtocol):
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``persist`` are mutually exclusive."
             )
+        keys_to_request = []
+        if key is not None:
+            keys_to_request.append(key)
+        if keys:
+            keys_to_request.extend(keys)
 
         exp_options: list[EncodableT] = extract_expire_flags(ex, px, exat, pxat)
 
@@ -5010,7 +5030,12 @@ class HashCommands(CommandsProtocol):
             exp_options.append("PERSIST")
 
         return self.execute_command(
-            "HGETEX", name, *exp_options, "FIELDS", len(keys), *keys
+            "HGETEX",
+            name,
+            *exp_options,
+            "FIELDS",
+            len(keys_to_request),
+            *keys_to_request,
         )
 
     def hincrby(
@@ -5093,8 +5118,7 @@ class HashCommands(CommandsProtocol):
         px: Optional[ExpiryT] = None,
         exat: Optional[AbsExpiryT] = None,
         pxat: Optional[AbsExpiryT] = None,
-        fnx: bool = False,
-        fxx: bool = False,
+        data_persist_option: Optional[HashDataPersistOptions] = None,
         keepttl: bool = False,
     ) -> Union[Awaitable[int], int]:
         """
@@ -5116,11 +5140,12 @@ class HashCommands(CommandsProtocol):
         ``pxat`` sets an expire flag on ``keys`` for ``ex`` milliseconds,
             specified in unix time.
 
-        ``fnx`` if set to True, set the value for each provided key to each
-            provided value only if all do not already exist.
-
-        ``fxx`` if set to True, set the value for each provided key to each
-            provided value only if all already exist.
+        ``data_persist_option`` can be set to ``FNX`` or ``FXX`` to control the
+            behavior of the command.
+            ``FNX`` will set the value for each provided key to each
+                provided value only if all do not already exist.
+            ``FXX`` will set the value for each provided key to each
+                provided value only if all already exist.
 
         ``keepttl`` if True, retain the time to live associated with the keys.
 
@@ -5145,14 +5170,10 @@ class HashCommands(CommandsProtocol):
                 "and ``keepttl`` are mutually exclusive."
             )
 
-        if fnx and fxx:
-            raise DataError("``fnx`` and ``fxx`` are mutually exclusive.")
-
         exp_options: list[EncodableT] = extract_expire_flags(ex, px, exat, pxat)
-        if fnx:
-            exp_options.append("FNX")
-        if fxx:
-            exp_options.append("FXX")
+        if data_persist_option:
+            exp_options.append(data_persist_option.value)
+
         if keepttl:
             exp_options.append("KEEPTTL")
 
