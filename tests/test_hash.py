@@ -383,6 +383,9 @@ def test_hgetdel(r):
     assert r.hgetdel("test:hash", "foo", "1") == [None, None]
     assert r.hget("test:hash", "2") == b"2"
 
+    with pytest.raises(exceptions.DataError):
+        r.hgetdel("test:hash")
+
 
 @skip_if_server_version_lt("7.9.0")
 def test_hgetex_no_expiration(r):
@@ -445,6 +448,9 @@ def test_hgetex_invalid_inputs(r):
     with pytest.raises(exceptions.DataError):
         r.hgetex("b", "foo", "1", "3", ex=10, px=6000)
 
+    with pytest.raises(exceptions.DataError):
+        r.hgetex("b", ex=10)
+
 
 @skip_if_server_version_lt("7.9.0")
 def test_hsetex_no_expiration(r):
@@ -454,7 +460,6 @@ def test_hsetex_no_expiration(r):
     assert r.hsetex("test:hash", None, None, mapping={"1": 1, "4": b"four"}) == 1
     assert r.httl("test:hash", "foo", "1", "4") == [-2, -1, -1]
     assert r.hgetex("test:hash", "foo", "1") == [None, b"1"]
-    pass
 
 
 @skip_if_server_version_lt("7.9.0")
@@ -583,6 +588,9 @@ def test_hsetex_invalid_inputs(r):
 
     with pytest.raises(exceptions.DataError):
         r.hsetex("b", None, None)
+
+    with pytest.raises(exceptions.DataError):
+        r.hsetex("b", "foo", "bar", items=["i1", 11, "i2"], px=6000)
 
     with pytest.raises(exceptions.DataError):
         r.hsetex("b", "foo", "bar", ex=10, keepttl=True)

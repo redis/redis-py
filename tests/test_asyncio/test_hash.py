@@ -316,6 +316,9 @@ async def test_hgetdel(r):
     assert await r.hgetdel("test:hash", "foo", "1") == [None, None]
     assert await r.hget("test:hash", "2") == b"2"
 
+    with pytest.raises(exceptions.DataError):
+        await r.hgetdel("test:hash")
+
 
 @skip_if_server_version_lt("7.9.0")
 async def test_hgetex_no_expiration(r):
@@ -395,6 +398,9 @@ async def test_hgetex_invalid_inputs(r):
 
     with pytest.raises(exceptions.DataError):
         await r.hgetex("b", "foo", "1", "3", ex=10, px=6000)
+
+    with pytest.raises(exceptions.DataError):
+        await r.hgetex("b", ex=10)
 
 
 @skip_if_server_version_lt("7.9.0")
@@ -544,6 +550,9 @@ async def test_hsetex_invalid_inputs(r):
 
     with pytest.raises(exceptions.DataError):
         await r.hsetex("b", None, None)
+
+    with pytest.raises(exceptions.DataError):
+        await r.hsetex("b", "foo", "bar", items=["i1", 11, "i2"], px=6000)
 
     with pytest.raises(exceptions.DataError):
         await r.hsetex("b", "foo", "bar", ex=10, keepttl=True)

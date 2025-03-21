@@ -4959,6 +4959,9 @@ class HashCommands(CommandsProtocol):
         Available since Redis 8.0
         For more information see https://redis.io/commands/hgetdel
         """
+        if len(keys) == 0:
+            raise DataError("'hgetdel' should have at least one key provided")
+
         return self.execute_command("HGETDEL", name, "FIELDS", len(keys), *keys)
 
     def hgetex(
@@ -4990,6 +4993,10 @@ class HashCommands(CommandsProtocol):
         Available since Redis 8.0
         For more information see https://redis.io/commands/hgetex
         """
+
+        if len(keys) == 0:
+            raise DataError("'hgetex' should have at least one key provided")
+
         opset = {ex, px, exat, pxat}
         if len(opset) > 2 or len(opset) > 1 and persist:
             raise DataError(
@@ -5060,8 +5067,10 @@ class HashCommands(CommandsProtocol):
 
         For more information see https://redis.io/commands/hset
         """
+
         if key is None and not mapping and not items:
             raise DataError("'hset' with no key value pairs")
+
         pieces = []
         if items:
             pieces.extend(items)
@@ -5122,6 +5131,12 @@ class HashCommands(CommandsProtocol):
         """
         if key is None and not mapping and not items:
             raise DataError("'hsetex' with no key value pairs")
+
+        if items and len(items) % 2 != 0:
+            raise DataError(
+                "'hsetex' with odd number of items. "
+                "'items' must contain a list of key/value pairs."
+            )
 
         opset = {ex, px, exat, pxat}
         if len(opset) > 2 or len(opset) > 1 and keepttl:
