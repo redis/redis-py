@@ -288,7 +288,6 @@ class AbstractRedisCluster:
                 "TFUNCTION LIST",
                 "TFCALL",
                 "TFCALLASYNC",
-                "GRAPH.CONFIG",
                 "LATENCY HISTORY",
                 "LATENCY LATEST",
                 "LATENCY RESET",
@@ -664,7 +663,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.close()
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def disconnect_connection_pools(self):
         for node in self.get_nodes():
@@ -822,6 +824,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         blocking_timeout=None,
         lock_class=None,
         thread_local=True,
+        raise_on_release_error: bool = True,
     ):
         """
         Return a new Lock object using key ``name`` that mimics
@@ -868,6 +871,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
 
+        ``raise_on_release_error`` indicates whether to raise an exception when
+        the lock is no longer owned when exiting the context manager. By default,
+        this is True, meaning an exception will be raised. If False, the warning
+        will be logged and the exception will be suppressed.
+
         In some use cases it's necessary to disable thread local storage. For
         example, if you have code where one thread acquires a lock and passes
         that lock instance to a worker thread to release later. If thread
@@ -885,6 +893,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
+            raise_on_release_error=raise_on_release_error,
         )
 
     def set_response_callback(self, command, callback):

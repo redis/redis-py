@@ -839,6 +839,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         blocking_timeout: Optional[float] = None,
         lock_class: Optional[Type[Lock]] = None,
         thread_local: bool = True,
+        raise_on_release_error: bool = True,
     ) -> Lock:
         """
         Return a new Lock object using key ``name`` that mimics
@@ -885,6 +886,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
 
+        ``raise_on_release_error`` indicates whether to raise an exception when
+        the lock is no longer owned when exiting the context manager. By default,
+        this is True, meaning an exception will be raised. If False, the warning
+        will be logged and the exception will be suppressed.
+
         In some use cases it's necessary to disable thread local storage. For
         example, if you have code where one thread acquires a lock and passes
         that lock instance to a worker thread to release later. If thread
@@ -902,6 +908,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
+            raise_on_release_error=raise_on_release_error,
         )
 
 
@@ -1509,29 +1516,28 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             return []
 
         try:
-            for _ in range(self._client.cluster_error_retry_attempts):
-                if self._client._initialize:
-                    await self._client.initialize()
-
+            retry_attempts = self._client.cluster_error_retry_attempts
+            while True:
                 try:
+                    if self._client._initialize:
+                        await self._client.initialize()
                     return await self._execute(
                         self._client,
                         self._command_stack,
                         raise_on_error=raise_on_error,
                         allow_redirections=allow_redirections,
                     )
-                except BaseException as e:
-                    if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
-                        # Try again with the new cluster setup.
-                        exception = e
+
+                except self.__class__.ERRORS_ALLOW_RETRY as e:
+                    if retry_attempts > 0:
+                        # Try again with the new cluster setup. All other errors
+                        # should be raised.
+                        retry_attempts -= 1
                         await self._client.aclose()
                         await asyncio.sleep(0.25)
                     else:
                         # All other errors should be raised.
-                        raise
-
-            # If it fails the configured number of times then raise an exception
-            raise exception
+                        raise e
         finally:
             self._command_stack = []
 
