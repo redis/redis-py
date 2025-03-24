@@ -54,7 +54,7 @@ Looking for a high-level library to handle object mapping? See [redis-om-python]
 
 ## Supported Redis Versions
 
-The most recent version of this library supports redis version [5.0](https://github.com/redis/redis/blob/5.0/00-RELEASENOTES), [6.0](https://github.com/redis/redis/blob/6.0/00-RELEASENOTES), [6.2](https://github.com/redis/redis/blob/6.2/00-RELEASENOTES), [7.0](https://github.com/redis/redis/blob/7.0/00-RELEASENOTES), [7.2](https://github.com/redis/redis/blob/7.2/00-RELEASENOTES) and [7.4](https://github.com/redis/redis/blob/7.4/00-RELEASENOTES).
+The most recent version of this library supports redis version [7.2](https://github.com/redis/redis/blob/7.2/00-RELEASENOTES), [7.4](https://github.com/redis/redis/blob/7.4/00-RELEASENOTES) and [8.0](https://github.com/redis/redis/blob/8.0/00-RELEASENOTES).
 
 The table below highlights version compatibility of the most-recent library versions and redis versions.
 
@@ -62,7 +62,8 @@ The table below highlights version compatibility of the most-recent library vers
 |-----------------|-------------------|
 | 3.5.3 | <= 6.2 Family of releases |
 | >= 4.5.0 | Version 5.0 to 7.0 |
-| >= 5.0.0 | Version 5.0 to current |
+| >= 5.0.0 | Version 5.0 to 7.4 |
+| >= 6.0.0 | Version 7.2 to current |
 
 
 ## Usage
@@ -152,8 +153,36 @@ The following example shows how to utilize [Redis Pub/Sub](https://redis.io/docs
 {'pattern': None, 'type': 'subscribe', 'channel': b'my-second-channel', 'data': 1}
 ```
 
+### Redis’ search and query capabilities default dialect
 
---------------------------
+Release 6.0.0 introduces a client-side default dialect for Redis’ search and query capabilities.  
+By default, the client now overrides the server-side dialect with version 2, automatically appending *DIALECT 2* to commands like *FT.AGGREGATE* and *FT.SEARCH*.  
+
+**Important**: Be aware that the query dialect may impact the results returned. If needed, you can revert to a different dialect version by configuring the client accordingly.
+
+``` python
+>>> r.ft().create_index(
+>>>     (TextField("name"), TextField("lastname")),
+>>>     definition=IndexDefinition(prefix=["test:"]),
+>>> )
+
+>>> r.hset("test:1", "name", "James")
+>>> r.hset("test:1", "lastname", "Brown")
+
+>>> # Query with default DIALECT 2
+>>> query = "@name: James Brown"
+>>> q = Query(query)
+>>> res = r.ft().search(q)
+
+>>> # Query with explicit DIALECT 1
+>>> query = "@name: James Brown"
+>>> q = Query(query).dialect(1)
+>>> res = r.ft().search(q)
+```
+
+You can find further details in the [query dialect documentation](https://redis.io/docs/latest/develop/interact/search-and-query/advanced-concepts/dialects/).
+
+---------------------------------------------
 
 ### Author
 
