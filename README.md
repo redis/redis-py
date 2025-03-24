@@ -164,7 +164,9 @@ By default, the client now overrides the server-side dialect with version 2, aut
 >>> from redis.commands.search.field import TextField
 >>> from redis.commands.search.query import Query
 >>> from redis.commands.search.index_definition import IndexDefinition
+>>> import redis
 
+>>> r = redis.Redis(host='localhost', port=6379, db=0)
 >>> r.ft().create_index(
 >>>     (TextField("name"), TextField("lastname")),
 >>>     definition=IndexDefinition(prefix=["test:"]),
