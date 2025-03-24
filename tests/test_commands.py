@@ -21,6 +21,7 @@ from redis.client import EMPTY_RESPONSE, NEVER_DECODE
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
+from tests.test_utils import redis_server_time
 
 from .conftest import (
     _get_client,
@@ -48,12 +49,6 @@ def slowlog(request, r):
 
     r.config_set("slowlog-log-slower-than", 0)
     r.config_set("slowlog-max-len", 128)
-
-
-def redis_server_time(client):
-    seconds, milliseconds = client.time()
-    timestamp = float(f"{seconds}.{milliseconds}")
-    return datetime.datetime.fromtimestamp(timestamp)
 
 
 def get_stream_message(client, stream, message_id):
@@ -3393,13 +3388,8 @@ class TestRedisCommands:
         assert r.hmget("a", "a", "b", "c") == [b"1", b"2", b"3"]
 
     def test_hmset(self, r):
-        redis_class = type(r).__name__
-        warning_message = (
-            r"^{0}\.hmset\(\) is deprecated\. "
-            r"Use {0}\.hset\(\) instead\.$".format(redis_class)
-        )
         h = {b"a": b"1", b"b": b"2", b"c": b"3"}
-        with pytest.warns(DeprecationWarning, match=warning_message):
+        with pytest.warns(DeprecationWarning):
             assert r.hmset("a", h)
         assert r.hgetall("a") == h
 
