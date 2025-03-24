@@ -161,6 +161,10 @@ By default, the client now overrides the server-side dialect with version 2, aut
 **Important**: Be aware that the query dialect may impact the results returned. If needed, you can revert to a different dialect version by configuring the client accordingly.
 
 ``` python
+>>> from redis.commands.search.field import TextField
+>>> from redis.commands.search.query import Query
+>>> from redis.commands.search.index_definition import IndexDefinition
+
 >>> r.ft().create_index(
 >>>     (TextField("name"), TextField("lastname")),
 >>>     definition=IndexDefinition(prefix=["test:"]),
