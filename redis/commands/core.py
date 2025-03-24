@@ -4980,8 +4980,7 @@ class HashCommands(CommandsProtocol):
     def hgetex(
         self,
         name: KeyT,
-        key: Optional[str] = None,
-        keys: Optional[list] = None,
+        *keys: str,
         ex: Optional[ExpiryT] = None,
         px: Optional[ExpiryT] = None,
         exat: Optional[AbsExpiryT] = None,
@@ -5009,7 +5008,7 @@ class HashCommands(CommandsProtocol):
         Available since Redis 8.0
         For more information see https://redis.io/commands/hgetex
         """
-        if key is None and not keys:
+        if not keys:
             raise DataError("'hgetex' should have at least one key provided")
 
         opset = {ex, px, exat, pxat}
@@ -5018,11 +5017,6 @@ class HashCommands(CommandsProtocol):
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``persist`` are mutually exclusive."
             )
-        keys_to_request = []
-        if key is not None:
-            keys_to_request.append(key)
-        if keys:
-            keys_to_request.extend(keys)
 
         exp_options: list[EncodableT] = extract_expire_flags(ex, px, exat, pxat)
 
@@ -5034,8 +5028,8 @@ class HashCommands(CommandsProtocol):
             name,
             *exp_options,
             "FIELDS",
-            len(keys_to_request),
-            *keys_to_request,
+            len(keys),
+            *keys,
         )
 
     def hincrby(

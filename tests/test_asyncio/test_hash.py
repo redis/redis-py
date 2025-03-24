@@ -328,8 +328,7 @@ async def test_hgetex_no_expiration(r):
         "b", "foo", "bar", mapping={"1": 1, "2": 2, "3": "three", "4": b"four"}
     )
 
-    assert await r.hgetex("b", keys=["foo", "1", "4"]) == [b"bar", b"1", b"four"]
-    assert await r.hgetex("b", "foo", keys=["1", "4"]) == [b"bar", b"1", b"four"]
+    assert await r.hgetex("b", "foo", "1", "4") == [b"bar", b"1", b"four"]
     assert await r.hgetex("b", "foo") == [b"bar"]
     assert await r.httl("b", "foo", "1", "4") == [-1, -1, -1]
 
@@ -343,7 +342,7 @@ async def test_hgetex_expiration_configs(r):
 
     test_keys = ["foo", "1", "4"]
     # test get with multiple fields with expiration set through 'ex'
-    assert await r.hgetex("test:hash", keys=test_keys, ex=10) == [
+    assert await r.hgetex("test:hash", *test_keys, ex=10) == [
         b"bar",
         b"1",
         b"four",
@@ -353,7 +352,7 @@ async def test_hgetex_expiration_configs(r):
         assert pytest.approx(ttl) == 10
 
     # test get with multiple fields removing expiration settings with 'persist'
-    assert await r.hgetex("test:hash", "foo", keys=["1", "4"], persist=True) == [
+    assert await r.hgetex("test:hash", *test_keys, persist=True) == [
         b"bar",
         b"1",
         b"four",
@@ -361,7 +360,7 @@ async def test_hgetex_expiration_configs(r):
     assert await r.httl("test:hash", *test_keys) == [-1, -1, -1]
 
     # test get with multiple fields with expiration set through 'px'
-    assert await r.hgetex("test:hash", keys=test_keys, px=6000) == [
+    assert await r.hgetex("test:hash", *test_keys, px=6000) == [
         b"bar",
         b"1",
         b"four",
@@ -390,13 +389,13 @@ async def test_hgetex_validate_expired_fields_removed(r):
 
     # test get multiple fields with expiration set
     # validate that expired fields are removed
-    assert await r.hgetex("test:hash", keys=["foo", "1", "3"], ex=1) == [
+    assert await r.hgetex("test:hash", "foo", "1", "3", ex=1) == [
         b"bar",
         b"1",
         b"three",
     ]
     await asyncio.sleep(1.1)
-    assert await r.hgetex("test:hash", "foo", keys=["1", "3"]) == [None, None, None]
+    assert await r.hgetex("test:hash", "foo", "1", "3") == [None, None, None]
     assert await r.httl("test:hash", "foo", "1", "3") == [-2, -2, -2]
     assert await r.hgetex("test:hash", "4") == [b"four"]
 
@@ -448,7 +447,7 @@ async def test_hsetex_expiration_ex_and_keepttl(r):
     for ttl in ttls:
         assert pytest.approx(ttl) == 10
 
-    assert await r.hgetex("test:hash", keys=test_keys) == [
+    assert await r.hgetex("test:hash", *test_keys) == [
         b"bar",
         b"1",
         b"2",
@@ -475,7 +474,7 @@ async def test_hsetex_expiration_px(r):
     for ttl in ttls:
         assert pytest.approx(ttl) == 60
 
-    assert await r.hgetex("test:hash", keys=test_keys) == [b"bar", b"1", b"2"]
+    assert await r.hgetex("test:hash", *test_keys) == [b"bar", b"1", b"2"]
 
 
 @skip_if_server_version_lt("7.9.0")
@@ -502,7 +501,7 @@ async def test_hsetex_expiration_pxat_and_fnx(r):
     assert ttls[0] <= 30
     assert ttls[1] == -2
 
-    assert await r.hgetex("test:hash", keys=["foo", "1", "new"]) == [b"bar", b"1", None]
+    assert await r.hgetex("test:hash", "foo", "1", "new") == [b"bar", b"1", None]
     assert (
         await r.hsetex(
             "test:hash",
@@ -517,7 +516,7 @@ async def test_hsetex_expiration_pxat_and_fnx(r):
     ttls = await r.httl("test:hash", "foo", "new")
     for ttl in ttls:
         assert ttl <= 61
-    assert await r.hgetex("test:hash", keys=["foo", "foo_new", "new"]) == [
+    assert await r.hgetex("test:hash", "foo", "foo_new", "new") == [
         b"bar",
         b"bar1",
         b"ok",
@@ -548,7 +547,7 @@ async def test_hsetex_expiration_exat_and_fxx(r):
     assert 10 < ttls[0] <= 30
     assert ttls[1] == -2
 
-    assert await r.hgetex("test:hash", keys=["foo", "1", "new"]) == [b"bar", b"1", None]
+    assert await r.hgetex("test:hash", "foo", "1", "new") == [b"bar", b"1", None]
     assert (
         await r.hsetex(
             "test:hash",
@@ -560,7 +559,7 @@ async def test_hsetex_expiration_exat_and_fxx(r):
         )
         == 1
     )
-    assert await r.hgetex("test:hash", keys=["foo", "1"]) == [b"bar1", b"new_value"]
+    assert await r.hgetex("test:hash", "foo", "1") == [b"bar1", b"new_value"]
 
 
 @skip_if_server_version_lt("7.9.0")
