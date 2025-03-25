@@ -1021,7 +1021,7 @@ class SSLConnection(Connection):
         Args:
             ssl_keyfile: Path to an ssl private key. Defaults to None.
             ssl_certfile: Path to an ssl certificate. Defaults to None.
-            ssl_cert_reqs: The string value for the SSLContext.verify_mode (none, optional, required). Defaults to "required".
+            ssl_cert_reqs: The string value for the SSLContext.verify_mode (none, optional, required), or an ssl.VerifyMode. Defaults to "required".
             ssl_ca_certs: The path to a file of concatenated CA certificates in PEM format. Defaults to None.
             ssl_ca_data: Either an ASCII string of one or more PEM-encoded certificates or a bytes-like object of DER-encoded certificates.
             ssl_check_hostname: If set, match the hostname during the SSL handshake. Defaults to False.

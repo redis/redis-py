@@ -81,9 +81,10 @@ from redis.utils import (
 )
 
 if TYPE_CHECKING and SSL_AVAILABLE:
-    from ssl import TLSVersion
+    from ssl import TLSVersion, VerifyMode
 else:
     TLSVersion = None
+    VerifyMode = None
 
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
 _KeyT = TypeVar("_KeyT", bound=KeyT)
@@ -228,7 +229,7 @@ class Redis(
         ssl: bool = False,
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
-        ssl_cert_reqs: str = "required",
+        ssl_cert_reqs: Union[str, VerifyMode] = "required",
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
