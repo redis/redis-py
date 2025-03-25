@@ -71,6 +71,7 @@ from redis.utils import (
     get_lib_version,
     safe_str,
     str_if_bytes,
+    truncate_text,
 )
 
 if SSL_AVAILABLE:
@@ -1633,8 +1634,9 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                     if isinstance(result, Exception):
                         command = " ".join(map(safe_str, cmd.args))
                         msg = (
-                            f"Command # {cmd.position + 1} ({command}) of pipeline "
-                            f"caused error: {result.args}"
+                            f"Command # {cmd.position + 1} "
+                            f"({truncate_text(command)}) "
+                            f"of pipeline caused error: {result.args}"
                         )
                         result.args = (msg,) + result.args[1:]
                         raise result
