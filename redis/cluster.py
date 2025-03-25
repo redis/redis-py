@@ -47,6 +47,7 @@ from redis.utils import (
     merge_result,
     safe_str,
     str_if_bytes,
+    truncate_text,
 )
 
 
@@ -2125,7 +2126,8 @@ class ClusterPipeline(RedisCluster):
         """
         cmd = " ".join(map(safe_str, command))
         msg = (
-            f"Command # {number} ({cmd}) of pipeline caused error: {exception.args[0]}"
+            f"Command # {number} ({truncate_text(cmd)}) of pipeline "
+            f"caused error: {exception.args[0]}"
         )
         exception.args = (msg,) + exception.args[1:]
 
