@@ -766,7 +766,7 @@ class Connection(AbstractConnection):
                 if sock is not None:
                     try:
                         sock.shutdown(socket.SHUT_RDWR)  # ensure a clean close
-                    except:
+                    except OSError:
                         pass  
                     sock.close()
 
