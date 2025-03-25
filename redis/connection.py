@@ -1185,7 +1185,7 @@ class UnixDomainSocketConnection(AbstractConnection):
             # Prevent ResourceWarnings for unclosed sockets.
             try:
                 sock.shutdown(socket.SHUT_RDWR)  # ensure a clean close
-            except:
+            except OSError:
                 pass
 
             sock.close()
