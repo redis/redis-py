@@ -77,6 +77,7 @@ from redis.utils import (
     get_lib_version,
     safe_str,
     str_if_bytes,
+    truncate_text,
 )
 
 if TYPE_CHECKING and SSL_AVAILABLE:
@@ -1514,7 +1515,10 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         self, exception: Exception, number: int, command: Iterable[object]
     ) -> None:
         cmd = " ".join(map(safe_str, command))
-        msg = f"Command # {number} ({cmd}) of pipeline caused error: {exception.args}"
+        msg = (
+            f"Command # {number} ({truncate_text(cmd)}) "
+            "of pipeline caused error: {exception.args}"
+        )
         exception.args = (msg,) + exception.args[1:]
 
     async def parse_response(

@@ -369,6 +369,22 @@ class TestPipeline:
 
         assert r[key] == b"1"
 
+    def test_exec_error_in_pipeline_truncated(self, r):
+        key = "a" * 50
+        a_value = "a" * 20
+        b_value = "b" * 20
+
+        r[key] = 1
+        with r.pipeline(transaction=False) as pipe:
+            pipe.hset(key, mapping={"field_a": a_value, "field_b": b_value})
+            pipe.expire(key, 100)
+
+            with pytest.raises(redis.ResponseError) as ex:
+                pipe.execute()
+
+            expected = f"Command # 1 (HSET {key} field_a {a_value} field_b...) of pipeline caused error: "
+            assert str(ex.value).startswith(expected)
+
     def test_pipeline_with_bitfield(self, r):
         with r.pipeline() as pipe:
             pipe.set("a", "1")
