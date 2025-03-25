@@ -1,5 +1,6 @@
 import datetime
 import logging
+import textwrap
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Dict, List, Mapping, Optional, Union
@@ -298,3 +299,9 @@ def extract_expire_flags(
         exp_options.extend(["PXAT", pxat])
 
     return exp_options
+
+
+def truncate_text(txt, max_length=100):
+    return textwrap.shorten(
+        text=txt, width=max_length, placeholder="...", break_long_words=True
+    )
