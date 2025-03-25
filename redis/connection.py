@@ -767,7 +767,7 @@ class Connection(AbstractConnection):
                     try:
                         sock.shutdown(socket.SHUT_RDWR)  # ensure a clean close
                     except OSError:
-                        pass  
+                        pass
                     sock.close()
 
         if err is not None:
@@ -1187,7 +1187,6 @@ class UnixDomainSocketConnection(AbstractConnection):
                 sock.shutdown(socket.SHUT_RDWR)  # ensure a clean close
             except OSError:
                 pass
-
             sock.close()
             raise
         sock.settimeout(self.socket_timeout)
