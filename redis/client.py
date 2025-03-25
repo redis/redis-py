@@ -211,7 +211,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl: bool = False,
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
-        ssl_cert_reqs: str = "required",
+        ssl_cert_reqs: Union[str, "ssl.VerifyMode"] = "required",
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_path: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
