@@ -1766,7 +1766,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_not(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["{foo}a"] = test_str
         r.bitop("not", "{foo}r", "{foo}a")
@@ -1774,7 +1774,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_not_in_place(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["{foo}a"] = test_str
         r.bitop("not", "{foo}a", "{foo}a")
@@ -1782,7 +1782,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_single_string(self, r):
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         r["{foo}a"] = test_str
         r.bitop("and", "{foo}res1", "{foo}a")
         r.bitop("or", "{foo}res2", "{foo}a")
@@ -1793,8 +1793,8 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_string_operands(self, r):
-        r["{foo}a"] = b"\x01\x02\xFF\xFF"
-        r["{foo}b"] = b"\x01\x02\xFF"
+        r["{foo}a"] = b"\x01\x02\xff\xff"
+        r["{foo}b"] = b"\x01\x02\xff"
         r.bitop("and", "{foo}res1", "{foo}a", "{foo}b")
         r.bitop("or", "{foo}res2", "{foo}a", "{foo}b")
         r.bitop("xor", "{foo}res3", "{foo}a", "{foo}b")
@@ -3319,19 +3319,19 @@ class TestClusterPipeline:
         """
         Test that an error from the pipeline is truncated correctly.
         """
-        key = "a" * 5000
+        key = "a" * 50
+        a_value = "a" * 20
+        b_value = "b" * 20
 
         with r.pipeline() as pipe:
             pipe.set(key, 1)
-            pipe.llen(key)
+            pipe.hset(key, mapping={"field_a": a_value, "field_b": b_value})
             pipe.expire(key, 100)
 
             with pytest.raises(Exception) as ex:
                 pipe.execute()
 
-            expected = (
-                "Command # 2 (LLEN " + ("a" * 92) + "...) of pipeline caused error: "
-            )
+            expected = f"Command # 2 (HSET {key} field_a {a_value} field_b...) of pipeline caused error: "
             assert str(ex.value).startswith(expected)
 
     def test_return_previously_acquired_connections(self, r):

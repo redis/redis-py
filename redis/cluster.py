@@ -47,7 +47,7 @@ from redis.utils import (
     merge_result,
     safe_str,
     str_if_bytes,
-    truncate_command_for_exception,
+    truncate_text,
 )
 
 
@@ -1703,7 +1703,7 @@ class NodesManager:
                             if len(disagreements) > 5:
                                 raise RedisClusterException(
                                     f"startup_nodes could not agree on a valid "
-                                    f'slots cache: {", ".join(disagreements)}'
+                                    f"slots cache: {', '.join(disagreements)}"
                                 )
 
             fully_covered = self.check_slots_coverage(tmp_slots)
@@ -2126,7 +2126,7 @@ class ClusterPipeline(RedisCluster):
         """
         cmd = " ".join(map(safe_str, command))
         msg = (
-            f"Command # {number} ({truncate_command_for_exception(cmd)}) of pipeline "
+            f"Command # {number} ({truncate_text(cmd)}) of pipeline "
             f"caused error: {exception.args[0]}"
         )
         exception.args = (msg,) + exception.args[1:]

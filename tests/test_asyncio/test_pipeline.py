@@ -369,18 +369,19 @@ class TestPipeline:
         assert await r.get(key) == b"1"
 
     async def test_exec_error_in_pipeline_truncated(self, r):
-        key = "a" * 5000
+        key = "a" * 50
+        a_value = "a" * 20
+        b_value = "b" * 20
+
         await r.set(key, 1)
         async with r.pipeline(transaction=False) as pipe:
-            pipe.llen(key)
+            pipe.hset(key, mapping={"field_a": a_value, "field_b": b_value})
             pipe.expire(key, 100)
 
             with pytest.raises(redis.ResponseError) as ex:
                 await pipe.execute()
 
-            expected = (
-                "Command # 1 (LLEN " + ("a" * 92) + "...) of pipeline caused error: "
-            )
+            expected = f"Command # 1 (HSET {key} field_a {a_value} field_b...) of pipeline caused error: "
             assert str(ex.value).startswith(expected)
 
     async def test_pipeline_with_bitfield(self, r):

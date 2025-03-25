@@ -1,5 +1,6 @@
 import datetime
 import logging
+import textwrap
 from contextlib import contextmanager
 from functools import wraps
 from typing import Any, Dict, List, Mapping, Optional, Union
@@ -263,12 +264,6 @@ def ensure_string(key):
         raise TypeError("Key must be either a string or bytes")
 
 
-def truncate_command_for_exception(self, command, max_length=100):
-    if len(command) > max_length:
-        return command[: max_length - 3] + "..."
-    return command
-
-
 def extract_expire_flags(
     ex: Optional[ExpiryT] = None,
     px: Optional[ExpiryT] = None,
@@ -306,7 +301,7 @@ def extract_expire_flags(
     return exp_options
 
 
-def truncate_command_for_exception(self, command, max_length=100):
-    if len(command) > max_length:
-        return command[: max_length - 3] + "..."
-    return command
+def truncate_text(txt, max_length=100):
+    return textwrap.shorten(
+        text=txt, width=max_length, placeholder="...", break_long_words=True
+    )
