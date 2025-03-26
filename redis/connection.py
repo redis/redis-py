@@ -376,6 +376,9 @@ class AbstractConnection(ConnectionInterface):
 
     def connect(self):
         "Connects to the Redis server if not already connected"
+        self.connect_check_health(check_health=True)
+
+    def connect_check_health(self, check_health: bool = True):
         if self._sock:
             return
         try:
@@ -391,7 +394,7 @@ class AbstractConnection(ConnectionInterface):
         try:
             if self.redis_connect_func is None:
                 # Use the default on_connect function
-                self.on_connect()
+                self.on_connect_check_health(check_health=check_health)
             else:
                 # Use the passed function redis_connect_func
                 self.redis_connect_func(self)
@@ -421,6 +424,9 @@ class AbstractConnection(ConnectionInterface):
         return format_error_message(self._host_error(), exception)
 
     def on_connect(self):
+        self.on_connect_check_health(check_health=True)
+
+    def on_connect_check_health(self, check_health: bool = True):
         "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
         parser = self._parser
@@ -479,7 +485,7 @@ class AbstractConnection(ConnectionInterface):
                 # update cluster exception classes
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
-            self.send_command("HELLO", self.protocol)
+            self.send_command("HELLO", self.protocol, check_health=check_health)
             self.handshake_metadata = self.read_response()
             if (
                 self.handshake_metadata.get(b"proto") != self.protocol
@@ -489,28 +495,45 @@ class AbstractConnection(ConnectionInterface):
 
         # if a client_name is given, set it
         if self.client_name:
-            self.send_command("CLIENT", "SETNAME", self.client_name)
+            self.send_command(
+                "CLIENT",
+                "SETNAME",
+                self.client_name,
+                check_health=check_health,
+            )
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
         try:
             # set the library name and version
             if self.lib_name:
-                self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
+                self.send_command(
+                    "CLIENT",
+                    "SETINFO",
+                    "LIB-NAME",
+                    self.lib_name,
+                    check_health=check_health,
+                )
                 self.read_response()
         except ResponseError:
             pass
 
         try:
             if self.lib_version:
-                self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
+                self.send_command(
+                    "CLIENT",
+                    "SETINFO",
+                    "LIB-VER",
+                    self.lib_version,
+                    check_health=check_health,
+                )
                 self.read_response()
         except ResponseError:
             pass
 
         # if a database is specified, switch to it
         if self.db:
-            self.send_command("SELECT", self.db)
+            self.send_command("SELECT", self.db, check_health=check_health)
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
@@ -552,7 +575,7 @@ class AbstractConnection(ConnectionInterface):
     def send_packed_command(self, command, check_health=True):
         """Send an already packed command to the Redis server"""
         if not self._sock:
-            self.connect()
+            self.connect_check_health(check_health=False)
         # guard against health check recursion
         if check_health:
             self.check_health()
