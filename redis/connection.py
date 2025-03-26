@@ -764,6 +764,10 @@ class Connection(AbstractConnection):
             except OSError as _:
                 err = _
                 if sock is not None:
+                    try:
+                        sock.shutdown(socket.SHUT_RDWR)  # ensure a clean close
+                    except OSError:
+                        pass
                     sock.close()
 
         if err is not None:
@@ -1179,6 +1183,10 @@ class UnixDomainSocketConnection(AbstractConnection):
             sock.connect(self.path)
         except OSError:
             # Prevent ResourceWarnings for unclosed sockets.
+            try:
+                sock.shutdown(socket.SHUT_RDWR)  # ensure a clean close
+            except OSError:
+                pass
             sock.close()
             raise
         sock.settimeout(self.socket_timeout)
