@@ -349,6 +349,8 @@ class Sentinel(SentinelCommands):
     ):
         """
         Returns a redis client instance for the ``service_name`` master.
+        Sentinel client will detect failover and reconnect Redis clients
+        automatically.
 
         A :py:class:`~redis.sentinel.SentinelConnectionPool` class is
         used to retrieve the master's address before establishing a new
