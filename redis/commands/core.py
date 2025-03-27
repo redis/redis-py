@@ -6556,7 +6556,7 @@ class FunctionCommands:
         This is a read-only variant of the FCALL command that cannot
         execute commands that modify data.
 
-        For more information see https://redis.io/commands/fcal_ro
+        For more information see https://redis.io/commands/fcall_ro
         """
         return self._fcall("FCALL_RO", function, numkeys, *keys_and_args)
 
