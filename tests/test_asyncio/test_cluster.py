@@ -46,7 +46,7 @@ from tests.conftest import (
 from ..ssl_utils import get_tls_certificates
 from .compat import aclosing, mock
 
-pytestmark = pytest.mark.onlycluster
+pytestmark = [pytest.mark.onlycluster, pytest.mark.asyncio]
 
 
 default_host = "127.0.0.1"

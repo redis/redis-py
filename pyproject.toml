@@ -74,7 +74,7 @@ markers = [
     "cp_integration: credential provider integration tests",
 ]
 asyncio_default_fixture_loop_scope = "function"
-asyncio_mode = "auto"
+asyncio_mode = "strict"
 timeout = 30
 filterwarnings = [
     "always",

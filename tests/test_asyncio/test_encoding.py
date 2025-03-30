@@ -3,6 +3,8 @@ import pytest_asyncio
 import redis.asyncio as redis
 from redis.exceptions import DataError
 
+pytestmark = pytest.mark.asyncio
+
 
 @pytest.mark.onlynoncluster
 class TestEncoding:
@@ -89,7 +91,6 @@ class TestCommandsAreNotEncoded:
         yield redis
         await redis.flushall()
 
-    @pytest.mark.xfail
     async def test_basic_command(self, r: redis.Redis):
         await r.set("hello", "world")
 
