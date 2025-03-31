@@ -3,7 +3,6 @@ import copy
 import enum
 import inspect
 import socket
-import ssl
 import sys
 import warnings
 import weakref
@@ -27,7 +26,19 @@ from typing import (
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
-from ..utils import format_error_message
+from ..utils import SSL_AVAILABLE
+
+if SSL_AVAILABLE:
+    import ssl
+    from ssl import SSLContext, TLSVersion
+else:
+    ssl = None
+    TLSVersion = None
+    SSLContext = None
+
+from ..auth.token import TokenInterface
+from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
+from ..utils import deprecated_args, format_error_message
 
 # the functionality is available in 3.11.x but has a major issue before
 # 3.11.3. See https://github.com/redis/redis-py/issues/2633
@@ -148,6 +159,7 @@ class AbstractConnection:
         encoder_class: Type[Encoder] = Encoder,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ):
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -156,6 +168,10 @@ class AbstractConnection:
                 "1. 'password' and (optional) 'username'\n"
                 "2. 'credential_provider'"
             )
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
         self.db = db
         self.client_name = client_name
         self.lib_name = lib_name
@@ -195,6 +211,8 @@ class AbstractConnection:
         self.set_parser(parser_class)
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
+        self._re_auth_token: Optional[TokenInterface] = None
+
         try:
             p = int(protocol)
         except TypeError:
@@ -214,7 +232,13 @@ class AbstractConnection:
             _warnings.warn(
                 f"unclosed Connection {self!r}", ResourceWarning, source=self
             )
-            self._close()
+
+            try:
+                asyncio.get_running_loop()
+                self._close()
+            except RuntimeError:
+                # No actions been taken if pool already closed.
+                pass
 
     def _close(self):
         """
@@ -269,6 +293,9 @@ class AbstractConnection:
 
     async def connect(self):
         """Connects to the Redis server if not already connected"""
+        await self.connect_check_health(check_health=True)
+
+    async def connect_check_health(self, check_health: bool = True):
         if self.is_connected:
             return
         try:
@@ -287,7 +314,7 @@ class AbstractConnection:
         try:
             if not self.redis_connect_func:
                 # Use the default on_connect function
-                await self.on_connect()
+                await self.on_connect_check_health(check_health=check_health)
             else:
                 # Use the passed function redis_connect_func
                 (
@@ -321,8 +348,14 @@ class AbstractConnection:
     def _error_message(self, exception: BaseException) -> str:
         return format_error_message(self._host_error(), exception)
 
+    def get_protocol(self):
+        return self.protocol
+
     async def on_connect(self) -> None:
         """Initialize the connection, authenticate and select a database"""
+        await self.on_connect_check_health(check_health=True)
+
+    async def on_connect_check_health(self, check_health: bool = True) -> None:
         self._parser.on_connect(self)
         parser = self._parser
 
@@ -333,7 +366,8 @@ class AbstractConnection:
                 self.credential_provider
                 or UsernamePasswordCredentialProvider(self.username, self.password)
             )
-            auth_args = cred_provider.get_credentials()
+            auth_args = await cred_provider.get_credentials_async()
+
             # if resp version is specified and we have auth args,
             # we need to send them via HELLO
         if auth_args and self.protocol not in [2, "2"]:
@@ -344,7 +378,11 @@ class AbstractConnection:
                 self._parser.on_connect(self)
             if len(auth_args) == 1:
                 auth_args = ["default", auth_args[0]]
-            await self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
+            # avoid checking health here -- PING will fail if we try
+            # to check the health prior to the AUTH
+            await self.send_command(
+                "HELLO", self.protocol, "AUTH", *auth_args, check_health=False
+            )
             response = await self.read_response()
             if response.get(b"proto") != int(self.protocol) and response.get(
                 "proto"
@@ -375,7 +413,7 @@ class AbstractConnection:
                 # update cluster exception classes
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
-            await self.send_command("HELLO", self.protocol)
+            await self.send_command("HELLO", self.protocol, check_health=check_health)
             response = await self.read_response()
             # if response.get(b"proto") != self.protocol and response.get(
             #     "proto"
@@ -384,18 +422,35 @@ class AbstractConnection:
 
         # if a client_name is given, set it
         if self.client_name:
-            await self.send_command("CLIENT", "SETNAME", self.client_name)
+            await self.send_command(
+                "CLIENT",
+                "SETNAME",
+                self.client_name,
+                check_health=check_health,
+            )
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
         # set the library name and version, pipeline for lower startup latency
         if self.lib_name:
-            await self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
+            await self.send_command(
+                "CLIENT",
+                "SETINFO",
+                "LIB-NAME",
+                self.lib_name,
+                check_health=check_health,
+            )
         if self.lib_version:
-            await self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
+            await self.send_command(
+                "CLIENT",
+                "SETINFO",
+                "LIB-VER",
+                self.lib_version,
+                check_health=check_health,
+            )
         # if a database is specified, switch to it. Also pipeline this
         if self.db:
-            await self.send_command("SELECT", self.db)
+            await self.send_command("SELECT", self.db, check_health=check_health)
 
         # read responses from pipeline
         for _ in (sent for sent in (self.lib_name, self.lib_version) if sent):
@@ -457,8 +512,8 @@ class AbstractConnection:
         self, command: Union[bytes, str, Iterable[bytes]], check_health: bool = True
     ) -> None:
         if not self.is_connected:
-            await self.connect()
-        elif check_health:
+            await self.connect_check_health(check_health=False)
+        if check_health:
             await self.check_health()
 
         try:
@@ -655,6 +710,19 @@ class AbstractConnection:
         while not self._socket_is_empty():
             await self.read_response(push_request=True)
 
+    def set_re_auth_token(self, token: TokenInterface):
+        self._re_auth_token = token
+
+    async def re_auth(self):
+        if self._re_auth_token is not None:
+            await self.send_command(
+                "AUTH",
+                self._re_auth_token.try_get("oid"),
+                self._re_auth_token.get_value(),
+            )
+            await self.read_response()
+            self._re_auth_token = None
+
 
 class Connection(AbstractConnection):
     "Manages TCP communication to and from a Redis server"
@@ -723,14 +791,17 @@ class SSLConnection(Connection):
         self,
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
-        ssl_cert_reqs: str = "required",
+        ssl_cert_reqs: Union[str, ssl.VerifyMode] = "required",
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = False,
-        ssl_min_version: Optional[ssl.TLSVersion] = None,
+        ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
         **kwargs,
     ):
+        if not SSL_AVAILABLE:
+            raise RedisError("Python wasn't built with SSL support")
+
         self.ssl_context: RedisSSLContext = RedisSSLContext(
             keyfile=ssl_keyfile,
             certfile=ssl_certfile,
@@ -794,19 +865,22 @@ class RedisSSLContext:
         self,
         keyfile: Optional[str] = None,
         certfile: Optional[str] = None,
-        cert_reqs: Optional[str] = None,
+        cert_reqs: Optional[Union[str, ssl.VerifyMode]] = None,
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
         check_hostname: bool = False,
-        min_version: Optional[ssl.TLSVersion] = None,
+        min_version: Optional[TLSVersion] = None,
         ciphers: Optional[str] = None,
     ):
+        if not SSL_AVAILABLE:
+            raise RedisError("Python wasn't built with SSL support")
+
         self.keyfile = keyfile
         self.certfile = certfile
         if cert_reqs is None:
-            self.cert_reqs = ssl.CERT_NONE
+            cert_reqs = ssl.CERT_NONE
         elif isinstance(cert_reqs, str):
-            CERT_REQS = {
+            CERT_REQS = {  # noqa: N806
                 "none": ssl.CERT_NONE,
                 "optional": ssl.CERT_OPTIONAL,
                 "required": ssl.CERT_REQUIRED,
@@ -815,15 +889,16 @@ class RedisSSLContext:
                 raise RedisError(
                     f"Invalid SSL Certificate Requirements Flag: {cert_reqs}"
                 )
-            self.cert_reqs = CERT_REQS[cert_reqs]
+            cert_reqs = CERT_REQS[cert_reqs]
+        self.cert_reqs = cert_reqs
         self.ca_certs = ca_certs
         self.ca_data = ca_data
         self.check_hostname = check_hostname
         self.min_version = min_version
         self.ciphers = ciphers
-        self.context: Optional[ssl.SSLContext] = None
+        self.context: Optional[SSLContext] = None
 
-    def get(self) -> ssl.SSLContext:
+    def get(self) -> SSLContext:
         if not self.context:
             context = ssl.create_default_context()
             context.check_hostname = self.check_hostname
@@ -1033,6 +1108,10 @@ class ConnectionPool:
         self._available_connections: List[AbstractConnection] = []
         self._in_use_connections: Set[AbstractConnection] = set()
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
+        self._lock = asyncio.Lock()
+        self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
+        if self._event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
 
     def __repr__(self):
         return (
@@ -1051,14 +1130,20 @@ class ConnectionPool:
             or len(self._in_use_connections) < self.max_connections
         )
 
-    async def get_connection(self, command_name, *keys, **options):
-        """Get a connected connection from the pool"""
-        connection = self.get_available_connection()
-        try:
-            await self.ensure_connection(connection)
-        except BaseException:
-            await self.release(connection)
-            raise
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    async def get_connection(self, command_name=None, *keys, **options):
+        async with self._lock:
+            """Get a connected connection from the pool"""
+            connection = self.get_available_connection()
+            try:
+                await self.ensure_connection(connection)
+            except BaseException:
+                await self.release(connection)
+                raise
 
         return connection
 
@@ -1096,7 +1181,7 @@ class ConnectionPool:
         try:
             if await connection.can_read_destructive():
                 raise ConnectionError("Connection has data") from None
-        except (ConnectionError, OSError):
+        except (ConnectionError, TimeoutError, OSError):
             await connection.disconnect()
             await connection.connect()
             if await connection.can_read_destructive():
@@ -1108,6 +1193,9 @@ class ConnectionPool:
         # not doing so is an error that will cause an exception here.
         self._in_use_connections.remove(connection)
         self._available_connections.append(connection)
+        await self._event_dispatcher.dispatch_async(
+            AsyncAfterConnectionReleasedEvent(connection)
+        )
 
     async def disconnect(self, inuse_connections: bool = True):
         """
@@ -1140,6 +1228,29 @@ class ConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
+
+    async def re_auth_callback(self, token: TokenInterface):
+        async with self._lock:
+            for conn in self._available_connections:
+                await conn.retry.call_with_retry(
+                    lambda: conn.send_command(
+                        "AUTH", token.try_get("oid"), token.get_value()
+                    ),
+                    lambda error: self._mock(error),
+                )
+                await conn.retry.call_with_retry(
+                    lambda: conn.read_response(), lambda error: self._mock(error)
+                )
+            for conn in self._in_use_connections:
+                conn.set_re_auth_token(token)
+
+    async def _mock(self, error: RedisError):
+        """
+        Dummy functions, needs to be passed as error callback to retry object.
+        :param error:
+        :return:
+        """
+        pass
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -1192,7 +1303,12 @@ class BlockingConnectionPool(ConnectionPool):
         self._condition = asyncio.Condition()
         self.timeout = timeout
 
-    async def get_connection(self, command_name, *keys, **options):
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.0.3",
+    )
+    async def get_connection(self, command_name=None, *keys, **options):
         """Gets a connection from the pool, blocking until one is available"""
         try:
             async with self._condition:
