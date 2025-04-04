@@ -4,6 +4,8 @@ on:
   push:
     # branches to consider in the event; optional, defaults to all
     branches:
+      - ps_rearrange_release_notes_template
+      - 6.0
       - master
 
 permissions: {}
@@ -19,6 +21,6 @@ jobs:
       - uses: release-drafter/release-drafter@v6
         with:
           # (Optional) specify config name to use, relative to .github/. Default: release-drafter.yml
-           config-name: release-drafter-config.yml
+           config-name: tmp-release-drafter-config.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
