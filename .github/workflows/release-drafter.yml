@@ -5,6 +5,7 @@ on:
     # branches to consider in the event; optional, defaults to all
     branches:
       - master
+      - ps_rearrange_release_notes_template
 
 permissions: {}
 jobs:
