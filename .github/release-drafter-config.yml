@@ -1,7 +1,27 @@
-name-template: '$NEXT_MINOR_VERSION'
-tag-template: 'v$NEXT_MINOR_VERSION'
+name-template: '5.2.1'
+tag-template: 'v5.2.1'
+
+pre-release: true
+
+version-resolver:
+  major:
+    labels:
+      - 'type: breakingchanges'
+  minor:
+    labels:
+      - 'type: feature'
+      - 'type: deprecation'
+  patch:
+    labels:
+      - 'type: bug'
+      - 'type: maintenance'
+      - 'type: update-docs'
+      - 'type: dependencies'
+      - 'type: security'
+
 filter-by-commitish: true
-commitish: master
+commitish: 6.0
+
 autolabeler:
   - label: 'maintenance'
     files:
@@ -17,32 +37,34 @@ autolabeler:
     branch:
       - '/feature-.+'
 categories:
-  - title: '🔥 Breaking Changes'
-    labels:
-      - 'breakingchange'
-  - title: '🧪 Experimental Features'
-    labels:
-      - 'experimental'
   - title: '🚀 New Features'
     labels:
       - 'feature'
-      - 'enhancement'
+  - title: '🧪 Experimental Features'
+    labels:
+      - 'experimental'
+  - title: '🔥 Breaking Changes'
+    labels:
+      - 'breakingchange'
+  - title: '⚠️ Deprecations'
+    labels:
+      - 'deprecation'
   - title: '🐛 Bug Fixes'
     labels:
-      - 'fix'
       - 'bugfix'
       - 'bug'
-      - 'BUG'
   - title: '🧰 Maintenance'
     labels:
       - 'maintenance'
       - 'dependencies'
-      - 'documentation'
-      - 'docs'
       - 'testing'
+      - 'techdebt'
+      - 'docs-review'
+      - 'update-docs'
 change-template: '- $TITLE (#$NUMBER)'
 exclude-labels:
   - 'skip-changelog'
+
 template: |
   # Changes
 
