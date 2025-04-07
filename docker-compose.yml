@@ -1,9 +1,9 @@
 ---
 x-client-libs-stack-image: &client-libs-stack-image
-  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_STACK_IMAGE_TAG:-rs-7.4.0-v2}"
+  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_STACK_IMAGE_TAG:-8.0-M06-pre}"
 
 x-client-libs-image: &client-libs-image
-  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-7.4.2}"
+  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-8.0-M06-pre}"
 
 services:
 
