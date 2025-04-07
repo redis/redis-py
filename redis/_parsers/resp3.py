@@ -19,7 +19,7 @@ class _RESP3Parser(_RESPBase):
 
     def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
-        logger.info("Push response: " + str(response))
+        logger.debug("Push response: " + str(response))
         return response
 
     def read_response(self, disable_decoding=False, push_request=False):
@@ -150,7 +150,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
 
     async def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
-        logger.info("Push response: " + str(response))
+        logger.debug("Push response: " + str(response))
         return response
 
     async def read_response(
