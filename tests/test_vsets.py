@@ -311,10 +311,10 @@ def test_vsim_unexisting(d_client):
 
 @skip_if_server_version_lt("7.9.0")
 def test_vsim_with_filter(d_client):
-    elements_count = 30
+    elements_count = 50
     vector_dim = 800
     for i in range(elements_count):
-        float_array = [random.uniform(0, 10) for x in range(vector_dim)]
+        float_array = [random.uniform(10, 20) for x in range(vector_dim)]
         attributes = {"index": i, "elem_name": f"elem_{i}"}
         d_client.vset().vadd(
             "myset",
@@ -323,6 +323,15 @@ def test_vsim_with_filter(d_client):
             numlinks=4,
             attributes=attributes,
         )
+    float_array = [-random.uniform(10, 20) for x in range(vector_dim)]
+    attributes = {"index": elements_count, "elem_name": "elem_special"}
+    d_client.vset().vadd(
+        "myset",
+        float_array,
+        "elem_special",
+        numlinks=4,
+        attributes=attributes,
+    )
     sim = d_client.vset().vsim("myset", input="elem_1", filter=".index > 10")
     assert len(sim) == 10
     assert isinstance(sim, list)
@@ -350,17 +359,19 @@ def test_vsim_with_filter(d_client):
     sim = d_client.vset().vsim(
         "myset",
         input="elem_1",
-        filter=".index > 28 and .elem_name in ['elem_12', 'elem_17', 'elem_29']",
+        filter=".index > 28 and .elem_name in ['elem_12', 'elem_17', 'elem_special']",
         filter_ef=1,
     )
-    assert len(sim) == 0
+    assert len(sim) == 0, (
+        f"Expected 0 results, but got {len(sim)} with filter_ef=1, sim: {sim}"
+    )
     assert isinstance(sim, list)
 
     sim = d_client.vset().vsim(
         "myset",
         input="elem_1",
-        filter=".index > 28 and .elem_name in ['elem_12', 'elem_17', 'elem_29']",
-        filter_ef=20,
+        filter=".index > 28 and .elem_name in ['elem_12', 'elem_17', 'elem_special']",
+        filter_ef=500,
     )
     assert len(sim) == 1
     assert isinstance(sim, list)
@@ -369,7 +380,7 @@ def test_vsim_with_filter(d_client):
 @skip_if_server_version_lt("7.9.0")
 def test_vsim_truth_no_thread_enabled(d_client):
     elements_count = 5000
-    vector_dim = 30
+    vector_dim = 50
     for i in range(1, elements_count + 1):
         float_array = [random.uniform(10 * i, 1000 * i) for x in range(vector_dim)]
         d_client.vset().vadd("myset", float_array, f"elem_{i}")
@@ -396,7 +407,7 @@ def test_vsim_truth_no_thread_enabled(d_client):
     )
 
     found_better_match = False
-    for index, (score_with_truth, score_without_truth) in enumerate(results_scores):
+    for score_with_truth, score_without_truth in results_scores:
         if score_with_truth < score_without_truth:
             assert False, (
                 "Score with truth [{score_with_truth}] < score without truth [{score_without_truth}]"
@@ -764,7 +775,7 @@ def test_vset_commands_without_decoding_responces(client):
     # test vadd
     elements = ["elem1", "elem2", "elem3"]
     for elem in elements:
-        float_array = [random.uniform(0, 10) for x in range(0, 8)]
+        float_array = [random.uniform(0.5, 10) for x in range(0, 8)]
         resp = client.vset().vadd("myset", float_array, element=elem)
         assert resp == 1
 
@@ -772,7 +783,7 @@ def test_vset_commands_without_decoding_responces(client):
     emb = client.vset().vemb("myset", "elem1")
     assert len(emb) == 8
     assert isinstance(emb, list)
-    assert all(isinstance(x, float) for x in emb)
+    assert all(isinstance(x, float) for x in emb), f"Expected float values, got {emb}"
 
     emb_raw = client.vset().vemb("myset", "elem1", raw=True)
     assert emb_raw["quantization"] == b"int8"
