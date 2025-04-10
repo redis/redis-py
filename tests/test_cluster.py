@@ -633,7 +633,7 @@ class TestRedisClusterObj:
             Connection,
             send_command=DEFAULT,
             read_response=DEFAULT,
-            _connect=DEFAULT,
+            _connect_check_server_ready=DEFAULT,
             can_read=DEFAULT,
             on_connect=DEFAULT,
         ) as mocks:
@@ -662,7 +662,7 @@ class TestRedisClusterObj:
                 parse_response.side_effect = parse_response_mock_first
                 mocks["send_command"].return_value = True
                 mocks["read_response"].return_value = "OK"
-                mocks["_connect"].return_value = True
+                mocks["_connect_check_server_ready"].return_value = True
                 mocks["can_read"].return_value = False
                 mocks["on_connect"].return_value = True
 
