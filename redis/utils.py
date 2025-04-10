@@ -276,7 +276,7 @@ def extract_expire_flags(
         if isinstance(ex, datetime.timedelta):
             exp_options.append(int(ex.total_seconds()))
         elif isinstance(ex, int):
-            exp_options.append(ex)
+            exp_options.append(int(ex))
         elif isinstance(ex, str) and ex.isdigit():
             exp_options.append(int(ex))
         else:
@@ -286,7 +286,7 @@ def extract_expire_flags(
         if isinstance(px, datetime.timedelta):
             exp_options.append(int(px.total_seconds() * 1000))
         elif isinstance(px, int):
-            exp_options.append(px)
+            exp_options.append(int(px))
         else:
             raise DataError("px must be datetime.timedelta or int")
     elif exat is not None:
