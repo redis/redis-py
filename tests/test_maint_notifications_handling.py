@@ -274,6 +274,8 @@ class MockSocket:
                 self.pending_responses.append(b"$6\r\nvalue1\r\n")
             else:
                 self.pending_responses.append(b"$-1\r\n")  # NULL response
+        elif b"PING" in data:
+            self.pending_responses.append(b"+PONG\r\n")
         else:
             self.pending_responses.append(b"+OK\r\n")  # Default response
 

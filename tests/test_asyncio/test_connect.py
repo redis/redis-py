@@ -2,6 +2,8 @@ import asyncio
 import re
 import socket
 import ssl
+import struct
+import sys
 
 import pytest
 from redis.asyncio.connection import (
@@ -16,6 +18,7 @@ from ..ssl_utils import CertificateType, get_tls_certificates
 _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"
 _SUCCESS_RESP = b"+OK" + _CMD_SEP
+_PONG_RESP = b"+PONG" + _CMD_SEP
 _ERROR_RESP = b"-ERR" + _CMD_SEP
 _SUPPORTED_CMDS = {f"CLIENT SETNAME {_CLIENT_NAME}": _SUCCESS_RESP}
 
@@ -32,18 +35,37 @@ def uds_address(tmpdir):
     return tmpdir / "uds.sock"
 
 
-async def test_tcp_connect(tcp_address):
+@pytest.mark.parametrize(
+    "check_server_ready",
+    [True, False],
+    ids=["check_server_ready", "no_check_server_ready"],
+)
+async def test_tcp_connect(tcp_address, check_server_ready):
     host, port = tcp_address
-    conn = Connection(host=host, port=port, client_name=_CLIENT_NAME, socket_timeout=10)
-    await _assert_connect(conn, tcp_address)
+    conn = Connection(
+        host=host,
+        port=port,
+        client_name=_CLIENT_NAME,
+        socket_timeout=10,
+        check_server_ready=check_server_ready,
+    )
+    await _assert_connect(conn, tcp_address, check_server_ready)
 
 
-async def test_uds_connect(uds_address):
+@pytest.mark.parametrize(
+    "check_server_ready",
+    [True, False],
+    ids=["check_server_ready", "no_check_server_ready"],
+)
+async def test_uds_connect(uds_address, check_server_ready):
     path = str(uds_address)
     conn = UnixDomainSocketConnection(
-        path=path, client_name=_CLIENT_NAME, socket_timeout=10
+        path=path,
+        client_name=_CLIENT_NAME,
+        socket_timeout=10,
+        check_server_ready=check_server_ready,
     )
-    await _assert_connect(conn, path)
+    await _assert_connect(conn, path, check_server_ready)
 
 
 @pytest.mark.ssl
@@ -90,7 +112,12 @@ async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
         ),
     ],
 )
-async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
+@pytest.mark.parametrize(
+    "check_server_ready",
+    [True, False],
+    ids=["check_server_ready", "no_check_server_ready"],
+)
+async def test_tcp_ssl_connect(tcp_address, ssl_min_version, check_server_ready):
     host, port = tcp_address
 
     # in order to have working hostname verification, we need to use "localhost"
@@ -106,14 +133,138 @@ async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
         ssl_ca_certs=server_certs.ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl_min_version,
+        check_server_ready=check_server_ready,
     )
     await _assert_connect(
         conn,
         tcp_address,
+        check_server_ready,
         certfile=server_certs.certfile,
         keyfile=server_certs.keyfile,
     )
     await conn.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_connect_check_server_ready_asyncio_timeout_error(tcp_address):
+    """
+    Demonstrates a scenario where redis-py hits an `asyncio.TimeoutError` internally
+    (via `asyncio.wait_for(...)` or `async_timeout(...)`). Redis-py catches that
+    and re-raises `ConnectionError`.
+    """
+    host, port = tcp_address
+    conn = Connection(
+        host=host,
+        port=port,
+        client_name="test-suite-client",
+        socket_timeout=0.5,
+        check_server_ready=True,
+    )
+
+    async def _no_response_handler(reader, writer):
+        # Accept the connection
+        buffer = await reader.read(1024)
+        assert "PING" in buffer.decode()
+        # do nothing (no response to PING).
+        # The client code will eventually hit asyncio.TimeoutError on read.
+        await asyncio.sleep(1)
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(_no_response_handler, host=host, port=port)
+    async with server:
+        await server.start_serving()
+        # We expect ConnectionError due to the underlying asyncio.TimeoutError
+        # from lack of a timely PONG.
+        with pytest.raises(ConnectionError):
+            await conn.connect()
+
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_connect_check_server_ready_invalid_ping(tcp_address):
+    """
+    Demonstrates a scenario where redis-py hits an `ResponseError` internally
+    due to an invalid response to the PING command.
+    Redis-py catches that and re-raises `ConnectionError`.
+    """
+    host, port = tcp_address
+    conn = Connection(
+        host=host,
+        port=port,
+        client_name="test-suite-client",
+        socket_timeout=5,
+        check_server_ready=True,
+    )
+
+    async def _no_response_handler(reader, writer):
+        # Accept the connection
+        buffer = await reader.read(1024)
+        assert "PING" in buffer.decode()
+        # Send wrong answer back
+        writer.write(_ERROR_RESP)
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(_no_response_handler, host=host, port=port)
+    async with server:
+        await server.start_serving()
+        # We expect ConnectionError due to a wrong response to PING.
+        with pytest.raises(ConnectionError, match="Invalid PING response"):
+            await conn.connect()
+
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_connect_check_server_ready_connection_reset(tcp_address):
+    """
+    Demonstrates a scenario where the server accepts the connection and receives the PING command,
+    but abruptly resets the connection (sends a TCP RST). This causes the client to raise a
+    ConnectionResetError internally, which redis-py catches and re-raises as ConnectionError.
+    """
+    host, port = tcp_address
+    conn = Connection(
+        host=host,
+        port=port,
+        client_name="test-suite-client",
+        socket_timeout=5,
+        check_server_ready=True,
+    )
+
+    async def _no_response_handler(reader, writer):
+        # Accept the connection
+        buffer = await reader.read(1024)
+        assert "PING" in buffer.decode()
+
+        sock = writer.transport.get_extra_info("socket")
+
+        # Configure socket for abrupt close (RST packet)
+        linger_struct = struct.pack("ii", 1, 0)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, linger_struct)
+
+        # Close immediately to trigger ConnectionResetError on client side
+        sock.close()
+
+    server = await asyncio.start_server(_no_response_handler, host=host, port=port)
+    async with server:
+        await server.start_serving()
+
+        if sys.version_info < (3, 11, 3):
+            # Python 3.11.3+ handles ConnectionResetError differently
+            # and overloads with TimeoutError.
+            with pytest.raises(ConnectionError):
+                await conn.connect()
+        else:
+            with pytest.raises(ConnectionError, match="Connection reset by peer"):
+                await conn.connect()
+
+        server.close()
+        await server.wait_closed()
 
 
 @pytest.mark.ssl
@@ -143,6 +294,7 @@ async def test_tcp_ssl_version_mismatch(tcp_address):
 async def _assert_connect(
     conn,
     server_address,
+    check_server_ready=False,
     certfile=None,
     keyfile=None,
     minimum_ssl_version=ssl.TLSVersion.TLSv1_2,
@@ -153,7 +305,9 @@ async def _assert_connect(
 
     async def _handler(reader, writer):
         try:
-            return await _redis_request_handler(reader, writer, stop_event)
+            return await _redis_request_handler(
+                reader, writer, stop_event, check_server_ready
+            )
         finally:
             writer.close()
             await writer.wait_closed()
@@ -187,7 +341,7 @@ async def _assert_connect(
             await finished.wait()
 
 
-async def _redis_request_handler(reader, writer, stop_event):
+async def _redis_request_handler(reader, writer, stop_event, check_server_ready):
     command = None
     command_ptr = None
     fragment_length = None
@@ -219,7 +373,10 @@ async def _redis_request_handler(reader, writer, stop_event):
                 continue
 
             command = " ".join(command)
-            resp = _SUPPORTED_CMDS.get(command, _ERROR_RESP)
+            if check_server_ready and command == "PING":
+                resp = _PONG_RESP
+            else:
+                resp = _SUPPORTED_CMDS.get(command, _ERROR_RESP)
             writer.write(resp)
             await writer.drain()
             command = None

@@ -729,7 +729,7 @@ class TestRedisClusterObj:
             Connection,
             send_command=mock.DEFAULT,
             read_response=mock.DEFAULT,
-            _connect=mock.DEFAULT,
+            _connect_check_server_ready=mock.DEFAULT,
             can_read_destructive=mock.DEFAULT,
             on_connect=mock.DEFAULT,
         ) as mocks:
@@ -761,7 +761,7 @@ class TestRedisClusterObj:
                 execute_command.side_effect = execute_command_mock_first
                 mocks["send_command"].return_value = True
                 mocks["read_response"].return_value = "OK"
-                mocks["_connect"].return_value = True
+                mocks["_connect_check_server_ready"].return_value = True
                 mocks["can_read_destructive"].return_value = False
                 mocks["on_connect"].return_value = True
 
@@ -3117,13 +3117,19 @@ class TestSSL:
 
         return _create_client
 
+    @pytest.mark.parametrize("check_server_ready", [True, False])
     async def test_ssl_connection_without_ssl(
-        self, create_client: Callable[..., Awaitable[RedisCluster]]
+        self, create_client: Callable[..., Awaitable[RedisCluster]], check_server_ready
     ) -> None:
         with pytest.raises(RedisClusterException) as e:
-            await create_client(mocked=False, ssl=False)
+            await create_client(
+                mocked=False, ssl=False, check_server_ready=check_server_ready
+            )
         e = e.value.__cause__
-        assert "Connection closed by server" in str(e)
+        if check_server_ready:
+            assert "Invalid PING response" in str(e)
+        else:
+            assert "Connection closed by server" in str(e)
 
     async def test_ssl_with_invalid_cert(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
