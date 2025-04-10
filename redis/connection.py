@@ -332,6 +332,7 @@ class AbstractConnection(ConnectionInterface):
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
+        check_server_ready: bool = False,
         parser_class=DefaultParser,
         socket_read_size: int = 65536,
         health_check_interval: int = 0,
@@ -408,6 +409,7 @@ class AbstractConnection(ConnectionInterface):
         self.redis_connect_func = redis_connect_func
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self.handshake_metadata = None
+        self.check_server_ready = check_server_ready
         self._sock = None
         self._socket_read_size = socket_read_size
         self._connect_callbacks = []
@@ -571,17 +573,17 @@ class AbstractConnection(ConnectionInterface):
             return
         try:
             if retry_socket_connect:
-                sock = self.retry.call_with_retry(
-                    lambda: self._connect(), lambda error: self.disconnect(error)
+                self.retry.call_with_retry(
+                    lambda: self._connect_check_server_ready(),
+                    lambda error: self.disconnect(error),
                 )
             else:
-                sock = self._connect()
+                self._connect_check_server_ready()
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
         except OSError as e:
             raise ConnectionError(self._error_message(e))
 
-        self._sock = sock
         try:
             if self.redis_connect_func is None:
                 # Use the default on_connect function
@@ -603,8 +605,27 @@ class AbstractConnection(ConnectionInterface):
             if callback:
                 callback(self)
 
+    def _connect_check_server_ready(self):
+        self._connect()
+
+        # Doing handshake since connect and send operations work even when Redis is not ready
+        if self.check_server_ready:
+            try:
+                self.send_command("PING", check_health=False)
+
+                response = str_if_bytes(self._sock.recv(1024))
+                if not (response.startswith("+PONG") or response.startswith("-NOAUTH")):
+                    raise ResponseError(f"Invalid PING response: {response}")
+            except (ConnectionResetError, ResponseError) as err:
+                try:
+                    self._sock.shutdown(socket.SHUT_RDWR)  # ensure a clean close
+                except OSError:
+                    pass
+                self._sock.close()
+                raise ConnectionError(self._error_message(err))
+
     @abstractmethod
-    def _connect(self):
+    def _connect(self) -> None:
         pass
 
     @abstractmethod
@@ -1083,7 +1104,7 @@ class Connection(AbstractConnection):
             pieces.append(("client_name", self.client_name))
         return pieces
 
-    def _connect(self):
+    def _connect(self) -> None:
         "Create a TCP socket connection"
         # we want to mimic what socket.create_connection does to support
         # ipv4/ipv6, but we want to set options prior to calling
@@ -1114,7 +1135,8 @@ class Connection(AbstractConnection):
 
                 # set the socket_timeout now that we're connected
                 sock.settimeout(self.socket_timeout)
-                return sock
+                self._sock = sock
+                return
 
             except OSError as _:
                 err = _
@@ -1427,15 +1449,15 @@ class SSLConnection(Connection):
         self.ssl_ciphers = ssl_ciphers
         super().__init__(**kwargs)
 
-    def _connect(self):
+    def _connect(self) -> None:
         """
         Wrap the socket with SSL support, handling potential errors.
         """
-        sock = super()._connect()
+        super()._connect()
         try:
-            return self._wrap_socket_with_ssl(sock)
+            self._sock = self._wrap_socket_with_ssl(self._sock)
         except (OSError, RedisError):
-            sock.close()
+            self._sock.close()
             raise
 
     def _wrap_socket_with_ssl(self, sock):
@@ -1532,7 +1554,7 @@ class UnixDomainSocketConnection(AbstractConnection):
             pieces.append(("client_name", self.client_name))
         return pieces
 
-    def _connect(self):
+    def _connect(self) -> None:
         "Create a Unix domain socket connection"
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(self.socket_connect_timeout)
@@ -1547,7 +1569,7 @@ class UnixDomainSocketConnection(AbstractConnection):
             sock.close()
             raise
         sock.settimeout(self.socket_timeout)
-        return sock
+        self._sock = sock
 
     def _host_error(self):
         return self.path
