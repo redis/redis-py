@@ -43,19 +43,32 @@ def parse_to_list(response):
     """Optimistically parse the response to a list."""
     res = []
 
+    special_values = {"infinity", "nan", "-infinity"}
+
     if response is None:
         return res
 
     for item in response:
+        if item is None:
+            res.append(None)
+            continue
         try:
-            res.append(int(item))
-        except ValueError:
-            try:
-                res.append(float(item))
-            except ValueError:
-                res.append(nativestr(item))
+            item_str = nativestr(item)
         except TypeError:
             res.append(None)
+            continue
+
+        if isinstance(item_str, str) and item_str.lower() in special_values:
+            res.append(item_str)  # Keep as string
+        else:
+            try:
+                res.append(int(item))
+            except ValueError:
+                try:
+                    res.append(float(item))
+                except ValueError:
+                    res.append(item_str)
+
     return res
 
 
