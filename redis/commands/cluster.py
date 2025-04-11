@@ -16,6 +16,7 @@ from typing import (
 
 from redis.crc import key_slot
 from redis.exceptions import RedisClusterException, RedisError
+from redis.load_balancer import LoadBalancingStrategy
 from redis.typing import (
     AnyKeyT,
     ClusterCommandsProtocol,
@@ -124,7 +125,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         return slots_to_pairs
 
     def _execute_pipeline_by_slot(
-        self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
+        self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]], *, load_balancing_strategy: Optional["LoadBalancingStrategy"] = None
     ) -> List[Any]:
         read_from_replicas = self.read_from_replicas and command in READ_COMMANDS
         pipe = self.pipeline()
@@ -133,7 +134,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
                 command,
                 *slot_args,
                 target_nodes=[
-                    self.nodes_manager.get_node_from_slot(slot, read_from_replicas)
+                    self.nodes_manager.get_node_from_slot(slot, read_from_replicas, load_balancing_strategy)
                 ],
             )
             for slot, slot_args in slots_to_args.items()
@@ -153,7 +154,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         }
         return [results[key] for key in keys]
 
-    def mget_nonatomic(self, keys: KeysT, *args: KeyT) -> List[Optional[Any]]:
+    def mget_nonatomic(self, keys: KeysT, *args: KeyT, load_balancing_strategy: Optional["LoadBalancingStrategy"] = None) -> List[Optional[Any]]:
         """
         Splits the keys into different slots and then calls MGET
         for the keys of every slot. This operation will not be atomic
@@ -171,7 +172,7 @@ class ClusterMultiKeyCommands(ClusterCommandsProtocol):
         slots_to_keys = self._partition_keys_by_slot(keys)
 
         # Execute commands using a pipeline
-        res = self._execute_pipeline_by_slot("MGET", slots_to_keys)
+        res = self._execute_pipeline_by_slot("MGET", slots_to_keys, load_balancing_strategy=load_balancing_strategy)
 
         # Reorder keys in the order the user provided & return
         return self._reorder_keys_by_command(keys, slots_to_keys, res)
@@ -265,7 +266,7 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
     A class containing commands that handle more than one key
     """
 
-    async def mget_nonatomic(self, keys: KeysT, *args: KeyT) -> List[Optional[Any]]:
+    async def mget_nonatomic(self, keys: KeysT, *args: KeyT, load_balancing_strategy: Optional["LoadBalancingStrategy"] = None) -> List[Optional[Any]]:
         """
         Splits the keys into different slots and then calls MGET
         for the keys of every slot. This operation will not be atomic
@@ -283,7 +284,7 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
         slots_to_keys = self._partition_keys_by_slot(keys)
 
         # Execute commands using a pipeline
-        res = await self._execute_pipeline_by_slot("MGET", slots_to_keys)
+        res = await self._execute_pipeline_by_slot("MGET", slots_to_keys, load_balancing_strategy=load_balancing_strategy)
 
         # Reorder keys in the order the user provided & return
         return self._reorder_keys_by_command(keys, slots_to_keys, res)
@@ -320,7 +321,7 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
         return sum(await self._execute_pipeline_by_slot(command, slots_to_keys))
 
     async def _execute_pipeline_by_slot(
-        self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]]
+        self, command: str, slots_to_args: Mapping[int, Iterable[EncodableT]], *, load_balancing_strategy: Optional["LoadBalancingStrategy"] = None
     ) -> List[Any]:
         if self._initialize:
             await self.initialize()
@@ -331,7 +332,7 @@ class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
                 command,
                 *slot_args,
                 target_nodes=[
-                    self.nodes_manager.get_node_from_slot(slot, read_from_replicas)
+                    self.nodes_manager.get_node_from_slot(slot, read_from_replicas, load_balancing_strategy)
                 ],
             )
             for slot, slot_args in slots_to_args.items()

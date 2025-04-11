@@ -44,8 +44,6 @@ from redis.cluster import (
     REPLICA,
     SLOT_ID,
     AbstractRedisCluster,
-    LoadBalancer,
-    LoadBalancingStrategy,
     block_pipeline_command,
     get_node_name,
     parse_cluster_slots,
@@ -74,6 +72,7 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
+from redis.load_balancer import LoadBalancer, LoadBalancingStrategy
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
     SSL_AVAILABLE,

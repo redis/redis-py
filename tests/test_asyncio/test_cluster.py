@@ -23,7 +23,6 @@ from redis.cluster import (
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
     REPLICA,
-    LoadBalancingStrategy,
     get_node_name,
 )
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
@@ -39,6 +38,7 @@ from redis.exceptions import (
     RedisError,
     ResponseError,
 )
+from redis.load_balancer import LoadBalancingStrategy
 from redis.utils import str_if_bytes
 from tests.conftest import (
     assert_resp_response,
