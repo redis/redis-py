@@ -20,7 +20,6 @@ from redis.cluster import (
     REDIS_CLUSTER_HASH_SLOTS,
     REPLICA,
     ClusterNode,
-    LoadBalancingStrategy,
     NodesManager,
     RedisCluster,
     get_node_name,
@@ -39,6 +38,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.load_balancer import LoadBalancingStrategy
 from redis.retry import Retry
 from redis.utils import str_if_bytes
 from tests.test_pubsub import wait_for_message
