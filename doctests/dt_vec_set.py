@@ -7,11 +7,18 @@ Code samples for Vector set doc pages:
 
 import redis
 
+from redis.commands.vectorset.commands import (
+    QuantizationOptions
+)
+
 r = redis.Redis(decode_responses=True)
 # HIDE_END
 
 # REMOVE_START
-r.delete("points")
+r.delete(
+    "points", "quantSetQ8", "quantSetNoQ",
+    "quantSetBin", "setNotReduced", "setReduced"
+)
 # REMOVE_END
 
 # STEP_START vadd
@@ -208,3 +215,72 @@ assert res28 == 1
 
 assert res30 == ['pt:C', 'pt:B']
 # REMOVE_END
+
+# STEP_START add_quant
+# Import `QuantizationOptions` enum using:
+#
+# from redis.commands.vectorset.commands import (
+#   QuantizationOptions
+# )
+res31 = r.vset().vadd(
+    "quantSetQ8", [1.262185, 1.958231],
+    "quantElement",
+    quantization=QuantizationOptions.Q8
+)
+print(res31)  # >>> 1
+
+res32 = r.vset().vemb("quantSetQ8", "quantElement")
+print(f"Q8: {res32}")
+# >>> Q8: [1.2643694877624512, 1.958230972290039]
+
+res33 = r.vset().vadd(
+    "quantSetNoQ", [1.262185, 1.958231],
+    "quantElement",
+    quantization=QuantizationOptions.NOQUANT
+)
+print(res33)  # >>> 1
+
+res34 = r.vset().vemb("quantSetNoQ", "quantElement")
+print(f"NOQUANT: {res34}")
+# >>> NOQUANT: [1.262184977531433, 1.958230972290039]
+
+res35 = r.vset().vadd(
+    "quantSetBin", [1.262185, 1.958231],
+    "quantElement",
+    quantization=QuantizationOptions.BIN
+)
+print(res35)  # >>> 1
+
+res36 = r.vset().vemb("quantSetBin", "quantElement")
+print(f"BIN: {res36}")
+# >>> BIN: [1, 1]
+# STEP_END
+# REMOVE_START
+assert res31 == 1
+# REMOVE_END
+
+# STEP_START add_reduce
+# Create a list of 300 arbitrary values.
+values = [x / 299 for x in range(300)]
+
+res37 = r.vset().vadd(
+    "setNotReduced",
+    values,
+    "element"
+)
+print(res37)  # >>> 1
+
+res38 = r.vset().vdim("setNotReduced")
+print(res38)  # >>> 300
+
+res39 = r.vset().vadd(
+    "setReduced",
+    values,
+    "element",
+    reduce_dim=100
+)
+print(res39)  # >>> 1
+
+res40 = r.vset().vdim("setReduced")  # >>> 100
+print(res40)
+# STEP_END
