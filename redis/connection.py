@@ -236,6 +236,7 @@ class AbstractConnection(ConnectionInterface):
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
+        check_ready: bool = False,
         parser_class=DefaultParser,
         socket_read_size: int = 65536,
         health_check_interval: int = 0,
@@ -302,6 +303,7 @@ class AbstractConnection(ConnectionInterface):
         self.redis_connect_func = redis_connect_func
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self.handshake_metadata = None
+        self.check_ready = check_ready
         self._sock = None
         self._socket_read_size = socket_read_size
         self.set_parser(parser_class)
@@ -378,12 +380,35 @@ class AbstractConnection(ConnectionInterface):
         "Connects to the Redis server if not already connected"
         self.connect_check_health(check_health=True)
 
+    def _connect_check_ready(self):
+        sock = self._connect()
+
+        # Doing handshake since connect and send operations work even when Redis is not ready
+        if self.check_ready:
+            try:
+                ping_parts = self._command_packer.pack("PING")
+                for part in ping_parts:
+                    sock.sendall(part)
+
+                response = str_if_bytes(sock.recv(1024))
+                if not (response.startswith("+PONG") or response.startswith("-NOAUTH")):
+                    raise ResponseError(f"Invalid PING response: {response}")
+            except (ConnectionResetError, ResponseError) as err:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)  # ensure a clean close
+                except OSError:
+                    pass
+                sock.close()
+                raise ConnectionError(self._error_message(err))
+        return sock
+
     def connect_check_health(self, check_health: bool = True):
         if self._sock:
             return
         try:
             sock = self.retry.call_with_retry(
-                lambda: self._connect(), lambda error: self.disconnect(error)
+                lambda: self._connect_check_ready(),
+                lambda error: self.disconnect(error),
             )
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")

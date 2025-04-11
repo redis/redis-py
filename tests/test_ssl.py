@@ -41,14 +41,19 @@ class TestSSL:
         assert r.ping()
         r.close()
 
-    def test_ssl_connection_without_ssl(self, request):
+    @pytest.mark.parametrize("check_ready", [True, False])
+    def test_ssl_connection_without_ssl(self, request, check_ready):
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
-        r = redis.Redis(host=p[0], port=p[1], ssl=False)
+        r = redis.Redis(host=p[0], port=p[1], ssl=False, check_ready=check_ready)
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
-        assert "Connection closed by server" in str(e)
+
+        if check_ready:
+            assert "Invalid PING response" in str(e)
+        else:
+            assert "Connection closed by server" in str(e)
         r.close()
 
     def test_validating_self_signed_certificate(self, request):

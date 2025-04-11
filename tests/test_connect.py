@@ -2,17 +2,19 @@ import re
 import socket
 import socketserver
 import ssl
+import struct
 import threading
 
 import pytest
 from redis.connection import Connection, SSLConnection, UnixDomainSocketConnection
-from redis.exceptions import RedisError
+from redis.exceptions import RedisError, ConnectionError
 
 from .ssl_utils import CertificateType, get_tls_certificates
 
 _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"
 _SUCCESS_RESP = b"+OK" + _CMD_SEP
+_PONG_RESP = b"+PONG" + _CMD_SEP
 _ERROR_RESP = b"-ERR" + _CMD_SEP
 _SUPPORTED_CMDS = {f"CLIENT SETNAME {_CLIENT_NAME}": _SUCCESS_RESP}
 
@@ -29,16 +31,30 @@ def uds_address(tmpdir):
     return tmpdir / "uds.sock"
 
 
-def test_tcp_connect(tcp_address):
+@pytest.mark.parametrize(
+    "check_ready", [True, False], ids=["check_ready", "no_check_ready"]
+)
+def test_tcp_connect(tcp_address, check_ready):
     host, port = tcp_address
-    conn = Connection(host=host, port=port, client_name=_CLIENT_NAME, socket_timeout=10)
-    _assert_connect(conn, tcp_address)
+    conn = Connection(
+        host=host,
+        port=port,
+        client_name=_CLIENT_NAME,
+        socket_timeout=10,
+        check_ready=check_ready,
+    )
+    _assert_connect(conn, tcp_address, check_ready)
 
 
-def test_uds_connect(uds_address):
+@pytest.mark.parametrize(
+    "check_ready", [True, False], ids=["check_ready", "no_check_ready"]
+)
+def test_uds_connect(uds_address, check_ready):
     path = str(uds_address)
-    conn = UnixDomainSocketConnection(path, client_name=_CLIENT_NAME, socket_timeout=10)
-    _assert_connect(conn, path)
+    conn = UnixDomainSocketConnection(
+        path, client_name=_CLIENT_NAME, socket_timeout=10, check_ready=check_ready
+    )
+    _assert_connect(conn, path, check_ready)
 
 
 @pytest.mark.ssl
@@ -52,7 +68,10 @@ def test_uds_connect(uds_address):
         ),
     ],
 )
-def test_tcp_ssl_connect(tcp_address, ssl_min_version):
+@pytest.mark.parametrize(
+    "check_ready", [True, False], ids=["check_ready", "no_check_ready"]
+)
+def test_tcp_ssl_connect(tcp_address, ssl_min_version, check_ready):
     host, port = tcp_address
     server_certs = get_tls_certificates(cert_type=CertificateType.server)
     conn = SSLConnection(
@@ -62,9 +81,14 @@ def test_tcp_ssl_connect(tcp_address, ssl_min_version):
         ssl_ca_certs=server_certs.ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl_min_version,
+        check_ready=check_ready,
     )
     _assert_connect(
-        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+        conn,
+        tcp_address,
+        check_ready,
+        certfile=server_certs.certfile,
+        keyfile=server_certs.keyfile,
     )
 
 
@@ -136,13 +160,83 @@ def test_tcp_ssl_version_mismatch(tcp_address):
         )
 
 
-def _assert_connect(conn, server_address, **tcp_kw):
+def test_connect_check_ready_connection_reset(tcp_address):
+    host, port = tcp_address
+    conn = Connection(
+        host=host,
+        port=port,
+        client_name=_CLIENT_NAME,
+        socket_timeout=10,
+        check_ready=True,
+    )
+
+    class _CloseConnectionRequestHandler(socketserver.BaseRequestHandler):
+        def handle(self):
+            data = self.request.recv(1024)
+            assert "PING" in data.decode()
+
+            # Configure socket for abrupt close (RST packet)
+            linger_struct = struct.pack("ii", 1, 0)
+            self.request.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, linger_struct)
+
+            # Close immediately to trigger ConnectionResetError on client side
+            self.request.close()
+
+    server = _RedisTCPServer(
+        (host, port), _CloseConnectionRequestHandler, check_ready=True
+    )
+    with server as aserver:
+        t = threading.Thread(target=aserver.serve_forever)
+        t.start()
+        try:
+            aserver.wait_online()
+            with pytest.raises(ConnectionError, match="Connection reset by peer"):
+                conn.connect()
+        finally:
+            aserver.stop()
+            t.join(timeout=5)
+
+
+def test_connect_check_ready_invalid_ping(tcp_address):
+    host, port = tcp_address
+    conn = Connection(
+        host=host,
+        port=port,
+        client_name=_CLIENT_NAME,
+        socket_timeout=10,
+        check_ready=True,
+    )
+
+    class _InvalidPingRequestHandler(socketserver.BaseRequestHandler):
+        def handle(self):
+            data = self.request.recv(1024)
+            assert "PING" in data.decode()
+            self.request.sendall(_ERROR_RESP)
+
+    server = _RedisTCPServer((host, port), _InvalidPingRequestHandler, check_ready=True)
+    with server as aserver:
+        t = threading.Thread(target=aserver.serve_forever)
+        t.start()
+        try:
+            aserver.wait_online()
+            with pytest.raises(ConnectionError, match="Invalid PING response"):
+                conn.connect()
+        finally:
+            aserver.stop()
+            t.join(timeout=5)
+
+
+def _assert_connect(conn, server_address, check_ready=False, **tcp_kw):
     if isinstance(server_address, str):
         if not _RedisUDSServer:
             pytest.skip("Unix domain sockets are not supported on this platform")
-        server = _RedisUDSServer(server_address, _RedisRequestHandler)
+        server = _RedisUDSServer(
+            server_address, _RedisRequestHandler, check_ready=check_ready
+        )
     else:
-        server = _RedisTCPServer(server_address, _RedisRequestHandler, **tcp_kw)
+        server = _RedisTCPServer(
+            server_address, _RedisRequestHandler, check_ready=check_ready, **tcp_kw
+        )
     with server as aserver:
         t = threading.Thread(target=aserver.serve_forever)
         t.start()
@@ -163,6 +257,7 @@ class _RedisTCPServer(socketserver.TCPServer):
         keyfile=None,
         minimum_ssl_version=ssl.TLSVersion.TLSv1_2,
         maximum_ssl_version=ssl.TLSVersion.TLSv1_3,
+        check_ready=False,
         **kw,
     ) -> None:
         self._ready_event = threading.Event()
@@ -171,6 +266,7 @@ class _RedisTCPServer(socketserver.TCPServer):
         self._keyfile = keyfile
         self._minimum_ssl_version = minimum_ssl_version
         self._maximum_ssl_version = maximum_ssl_version
+        self.check_ready = check_ready
         super().__init__(*args, **kw)
 
     def service_actions(self):
@@ -201,9 +297,10 @@ class _RedisTCPServer(socketserver.TCPServer):
 if hasattr(socketserver, "UnixStreamServer"):
 
     class _RedisUDSServer(socketserver.UnixStreamServer):
-        def __init__(self, *args, **kw) -> None:
+        def __init__(self, *args, check_ready=False, **kw) -> None:
             self._ready_event = threading.Event()
             self._stop_requested = False
+            self.check_ready = check_ready
             super().__init__(*args, **kw)
 
         def service_actions(self):
@@ -223,13 +320,7 @@ else:
     _RedisUDSServer = None
 
 
-class _RedisRequestHandler(socketserver.StreamRequestHandler):
-    def setup(self):
-        pass
-
-    def finish(self):
-        pass
-
+class _RedisRequestHandler(socketserver.BaseRequestHandler):
     def handle(self):
         buffer = b""
         command = None
@@ -265,6 +356,9 @@ class _RedisRequestHandler(socketserver.StreamRequestHandler):
                     continue
 
                 command = " ".join(command)
-                resp = _SUPPORTED_CMDS.get(command, _ERROR_RESP)
+                if self.server.check_ready and command == "PING":
+                    resp = _PONG_RESP
+                else:
+                    resp = _SUPPORTED_CMDS.get(command, _ERROR_RESP)
                 self.request.sendall(resp)
                 command = None
