@@ -15,7 +15,10 @@ r = redis.Redis(decode_responses=True)
 # HIDE_END
 
 # REMOVE_START
-r.delete("points", "quantSetQ8", "quantSetNoQ", "quantSetBin")
+r.delete(
+    "points", "quantSetQ8", "quantSetNoQ",
+    "quantSetBin", "setNotReduced", "setReduced"
+)
 # REMOVE_END
 
 # STEP_START vadd
@@ -255,3 +258,29 @@ print(f"BIN: {res36}")
 # REMOVE_START
 assert res31 == 1
 # REMOVE_END
+
+# STEP_START add_reduce
+# Create a list of 300 arbitrary values.
+values = [x / 299 for x in range(300)]
+
+res37 = r.vset().vadd(
+    "setNotReduced",
+    values,
+    "element"
+)
+print(res37)  # >>> 1
+
+res38 = r.vset().vdim("setNotReduced")
+print(res38)  # >>> 300
+
+res39 = r.vset().vadd(
+    "setReduced",
+    values,
+    "element",
+    reduce_dim=100
+)
+print(res39)  # >>> 1
+
+res40 = r.vset().vdim("setReduced")  # >>> 100
+print(res40)
+# STEP_END
