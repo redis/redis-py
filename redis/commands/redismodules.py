@@ -72,15 +72,13 @@ class RedisModuleCommands:
         tdigest = TDigestBloom(client=self)
         return tdigest
 
-    def graph(self, index_name="idx"):
-        """Access the graph namespace, providing support for
-        redis graph data.
-        """
+    def vset(self):
+        """Access the VectorSet commands namespace."""
 
-        from .graph import Graph
+        from .vectorset import VectorSet
 
-        g = Graph(client=self, name=index_name)
-        return g
+        vset = VectorSet(client=self)
+        return vset
 
 
 class AsyncRedisModuleCommands(RedisModuleCommands):
@@ -91,13 +89,3 @@ class AsyncRedisModuleCommands(RedisModuleCommands):
 
         s = AsyncSearch(client=self, index_name=index_name)
         return s
-
-    def graph(self, index_name="idx"):
-        """Access the graph namespace, providing support for
-        redis graph data.
-        """
-
-        from .graph import AsyncGraph
-
-        g = AsyncGraph(client=self, name=index_name)
-        return g
