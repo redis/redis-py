@@ -378,13 +378,18 @@ class AbstractConnection(ConnectionInterface):
         "Connects to the Redis server if not already connected"
         self.connect_check_health(check_health=True)
 
-    def connect_check_health(self, check_health: bool = True):
+    def connect_check_health(
+        self, check_health: bool = True, retry_socket_connect: bool = True
+    ):
         if self._sock:
             return
         try:
-            sock = self.retry.call_with_retry(
-                lambda: self._connect(), lambda error: self.disconnect(error)
-            )
+            if retry_socket_connect:
+                sock = self.retry.call_with_retry(
+                    lambda: self._connect(), lambda error: self.disconnect(error)
+                )
+            else:
+                sock = self._connect()
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
         except OSError as e:
