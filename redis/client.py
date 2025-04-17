@@ -2,7 +2,6 @@ import copy
 import re
 import threading
 import time
-import warnings
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
@@ -203,8 +202,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         unix_socket_path: Optional[str] = None,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
-        charset: Optional[str] = None,
-        errors: Optional[str] = None,
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
         retry_on_error: Optional[List[Type[Exception]]] = None,
@@ -256,20 +253,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         else:
             self._event_dispatcher = event_dispatcher
         if not connection_pool:
-            if charset is not None:
-                warnings.warn(
-                    DeprecationWarning(
-                        '"charset" is deprecated. Use "encoding" instead'
-                    )
-                )
-                encoding = charset
-            if errors is not None:
-                warnings.warn(
-                    DeprecationWarning(
-                        '"errors" is deprecated. Use "encoding_errors" instead'
-                    )
-                )
-                encoding_errors = errors
             if not retry_on_error:
                 retry_on_error = []
             if retry_on_timeout is True:
