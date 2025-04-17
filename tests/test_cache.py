@@ -2,6 +2,7 @@ import time
 
 import pytest
 import redis
+
 from redis.cache import (
     CacheConfig,
     CacheEntry,
@@ -636,6 +637,7 @@ class TestSentinelCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
+        time.sleep(0.1)
         # Retrieves a new value from server and cache_data it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
