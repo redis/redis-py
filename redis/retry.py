@@ -9,6 +9,12 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from redis.backoff import AbstractBackoff
 
+DEFAULT_SUPPORTED_EXCEPTIONS = (
+    ConnectionError,
+    TimeoutError,
+    socket.timeout,
+)
+
 
 class Retry:
     """Retry a specific number of times after a failure"""
@@ -17,11 +23,7 @@ class Retry:
         self,
         backoff: "AbstractBackoff",
         retries: int,
-        supported_errors: Tuple[Type[Exception], ...] = (
-            ConnectionError,
-            TimeoutError,
-            socket.timeout,
-        ),
+        supported_errors: Tuple[Type[Exception], ...] = DEFAULT_SUPPORTED_EXCEPTIONS,
     ):
         """
         Initialize a `Retry` object with a `Backoff` object
@@ -43,6 +45,12 @@ class Retry:
         self._supported_errors = tuple(
             set(self._supported_errors + tuple(specified_errors))
         )
+
+    def update_retries(self, retries: int) -> None:
+        """
+        Updates the retries count.
+        """
+        self._retries = retries
 
     def call_with_retry(
         self,

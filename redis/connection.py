@@ -1611,7 +1611,7 @@ class ConnectionPool:
         """Close the pool, disconnecting all connections"""
         self.disconnect()
 
-    def set_retry(self, retry: "Retry") -> None:
+    def set_retry(self, retry: Retry) -> None:
         self.connection_kwargs.update({"retry": retry})
         for conn in self._available_connections:
             conn.retry = retry

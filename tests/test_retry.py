@@ -159,7 +159,7 @@ class TestRedisClientRetry:
 
     def test_client_retry_on_error_different_error_raised(self, request):
         with patch.object(Redis, "parse_response") as parse_response:
-            parse_response.side_effect = TimeoutError()
+            parse_response.side_effect = OSError()
             retries = 3
             r = _get_client(
                 Redis,
@@ -167,7 +167,7 @@ class TestRedisClientRetry:
                 retry_on_error=[ReadOnlyError],
                 retry=Retry(NoBackoff(), retries),
             )
-            with pytest.raises(TimeoutError):
+            with pytest.raises(OSError):
                 try:
                     r.get("foo")
                 finally:

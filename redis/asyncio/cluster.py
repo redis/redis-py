@@ -759,7 +759,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                         )
                     return dict(zip(keys, values))
             except Exception as e:
-                if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
+                if (
+                    retry_attempts > 0
+                    and type(e) in self.__class__.CONNECTION_ERRORS_FOR_RETRY
+                ):
                     # The nodes and slots cache were should be reinitialized.
                     # Try again with the new cluster setup.
                     retry_attempts -= 1
@@ -1566,7 +1569,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                         allow_redirections=allow_redirections,
                     )
 
-                except self.__class__.ERRORS_ALLOW_RETRY as e:
+                except self.__class__.CONNECTION_ERRORS_FOR_RETRY as e:
                     if retry_attempts > 0:
                         # Try again with the new cluster setup. All other errors
                         # should be raised.
@@ -1657,7 +1660,10 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                     for cmd in default_node[1]:
                         # Check if it has a command that failed with a relevant
                         # exception
-                        if type(cmd.result) in self.__class__.ERRORS_ALLOW_RETRY:
+                        if (
+                            type(cmd.result)
+                            in self.__class__.CONNECTION_ERRORS_FOR_RETRY
+                        ):
                             client.replace_default_node()
                             break
 
