@@ -142,7 +142,6 @@ REPLICA = "replica"
 SLOT_ID = "slot-id"
 
 REDIS_ALLOWED_KEYS = (
-    "charset",
     "connection_class",
     "connection_pool",
     "connection_pool_class",
@@ -152,7 +151,6 @@ REDIS_ALLOWED_KEYS = (
     "decode_responses",
     "encoding",
     "encoding_errors",
-    "errors",
     "host",
     "lib_name",
     "lib_version",
