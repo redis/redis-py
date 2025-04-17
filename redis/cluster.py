@@ -5,11 +5,11 @@ import threading
 import time
 from collections import OrderedDict
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.helpers import parse_scan
-from redis.backoff import default_backoff
+from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
 from redis.client import CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
@@ -38,7 +38,7 @@ from redis.exceptions import (
     TryAgainError,
 )
 from redis.lock import Lock
-from redis.retry import Retry
+from redis.retry import DEFAULT_SUPPORTED_EXCEPTIONS, Retry
 from redis.utils import (
     HIREDIS_AVAILABLE,
     deprecated_args,
@@ -412,7 +412,9 @@ class AbstractRedisCluster:
         list_keys_to_dict(["SCRIPT FLUSH"], lambda command, res: all(res.values())),
     )
 
-    ERRORS_ALLOW_RETRY = (ConnectionError, TimeoutError, ClusterDownError)
+    CONNECTION_ERRORS_FOR_RETRY = tuple(
+        set(DEFAULT_SUPPORTED_EXCEPTIONS + (ClusterDownError,))
+    )
 
     def replace_default_node(self, target_node: "ClusterNode" = None) -> None:
         """Replace the default cluster node.
@@ -433,7 +435,7 @@ class AbstractRedisCluster:
                 # Choose a primary if the cluster contains different primaries
                 self.nodes_manager.default_node = random.choice(primaries)
             else:
-                # Otherwise, hoose a primary if the cluster contains different primaries
+                # Otherwise, choose a primary if the cluster contains different primaries
                 replicas = [node for node in self.get_replicas() if node != curr_node]
                 if replicas:
                     self.nodes_manager.default_node = random.choice(replicas)
@@ -489,13 +491,23 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         reason="Please configure the 'load_balancing_strategy' instead",
         version="5.0.3",
     )
+    @deprecated_args(
+        args_to_warn=["cluster_error_retry_attempts"],
+        reason="Not needed anymore, the config will be part of the Retry object",
+        version="7.0.0",
+    )
     def __init__(
         self,
         host: Optional[str] = None,
         port: int = 6379,
         startup_nodes: Optional[List["ClusterNode"]] = None,
         cluster_error_retry_attempts: int = 3,
-        retry: Optional["Retry"] = None,
+        retry_on_error: Optional[List[Type[Exception]]] = None,
+        retry: Retry = Retry(
+            backoff=ExponentialWithJitterBackoff(base=0.1, cap=5),
+            retries=3,
+            supported_errors=AbstractRedisCluster.CONNECTION_ERRORS_FOR_RETRY,
+        ),
         require_full_coverage: bool = False,
         reinitialize_steps: int = 5,
         read_from_replicas: bool = False,
@@ -546,9 +558,20 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
              If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
              specific IP addresses, it is best to set it to false.
         :param cluster_error_retry_attempts:
+            @deprecated - please use retry object configuration instead
              Number of times to retry before raising an error when
              :class:`~.TimeoutError` or :class:`~.ConnectionError` or
              :class:`~.ClusterDownError` are encountered
+        :param retry_on_error:
+            A list of exceptions that should be retried - additional to the ones
+            configured in the 'retry'.
+        :param retry:
+            A Retry object that will be used to retry the command.
+            By default, the following
+            exceptions are retried:
+            - :class:`~.TimeoutError`
+            - :class:`~.ConnectionError`
+            - :class:`~.ClusterDownError`
         :param reinitialize_steps:
             Specifies the number of MOVED errors that need to occur before
             reinitializing the whole cluster topology. If a MOVED error occurs
@@ -623,11 +646,13 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.user_on_connect_func = kwargs.pop("redis_connect_func", None)
         kwargs.update({"redis_connect_func": self.on_connect})
         kwargs = cleanup_kwargs(**kwargs)
-        if retry:
-            self.retry = retry
-            kwargs.update({"retry": self.retry})
-        else:
-            kwargs.update({"retry": Retry(default_backoff(), 0)})
+
+        retry.update_retries(cluster_error_retry_attempts)
+        if retry_on_error:
+            retry.update_supported_errors(retry_on_error)
+
+        self.retry = retry
+        self.default_node_needs_changing = False
 
         self.encoder = Encoder(
             kwargs.get("encoding", "utf-8"),
@@ -769,13 +794,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.nodes_manager.default_node = node
         return True
 
-    def get_retry(self) -> Optional["Retry"]:
+    def get_retry(self) -> Retry:
         return self.retry
 
-    def set_retry(self, retry: "Retry") -> None:
+    def set_retry(self, retry: Retry) -> None:
         self.retry = retry
-        for node in self.get_nodes():
-            node.redis_connection.set_retry(retry)
 
     def monitor(self, target_node=None):
         """
@@ -823,6 +846,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             result_callbacks=self.result_callbacks,
             cluster_response_callbacks=self.cluster_response_callbacks,
             cluster_error_retry_attempts=self.cluster_error_retry_attempts,
+            retry=self.retry,
             read_from_replicas=self.read_from_replicas,
             load_balancing_strategy=self.load_balancing_strategy,
             reinitialize_steps=self.reinitialize_steps,
@@ -1081,81 +1105,103 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         return nodes
 
     def execute_command(self, *args, **kwargs):
-        return self._internal_execute_command(*args, **kwargs)
+        target_nodes_specified = False
+        target_nodes = []
+        # the target_nodes should be extracted here, but not removed from the kwargs
+        # since we will need to extract them later in case they are defined as node flags
+        passed_targets = kwargs.get("target_nodes", None)
+        if passed_targets is not None and not self._is_nodes_flag(passed_targets):
+            target_nodes = self._parse_target_nodes(passed_targets)
+            target_nodes_specified = True
 
-    def _internal_execute_command(self, *args, **kwargs):
+        res = {}
+        if target_nodes_specified:
+            # when target_nodes are provided we need to remove them from
+            # the kwargs prior command execution
+            kwargs.pop("target_nodes", None)
+            # when specific target node is provided we don't retry on connection errors
+            # TODO check what should we do for moved and ask errors
+            for node in target_nodes:
+                res[node.name] = self._execute_command(node, *args, **kwargs)
+        else:
+            res = self.retry.call_with_retry(
+                lambda: self._retryable_execute_command(*args, **kwargs),
+                lambda error: self._retry_error_handling(error),
+            )
+
+        # remove the target_nodes from kwargs
+        # since it is not needed anymore
+        # and we don't want to pass it to the response callback
+        # or the result callback
+        kwargs.pop("target_nodes", None)
+        # Return the processed result
+        return self._process_result(args[0], res, **kwargs)
+
+    def _retry_error_handling(self, error: Exception):
         """
-        Wrapper for ERRORS_ALLOW_RETRY error handling.
+        Handle errors that are raised during command execution.
+        This method is called when a command fails and should specific
+        cluster behavior.
+        """
+        if isinstance(error, ClusterDownError):
+            # ClusterDownError can occur during a failover and to get
+            # self-healed, we will try to reinitialize the cluster layout
+            # and retry executing the command
+            time.sleep(0.25)
+            self.nodes_manager.initialize()
+        elif isinstance(error, ConnectionError):
+            self.nodes_manager.initialize()
+            if self.default_node_needs_changing:
+                # If the default node is not reachable, we need to change it
+                self.replace_default_node()
 
-        It will try the number of times specified by the config option
-        "self.cluster_error_retry_attempts" which defaults to 3 unless manually
-        configured.
-
-        If it reaches the number of times, the command will raise the exception
-
+    def _retryable_execute_command(self, *args, **kwargs):
+        """
         Key argument :target_nodes: can be passed with the following types:
             nodes_flag: PRIMARIES, REPLICAS, ALL_NODES, RANDOM
             ClusterNode
             list<ClusterNode>
             dict<Any, ClusterNode>
         """
-        target_nodes_specified = False
-        is_default_node = False
-        target_nodes = None
+        res = {}
         passed_targets = kwargs.pop("target_nodes", None)
-        if passed_targets is not None and not self._is_nodes_flag(passed_targets):
-            target_nodes = self._parse_target_nodes(passed_targets)
-            target_nodes_specified = True
-        # If an error that allows retrying was thrown, the nodes and slots
-        # cache were reinitialized. We will retry executing the command with
-        # the updated cluster setup only when the target nodes can be
-        # determined again with the new cache tables. Therefore, when target
-        # nodes were passed to this function, we cannot retry the command
-        # execution since the nodes may not be valid anymore after the tables
-        # were reinitialized. So in case of passed target nodes,
-        # retry_attempts will be set to 0.
-        retry_attempts = (
-            0 if target_nodes_specified else self.cluster_error_retry_attempts
-        )
-        # Add one for the first execution
-        execute_attempts = 1 + retry_attempts
-        for _ in range(execute_attempts):
-            try:
-                res = {}
-                if not target_nodes_specified:
-                    # Determine the nodes to execute the command on
-                    target_nodes = self._determine_nodes(
-                        *args, **kwargs, nodes_flag=passed_targets
-                    )
-                    if not target_nodes:
-                        raise RedisClusterException(
-                            f"No targets were found to execute {args} command on"
-                        )
-                    if (
-                        len(target_nodes) == 1
-                        and target_nodes[0] == self.get_default_node()
-                    ):
-                        is_default_node = True
-                for node in target_nodes:
-                    res[node.name] = self._execute_command(node, *args, **kwargs)
-                # Return the processed result
-                return self._process_result(args[0], res, **kwargs)
-            except Exception as e:
-                if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
-                    if is_default_node:
-                        # Replace the default cluster node
-                        self.replace_default_node()
-                    # The nodes and slots cache were reinitialized.
-                    # Try again with the new cluster setup.
-                    retry_attempts -= 1
-                    continue
-                else:
-                    # raise the exception
-                    raise e
+        target_nodes = []
+        try:
+            # Determine the nodes to execute the command on
+            target_nodes = self._determine_nodes(
+                *args, **kwargs, nodes_flag=passed_targets
+            )
+            if not target_nodes:
+                raise RedisClusterException(
+                    f"No targets were found to execute {args} command on"
+                )
+
+            for node in target_nodes:
+                res[node.name] = self._execute_command(node, *args, **kwargs)
+
+            # Return the collected results
+            return res
+        except Exception:
+            if len(target_nodes) == 1 and target_nodes[0] == self.get_default_node():
+                # Set a flag that we need to replace the default node in error handler
+                # after cluster is reinitialized
+                self.default_node_needs_changing = True
+            raise
 
     def _execute_command(self, target_node, *args, **kwargs):
         """
-        Send a command to a node in the cluster
+        Send a command to a node in the cluster.
+        In this method certain errors are handled and retried.
+        The method does internal retries on the following errors:
+        - MovedError
+        - AskError
+        - TryAgainError
+        The method is called by the retry object.
+
+        :param target_node: The node to send the command to
+        :param args: The command to send
+        :param kwargs: The command's arguments
+        :return: The response from the server
         """
         command = args[0]
         redis_node = None
@@ -1201,10 +1247,13 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     )
                 return response
             except AuthenticationError:
+                # We need to raise this error without disconnecting the connection
                 raise
-            except (ConnectionError, TimeoutError) as e:
-                # Connection retries are being handled in the node's
-                # Retry object.
+            except (ConnectionError, TimeoutError):
+                # Connection retries are handles in the cluster's retry object.
+                # Here we need to handle some operations related to target_node
+                # and connection which are not available in the error handler.
+
                 # ConnectionError can also be raised if we couldn't get a
                 # connection from the pool before timing out, so check that
                 # this is an actual connection before attempting to disconnect.
@@ -1213,11 +1262,14 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
 
                 # Remove the failed node from the startup nodes before we try
                 # to reinitialize the cluster
+                # TODO Discuss if the startup node should be removed from here
+                # when we are not using dynamic_startup_nodes
+                # with RedisEnterprise the startup node should not be removed
+                # from the startup nodes list.
                 self.nodes_manager.startup_nodes.pop(target_node.name, None)
                 # Reset the cluster node's connection
                 target_node.redis_connection = None
-                self.nodes_manager.initialize()
-                raise e
+                raise
             except MovedError as e:
                 # First, we will try to patch the slots/nodes cache with the
                 # redirected node output and try again. If MovedError exceeds
@@ -1241,19 +1293,13 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             except AskError as e:
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
-            except ClusterDownError as e:
-                # ClusterDownError can occur during a failover and to get
-                # self-healed, we will try to reinitialize the cluster layout
-                # and retry executing the command
-                time.sleep(0.25)
-                self.nodes_manager.initialize()
-                raise e
             except ResponseError:
+                # We need to raise this error without disconnecting the connection
                 raise
-            except Exception as e:
+            except Exception:
                 if connection:
                     connection.disconnect()
-                raise e
+                raise
             finally:
                 if connection is not None:
                     redis_node.connection_pool.release(connection)
@@ -1324,8 +1370,12 @@ class ClusterNode:
         return isinstance(obj, ClusterNode) and obj.name == self.name
 
     def __del__(self):
-        if self.redis_connection is not None:
-            self.redis_connection.close()
+        try:
+            if self.redis_connection is not None:
+                self.redis_connection.close()
+        except Exception:
+            # Ignore errors when closing the connection
+            pass
 
 
 class LoadBalancingStrategy(Enum):
@@ -1576,17 +1626,26 @@ class NodesManager:
         )
 
     def create_redis_node(self, host, port, **kwargs):
+        # We are configuring the connection pool to not retry connections
+        # to avoid retrying connections to nodes that are not reachable
+        # and to avoid blocking the connection pool.
+        # The retries will be handled on cluster client level
+        # where we will have proper handling of the cluster topology
+        retry = Retry(backoff=NoBackoff(), retries=0)
+
         if self.from_url:
             # Create a redis node with a costumed connection pool
             kwargs.update({"host": host})
             kwargs.update({"port": port})
             kwargs.update({"cache": self._cache})
+            kwargs.update({"retry": retry})
             r = Redis(connection_pool=self.connection_pool_class(**kwargs))
         else:
             r = Redis(
                 host=host,
                 port=port,
                 cache=self._cache,
+                retry=retry,
                 **kwargs,
             )
         return r
@@ -2040,6 +2099,11 @@ class ClusterPipeline(RedisCluster):
         read_from_replicas: bool = False,
         load_balancing_strategy: Optional[LoadBalancingStrategy] = None,
         cluster_error_retry_attempts: int = 3,
+        retry: Retry = Retry(
+            backoff=ExponentialWithJitterBackoff(base=0.1, cap=5),
+            retries=3,
+            supported_errors=AbstractRedisCluster.CONNECTION_ERRORS_FOR_RETRY,
+        ),
         reinitialize_steps: int = 5,
         lock=None,
         **kwargs,
@@ -2058,6 +2122,8 @@ class ClusterPipeline(RedisCluster):
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.cluster_response_callbacks = cluster_response_callbacks
         self.cluster_error_retry_attempts = cluster_error_retry_attempts
+        retry.update_retries(cluster_error_retry_attempts)
+        self.retry = retry
         self.reinitialize_counter = 0
         self.reinitialize_steps = reinitialize_steps
         self.encoder = Encoder(
@@ -2201,7 +2267,7 @@ class ClusterPipeline(RedisCluster):
                     raise_on_error=raise_on_error,
                     allow_redirections=allow_redirections,
                 )
-            except RedisCluster.ERRORS_ALLOW_RETRY as e:
+            except RedisCluster.CONNECTION_ERRORS_FOR_RETRY as e:
                 if retry_attempts > 0:
                     # Try again with the new cluster setup. All other errors
                     # should be raised.

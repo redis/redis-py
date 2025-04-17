@@ -818,7 +818,7 @@ class TestRedisClusterObj:
         for node in r.get_primaries():
             assert node in nodes
 
-    @pytest.mark.parametrize("error", RedisCluster.ERRORS_ALLOW_RETRY)
+    @pytest.mark.parametrize("error", RedisCluster.CONNECTION_ERRORS_FOR_RETRY)
     async def test_cluster_down_overreaches_retry_attempts(
         self,
         error: Union[Type[TimeoutError], Type[ClusterDownError], Type[ConnectionError]],

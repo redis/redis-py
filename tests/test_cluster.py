@@ -14,7 +14,12 @@ import pytest
 import redis
 from redis import Redis
 from redis._parsers import CommandsParser
-from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
+from redis.backoff import (
+    ExponentialBackoff,
+    ExponentialWithJitterBackoff,
+    NoBackoff,
+    default_backoff,
+)
 from redis.cluster import (
     PRIMARY,
     REDIS_CLUSTER_HASH_SLOTS,
@@ -161,6 +166,7 @@ def get_mocked_redis_client(
     nodes and slots setup to remove the problem of different IP addresses
     on different installations and machines.
     """
+
     cluster_slots = kwargs.pop("cluster_slots", default_cluster_slots)
     coverage_res = kwargs.pop("coverage_result", "yes")
     cluster_enabled = kwargs.pop("cluster_enabled", True)
@@ -741,7 +747,7 @@ class TestRedisClusterObj:
         for node in r.get_primaries():
             assert node in nodes
 
-    @pytest.mark.parametrize("error", RedisCluster.ERRORS_ALLOW_RETRY)
+    @pytest.mark.parametrize("error", RedisCluster.CONNECTION_ERRORS_FOR_RETRY)
     def test_cluster_down_overreaches_retry_attempts(self, error):
         """
         When error that allows retry is thrown, test that we retry executing
@@ -751,7 +757,6 @@ class TestRedisClusterObj:
         with patch.object(RedisCluster, "_execute_command") as execute_command:
 
             def raise_error(target_node, *args, **kwargs):
-                execute_command.failed_calls += 1
                 raise error("mocked error")
 
             execute_command.side_effect = raise_error
@@ -759,8 +764,11 @@ class TestRedisClusterObj:
             rc = get_mocked_redis_client(host=default_host, port=default_port)
 
             with pytest.raises(error):
-                rc.get("bar")
-                assert execute_command.failed_calls == rc.cluster_error_retry_attempts
+                with patch.object(NodesManager, "initialize") as initilize_cluster:
+                    initilize_cluster.return_value = default_cluster_slots
+                    rc.get("bar")
+
+            assert execute_command.call_count == rc.retry._retries + 1
 
     def test_user_on_connect_function(self, request):
         """
@@ -863,7 +871,7 @@ class TestRedisClusterObj:
 
             def moved_redirect_effect(connection, *args, **options):
                 # raise a timeout for 5 times so we'll need to reinitialize the topology
-                if count.val == 4:
+                if count.val == 2:
                     parse_response.side_effect = real_func
                 count.val += 1
                 raise TimeoutError()
@@ -887,7 +895,7 @@ class TestRedisClusterObj:
         assert r.get_retry()._retries == retry._retries
         assert isinstance(r.get_retry()._backoff, NoBackoff)
         for node in r.get_nodes():
-            assert node.redis_connection.get_retry()._retries == retry._retries
+            assert node.redis_connection.get_retry()._retries == 0
             assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
         rand_node = r.get_random_node()
         existing_conn = rand_node.redis_connection.connection_pool.get_connection()
@@ -897,34 +905,31 @@ class TestRedisClusterObj:
         assert r.get_retry()._retries == new_retry._retries
         assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
         for node in r.get_nodes():
-            assert node.redis_connection.get_retry()._retries == new_retry._retries
-            assert isinstance(
-                node.redis_connection.get_retry()._backoff, ExponentialBackoff
-            )
-        assert existing_conn.retry._retries == new_retry._retries
+            # validate that for each node the retries are disabled
+            # we want the retries to be handled by the cluster
+            assert node.redis_connection.get_retry()._retries == 0
+            assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
+        assert existing_conn.retry._retries == 0
         new_conn = rand_node.redis_connection.connection_pool.get_connection()
-        assert new_conn.retry._retries == new_retry._retries
+        assert new_conn.retry._retries == 0
 
     def test_cluster_retry_object(self, r) -> None:
         # Test default retry
         # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
         host = r.get_default_node().host
 
-        retry = r.get_connection_kwargs().get("retry")
+        retry = r.get_retry()
         assert isinstance(retry, Retry)
-        assert retry._retries == 0
-        assert isinstance(retry._backoff, type(default_backoff()))
+        assert retry._retries == 3
+        assert isinstance(retry._backoff, ExponentialWithJitterBackoff)
         node1 = r.get_node(host, 16379).redis_connection
         node2 = r.get_node(host, 16380).redis_connection
-        assert node1.get_retry()._retries == node2.get_retry()._retries
+        assert node1.get_retry()._retries == 0 and node2.get_retry()._retries == 0
 
         # Test custom retry
         retry = Retry(ExponentialBackoff(10, 5), 5)
         rc_custom_retry = RedisCluster(host, 16379, retry=retry)
-        assert (
-            rc_custom_retry.get_node(host, 16379).redis_connection.get_retry()._retries
-            == retry._retries
-        )
+        assert rc_custom_retry.get_retry()._retries == retry._retries
 
     def test_replace_cluster_node(self, r) -> None:
         prev_default_node = r.get_default_node()
