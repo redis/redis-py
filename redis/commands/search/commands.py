@@ -404,9 +404,7 @@ class SearchCommands:
             doc_id, conn=None, score=score, language=language, replace=replace
         )
 
-    @deprecated_function(
-        version="2.0.0", reason="deprecated since redisearch 2.0"
-    )
+    @deprecated_function(version="2.0.0", reason="deprecated since redisearch 2.0")
     def delete_document(self, doc_id, conn=None, delete_actual_document=False):
         """
         Delete a document from index
@@ -441,9 +439,7 @@ class SearchCommands:
 
         return Document(id=id, **fields)
 
-    @deprecated_function(
-        version="2.0.0", reason="deprecated since redisearch 2.0"
-    )
+    @deprecated_function(version="2.0.0", reason="deprecated since redisearch 2.0")
     def get(self, *ids):
         """
         Returns the full contents of multiple documents.
