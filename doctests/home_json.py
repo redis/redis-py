@@ -10,7 +10,7 @@ from redis.commands.json.path import Path
 import redis.commands.search.aggregation as aggregations
 import redis.commands.search.reducers as reducers
 from redis.commands.search.field import TextField, NumericField, TagField
-from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 import redis.exceptions
 # STEP_END
@@ -25,7 +25,12 @@ try:
 except redis.exceptions.ResponseError:
     pass
 
-r.delete("user:1", "user:2", "user:3")
+try:
+    r.ft("hash-idx:users").dropindex(True)
+except redis.exceptions.ResponseError:
+    pass
+
+r.delete("user:1", "user:2", "user:3", "huser:1", "huser:2", "huser:3")
 # REMOVE_END
 # STEP_START create_data
 user1 = {
@@ -131,6 +136,52 @@ aggResult.sort(key=lambda row: row[1])
 
 assert str(aggResult) == (
     "[['city', 'London', 'count', '1'], ['city', 'Tel Aviv', 'count', '2']]"
+)
+# REMOVE_END
+
+# STEP_START make_hash_index
+hashSchema = (
+    TextField("name"),
+    TagField("city"),
+    NumericField("age")
+)
+
+hashIndexCreated = r.ft("hash-idx:users").create_index(
+    hashSchema,
+    definition=IndexDefinition(
+        prefix=["huser:"], index_type=IndexType.HASH
+    )
+)
+# STEP_END
+# REMOVE_START
+assert hashIndexCreated
+# REMOVE_END
+
+# STEP_START add_hash_data
+huser1Set = r.hset("huser:1", mapping=user1)
+huser2Set = r.hset("huser:2", mapping=user2)
+huser3Set = r.hset("huser:3", mapping=user3)
+# STEP_END
+# REMOVE_START
+assert huser1Set
+assert huser2Set
+assert huser3Set
+# REMOVE_END
+
+# STEP_START query1_hash
+findPaulHashResult = r.ft("hash-idx:users").search(
+    Query("Paul @age:[30 40]")
+)
+
+print(findPaulHashResult)
+# >>> Result{1 total, docs: [Document {'id': 'huser:3',
+# >>>   'payload': None, 'name': 'Paul Zamir', ...
+# STEP_END
+# REMOVE_START
+assert str(findPaulHashResult) == (
+    "Result{1 total, docs: [Document " +
+    "{'id': 'huser:3', 'payload': None, 'name': 'Paul Zamir', " +
+    "'email': 'paul.zamir@example.com', 'age': '35', 'city': 'Tel Aviv'}]}"
 )
 # REMOVE_END
 
