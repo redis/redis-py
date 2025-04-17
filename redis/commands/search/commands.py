@@ -23,7 +23,6 @@ ALTER_CMD = "FT.ALTER"
 SEARCH_CMD = "FT.SEARCH"
 ADD_CMD = "FT.ADD"
 ADDHASH_CMD = "FT.ADDHASH"
-DROP_CMD = "FT.DROP"
 DROPINDEX_CMD = "FT.DROPINDEX"
 EXPLAIN_CMD = "FT.EXPLAIN"
 EXPLAINCLI_CMD = "FT.EXPLAINCLI"
@@ -35,7 +34,6 @@ SPELLCHECK_CMD = "FT.SPELLCHECK"
 DICT_ADD_CMD = "FT.DICTADD"
 DICT_DEL_CMD = "FT.DICTDEL"
 DICT_DUMP_CMD = "FT.DICTDUMP"
-GET_CMD = "FT.GET"
 MGET_CMD = "FT.MGET"
 CONFIG_CMD = "FT.CONFIG"
 TAGVALS_CMD = "FT.TAGVALS"
@@ -406,6 +404,9 @@ class SearchCommands:
             doc_id, conn=None, score=score, language=language, replace=replace
         )
 
+    @deprecated_function(
+        version="2.0.0", reason="deprecated since redisearch 2.0"
+    )
     def delete_document(self, doc_id, conn=None, delete_actual_document=False):
         """
         Delete a document from index
@@ -440,6 +441,9 @@ class SearchCommands:
 
         return Document(id=id, **fields)
 
+    @deprecated_function(
+        version="2.0.0", reason="deprecated since redisearch 2.0"
+    )
     def get(self, *ids):
         """
         Returns the full contents of multiple documents.
