@@ -4458,7 +4458,7 @@ class SortedSetCommands(CommandsProtocol):
         byscore: bool = False,
         bylex: bool = False,
         offset: int = None,
-        num: int = None,
+        num: Optional[int] = None,
     ) -> ResponseT:
         """
         Return a range of values from sorted set ``name`` between
