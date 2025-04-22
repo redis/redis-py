@@ -22,6 +22,7 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
     bool_ok,
 )
+from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
     CoreCommands,
@@ -57,6 +58,7 @@ from redis.retry import Retry
 from redis.utils import (
     HIREDIS_AVAILABLE,
     _set_info_logger,
+    deprecated_args,
     get_lib_version,
     safe_str,
     str_if_bytes,
@@ -188,6 +190,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         client.auto_close_connection_pool = True
         return client
 
+    @deprecated_args(
+        args_to_warn=["retry_on_timeout"],
+        reason="TimeoutError is included by default.",
+        version="6.0.0",
+    )
     def __init__(
         self,
         host: str = "localhost",
@@ -204,6 +211,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
+        retry: Retry = Retry(
+            backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+        ),
         retry_on_error: Optional[List[Type[Exception]]] = None,
         ssl: bool = False,
         ssl_keyfile: Optional[str] = None,
@@ -227,7 +237,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         lib_name: Optional[str] = "redis-py",
         lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
-        retry: Optional[Retry] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
@@ -237,10 +246,23 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     ) -> None:
         """
         Initialize a new Redis client.
-        To specify a retry policy for specific errors, first set
-        `retry_on_error` to a list of the error/s to retry on, then set
-        `retry` to a valid `Retry` object.
-        To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
+
+        To specify a retry policy for specific errors, you have two options:
+
+        1. Set the `retry_on_error` to a list of the error/s to retry on, and
+        you can also set `retry` to a valid `Retry` object(in case the default
+        one is not appropriate) - with this approach the retries will be triggered
+        on the default errors specified in the Retry object enriched with the
+        errors specified in `retry_on_error`.
+
+        2. Define a `Retry` object with configured 'supported_errors' and set
+        it to the `retry` parameter - with this approach you completely redefine
+        the errors on which retries will happen.
+
+        `retry_on_timeout` is deprecated - please include the TimeoutError
+        either in the Retry object or in the `retry_on_error` list.
+        When 'connection_pool' is provided - the retry configuration of the
+        provided pool will be used.
 
         Args:
 
@@ -255,8 +277,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if not connection_pool:
             if not retry_on_error:
                 retry_on_error = []
-            if retry_on_timeout is True:
-                retry_on_error.append(TimeoutError)
             kwargs = {
                 "db": db,
                 "username": username,
@@ -378,10 +398,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
 
-    def get_retry(self) -> Optional["Retry"]:
+    def get_retry(self) -> Optional[Retry]:
         return self.get_connection_kwargs().get("retry")
 
-    def set_retry(self, retry: "Retry") -> None:
+    def set_retry(self, retry: Retry) -> None:
         self.get_connection_kwargs().update({"retry": retry})
         self.connection_pool.set_retry(retry)
 
@@ -581,18 +601,20 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         conn.send_command(*args, **options)
         return self.parse_response(conn, command_name, **options)
 
-    def _disconnect_raise(self, conn, error):
+    def _conditional_disconnect(self, conn, error) -> None:
         """
-        Close the connection and raise an exception
-        if retry_on_error is not set or the error
-        is not one of the specified error types
+        Close the connection if the error is not TimeoutError.
+        The supported exceptions are already checked in the
+        retry object so we don't need to do it here.
+        After we disconnect the connection, it will try to reconnect and
+        do a health check as part of the send_command logic(on connection level).
         """
+        if isinstance(error, TimeoutError):
+            # If the error is a TimeoutError, we don't want to
+            # disconnect the connection. We want to retry the command.
+            return
+
         conn.disconnect()
-        if (
-            conn.retry_on_error is None
-            or isinstance(error, tuple(conn.retry_on_error)) is False
-        ):
-            raise error
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
@@ -611,7 +633,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 lambda: self._send_command_parse_response(
                     conn, command_name, *args, **options
                 ),
-                lambda error: self._disconnect_raise(conn, error),
+                lambda error: self._conditional_disconnect(conn, error),
             )
         finally:
             if self._single_connection_client:
