@@ -384,13 +384,13 @@ run_in_thread.
 
 A PubSub object adheres to the same encoding semantics as the client
 instance it was created from. Any channel or pattern that's unicode will
-be encoded using the charset specified on the client before being sent
+be encoded using the encoding specified on the client before being sent
 to Redis. If the client's decode_responses flag is set the False (the
 default), the 'channel', 'pattern' and 'data' values in message
 dictionaries will be byte strings (str on Python 2, bytes on Python 3).
 If the client's decode_responses is True, then the 'channel', 'pattern'
 and 'data' values will be automatically decoded to unicode strings using
-the client's charset.
+the client's encoding.
 
 PubSub objects remember what channels and patterns they are subscribed
 to. In the event of a disconnection such as a network error or timeout,
