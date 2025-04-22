@@ -89,7 +89,7 @@ class JSONCommands:
 
     def arrtrim(
         self, name: str, path: str, start: int, stop: int
-    ) -> List[Optional[int]]:
+    ) -> Optional[int]:
         """Trim the array JSON value under ``path`` at key ``name`` to the
         inclusive range given by ``start`` and ``stop``.
 
