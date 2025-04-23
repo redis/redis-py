@@ -44,6 +44,12 @@ class Retry:
             set(self._supported_errors + tuple(specified_errors))
         )
 
+    def update_retries_count(self, retries: int) -> None:
+        """
+        Updates the retries count with the specified value
+        """
+        self._retries = retries
+
     def call_with_retry(
         self,
         do: Callable[[], T],

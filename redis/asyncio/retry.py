@@ -43,6 +43,18 @@ class Retry:
             set(self._supported_errors + tuple(specified_errors))
         )
 
+    def get_retries_count(self) -> int:
+        """
+        Returns the current retries count
+        """
+        return self._retries
+
+    def update_retries_count(self, retries: int) -> None:
+        """
+        Updates the retries count with the specified value
+        """
+        self._retries = retries
+
     async def call_with_retry(
         self, do: Callable[[], Awaitable[T]], fail: Callable[[RedisError], Any]
     ) -> T:
