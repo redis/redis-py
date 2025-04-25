@@ -2561,9 +2561,6 @@ class ClusterPipeline(RedisCluster):
         are issued. End the transactional block with `execute`.
         """
 
-        # Cluster transaction support (pipeline/multi/exec) originally developed
-        # by Scopely and contributed to redis-py under the MIT License.
-
         if self.explicit_transaction:
             raise RedisError("Cannot issue nested calls to MULTI")
         if self.command_stack:
@@ -2774,9 +2771,6 @@ class ClusterPipeline(RedisCluster):
     def watch(self, *names):
         """Watches the values at keys ``names``"""
 
-        # Cluster transaction support (pipeline/multi/exec) originally developed
-        # by Scopely and contributed to redis-py under the MIT License.
-
         if self.explicit_transaction:
             raise RedisError("Cannot issue a WATCH after a MULTI")
 
@@ -2784,9 +2778,6 @@ class ClusterPipeline(RedisCluster):
 
     def unwatch(self):
         """Unwatches all previously specified keys"""
-
-        # Cluster transaction support (pipeline/multi/exec) originally developed
-        # by Scopely and contributed to redis-py under the MIT License.
 
         if self.watching:
             return self.execute_command("UNWATCH")

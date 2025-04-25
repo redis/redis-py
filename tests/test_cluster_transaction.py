@@ -10,10 +10,6 @@ from redis.cluster import PRIMARY, ClusterNode, NodesManager, RedisCluster
 from .conftest import skip_if_server_version_lt, wait_for_command
 
 
-# Cluster transaction support (pipeline/multi/exec) originally developed
-# by Scopely and contributed to redis-py under the MIT License.
-
-
 def _find_source_and_target_node_for_slot(
     r: RedisCluster, slot: int
 ) -> Tuple[ClusterNode, ClusterNode]:

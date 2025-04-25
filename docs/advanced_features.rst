@@ -215,9 +215,6 @@ An alternative is some kind of two-step commit solution, where a slot
 validation is run before the actual commands are run. This could work
 with controlled node maintenance but does not cover single node failures.
 
-Cluster transaction support (pipeline/multi/exec) was originally developed by
-Scopely and contributed to redis-py under the MIT License.
-
 
 
 Publish / Subscribe

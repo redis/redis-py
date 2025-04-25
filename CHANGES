@@ -1,4 +1,4 @@
-    * Support transactions in ClusterPipeline (originally developed by Scopely and contributed under the MIT License)
+    * Support transactions in ClusterPipeline
     * Removing support for RedisGraph module. RedisGraph support is deprecated since Redis Stack 7.2 (https://redis.com/blog/redisgraph-eol/)
     * Fix lock.extend() typedef to accept float TTL extension
     * Update URL in the readme linking to Redis University
