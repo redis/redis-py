@@ -28,6 +28,13 @@ runs:
         python-version: ${{ inputs.python-version }}
         cache: 'pip'
 
+    - uses: actions/checkout@v4
+      if: ${{ inputs.parser-backend == 'hiredis' && inputs.hiredis-version == 'unstable' }}
+      with:
+        repository: redis/hiredis-py
+        submodules: true
+        path: hiredis-py
+
     - name: Setup Test environment
       env:
         REDIS_VERSION: ${{ inputs.redis-version }}
@@ -40,8 +47,13 @@ runs:
         pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
         pip install -e .[jwt]  # install the working copy
         if [ "${{inputs.parser-backend}}" == "hiredis" ]; then
-          pip install "hiredis${{inputs.hiredis-version}}"
-          echo "PARSER_BACKEND=$(echo "${{inputs.parser-backend}}_${{inputs.hiredis-version}}" | sed 's/[^a-zA-Z0-9]/_/g')" >> $GITHUB_ENV        
+          if [[ "${{inputs.hiredis-version}}" == "unstable" ]]; then
+            echo "Installing unstable version of hiredis from local directory"
+            pip install -e ./hiredis-py
+          else
+            pip install "hiredis${{inputs.hiredis-version}}"
+          fi          
+          echo "PARSER_BACKEND=$(echo "${{inputs.parser-backend}}_${{inputs.hiredis-version}}" | sed 's/[^a-zA-Z0-9]/_/g')" >> $GITHUB_ENV
         else
           echo "PARSER_BACKEND=${{inputs.parser-backend}}" >> $GITHUB_ENV
         fi
@@ -86,6 +98,7 @@ runs:
       shell: bash
 
     - name: Run tests
+      continue-on-error: ${{ inputs.parser-backend == 'hiredis' && inputs.hiredis-version == 'unstable' }}
       run: |
         set -e
         

@@ -125,7 +125,7 @@ jobs:
         redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
         python-version: [ '3.8', '3.13']
         parser-backend: [ 'hiredis' ]
-        hiredis-version: [ '>=3.0.0', '<3.0.0' ]
+        hiredis-version: [ '>=3.0.0', '<3.0.0', 'unstable' ]
         event-loop: [ 'asyncio' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
