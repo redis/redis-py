@@ -92,7 +92,7 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL DELUSER", *username, **kwargs)
 
-    def acl_genpass(self, bits: Optional[None] = None, **kwargs) -> ResponseT:
+    def acl_genpass(self, bits: Optional[int] = None, **kwargs) -> ResponseT:
         """Generate a random password value.
         If ``bits`` is supplied then use this number of bits, rounded to
         the next multiple of 4.
@@ -1304,7 +1304,7 @@ class ManagementCommands(CommandsProtocol):
             return self.execute_command("SLAVEOF", b"NO", b"ONE", **kwargs)
         return self.execute_command("SLAVEOF", host, port, **kwargs)
 
-    def slowlog_get(self, num: Optional[None] = None, **kwargs) -> ResponseT:
+    def slowlog_get(self, num: Optional[int] = None, **kwargs) -> ResponseT:
         """
         Get the entries from the slowlog. If ``num`` is specified, get the
         most recent ``num`` items.
@@ -1572,8 +1572,8 @@ class BasicKeyCommands(CommandsProtocol):
     def bitcount(
         self,
         key: KeyT,
-        start: Optional[None] = None,
-        end: Optional[None] = None,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
         mode: Optional[str] = None,
     ) -> ResponseT:
         """
@@ -1641,8 +1641,8 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         key: KeyT,
         bit: int,
-        start: Optional[None] = None,
-        end: Optional[None] = None,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
         mode: Optional[str] = None,
     ) -> ResponseT:
         """
@@ -2191,8 +2191,8 @@ class BasicKeyCommands(CommandsProtocol):
         value: EncodableT,
         replace: bool = False,
         absttl: bool = False,
-        idletime: Optional[None] = None,
-        frequency: Optional[None] = None,
+        idletime: Optional[int] = None,
+        frequency: Optional[int] = None,
     ) -> ResponseT:
         """
         Create a key using the provided serialized value, previously obtained
@@ -2360,7 +2360,7 @@ class BasicKeyCommands(CommandsProtocol):
         specific_argument: Union[Literal["strings"], Literal["keys"]] = "strings",
         len: bool = False,
         idx: bool = False,
-        minmatchlen: Optional[None] = None,
+        minmatchlen: Optional[int] = None,
         withmatchlen: bool = False,
         **kwargs,
     ) -> ResponseT:
@@ -2960,7 +2960,7 @@ class ScanCommands(CommandsProtocol):
         self,
         cursor: int = 0,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         _type: Optional[str] = None,
         **kwargs,
     ) -> ResponseT:
@@ -2992,7 +2992,7 @@ class ScanCommands(CommandsProtocol):
     def scan_iter(
         self,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         _type: Optional[str] = None,
         **kwargs,
     ) -> Iterator:
@@ -3022,7 +3022,7 @@ class ScanCommands(CommandsProtocol):
         name: KeyT,
         cursor: int = 0,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
     ) -> ResponseT:
         """
         Incrementally return lists of elements in a set. Also return a cursor
@@ -3045,7 +3045,7 @@ class ScanCommands(CommandsProtocol):
         self,
         name: KeyT,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
     ) -> Iterator:
         """
         Make an iterator using the SSCAN command so that the client doesn't
@@ -3065,7 +3065,7 @@ class ScanCommands(CommandsProtocol):
         name: KeyT,
         cursor: int = 0,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         no_values: Union[bool, None] = None,
     ) -> ResponseT:
         """
@@ -3093,7 +3093,7 @@ class ScanCommands(CommandsProtocol):
         self,
         name: str,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         no_values: Union[bool, None] = None,
     ) -> Iterator:
         """
@@ -3121,7 +3121,7 @@ class ScanCommands(CommandsProtocol):
         name: KeyT,
         cursor: int = 0,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
         """
@@ -3148,7 +3148,7 @@ class ScanCommands(CommandsProtocol):
         self,
         name: KeyT,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         score_cast_func: Union[type, Callable] = float,
     ) -> Iterator:
         """
@@ -3177,7 +3177,7 @@ class AsyncScanCommands(ScanCommands):
     async def scan_iter(
         self,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         _type: Optional[str] = None,
         **kwargs,
     ) -> AsyncIterator:
@@ -3207,7 +3207,7 @@ class AsyncScanCommands(ScanCommands):
         self,
         name: KeyT,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
     ) -> AsyncIterator:
         """
         Make an iterator using the SSCAN command so that the client doesn't
@@ -3229,7 +3229,7 @@ class AsyncScanCommands(ScanCommands):
         self,
         name: str,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         no_values: Union[bool, None] = None,
     ) -> AsyncIterator:
         """
@@ -3258,7 +3258,7 @@ class AsyncScanCommands(ScanCommands):
         self,
         name: KeyT,
         match: Union[PatternT, None] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         score_cast_func: Union[type, Callable] = float,
     ) -> AsyncIterator:
         """
@@ -3489,11 +3489,11 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         fields: Dict[FieldT, EncodableT],
         id: StreamIdT = "*",
-        maxlen: Optional[None] = None,
+        maxlen: Optional[int] = None,
         approximate: bool = True,
         nomkstream: bool = False,
         minid: Union[StreamIdT, None] = None,
-        limit: Optional[None] = None,
+        limit: Optional[int] = None,
     ) -> ResponseT:
         """
         Add to a stream.
@@ -3544,7 +3544,7 @@ class StreamCommands(CommandsProtocol):
         consumername: ConsumerT,
         min_idle_time: int,
         start_id: StreamIdT = "0-0",
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         justid: bool = False,
     ) -> ResponseT:
         """
@@ -3595,9 +3595,9 @@ class StreamCommands(CommandsProtocol):
         consumername: ConsumerT,
         min_idle_time: int,
         message_ids: Union[List[StreamIdT], Tuple[StreamIdT]],
-        idle: Optional[None] = None,
-        time: Optional[None] = None,
-        retrycount: Optional[None] = None,
+        idle: Optional[int] = None,
+        time: Optional[int] = None,
+        retrycount: Optional[int] = None,
         force: bool = False,
         justid: bool = False,
     ) -> ResponseT:
@@ -3829,7 +3829,7 @@ class StreamCommands(CommandsProtocol):
         max: StreamIdT,
         count: int,
         consumername: Union[ConsumerT, None] = None,
-        idle: Optional[None] = None,
+        idle: Optional[int] = None,
     ) -> ResponseT:
         """
         Returns information about pending messages, in a range.
@@ -3883,7 +3883,7 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         min: StreamIdT = "-",
         max: StreamIdT = "+",
-        count: Optional[None] = None,
+        count: Optional[int] = None,
     ) -> ResponseT:
         """
         Read stream values within an interval.
@@ -3913,8 +3913,8 @@ class StreamCommands(CommandsProtocol):
     def xread(
         self,
         streams: Dict[KeyT, StreamIdT],
-        count: Optional[None] = None,
-        block: Optional[None] = None,
+        count: Optional[int] = None,
+        block: Optional[int] = None,
     ) -> ResponseT:
         """
         Block and monitor multiple streams for new data.
@@ -3953,8 +3953,8 @@ class StreamCommands(CommandsProtocol):
         groupname: str,
         consumername: str,
         streams: Dict[KeyT, StreamIdT],
-        count: Optional[None] = None,
-        block: Optional[None] = None,
+        count: Optional[int] = None,
+        block: Optional[int] = None,
         noack: bool = False,
     ) -> ResponseT:
         """
@@ -4000,7 +4000,7 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         max: StreamIdT = "+",
         min: StreamIdT = "-",
-        count: Optional[None] = None,
+        count: Optional[int] = None,
     ) -> ResponseT:
         """
         Read stream values within an interval, in reverse order.
@@ -4030,10 +4030,10 @@ class StreamCommands(CommandsProtocol):
     def xtrim(
         self,
         name: KeyT,
-        maxlen: Optional[None] = None,
+        maxlen: Optional[int] = None,
         approximate: bool = True,
         minid: Union[StreamIdT, None] = None,
-        limit: Optional[None] = None,
+        limit: Optional[int] = None,
     ) -> ResponseT:
         """
         Trims old messages from a stream.
@@ -4263,7 +4263,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZLEXCOUNT", name, min, max, keys=[name])
 
-    def zpopmax(self, name: KeyT, count: Optional[None] = None) -> ResponseT:
+    def zpopmax(self, name: KeyT, count: Optional[int] = None) -> ResponseT:
         """
         Remove and return up to ``count`` members with the highest scores
         from the sorted set ``name``.
@@ -4274,7 +4274,7 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscores": True}
         return self.execute_command("ZPOPMAX", name, *args, **options)
 
-    def zpopmin(self, name: KeyT, count: Optional[None] = None) -> ResponseT:
+    def zpopmin(self, name: KeyT, count: Optional[int] = None) -> ResponseT:
         """
         Remove and return up to ``count`` members with the lowest scores
         from the sorted set ``name``.
@@ -4418,8 +4418,8 @@ class SortedSetCommands(CommandsProtocol):
         bylex: bool = False,
         withscores: bool = False,
         score_cast_func: Union[type, Callable, None] = float,
-        offset: Optional[None] = None,
-        num: Optional[None] = None,
+        offset: Optional[int] = None,
+        num: Optional[int] = None,
     ) -> ResponseT:
         if byscore and bylex:
             raise DataError("``byscore`` and ``bylex`` can not be specified together.")
@@ -4545,8 +4545,8 @@ class SortedSetCommands(CommandsProtocol):
         byscore: bool = False,
         bylex: bool = False,
         desc: bool = False,
-        offset: Optional[None] = None,
-        num: Optional[None] = None,
+        offset: Optional[int] = None,
+        num: Optional[int] = None,
     ) -> ResponseT:
         """
         Stores in ``dest`` the result of a range of values from sorted set
@@ -4591,8 +4591,8 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         min: EncodableT,
         max: EncodableT,
-        start: Optional[None] = None,
-        num: Optional[None] = None,
+        start: Optional[int] = None,
+        num: Optional[int] = None,
     ) -> ResponseT:
         """
         Return the lexicographical range of values from sorted set ``name``
@@ -4615,8 +4615,8 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         max: EncodableT,
         min: EncodableT,
-        start: Optional[None] = None,
-        num: Optional[None] = None,
+        start: Optional[int] = None,
+        num: Optional[int] = None,
     ) -> ResponseT:
         """
         Return the reversed lexicographical range of values from sorted set
@@ -4639,8 +4639,8 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         min: ZScoreBoundT,
         max: ZScoreBoundT,
-        start: Optional[None] = None,
-        num: Optional[None] = None,
+        start: Optional[int] = None,
+        num: Optional[int] = None,
         withscores: bool = False,
         score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
@@ -4674,8 +4674,8 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         max: ZScoreBoundT,
         min: ZScoreBoundT,
-        start: Optional[None] = None,
-        num: Optional[None] = None,
+        start: Optional[int] = None,
+        num: Optional[int] = None,
         withscores: bool = False,
         score_cast_func: Union[type, Callable] = float,
     ):
@@ -6040,7 +6040,7 @@ class GeoCommands(CommandsProtocol):
         withdist: bool = False,
         withcoord: bool = False,
         withhash: bool = False,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         sort: Optional[str] = None,
         store: Optional[KeyT] = None,
         store_dist: Optional[KeyT] = None,
@@ -6102,7 +6102,7 @@ class GeoCommands(CommandsProtocol):
         withdist: bool = False,
         withcoord: bool = False,
         withhash: bool = False,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         sort: Optional[str] = None,
         store: Union[KeyT, None] = None,
         store_dist: Union[KeyT, None] = None,
@@ -6189,7 +6189,7 @@ class GeoCommands(CommandsProtocol):
         width: Union[float, None] = None,
         height: Union[float, None] = None,
         sort: Optional[str] = None,
-        count: Optional[None] = None,
+        count: Optional[int] = None,
         any: bool = False,
         withcoord: bool = False,
         withdist: bool = False,
