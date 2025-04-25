@@ -2174,7 +2174,7 @@ class ClusterPipeline(RedisCluster):
                 self.transaction_connection = None
 
         if not self.transaction_connection:
-            self.transaction_connection = get_connection(redis_node, ("INFO",))
+            self.transaction_connection = get_connection(redis_node)
 
         return redis_node, self.transaction_connection
 
