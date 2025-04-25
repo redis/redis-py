@@ -14,6 +14,10 @@ inputs:
     description: 'hiredis version to test against'
     required: false
     default: '>3.0.0'
+  hiredis-branch:
+    description: 'hiredis branch to test against'
+    required: false
+    default: 'master'
   event-loop:
     description: 'Event loop to use'
     required: false
@@ -34,6 +38,7 @@ runs:
         repository: redis/hiredis-py
         submodules: true
         path: hiredis-py
+        ref: ${{ inputs.hiredis-branch }}
 
     - name: Setup Test environment
       env:
@@ -98,7 +103,6 @@ runs:
       shell: bash
 
     - name: Run tests
-      continue-on-error: ${{ inputs.parser-backend == 'hiredis' && inputs.hiredis-version == 'unstable' }}
       run: |
         set -e
         
