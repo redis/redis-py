@@ -125,12 +125,10 @@ runs:
           fi
         
           echo "::endgroup::"
-    
-          if [ "$protocol" == "2" ] || [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
-            echo "::group::RESP${protocol} cluster tests"
-            invoke cluster-tests $eventloop --protocol=${protocol}
-            echo "::endgroup::"
-          fi
+            
+          echo "::group::RESP${protocol} cluster tests"
+          invoke cluster-tests $eventloop --protocol=${protocol}
+          echo "::endgroup::"          
         }
   
         run_tests 2 "${{inputs.event-loop}}"
