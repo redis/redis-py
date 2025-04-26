@@ -701,7 +701,7 @@ def string_keys_to_dict(key_string, callback):
 _RedisCallbacks = {
     **string_keys_to_dict(
         "AUTH COPY EXPIRE EXPIREAT HEXISTS HMSET MOVE MSETNX PERSIST PSETEX "
-        "PEXPIRE PEXPIREAT RENAMENX SETEX SETNX SMOVE",
+        "PEXPIRE PEXPIREAT RENAMENX SETEX SETNX SMOVE HSETNX SISMEMBER",
         bool,
     ),
     **string_keys_to_dict("HINCRBYFLOAT INCRBYFLOAT", float),
@@ -777,6 +777,7 @@ _RedisCallbacks = {
     "SENTINEL SET": bool_ok,
     "SLOWLOG GET": parse_slowlog_get,
     "SLOWLOG RESET": bool_ok,
+    "SMISMEMBER": lambda r: list(map(bool, r)),
     "SORT": sort_return_tuples,
     "SSCAN": parse_scan,
     "TIME": lambda x: (int(x[0]), int(x[1])),
@@ -830,6 +831,7 @@ _RedisCallbacksRESP2 = {
     "SENTINEL MASTERS": parse_sentinel_masters,
     "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels,
     "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels,
+    "SMISMEMBER": lambda r: list(map(bool, r)),
     "STRALGO": parse_stralgo,
     "XINFO CONSUMERS": parse_list_of_dicts,
     "XINFO GROUPS": parse_list_of_dicts,
@@ -868,6 +870,7 @@ _RedisCallbacksRESP3 = {
     "SENTINEL MASTERS": parse_sentinel_masters_resp3,
     "SENTINEL SENTINELS": parse_sentinel_slaves_and_sentinels_resp3,
     "SENTINEL SLAVES": parse_sentinel_slaves_and_sentinels_resp3,
+    "SMISMEMBER": lambda r: list(map(bool, r)),
     "STRALGO": lambda r, **options: (
         {str_if_bytes(key): str_if_bytes(value) for key, value in r.items()}
         if isinstance(r, dict)
