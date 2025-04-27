@@ -258,6 +258,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         # Connection related kwargs
+        check_ready: bool = False,
         health_check_interval: float = 0,
         socket_connect_timeout: Optional[float] = None,
         socket_keepalive: bool = False,
@@ -313,6 +314,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "encoding_errors": encoding_errors,
             "decode_responses": decode_responses,
             # Connection related kwargs
+            "check_ready": check_ready,
             "health_check_interval": health_check_interval,
             "socket_connect_timeout": socket_connect_timeout,
             "socket_keepalive": socket_keepalive,
