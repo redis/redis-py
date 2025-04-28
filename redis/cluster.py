@@ -1621,9 +1621,14 @@ class NodesManager:
         # connections on lower level clients to avoid retrying
         # connections to nodes that are not reachable
         # and to avoid blocking the connection pool.
+        # The only error that will have some handling in the lower
+        # level clients is ConnectionError which will trigger disconnection
+        # of the socket.
         # The retries will be handled on cluster client level
         # where we will have proper handling of the cluster topology
-        node_retry_config = Retry(backoff=NoBackoff(), retries=0)
+        node_retry_config = Retry(
+            backoff=NoBackoff(), retries=0, supported_errors=(ConnectionError,)
+        )
 
         if self.from_url:
             # Create a redis node with a costumed connection pool
