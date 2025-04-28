@@ -14,7 +14,11 @@ import pytest
 import redis
 from redis import Redis
 from redis._parsers import CommandsParser
-from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
+from redis.backoff import (
+    ExponentialBackoff,
+    ExponentialWithJitterBackoff,
+    NoBackoff,
+)
 from redis.cluster import (
     PRIMARY,
     REDIS_CLUSTER_HASH_SLOTS,
@@ -884,46 +888,48 @@ class TestRedisClusterObj:
     def test_cluster_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
         r = _get_client(RedisCluster, request, retry=retry)
-        assert r.get_retry()._retries == retry._retries
+        assert r.get_retry().get_retries() == retry.get_retries()
         assert isinstance(r.get_retry()._backoff, NoBackoff)
         for node in r.get_nodes():
-            assert node.redis_connection.get_retry()._retries == retry._retries
+            assert node.redis_connection.get_retry().get_retries() == 0
             assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
         rand_node = r.get_random_node()
         existing_conn = rand_node.redis_connection.connection_pool.get_connection()
         # Change retry policy
         new_retry = Retry(ExponentialBackoff(), 3)
         r.set_retry(new_retry)
-        assert r.get_retry()._retries == new_retry._retries
+        assert r.get_retry().get_retries() == new_retry.get_retries()
         assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
         for node in r.get_nodes():
-            assert node.redis_connection.get_retry()._retries == new_retry._retries
-            assert isinstance(
-                node.redis_connection.get_retry()._backoff, ExponentialBackoff
-            )
-        assert existing_conn.retry._retries == new_retry._retries
+            assert node.redis_connection.get_retry()._retries == 0
+            assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
+        assert existing_conn.retry._retries == 0
         new_conn = rand_node.redis_connection.connection_pool.get_connection()
-        assert new_conn.retry._retries == new_retry._retries
+        assert new_conn.retry._retries == 0
 
     def test_cluster_retry_object(self, r) -> None:
         # Test default retry
         # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
         host = r.get_default_node().host
 
-        retry = r.get_connection_kwargs().get("retry")
+        # test default retry config
+        retry = r.get_retry()
         assert isinstance(retry, Retry)
-        assert retry._retries == 0
-        assert isinstance(retry._backoff, type(default_backoff()))
+        assert retry.get_retries() == 3
+        assert isinstance(retry._backoff, type(ExponentialWithJitterBackoff()))
         node1 = r.get_node(host, 16379).redis_connection
         node2 = r.get_node(host, 16380).redis_connection
-        assert node1.get_retry()._retries == node2.get_retry()._retries
+        assert node1.get_retry()._retries == 0
+        assert node2.get_retry()._retries == 0
 
-        # Test custom retry
+        # Test custom retry is not applied to nodes
         retry = Retry(ExponentialBackoff(10, 5), 5)
         rc_custom_retry = RedisCluster(host, 16379, retry=retry)
         assert (
-            rc_custom_retry.get_node(host, 16379).redis_connection.get_retry()._retries
-            == retry._retries
+            rc_custom_retry.get_node(host, 16379)
+            .redis_connection.get_retry()
+            .get_retries()
+            == 0
         )
 
     def test_replace_cluster_node(self, r) -> None:
