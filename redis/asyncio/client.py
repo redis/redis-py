@@ -949,10 +949,7 @@ class PubSub:
 
     async def _reconnect(self, conn):
         """
-        Close the connection and raise an exception
-        if retry_on_error is not set or the error is not one
-        of the specified error types. Otherwise, try to
-        reconnect
+        Try to reconnect
         """
         await conn.disconnect()
         await conn.connect()
