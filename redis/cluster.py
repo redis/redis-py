@@ -410,7 +410,12 @@ class AbstractRedisCluster:
         list_keys_to_dict(["SCRIPT FLUSH"], lambda command, res: all(res.values())),
     )
 
-    ERRORS_ALLOW_RETRY = (ConnectionError, TimeoutError, ClusterDownError)
+    ERRORS_ALLOW_RETRY = (
+        ConnectionError,
+        TimeoutError,
+        ClusterDownError,
+        SlotNotCoveredError,
+    )
 
     def replace_default_node(self, target_node: "ClusterNode" = None) -> None:
         """Replace the default cluster node.
@@ -1239,13 +1244,19 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             except AskError as e:
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
-            except ClusterDownError as e:
+            except (ClusterDownError, SlotNotCoveredError):
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
+
+                # SlotNotCoveredError can occur when the cluster is not fully
+                # initialized or can be temporary issue.
+                # We will try to reinitialize the cluster topology
+                # and retry executing the command
+
                 time.sleep(0.25)
                 self.nodes_manager.initialize()
-                raise e
+                raise
             except ResponseError:
                 raise
             except Exception as e:
