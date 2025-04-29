@@ -610,7 +610,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             # and there we provide retry configuration without retries allowed.
             # The retries should be handled on cluster client level.
             raise RedisClusterException(
-                "Argument 'retry' is not possible to be used in kwargs when in cluster mode"
+                "The 'retry' argument cannot be used in kwargs when running in cluster mode."
             )
 
         # Get the startup node/s
@@ -799,9 +799,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             return False
         self.nodes_manager.default_node = node
         return True
-
-    def get_retry(self) -> Retry:
-        return self.retry
 
     def set_retry(self, retry: Retry) -> None:
         if not isinstance(retry, Retry):

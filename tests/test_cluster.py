@@ -888,8 +888,8 @@ class TestRedisClusterObj:
     def test_cluster_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
         r = _get_client(RedisCluster, request, retry=retry)
-        assert r.get_retry().get_retries() == retry.get_retries()
-        assert isinstance(r.get_retry()._backoff, NoBackoff)
+        assert r.retry.get_retries() == retry.get_retries()
+        assert isinstance(r.retry._backoff, NoBackoff)
         for node in r.get_nodes():
             assert node.redis_connection.get_retry().get_retries() == 0
             assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
@@ -898,8 +898,8 @@ class TestRedisClusterObj:
         # Change retry policy
         new_retry = Retry(ExponentialBackoff(), 3)
         r.set_retry(new_retry)
-        assert r.get_retry().get_retries() == new_retry.get_retries()
-        assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
+        assert r.retry.get_retries() == new_retry.get_retries()
+        assert isinstance(r.retry._backoff, ExponentialBackoff)
         for node in r.get_nodes():
             assert node.redis_connection.get_retry()._retries == 0
             assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
@@ -913,14 +913,14 @@ class TestRedisClusterObj:
         host = r.get_default_node().host
 
         # test default retry config
-        retry = r.get_retry()
+        retry = r.retry
         assert isinstance(retry, Retry)
         assert retry.get_retries() == 3
         assert isinstance(retry._backoff, type(ExponentialWithJitterBackoff()))
-        node1 = r.get_node(host, 16379).redis_connection
-        node2 = r.get_node(host, 16380).redis_connection
-        assert node1.get_retry()._retries == 0
-        assert node2.get_retry()._retries == 0
+        node1_connection = r.get_node(host, 16379).redis_connection
+        node2_connection = r.get_node(host, 16380).redis_connection
+        assert node1_connection.get_retry()._retries == 0
+        assert node2_connection.get_retry()._retries == 0
 
         # Test custom retry is not applied to nodes
         retry = Retry(ExponentialBackoff(10, 5), 5)

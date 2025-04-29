@@ -371,8 +371,8 @@ class TestRedisClusterObj:
         retry = Retry(NoBackoff(), 2)
         url = request.config.getoption("--redis-url")
         async with RedisCluster.from_url(url, retry=retry) as r:
-            assert r.get_retry().get_retries() == retry.get_retries()
-            assert isinstance(r.get_retry()._backoff, NoBackoff)
+            assert r.retry.get_retries() == retry.get_retries()
+            assert isinstance(r.retry._backoff, NoBackoff)
             for node in r.get_nodes():
                 # validate nodes lower level connections default
                 # retry policy is applied
@@ -385,8 +385,8 @@ class TestRedisClusterObj:
             # Change retry policy
             new_retry = Retry(ExponentialBackoff(), 3)
             r.set_retry(new_retry)
-            assert r.get_retry().get_retries() == new_retry.get_retries()
-            assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
+            assert r.retry.get_retries() == new_retry.get_retries()
+            assert isinstance(r.retry._backoff, ExponentialBackoff)
             for node in r.get_nodes():
                 # validate nodes lower level connections are not affected
                 n_retry = node.acquire_connection().retry
@@ -423,7 +423,7 @@ class TestRedisClusterObj:
         retry = Retry(ExponentialBackoff(10, 5), 5)
         async with RedisCluster.from_url(url, retry=retry) as rc_custom_retry:
             # Test custom retry
-            assert rc_custom_retry.get_retry() == retry
+            assert rc_custom_retry.retry == retry
             # validate nodes connections are using the default retry for
             # lower level connections when client is created through 'from_url' method
             # with specified retry object
@@ -438,12 +438,12 @@ class TestRedisClusterObj:
             url, cluster_error_retry_attempts=0
         ) as rc_no_retries:
             # Test no cluster retries
-            assert rc_no_retries.get_retry().get_retries() == 0
+            assert rc_no_retries.retry.get_retries() == 0
 
         async with RedisCluster.from_url(
             url, retry=Retry(NoBackoff(), 0)
         ) as rc_no_retries:
-            assert rc_no_retries.get_retry().get_retries() == 0
+            assert rc_no_retries.retry.get_retries() == 0
 
     async def test_empty_startup_nodes(self) -> None:
         """

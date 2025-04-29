@@ -53,8 +53,6 @@ class Retry:
         """
         Set the number of retries.
         """
-        if not isinstance(value, int):
-            raise ValueError("Retries must be an integer.")
         self._retries = value
 
     async def call_with_retry(

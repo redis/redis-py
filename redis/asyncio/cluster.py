@@ -565,9 +565,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         """Get the kwargs passed to :class:`~redis.asyncio.connection.Connection`."""
         return self.connection_kwargs
 
-    def get_retry(self) -> Retry:
-        return self.retry
-
     def set_retry(self, retry: Retry) -> None:
         if not isinstance(retry, Retry):
             raise TypeError(
