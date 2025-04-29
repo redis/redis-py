@@ -334,6 +334,34 @@ async def test_topk(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+async def test_topk_list_with_special_words(decoded_r: redis.Redis):
+    # test list with empty buckets
+    assert await decoded_r.topk().reserve("topklist:specialwords", 5, 20, 4, 0.9)
+    assert await decoded_r.topk().add(
+        "topklist:specialwords",
+        "infinity",
+        "B",
+        "nan",
+        "D",
+        "-infinity",
+        "infinity",
+        "infinity",
+        "B",
+        "nan",
+        "G",
+        "D",
+        "B",
+        "D",
+        "infinity",
+        "-infinity",
+        "-infinity",
+    )
+    assert ["infinity", "B", "D", "-infinity", "nan"] == await decoded_r.topk().list(
+        "topklist:specialwords"
+    )
+
+
+@pytest.mark.redismod
 async def test_topk_incrby(decoded_r: redis.Redis):
     await decoded_r.flushdb()
     assert await decoded_r.topk().reserve("topk", 3, 10, 3, 1)
