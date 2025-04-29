@@ -1,7 +1,12 @@
+import datetime
 import logging
+import textwrap
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Dict, Mapping, Union
+from typing import Any, Dict, List, Mapping, Optional, Union
+
+from redis.exceptions import DataError
+from redis.typing import AbsExpiryT, EncodableT, ExpiryT
 
 try:
     import hiredis  # noqa
@@ -122,6 +127,71 @@ def deprecated_function(reason="", version="", name=None):
     return decorator
 
 
+def warn_deprecated_arg_usage(
+    arg_name: Union[list, str],
+    function_name: str,
+    reason: str = "",
+    version: str = "",
+    stacklevel: int = 2,
+):
+    import warnings
+
+    msg = (
+        f"Call to '{function_name}' function with deprecated"
+        f" usage of input argument/s '{arg_name}'."
+    )
+    if reason:
+        msg += f" ({reason})"
+    if version:
+        msg += f" -- Deprecated since version {version}."
+    warnings.warn(msg, category=DeprecationWarning, stacklevel=stacklevel)
+
+
+def deprecated_args(
+    args_to_warn: list = ["*"],
+    allowed_args: list = [],
+    reason: str = "",
+    version: str = "",
+):
+    """
+    Decorator to mark specified args of a function as deprecated.
+    If '*' is in args_to_warn, all arguments will be marked as deprecated.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get function argument names
+            arg_names = func.__code__.co_varnames[: func.__code__.co_argcount]
+
+            provided_args = dict(zip(arg_names, args))
+            provided_args.update(kwargs)
+
+            provided_args.pop("self", None)
+            for allowed_arg in allowed_args:
+                provided_args.pop(allowed_arg, None)
+
+            for arg in args_to_warn:
+                if arg == "*" and len(provided_args) > 0:
+                    warn_deprecated_arg_usage(
+                        list(provided_args.keys()),
+                        func.__name__,
+                        reason,
+                        version,
+                        stacklevel=3,
+                    )
+                elif arg in provided_args:
+                    warn_deprecated_arg_usage(
+                        arg, func.__name__, reason, version, stacklevel=3
+                    )
+
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 def _set_info_logger():
     """
     Set up a logger that log info logs to stdout.
@@ -192,3 +262,46 @@ def ensure_string(key):
         return key
     else:
         raise TypeError("Key must be either a string or bytes")
+
+
+def extract_expire_flags(
+    ex: Optional[ExpiryT] = None,
+    px: Optional[ExpiryT] = None,
+    exat: Optional[AbsExpiryT] = None,
+    pxat: Optional[AbsExpiryT] = None,
+) -> List[EncodableT]:
+    exp_options: list[EncodableT] = []
+    if ex is not None:
+        exp_options.append("EX")
+        if isinstance(ex, datetime.timedelta):
+            exp_options.append(int(ex.total_seconds()))
+        elif isinstance(ex, int):
+            exp_options.append(ex)
+        elif isinstance(ex, str) and ex.isdigit():
+            exp_options.append(int(ex))
+        else:
+            raise DataError("ex must be datetime.timedelta or int")
+    elif px is not None:
+        exp_options.append("PX")
+        if isinstance(px, datetime.timedelta):
+            exp_options.append(int(px.total_seconds() * 1000))
+        elif isinstance(px, int):
+            exp_options.append(px)
+        else:
+            raise DataError("px must be datetime.timedelta or int")
+    elif exat is not None:
+        if isinstance(exat, datetime.datetime):
+            exat = int(exat.timestamp())
+        exp_options.extend(["EXAT", exat])
+    elif pxat is not None:
+        if isinstance(pxat, datetime.datetime):
+            pxat = int(pxat.timestamp() * 1000)
+        exp_options.extend(["PXAT", pxat])
+
+    return exp_options
+
+
+def truncate_text(txt, max_length=100):
+    return textwrap.shorten(
+        text=txt, width=max_length, placeholder="...", break_long_words=True
+    )

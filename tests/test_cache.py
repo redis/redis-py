@@ -2,6 +2,7 @@ import time
 
 import pytest
 import redis
+
 from redis.cache import (
     CacheConfig,
     CacheEntry,
@@ -159,7 +160,7 @@ class TestCache:
             == b"bar"
         )
         # Force disconnection
-        r.connection_pool.get_connection("_").disconnect()
+        r.connection_pool.get_connection().disconnect()
         # Make sure cache is empty
         assert cache.size == 0
 
@@ -429,7 +430,7 @@ class TestClusterCache:
         # Force disconnection
         r.nodes_manager.get_node_from_slot(
             12000
-        ).redis_connection.connection_pool.get_connection("_").disconnect()
+        ).redis_connection.connection_pool.get_connection().disconnect()
         # Make sure cache is empty
         assert cache.size == 0
 
@@ -636,6 +637,7 @@ class TestSentinelCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
+        time.sleep(0.1)
         # Retrieves a new value from server and cache_data it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
@@ -667,7 +669,7 @@ class TestSentinelCache:
             == b"bar"
         )
         # Force disconnection
-        master.connection_pool.get_connection("_").disconnect()
+        master.connection_pool.get_connection().disconnect()
         # Make sure cache_data is empty
         assert cache.size == 0
 

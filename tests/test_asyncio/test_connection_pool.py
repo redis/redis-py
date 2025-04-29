@@ -5,6 +5,7 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as redis
 from redis.asyncio.connection import Connection, to_bool
+from redis.auth.token import TokenInterface
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
 from .compat import aclosing, mock
@@ -28,8 +29,8 @@ class TestRedisAutoReleaseConnectionPool:
     @staticmethod
     async def create_two_conn(r: redis.Redis):
         if not r.single_connection_client:  # Single already initialized connection
-            r.connection = await r.connection_pool.get_connection("_")
-        return await r.connection_pool.get_connection("_")
+            r.connection = await r.connection_pool.get_connection()
+        return await r.connection_pool.get_connection()
 
     @staticmethod
     def has_no_connected_connections(pool: redis.ConnectionPool):
@@ -106,6 +107,12 @@ class DummyConnection(Connection):
     async def can_read_destructive(self, timeout: float = 0):
         return False
 
+    def set_re_auth_token(self, token: TokenInterface):
+        pass
+
+    async def re_auth(self):
+        pass
+
 
 class TestConnectionPool:
     @asynccontextmanager
@@ -131,7 +138,7 @@ class TestConnectionPool:
         async with self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=DummyConnection
         ) as pool:
-            connection = await pool.get_connection("_")
+            connection = await pool.get_connection()
             assert isinstance(connection, DummyConnection)
             assert connection.kwargs == connection_kwargs
 
@@ -148,8 +155,8 @@ class TestConnectionPool:
     async def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
-            c1 = await pool.get_connection("_")
-            c2 = await pool.get_connection("_")
+            c1 = await pool.get_connection()
+            c2 = await pool.get_connection()
             assert c1 != c2
 
     async def test_max_connections(self, master_host):
@@ -157,17 +164,17 @@ class TestConnectionPool:
         async with self.get_pool(
             max_connections=2, connection_kwargs=connection_kwargs
         ) as pool:
-            await pool.get_connection("_")
-            await pool.get_connection("_")
+            await pool.get_connection()
+            await pool.get_connection()
             with pytest.raises(redis.ConnectionError):
-                await pool.get_connection("_")
+                await pool.get_connection()
 
     async def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
-            c1 = await pool.get_connection("_")
+            c1 = await pool.get_connection()
             await pool.release(c1)
-            c2 = await pool.get_connection("_")
+            c2 = await pool.get_connection()
             assert c1 == c2
 
     async def test_repr_contains_db_info_tcp(self):
@@ -216,7 +223,7 @@ class TestBlockingConnectionPool:
             "port": master_host[1],
         }
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
-            connection = await pool.get_connection("_")
+            connection = await pool.get_connection()
             assert isinstance(connection, DummyConnection)
             assert connection.kwargs == connection_kwargs
 
@@ -229,14 +236,14 @@ class TestBlockingConnectionPool:
             "port": master_host[1],
         }
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
-            await pool.get_connection("_")
+            await pool.get_connection()
             await pool.disconnect()
 
     async def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
-            c1 = await pool.get_connection("_")
-            c2 = await pool.get_connection("_")
+            c1 = await pool.get_connection()
+            c2 = await pool.get_connection()
             assert c1 != c2
 
     async def test_connection_pool_blocks_until_timeout(self, master_host):
@@ -245,11 +252,11 @@ class TestBlockingConnectionPool:
         async with self.get_pool(
             max_connections=1, timeout=0.1, connection_kwargs=connection_kwargs
         ) as pool:
-            c1 = await pool.get_connection("_")
+            c1 = await pool.get_connection()
 
             start = asyncio.get_running_loop().time()
             with pytest.raises(redis.ConnectionError):
-                await pool.get_connection("_")
+                await pool.get_connection()
 
             # we should have waited at least some period of time
             assert asyncio.get_running_loop().time() - start >= 0.05
@@ -264,23 +271,23 @@ class TestBlockingConnectionPool:
         async with self.get_pool(
             max_connections=1, timeout=2, connection_kwargs=connection_kwargs
         ) as pool:
-            c1 = await pool.get_connection("_")
+            c1 = await pool.get_connection()
 
             async def target():
                 await asyncio.sleep(0.1)
                 await pool.release(c1)
 
             start = asyncio.get_running_loop().time()
-            await asyncio.gather(target(), pool.get_connection("_"))
+            await asyncio.gather(target(), pool.get_connection())
             stop = asyncio.get_running_loop().time()
             assert (stop - start) <= 0.2
 
     async def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
-            c1 = await pool.get_connection("_")
+            c1 = await pool.get_connection()
             await pool.release(c1)
-            c2 = await pool.get_connection("_")
+            c2 = await pool.get_connection()
             assert c1 == c2
 
     def test_repr_contains_db_info_tcp(self):
@@ -545,23 +552,23 @@ class TestSSLConnectionURLParsing:
         import ssl
 
         class DummyConnectionPool(redis.ConnectionPool):
-            def get_connection(self, *args, **kwargs):
+            def get_connection(self):
                 return self.make_connection()
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_cert_reqs=none")
-        assert pool.get_connection("_").cert_reqs == ssl.CERT_NONE
+        assert pool.get_connection().cert_reqs == ssl.CERT_NONE
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_cert_reqs=optional")
-        assert pool.get_connection("_").cert_reqs == ssl.CERT_OPTIONAL
+        assert pool.get_connection().cert_reqs == ssl.CERT_OPTIONAL
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_cert_reqs=required")
-        assert pool.get_connection("_").cert_reqs == ssl.CERT_REQUIRED
+        assert pool.get_connection().cert_reqs == ssl.CERT_REQUIRED
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_check_hostname=False")
-        assert pool.get_connection("_").check_hostname is False
+        assert pool.get_connection().check_hostname is False
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_check_hostname=True")
-        assert pool.get_connection("_").check_hostname is True
+        assert pool.get_connection().check_hostname is True
 
 
 class TestConnection:
@@ -607,9 +614,9 @@ class TestConnection:
                 "DEBUG", "ERROR", "LOADING fake message"
             )
         pool = r.connection_pool
-        assert not pipe.connection
-        assert len(pool._available_connections) == 1
-        assert not pool._available_connections[0]._reader
+        assert pipe.connection
+        assert pipe.connection in pool._in_use_connections
+        assert not pipe.connection._reader
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
@@ -749,7 +756,7 @@ class TestHealthCheck:
 
     async def test_health_check_in_pipeline(self, r):
         async with r.pipeline(transaction=False) as pipe:
-            pipe.connection = await pipe.connection_pool.get_connection("_")
+            pipe.connection = await pipe.connection_pool.get_connection()
             pipe.connection.next_health_check = 0
             with mock.patch.object(
                 pipe.connection, "send_command", wraps=pipe.connection.send_command
@@ -760,7 +767,7 @@ class TestHealthCheck:
 
     async def test_health_check_in_transaction(self, r):
         async with r.pipeline(transaction=True) as pipe:
-            pipe.connection = await pipe.connection_pool.get_connection("_")
+            pipe.connection = await pipe.connection_pool.get_connection()
             pipe.connection.next_health_check = 0
             with mock.patch.object(
                 pipe.connection, "send_command", wraps=pipe.connection.send_command
@@ -772,7 +779,7 @@ class TestHealthCheck:
     async def test_health_check_in_watched_pipeline(self, r):
         await r.set("foo", "bar")
         async with r.pipeline(transaction=False) as pipe:
-            pipe.connection = await pipe.connection_pool.get_connection("_")
+            pipe.connection = await pipe.connection_pool.get_connection()
             pipe.connection.next_health_check = 0
             with mock.patch.object(
                 pipe.connection, "send_command", wraps=pipe.connection.send_command
@@ -796,7 +803,7 @@ class TestHealthCheck:
     async def test_health_check_in_pubsub_before_subscribe(self, r):
         """A health check happens before the first [p]subscribe"""
         p = r.pubsub()
-        p.connection = await p.connection_pool.get_connection("_")
+        p.connection = await p.connection_pool.get_connection()
         p.connection.next_health_check = 0
         with mock.patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
@@ -818,7 +825,7 @@ class TestHealthCheck:
         connection health
         """
         p = r.pubsub()
-        p.connection = await p.connection_pool.get_connection("_")
+        p.connection = await p.connection_pool.get_connection()
         p.connection.next_health_check = 0
         with mock.patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
@@ -858,7 +865,7 @@ class TestHealthCheck:
         check the connection's health.
         """
         p = r.pubsub()
-        p.connection = await p.connection_pool.get_connection("_")
+        p.connection = await p.connection_pool.get_connection()
         with mock.patch.object(
             p.connection, "send_command", wraps=p.connection.send_command
         ) as m:

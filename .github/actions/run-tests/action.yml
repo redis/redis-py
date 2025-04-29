@@ -1,0 +1,146 @@
+name: 'Run redis-py tests'
+description: 'Runs redis-py tests against different Redis versions and configurations'
+inputs:
+  python-version:
+    description: 'Python version to use for running tests'
+    default: '3.12'
+  parser-backend:
+    description: 'Parser backend to use: plain or hiredis'
+    required: true
+  redis-version:
+    description: 'Redis version to test against'
+    required: true
+  hiredis-version:
+    description: 'hiredis version to test against'
+    required: false
+    default: '>3.0.0'
+  event-loop:
+    description: 'Event loop to use'
+    required: false
+    default: 'asyncio'
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: 'pip'
+
+    - name: Setup Test environment
+      env:
+        REDIS_VERSION: ${{ inputs.redis-version }}
+        CLIENT_LIBS_TEST_IMAGE_TAG: ${{ inputs.redis-version }}
+      run: |
+        set -e
+                
+        echo "::group::Installing dependencies"
+        pip install -r dev_requirements.txt
+        pip uninstall -y redis  # uninstall Redis package installed via redis-entraid
+        pip install -e .[jwt]  # install the working copy
+        if [ "${{inputs.parser-backend}}" == "hiredis" ]; then
+          pip install "hiredis${{inputs.hiredis-version}}"
+          echo "PARSER_BACKEND=$(echo "${{inputs.parser-backend}}_${{inputs.hiredis-version}}" | sed 's/[^a-zA-Z0-9]/_/g')" >> $GITHUB_ENV        
+        else
+          echo "PARSER_BACKEND=${{inputs.parser-backend}}" >> $GITHUB_ENV
+        fi
+        echo "::endgroup::"
+        
+        echo "::group::Starting Redis servers"
+        redis_major_version=$(echo "$REDIS_VERSION" | grep -oP '^\d+')
+        
+        if (( redis_major_version < 8 )); then
+          echo "Using redis-stack for module tests"
+        
+          # Mapping of redis version to stack version  
+          declare -A redis_stack_version_mapping=(
+            ["7.4.2"]="rs-7.4.0-v2"
+            ["7.2.7"]="rs-7.2.0-v14"
+            ["6.2.17"]="rs-6.2.6-v18"
+          )
+                  
+          if [[ -v redis_stack_version_mapping[$REDIS_VERSION] ]]; then
+            export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=${redis_stack_version_mapping[$REDIS_VERSION]}
+            echo "REDIS_MOD_URL=redis://127.0.0.1:6479/0" >> $GITHUB_ENV
+          else
+            echo "Version not found in the mapping."
+            exit 1
+          fi
+                  
+          if (( redis_major_version < 7 )); then
+            export REDIS_STACK_EXTRA_ARGS="--tls-auth-clients optional --save ''"
+            export REDIS_EXTRA_ARGS="--tls-auth-clients optional --save ''"
+            echo "REDIS_MAJOR_VERSION=${redis_major_version}" >> $GITHUB_ENV
+          fi
+        
+          invoke devenv --endpoints=all-stack
+        else
+          echo "Using redis CE for module tests"
+          echo "REDIS_MOD_URL=redis://127.0.0.1:6379" >> $GITHUB_ENV
+          invoke devenv --endpoints all
+        fi        
+        
+        sleep 10 # time to settle
+        echo "::endgroup::"
+      shell: bash
+
+    - name: Run tests
+      run: |
+        set -e
+        
+        run_tests() {
+          local protocol=$1
+          local eventloop=""
+    
+          if [ "${{inputs.event-loop}}" == "uvloop" ]; then
+            eventloop="--uvloop"
+          fi
+    
+          echo "::group::RESP${protocol} standalone tests"
+          echo "REDIS_MOD_URL=${REDIS_MOD_URL}"
+        
+          if (( $REDIS_MAJOR_VERSION < 7 )) && [ "$protocol" == "3" ]; then
+            echo "Skipping module tests: Modules doesn't support RESP3 for Redis versions < 7"
+            invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}" --extra-markers="not redismod and not cp_integration"
+          else        
+            invoke standalone-tests --redis-mod-url=${REDIS_MOD_URL} $eventloop --protocol="${protocol}"
+          fi
+        
+          echo "::endgroup::"
+    
+          if [ "$protocol" == "2" ] || [ "${{inputs.parser-backend}}" != 'hiredis' ]; then
+            echo "::group::RESP${protocol} cluster tests"
+            invoke cluster-tests $eventloop --protocol=${protocol}
+            echo "::endgroup::"
+          fi
+        }
+  
+        run_tests 2 "${{inputs.event-loop}}"
+        run_tests 3 "${{inputs.event-loop}}"
+      shell: bash
+
+    - name: Debug
+      if: failure()
+      run: |
+        sudo apt-get install -y redis-tools
+        echo "Docker Containers:"
+        docker ps
+        redis-cli -p 16379 CLUSTER NODES
+      shell: bash
+
+    - name: Upload test results and profiling data
+      uses: actions/upload-artifact@v4
+      with:
+        name: pytest-results-redis_${{inputs.redis-version}}-python_${{inputs.python-version}}-parser_${{env.PARSER_BACKEND}}-el_${{inputs.event-loop}}
+        path: |
+          *-results.xml
+          prof/**
+          profile_output*
+        if-no-files-found: error
+        retention-days: 10
+
+    - name: Upload codecov coverage
+      uses: codecov/codecov-action@v4
+      with:
+        fail_ci_if_error: false

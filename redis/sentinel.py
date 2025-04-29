@@ -273,7 +273,7 @@ class Sentinel(SentinelCommands):
             )
         return (
             f"<{type(self).__module__}.{type(self).__name__}"
-            f'(sentinels=[{",".join(sentinel_addresses)}])>'
+            f"(sentinels=[{','.join(sentinel_addresses)}])>"
         )
 
     def check_master_state(self, state, service_name):
@@ -349,6 +349,8 @@ class Sentinel(SentinelCommands):
     ):
         """
         Returns a redis client instance for the ``service_name`` master.
+        Sentinel client will detect failover and reconnect Redis clients
+        automatically.
 
         A :py:class:`~redis.sentinel.SentinelConnectionPool` class is
         used to retrieve the master's address before establishing a new
