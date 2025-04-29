@@ -1,14 +1,13 @@
 import bz2
 import csv
 import os
-import time
+import asyncio
 from io import TextIOWrapper
 
 import numpy as np
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
-import redis.commands.search
 import redis.commands.search.aggregation as aggregations
 import redis.commands.search.reducers as reducers
 from redis.commands.search import AsyncSearch
@@ -49,8 +48,8 @@ async def decoded_r(create_redis, stack_url):
 async def waitForIndex(env, idx, timeout=None):
     delay = 0.1
     while True:
-        res = await env.execute_command("FT.INFO", idx)
         try:
+            res = await env.execute_command("FT.INFO", idx)
             if int(res[res.index("indexing") + 1]) == 0:
                 break
         except ValueError:
@@ -62,7 +61,7 @@ async def waitForIndex(env, idx, timeout=None):
             except ValueError:
                 break
 
-        time.sleep(delay)
+        await asyncio.sleep(delay)
         if timeout is not None:
             timeout -= delay
             if timeout <= 0:
@@ -1765,7 +1764,7 @@ async def test_binary_and_text_fields(decoded_r: redis.Redis):
     mixed_data = {"first_name": "🐍python", "vector_emb": fake_vec.tobytes()}
     await decoded_r.hset(f"{index_name}:1", mapping=mixed_data)
 
-    schema = (
+    schema = [
         TagField("first_name"),
         VectorField(
             "embeddings_bio",
@@ -1776,7 +1775,7 @@ async def test_binary_and_text_fields(decoded_r: redis.Redis):
                 "DISTANCE_METRIC": "COSINE",
             },
         ),
-    )
+    ]
 
     await decoded_r.ft(index_name).create_index(
         fields=schema,
@@ -1784,6 +1783,7 @@ async def test_binary_and_text_fields(decoded_r: redis.Redis):
             prefix=[f"{index_name}:"], index_type=IndexType.HASH
         ),
     )
+    await waitForIndex(decoded_r, index_name)
 
     query = (
         Query("*")
@@ -1792,6 +1792,12 @@ async def test_binary_and_text_fields(decoded_r: redis.Redis):
     )
     result = await decoded_r.ft(index_name).search(query=query, query_params={})
     docs = result.docs
+
+    if len(docs) == 0:
+        hash_content = await decoded_r.hget(f"{index_name}:1", "first_name")
+    assert len(docs) > 0, (
+        f"Returned search results are empty. Result: {result}; Hash: {hash_content}"
+    )
 
     decoded_vec_from_search_results = np.frombuffer(
         docs[0]["vector_emb"], dtype=np.float32

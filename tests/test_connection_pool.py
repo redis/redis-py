@@ -563,9 +563,9 @@ class TestConnection:
         with pytest.raises(redis.BusyLoadingError):
             pipe.immediate_execute_command("DEBUG", "ERROR", "LOADING fake message")
         pool = r.connection_pool
-        assert not pipe.connection
-        assert len(pool._available_connections) == 1
-        assert not pool._available_connections[0]._sock
+        assert pipe.connection
+        assert pipe.connection in pool._in_use_connections
+        assert not pipe.connection._sock
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")

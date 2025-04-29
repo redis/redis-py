@@ -365,6 +365,34 @@ def test_topk(client):
 
 
 @pytest.mark.redismod
+def test_topk_list_with_special_words(client):
+    # test list with empty buckets
+    assert client.topk().reserve("topklist:specialwords", 5, 20, 4, 0.9)
+    assert client.topk().add(
+        "topklist:specialwords",
+        "infinity",
+        "B",
+        "nan",
+        "D",
+        "-infinity",
+        "infinity",
+        "infinity",
+        "B",
+        "nan",
+        "G",
+        "D",
+        "B",
+        "D",
+        "infinity",
+        "-infinity",
+        "-infinity",
+    )
+    assert ["infinity", "B", "D", "-infinity", "nan"] == client.topk().list(
+        "topklist:specialwords"
+    )
+
+
+@pytest.mark.redismod
 def test_topk_incrby(client):
     client.flushdb()
     assert client.topk().reserve("topk", 3, 10, 3, 1)
