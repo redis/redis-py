@@ -4811,7 +4811,7 @@ class SortedSetCommands(CommandsProtocol):
         self,
         dest: KeyT,
         keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
-        aggregate: Optional[atr] = None,
+        aggregate: Optional[str] = None,
     ) -> ResponseT:
         """
         Union multiple sorted sets specified by ``keys`` into
