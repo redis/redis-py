@@ -670,7 +670,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         if (cache_config or cache) and protocol not in [3, "3"]:
             raise RedisError("Client caching is only supported with RESP version 3")
 
-        self.cluster_error_retry_attempts = cluster_error_retry_attempts
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
         self.read_from_replicas = read_from_replicas
@@ -854,7 +853,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             startup_nodes=self.nodes_manager.startup_nodes,
             result_callbacks=self.result_callbacks,
             cluster_response_callbacks=self.cluster_response_callbacks,
-            cluster_error_retry_attempts=self.cluster_error_retry_attempts,
+            cluster_error_retry_attempts=self.retry.get_retries(),
             read_from_replicas=self.read_from_replicas,
             load_balancing_strategy=self.load_balancing_strategy,
             reinitialize_steps=self.reinitialize_steps,
@@ -1120,8 +1119,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """
         Wrapper for ERRORS_ALLOW_RETRY error handling.
 
-        It will try the number of times specified by the config option
-        "self.cluster_error_retry_attempts" which defaults to 3 unless manually
+        It will try the number of times specified by the retries property from
+        config option "self.retry" which defaults to 3 unless manually
         configured.
 
         If it reaches the number of times, the command will raise the exception
@@ -1617,7 +1616,7 @@ class NodesManager:
         )
 
     def create_redis_node(self, host, port, **kwargs):
-        # We are configuring the connection pool to not retry
+        # We are configuring the connection pool not to retry
         # connections on lower level clients to avoid retrying
         # connections to nodes that are not reachable
         # and to avoid blocking the connection pool.
@@ -2121,7 +2120,6 @@ class ClusterPipeline(RedisCluster):
         self.load_balancing_strategy = load_balancing_strategy
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.cluster_response_callbacks = cluster_response_callbacks
-        self.cluster_error_retry_attempts = cluster_error_retry_attempts
         self.reinitialize_counter = 0
         self.reinitialize_steps = reinitialize_steps
         if retry is not None:
@@ -2257,7 +2255,7 @@ class ClusterPipeline(RedisCluster):
          - refereh_table_asap set to True
 
         It will try the number of times specified by
-        the config option "self.cluster_error_retry_attempts"
+        the retries in config option "self.retry"
         which defaults to 3 unless manually configured.
 
         If it reaches the number of times, the command will
