@@ -149,7 +149,7 @@ class TestLock:
             async with self.get_lock(
                 r, "foo", timeout=0.1, raise_on_release_error=False
             ) as lock:
-                lock.release()
+                await lock.release()
         except LockError:
             pytest.fail("LockError should not have been raised")
 
@@ -157,7 +157,7 @@ class TestLock:
             async with self.get_lock(
                 r, "foo", timeout=0.1, raise_on_release_error=True
             ) as lock:
-                lock.release()
+                await lock.release()
 
     async def test_high_sleep_small_blocking_timeout(self, r):
         lock1 = self.get_lock(r, "foo")

@@ -72,6 +72,14 @@ class RedisModuleCommands:
         tdigest = TDigestBloom(client=self)
         return tdigest
 
+    def vset(self):
+        """Access the VectorSet commands namespace."""
+
+        from .vectorset import VectorSet
+
+        vset = VectorSet(client=self)
+        return vset
+
 
 class AsyncRedisModuleCommands(RedisModuleCommands):
     def ft(self, index_name="idx"):
