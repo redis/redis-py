@@ -3063,7 +3063,6 @@ class TestSSL:
         )
 
         async def _create_client(mocked: bool = True, **kwargs: Any) -> RedisCluster:
-            kwargs.pop("use_localhost", None)
             if mocked:
                 with mock.patch.object(
                     ClusterNode, "execute_command", autospec=True
