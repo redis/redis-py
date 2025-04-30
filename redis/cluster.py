@@ -499,7 +499,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         startup_nodes: Optional[List["ClusterNode"]] = None,
         cluster_error_retry_attempts: int = 3,
         retry: Optional["Retry"] = None,
-        require_full_coverage: bool = False,
+        require_full_coverage: bool = True,
         reinitialize_steps: int = 5,
         read_from_replicas: bool = False,
         load_balancing_strategy: Optional["LoadBalancingStrategy"] = None,
