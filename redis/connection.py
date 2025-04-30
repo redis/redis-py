@@ -1028,7 +1028,7 @@ class SSLConnection(Connection):
         ssl_cert_reqs="required",
         ssl_ca_certs=None,
         ssl_ca_data=None,
-        ssl_check_hostname=False,
+        ssl_check_hostname=True,
         ssl_ca_path=None,
         ssl_password=None,
         ssl_validate_ocsp=False,

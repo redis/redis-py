@@ -794,7 +794,7 @@ class SSLConnection(Connection):
         ssl_cert_reqs: Union[str, ssl.VerifyMode] = "required",
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
-        ssl_check_hostname: bool = False,
+        ssl_check_hostname: bool = True,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
         **kwargs,
