@@ -229,7 +229,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     @deprecated_args(
         args_to_warn=["read_from_replicas"],
         reason="Please configure the 'load_balancing_strategy' instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def __init__(
         self,
@@ -808,10 +808,16 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 # and try again with the new setup
                 await self.aclose()
                 raise
-            except ClusterDownError:
+            except (ClusterDownError, SlotNotCoveredError):
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
+
+                # SlotNotCoveredError can occur when the cluster is not fully
+                # initialized or can be temporary issue.
+                # We will try to reinitialize the cluster topology
+                # and retry executing the command
+
                 await self.aclose()
                 await asyncio.sleep(0.25)
                 raise

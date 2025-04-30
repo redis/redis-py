@@ -58,7 +58,7 @@ def get_node_name(host: str, port: Union[str, int]) -> str:
 @deprecated_args(
     allowed_args=["redis_node"],
     reason="Use get_connection(redis_node) instead",
-    version="5.0.3",
+    version="5.3.0",
 )
 def get_connection(redis_node, *args, **options):
     return redis_node.connection or redis_node.connection_pool.get_connection()
@@ -410,7 +410,12 @@ class AbstractRedisCluster:
         list_keys_to_dict(["SCRIPT FLUSH"], lambda command, res: all(res.values())),
     )
 
-    ERRORS_ALLOW_RETRY = (ConnectionError, TimeoutError, ClusterDownError)
+    ERRORS_ALLOW_RETRY = (
+        ConnectionError,
+        TimeoutError,
+        ClusterDownError,
+        SlotNotCoveredError,
+    )
 
     def replace_default_node(self, target_node: "ClusterNode" = None) -> None:
         """Replace the default cluster node.
@@ -485,7 +490,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
     @deprecated_args(
         args_to_warn=["read_from_replicas"],
         reason="Please configure the 'load_balancing_strategy' instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def __init__(
         self,
@@ -1239,13 +1244,19 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             except AskError as e:
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
-            except ClusterDownError as e:
+            except (ClusterDownError, SlotNotCoveredError):
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
+
+                # SlotNotCoveredError can occur when the cluster is not fully
+                # initialized or can be temporary issue.
+                # We will try to reinitialize the cluster topology
+                # and retry executing the command
+
                 time.sleep(0.25)
                 self.nodes_manager.initialize()
-                raise e
+                raise
             except ResponseError:
                 raise
             except Exception as e:
@@ -1482,7 +1493,7 @@ class NodesManager:
             "In case you need select some load balancing strategy "
             "that will use replicas, please set it through 'load_balancing_strategy'"
         ),
-        version="5.0.3",
+        version="5.3.0",
     )
     def get_node_from_slot(
         self,
