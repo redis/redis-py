@@ -37,6 +37,7 @@ class TestSSL:
     def test_ssl_connection(self, request):
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
+
         r = redis.Redis(
             host=p[0],
             port=p[1],
