@@ -1502,7 +1502,7 @@ class ConnectionPool:
     @deprecated_args(
         args_to_warn=["*"],
         reason="Use get_connection() without args instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def get_connection(self, command_name=None, *keys, **options) -> "Connection":
         "Get a connection from the pool"
@@ -1730,7 +1730,7 @@ class BlockingConnectionPool(ConnectionPool):
     @deprecated_args(
         args_to_warn=["*"],
         reason="Use get_connection() without args instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def get_connection(self, command_name=None, *keys, **options):
         """
