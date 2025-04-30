@@ -58,7 +58,7 @@ def get_node_name(host: str, port: Union[str, int]) -> str:
 @deprecated_args(
     allowed_args=["redis_node"],
     reason="Use get_connection(redis_node) instead",
-    version="5.0.3",
+    version="5.3.0",
 )
 def get_connection(redis_node, *args, **options):
     return redis_node.connection or redis_node.connection_pool.get_connection()
@@ -490,7 +490,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
     @deprecated_args(
         args_to_warn=["read_from_replicas"],
         reason="Please configure the 'load_balancing_strategy' instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def __init__(
         self,
@@ -1493,7 +1493,7 @@ class NodesManager:
             "In case you need select some load balancing strategy "
             "that will use replicas, please set it through 'load_balancing_strategy'"
         ),
-        version="5.0.3",
+        version="5.3.0",
     )
     def get_node_from_slot(
         self,

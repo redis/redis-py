@@ -229,7 +229,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     @deprecated_args(
         args_to_warn=["read_from_replicas"],
         reason="Please configure the 'load_balancing_strategy' instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def __init__(
         self,
