@@ -3118,7 +3118,9 @@ class TestSSL:
     async def test_ssl_connection(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
-        async with await create_client(ssl=True, ssl_cert_reqs="none") as rc:
+        async with await create_client(
+            ssl=True, ssl_check_hostname=False, ssl_cert_reqs="none"
+        ) as rc:
             assert await rc.ping()
 
     @pytest.mark.parametrize(
@@ -3134,6 +3136,7 @@ class TestSSL:
     ) -> None:
         async with await create_client(
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
@@ -3145,6 +3148,7 @@ class TestSSL:
     ) -> None:
         async with await create_client(
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers="foo:bar",
@@ -3166,6 +3170,7 @@ class TestSSL:
         # TLSv1.3 does not support changing the ciphers
         async with await create_client(
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
@@ -3177,12 +3182,20 @@ class TestSSL:
     async def test_validating_self_signed_certificate(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
+        # ssl_check_hostname=False is used to avoid hostname verification
+        # in the test environment, where the server certificate is self-signed
+        # and does not match the hostname that is extracted for the cluster.
+        # Cert hostname is 'localhost' in the cluster initialization when using
+        # 'localhost' it gets transformed into 127.0.0.1
+        # In production code, ssl_check_hostname should be set to True
+        # to ensure proper hostname verification.
         async with await create_client(
             ssl=True,
             ssl_ca_certs=self.ca_cert,
             ssl_cert_reqs="required",
             ssl_certfile=self.client_cert,
             ssl_keyfile=self.client_key,
+            ssl_check_hostname=False,
         ) as rc:
             assert await rc.ping()
 
@@ -3192,10 +3205,18 @@ class TestSSL:
         with open(self.ca_cert) as f:
             cert_data = f.read()
 
+        # ssl_check_hostname=False is used to avoid hostname verification
+        # in the test environment, where the server certificate is self-signed
+        # and does not match the hostname that is extracted for the cluster.
+        # Cert hostname is 'localhost' in the cluster initialization when using
+        # 'localhost' it gets transformed into 127.0.0.1
+        # In production code, ssl_check_hostname should be set to True
+        # to ensure proper hostname verification.
         async with await create_client(
             ssl=True,
             ssl_ca_data=cert_data,
             ssl_cert_reqs="required",
+            ssl_check_hostname=False,
             ssl_certfile=self.client_cert,
             ssl_keyfile=self.client_key,
         ) as rc:

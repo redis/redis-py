@@ -280,7 +280,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_ca_data: Optional[str] = None,
         ssl_cert_reqs: Union[str, VerifyMode] = "required",
         ssl_certfile: Optional[str] = None,
-        ssl_check_hostname: bool = False,
+        ssl_check_hostname: bool = True,
         ssl_keyfile: Optional[str] = None,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
