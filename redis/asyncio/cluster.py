@@ -29,7 +29,7 @@ from redis.asyncio.connection import Connection, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
 from redis.asyncio.retry import Retry
 from redis.auth.token import TokenInterface
-from redis.backoff import default_backoff
+from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
 from redis.cluster import (
     PIPELINE_BLOCKED_COMMANDS,
@@ -143,19 +143,23 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
           To avoid reinitializing the cluster on moved errors, set reinitialize_steps to
           0.
     :param cluster_error_retry_attempts:
-        | Number of times to retry before raising an error when :class:`~.TimeoutError`
-          or :class:`~.ConnectionError` or :class:`~.ClusterDownError` are encountered
-    :param connection_error_retry_attempts:
-        | Number of times to retry before reinitializing when :class:`~.TimeoutError`
-          or :class:`~.ConnectionError` are encountered.
-          The default backoff strategy will be set if Retry object is not passed (see
-          default_backoff in backoff.py). To change it, pass a custom Retry object
-          using the "retry" keyword.
+        | @deprecated - Please configure the 'retry' object instead
+          In case 'retry' object is set - this argument is ignored!
+
+          Number of times to retry before raising an error when :class:`~.TimeoutError`,
+          :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError`
+          or :class:`~.ClusterDownError` are encountered
+    :param retry:
+        | A retry object that defines the retry strategy and the number of
+          retries for the cluster client.
+          In current implementation for the cluster client (starting form redis-py version 6.0.0)
+          the retry object is not yet fully utilized, instead it is used just to determine
+          the number of retries for the cluster client.
+          In the future releases the retry object will be used to handle the cluster client retries!
     :param max_connections:
         | Maximum number of connections per node. If there are no free connections & the
           maximum number of connections are already created, a
-          :class:`~.MaxConnectionsError` is raised. This error may be retried as defined
-          by :attr:`connection_error_retry_attempts`
+          :class:`~.MaxConnectionsError` is raised.
     :param address_remap:
         | An optional callable which, when provided with an internal network
           address of a node, e.g. a `(host, port)` tuple, will return the address
@@ -211,10 +215,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     __slots__ = (
         "_initialize",
         "_lock",
-        "cluster_error_retry_attempts",
+        "retry",
         "command_flags",
         "commands_parser",
-        "connection_error_retry_attempts",
         "connection_kwargs",
         "encoder",
         "node_flags",
@@ -231,6 +234,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         reason="Please configure the 'load_balancing_strategy' instead",
         version="5.3.0",
     )
+    @deprecated_args(
+        args_to_warn=[
+            "cluster_error_retry_attempts",
+        ],
+        reason="Please configure the 'retry' object instead",
+        version="6.0.0",
+    )
     def __init__(
         self,
         host: Optional[str] = None,
@@ -242,8 +252,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         load_balancing_strategy: Optional[LoadBalancingStrategy] = None,
         reinitialize_steps: int = 5,
         cluster_error_retry_attempts: int = 3,
-        connection_error_retry_attempts: int = 3,
         max_connections: int = 2**31,
+        retry: Optional["Retry"] = None,
+        retry_on_error: Optional[List[Type[Exception]]] = None,
         # Client related kwargs
         db: Union[str, int] = 0,
         path: Optional[str] = None,
@@ -263,8 +274,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         socket_keepalive: bool = False,
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         socket_timeout: Optional[float] = None,
-        retry: Optional["Retry"] = None,
-        retry_on_error: Optional[List[Type[Exception]]] = None,
         # SSL related kwargs
         ssl: bool = False,
         ssl_ca_certs: Optional[str] = None,
@@ -318,7 +327,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_keepalive": socket_keepalive,
             "socket_keepalive_options": socket_keepalive_options,
             "socket_timeout": socket_timeout,
-            "retry": retry,
             "protocol": protocol,
         }
 
@@ -342,17 +350,15 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             # Call our on_connect function to configure READONLY mode
             kwargs["redis_connect_func"] = self.on_connect
 
-        self.retry = retry
-        if retry or retry_on_error or connection_error_retry_attempts > 0:
-            # Set a retry object for all cluster nodes
-            self.retry = retry or Retry(
-                default_backoff(), connection_error_retry_attempts
+        if retry:
+            self.retry = retry
+        else:
+            self.retry = Retry(
+                backoff=ExponentialWithJitterBackoff(base=1, cap=10),
+                retries=cluster_error_retry_attempts,
             )
-            if not retry_on_error:
-                # Default errors for retrying
-                retry_on_error = [ConnectionError, TimeoutError]
+        if retry_on_error:
             self.retry.update_supported_errors(retry_on_error)
-            kwargs.update({"retry": self.retry})
 
         kwargs["response_callbacks"] = _RedisCallbacks.copy()
         if kwargs.get("protocol") in ["3", 3]:
@@ -389,8 +395,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.read_from_replicas = read_from_replicas
         self.load_balancing_strategy = load_balancing_strategy
         self.reinitialize_steps = reinitialize_steps
-        self.cluster_error_retry_attempts = cluster_error_retry_attempts
-        self.connection_error_retry_attempts = connection_error_retry_attempts
         self.reinitialize_counter = 0
         self.commands_parser = AsyncCommandsParser()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
@@ -561,15 +565,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         """Get the kwargs passed to :class:`~redis.asyncio.connection.Connection`."""
         return self.connection_kwargs
 
-    def get_retry(self) -> Optional["Retry"]:
-        return self.retry
-
-    def set_retry(self, retry: "Retry") -> None:
+    def set_retry(self, retry: Retry) -> None:
         self.retry = retry
-        for node in self.get_nodes():
-            node.connection_kwargs.update({"retry": retry})
-            for conn in node._connections:
-                conn.retry = retry
 
     def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:
         """Set a custom response callback."""
@@ -688,8 +685,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         """
         Execute a raw command on the appropriate cluster node or target_nodes.
 
-        It will retry the command as specified by :attr:`cluster_error_retry_attempts` &
-        then raise an exception.
+        It will retry the command as specified by the retries property of
+        the :attr:`retry` & then raise an exception.
 
         :param args:
             | Raw command args
@@ -705,7 +702,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         command = args[0]
         target_nodes = []
         target_nodes_specified = False
-        retry_attempts = self.cluster_error_retry_attempts
+        retry_attempts = self.retry.get_retries()
 
         passed_targets = kwargs.pop("target_nodes", None)
         if passed_targets and not self._is_node_flag(passed_targets):
@@ -1048,7 +1045,23 @@ class ClusterNode:
             return self._free.popleft()
         except IndexError:
             if len(self._connections) < self.max_connections:
-                connection = self.connection_class(**self.connection_kwargs)
+                # We are configuring the connection pool not to retry
+                # connections on lower level clients to avoid retrying
+                # connections to nodes that are not reachable
+                # and to avoid blocking the connection pool.
+                # The only error that will have some handling in the lower
+                # level clients is ConnectionError which will trigger disconnection
+                # of the socket.
+                # The retries will be handled on cluster client level
+                # where we will have proper handling of the cluster topology
+                retry = Retry(
+                    backoff=NoBackoff(),
+                    retries=0,
+                    supported_errors=(ConnectionError,),
+                )
+                connection_kwargs = self.connection_kwargs.copy()
+                connection_kwargs["retry"] = retry
+                connection = self.connection_class(**connection_kwargs)
                 self._connections.append(connection)
                 return connection
 
@@ -1544,7 +1557,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         """
         Execute the pipeline.
 
-        It will retry the commands as specified by :attr:`cluster_error_retry_attempts`
+        It will retry the commands as specified by retries specified in :attr:`retry`
         & then raise an exception.
 
         :param raise_on_error:
@@ -1560,7 +1573,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             return []
 
         try:
-            retry_attempts = self._client.cluster_error_retry_attempts
+            retry_attempts = self._client.retry.get_retries()
             while True:
                 try:
                     if self._client._initialize:
