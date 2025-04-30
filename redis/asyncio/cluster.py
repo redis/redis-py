@@ -139,11 +139,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         | Enable read from replicas in READONLY mode.
           When set to true, read commands will be assigned between the primary and
           its replications in a Round-Robin manner.
-          The data read from replicas is eventually consistent with the data in primary nodes.
+          The data read from replicas is eventually consistent
+          with the data in primary nodes.
     :param load_balancing_strategy:
         | Enable read from replicas in READONLY mode and defines the load balancing
           strategy that will be used for cluster node selection.
-          The data read from replicas is eventually consistent with the data in primary nodes.
+          The data read from replicas is eventually consistent
+          with the data in primary nodes.
     :param reinitialize_steps:
         | Specifies the number of MOVED errors that need to occur before reinitializing
           the whole cluster topology. If a MOVED error occurs and the cluster does not
@@ -800,9 +802,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
                         self.read_from_replicas and args[0] in READ_COMMANDS,
-                        self.load_balancing_strategy
-                        if args[0] in READ_COMMANDS
-                        else None,
+                        (
+                            self.load_balancing_strategy
+                            if args[0] in READ_COMMANDS
+                            else None
+                        ),
                     )
                     moved = False
 
@@ -1276,7 +1280,8 @@ class NodesManager:
 
         try:
             if len(self.slots_cache[slot]) > 1 and load_balancing_strategy:
-                # get the server index using the strategy defined in load_balancing_strategy
+                # get the server index using the strategy defined
+                # in load_balancing_strategy
                 primary_name = self.slots_cache[slot][0].name
                 node_idx = self.read_load_balancer.get_server_index(
                     primary_name, len(self.slots_cache[slot]), load_balancing_strategy

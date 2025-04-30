@@ -558,7 +558,8 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         :param load_balancing_strategy:
              Enable read from replicas in READONLY mode and defines the load balancing
              strategy that will be used for cluster node selection.
-             The data read from replicas is eventually consistent with the data in primary nodes.
+             The data read from replicas is eventually consistent
+             with the data in primary nodes.
         :param dynamic_startup_nodes:
              Set the RedisCluster's startup nodes to all of the discovered nodes.
              If true (default value), the cluster's discovered nodes will be used to
@@ -1190,9 +1191,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     target_node = self.nodes_manager.get_node_from_slot(
                         slot,
                         self.read_from_replicas and command in READ_COMMANDS,
-                        self.load_balancing_strategy
-                        if command in READ_COMMANDS
-                        else None,
+                        (
+                            self.load_balancing_strategy
+                            if command in READ_COMMANDS
+                            else None
+                        ),
                     )
                     moved = False
 
@@ -1366,7 +1369,7 @@ class LoadBalancer:
         self,
         primary: str,
         list_size: int,
-        load_balancing_strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN,
+        load_balancing_strategy: LoadBalancingStrategy = LoadBalancingStrategy.ROUND_ROBIN,  # noqa: line too long ignored
     ) -> int:
         if load_balancing_strategy == LoadBalancingStrategy.RANDOM_REPLICA:
             return self._get_random_replica_index(list_size)
