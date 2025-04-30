@@ -3118,7 +3118,9 @@ class TestSSL:
     async def test_ssl_connection(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
-        async with await create_client(ssl=True, ssl_cert_reqs="none") as rc:
+        async with await create_client(
+            ssl=True, ssl_check_hostname=False, ssl_cert_reqs="none"
+        ) as rc:
             assert await rc.ping()
 
     @pytest.mark.parametrize(
@@ -3134,6 +3136,7 @@ class TestSSL:
     ) -> None:
         async with await create_client(
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
@@ -3145,6 +3148,7 @@ class TestSSL:
     ) -> None:
         async with await create_client(
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers="foo:bar",
@@ -3166,6 +3170,7 @@ class TestSSL:
         # TLSv1.3 does not support changing the ciphers
         async with await create_client(
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
@@ -3181,6 +3186,7 @@ class TestSSL:
             ssl=True,
             ssl_ca_certs=self.ca_cert,
             ssl_cert_reqs="required",
+            ssl_check_hostname=False,
             ssl_certfile=self.client_cert,
             ssl_keyfile=self.client_key,
         ) as rc:
@@ -3196,6 +3202,7 @@ class TestSSL:
             ssl=True,
             ssl_ca_data=cert_data,
             ssl_cert_reqs="required",
+            ssl_check_hostname=False,
             ssl_certfile=self.client_cert,
             ssl_keyfile=self.client_key,
         ) as rc:

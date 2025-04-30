@@ -68,6 +68,7 @@ async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
         socket_timeout=10,
         ssl_min_version=ssl.TLSVersion.TLSv1_2,
         ssl_ciphers=ssl_ciphers,
+        ssl_check_hostname=False,
     )
     await _assert_connect(
         conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
@@ -95,12 +96,16 @@ async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
+        ssl_check_hostname=False,
         ssl_ca_certs=server_certs.ca_certfile,
         socket_timeout=10,
         ssl_min_version=ssl_min_version,
     )
     await _assert_connect(
-        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+        conn,
+        tcp_address,
+        certfile=server_certs.certfile,
+        keyfile=server_certs.keyfile,
     )
     await conn.disconnect()
 
