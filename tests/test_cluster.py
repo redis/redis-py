@@ -265,12 +265,12 @@ def moved_redirection_helper(request, failover=False):
     slot = 12182
     redirect_node = None
     # Get the current primary that holds this slot
-    prev_primary = rc.nodes_manager.get_node_from_slot(slot)
+    prev_primary = rc._nodes_manager.get_node_from_slot(slot)
     if failover:
-        if len(rc.nodes_manager.slots_cache[slot]) < 2:
+        if len(rc._nodes_manager.slots_cache[slot]) < 2:
             warnings.warn("Skipping this test since it requires to have a replica")
             return
-        redirect_node = rc.nodes_manager.slots_cache[slot][1]
+        redirect_node = rc._nodes_manager.slots_cache[slot][1]
     else:
         # Use one of the primaries to be the redirected node
         redirect_node = rc.get_primaries()[0]
@@ -290,7 +290,7 @@ def moved_redirection_helper(request, failover=False):
 
         parse_response.side_effect = moved_redirect_effect
         assert rc.execute_command("SET", "foo", "bar") == "MOCK_OK"
-        slot_primary = rc.nodes_manager.slots_cache[slot][0]
+        slot_primary = rc._nodes_manager.slots_cache[slot][0]
         assert slot_primary == redirect_node
         if failover:
             assert rc.get_node(host=r_host, port=r_port).server_type == PRIMARY
@@ -722,7 +722,7 @@ class TestRedisClusterObj:
         """
         Set a list of nodes and it should be possible to iterate over all
         """
-        nodes = [node for node in r.nodes_manager.nodes_cache.values()]
+        nodes = [node for node in r._nodes_manager.nodes_cache.values()]
 
         for i, node in enumerate(r.get_nodes()):
             assert node in nodes
@@ -734,7 +734,7 @@ class TestRedisClusterObj:
         """
         nodes = [
             node
-            for node in r.nodes_manager.nodes_cache.values()
+            for node in r._nodes_manager.nodes_cache.values()
             if node.server_type == PRIMARY
         ]
 
@@ -805,7 +805,7 @@ class TestRedisClusterObj:
         """
         key = "bar"
         slot = r.keyslot(key)
-        slot_nodes = r.nodes_manager.slots_cache.get(slot)
+        slot_nodes = r._nodes_manager.slots_cache.get(slot)
         primary = slot_nodes[0]
         assert r.get_node_from_key(key, replica=False) == primary
         replica = r.get_node_from_key(key, replica=True)
@@ -1003,8 +1003,8 @@ class TestClusterRedisCommands:
 
     def test_case_insensitive_command_names(self, r):
         assert (
-            r.cluster_response_callbacks["cluster slots"]
-            == r.cluster_response_callbacks["CLUSTER SLOTS"]
+            r._cluster_response_callbacks["cluster slots"]
+            == r._cluster_response_callbacks["CLUSTER SLOTS"]
         )
 
     def test_get_and_set(self, r):
@@ -1275,7 +1275,7 @@ class TestClusterRedisCommands:
 
     @skip_if_redis_enterprise()
     def test_cluster_countkeysinslot(self, r):
-        node = r.nodes_manager.get_node_from_slot(1)
+        node = r._nodes_manager.get_node_from_slot(1)
         mock_node_resp(node, 2)
         assert r.cluster_countkeysinslot(1) == 2
 
@@ -1450,7 +1450,7 @@ class TestClusterRedisCommands:
     @skip_if_redis_enterprise()
     def test_cluster_get_keys_in_slot(self, r):
         response = ["{foo}1", "{foo}2"]
-        node = r.nodes_manager.get_node_from_slot(12182)
+        node = r._nodes_manager.get_node_from_slot(12182)
         mock_node_resp(node, response)
         keys = r.cluster_get_keys_in_slot(12182, 4)
         assert keys == response
@@ -1476,7 +1476,7 @@ class TestClusterRedisCommands:
             r.cluster_failover(node, "STATE")
 
     def test_cluster_setslot_stable(self, r):
-        node = r.nodes_manager.get_node_from_slot(12182)
+        node = r._nodes_manager.get_node_from_slot(12182)
         mock_node_resp(node, "OK")
         assert r.cluster_setslot_stable(12182) is True
         assert node.redis_connection.connection.read_response.called
@@ -1562,7 +1562,7 @@ class TestClusterRedisCommands:
         r.set("z{1}", 3)
         # Get node that handles the slot
         slot = r.keyslot("x{1}")
-        node = r.nodes_manager.get_node_from_slot(slot)
+        node = r._nodes_manager.get_node_from_slot(slot)
         # Run info on that node
         info = r.info(target_nodes=node)
         assert isinstance(info, dict)
@@ -1618,7 +1618,7 @@ class TestClusterRedisCommands:
 
     def test_slowlog_length(self, r, slowlog):
         r.get("foo")
-        node = r.nodes_manager.get_node_from_slot(key_slot(b"foo"))
+        node = r._nodes_manager.get_node_from_slot(key_slot(b"foo"))
         slowlog_len = r.slowlog_len(target_nodes=node)
         assert isinstance(slowlog_len, int)
 
@@ -1644,7 +1644,7 @@ class TestClusterRedisCommands:
         # put a key into the current db to make sure that "db.<current-db>"
         # has data
         r.set("foo", "bar")
-        node = r.nodes_manager.get_node_from_slot(key_slot(b"foo"))
+        node = r._nodes_manager.get_node_from_slot(key_slot(b"foo"))
         stats = r.memory_stats(target_nodes=node)
         assert isinstance(stats, dict)
         for key, value in stats.items():
@@ -2530,7 +2530,7 @@ class TestNodesManager:
     """
 
     def test_load_balancer(self, r):
-        n_manager = r.nodes_manager
+        n_manager = r._nodes_manager
         lb = n_manager.read_load_balancer
         slot_1 = 1257
         slot_2 = 8975
@@ -3342,7 +3342,7 @@ class TestClusterPipeline:
 
         # 4 = 2 get_connections per execution * 2 executions
         assert get_connection.call_count == 4
-        for cluster_node in r.nodes_manager.nodes_cache.values():
+        for cluster_node in r._nodes_manager.nodes_cache.values():
             connection_pool = cluster_node.redis_connection.connection_pool
             num_of_conns = len(connection_pool._available_connections)
             assert num_of_conns == connection_pool._created_connections
@@ -3428,7 +3428,7 @@ class TestReadOnlyPipeline:
             mock_all_nodes_resp(ro, "MOCK_OK")
             assert readonly_pipe.read_from_replicas is True
             assert readonly_pipe.get(key).get(key).execute() == ["MOCK_OK", "MOCK_OK"]
-            slot_nodes = ro.nodes_manager.slots_cache[ro.keyslot(key)]
+            slot_nodes = ro._nodes_manager.slots_cache[ro.keyslot(key)]
             if len(slot_nodes) > 1:
                 executed_on_replica = False
                 for node in slot_nodes:
@@ -3468,7 +3468,7 @@ class TestReadOnlyPipeline:
             mock_all_nodes_resp(ro, "MOCK_OK")
             assert readonly_pipe.load_balancing_strategy == load_balancing_strategy
             assert readonly_pipe.get(key).get(key).execute() == ["MOCK_OK", "MOCK_OK"]
-            slot_nodes = ro.nodes_manager.slots_cache[ro.keyslot(key)]
+            slot_nodes = ro._nodes_manager.slots_cache[ro.keyslot(key)]
             executed_on_replicas_only = True
             for node in slot_nodes:
                 if node.server_type == PRIMARY:

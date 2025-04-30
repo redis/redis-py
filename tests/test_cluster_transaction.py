@@ -185,7 +185,7 @@ class TestClusterTransaction:
 
         with r.pipeline() as pipe:
             pipe.watch(f"{hashkey}:a", f"{hashkey}:b")
-            assert pipe.watching
+            assert pipe._watching
             a_value = pipe.get(f"{hashkey}:a")
             b_value = pipe.get(f"{hashkey}:b")
             assert a_value == b"1"
@@ -194,7 +194,7 @@ class TestClusterTransaction:
 
             pipe.set(f"{hashkey}:c", 3)
             assert pipe.execute() == [b"OK"]
-            assert not pipe.watching
+            assert not pipe._watching
 
     @pytest.mark.onlycluster
     def test_watch_failure(self, r):
@@ -210,7 +210,7 @@ class TestClusterTransaction:
             with pytest.raises(redis.WatchError):
                 pipe.execute()
 
-            assert not pipe.watching
+            assert not pipe._watching
 
     @pytest.mark.onlycluster
     def test_cross_slot_watch_single_call_failure(self, r):
@@ -222,7 +222,7 @@ class TestClusterTransaction:
                 "WATCH - all keys must map to the same key slot"
             )
 
-            assert not pipe.watching
+            assert not pipe._watching
 
     @pytest.mark.onlycluster
     def test_cross_slot_watch_multiple_calls_failure(self, r):
@@ -235,7 +235,7 @@ class TestClusterTransaction:
                 "Cannot watch or send commands on different slots"
             )
 
-            assert pipe.watching
+            assert pipe._watching
 
     @pytest.mark.onlycluster
     def test_watch_failure_in_empty_transaction(self, r):
@@ -250,7 +250,7 @@ class TestClusterTransaction:
             with pytest.raises(redis.WatchError):
                 pipe.execute()
 
-            assert not pipe.watching
+            assert not pipe._watching
 
     @pytest.mark.onlycluster
     def test_unwatch(self, r):
@@ -262,7 +262,7 @@ class TestClusterTransaction:
             pipe.watch(f"{hashkey}:a", f"{hashkey}:b")
             r[f"{hashkey}:b"] = 3
             pipe.unwatch()
-            assert not pipe.watching
+            assert not pipe._watching
             pipe.get(f"{hashkey}:a")
             assert pipe.execute() == [b"1"]
 
@@ -273,11 +273,11 @@ class TestClusterTransaction:
         r[f"{hashkey}:b"] = 2
 
         target_slot = r.determine_slot("GET", f"{hashkey}:a")
-        target_node = r.nodes_manager.get_node_from_slot(target_slot)
+        target_node = r._nodes_manager.get_node_from_slot(target_slot)
         with r.monitor(target_node=target_node) as m:
             with r.pipeline() as pipe:
                 pipe.watch(f"{hashkey}:a", f"{hashkey}:b")
-                assert pipe.watching
+                assert pipe._watching
                 a_value = pipe.get(f"{hashkey}:a")
                 b_value = pipe.get(f"{hashkey}:b")
                 assert a_value == b"1"
@@ -285,7 +285,7 @@ class TestClusterTransaction:
                 pipe.multi()
                 pipe.set(f"{hashkey}:c", 3)
                 assert pipe.execute() == [b"OK"]
-                assert not pipe.watching
+                assert not pipe._watching
 
             unwatch_command = wait_for_command(
                 r, m, "UNWATCH", key=f"{hashkey}:test_watch_exec_auto_unwatch"
@@ -300,13 +300,13 @@ class TestClusterTransaction:
         r[f"{hashkey}:a"] = 1
 
         target_slot = r.determine_slot("GET", f"{hashkey}:a")
-        target_node = r.nodes_manager.get_node_from_slot(target_slot)
+        target_node = r._nodes_manager.get_node_from_slot(target_slot)
         with r.monitor(target_node=target_node) as m:
             with r.pipeline() as pipe:
                 pipe.watch(f"{hashkey}:a")
-                assert pipe.watching
+                assert pipe._watching
                 pipe.reset()
-                assert not pipe.watching
+                assert not pipe._watching
 
             unwatch_command = wait_for_command(
                 r, m, "UNWATCH", key=f"{hashkey}:test_watch_reset_unwatch"
@@ -396,7 +396,7 @@ class TestClusterTransaction:
             pipe.set(f"{hashkey}:key", "someval")
             pipe.discard()
 
-            assert not pipe.watching
+            assert not pipe._watching
             assert not pipe.command_stack
 
         # pipelines with multi can be discarded
@@ -406,7 +406,7 @@ class TestClusterTransaction:
             pipe.set(f"{hashkey}:key", "someval")
             pipe.discard()
 
-            assert not pipe.watching
+            assert not pipe._watching
             assert not pipe.command_stack
 
     @pytest.mark.onlycluster
@@ -485,11 +485,11 @@ class TestClusterTransaction:
                     assert False, f"unexpected node {conn.host}:{conn.port} was called"
 
             def update_moved_slot():  # simulate slot table update
-                ask_error = r.nodes_manager._moved_exception
+                ask_error = r._nodes_manager._moved_exception
                 assert ask_error is not None, "No AskError was previously triggered"
                 assert f"{ask_error.host}:{ask_error.port}" == node_importing.name
-                r.nodes_manager._moved_exception = None
-                r.nodes_manager.slots_cache[slot] = [node_importing]
+                r._nodes_manager._moved_exception = None
+                r._nodes_manager.slots_cache[slot] = [node_importing]
 
             parse_response.side_effect = ask_redirect_effect
             manager_update_moved_slots.side_effect = update_moved_slot
@@ -559,7 +559,7 @@ class TestClusterTransaction:
         # force a MovedError on the first call to pipe.watch()
         # by switching the node that owns the slot to another one
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
-        r.nodes_manager.slots_cache[slot] = [node_importing]
+        r._nodes_manager.slots_cache[slot] = [node_importing]
 
         with r.pipeline(transaction=True) as pipe:
             pipe.watch(key)
