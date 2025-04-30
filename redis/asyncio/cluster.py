@@ -566,10 +566,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         return self.connection_kwargs
 
     def set_retry(self, retry: Retry) -> None:
-        if not isinstance(retry, Retry):
-            raise TypeError(
-                "retry must be a valid instance of redis.asyncio.retry.Retry"
-            )
         self.retry = retry
 
     def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:

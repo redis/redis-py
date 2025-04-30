@@ -801,8 +801,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         return True
 
     def set_retry(self, retry: Retry) -> None:
-        if not isinstance(retry, Retry):
-            raise TypeError("retry must be a valid instance of redis.retry.Retry")
         self.retry = retry
 
     def monitor(self, target_node=None):
