@@ -64,11 +64,6 @@ async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
 
     server_certs = get_tls_certificates(cert_type=CertificateType.server)
 
-    # ssl_check_hostname=False is used to avoid hostname verification
-    # in the test environment, where the server certificate is self-signed
-    # and does not match the hostname.
-    # In production code, ssl_check_hostname should be set to True
-    # to ensure proper hostname verification.
     conn = SSLConnection(
         host=host,
         port=port,
