@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Callable, Coroutine, Sequence
 from typing import Any, TYPE_CHECKING
 

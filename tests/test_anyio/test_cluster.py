@@ -87,10 +87,8 @@ class NodeProxy:
 
     async def handle(self, client_stream: SocketStream) -> None:
         # establish connection to redis
-        async with (
-            client_stream,
-            await anyio.connect_tcp(*self.redis_addr) as proxied_stream
-        ):
+        proxied_stream = await anyio.connect_tcp(*self.redis_addr)
+        async with client_stream, proxied_stream:
             self.n_connections += 1
             async with anyio.create_task_group() as tg:
                 tg.start_soon(self.pipe, client_stream, proxied_stream)
