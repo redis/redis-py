@@ -57,7 +57,7 @@ from ..ssl_utils import get_tls_certificates
 if sys.version_info < (3, 11):
     from exceptiongroup import ExceptionGroup
 
-pytestmark = [pytest.mark.anyio, pytest.mark.onlycluster]
+pytestmark = [pytest.mark.onlycluster, pytest.mark.anyio]
 
 
 default_host = "127.0.0.1"
@@ -67,12 +67,6 @@ default_cluster_slots = [
     [8192, 16383, ["127.0.0.1", 7001, "node_1"], ["127.0.0.1", 7002, "node_2"]],
 ]
 
-@pytest.fixture(autouse=True)
-def run_gc():
-    import gc
-
-    yield
-    gc.collect()
 
 class NodeProxy:
     """A class to proxy a node connection to a different port"""
