@@ -60,6 +60,10 @@ async def test_uds_connect(uds_address):
 async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
     host, port = tcp_address
 
+    # in order to have working hostname verification, we need to use "localhost"
+    # as redis host as the server certificate is self-signed and only valid for "localhost"
+    host = "localhost"
+
     server_certs = get_tls_certificates(cert_type=CertificateType.server)
 
     conn = SSLConnection(
@@ -91,6 +95,10 @@ async def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
 async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     host, port = tcp_address
 
+    # in order to have working hostname verification, we need to use "localhost"
+    # as redis host as the server certificate is self-signed and only valid for "localhost"
+    host = "localhost"
+
     server_certs = get_tls_certificates(cert_type=CertificateType.server)
 
     conn = SSLConnection(
@@ -102,7 +110,10 @@ async def test_tcp_ssl_connect(tcp_address, ssl_min_version):
         ssl_min_version=ssl_min_version,
     )
     await _assert_connect(
-        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+        conn,
+        tcp_address,
+        certfile=server_certs.certfile,
+        keyfile=server_certs.keyfile,
     )
     await conn.disconnect()
 

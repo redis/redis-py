@@ -635,9 +635,9 @@ class TestConnection:
                 "DEBUG", "ERROR", "LOADING fake message"
             )
         pool = r.connection_pool
-        assert not pipe.connection
-        assert len(pool._available_connections) == 1
-        assert not pool._available_connections[0]._reader
+        assert pipe.connection
+        assert pipe.connection in pool._in_use_connections
+        assert not pipe.connection._reader
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")

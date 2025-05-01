@@ -13,7 +13,11 @@ from redis._parsers import AsyncCommandsParser
 from redis.asyncio.cluster import ClusterNode, NodesManager, RedisCluster
 from redis.asyncio.connection import Connection, SSLConnection, async_timeout
 from redis.asyncio.retry import Retry
-from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
+from redis.backoff import (
+    ExponentialBackoff,
+    ExponentialWithJitterBackoff,
+    NoBackoff,
+)
 from redis.cluster import (
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,
@@ -367,71 +371,79 @@ class TestRedisClusterObj:
         retry = Retry(NoBackoff(), 2)
         url = request.config.getoption("--redis-url")
         async with RedisCluster.from_url(url, retry=retry) as r:
-            assert r.get_retry()._retries == retry._retries
-            assert isinstance(r.get_retry()._backoff, NoBackoff)
+            assert r.retry.get_retries() == retry.get_retries()
+            assert isinstance(r.retry._backoff, NoBackoff)
             for node in r.get_nodes():
-                n_retry = node.connection_kwargs.get("retry")
+                # validate nodes lower level connections default
+                # retry policy is applied
+                n_retry = node.acquire_connection().retry
                 assert n_retry is not None
-                assert n_retry._retries == retry._retries
+                assert n_retry._retries == 0
                 assert isinstance(n_retry._backoff, NoBackoff)
             rand_cluster_node = r.get_random_node()
             existing_conn = rand_cluster_node.acquire_connection()
             # Change retry policy
             new_retry = Retry(ExponentialBackoff(), 3)
             r.set_retry(new_retry)
-            assert r.get_retry()._retries == new_retry._retries
-            assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
+            assert r.retry.get_retries() == new_retry.get_retries()
+            assert isinstance(r.retry._backoff, ExponentialBackoff)
             for node in r.get_nodes():
-                n_retry = node.connection_kwargs.get("retry")
+                # validate nodes lower level connections are not affected
+                n_retry = node.acquire_connection().retry
                 assert n_retry is not None
-                assert n_retry._retries == new_retry._retries
-                assert isinstance(n_retry._backoff, ExponentialBackoff)
-            assert existing_conn.retry._retries == new_retry._retries
+                assert n_retry._retries == 0
+                assert isinstance(n_retry._backoff, NoBackoff)
+            assert existing_conn.retry.get_retries() == 0
             new_conn = rand_cluster_node.acquire_connection()
-            assert new_conn.retry._retries == new_retry._retries
+            assert new_conn.retry._retries == 0
 
     async def test_cluster_retry_object(self, request: FixtureRequest) -> None:
         url = request.config.getoption("--redis-url")
         async with RedisCluster.from_url(url) as rc_default:
             # Test default retry
-            retry = rc_default.connection_kwargs.get("retry")
+            retry = rc_default.retry
 
             # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
             host = rc_default.get_default_node().host
 
             assert isinstance(retry, Retry)
             assert retry._retries == 3
-            assert isinstance(retry._backoff, type(default_backoff()))
-            assert rc_default.get_node(host, 16379).connection_kwargs.get(
-                "retry"
-            ) == rc_default.get_node(host, 16380).connection_kwargs.get("retry")
+            assert isinstance(retry._backoff, type(ExponentialWithJitterBackoff()))
+
+            # validate nodes connections are using the default retry for
+            # lower level connections when client is created through 'from_url' method
+            # without specified retry object
+            node1_retry = rc_default.get_node(host, 16379).acquire_connection().retry
+            node2_retry = rc_default.get_node(host, 16380).acquire_connection().retry
+            for node_retry in (node1_retry, node2_retry):
+                assert node_retry.get_retries() == 0
+                assert isinstance(node_retry._backoff, NoBackoff)
+                assert node_retry._supported_errors == (ConnectionError,)
 
         retry = Retry(ExponentialBackoff(10, 5), 5)
         async with RedisCluster.from_url(url, retry=retry) as rc_custom_retry:
             # Test custom retry
-            assert (
-                rc_custom_retry.get_node(host, 16379).connection_kwargs.get("retry")
-                == retry
-            )
+            assert rc_custom_retry.retry == retry
+            # validate nodes connections are using the default retry for
+            # lower level connections when client is created through 'from_url' method
+            # with specified retry object
+            node1_retry = rc_default.get_node(host, 16379).acquire_connection().retry
+            node2_retry = rc_default.get_node(host, 16380).acquire_connection().retry
+            for node_retry in (node1_retry, node2_retry):
+                assert node_retry.get_retries() == 0
+                assert isinstance(node_retry._backoff, NoBackoff)
+                assert node_retry._supported_errors == (ConnectionError,)
 
         async with RedisCluster.from_url(
-            url, connection_error_retry_attempts=0
+            url, cluster_error_retry_attempts=0
         ) as rc_no_retries:
-            # Test no connection retries
-            assert (
-                rc_no_retries.get_node(host, 16379).connection_kwargs.get("retry")
-                is None
-            )
+            # Test no cluster retries
+            assert rc_no_retries.retry.get_retries() == 0
 
         async with RedisCluster.from_url(
             url, retry=Retry(NoBackoff(), 0)
         ) as rc_no_retries:
-            assert (
-                rc_no_retries.get_node(host, 16379)
-                .connection_kwargs.get("retry")
-                ._retries
-                == 0
-            )
+            assert rc_no_retries.retry.get_retries() == 0
 
     async def test_empty_startup_nodes(self) -> None:
         """
@@ -2809,7 +2821,7 @@ class TestClusterPipeline:
 
     async def test_cluster_down_error(self, r: RedisCluster) -> None:
         """
-        Test that the pipeline retries cluster_error_retry_attempts times before raising
+        Test that the pipeline retries the specified in retry object times before raising
         an error.
         """
         key = "foo"
@@ -2834,10 +2846,7 @@ class TestClusterPipeline:
             async with r.pipeline() as pipe:
                 with pytest.raises(ClusterDownError):
                     await pipe.get(key).execute()
-                assert (
-                    node.parse_response.await_count
-                    == 3 * r.cluster_error_retry_attempts + 1
-                )
+                assert node.parse_response.await_count == 3 * r.retry.get_retries() + 1
 
     async def test_connection_error_not_raised(self, r: RedisCluster) -> None:
         """Test ConnectionError handling with raise_on_error=False."""
@@ -3109,7 +3118,9 @@ class TestSSL:
     async def test_ssl_connection(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
-        async with await create_client(ssl=True, ssl_cert_reqs="none") as rc:
+        async with await create_client(
+            ssl=True, ssl_check_hostname=False, ssl_cert_reqs="none"
+        ) as rc:
             assert await rc.ping()
 
     @pytest.mark.parametrize(
@@ -3125,6 +3136,7 @@ class TestSSL:
     ) -> None:
         async with await create_client(
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
@@ -3136,6 +3148,7 @@ class TestSSL:
     ) -> None:
         async with await create_client(
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers="foo:bar",
@@ -3157,6 +3170,7 @@ class TestSSL:
         # TLSv1.3 does not support changing the ciphers
         async with await create_client(
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
@@ -3168,12 +3182,20 @@ class TestSSL:
     async def test_validating_self_signed_certificate(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
+        # ssl_check_hostname=False is used to avoid hostname verification
+        # in the test environment, where the server certificate is self-signed
+        # and does not match the hostname that is extracted for the cluster.
+        # Cert hostname is 'localhost' in the cluster initialization when using
+        # 'localhost' it gets transformed into 127.0.0.1
+        # In production code, ssl_check_hostname should be set to True
+        # to ensure proper hostname verification.
         async with await create_client(
             ssl=True,
             ssl_ca_certs=self.ca_cert,
             ssl_cert_reqs="required",
             ssl_certfile=self.client_cert,
             ssl_keyfile=self.client_key,
+            ssl_check_hostname=False,
         ) as rc:
             assert await rc.ping()
 
@@ -3183,10 +3205,18 @@ class TestSSL:
         with open(self.ca_cert) as f:
             cert_data = f.read()
 
+        # ssl_check_hostname=False is used to avoid hostname verification
+        # in the test environment, where the server certificate is self-signed
+        # and does not match the hostname that is extracted for the cluster.
+        # Cert hostname is 'localhost' in the cluster initialization when using
+        # 'localhost' it gets transformed into 127.0.0.1
+        # In production code, ssl_check_hostname should be set to True
+        # to ensure proper hostname verification.
         async with await create_client(
             ssl=True,
             ssl_ca_data=cert_data,
             ssl_cert_reqs="required",
+            ssl_check_hostname=False,
             ssl_certfile=self.client_cert,
             ssl_keyfile=self.client_key,
         ) as rc:

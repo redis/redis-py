@@ -2,7 +2,6 @@ import copy
 import re
 import threading
 import time
-import warnings
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
@@ -12,6 +11,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Set,
     Type,
     Union,
 )
@@ -23,6 +23,7 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
     bool_ok,
 )
+from redis.backoff import ExponentialWithJitterBackoff
 from redis.cache import CacheConfig, CacheInterface
 from redis.commands import (
     CoreCommands,
@@ -30,6 +31,7 @@ from redis.commands import (
     SentinelCommands,
     list_or_args,
 )
+from redis.commands.core import Script
 from redis.connection import (
     AbstractConnection,
     ConnectionPool,
@@ -50,7 +52,6 @@ from redis.exceptions import (
     PubSubError,
     RedisError,
     ResponseError,
-    TimeoutError,
     WatchError,
 )
 from redis.lock import Lock
@@ -58,6 +59,7 @@ from redis.retry import Retry
 from redis.utils import (
     HIREDIS_AVAILABLE,
     _set_info_logger,
+    deprecated_args,
     get_lib_version,
     safe_str,
     str_if_bytes,
@@ -189,6 +191,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         client.auto_close_connection_pool = True
         return client
 
+    @deprecated_args(
+        args_to_warn=["retry_on_timeout"],
+        reason="TimeoutError is included by default.",
+        version="6.0.0",
+    )
     def __init__(
         self,
         host: str = "localhost",
@@ -203,10 +210,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         unix_socket_path: Optional[str] = None,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
-        charset: Optional[str] = None,
-        errors: Optional[str] = None,
         decode_responses: bool = False,
         retry_on_timeout: bool = False,
+        retry: Retry = Retry(
+            backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+        ),
         retry_on_error: Optional[List[Type[Exception]]] = None,
         ssl: bool = False,
         ssl_keyfile: Optional[str] = None,
@@ -215,7 +223,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_path: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
-        ssl_check_hostname: bool = False,
+        ssl_check_hostname: bool = True,
         ssl_password: Optional[str] = None,
         ssl_validate_ocsp: bool = False,
         ssl_validate_ocsp_stapled: bool = False,
@@ -230,7 +238,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         lib_name: Optional[str] = "redis-py",
         lib_version: Optional[str] = get_lib_version(),
         username: Optional[str] = None,
-        retry: Optional[Retry] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
         protocol: Optional[int] = 2,
@@ -240,10 +247,24 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     ) -> None:
         """
         Initialize a new Redis client.
-        To specify a retry policy for specific errors, first set
-        `retry_on_error` to a list of the error/s to retry on, then set
-        `retry` to a valid `Retry` object.
-        To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
+
+        To specify a retry policy for specific errors, you have two options:
+
+        1. Set the `retry_on_error` to a list of the error/s to retry on, and
+        you can also set `retry` to a valid `Retry` object(in case the default
+        one is not appropriate) - with this approach the retries will be triggered
+        on the default errors specified in the Retry object enriched with the
+        errors specified in `retry_on_error`.
+
+        2. Define a `Retry` object with configured 'supported_errors' and set
+        it to the `retry` parameter - with this approach you completely redefine
+        the errors on which retries will happen.
+
+        `retry_on_timeout` is deprecated - please include the TimeoutError
+        either in the Retry object or in the `retry_on_error` list.
+
+        When 'connection_pool' is provided - the retry configuration of the
+        provided pool will be used.
 
         Args:
 
@@ -256,24 +277,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         else:
             self._event_dispatcher = event_dispatcher
         if not connection_pool:
-            if charset is not None:
-                warnings.warn(
-                    DeprecationWarning(
-                        '"charset" is deprecated. Use "encoding" instead'
-                    )
-                )
-                encoding = charset
-            if errors is not None:
-                warnings.warn(
-                    DeprecationWarning(
-                        '"errors" is deprecated. Use "encoding_errors" instead'
-                    )
-                )
-                encoding_errors = errors
             if not retry_on_error:
                 retry_on_error = []
-            if retry_on_timeout is True:
-                retry_on_error.append(TimeoutError)
             kwargs = {
                 "db": db,
                 "username": username,
@@ -395,10 +400,10 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
 
-    def get_retry(self) -> Optional["Retry"]:
+    def get_retry(self) -> Optional[Retry]:
         return self.get_connection_kwargs().get("retry")
 
-    def set_retry(self, retry: "Retry") -> None:
+    def set_retry(self, retry: Retry) -> None:
         self.get_connection_kwargs().update({"retry": retry})
         self.connection_pool.set_retry(retry)
 
@@ -598,18 +603,18 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         conn.send_command(*args, **options)
         return self.parse_response(conn, command_name, **options)
 
-    def _disconnect_raise(self, conn, error):
+    def _close_connection(self, conn) -> None:
         """
-        Close the connection and raise an exception
-        if retry_on_error is not set or the error
-        is not one of the specified error types
+        Close the connection before retrying.
+
+        The supported exceptions are already checked in the
+        retry object so we don't need to do it here.
+
+        After we disconnect the connection, it will try to reconnect and
+        do a health check as part of the send_command logic(on connection level).
         """
+
         conn.disconnect()
-        if (
-            conn.retry_on_error is None
-            or isinstance(error, tuple(conn.retry_on_error)) is False
-        ):
-            raise error
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
     def execute_command(self, *args, **options):
@@ -628,7 +633,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 lambda: self._send_command_parse_response(
                     conn, command_name, *args, **options
                 ),
-                lambda error: self._disconnect_raise(conn, error),
+                lambda _: self._close_connection(conn),
             )
         finally:
             if self._single_connection_client:
@@ -887,19 +892,14 @@ class PubSub:
                     )
             ttl -= 1
 
-    def _disconnect_raise_connect(self, conn, error) -> None:
+    def _reconnect(self, conn) -> None:
         """
-        Close the connection and raise an exception
-        if retry_on_error is not set or the error is not one
-        of the specified error types. Otherwise, try to
-        reconnect
+        The supported exceptions are already checked in the
+        retry object so we don't need to do it here.
+
+        In this error handler we are trying to reconnect to the server.
         """
         conn.disconnect()
-        if (
-            conn.retry_on_error is None
-            or isinstance(error, tuple(conn.retry_on_error)) is False
-        ):
-            raise error
         conn.connect()
 
     def _execute(self, conn, command, *args, **kwargs):
@@ -912,7 +912,7 @@ class PubSub:
         """
         return conn.retry.call_with_retry(
             lambda: command(*args, **kwargs),
-            lambda error: self._disconnect_raise_connect(conn, error),
+            lambda _: self._reconnect(conn),
         )
 
     def parse_response(self, block=True, timeout=0):
@@ -1281,7 +1281,8 @@ class Pipeline(Redis):
     in one transmission.  This is convenient for batch processing, such as
     saving all the values in a list to Redis.
 
-    All commands executed within a pipeline are wrapped with MULTI and EXEC
+    All commands executed within a pipeline(when running in transactional mode,
+    which is the default behavior) are wrapped with MULTI and EXEC
     calls. This guarantees all commands executed in the pipeline will be
     executed atomically.
 
@@ -1302,9 +1303,10 @@ class Pipeline(Redis):
         self.response_callbacks = response_callbacks
         self.transaction = transaction
         self.shard_hint = shard_hint
-
         self.watching = False
-        self.reset()
+        self.command_stack = []
+        self.scripts: Set[Script] = set()
+        self.explicit_transaction = False
 
     def __enter__(self) -> "Pipeline":
         return self
@@ -1370,36 +1372,37 @@ class Pipeline(Redis):
             return self.immediate_execute_command(*args, **kwargs)
         return self.pipeline_execute_command(*args, **kwargs)
 
-    def _disconnect_reset_raise(self, conn, error) -> None:
+    def _disconnect_reset_raise_on_watching(
+        self,
+        conn: AbstractConnection,
+        error: Exception,
+    ) -> None:
         """
-        Close the connection, reset watching state and
-        raise an exception if we were watching,
-        if retry_on_error is not set or the error is not one
-        of the specified error types.
+        Close the connection reset watching state and
+        raise an exception if we were watching.
+
+        The supported exceptions are already checked in the
+        retry object so we don't need to do it here.
+
+        After we disconnect the connection, it will try to reconnect and
+        do a health check as part of the send_command logic(on connection level).
         """
         conn.disconnect()
+
         # if we were already watching a variable, the watch is no longer
         # valid since this connection has died. raise a WatchError, which
         # indicates the user should retry this transaction.
         if self.watching:
             self.reset()
             raise WatchError(
-                "A ConnectionError occurred on while watching one or more keys"
+                f"A {type(error).__name__} occurred while watching one or more keys"
             )
-        # if retry_on_error is not set or the error is not one
-        # of the specified error types, raise it
-        if (
-            conn.retry_on_error is None
-            or isinstance(error, tuple(conn.retry_on_error)) is False
-        ):
-            self.reset()
-            raise
 
     def immediate_execute_command(self, *args, **options):
         """
-        Execute a command immediately, but don't auto-retry on a
-        ConnectionError if we're already WATCHing a variable. Used when
-        issuing WATCH or subsequent commands retrieving their values but before
+        Execute a command immediately, but don't auto-retry on the supported
+        errors for retry if we're already WATCHing a variable.
+        Used when issuing WATCH or subsequent commands retrieving their values but before
         MULTI is called.
         """
         command_name = args[0]
@@ -1413,7 +1416,7 @@ class Pipeline(Redis):
             lambda: self._send_command_parse_response(
                 conn, command_name, *args, **options
             ),
-            lambda error: self._disconnect_reset_raise(conn, error),
+            lambda error: self._disconnect_reset_raise_on_watching(conn, error),
         )
 
     def pipeline_execute_command(self, *args, **options) -> "Pipeline":
@@ -1551,15 +1554,19 @@ class Pipeline(Redis):
                 if not exist:
                     s.sha = immediate("SCRIPT LOAD", s.script)
 
-    def _disconnect_raise_reset(
+    def _disconnect_raise_on_watching(
         self,
         conn: AbstractConnection,
         error: Exception,
     ) -> None:
         """
-        Close the connection, raise an exception if we were watching,
-        and raise an exception if retry_on_error is not set or the
-        error is not one of the specified error types.
+        Close the connection, raise an exception if we were watching.
+
+        The supported exceptions are already checked in the
+        retry object so we don't need to do it here.
+
+        After we disconnect the connection, it will try to reconnect and
+        do a health check as part of the send_command logic(on connection level).
         """
         conn.disconnect()
         # if we were watching a variable, the watch is no longer valid
@@ -1567,16 +1574,8 @@ class Pipeline(Redis):
         # indicates the user should retry this transaction.
         if self.watching:
             raise WatchError(
-                "A ConnectionError occurred on while watching one or more keys"
+                f"A {type(error).__name__} occurred while watching one or more keys"
             )
-        # if retry_on_error is not set or the error is not one
-        # of the specified error types, raise it
-        if (
-            conn.retry_on_error is None
-            or isinstance(error, tuple(conn.retry_on_error)) is False
-        ):
-            self.reset()
-            raise error
 
     def execute(self, raise_on_error: bool = True) -> List[Any]:
         """Execute all the commands in the current pipeline"""
@@ -1600,7 +1599,7 @@ class Pipeline(Redis):
         try:
             return conn.retry.call_with_retry(
                 lambda: execute(conn, stack, raise_on_error),
-                lambda error: self._disconnect_raise_reset(conn, error),
+                lambda error: self._disconnect_raise_on_watching(conn, error),
             )
         finally:
             self.reset()
