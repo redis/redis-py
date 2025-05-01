@@ -32,6 +32,9 @@ classifiers = [
 dependencies = ['async-timeout>=4.0.3; python_full_version<"3.11.3"']
 
 [project.optional-dependencies]
+anyio = [
+    "anyio >= 4.5.2",
+]
 hiredis = [
     "hiredis>=3.0.0",
 ]
@@ -68,7 +71,7 @@ markers = [
     "onlycluster: marks tests to be run only with cluster mode redis",
     "onlynoncluster: marks tests to be run only with standalone redis",
     "ssl: marker for only the ssl tests",
-    "asyncio: marker for async tests",
+    "asyncio: marker for asyncio tests",
     "replica: replica tests",
     "experimental: run only experimental tests",
     "cp_integration: credential provider integration tests",
