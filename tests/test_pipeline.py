@@ -198,7 +198,7 @@ class TestPipeline:
 
         with r.pipeline() as pipe:
             pipe.watch("a", "b")
-            assert pipe._watching
+            assert pipe.watching
             a_value = pipe.get("a")
             b_value = pipe.get("b")
             assert a_value == b"1"
@@ -207,7 +207,7 @@ class TestPipeline:
 
             pipe.set("c", 3)
             assert pipe.execute() == [True]
-            assert not pipe._watching
+            assert not pipe.watching
 
     @pytest.mark.onlynoncluster
     def test_watch_failure(self, r):
@@ -222,7 +222,7 @@ class TestPipeline:
             with pytest.raises(redis.WatchError):
                 pipe.execute()
 
-            assert not pipe._watching
+            assert not pipe.watching
 
     @pytest.mark.onlynoncluster
     def test_watch_failure_in_empty_transaction(self, r):
@@ -236,7 +236,7 @@ class TestPipeline:
             with pytest.raises(redis.WatchError):
                 pipe.execute()
 
-            assert not pipe._watching
+            assert not pipe.watching
 
     @pytest.mark.onlynoncluster
     def test_unwatch(self, r):
@@ -247,7 +247,7 @@ class TestPipeline:
             pipe.watch("a", "b")
             r["b"] = 3
             pipe.unwatch()
-            assert not pipe._watching
+            assert not pipe.watching
             pipe.get("a")
             assert pipe.execute() == [b"1"]
 
@@ -259,7 +259,7 @@ class TestPipeline:
         with r.monitor() as m:
             with r.pipeline() as pipe:
                 pipe.watch("a", "b")
-                assert pipe._watching
+                assert pipe.watching
                 a_value = pipe.get("a")
                 b_value = pipe.get("b")
                 assert a_value == b"1"
@@ -267,7 +267,7 @@ class TestPipeline:
                 pipe.multi()
                 pipe.set("c", 3)
                 assert pipe.execute() == [True]
-                assert not pipe._watching
+                assert not pipe.watching
 
             unwatch_command = wait_for_command(r, m, "UNWATCH")
             assert unwatch_command is None, "should not send UNWATCH"
@@ -279,9 +279,9 @@ class TestPipeline:
         with r.monitor() as m:
             with r.pipeline() as pipe:
                 pipe.watch("a")
-                assert pipe._watching
+                assert pipe.watching
                 pipe.reset()
-                assert not pipe._watching
+                assert not pipe.watching
 
             unwatch_command = wait_for_command(r, m, "UNWATCH")
             assert unwatch_command is not None
@@ -330,6 +330,7 @@ class TestPipeline:
         assert result == [True]
         assert r["c"] == b"4"
 
+    @pytest.mark.onlynoncluster
     def test_transaction_callable_returns_value_from_callable(self, r):
         def callback(pipe):
             # No need to do anything here since we only want the return value

@@ -2116,6 +2116,7 @@ class ClusterPipeline(RedisCluster):
         ) if not transaction else TransactionStrategy(
             self
         )
+        self.command_stack = self._execution_strategy.command_queue
 
     def __repr__(self):
         """ """
@@ -2137,7 +2138,7 @@ class ClusterPipeline(RedisCluster):
 
     def __len__(self):
         """ """
-        return len(self._execution_strategy.command_queue)
+        return len(self.command_stack)
 
     def __bool__(self):
         "Pipeline instances should  always evaluate to True on Python 3+"
@@ -2147,7 +2148,7 @@ class ClusterPipeline(RedisCluster):
         """
         Wrapper function for pipeline_execute_command
         """
-        return self.pipeline_execute_command(*args, **kwargs)
+        return self._execution_strategy.execute_command(*args, **kwargs)
 
     def pipeline_execute_command(self, *args, **options):
         """
@@ -2161,8 +2162,7 @@ class ClusterPipeline(RedisCluster):
         At some other point, you can then run: pipe.execute(),
         which will execute all commands queued in the pipe.
         """
-        self._execution_strategy.pipeline_execute_command(*args, **options)
-        return self
+        return self._execution_strategy.execute_command(*args, **options)
 
     def annotate_exception(self, exception, number, command):
         """
@@ -2557,6 +2557,7 @@ class AbstractStrategy(ExecutionStrategy):
         self._command_queue.append(
             PipelineCommand(args, options, len(self._command_queue))
         )
+        return self._pipe
 
     @abstractmethod
     def execute(self, raise_on_error: bool = True) -> List[Any]:
@@ -2605,7 +2606,7 @@ class PipelineStrategy(AbstractStrategy):
         self.command_flags = pipe.command_flags
 
     def execute_command(self, *args, **kwargs):
-        self.pipeline_execute_command(*args, **kwargs)
+        return self.pipeline_execute_command(*args, **kwargs)
 
     def _raise_first_error(self, stack):
         """
@@ -3150,6 +3151,10 @@ class TransactionStrategy(AbstractStrategy):
         except ResponseError as e:
             self.annotate_exception(e, 0, "MULTI")
             errors.append(e)
+        except (ClusterDownError, ConnectionError) as cluster_error:
+            self._cluster_error = True
+            self.annotate_exception(cluster_error, 0, "MULTI")
+            raise
 
         # and all the other commands
         for i, command in enumerate(self._command_queue):
