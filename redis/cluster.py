@@ -2088,7 +2088,6 @@ class ClusterPipeline(RedisCluster):
         **kwargs,
     ):
         """ """
-        self.command_stack: List[PipelineCommand] = []
         self.nodes_manager = nodes_manager
         self.commands_parser = commands_parser
         self.refresh_table_asap = False
@@ -2111,23 +2110,12 @@ class ClusterPipeline(RedisCluster):
         if lock is None:
             lock = threading.Lock()
         self._lock = lock
-        self.transaction = transaction
+        self.parent_execute_command = super().execute_command
         self._execution_strategy: ExecutionStrategy = PipelineStrategy(
-            super(),
-            cluster_response_callbacks=self.cluster_response_callbacks,
-            cluster_error_retry_attempts=self.cluster_error_retry_attempts,
-        ) if not self.transaction else TransactionStrategy(
-            super(),
-            cluster_response_callbacks=self.cluster_response_callbacks,
-            cluster_error_retry_attempts=self.cluster_error_retry_attempts,
+            self
+        ) if not transaction else TransactionStrategy(
+            self
         )
-        self.explicit_transaction = False
-        self.watching = False
-        self.transaction_connection: Optional[Connection] = None
-        self.pipeline_slots: Set[int] = set()
-        self.slot_migrating = False
-        self.cluster_error = False
-        self.executing = False
 
     def __repr__(self):
         """ """
@@ -2149,7 +2137,7 @@ class ClusterPipeline(RedisCluster):
 
     def __len__(self):
         """ """
-        return len(self.command_stack)
+        return len(self._execution_strategy.command_queue)
 
     def __bool__(self):
         "Pipeline instances should  always evaluate to True on Python 3+"
@@ -2159,7 +2147,7 @@ class ClusterPipeline(RedisCluster):
         """
         Wrapper function for pipeline_execute_command
         """
-        return self._execution_strategy.execute_command(*args, **kwargs)
+        return self.pipeline_execute_command(*args, **kwargs)
 
     def pipeline_execute_command(self, *args, **options):
         """
@@ -2423,6 +2411,11 @@ class NodeCommands:
 
 class ExecutionStrategy(ABC):
 
+    @property
+    @abstractmethod
+    def command_queue(self):
+        pass
+
     @abstractmethod
     def execute_command(self, *args, **kwargs):
         """
@@ -2504,6 +2497,11 @@ class ExecutionStrategy(ABC):
 
     @abstractmethod
     def unwatch(self):
+        """
+        Unwatches all previously specified keys
+
+        See: ClusterPipeline.unwatch()
+        """
         pass
 
     @abstractmethod
@@ -2512,10 +2510,20 @@ class ExecutionStrategy(ABC):
 
     @abstractmethod
     def delete(self, *names):
+        """
+        "Delete a key specified by ``names``"
+
+        See: ClusterPipeline.delete()
+        """
         pass
 
     @abstractmethod
     def unlink(self, *names):
+        """
+        "Unlink a key specified by ``names``"
+
+        See: ClusterPipeline.unlink()
+        """
         pass
 
     @abstractmethod
@@ -2527,15 +2535,19 @@ class AbstractStrategy(ExecutionStrategy):
 
     def __init__(
             self,
-            cluster: RedisCluster,
-            cluster_response_callbacks: Optional[Dict[str, Callable]] = None,
-            cluster_error_retry_attempts: int = 3,
+            pipe: ClusterPipeline,
     ):
         self._command_queue: List[PipelineCommand] = []
-        self._cluster = cluster
-        self._nodes_manager = self._cluster.nodes_manager
-        self._cluster_response_callbacks = cluster_response_callbacks
-        self._cluster_error_retry_attempts = cluster_error_retry_attempts
+        self._pipe = pipe
+        self._nodes_manager = self._pipe.nodes_manager
+
+    @property
+    def command_queue(self):
+        return self._command_queue
+
+    @command_queue.setter
+    def command_queue(self, queue: List[PipelineCommand]):
+        self._command_queue = queue
 
     @abstractmethod
     def execute_command(self, *args, **kwargs):
@@ -2575,18 +2587,6 @@ class AbstractStrategy(ExecutionStrategy):
             "method script_load_for_pipeline() is not implemented"
         )
 
-    def delete(self, *names):
-        """
-        "Delete a key specified by ``names``"
-        """
-        return self.execute_command("DEL", *names)
-
-    def unlink(self, *names):
-        """
-        "Unlink a key specified by ``names``"
-        """
-        return self.execute_command("UNLINK", *names)
-
     def annotate_exception(self, exception, number, command):
         """
         Provides extra context to the exception prior to it being handled
@@ -2600,19 +2600,9 @@ class AbstractStrategy(ExecutionStrategy):
 
 class PipelineStrategy(AbstractStrategy):
 
-    def __init__(
-            self,
-            cluster: RedisCluster,
-            cluster_response_callbacks: Optional[Dict[str, Callable]] = None,
-            cluster_error_retry_attempts: int = 3,
-    ):
-        super().__init__(
-            cluster,
-            cluster_response_callbacks,
-            cluster_error_retry_attempts
-        )
-        self.node_flags = cluster.NODE_FLAGS.copy()
-        self.command_flags = cluster.COMMAND_FLAGS.copy()
+    def __init__(self, pipe: ClusterPipeline):
+        super().__init__(pipe)
+        self.command_flags = pipe.command_flags
 
     def execute_command(self, *args, **kwargs):
         self.pipeline_execute_command(*args, **kwargs)
@@ -2666,7 +2656,7 @@ class PipelineStrategy(AbstractStrategy):
         """
         if not stack:
             return []
-        retry_attempts = self._cluster_error_retry_attempts
+        retry_attempts = self._pipe.cluster_error_retry_attempts
         while True:
             try:
                 return self._send_cluster_commands(
@@ -2731,7 +2721,7 @@ class PipelineStrategy(AbstractStrategy):
                     )
 
                 node = target_nodes[0]
-                if node == self._cluster.get_default_node():
+                if node == self._pipe.get_default_node():
                     is_default_node = True
 
                 # now that we know the name of the node
@@ -2739,7 +2729,7 @@ class PipelineStrategy(AbstractStrategy):
                 # we can build a list of commands for each node.
                 node_name = node.name
                 if node_name not in nodes:
-                    redis_node = self._cluster.get_redis_connection(node)
+                    redis_node = self._pipe.get_redis_connection(node)
                     try:
                         connection = get_connection(redis_node)
                     except (ConnectionError, TimeoutError):
@@ -2749,7 +2739,7 @@ class PipelineStrategy(AbstractStrategy):
                         # Retry object. Reinitialize the node -> slot table.
                         self._nodes_manager.initialize()
                         if is_default_node:
-                            self._cluster.replace_default_node()
+                            self._pipe.replace_default_node()
                         raise
                     nodes[node_name] = NodeCommands(
                         redis_node.parse_response,
@@ -2830,16 +2820,16 @@ class PipelineStrategy(AbstractStrategy):
             # If a lot of commands have failed, we'll be setting the
             # flag to rebuild the slots table from scratch.
             # So MOVED errors should correct themselves fairly quickly.
-            self._cluster.reinitialize_counter += 1
-            if self._cluster._should_reinitialized():
+            self._pipe.reinitialize_counter += 1
+            if self._pipe._should_reinitialized():
                 self._nodes_manager.initialize()
                 if is_default_node:
-                    self._cluster.replace_default_node()
+                    self._pipe.replace_default_node()
             for c in attempt:
                 try:
                     # send each command individually like we
                     # do in the main client.
-                    c.result = super().execute_command(*c.args, **c.options)
+                    c.result = self._pipe.parent_execute_command(*c.args, **c.options)
                 except RedisError as e:
                     c.result = e
 
@@ -2847,10 +2837,10 @@ class PipelineStrategy(AbstractStrategy):
         # to the sequence of commands issued in the stack in pipeline.execute()
         response = []
         for c in sorted(stack, key=lambda x: x.position):
-            if c.args[0] in self._cluster_response_callbacks:
+            if c.args[0] in self._pipe.cluster_response_callbacks:
                 # Remove keys entry, it needs only for cache.
                 c.options.pop("keys", None)
-                c.result = self._cluster_response_callbacks[c.args[0]](
+                c.result = self._pipe.cluster_response_callbacks[c.args[0]](
                     c.result, **c.options
                 )
             response.append(c.result)
@@ -2861,7 +2851,7 @@ class PipelineStrategy(AbstractStrategy):
         return response
 
     def _is_nodes_flag(self, target_nodes):
-        return isinstance(target_nodes, str) and target_nodes in self.node_flags
+        return isinstance(target_nodes, str) and target_nodes in self._pipe.node_flags
 
     def _parse_target_nodes(self, target_nodes):
         if isinstance(target_nodes, list):
@@ -2887,7 +2877,7 @@ class PipelineStrategy(AbstractStrategy):
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
         command = args[0].upper()
-        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self._pipe.command_flags:
             command = f"{args[0]} {args[1]}".upper()
 
         nodes_flag = kwargs.pop("nodes_flag", None)
@@ -2896,31 +2886,31 @@ class PipelineStrategy(AbstractStrategy):
             command_flag = nodes_flag
         else:
             # get the nodes group for this command if it was predefined
-            command_flag = self.command_flags.get(command)
-        if command_flag == self._cluster.RANDOM:
+            command_flag = self._pipe.command_flags.get(command)
+        if command_flag == self._pipe.RANDOM:
             # return a random node
-            return [self._cluster.get_random_node()]
-        elif command_flag == self._cluster.PRIMARIES:
+            return [self._pipe.get_random_node()]
+        elif command_flag == self._pipe.PRIMARIES:
             # return all primaries
-            return self._cluster.get_primaries()
-        elif command_flag == self._cluster.REPLICAS:
+            return self._pipe.get_primaries()
+        elif command_flag == self._pipe.REPLICAS:
             # return all replicas
-            return self._cluster.get_replicas()
-        elif command_flag == self._cluster.ALL_NODES:
+            return self._pipe.get_replicas()
+        elif command_flag == self._pipe.ALL_NODES:
             # return all nodes
-            return self._cluster.get_nodes()
-        elif command_flag == self._cluster.DEFAULT_NODE:
+            return self._pipe.get_nodes()
+        elif command_flag == self._pipe.DEFAULT_NODE:
             # return the cluster's default node
             return [self._nodes_manager.default_node]
-        elif command in self._cluster.SEARCH_COMMANDS[0]:
+        elif command in self._pipe.SEARCH_COMMANDS[0]:
             return [self._nodes_manager.default_node]
         else:
             # get the node that holds the key's slot
-            slot = self._cluster.determine_slot(*args)
+            slot = self._pipe.determine_slot(*args)
             node = self._nodes_manager.get_node_from_slot(
                 slot,
-                self._cluster.read_from_replicas and command in READ_COMMANDS,
-                self._cluster.load_balancing_strategy if command in READ_COMMANDS else None,
+                self._pipe.read_from_replicas and command in READ_COMMANDS,
+                self._pipe.load_balancing_strategy if command in READ_COMMANDS else None,
             )
             return [node]
 
@@ -2936,6 +2926,22 @@ class PipelineStrategy(AbstractStrategy):
     def unwatch(self, *names):
         raise RedisClusterException("method unwatch() is not implemented")
 
+    def delete(self, *names):
+        if len(names) != 1:
+            raise RedisClusterException(
+                "deleting multiple keys is not implemented in pipeline command"
+            )
+
+        return self.execute_command("DEL", names[0])
+
+    def unlink(self, *names):
+        if len(names) != 1:
+            raise RedisClusterException(
+                "unlinking multiple keys is not implemented in pipeline command"
+            )
+
+        return self.execute_command("UNLINK", names[0])
+
 
 class TransactionStrategy(AbstractStrategy):
 
@@ -2943,17 +2949,8 @@ class TransactionStrategy(AbstractStrategy):
     IMMEDIATE_EXECUTE_COMMANDS = {"WATCH", "UNWATCH"}
     UNWATCH_COMMANDS = {"DISCARD", "EXEC", "UNWATCH"}
 
-    def __init__(
-            self,
-            cluster: RedisCluster,
-            cluster_response_callbacks: Optional[Dict[str, Callable]] = None,
-            cluster_error_retry_attempts: int = 3,
-    ):
-        super().__init__(
-            cluster,
-            cluster_response_callbacks,
-            cluster_error_retry_attempts
-        )
+    def __init__(self, pipe: ClusterPipeline):
+        super().__init__(pipe)
         self._explicit_transaction = False
         self._watching = False
         self._pipeline_slots: Set[int] = set()
@@ -2979,7 +2976,7 @@ class TransactionStrategy(AbstractStrategy):
         node: ClusterNode = self._nodes_manager.get_node_from_slot(
             list(self._pipeline_slots)[0], False
         )
-        redis_node: Redis = self._cluster.get_redis_connection(node)
+        redis_node: Redis = self._pipe.get_redis_connection(node)
         if self._transaction_connection:
             if not redis_node.connection_pool.owns_connection(
                 self._transaction_connection
@@ -2998,7 +2995,7 @@ class TransactionStrategy(AbstractStrategy):
     def execute_command(self, *args, **kwargs):
         slot_number: Optional[int] = None
         if args[0] not in ClusterPipeline.NO_SLOTS_COMMANDS:
-            slot_number = self._cluster.determine_slot(*args)
+            slot_number = self._pipe.determine_slot(*args)
 
         if (
                 self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
@@ -3035,7 +3032,7 @@ class TransactionStrategy(AbstractStrategy):
     def _immediate_execute_command(self, *args, **options):
         retry = Retry(
             default_backoff(),
-            self._cluster.cluster_error_retry_attempts,
+            self._pipe.cluster_error_retry_attempts,
         )
         retry.update_supported_errors([AskError, MovedError])
         return retry.call_with_retry(
@@ -3080,8 +3077,8 @@ class TransactionStrategy(AbstractStrategy):
             if self._transaction_connection:
                 self._transaction_connection = None
 
-            self._cluster.reinitialize_counter += 1
-            if self._cluster._should_reinitialized():
+            self._pipe.reinitialize_counter += 1
+            if self._pipe._should_reinitialized():
                 self._nodes_manager.initialize()
                 self.reinitialize_counter = 0
             else:
@@ -3112,7 +3109,7 @@ class TransactionStrategy(AbstractStrategy):
     ):
         retry = Retry(
             default_backoff(),
-            self._cluster.cluster_error_retry_attempts,
+            self._pipe.cluster_error_retry_attempts,
         )
         retry.update_supported_errors([AskError, MovedError])
         return retry.call_with_retry(
@@ -3214,8 +3211,8 @@ class TransactionStrategy(AbstractStrategy):
         for r, cmd in zip(response, self._command_queue):
             if not isinstance(r, Exception):
                 command_name = cmd.args[0]
-                if command_name in self._cluster.cluster_response_callbacks:
-                    r = self._cluster_response_callbacks[command_name](r, **cmd.options)
+                if command_name in self._pipe.cluster_response_callbacks:
+                    r = self._pipe.cluster_response_callbacks[command_name](r, **cmd.options)
             data.append(r)
         return data
 
@@ -3282,3 +3279,9 @@ class TransactionStrategy(AbstractStrategy):
             return
 
         raise RedisClusterException("DISCARD triggered without MULTI")
+
+    def delete(self, *names):
+        return self.execute_command("DEL", *names)
+
+    def unlink(self, *names):
+        return self.execute_command("UNLINK", *names)

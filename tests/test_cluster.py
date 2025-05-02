@@ -3095,7 +3095,7 @@ class TestClusterPipeline:
         """
         Test that multi delete operation is unsupported
         """
-        with r.pipeline(transaction=False) as pipe:
+        with r.pipeline(transaction=True) as pipe:
             r["{key}:a"] = 1
             r["{key}:b"] = 2
             pipe.delete("{key}:a", "{key}:b")
@@ -3342,7 +3342,7 @@ class TestClusterPipeline:
 
         # 4 = 2 get_connections per execution * 2 executions
         assert get_connection.call_count == 4
-        for cluster_node in r._nodes_manager.nodes_cache.values():
+        for cluster_node in r.nodes_manager.nodes_cache.values():
             connection_pool = cluster_node.redis_connection.connection_pool
             num_of_conns = len(connection_pool._available_connections)
             assert num_of_conns == connection_pool._created_connections
