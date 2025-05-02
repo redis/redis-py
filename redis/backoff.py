@@ -31,6 +31,15 @@ class ConstantBackoff(AbstractBackoff):
         """`backoff`: backoff time in seconds"""
         self._backoff = backoff
 
+    def __hash__(self) -> int:
+        return hash((self._backoff,))
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, ConstantBackoff):
+            return NotImplemented
+
+        return self._backoff == other._backoff
+
     def compute(self, failures: int) -> float:
         return self._backoff
 
@@ -53,6 +62,15 @@ class ExponentialBackoff(AbstractBackoff):
         self._cap = cap
         self._base = base
 
+    def __hash__(self) -> int:
+        return hash((self._base, self._cap))
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, ExponentialBackoff):
+            return NotImplemented
+
+        return self._base == other._base and self._cap == other._cap
+
     def compute(self, failures: int) -> float:
         return min(self._cap, self._base * 2**failures)
 
@@ -68,6 +86,15 @@ class FullJitterBackoff(AbstractBackoff):
         self._cap = cap
         self._base = base
 
+    def __hash__(self) -> int:
+        return hash((self._base, self._cap))
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, FullJitterBackoff):
+            return NotImplemented
+
+        return self._base == other._base and self._cap == other._cap
+
     def compute(self, failures: int) -> float:
         return random.uniform(0, min(self._cap, self._base * 2**failures))
 
@@ -82,6 +109,15 @@ class EqualJitterBackoff(AbstractBackoff):
         """
         self._cap = cap
         self._base = base
+
+    def __hash__(self) -> int:
+        return hash((self._base, self._cap))
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, EqualJitterBackoff):
+            return NotImplemented
+
+        return self._base == other._base and self._cap == other._cap
 
     def compute(self, failures: int) -> float:
         temp = min(self._cap, self._base * 2**failures) / 2
@@ -99,6 +135,15 @@ class DecorrelatedJitterBackoff(AbstractBackoff):
         self._cap = cap
         self._base = base
         self._previous_backoff = 0
+
+    def __hash__(self) -> int:
+        return hash((self._base, self._cap))
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, DecorrelatedJitterBackoff):
+            return NotImplemented
+
+        return self._base == other._base and self._cap == other._cap
 
     def reset(self) -> None:
         self._previous_backoff = 0
@@ -120,6 +165,15 @@ class ExponentialWithJitterBackoff(AbstractBackoff):
         """
         self._cap = cap
         self._base = base
+
+    def __hash__(self) -> int:
+        return hash((self._base, self._cap))
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, EqualJitterBackoff):
+            return NotImplemented
+
+        return self._base == other._base and self._cap == other._cap
 
     def compute(self, failures: int) -> float:
         return min(self._cap, random.random() * self._base * 2**failures)
