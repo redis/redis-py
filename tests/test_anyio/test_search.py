@@ -1,9 +1,9 @@
 import bz2
 import csv
 import os
-import time
 from io import TextIOWrapper
 
+import anyio
 import numpy as np
 import pytest
 import redis.anyio as redis
