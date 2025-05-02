@@ -31,9 +31,9 @@ import anyio
 from anyio import BrokenResourceError, aclose_forcefully
 from anyio.abc import SocketAttribute, SocketStream
 
+from ..utils import SSL_AVAILABLE
 from ._parsers.base import AnyIOBaseParser
 from .utils import wait_for_condition
-from ..utils import SSL_AVAILABLE
 
 if SSL_AVAILABLE:
     import ssl
@@ -42,10 +42,6 @@ else:
     ssl = None
     TLSVersion = None
     SSLContext = None
-
-from ..auth.token import TokenInterface
-from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
-from ..utils import deprecated_args, format_error_message
 
 from redis.anyio.retry import Retry
 from redis.backoff import NoBackoff
@@ -64,9 +60,11 @@ from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, get_lib_version, str_if_bytes
 
 from .._parsers import (
-    BaseParser,
     Encoder,
 )
+from ..auth.token import TokenInterface
+from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
+from ..utils import deprecated_args, format_error_message
 from ._parsers import (
     _AnyIOHiredisParser,
     _AnyIORESP2Parser,
@@ -234,9 +232,7 @@ class AbstractConnection:
         # collected and therefore produce no resource warnings.  We add one
         # here, in the same style as those from the stdlib.
         if getattr(self, "_stream", None):
-            _warn(
-                f"unclosed Connection {self!r}", ResourceWarning, source=self
-            )
+            _warn(f"unclosed Connection {self!r}", ResourceWarning, source=self)
 
     def __repr__(self):
         repr_args = ",".join((f"{k}={v}" for k, v in self.repr_pieces()))
@@ -488,10 +484,7 @@ class AbstractConnection:
 
     async def check_health(self):
         """Check the health of the connection with a PING/PONG"""
-        if (
-            self.health_check_interval
-            and anyio.current_time() > self.next_health_check
-        ):
+        if self.health_check_interval and anyio.current_time() > self.next_health_check:
             await self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:

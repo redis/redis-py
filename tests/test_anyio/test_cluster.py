@@ -5,8 +5,8 @@ import datetime
 import ssl
 import sys
 import warnings
-from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
+from collections.abc import AsyncGenerator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, NoReturn
 from unittest import mock
 from unittest.mock import AsyncMock, patch
@@ -81,7 +81,9 @@ class NodeProxy:
         await stream.aclose()
 
         local_host, local_port = self.addr
-        async with await anyio.create_tcp_listener(local_host=local_host, local_port=local_port, reuse_port=True) as listener:
+        async with await anyio.create_tcp_listener(
+            local_host=local_host, local_port=local_port, reuse_port=True
+        ) as listener:
             task_status.started()
             await listener.serve(self.handle)
 
@@ -173,9 +175,13 @@ async def get_mocked_redis_client(
         @property
         def connection_pool(self):
             # Required abstract property implementation
-            return self.nodes_manager.get_default_node().redis_connection.connection_pool
+            return (
+                self.nodes_manager.get_default_node().redis_connection.connection_pool
+            )
 
-    execute_command_patcher = patch.object(ClusterNode, "execute_command", mocked_execute_command)
+    execute_command_patcher = patch.object(
+        ClusterNode, "execute_command", mocked_execute_command
+    )
     execute_command_patcher.start()
     with patch.object(AsyncCommandsParser, "initialize", cmd_init_mock):
         try:
@@ -279,7 +285,9 @@ class TestRedisClusterObj:
         Test that it is possible to use host & port arguments as startup node
         args
         """
-        async with get_mocked_redis_client(host=default_host, port=default_port) as cluster:
+        async with get_mocked_redis_client(
+            host=default_host, port=default_port
+        ) as cluster:
             assert cluster.get_node(host=default_host, port=default_port) is not None
 
     async def test_startup_nodes(self) -> None:
@@ -562,9 +570,7 @@ class TestRedisClusterObj:
         with patch.object(
             ClusterNode, "execute_command", autospec=True
         ) as execute_command:
-            with patch.object(
-                NodesManager, "initialize", autospec=True
-            ) as initialize:
+            with patch.object(NodesManager, "initialize", autospec=True) as initialize:
                 with patch.multiple(
                     Connection,
                     send_packed_command=mock.DEFAULT,
@@ -713,7 +719,10 @@ class TestRedisClusterObj:
                         load_balancing_strategy=load_balancing_strategy,
                     ) as read_cluster:
                         assert read_cluster.read_from_replicas is read_from_replicas
-                        assert read_cluster.load_balancing_strategy is load_balancing_strategy
+                        assert (
+                            read_cluster.load_balancing_strategy
+                            is load_balancing_strategy
+                        )
                         # Check that we read from the slot's nodes in a round robin
                         # matter.
                         # 'foo' belongs to slot 12182 and the slot's nodes are:
@@ -787,10 +796,14 @@ class TestRedisClusterObj:
 
             execute_command.side_effect = raise_error
 
-            async with get_mocked_redis_client(host=default_host, port=default_port) as rc:
+            async with get_mocked_redis_client(
+                host=default_host, port=default_port
+            ) as rc:
                 with pytest.raises(error):
                     await rc.get("bar")
-                    assert execute_command.failed_calls == rc.cluster_error_retry_attempts
+                    assert (
+                        execute_command.failed_calls == rc.cluster_error_retry_attempts
+                    )
 
     async def test_set_default_node_success(self, r: RedisCluster) -> None:
         """
@@ -868,7 +881,10 @@ class TestRedisClusterObj:
         async with RedisCluster.from_url(url) as rc:
             assert all(
                 await gather(
-                    *(rc.echo("i", target_nodes=RedisCluster.ALL_NODES) for i in range(100))
+                    *(
+                        rc.echo("i", target_nodes=RedisCluster.ALL_NODES)
+                        for i in range(100)
+                    )
                 )
             )
 
@@ -2413,7 +2429,7 @@ class TestNodesManager:
         ]
         with pytest.raises(
             RedisClusterException,
-            match="^All slots are not covered after query all startup_nodes."
+            match="^All slots are not covered after query all startup_nodes.",
         ):
             async with get_mocked_redis_client(
                 host=default_host,
@@ -2483,7 +2499,7 @@ class TestNodesManager:
                 host=default_host,
                 port=default_port,
                 cluster_enabled=False,
-            ) as rc:
+            ):
                 pass
         assert "Cluster mode is not enabled on this node" in str(e.value)
 
@@ -2540,13 +2556,13 @@ class TestNodesManager:
             patch.object(ClusterNode, "execute_command", mocked_execute_command),
             pytest.raises(
                 RedisClusterException,
-                match="^startup_nodes could not agree on a valid slots cache"
-            )
+                match="^startup_nodes could not agree on a valid slots cache",
+            ),
         ):
             node_1 = ClusterNode("127.0.0.1", 7000)
             node_2 = ClusterNode("127.0.0.1", 7001)
             async with RedisCluster(startup_nodes=[node_1, node_2]):
-                    ...
+                ...
 
     async def test_cluster_one_instance(self) -> None:
         """
@@ -2942,7 +2958,9 @@ class TestSSL:
     """
 
     @pytest.fixture
-    def create_client(self, request: FixtureRequest) -> Callable[..., AbstractAsyncContextManager[RedisCluster]]:
+    def create_client(
+        self, request: FixtureRequest
+    ) -> Callable[..., AbstractAsyncContextManager[RedisCluster]]:
         ssl_url = request.config.option.redis_ssl_url
         ssl_host, ssl_port = urlparse(ssl_url)[1].split(":")
         self.client_cert, self.client_key, self.ca_cert = get_tls_certificates(
@@ -2950,8 +2968,11 @@ class TestSSL:
         )
 
         @asynccontextmanager
-        async def _create_client(mocked: bool = True, **kwargs: Any) -> AsyncGenerator[RedisCluster]:
+        async def _create_client(
+            mocked: bool = True, **kwargs: Any
+        ) -> AsyncGenerator[RedisCluster]:
             if mocked:
+
                 async def execute_command(self, *args, **kwargs):
                     if args[0] == "INFO":
                         return {"cluster_enabled": True}
@@ -3018,7 +3039,9 @@ class TestSSL:
         ],
     )
     async def test_ssl_connection_tls12_custom_ciphers(
-        self, ssl_ciphers, create_client: Callable[..., AbstractAsyncContextManager[RedisCluster]]
+        self,
+        ssl_ciphers,
+        create_client: Callable[..., AbstractAsyncContextManager[RedisCluster]],
     ) -> None:
         async with create_client(
             ssl=True,
@@ -3049,7 +3072,9 @@ class TestSSL:
         ],
     )
     async def test_ssl_connection_tls13_custom_ciphers(
-        self, ssl_ciphers, create_client: Callable[..., AbstractAsyncContextManager[RedisCluster]]
+        self,
+        ssl_ciphers,
+        create_client: Callable[..., AbstractAsyncContextManager[RedisCluster]],
     ) -> None:
         # TLSv1.3 does not support changing the ciphers
         async with create_client(

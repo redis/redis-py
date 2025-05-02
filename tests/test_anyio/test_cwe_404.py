@@ -209,10 +209,9 @@ async def test_cluster(master_host):
         for p in proxies:
             await stack.enter_async_context(p)
 
-        r = RedisCluster.from_url(
+        async with RedisCluster.from_url(
             f"redis://{hostname}:{remap_base}", address_remap=remap
-        )
-        try:
+        ) as r:
             await r.initialize()
             await r.set("foo", "foo")
             await r.set("bar", "bar")
@@ -222,13 +221,11 @@ async def test_cluster(master_host):
                     return await r.get("foo")
 
             all_clear()
-            t = asyncio.create_task(op(r))
-            # Wait for whichever DelayProxy gets the request first
-            await wait_for_send()
-            await anyio.sleep(0.01)
-            t.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await t
+            async with anyio.create_task_group() as tg:
+                # Wait for whichever DelayProxy gets the request first
+                await wait_for_send()
+                await anyio.sleep(0.01)
+                tg.cancel_scope.cancel()
 
             # try a number of requests to exercise all the connections
             async def doit():
@@ -237,5 +234,3 @@ async def test_cluster(master_host):
                 assert await r.get("foo") == b"foo"
 
             await gather(*[doit() for _ in range(10)])
-        finally:
-            await r.aclose()

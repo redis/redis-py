@@ -12,7 +12,6 @@ from typing import (
     Callable,
     Deque,
     Dict,
-    Generator,
     List,
     Mapping,
     Optional,
@@ -461,7 +460,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self,
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
-        exc_tb: TracebackType | None
+        exc_tb: TracebackType | None,
     ) -> None:
         exit_stack, self._exit_stack = self._exit_stack, None
         await exit_stack.__aexit__(exc_type, exc_value, exc_tb)
@@ -471,7 +470,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         _warn: Any = warnings.warn,
     ) -> None:
         if getattr(self, "_exit_stack", None) is not None:
-            _warn(f"Unclosed RedisCluster client {self!r}", ResourceWarning, source=self)
+            _warn(
+                f"Unclosed RedisCluster client {self!r}", ResourceWarning, source=self
+            )
 
     async def on_connect(self, connection: Connection) -> None:
         await connection.on_connect()
@@ -1428,7 +1429,7 @@ class NodesManager:
         self,
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
-        exc_tb: TracebackType | None
+        exc_tb: TracebackType | None,
     ) -> bool | None:
         try:
             return await self._exit_stack.__aexit__(exc_type, exc_value, exc_tb)
@@ -1446,12 +1447,7 @@ class NodesManager:
 
     async def aclose(self, attr: str = "nodes_cache") -> None:
         self.default_node = None
-        await gather(
-            *(
-                node.disconnect()
-                for node in getattr(self, attr).values()
-            )
-        )
+        await gather(*(node.disconnect() for node in getattr(self, attr).values()))
 
     def remap_host_port(self, host: str, port: int) -> Tuple[str, int]:
         """
@@ -1632,10 +1628,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             nodes[node.name][1].append(cmd)
 
         errors = await gather(
-            *(
-                node[0].execute_pipeline(node[1])
-                for node in nodes.values()
-            )
+            *(node[0].execute_pipeline(node[1]) for node in nodes.values())
         )
 
         if any(errors):

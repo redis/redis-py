@@ -5,14 +5,13 @@ from typing import TypedDict
 
 from anyio import BrokenResourceError, EndOfStream, move_on_after
 
+from ..._parsers.socket import (
+    SERVER_CLOSED_CONNECTION_ERROR,
+)
 from ...exceptions import ConnectionError, InvalidResponse, RedisError
 from ...typing import EncodableT
 from ...utils import HIREDIS_AVAILABLE
 from .base import AnyIOBaseParser
-from ..._parsers.socket import (
-    SENTINEL,
-    SERVER_CLOSED_CONNECTION_ERROR,
-)
 
 # Used to signal that hiredis-py does not have enough data to parse.
 # Using `False` or `None` is not reliable, given that the parser can

@@ -185,7 +185,9 @@ async def _assert_connect(
                 await finished.wait()
                 tg.cancel_scope.cancel()
     except ExceptionGroup as excgrp:
-        if len(excgrp.exceptions) == 1 and isinstance(excgrp.exceptions[0], ConnectionError):
+        if len(excgrp.exceptions) == 1 and isinstance(
+            excgrp.exceptions[0], ConnectionError
+        ):
             raise excgrp.exceptions[0] from None
 
         raise

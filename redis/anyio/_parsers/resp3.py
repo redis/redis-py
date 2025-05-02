@@ -3,10 +3,10 @@ from __future__ import annotations
 from logging import getLogger
 from typing import Any
 
+from ..._parsers.socket import SERVER_CLOSED_CONNECTION_ERROR
 from ...exceptions import ConnectionError, InvalidResponse, ResponseError
 from ...typing import EncodableT
 from .base import _AnyIORESPBase
-from ..._parsers.socket import SERVER_CLOSED_CONNECTION_ERROR
 
 _INVALIDATION_MESSAGE = [b"invalidate", "invalidate"]
 

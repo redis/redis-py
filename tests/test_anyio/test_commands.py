@@ -5,12 +5,10 @@ Tests async overrides of commands from their mixins
 import binascii
 import datetime
 import re
-import sys
 from string import ascii_letters
 
 import anyio
 import pytest
-from anyio import wait_all_tasks_blocked
 
 import redis
 from redis import exceptions

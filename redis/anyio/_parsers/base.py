@@ -7,9 +7,10 @@ from anyio import IncompleteRead, move_on_after
 from anyio.abc import ByteStream
 from anyio.streams.buffered import BufferedByteReceiveStream
 
-from redis.exceptions import RedisError, ResponseError
 from redis._parsers import BaseParser, Encoder
+from redis.exceptions import RedisError, ResponseError
 from redis.typing import EncodableT
+
 from ..._parsers.socket import SERVER_CLOSED_CONNECTION_ERROR
 
 

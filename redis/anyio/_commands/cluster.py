@@ -10,10 +10,11 @@ from typing import (
     Optional,
 )
 
-from ..utils import gather
 from ...commands.cluster import (
-    ClusterDataAccessCommands, ClusterManagementCommands,
-    ClusterMultiKeyCommands, READ_COMMANDS,
+    READ_COMMANDS,
+    ClusterDataAccessCommands,
+    ClusterManagementCommands,
+    ClusterMultiKeyCommands,
 )
 from ...commands.core import (
     AsyncACLCommands,
@@ -25,7 +26,8 @@ from ...commands.core import (
 )
 from ...commands.helpers import list_or_args
 from ...commands.redismodules import AsyncRedisModuleCommands
-from ...typing import AnyKeyT, EncodableT, KeyT, KeysT, PatternT
+from ...typing import AnyKeyT, EncodableT, KeysT, KeyT, PatternT
+from ..utils import gather
 
 
 class AsyncClusterMultiKeyCommands(ClusterMultiKeyCommands):
@@ -125,10 +127,7 @@ class AsyncClusterManagementCommands(
         For more information see https://redis.io/commands/cluster-delslots
         """
         return await gather(
-            *(
-                self.execute_command("CLUSTER DELSLOTS", slot)
-                for slot in slots
-            )
+            *(self.execute_command("CLUSTER DELSLOTS", slot) for slot in slots)
         )
 
 

@@ -9,7 +9,7 @@ import redis
 from anyio import Lock as AsyncLock
 from anyio import sleep as async_sleep
 from mock.mock import Mock, call
-from redis import AuthenticationError, DataError, RedisError, ResponseError
+from redis import AuthenticationError, DataError, ResponseError
 from redis.anyio import Connection, ConnectionPool, Redis
 from redis.anyio.retry import Retry
 from redis.auth.err import RequestTokenErr
@@ -327,9 +327,7 @@ class TestUsernamePasswordCredentialProvider:
 
         await init_required_pass(r, password)
 
-        async with create_redis(
-            flushdb=False, credential_provider=provider
-        ) as r2:
+        async with create_redis(flushdb=False, credential_provider=provider) as r2:
             assert await r2.auth(provider.password) is True
             assert await r2.ping() is True
 

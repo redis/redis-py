@@ -11,6 +11,7 @@ from tests.conftest import (
 
 pytestmark = pytest.mark.anyio
 
+
 @pytest.fixture
 async def decoded_r(create_redis, stack_url):
     async with create_redis(decode_responses=True, url=stack_url) as client:

@@ -4,7 +4,6 @@ from unittest import mock
 import pytest
 import redis.anyio.sentinel
 from redis import exceptions
-from redis.anyio.compat import aclosing
 from redis.anyio.sentinel import (
     MasterNotFoundError,
     Sentinel,

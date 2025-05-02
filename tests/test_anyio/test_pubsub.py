@@ -703,6 +703,7 @@ class TestPubSubReconnect:
         Test that a loop processing PubSub messages can survive
         a disconnect, by issuing a connect() call.
         """
+
         async def loop(send: MemoryObjectSendStream, task_status: TaskStatus[None]):
             # must make sure the task exits
             with send, anyio.fail_after(2):
@@ -712,7 +713,7 @@ class TestPubSubReconnect:
                     try:
                         await pubsub.connect()
                         await loop_step(send)
-                    except redis.ConnectionError as exc:
+                    except redis.ConnectionError:
                         await anyio.sleep(0.1)
 
         async def loop_step(send: MemoryObjectSendStream):
@@ -801,7 +802,9 @@ class TestPubSubRun:
             await self._subscribe(p, foo=lambda x: None)
             with mock.patch.object(p, "get_message", side_effect=Exception("error")):
                 async with anyio.create_task_group() as tg:
-                    tg.start_soon(lambda: p.run(exception_handler=exception_handler_callback))
+                    tg.start_soon(
+                        lambda: p.run(exception_handler=exception_handler_callback)
+                    )
                     e = await receive.receive()
                     tg.cancel_scope.cancel()
 
@@ -909,8 +912,7 @@ class TestPubSubAutoReconnect:
                     # wait for reconnect
                     print("wait for reconnect")
                     await wait_for_condition(
-                        self.cond,
-                        lambda: self.pubsub.connection.is_connected
+                        self.cond, lambda: self.pubsub.connection.is_connected
                     )
                     assert self.state == 3
 
@@ -927,12 +929,13 @@ class TestPubSubAutoReconnect:
                     assert not self.pubsub.connection.is_connected
                     # wait for reconnect
                     await wait_for_condition(
-                        self.cond,
-                        lambda: self.pubsub.connection.is_connected
+                        self.cond, lambda: self.pubsub.connection.is_connected
                     )
                     assert self.state == 3
 
-    async def loop(self, receive: MemoryObjectReceiveStream, *, task_status: TaskStatus[None]):
+    async def loop(
+        self, receive: MemoryObjectReceiveStream, *, task_status: TaskStatus[None]
+    ):
         # reader loop, performing state transitions as it
         # discovers disconnects and reconnects
         with receive:
@@ -1047,9 +1050,13 @@ class TestBaseException:
         assert msg is not None
         # timeout waiting for another message which never arrives
         assert pubsub.connection.is_connected
-        with patch("redis.anyio._parsers._AnyIORESP2Parser.read_response") as mock1, patch(
+        with patch(
+            "redis.anyio._parsers._AnyIORESP2Parser.read_response"
+        ) as mock1, patch(
             "redis.anyio._parsers._AnyIOHiredisParser.read_response"
-        ) as mock2, patch("redis.anyio._parsers._AnyIORESP3Parser.read_response") as mock3:
+        ) as mock2, patch(
+            "redis.anyio._parsers._AnyIORESP3Parser.read_response"
+        ) as mock3:
             mock1.side_effect = BaseException("boom")
             mock2.side_effect = BaseException("boom")
             mock3.side_effect = BaseException("boom")

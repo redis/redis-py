@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..._parsers.socket import SERVER_CLOSED_CONNECTION_ERROR
 from ...exceptions import ConnectionError, InvalidResponse, ResponseError
 from ...typing import EncodableT
 from .base import _AnyIORESPBase
-from ..._parsers.socket import SERVER_CLOSED_CONNECTION_ERROR
 
 
 class _AnyIORESP2Parser(_AnyIORESPBase):

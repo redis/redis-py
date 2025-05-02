@@ -53,8 +53,8 @@ from redis.utils import (
 from .helpers import list_or_args
 
 if TYPE_CHECKING:
-    import redis.asyncio.client
     import redis.anyio.client
+    import redis.asyncio.client
     import redis.client
 
 
@@ -1453,7 +1453,7 @@ class BitFieldOperation:
         client: Union[
             "redis.client.Redis",
             "redis.asyncio.client.Redis",
-            "redis.anyio.client.Redis"
+            "redis.anyio.client.Redis",
         ],
         key: str,
         default_overflow: Union[str, None] = None,
@@ -1601,7 +1601,7 @@ class BasicKeyCommands(CommandsProtocol):
         self: Union[
             "redis.client.Redis",
             "redis.asyncio.client.Redis",
-            "redis.anyio.client.Redis"
+            "redis.anyio.client.Redis",
         ],
         key: KeyT,
         default_overflow: Union[str, None] = None,
@@ -1618,7 +1618,7 @@ class BasicKeyCommands(CommandsProtocol):
         self: Union[
             "redis.client.Redis",
             "redis.asyncio.client.Redis",
-            "redis.anyio.client.Redis"
+            "redis.anyio.client.Redis",
         ],
         key: KeyT,
         encoding: str,
@@ -5706,7 +5706,9 @@ class AsyncScript:
         self,
         keys: Union[Sequence[KeyT], None] = None,
         args: Union[Iterable[EncodableT], None] = None,
-        client: Union["redis.asyncio.client.Redis", "redis.anyio.client.Redis", None] = None,
+        client: Union[
+            "redis.asyncio.client.Redis", "redis.anyio.client.Redis", None
+        ] = None,
     ):
         """Execute the script, passing any required ``args``"""
         keys = keys or []
@@ -5715,8 +5717,8 @@ class AsyncScript:
             client = self.registered_client
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
-        from redis.asyncio.client import Pipeline as AsyncioPipeline
         from redis.anyio.client import Pipeline as AnyioPipeline
+        from redis.asyncio.client import Pipeline as AsyncioPipeline
 
         if isinstance(client, (AsyncioPipeline, AnyioPipeline)):
             # Make sure the pipeline can register the script before executing.

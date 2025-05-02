@@ -37,9 +37,9 @@ async def _get_info(redis_url):
         pytest.param(False, id="pool"),
     ],
 )
-async def create_redis(request) -> Callable[
-    ..., AbstractAsyncContextManager[redis.Redis]
-]:
+async def create_redis(
+    request,
+) -> Callable[..., AbstractAsyncContextManager[redis.Redis]]:
     """Wrapper around redis.create_redis."""
     single_connection = request.param
 
@@ -56,7 +56,9 @@ async def create_redis(request) -> Callable[
         async with AsyncExitStack() as exit_stack:
             cluster_mode = REDIS_INFO["cluster_enabled"]
             if not cluster_mode:
-                single = kwargs.pop("single_connection_client", False) or single_connection
+                single = (
+                    kwargs.pop("single_connection_client", False) or single_connection
+                )
                 url_options = parse_url(url)
                 url_options.update(kwargs)
                 pool = redis.ConnectionPool(**url_options)
