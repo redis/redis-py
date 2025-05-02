@@ -223,7 +223,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_path: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
-        ssl_check_hostname: bool = False,
+        ssl_check_hostname: bool = True,
         ssl_password: Optional[str] = None,
         ssl_validate_ocsp: bool = False,
         ssl_validate_ocsp_stapled: bool = False,

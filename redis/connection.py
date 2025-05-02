@@ -1028,7 +1028,7 @@ class SSLConnection(Connection):
         ssl_cert_reqs="required",
         ssl_ca_certs=None,
         ssl_ca_data=None,
-        ssl_check_hostname=False,
+        ssl_check_hostname=True,
         ssl_ca_path=None,
         ssl_password=None,
         ssl_validate_ocsp=False,
@@ -1502,7 +1502,7 @@ class ConnectionPool:
     @deprecated_args(
         args_to_warn=["*"],
         reason="Use get_connection() without args instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def get_connection(self, command_name=None, *keys, **options) -> "Connection":
         "Get a connection from the pool"
@@ -1730,7 +1730,7 @@ class BlockingConnectionPool(ConnectionPool):
     @deprecated_args(
         args_to_warn=["*"],
         reason="Use get_connection() without args instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def get_connection(self, command_name=None, *keys, **options):
         """
