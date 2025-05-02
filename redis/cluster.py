@@ -1674,7 +1674,7 @@ class NodesManager:
         fully_covered = False
         kwargs = self.connection_kwargs
         exception = None
-        for startup_node in self.startup_nodes.values():
+        for startup_node in tuple(self.startup_nodes.values()):
             try:
                 if startup_node.redis_connection:
                     r = startup_node.redis_connection
