@@ -37,7 +37,14 @@ class TestSSL:
     def test_ssl_connection(self, request):
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
-        r = redis.Redis(host=p[0], port=p[1], ssl=True, ssl_cert_reqs="none")
+
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_check_hostname=False,
+            ssl_cert_reqs="none",
+        )
         assert r.ping()
         r.close()
 
@@ -98,6 +105,7 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_3,
             ssl_ciphers=ssl_ciphers,
@@ -112,6 +120,7 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers="foo:bar",
@@ -136,6 +145,7 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
+            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
