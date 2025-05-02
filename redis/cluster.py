@@ -5,6 +5,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
+from copy import copy
 from enum import Enum
 from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
@@ -2166,7 +2167,7 @@ class ClusterPipeline(RedisCluster):
         else:
             self.retry = Retry(
                 backoff=ExponentialWithJitterBackoff(base=1, cap=10),
-                retries=self.cluster_error_retry_attempts,
+                retries=cluster_error_retry_attempts,
             )
 
         self.encoder = Encoder(
@@ -2178,10 +2179,8 @@ class ClusterPipeline(RedisCluster):
             lock = threading.Lock()
         self._lock = lock
         self.parent_execute_command = super().execute_command
-        self._execution_strategy: ExecutionStrategy = PipelineStrategy(
-            self
-        ) if not transaction else TransactionStrategy(
-            self
+        self._execution_strategy: ExecutionStrategy = (
+            PipelineStrategy(self) if not transaction else TransactionStrategy(self)
         )
         self.command_stack = self._execution_strategy.command_queue
 
@@ -2477,7 +2476,6 @@ class NodeCommands:
 
 
 class ExecutionStrategy(ABC):
-
     @property
     @abstractmethod
     def command_queue(self):
@@ -2520,7 +2518,9 @@ class ExecutionStrategy(ABC):
         pass
 
     @abstractmethod
-    def send_cluster_commands(self, stack, raise_on_error=True, allow_redirections=True):
+    def send_cluster_commands(
+        self, stack, raise_on_error=True, allow_redirections=True
+    ):
         """
         Sends commands according to current execution strategy.
 
@@ -2599,10 +2599,9 @@ class ExecutionStrategy(ABC):
 
 
 class AbstractStrategy(ExecutionStrategy):
-
     def __init__(
-            self,
-            pipe: ClusterPipeline,
+        self,
+        pipe: ClusterPipeline,
     ):
         self._command_queue: List[PipelineCommand] = []
         self._pipe = pipe
@@ -2631,7 +2630,9 @@ class AbstractStrategy(ExecutionStrategy):
         pass
 
     @abstractmethod
-    def send_cluster_commands(self, stack, raise_on_error=True, allow_redirections=True):
+    def send_cluster_commands(
+        self, stack, raise_on_error=True, allow_redirections=True
+    ):
         pass
 
     @abstractmethod
@@ -2666,8 +2667,8 @@ class AbstractStrategy(ExecutionStrategy):
         )
         exception.args = (msg,) + exception.args[1:]
 
-class PipelineStrategy(AbstractStrategy):
 
+class PipelineStrategy(AbstractStrategy):
     def __init__(self, pipe: ClusterPipeline):
         super().__init__(pipe)
         self.command_flags = pipe.command_flags
@@ -2702,10 +2703,7 @@ class PipelineStrategy(AbstractStrategy):
         self._command_queue = []
 
     def send_cluster_commands(
-            self,
-            stack,
-            raise_on_error=True,
-            allow_redirections=True
+        self, stack, raise_on_error=True, allow_redirections=True
     ):
         """
         Wrapper for CLUSTERDOWN error handling.
@@ -2724,7 +2722,7 @@ class PipelineStrategy(AbstractStrategy):
         """
         if not stack:
             return []
-        retry_attempts = self._pipe.cluster_error_retry_attempts
+        retry_attempts = self._pipe.retry.get_retries()
         while True:
             try:
                 return self._send_cluster_commands(
@@ -2742,10 +2740,7 @@ class PipelineStrategy(AbstractStrategy):
                     raise e
 
     def _send_cluster_commands(
-            self,
-            stack,
-            raise_on_error=True,
-            allow_redirections=True
+        self, stack, raise_on_error=True, allow_redirections=True
     ):
         """
         Send a bunch of cluster commands to the redis cluster.
@@ -2945,7 +2940,10 @@ class PipelineStrategy(AbstractStrategy):
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
         command = args[0].upper()
-        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self._pipe.command_flags:
+        if (
+            len(args) >= 2
+            and f"{args[0]} {args[1]}".upper() in self._pipe.command_flags
+        ):
             command = f"{args[0]} {args[1]}".upper()
 
         nodes_flag = kwargs.pop("nodes_flag", None)
@@ -2978,7 +2976,9 @@ class PipelineStrategy(AbstractStrategy):
             node = self._nodes_manager.get_node_from_slot(
                 slot,
                 self._pipe.read_from_replicas and command in READ_COMMANDS,
-                self._pipe.load_balancing_strategy if command in READ_COMMANDS else None,
+                self._pipe.load_balancing_strategy
+                if command in READ_COMMANDS
+                else None,
             )
             return [node]
 
@@ -3012,7 +3012,6 @@ class PipelineStrategy(AbstractStrategy):
 
 
 class TransactionStrategy(AbstractStrategy):
-
     NO_SLOTS_COMMANDS = {"UNWATCH"}
     IMMEDIATE_EXECUTE_COMMANDS = {"WATCH", "UNWATCH"}
     UNWATCH_COMMANDS = {"DISCARD", "EXEC", "UNWATCH"}
@@ -3066,7 +3065,7 @@ class TransactionStrategy(AbstractStrategy):
             slot_number = self._pipe.determine_slot(*args)
 
         if (
-                self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
+            self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
         ) and not self._explicit_transaction:
             if args[0] == "WATCH":
                 self._validate_watch()
@@ -3098,10 +3097,7 @@ class TransactionStrategy(AbstractStrategy):
         self._watching = True
 
     def _immediate_execute_command(self, *args, **options):
-        retry = Retry(
-            default_backoff(),
-            self._pipe.cluster_error_retry_attempts,
-        )
+        retry = copy(self._pipe.retry)
         retry.update_supported_errors([AskError, MovedError])
         return retry.call_with_retry(
             lambda: self._get_connection_and_send_command(*args, **options),
@@ -3175,10 +3171,7 @@ class TransactionStrategy(AbstractStrategy):
     def _execute_transaction_with_retries(
         self, stack: List["PipelineCommand"], raise_on_error: bool
     ):
-        retry = Retry(
-            default_backoff(),
-            self._pipe.cluster_error_retry_attempts,
-        )
+        retry = copy(self._pipe.retry)
         retry.update_supported_errors([AskError, MovedError])
         return retry.call_with_retry(
             lambda: self._execute_transaction(stack, raise_on_error),
@@ -3284,7 +3277,9 @@ class TransactionStrategy(AbstractStrategy):
             if not isinstance(r, Exception):
                 command_name = cmd.args[0]
                 if command_name in self._pipe.cluster_response_callbacks:
-                    r = self._pipe.cluster_response_callbacks[command_name](r, **cmd.options)
+                    r = self._pipe.cluster_response_callbacks[command_name](
+                        r, **cmd.options
+                    )
             data.append(r)
         return data
 
@@ -3321,8 +3316,12 @@ class TransactionStrategy(AbstractStrategy):
         self._cluster_error = False
         self._executing = False
 
-    def send_cluster_commands(self, stack, raise_on_error=True, allow_redirections=True):
-        raise NotImplementedError("send_cluster_commands cannot be executed in transactional context.")
+    def send_cluster_commands(
+        self, stack, raise_on_error=True, allow_redirections=True
+    ):
+        raise NotImplementedError(
+            "send_cluster_commands cannot be executed in transactional context."
+        )
 
     def multi(self):
         if self._explicit_transaction:

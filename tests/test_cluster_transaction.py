@@ -36,7 +36,6 @@ def _find_source_and_target_node_for_slot(
 
 
 class TestClusterTransaction:
-
     @pytest.mark.onlycluster
     def test_executes_transaction_against_cluster(self, r):
         with r.pipeline(transaction=True) as tx:
@@ -46,7 +45,14 @@ class TestClusterTransaction:
             tx.get("{foo}bar")
             tx.get("{foo}baz")
             tx.get("{foo}bad")
-            assert tx.execute() == [b"OK", b"OK", b"OK", b"value1", b"value2", b"value3"]
+            assert tx.execute() == [
+                b"OK",
+                b"OK",
+                b"OK",
+                b"value1",
+                b"value2",
+                b"value3",
+            ]
 
         r.flushall()
 
@@ -66,8 +72,8 @@ class TestClusterTransaction:
             tx.set("{foobar}baz", "value2")
 
             with pytest.raises(
-                    CrossSlotTransactionError,
-                    match="All keys involved in a cluster transaction must map to the same slot"
+                CrossSlotTransactionError,
+                match="All keys involved in a cluster transaction must map to the same slot",
             ):
                 tx.execute()
 
@@ -201,7 +207,9 @@ class TestClusterTransaction:
         key = "book"
         slot = r.keyslot(key)
 
-        mock_connection.read_response.side_effect = redis.exceptions.ConnectionError("Conn error")
+        mock_connection.read_response.side_effect = redis.exceptions.ConnectionError(
+            "Conn error"
+        )
         mock_connection.retry = Retry(NoBackoff(), 0)
         mock_pool = Mock(spec=ConnectionPool)
         mock_pool.get_connection.return_value = mock_connection
@@ -216,7 +224,6 @@ class TestClusterTransaction:
         with r.pipeline(transaction=True) as pipe:
             pipe.set(key, "val")
             pipe.execute()
-
 
     # @pytest.mark.onlycluster
     # def test_pipeline_is_true(self, r):
