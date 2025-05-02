@@ -79,7 +79,7 @@ class JSONCommands:
         name: str,
         path: Optional[str] = Path.root_path(),
         index: Optional[int] = -1,
-    ) -> List[Union[str, None]]:
+    ) -> List[Optional[str]]:
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
 
@@ -89,7 +89,7 @@ class JSONCommands:
 
     def arrtrim(
         self, name: str, path: str, start: int, stop: int
-    ) -> Optional[int]:
+    ) -> List[Optional[int]]:
         """Trim the array JSON value under ``path`` at key ``name`` to the
         inclusive range given by ``start`` and ``stop``.
 
@@ -113,7 +113,7 @@ class JSONCommands:
 
     def objkeys(
         self, name: str, path: Optional[str] = Path.root_path()
-    ) -> List[Union[List[str], None]]:
+    ) -> List[Optional[List[str]]]:
         """Return the key names in the dictionary JSON value under ``path`` at
         key ``name``.
 
