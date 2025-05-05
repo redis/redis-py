@@ -988,7 +988,7 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("SELECT", index, **kwargs)
 
     def info(
-        self, section: Optional[srt] = None, *args: List[str], **kwargs
+        self, section: Optional[str] = None, *args: List[str], **kwargs
     ) -> ResponseT:
         """
         Returns a dictionary containing information about the Redis server
