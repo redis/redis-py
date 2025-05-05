@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import socket
+from contextlib import asynccontextmanager
 from typing import Optional
 from unittest import mock
 from unittest.mock import patch
@@ -18,7 +19,6 @@ from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import get_protocol_version, skip_if_server_version_lt
-from tests.test_asyncio.conftest import asynccontextmanager
 
 pytestmark = pytest.mark.anyio
 
@@ -401,6 +401,7 @@ class TestPubSubMessages:
         p = r.pubsub(ignore_subscribe_messages=True)
         await p.subscribe(foo=self.message_handler)
         await p.subscribe(bar=self.async_message_handler)
+        assert await wait_for_message(p) is None
         assert await r.publish("foo", "test message") == 1
         assert await r.publish("bar", "test message 2") == 1
         assert await wait_for_message(p) is None
@@ -910,7 +911,6 @@ class TestPubSubAutoReconnect:
                         # it is in a disconnected state
 
                     # wait for reconnect
-                    print("wait for reconnect")
                     await wait_for_condition(
                         self.cond, lambda: self.pubsub.connection.is_connected
                     )
@@ -948,22 +948,14 @@ class TestPubSubAutoReconnect:
                     try:
                         if self.state == 4:
                             break
-                        print("loop: getting message")
                         got_msg = await self.get_message()
-                        print(f"{got_msg=} {self.state=}")
                         assert got_msg
                         if self.state in (1, 2):
-                            print("reconnected!")
                             self.state = 3  # successful reconnect
                     except redis.ConnectionError:
                         assert self.state in (1, 2)
-                        print("noticed disconnect")
                         self.state = 2  # signal that we noticed the disconnect
-                    except BaseException as exc:
-                        print("error while while getting message in loop():", type(exc))
-                        raise
                     finally:
-                        print("notifying condition")
                         self.cond.notify()
                     # make sure that we did notice the connection error
                     # or reconnected without any error
@@ -972,13 +964,9 @@ class TestPubSubAutoReconnect:
 
     async def loop_step_get_message(self, send: MemoryObjectSendStream) -> bool:
         # get a single message via get_message
-        print("getting message")
         message = await self.pubsub.get_message(timeout=0.1)
-        print(f"  result: {message}  {self.state=}")
         if message is not None:
-            print("  sending message")
             await send.send(message)
-            print("  sent message")
             return True
         return False
 

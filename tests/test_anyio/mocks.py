@@ -45,19 +45,14 @@ class MockStream(BufferedByteReceiveStream):
     async def receive(self, max_bytes: int = 65536) -> bytes:
         self.tick()
         data = await super().receive(5)
-        # print(f"receive() returned {data!r}")
         return data
 
     async def receive_exactly(self, nbytes: int) -> bytes:
-        # print(f"receive_exactly({nbytes}) called")
         self.tick()
         data = await super().receive_exactly(nbytes)
-        # print(f"  returned {data!r}")
         return data
 
     async def receive_until(self, delimiter: bytes, max_bytes: int) -> bytes:
-        # print(f"receive_until({delimiter!r}) called")
         self.tick()
         data = await super().receive_until(delimiter, max_bytes)
-        # print(f"  returned {data!r}")
         return data
