@@ -1674,6 +1674,8 @@ class NodesManager:
         fully_covered = False
         kwargs = self.connection_kwargs
         exception = None
+        # Convert to tuple to prevent RuntimeError if self.startup_nodes
+        # is modified during iteration
         for startup_node in tuple(self.startup_nodes.values()):
             try:
                 if startup_node.redis_connection:
