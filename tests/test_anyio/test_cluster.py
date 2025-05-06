@@ -2552,17 +2552,15 @@ class TestNodesManager:
             elif args[1] == "cluster-require-full-coverage":
                 return {"cluster-require-full-coverage": "yes"}
 
-        with (
-            patch.object(ClusterNode, "execute_command", mocked_execute_command),
-            pytest.raises(
+        with patch.object(ClusterNode, "execute_command", mocked_execute_command):
+            with pytest.raises(
                 RedisClusterException,
                 match="^startup_nodes could not agree on a valid slots cache",
-            ),
-        ):
-            node_1 = ClusterNode("127.0.0.1", 7000)
-            node_2 = ClusterNode("127.0.0.1", 7001)
-            async with RedisCluster(startup_nodes=[node_1, node_2]):
-                ...
+            ):
+                node_1 = ClusterNode("127.0.0.1", 7000)
+                node_2 = ClusterNode("127.0.0.1", 7001)
+                async with RedisCluster(startup_nodes=[node_1, node_2]):
+                    ...
 
     async def test_cluster_one_instance(self) -> None:
         """
