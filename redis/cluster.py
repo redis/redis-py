@@ -2603,25 +2603,25 @@ class AbstractStrategy(ExecutionStrategy):
         self,
         pipe: ClusterPipeline,
     ):
-        self._command_queue: List[PipelineCommand] = []
+        self.command_queue: List[PipelineCommand] = []
         self._pipe = pipe
         self._nodes_manager = self._pipe.nodes_manager
 
     @property
     def command_queue(self):
-        return self._command_queue
+        return self.command_queue
 
     @command_queue.setter
     def command_queue(self, queue: List[PipelineCommand]):
-        self._command_queue = queue
+        self.command_queue = queue
 
     @abstractmethod
     def execute_command(self, *args, **kwargs):
         pass
 
     def pipeline_execute_command(self, *args, **options):
-        self._command_queue.append(
-            PipelineCommand(args, options, len(self._command_queue))
+        self.command_queue.append(
+            PipelineCommand(args, options, len(self.command_queue))
         )
         return self._pipe
 
