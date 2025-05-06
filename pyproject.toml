@@ -41,7 +41,7 @@ ocsp = [
     "requests>=2.31.0",
 ]
 jwt = [
-    "PyJWT~=2.9.0",
+    "PyJWT>=2.9.0",
 ]
 
 [project.urls]
