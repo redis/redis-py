@@ -3023,6 +3023,8 @@ class TransactionStrategy(AbstractStrategy):
     NO_SLOTS_COMMANDS = {"UNWATCH"}
     IMMEDIATE_EXECUTE_COMMANDS = {"WATCH", "UNWATCH"}
     UNWATCH_COMMANDS = {"DISCARD", "EXEC", "UNWATCH"}
+    SLOT_REDIRECT_ERRORS = (AskError, MovedError)
+    CONNECTION_ERRORS = (ConnectionError,OSError,ClusterDownError)
 
     def __init__(self, pipe: ClusterPipeline):
         super().__init__(pipe)
@@ -3030,8 +3032,6 @@ class TransactionStrategy(AbstractStrategy):
         self._watching = False
         self._pipeline_slots: Set[int] = set()
         self._transaction_connection: Optional[Connection] = None
-        self._cluster_error = False
-        self._slot_migrating = False
         self._executing = False
 
     def _get_client_and_connection_for_transaction(self) -> Tuple[Redis, Connection]:
@@ -3125,17 +3125,8 @@ class TransactionStrategy(AbstractStrategy):
         Send a command and parse the response
         """
 
-        self.slot_migrating = False
-        try:
-            conn.send_command(*args)
-            output = redis_node.parse_response(conn, command_name, **options)
-
-        except (AskError, MovedError) as slot_error:
-            self.slot_migrating = True
-            raise slot_error
-        except ConnectionError as conn_error:
-            self._cluster_error = True
-            raise conn_error
+        conn.send_command(*args)
+        output = redis_node.parse_response(conn, command_name, **options)
 
         if command_name in self.UNWATCH_COMMANDS:
             self._watching = False
@@ -3143,10 +3134,10 @@ class TransactionStrategy(AbstractStrategy):
 
     def _reinitialize_on_error(self, error):
         if self._watching:
-            if self.slot_migrating and self._executing:
+            if type(error) in self.SLOT_REDIRECT_ERRORS and self._executing:
                 raise WatchError("Slot rebalancing occurred while watching keys")
 
-        if self.slot_migrating or self._cluster_error:
+        if type(error) in self.SLOT_REDIRECT_ERRORS or type(error) in self.CONNECTION_ERRORS:
             if self._transaction_connection:
                 self._transaction_connection = None
 
@@ -3157,8 +3148,6 @@ class TransactionStrategy(AbstractStrategy):
             else:
                 self._nodes_manager.update_moved_exception(error)
 
-            self.slot_migrating = False
-            self._cluster_error = False
         self._executing = False
 
     def _raise_first_error(self, responses, stack):
@@ -3196,8 +3185,6 @@ class TransactionStrategy(AbstractStrategy):
             )
 
         self._executing = True
-        self.slot_migrating = False
-        self._cluster_error = False
 
         redis_node, connection = self._get_client_and_connection_for_transaction()
 
@@ -3220,8 +3207,7 @@ class TransactionStrategy(AbstractStrategy):
         except ResponseError as e:
             self.annotate_exception(e, 0, "MULTI")
             errors.append(e)
-        except (ClusterDownError, ConnectionError) as cluster_error:
-            self._cluster_error = True
+        except self.CONNECTION_ERRORS as cluster_error:
             self.annotate_exception(cluster_error, 0, "MULTI")
             raise
 
@@ -3232,12 +3218,10 @@ class TransactionStrategy(AbstractStrategy):
             else:
                 try:
                     _ = redis_node.parse_response(connection, "_")
-                except (AskError, MovedError) as slot_error:
-                    self.slot_migrating = True
+                except self.SLOT_REDIRECT_ERRORS as slot_error:
                     self.annotate_exception(slot_error, i + 1, command.args)
                     errors.append(slot_error)
-                except (ClusterDownError, ConnectionError) as cluster_error:
-                    self._cluster_error = True
+                except self.CONNECTION_ERRORS as cluster_error:
                     self.annotate_exception(cluster_error, i + 1, command.args)
                     raise
                 except ResponseError as e:
@@ -3274,7 +3258,7 @@ class TransactionStrategy(AbstractStrategy):
             )
 
         # find any errors in the response and raise if necessary
-        if raise_on_error or self.slot_migrating:
+        if raise_on_error or len(errors) > 0:
             self._raise_first_error(
                 response,
                 self._command_queue,
@@ -3312,7 +3296,7 @@ class TransactionStrategy(AbstractStrategy):
                     self._transaction_connection
                 )
                 self._transaction_connection = None
-            except ConnectionError:
+            except self.CONNECTION_ERRORS:
                 # disconnect will also remove any previous WATCHes
                 if self._transaction_connection:
                     self._transaction_connection.disconnect()
@@ -3321,8 +3305,6 @@ class TransactionStrategy(AbstractStrategy):
         self._watching = False
         self._explicit_transaction = False
         self._pipeline_slots = set()
-        self._slot_migrating = False
-        self._cluster_error = False
         self._executing = False
 
     def send_cluster_commands(
