@@ -2149,6 +2149,7 @@ class ClusterPipeline(RedisCluster):
         **kwargs,
     ):
         """ """
+        self.command_stack = []
         self.nodes_manager = nodes_manager
         self.commands_parser = commands_parser
         self.refresh_table_asap = False
@@ -2182,7 +2183,6 @@ class ClusterPipeline(RedisCluster):
         self._execution_strategy: ExecutionStrategy = (
             PipelineStrategy(self) if not transaction else TransactionStrategy(self)
         )
-        self.command_stack = self._execution_strategy._command_queue
 
     def __repr__(self):
         """ """
@@ -2204,7 +2204,7 @@ class ClusterPipeline(RedisCluster):
 
     def __len__(self):
         """ """
-        return len(self.command_stack)
+        return len(self._execution_strategy.command_queue)
 
     def __bool__(self):
         "Pipeline instances should  always evaluate to True on Python 3+"
