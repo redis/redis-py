@@ -5,7 +5,7 @@ from unittest.mock import patch, Mock
 import pytest
 
 import redis
-from redis import CrossSlotTransactionError, ConnectionPool
+from redis import CrossSlotTransactionError, ConnectionPool, RedisClusterException
 from redis.backoff import NoBackoff
 from redis.client import Redis
 from redis.cluster import PRIMARY, ClusterNode, NodesManager, RedisCluster
@@ -36,13 +36,11 @@ def _find_source_and_target_node_for_slot(
 
 
 class TestClusterTransaction:
-
     @pytest.mark.onlycluster
     def test_pipeline_is_true(self, r):
         "Ensure pipeline instances are not false-y"
         with r.pipeline(transaction=True) as pipe:
             assert pipe
-
 
     @pytest.mark.onlycluster
     def test_pipeline_empty_transaction(self, r):
@@ -91,6 +89,15 @@ class TestClusterTransaction:
                 match="All keys involved in a cluster transaction must map to the same slot",
             ):
                 tx.execute()
+
+    @pytest.mark.onlycluster
+    def test_throws_exception_with_watch_on_different_hash_slots(self, r):
+        with r.pipeline(transaction=True) as tx:
+            with pytest.raises(
+                RedisClusterException,
+                match="WATCH - all keys must map to the same key slot",
+            ):
+                tx.watch("key1", "key2")
 
     @pytest.mark.onlycluster
     def test_transaction_with_watched_keys(self, r):
@@ -257,7 +264,7 @@ class TestClusterTransaction:
                     pipe.execute()
 
                 assert str(ex.value).startswith(
-                    "Slot rebalancing ocurred while watching keys"
+                    "Slot rebalancing occurred while watching keys"
                 )
 
     @pytest.mark.onlycluster
@@ -284,7 +291,9 @@ class TestClusterTransaction:
             assert pipe.execute() == [b"OK"]
 
     @pytest.mark.onlycluster
-    def test_retry_transaction_on_connection_error_with_watched_keys(self, r, mock_connection):
+    def test_retry_transaction_on_connection_error_with_watched_keys(
+        self, r, mock_connection
+    ):
         key = "book"
         slot = r.keyslot(key)
 
@@ -341,7 +350,6 @@ class TestClusterTransaction:
             # make sure the pipe was restored to a working state
             assert pipe.set(f"{hashkey}:z", "zzz").execute() == [b"OK"]
             assert r[f"{hashkey}:z"] == b"zzz"
-
 
     @pytest.mark.onlycluster
     def test_transaction_callable(self, r):

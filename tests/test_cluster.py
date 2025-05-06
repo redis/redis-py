@@ -3420,7 +3420,9 @@ class TestClusterPipeline:
             with pytest.raises(redis.exceptions.RedisClusterException) as ex:
                 pipe.discard()
 
-            assert str(ex.value).startswith("method discard() is not supported outside of transactional context")
+            assert str(ex.value).startswith(
+                "method discard() is not supported outside of transactional context"
+            )
 
         # setting a pipeline and discarding should do the same
         with r.pipeline() as pipe:
@@ -3431,7 +3433,9 @@ class TestClusterPipeline:
             with pytest.raises(redis.exceptions.RedisClusterException) as ex:
                 pipe.discard()
 
-            assert str(ex.value).startswith("method discard() is not supported outside of transactional context")
+            assert str(ex.value).startswith(
+                "method discard() is not supported outside of transactional context"
+            )
 
             pipe.set(f"{hashkey}:foo", "bar")
             response = pipe.execute()

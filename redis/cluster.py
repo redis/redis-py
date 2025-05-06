@@ -2983,16 +2983,24 @@ class PipelineStrategy(AbstractStrategy):
             return [node]
 
     def multi(self):
-        raise RedisClusterException("method multi() is not supported outside of transactional context")
+        raise RedisClusterException(
+            "method multi() is not supported outside of transactional context"
+        )
 
     def discard(self):
-        raise RedisClusterException("method discard() is not supported outside of transactional context")
+        raise RedisClusterException(
+            "method discard() is not supported outside of transactional context"
+        )
 
     def watch(self, *names):
-        raise RedisClusterException("method watch() is not supported outside of transactional context")
+        raise RedisClusterException(
+            "method watch() is not supported outside of transactional context"
+        )
 
     def unwatch(self, *names):
-        raise RedisClusterException("method unwatch() is not supported outside of transactional context")
+        raise RedisClusterException(
+            "method unwatch() is not supported outside of transactional context"
+        )
 
     def delete(self, *names):
         if len(names) != 1:
@@ -3136,7 +3144,7 @@ class TransactionStrategy(AbstractStrategy):
     def _reinitialize_on_error(self, error):
         if self._watching:
             if self.slot_migrating and self._executing:
-                raise WatchError("Slot rebalancing ocurred while watching keys")
+                raise WatchError("Slot rebalancing occurred while watching keys")
 
         if self.slot_migrating or self._cluster_error:
             if self._transaction_connection:
