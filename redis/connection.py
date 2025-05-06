@@ -1115,7 +1115,10 @@ class SSLConnection(Connection):
             An SSL wrapped socket.
         """
         context = ssl.create_default_context()
-        context.check_hostname = self.check_hostname
+        if self.cert_reqs == ssl.CERT_NONE:
+            context.check_hostname = False
+        else:
+            context.check_hostname = self.check_hostname
         context.verify_mode = self.cert_reqs
         if self.certfile or self.keyfile:
             context.load_cert_chain(

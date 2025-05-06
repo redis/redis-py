@@ -901,7 +901,10 @@ class RedisSSLContext:
     def get(self) -> SSLContext:
         if not self.context:
             context = ssl.create_default_context()
-            context.check_hostname = self.check_hostname
+            if self.cert_reqs == ssl.CERT_NONE:
+                context.check_hostname = False
+            else:
+                context.check_hostname = self.check_hostname
             context.verify_mode = self.cert_reqs
             if self.certfile and self.keyfile:
                 context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
