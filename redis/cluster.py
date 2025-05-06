@@ -2182,7 +2182,7 @@ class ClusterPipeline(RedisCluster):
         self._execution_strategy: ExecutionStrategy = (
             PipelineStrategy(self) if not transaction else TransactionStrategy(self)
         )
-        self.command_stack = self._execution_strategy.command_queue
+        self.command_stack = self._execution_strategy._command_queue
 
     def __repr__(self):
         """ """
@@ -2603,25 +2603,25 @@ class AbstractStrategy(ExecutionStrategy):
         self,
         pipe: ClusterPipeline,
     ):
-        self.command_queue: List[PipelineCommand] = []
+        self._command_queue: List[PipelineCommand] = []
         self._pipe = pipe
         self._nodes_manager = self._pipe.nodes_manager
 
     @property
     def command_queue(self):
-        return self.command_queue
+        return self._command_queue
 
     @command_queue.setter
     def command_queue(self, queue: List[PipelineCommand]):
-        self.command_queue = queue
+        self._command_queue = queue
 
     @abstractmethod
     def execute_command(self, *args, **kwargs):
         pass
 
     def pipeline_execute_command(self, *args, **options):
-        self.command_queue.append(
-            PipelineCommand(args, options, len(self.command_queue))
+        self._command_queue.append(
+            PipelineCommand(args, options, len(self._command_queue))
         )
         return self._pipe
 
