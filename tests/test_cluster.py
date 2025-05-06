@@ -3362,6 +3362,83 @@ class TestClusterPipeline:
         result = p.execute()
         assert result == []
 
+    @pytest.mark.onlycluster
+    def test_exec_error_in_response(self, r):
+        """
+        an invalid pipeline command at exec time adds the exception instance
+        to the list of returned values
+        """
+        hashkey = "{key}"
+        r[f"{hashkey}:c"] = "a"
+        with r.pipeline() as pipe:
+            pipe.set(f"{hashkey}:a", 1).set(f"{hashkey}:b", 2)
+            pipe.lpush(f"{hashkey}:c", 3).set(f"{hashkey}:d", 4)
+            result = pipe.execute(raise_on_error=False)
+
+            assert result[0]
+            assert r[f"{hashkey}:a"] == b"1"
+            assert result[1]
+            assert r[f"{hashkey}:b"] == b"2"
+
+            # we can't lpush to a key that's a string value, so this should
+            # be a ResponseError exception
+            assert isinstance(result[2], redis.ResponseError)
+            assert r[f"{hashkey}:c"] == b"a"
+
+            # since this isn't a transaction, the other commands after the
+            # error are still executed
+            assert result[3]
+            assert r[f"{hashkey}:d"] == b"4"
+
+            # make sure the pipe was restored to a working state
+            assert pipe.set(f"{hashkey}:z", "zzz").execute() == [True]
+            assert r[f"{hashkey}:z"] == b"zzz"
+
+    def test_exec_error_in_no_transaction_pipeline(self, r):
+        r["a"] = 1
+        with r.pipeline(transaction=False) as pipe:
+            pipe.llen("a")
+            pipe.expire("a", 100)
+
+            with pytest.raises(redis.ResponseError) as ex:
+                pipe.execute()
+
+            assert str(ex.value).startswith(
+                "Command # 1 (LLEN a) of pipeline caused error: "
+            )
+
+        assert r["a"] == b"1"
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("2.0.0")
+    def test_pipeline_discard(self, r):
+        hashkey = "{key}"
+
+        # empty pipeline should raise an error
+        with r.pipeline() as pipe:
+            pipe.set(f"{hashkey}:key", "someval")
+            with pytest.raises(redis.exceptions.RedisClusterException) as ex:
+                pipe.discard()
+
+            assert str(ex.value).startswith("method discard() is not supported outside of transactional context")
+
+        # setting a pipeline and discarding should do the same
+        with r.pipeline() as pipe:
+            pipe.set(f"{hashkey}:key", "someval")
+            pipe.set(f"{hashkey}:someotherkey", "val")
+            response = pipe.execute()
+            pipe.set(f"{hashkey}:key", "another value!")
+            with pytest.raises(redis.exceptions.RedisClusterException) as ex:
+                pipe.discard()
+
+            assert str(ex.value).startswith("method discard() is not supported outside of transactional context")
+
+            pipe.set(f"{hashkey}:foo", "bar")
+            response = pipe.execute()
+
+        assert response[0]
+        assert r.get(f"{hashkey}:foo") == b"bar"
+
 
 @pytest.mark.onlycluster
 class TestReadOnlyPipeline:

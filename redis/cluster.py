@@ -2983,16 +2983,16 @@ class PipelineStrategy(AbstractStrategy):
             return [node]
 
     def multi(self):
-        raise RedisClusterException("method multi() is not implemented")
+        raise RedisClusterException("method multi() is not supported outside of transactional context")
 
     def discard(self):
-        raise RedisClusterException("method discard() is not implemented")
+        raise RedisClusterException("method discard() is not supported outside of transactional context")
 
     def watch(self, *names):
-        raise RedisClusterException("method watch() is not implemented")
+        raise RedisClusterException("method watch() is not supported outside of transactional context")
 
     def unwatch(self, *names):
-        raise RedisClusterException("method unwatch() is not implemented")
+        raise RedisClusterException("method unwatch() is not supported outside of transactional context")
 
     def delete(self, *names):
         if len(names) != 1:
@@ -3125,6 +3125,9 @@ class TransactionStrategy(AbstractStrategy):
         except (AskError, MovedError) as slot_error:
             self.slot_migrating = True
             raise slot_error
+        except ConnectionError as conn_error:
+            self._cluster_error = True
+            raise conn_error
 
         if command_name in self.UNWATCH_COMMANDS:
             self._watching = False
@@ -3134,8 +3137,6 @@ class TransactionStrategy(AbstractStrategy):
         if self._watching:
             if self.slot_migrating and self._executing:
                 raise WatchError("Slot rebalancing ocurred while watching keys")
-            if self._cluster_error:
-                raise RedisClusterException("Cluster error ocurred while watching keys")
 
         if self.slot_migrating or self._cluster_error:
             if self._transaction_connection:
@@ -3345,11 +3346,7 @@ class TransactionStrategy(AbstractStrategy):
         return True
 
     def discard(self):
-        if self._explicit_transaction:
-            self.reset()
-            return
-
-        raise RedisClusterException("DISCARD triggered without MULTI")
+        self.reset()
 
     def delete(self, *names):
         return self.execute_command("DEL", *names)
