@@ -200,7 +200,7 @@ block, but there is no simple way that a client can enforce atomicity
 across nodes on a distributed system.
 
 The compromise of limiting the transaction pipeline to same-slot keys
-is exactly that: a compromise. While this behavior is differnet from
+is exactly that: a compromise. While this behavior is different from
 non-transactional cluster pipelines, it simplifies migration of clients
 from standalone to cluster under some circumstances. Note that application
 code that issues multi/exec commands on a standalone client without
@@ -215,6 +215,70 @@ An alternative is some kind of two-step commit solution, where a slot
 validation is run before the actual commands are run. This could work
 with controlled node maintenance but does not cover single node failures.
 
+Given the cluster limitations for transactions, by default pipeline isn't in
+transactional mode. To enable transactional context set:
+
+.. code:: python
+
+   >>> p = r.pipeline(transaction=True)
+
+After entering the transactional context you can add commands to a transactional
+context, by one of the following ways:
+
+.. code:: python
+
+   >>> p = r.pipeline(transaction=True) # Chaining commands
+   >>> p.set("key", "value")
+   >>> p.get("key")
+   >>> response = p.execute()
+
+Or
+
+.. code:: python
+
+   >>> with r.pipeline(transaction=True) as pipe: # Using context manager
+   >>>     pipe.set("key", "value")
+   >>>     pipe.get("key")
+   >>>     response = pipe.execute()
+
+As you see there's no need to explicitly send MULTI/EXEC commands to control context start/end
+ClusterPipeline will take care of it.
+
+To ensure that different keys will be mapped to a same hash slot on the server side
+prepend your keys with the same hash tag, the technique that allows you to control
+keys distribution. More information `here <https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/#hash-tags>`_
+
+.. code:: python
+
+   >>> with r.pipeline(transaction=True) as pipe:
+   >>>     pipe.set("{tag}foo", "bar")
+   >>>     pipe.set("{tag}bar", "foo")
+   >>>     pipe.get("{tag}foo")
+   >>>     pipe.get("{tag}bar")
+   >>>     response = pipe.execute()
+
+CAS Transactions
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you want to apply optimistic locking for certain keys, you have to execute
+WATCH command in transactional context. WATCH command follows the same limitations
+as any other multi key command - all keys should be mapped to the same hash slot.
+
+However, the difference between CAS transaction and normal one is that you have to
+explicitly call MULTI command to indicate the start of transactional context, WATCH
+command itself and any subsequent commands before MULTI will be immediately executed
+on the server side so you can apply optimistic locking and get necessary data before
+transaction execution.
+
+.. code:: python
+
+   >>> with r.pipeline(transaction=True) as pipe:
+   >>>     pipe.watch("mykey")       # Apply locking by immediately executing command
+   >>>     val = pipe.get("mykey")   # Immediately retrieves value
+   >>>     val = val + 1             # Increment value
+   >>>     pipe.multi()              # Starting transaction context
+   >>>     pipe.set("mykey", val)    # Command will be pipelined
+   >>>     response = pipe.execute() # Returns OK or None if key was modified in the meantime
 
 
 Publish / Subscribe
