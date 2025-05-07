@@ -6,7 +6,9 @@ from typing import (
     Any,
     Awaitable,
     Iterable,
+    List,
     Mapping,
+    Optional,
     Protocol,
     Type,
     TypeVar,
@@ -49,6 +51,36 @@ AnyFieldT = TypeVar("AnyFieldT", bytes, str, memoryview)
 AnyChannelT = TypeVar("AnyChannelT", bytes, str, memoryview)
 
 ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Exception]]]]
+
+
+# New typing work in progress
+
+BooleanType = bool
+IntegerType = int
+OptionalStringType = Optional[str]
+StringListType = List[str]
+OptionalStringListType = Optional[List[str]]
+
+ResponseTypeBoolean = TypeVar(
+    "ResponseTypeBoolean",
+    bound=Union[Awaitable[BooleanType], BooleanType],
+)
+ResponseTypeInteger = TypeVar(
+    "ResponseTypeInteger",
+    bound=Union[Awaitable[IntegerType], IntegerType],
+)
+ResponseTypeOptionalString = TypeVar(
+    "ResponseTypeOptionalString",
+    bound=Union[Awaitable[OptionalStringType], OptionalStringType],
+)
+ResponseTypeStringList = TypeVar(
+    "ResponseTypeStringList",
+    bound=Union[Awaitable[StringListType], StringListType],
+)
+ResponseTypeOptionalStringList = TypeVar(
+    "ResponseTypeOptionalStringList",
+    bound=Union[Awaitable[OptionalStringListType], OptionalStringListType],
+)
 
 
 class CommandsProtocol(Protocol):
