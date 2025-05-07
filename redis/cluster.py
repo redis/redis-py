@@ -174,6 +174,7 @@ REDIS_ALLOWED_KEYS = (
     "ssl_cert_reqs",
     "ssl_keyfile",
     "ssl_password",
+    "ssl_check_hostname",
     "unix_socket_path",
     "username",
     "cache",

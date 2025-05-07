@@ -868,7 +868,7 @@ class RedisSSLContext:
         cert_reqs: Optional[Union[str, ssl.VerifyMode]] = None,
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
-        check_hostname: bool = False,
+        check_hostname: bool = True,
         min_version: Optional[TLSVersion] = None,
         ciphers: Optional[str] = None,
     ):
