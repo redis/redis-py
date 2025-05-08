@@ -63,7 +63,7 @@ class ACLCommands(CommandsProtocol):
     see: https://redis.io/topics/acl
     """
 
-    def acl_cat(self, category: Union[str, None] = None, **kwargs) -> ResponseT:
+    def acl_cat(self, category: Optional[str] = None, **kwargs) -> ResponseT:
         """
         Returns a list of categories or commands within a category.
 
@@ -92,7 +92,7 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL DELUSER", *username, **kwargs)
 
-    def acl_genpass(self, bits: Union[int, None] = None, **kwargs) -> ResponseT:
+    def acl_genpass(self, bits: Optional[int] = None, **kwargs) -> ResponseT:
         """Generate a random password value.
         If ``bits`` is supplied then use this number of bits, rounded to
         the next multiple of 4.
@@ -137,7 +137,7 @@ class ACLCommands(CommandsProtocol):
         """
         return self.execute_command("ACL LIST", **kwargs)
 
-    def acl_log(self, count: Union[int, None] = None, **kwargs) -> ResponseT:
+    def acl_log(self, count: Optional[int] = None, **kwargs) -> ResponseT:
         """
         Get ACL logs as a list.
         :param int count: Get logs[0:count].
@@ -190,8 +190,8 @@ class ACLCommands(CommandsProtocol):
         username: str,
         enabled: bool = False,
         nopass: bool = False,
-        passwords: Union[str, Iterable[str], None] = None,
-        hashed_passwords: Union[str, Iterable[str], None] = None,
+        passwords: Optional[Union[str, Iterable[str]]] = None,
+        hashed_passwords: Optional[Union[str, Iterable[str]]] = None,
         categories: Optional[Iterable[str]] = None,
         commands: Optional[Iterable[str]] = None,
         keys: Optional[Iterable[KeyT]] = None,
@@ -450,13 +450,13 @@ class ManagementCommands(CommandsProtocol):
 
     def client_kill_filter(
         self,
-        _id: Union[str, None] = None,
-        _type: Union[str, None] = None,
-        addr: Union[str, None] = None,
-        skipme: Union[bool, None] = None,
-        laddr: Union[bool, None] = None,
-        user: str = None,
-        maxage: Union[int, None] = None,
+        _id: Optional[str] = None,
+        _type: Optional[str] = None,
+        addr: Optional[str] = None,
+        skipme: Optional[bool] = None,
+        laddr: Optional[bool] = None,
+        user: Optional[str] = None,
+        maxage: Optional[int] = None,
         **kwargs,
     ) -> ResponseT:
         """
@@ -512,7 +512,7 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("CLIENT INFO", **kwargs)
 
     def client_list(
-        self, _type: Union[str, None] = None, client_id: List[EncodableT] = [], **kwargs
+        self, _type: Optional[str] = None, client_id: List[EncodableT] = [], **kwargs
     ) -> ResponseT:
         """
         Returns a list of currently connected clients.
@@ -589,7 +589,7 @@ class ManagementCommands(CommandsProtocol):
 
     def client_tracking_on(
         self,
-        clientid: Union[int, None] = None,
+        clientid: Optional[int] = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
@@ -608,7 +608,7 @@ class ManagementCommands(CommandsProtocol):
 
     def client_tracking_off(
         self,
-        clientid: Union[int, None] = None,
+        clientid: Optional[int] = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
@@ -628,7 +628,7 @@ class ManagementCommands(CommandsProtocol):
     def client_tracking(
         self,
         on: bool = True,
-        clientid: Union[int, None] = None,
+        clientid: Optional[int] = None,
         prefix: Sequence[KeyT] = [],
         bcast: bool = False,
         optin: bool = False,
@@ -988,7 +988,7 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("SELECT", index, **kwargs)
 
     def info(
-        self, section: Union[str, None] = None, *args: List[str], **kwargs
+        self, section: Optional[str] = None, *args: List[str], **kwargs
     ) -> ResponseT:
         """
         Returns a dictionary containing information about the Redis server
@@ -1070,7 +1070,7 @@ class ManagementCommands(CommandsProtocol):
         timeout: int,
         copy: bool = False,
         replace: bool = False,
-        auth: Union[str, None] = None,
+        auth: Optional[str] = None,
         **kwargs,
     ) -> ResponseT:
         """
@@ -1152,7 +1152,7 @@ class ManagementCommands(CommandsProtocol):
         return self.execute_command("MEMORY MALLOC-STATS", **kwargs)
 
     def memory_usage(
-        self, key: KeyT, samples: Union[int, None] = None, **kwargs
+        self, key: KeyT, samples: Optional[int] = None, **kwargs
     ) -> ResponseT:
         """
         Return the total memory usage for key, its value and associated
@@ -1291,7 +1291,7 @@ class ManagementCommands(CommandsProtocol):
         raise RedisError("SHUTDOWN seems to have failed.")
 
     def slaveof(
-        self, host: Union[str, None] = None, port: Union[int, None] = None, **kwargs
+        self, host: Optional[str] = None, port: Optional[int] = None, **kwargs
     ) -> ResponseT:
         """
         Set the server to be a replicated slave of the instance identified
@@ -1304,7 +1304,7 @@ class ManagementCommands(CommandsProtocol):
             return self.execute_command("SLAVEOF", b"NO", b"ONE", **kwargs)
         return self.execute_command("SLAVEOF", host, port, **kwargs)
 
-    def slowlog_get(self, num: Union[int, None] = None, **kwargs) -> ResponseT:
+    def slowlog_get(self, num: Optional[int] = None, **kwargs) -> ResponseT:
         """
         Get the entries from the slowlog. If ``num`` is specified, get the
         most recent ``num`` items.
@@ -1451,7 +1451,7 @@ class BitFieldOperation:
         self,
         client: Union["redis.client.Redis", "redis.asyncio.client.Redis"],
         key: str,
-        default_overflow: Union[str, None] = None,
+        default_overflow: Optional[str] = None,
     ):
         self.client = client
         self.key = key
@@ -1487,7 +1487,7 @@ class BitFieldOperation:
         fmt: str,
         offset: BitfieldOffsetT,
         increment: int,
-        overflow: Union[str, None] = None,
+        overflow: Optional[str] = None,
     ):
         """
         Increment a bitfield by a given amount.
@@ -1572,8 +1572,8 @@ class BasicKeyCommands(CommandsProtocol):
     def bitcount(
         self,
         key: KeyT,
-        start: Union[int, None] = None,
-        end: Union[int, None] = None,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
         mode: Optional[str] = None,
     ) -> ResponseT:
         """
@@ -1595,7 +1595,7 @@ class BasicKeyCommands(CommandsProtocol):
     def bitfield(
         self: Union["redis.client.Redis", "redis.asyncio.client.Redis"],
         key: KeyT,
-        default_overflow: Union[str, None] = None,
+        default_overflow: Optional[str] = None,
     ) -> BitFieldOperation:
         """
         Return a BitFieldOperation instance to conveniently construct one or
@@ -1641,8 +1641,8 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         key: KeyT,
         bit: int,
-        start: Union[int, None] = None,
-        end: Union[int, None] = None,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
         mode: Optional[str] = None,
     ) -> ResponseT:
         """
@@ -1672,7 +1672,7 @@ class BasicKeyCommands(CommandsProtocol):
         self,
         source: str,
         destination: str,
-        destination_db: Union[str, None] = None,
+        destination_db: Optional[str] = None,
         replace: bool = False,
     ) -> ResponseT:
         """
@@ -2137,7 +2137,7 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("PTTL", name)
 
     def hrandfield(
-        self, key: str, count: int = None, withvalues: bool = False
+        self, key: str, count: Optional[int] = None, withvalues: bool = False
     ) -> ResponseT:
         """
         Return a random field from the hash value stored at key.
@@ -2191,8 +2191,8 @@ class BasicKeyCommands(CommandsProtocol):
         value: EncodableT,
         replace: bool = False,
         absttl: bool = False,
-        idletime: Union[int, None] = None,
-        frequency: Union[int, None] = None,
+        idletime: Optional[int] = None,
+        frequency: Optional[int] = None,
     ) -> ResponseT:
         """
         Create a key using the provided serialized value, previously obtained
@@ -2360,7 +2360,7 @@ class BasicKeyCommands(CommandsProtocol):
         specific_argument: Union[Literal["strings"], Literal["keys"]] = "strings",
         len: bool = False,
         idx: bool = False,
-        minmatchlen: Union[int, None] = None,
+        minmatchlen: Optional[int] = None,
         withmatchlen: bool = False,
         **kwargs,
     ) -> ResponseT:
@@ -2960,8 +2960,8 @@ class ScanCommands(CommandsProtocol):
         self,
         cursor: int = 0,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
-        _type: Union[str, None] = None,
+        count: Optional[int] = None,
+        _type: Optional[str] = None,
         **kwargs,
     ) -> ResponseT:
         """
@@ -2992,8 +2992,8 @@ class ScanCommands(CommandsProtocol):
     def scan_iter(
         self,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
-        _type: Union[str, None] = None,
+        count: Optional[int] = None,
+        _type: Optional[str] = None,
         **kwargs,
     ) -> Iterator:
         """
@@ -3022,7 +3022,7 @@ class ScanCommands(CommandsProtocol):
         name: KeyT,
         cursor: int = 0,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
     ) -> ResponseT:
         """
         Incrementally return lists of elements in a set. Also return a cursor
@@ -3045,7 +3045,7 @@ class ScanCommands(CommandsProtocol):
         self,
         name: KeyT,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
     ) -> Iterator:
         """
         Make an iterator using the SSCAN command so that the client doesn't
@@ -3065,7 +3065,7 @@ class ScanCommands(CommandsProtocol):
         name: KeyT,
         cursor: int = 0,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
         no_values: Union[bool, None] = None,
     ) -> ResponseT:
         """
@@ -3093,7 +3093,7 @@ class ScanCommands(CommandsProtocol):
         self,
         name: str,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
         no_values: Union[bool, None] = None,
     ) -> Iterator:
         """
@@ -3121,7 +3121,7 @@ class ScanCommands(CommandsProtocol):
         name: KeyT,
         cursor: int = 0,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
         score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
         """
@@ -3148,7 +3148,7 @@ class ScanCommands(CommandsProtocol):
         self,
         name: KeyT,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
         score_cast_func: Union[type, Callable] = float,
     ) -> Iterator:
         """
@@ -3177,8 +3177,8 @@ class AsyncScanCommands(ScanCommands):
     async def scan_iter(
         self,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
-        _type: Union[str, None] = None,
+        count: Optional[int] = None,
+        _type: Optional[str] = None,
         **kwargs,
     ) -> AsyncIterator:
         """
@@ -3207,7 +3207,7 @@ class AsyncScanCommands(ScanCommands):
         self,
         name: KeyT,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
     ) -> AsyncIterator:
         """
         Make an iterator using the SSCAN command so that the client doesn't
@@ -3229,7 +3229,7 @@ class AsyncScanCommands(ScanCommands):
         self,
         name: str,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
         no_values: Union[bool, None] = None,
     ) -> AsyncIterator:
         """
@@ -3258,7 +3258,7 @@ class AsyncScanCommands(ScanCommands):
         self,
         name: KeyT,
         match: Union[PatternT, None] = None,
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
         score_cast_func: Union[type, Callable] = float,
     ) -> AsyncIterator:
         """
@@ -3489,11 +3489,11 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         fields: Dict[FieldT, EncodableT],
         id: StreamIdT = "*",
-        maxlen: Union[int, None] = None,
+        maxlen: Optional[int] = None,
         approximate: bool = True,
         nomkstream: bool = False,
         minid: Union[StreamIdT, None] = None,
-        limit: Union[int, None] = None,
+        limit: Optional[int] = None,
     ) -> ResponseT:
         """
         Add to a stream.
@@ -3544,7 +3544,7 @@ class StreamCommands(CommandsProtocol):
         consumername: ConsumerT,
         min_idle_time: int,
         start_id: StreamIdT = "0-0",
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
         justid: bool = False,
     ) -> ResponseT:
         """
@@ -3595,9 +3595,9 @@ class StreamCommands(CommandsProtocol):
         consumername: ConsumerT,
         min_idle_time: int,
         message_ids: Union[List[StreamIdT], Tuple[StreamIdT]],
-        idle: Union[int, None] = None,
-        time: Union[int, None] = None,
-        retrycount: Union[int, None] = None,
+        idle: Optional[int] = None,
+        time: Optional[int] = None,
+        retrycount: Optional[int] = None,
         force: bool = False,
         justid: bool = False,
     ) -> ResponseT:
@@ -3829,7 +3829,7 @@ class StreamCommands(CommandsProtocol):
         max: StreamIdT,
         count: int,
         consumername: Union[ConsumerT, None] = None,
-        idle: Union[int, None] = None,
+        idle: Optional[int] = None,
     ) -> ResponseT:
         """
         Returns information about pending messages, in a range.
@@ -3883,7 +3883,7 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         min: StreamIdT = "-",
         max: StreamIdT = "+",
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
     ) -> ResponseT:
         """
         Read stream values within an interval.
@@ -3913,8 +3913,8 @@ class StreamCommands(CommandsProtocol):
     def xread(
         self,
         streams: Dict[KeyT, StreamIdT],
-        count: Union[int, None] = None,
-        block: Union[int, None] = None,
+        count: Optional[int] = None,
+        block: Optional[int] = None,
     ) -> ResponseT:
         """
         Block and monitor multiple streams for new data.
@@ -3953,8 +3953,8 @@ class StreamCommands(CommandsProtocol):
         groupname: str,
         consumername: str,
         streams: Dict[KeyT, StreamIdT],
-        count: Union[int, None] = None,
-        block: Union[int, None] = None,
+        count: Optional[int] = None,
+        block: Optional[int] = None,
         noack: bool = False,
     ) -> ResponseT:
         """
@@ -4000,7 +4000,7 @@ class StreamCommands(CommandsProtocol):
         name: KeyT,
         max: StreamIdT = "+",
         min: StreamIdT = "-",
-        count: Union[int, None] = None,
+        count: Optional[int] = None,
     ) -> ResponseT:
         """
         Read stream values within an interval, in reverse order.
@@ -4030,10 +4030,10 @@ class StreamCommands(CommandsProtocol):
     def xtrim(
         self,
         name: KeyT,
-        maxlen: Union[int, None] = None,
+        maxlen: Optional[int] = None,
         approximate: bool = True,
         minid: Union[StreamIdT, None] = None,
-        limit: Union[int, None] = None,
+        limit: Optional[int] = None,
     ) -> ResponseT:
         """
         Trims old messages from a stream.
@@ -4205,7 +4205,7 @@ class SortedSetCommands(CommandsProtocol):
         return self.execute_command("ZINCRBY", name, amount, value)
 
     def zinter(
-        self, keys: KeysT, aggregate: Union[str, None] = None, withscores: bool = False
+        self, keys: KeysT, aggregate: Optional[str] = None, withscores: bool = False
     ) -> ResponseT:
         """
         Return the intersect of multiple sorted sets specified by ``keys``.
@@ -4224,7 +4224,7 @@ class SortedSetCommands(CommandsProtocol):
         self,
         dest: KeyT,
         keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
-        aggregate: Union[str, None] = None,
+        aggregate: Optional[str] = None,
     ) -> ResponseT:
         """
         Intersect multiple sorted sets specified by ``keys`` into a new
@@ -4263,7 +4263,7 @@ class SortedSetCommands(CommandsProtocol):
         """
         return self.execute_command("ZLEXCOUNT", name, min, max, keys=[name])
 
-    def zpopmax(self, name: KeyT, count: Union[int, None] = None) -> ResponseT:
+    def zpopmax(self, name: KeyT, count: Optional[int] = None) -> ResponseT:
         """
         Remove and return up to ``count`` members with the highest scores
         from the sorted set ``name``.
@@ -4274,7 +4274,7 @@ class SortedSetCommands(CommandsProtocol):
         options = {"withscores": True}
         return self.execute_command("ZPOPMAX", name, *args, **options)
 
-    def zpopmin(self, name: KeyT, count: Union[int, None] = None) -> ResponseT:
+    def zpopmin(self, name: KeyT, count: Optional[int] = None) -> ResponseT:
         """
         Remove and return up to ``count`` members with the lowest scores
         from the sorted set ``name``.
@@ -4286,7 +4286,7 @@ class SortedSetCommands(CommandsProtocol):
         return self.execute_command("ZPOPMIN", name, *args, **options)
 
     def zrandmember(
-        self, key: KeyT, count: int = None, withscores: bool = False
+        self, key: KeyT, count: Optional[int] = None, withscores: bool = False
     ) -> ResponseT:
         """
         Return a random element from the sorted set value stored at key.
@@ -4418,8 +4418,8 @@ class SortedSetCommands(CommandsProtocol):
         bylex: bool = False,
         withscores: bool = False,
         score_cast_func: Union[type, Callable, None] = float,
-        offset: Union[int, None] = None,
-        num: Union[int, None] = None,
+        offset: Optional[int] = None,
+        num: Optional[int] = None,
     ) -> ResponseT:
         if byscore and bylex:
             raise DataError("``byscore`` and ``bylex`` can not be specified together.")
@@ -4457,8 +4457,8 @@ class SortedSetCommands(CommandsProtocol):
         score_cast_func: Union[type, Callable] = float,
         byscore: bool = False,
         bylex: bool = False,
-        offset: int = None,
-        num: int = None,
+        offset: Optional[int] = None,
+        num: Optional[int] = None,
     ) -> ResponseT:
         """
         Return a range of values from sorted set ``name`` between
@@ -4545,8 +4545,8 @@ class SortedSetCommands(CommandsProtocol):
         byscore: bool = False,
         bylex: bool = False,
         desc: bool = False,
-        offset: Union[int, None] = None,
-        num: Union[int, None] = None,
+        offset: Optional[int] = None,
+        num: Optional[int] = None,
     ) -> ResponseT:
         """
         Stores in ``dest`` the result of a range of values from sorted set
@@ -4591,8 +4591,8 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         min: EncodableT,
         max: EncodableT,
-        start: Union[int, None] = None,
-        num: Union[int, None] = None,
+        start: Optional[int] = None,
+        num: Optional[int] = None,
     ) -> ResponseT:
         """
         Return the lexicographical range of values from sorted set ``name``
@@ -4615,8 +4615,8 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         max: EncodableT,
         min: EncodableT,
-        start: Union[int, None] = None,
-        num: Union[int, None] = None,
+        start: Optional[int] = None,
+        num: Optional[int] = None,
     ) -> ResponseT:
         """
         Return the reversed lexicographical range of values from sorted set
@@ -4639,8 +4639,8 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         min: ZScoreBoundT,
         max: ZScoreBoundT,
-        start: Union[int, None] = None,
-        num: Union[int, None] = None,
+        start: Optional[int] = None,
+        num: Optional[int] = None,
         withscores: bool = False,
         score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
@@ -4674,8 +4674,8 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         max: ZScoreBoundT,
         min: ZScoreBoundT,
-        start: Union[int, None] = None,
-        num: Union[int, None] = None,
+        start: Optional[int] = None,
+        num: Optional[int] = None,
         withscores: bool = False,
         score_cast_func: Union[type, Callable] = float,
     ):
@@ -4794,7 +4794,7 @@ class SortedSetCommands(CommandsProtocol):
     def zunion(
         self,
         keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
-        aggregate: Union[str, None] = None,
+        aggregate: Optional[str] = None,
         withscores: bool = False,
     ) -> ResponseT:
         """
@@ -4811,7 +4811,7 @@ class SortedSetCommands(CommandsProtocol):
         self,
         dest: KeyT,
         keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
-        aggregate: Union[str, None] = None,
+        aggregate: Optional[str] = None,
     ) -> ResponseT:
         """
         Union multiple sorted sets specified by ``keys`` into
@@ -4843,7 +4843,7 @@ class SortedSetCommands(CommandsProtocol):
         command: str,
         dest: Union[KeyT, None],
         keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
-        aggregate: Union[str, None] = None,
+        aggregate: Optional[str] = None,
         **options,
     ) -> ResponseT:
         pieces: list[EncodableT] = [command]
@@ -5994,7 +5994,7 @@ class GeoCommands(CommandsProtocol):
         return self.execute_command("GEOADD", *pieces)
 
     def geodist(
-        self, name: KeyT, place1: FieldT, place2: FieldT, unit: Union[str, None] = None
+        self, name: KeyT, place1: FieldT, place2: FieldT, unit: Optional[str] = None
     ) -> ResponseT:
         """
         Return the distance between ``place1`` and ``place2`` members of the
@@ -6036,14 +6036,14 @@ class GeoCommands(CommandsProtocol):
         longitude: float,
         latitude: float,
         radius: float,
-        unit: Union[str, None] = None,
+        unit: Optional[str] = None,
         withdist: bool = False,
         withcoord: bool = False,
         withhash: bool = False,
-        count: Union[int, None] = None,
-        sort: Union[str, None] = None,
-        store: Union[KeyT, None] = None,
-        store_dist: Union[KeyT, None] = None,
+        count: Optional[int] = None,
+        sort: Optional[str] = None,
+        store: Optional[KeyT] = None,
+        store_dist: Optional[KeyT] = None,
         any: bool = False,
     ) -> ResponseT:
         """
@@ -6098,12 +6098,12 @@ class GeoCommands(CommandsProtocol):
         name: KeyT,
         member: FieldT,
         radius: float,
-        unit: Union[str, None] = None,
+        unit: Optional[str] = None,
         withdist: bool = False,
         withcoord: bool = False,
         withhash: bool = False,
-        count: Union[int, None] = None,
-        sort: Union[str, None] = None,
+        count: Optional[int] = None,
+        sort: Optional[str] = None,
         store: Union[KeyT, None] = None,
         store_dist: Union[KeyT, None] = None,
         any: bool = False,
@@ -6188,8 +6188,8 @@ class GeoCommands(CommandsProtocol):
         radius: Union[float, None] = None,
         width: Union[float, None] = None,
         height: Union[float, None] = None,
-        sort: Union[str, None] = None,
-        count: Union[int, None] = None,
+        sort: Optional[str] = None,
+        count: Optional[int] = None,
         any: bool = False,
         withcoord: bool = False,
         withdist: bool = False,
@@ -6263,15 +6263,15 @@ class GeoCommands(CommandsProtocol):
         self,
         dest: KeyT,
         name: KeyT,
-        member: Union[FieldT, None] = None,
-        longitude: Union[float, None] = None,
-        latitude: Union[float, None] = None,
+        member: Optional[FieldT] = None,
+        longitude: Optional[float] = None,
+        latitude: Optional[float] = None,
         unit: str = "m",
-        radius: Union[float, None] = None,
-        width: Union[float, None] = None,
-        height: Union[float, None] = None,
-        sort: Union[str, None] = None,
-        count: Union[int, None] = None,
+        radius: Optional[float] = None,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+        sort: Optional[str] = None,
+        count: Optional[int] = None,
         any: bool = False,
         storedist: bool = False,
     ) -> ResponseT:
