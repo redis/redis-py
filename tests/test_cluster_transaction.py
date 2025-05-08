@@ -11,7 +11,7 @@ from redis.client import Redis
 from redis.cluster import PRIMARY, ClusterNode, NodesManager, RedisCluster
 from redis.retry import Retry
 
-from .conftest import skip_if_server_version_lt, wait_for_command
+from .conftest import skip_if_server_version_lt
 
 
 def _find_source_and_target_node_for_slot(

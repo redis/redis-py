@@ -1237,8 +1237,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             except AuthenticationError:
                 raise
             except (ConnectionError, TimeoutError) as e:
-                # Connection retries are being handled in the node's
-                # Retry object.
                 # ConnectionError can also be raised if we couldn't get a
                 # connection from the pool before timing out, so check that
                 # this is an actual connection before attempting to disconnect.
@@ -1854,7 +1852,7 @@ class NodesManager:
 
     def find_connection_owner(self, connection: Connection) -> Optional[Redis]:
         node_name = get_node_name(connection.host, connection.port)
-        for node in self.nodes_cache.values():
+        for node in tuple(self.nodes_cache.values()):
             if node.redis_connection:
                 conn_args = node.redis_connection.connection_pool.connection_kwargs
                 if node_name == get_node_name(
@@ -2550,7 +2548,7 @@ class ExecutionStrategy(ABC):
         """
         Starts transactional context.
 
-        See: ClusterPipeline.reset()
+        See: ClusterPipeline.multi()
         """
         pass
 
@@ -2706,9 +2704,9 @@ class PipelineStrategy(AbstractStrategy):
         self, stack, raise_on_error=True, allow_redirections=True
     ):
         """
-        Wrapper for CLUSTERDOWN error handling.
+        Wrapper for RedisCluster.ERRORS_ALLOW_RETRY errors handling.
 
-        If the cluster reports it is down it is assumed that:
+        If one of the retryable exceptions has been thrown we assume that:
          - connection_pool was disconnected
          - connection_pool was reseted
          - refereh_table_asap set to True
@@ -2816,11 +2814,10 @@ class PipelineStrategy(AbstractStrategy):
         # we  write to all the open sockets for each node first,
         # before reading anything
         # this allows us to flush all the requests out across the
-        # network essentially in parallel
-        # so that we can read them all in parallel as they come back.
+        # network
+        # so that we can read them from different sockets as they come back.
         # we dont' multiplex on the sockets as they come available,
         # but that shouldn't make too much difference.
-        node_commands = nodes.values()
         try:
             node_commands = nodes.values()
             for n in node_commands:
@@ -3024,7 +3021,7 @@ class TransactionStrategy(AbstractStrategy):
     IMMEDIATE_EXECUTE_COMMANDS = {"WATCH", "UNWATCH"}
     UNWATCH_COMMANDS = {"DISCARD", "EXEC", "UNWATCH"}
     SLOT_REDIRECT_ERRORS = (AskError, MovedError)
-    CONNECTION_ERRORS = (ConnectionError,OSError,ClusterDownError)
+    CONNECTION_ERRORS = (ConnectionError, OSError, ClusterDownError)
 
     def __init__(self, pipe: ClusterPipeline):
         super().__init__(pipe)
@@ -3033,6 +3030,10 @@ class TransactionStrategy(AbstractStrategy):
         self._pipeline_slots: Set[int] = set()
         self._transaction_connection: Optional[Connection] = None
         self._executing = False
+        self._retry = copy(self._pipe.retry)
+        self._retry.update_supported_errors(
+            RedisCluster.ERRORS_ALLOW_RETRY + self.SLOT_REDIRECT_ERRORS
+        )
 
     def _get_client_and_connection_for_transaction(self) -> Tuple[Redis, Connection]:
         """
@@ -3105,9 +3106,7 @@ class TransactionStrategy(AbstractStrategy):
         self._watching = True
 
     def _immediate_execute_command(self, *args, **options):
-        retry = copy(self._pipe.retry)
-        retry.update_supported_errors([AskError, MovedError])
-        return retry.call_with_retry(
+        return self._retry.call_with_retry(
             lambda: self._get_connection_and_send_command(*args, **options),
             self._reinitialize_on_error,
         )
@@ -3137,7 +3136,10 @@ class TransactionStrategy(AbstractStrategy):
             if type(error) in self.SLOT_REDIRECT_ERRORS and self._executing:
                 raise WatchError("Slot rebalancing occurred while watching keys")
 
-        if type(error) in self.SLOT_REDIRECT_ERRORS or type(error) in self.CONNECTION_ERRORS:
+        if (
+            type(error) in self.SLOT_REDIRECT_ERRORS
+            or type(error) in self.CONNECTION_ERRORS
+        ):
             if self._transaction_connection:
                 self._transaction_connection = None
 
@@ -3169,9 +3171,7 @@ class TransactionStrategy(AbstractStrategy):
     def _execute_transaction_with_retries(
         self, stack: List["PipelineCommand"], raise_on_error: bool
     ):
-        retry = copy(self._pipe.retry)
-        retry.update_supported_errors([AskError, MovedError])
-        return retry.call_with_retry(
+        return self._retry.call_with_retry(
             lambda: self._execute_transaction(stack, raise_on_error),
             self._reinitialize_on_error,
         )

@@ -180,7 +180,7 @@ the server.
 Please note:
 
 -  RedisCluster pipelines currently only support key-based commands.
--  The pipeline gets its ‘read_from_replicas’ value from the
+-  The pipeline gets its ‘load_balancing_strategy’ value from the
    cluster’s parameter. Thus, if read from replications is enabled in
    the cluster instance, the pipeline will also direct read commands to
    replicas.
@@ -204,7 +204,7 @@ is exactly that: a compromise. While this behavior is different from
 non-transactional cluster pipelines, it simplifies migration of clients
 from standalone to cluster under some circumstances. Note that application
 code that issues multi/exec commands on a standalone client without
-embedding them within a pipeline would eventually get ‘AttributeError’s.
+embedding them within a pipeline would eventually get ‘AttributeError’.
 With this approach, if the application uses ‘client.pipeline(transaction=True)’,
 then switching the client with a cluster-aware instance would simplify
 code changes (to some extent). This may be true for application code that
