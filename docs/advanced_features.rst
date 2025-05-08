@@ -241,12 +241,13 @@ Or
    >>>     pipe.get("key")
    >>>     response = pipe.execute()
 
-As you see there's no need to explicitly send MULTI/EXEC commands to control context start/end
-ClusterPipeline will take care of it.
+As you see there's no need to explicitly send `MULTI/EXEC` commands to control context start/end
+`ClusterPipeline` will take care of it.
 
 To ensure that different keys will be mapped to a same hash slot on the server side
 prepend your keys with the same hash tag, the technique that allows you to control
-keys distribution. More information `here <https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/#hash-tags>`_
+keys distribution.
+More information `here <https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/#hash-tags>`_
 
 .. code:: python
 
@@ -261,7 +262,7 @@ CAS Transactions
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you want to apply optimistic locking for certain keys, you have to execute
-WATCH command in transactional context. WATCH command follows the same limitations
+`WATCH` command in transactional context. `WATCH` command follows the same limitations
 as any other multi key command - all keys should be mapped to the same hash slot.
 
 However, the difference between CAS transaction and normal one is that you have to
