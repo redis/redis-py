@@ -2124,7 +2124,7 @@ class ClusterPipeline(RedisCluster):
         else:
             self.retry = Retry(
                 backoff=ExponentialWithJitterBackoff(base=1, cap=10),
-                retries=self.cluster_error_retry_attempts,
+                retries=cluster_error_retry_attempts,
             )
 
         self.encoder = Encoder(

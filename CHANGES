@@ -70,6 +70,7 @@
     * Close Unix sockets if the connection attempt fails. This prevents `ResourceWarning`s. (#3314)
     * Close SSL sockets if the connection attempt fails, or if validations fail. (#3317)
     * Eliminate mutable default arguments in the `redis.commands.core.Script` class. (#3332)
+    * Allow newer versions of PyJWT as dependency. (#3630)
 
 * 4.1.3 (Feb 8, 2022)
   * Fix flushdb and flushall (#1926)
@@ -1146,3 +1147,4 @@ incompatible in code using*SCAN commands loops such as
   * Implemented STRLEN
   * Implemented PERSIST
   * Implemented SETRANGE
+  * Changed type annotation of the `num` parameter in `zrange` from `int` to `Optional[int]
