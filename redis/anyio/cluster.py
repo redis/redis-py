@@ -22,7 +22,6 @@ from typing import (
 )
 
 import anyio
-from exceptiongroup import ExceptionGroup
 
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.helpers import (
@@ -84,6 +83,7 @@ from redis.utils import (
 if sys.version_info >= (3, 11):
     from typing import Self
 else:
+    from exceptiongroup import ExceptionGroup
     from typing_extensions import Self
 
 if SSL_AVAILABLE:
