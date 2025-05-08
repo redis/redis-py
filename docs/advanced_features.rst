@@ -237,9 +237,9 @@ Or
 .. code:: python
 
    >>> with r.pipeline(transaction=True) as pipe: # Using context manager
-   >>>     pipe.set("key", "value")
-   >>>     pipe.get("key")
-   >>>     response = pipe.execute()
+   ...     pipe.set("key", "value")
+   ...     pipe.get("key")
+   ...     response = pipe.execute()
 
 As you see there's no need to explicitly send `MULTI/EXEC` commands to control context start/end
 `ClusterPipeline` will take care of it.
@@ -252,11 +252,11 @@ More information `here <https://redis.io/docs/latest/operate/oss_and_stack/refer
 .. code:: python
 
    >>> with r.pipeline(transaction=True) as pipe:
-   >>>     pipe.set("{tag}foo", "bar")
-   >>>     pipe.set("{tag}bar", "foo")
-   >>>     pipe.get("{tag}foo")
-   >>>     pipe.get("{tag}bar")
-   >>>     response = pipe.execute()
+   ...     pipe.set("{tag}foo", "bar")
+   ...     pipe.set("{tag}bar", "foo")
+   ...     pipe.get("{tag}foo")
+   ...     pipe.get("{tag}bar")
+   ...     response = pipe.execute()
 
 CAS Transactions
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -274,12 +274,12 @@ transaction execution.
 .. code:: python
 
    >>> with r.pipeline(transaction=True) as pipe:
-   >>>     pipe.watch("mykey")       # Apply locking by immediately executing command
-   >>>     val = pipe.get("mykey")   # Immediately retrieves value
-   >>>     val = val + 1             # Increment value
-   >>>     pipe.multi()              # Starting transaction context
-   >>>     pipe.set("mykey", val)    # Command will be pipelined
-   >>>     response = pipe.execute() # Returns OK or None if key was modified in the meantime
+   ...     pipe.watch("mykey")       # Apply locking by immediately executing command
+   ...     val = pipe.get("mykey")   # Immediately retrieves value
+   ...     val = val + 1             # Increment value
+   ...     pipe.multi()              # Starting transaction context
+   ...     pipe.set("mykey", val)    # Command will be pipelined
+   ...     response = pipe.execute() # Returns OK or None if key was modified in the meantime
 
 
 Publish / Subscribe
