@@ -15,7 +15,7 @@ class JSONCommands:
 
     def arrappend(
         self, name: str, path: Optional[str] = Path.root_path(), *args: List[JsonType]
-    ) -> List[Union[int, None]]:
+    ) -> List[Optional[int]]:
         """Append the objects ``args`` to the array under the
         ``path` in key ``name``.
 
@@ -33,7 +33,7 @@ class JSONCommands:
         scalar: int,
         start: Optional[int] = None,
         stop: Optional[int] = None,
-    ) -> List[Union[int, None]]:
+    ) -> List[Optional[int]]:
         """
         Return the index of ``scalar`` in the JSON array under ``path`` at key
         ``name``.
@@ -53,7 +53,7 @@ class JSONCommands:
 
     def arrinsert(
         self, name: str, path: str, index: int, *args: List[JsonType]
-    ) -> List[Union[int, None]]:
+    ) -> List[Optional[int]]:
         """Insert the objects ``args`` to the array at index ``index``
         under the ``path` in key ``name``.
 
@@ -66,7 +66,7 @@ class JSONCommands:
 
     def arrlen(
         self, name: str, path: Optional[str] = Path.root_path()
-    ) -> List[Union[int, None]]:
+    ) -> List[Optional[int]]:
         """Return the length of the array JSON value under ``path``
         at key``name``.
 
@@ -79,7 +79,7 @@ class JSONCommands:
         name: str,
         path: Optional[str] = Path.root_path(),
         index: Optional[int] = -1,
-    ) -> List[Union[str, None]]:
+    ) -> List[Optional[str]]:
         """Pop the element at ``index`` in the array JSON value under
         ``path`` at key ``name``.
 
@@ -89,7 +89,7 @@ class JSONCommands:
 
     def arrtrim(
         self, name: str, path: str, start: int, stop: int
-    ) -> List[Union[int, None]]:
+    ) -> List[Optional[int]]:
         """Trim the array JSON value under ``path`` at key ``name`` to the
         inclusive range given by ``start`` and ``stop``.
 
@@ -113,7 +113,7 @@ class JSONCommands:
 
     def objkeys(
         self, name: str, path: Optional[str] = Path.root_path()
-    ) -> List[Union[List[str], None]]:
+    ) -> List[Optional[List[str]]]:
         """Return the key names in the dictionary JSON value under ``path`` at
         key ``name``.
 
@@ -357,7 +357,7 @@ class JSONCommands:
 
         return set_files_result
 
-    def strlen(self, name: str, path: Optional[str] = None) -> List[Union[int, None]]:
+    def strlen(self, name: str, path: Optional[str] = None) -> List[Optional[int]]:
         """Return the length of the string JSON value under ``path`` at key
         ``name``.
 

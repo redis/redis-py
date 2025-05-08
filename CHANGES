@@ -1147,3 +1147,4 @@ incompatible in code using*SCAN commands loops such as
   * Implemented STRLEN
   * Implemented PERSIST
   * Implemented SETRANGE
+  * Changed type annotation of the `num` parameter in `zrange` from `int` to `Optional[int]
