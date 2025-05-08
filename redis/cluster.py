@@ -3021,7 +3021,7 @@ class TransactionStrategy(AbstractStrategy):
     IMMEDIATE_EXECUTE_COMMANDS = {"WATCH", "UNWATCH"}
     UNWATCH_COMMANDS = {"DISCARD", "EXEC", "UNWATCH"}
     SLOT_REDIRECT_ERRORS = (AskError, MovedError)
-    CONNECTION_ERRORS = (ConnectionError, OSError, ClusterDownError)
+    CONNECTION_ERRORS = (ConnectionError, OSError, ClusterDownError,SlotNotCoveredError)
 
     def __init__(self, pipe: ClusterPipeline):
         super().__init__(pipe)
