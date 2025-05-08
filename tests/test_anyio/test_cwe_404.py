@@ -66,12 +66,7 @@ class DelayProxy:
         writer: ByteSendStream,
         set_event_on_receive: bool,
     ):
-        while True:
-            try:
-                data = await reader.receive(1000)
-            except anyio.EndOfStream:
-                break
-            # print(f"{name} read {len(data)} delay {self.delay}")
+        async for data in reader:
             if set_event_on_receive:
                 self.send_event.set()
 
@@ -212,7 +207,6 @@ async def test_cluster(master_host):
         async with RedisCluster.from_url(
             f"redis://{hostname}:{remap_base}", address_remap=remap
         ) as r:
-            await r.initialize()
             await r.set("foo", "foo")
             await r.set("bar", "bar")
 
@@ -223,6 +217,7 @@ async def test_cluster(master_host):
             all_clear()
             async with anyio.create_task_group() as tg:
                 # Wait for whichever DelayProxy gets the request first
+                tg.start_soon(op, r)
                 await wait_for_send()
                 await anyio.sleep(0.01)
                 tg.cancel_scope.cancel()
