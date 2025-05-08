@@ -1674,7 +1674,9 @@ class NodesManager:
         fully_covered = False
         kwargs = self.connection_kwargs
         exception = None
-        for startup_node in self.startup_nodes.values():
+        # Convert to tuple to prevent RuntimeError if self.startup_nodes
+        # is modified during iteration
+        for startup_node in tuple(self.startup_nodes.values()):
             try:
                 if startup_node.redis_connection:
                     r = startup_node.redis_connection
@@ -2122,7 +2124,7 @@ class ClusterPipeline(RedisCluster):
         else:
             self.retry = Retry(
                 backoff=ExponentialWithJitterBackoff(base=1, cap=10),
-                retries=self.cluster_error_retry_attempts,
+                retries=cluster_error_retry_attempts,
             )
 
         self.encoder = Encoder(

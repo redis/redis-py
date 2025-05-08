@@ -1313,7 +1313,9 @@ class NodesManager:
         startup_nodes_reachable = False
         fully_covered = False
         exception = None
-        for startup_node in self.startup_nodes.values():
+        # Convert to tuple to prevent RuntimeError if self.startup_nodes
+        # is modified during iteration
+        for startup_node in tuple(self.startup_nodes.values()):
             try:
                 # Make sure cluster mode is enabled on this node
                 try:
