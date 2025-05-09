@@ -48,7 +48,6 @@ jobs:
         python-version: [ '3.8', '3.13']
         parser-backend: [ 'hiredis' ]
         hiredis-version: [ 'unstable' ]
-        hiredis-branch: ${{ inputs.hiredis-branch }}
         event-loop: [ 'asyncio' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
@@ -64,3 +63,4 @@ jobs:
           parser-backend: ${{ matrix.parser-backend }}
           redis-version: ${{ matrix.redis-version }}
           hiredis-version: ${{ matrix.hiredis-version }}
+          hiredis-branch: ${{ inputs.hiredis-branch }}
