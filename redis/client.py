@@ -34,6 +34,7 @@ from redis.commands import (
 from redis.commands.core import Script
 from redis.connection import (
     AbstractConnection,
+    Connection,
     ConnectionPool,
     SSLConnection,
     UnixDomainSocketConnection,
@@ -1297,9 +1298,15 @@ class Pipeline(Redis):
 
     UNWATCH_COMMANDS = {"DISCARD", "EXEC", "UNWATCH"}
 
-    def __init__(self, connection_pool, response_callbacks, transaction, shard_hint):
+    def __init__(
+        self,
+        connection_pool: ConnectionPool,
+        response_callbacks,
+        transaction,
+        shard_hint,
+    ):
         self.connection_pool = connection_pool
-        self.connection = None
+        self.connection: Optional[Connection] = None
         self.response_callbacks = response_callbacks
         self.transaction = transaction
         self.shard_hint = shard_hint
@@ -1434,7 +1441,9 @@ class Pipeline(Redis):
         self.command_stack.append((args, options))
         return self
 
-    def _execute_transaction(self, connection, commands, raise_on_error) -> List:
+    def _execute_transaction(
+        self, connection: Connection, commands, raise_on_error
+    ) -> List:
         cmds = chain([(("MULTI",), {})], commands, [(("EXEC",), {})])
         all_cmds = connection.pack_commands(
             [args for args, options in cmds if EMPTY_RESPONSE not in options]
