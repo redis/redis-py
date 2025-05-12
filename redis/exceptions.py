@@ -221,3 +221,21 @@ class SlotNotCoveredError(RedisClusterException):
 
 
 class MaxConnectionsError(ConnectionError): ...
+
+
+class CrossSlotTransactionError(RedisClusterException):
+    """
+    Raised when a transaction or watch is triggered in a pipeline
+    and not all keys or all commands belong to the same slot.
+    """
+
+    pass
+
+
+class InvalidPipelineStack(RedisClusterException):
+    """
+    Raised on unexpected response length on pipelines. This is
+    most likely a handling error on the stack.
+    """
+
+    pass
