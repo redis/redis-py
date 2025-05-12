@@ -1,4 +1,4 @@
-Advanced Features
+from redis import RedisClusterAdvanced Features
 =================
 
 A note about threading
@@ -167,6 +167,7 @@ the server.
 
 .. code:: python
 
+   >>> rc = RedisCluster()
    >>> with rc.pipeline() as pipe:
    ...     pipe.set('foo', 'value1')
    ...     pipe.set('bar', 'value2')
@@ -208,7 +209,7 @@ embedding them within a pipeline would eventually get ‘AttributeError’.
 With this approach, if the application uses ‘client.pipeline(transaction=True)’,
 then switching the client with a cluster-aware instance would simplify
 code changes (to some extent). This may be true for application code that
-makes use of hash keys, since its transactions may are already be
+makes use of hash keys, since its transactions may already be
 mapping all commands to the same slot.
 
 An alternative is some kind of two-step commit solution, where a slot
@@ -220,14 +221,14 @@ transactional mode. To enable transactional context set:
 
 .. code:: python
 
-   >>> p = r.pipeline(transaction=True)
+   >>> p = rc.pipeline(transaction=True)
 
 After entering the transactional context you can add commands to a transactional
 context, by one of the following ways:
 
 .. code:: python
 
-   >>> p = r.pipeline(transaction=True) # Chaining commands
+   >>> p = rc.pipeline(transaction=True) # Chaining commands
    >>> p.set("key", "value")
    >>> p.get("key")
    >>> response = p.execute()
@@ -236,7 +237,7 @@ Or
 
 .. code:: python
 
-   >>> with r.pipeline(transaction=True) as pipe: # Using context manager
+   >>> with rc.pipeline(transaction=True) as pipe: # Using context manager
    ...     pipe.set("key", "value")
    ...     pipe.get("key")
    ...     response = pipe.execute()
@@ -251,7 +252,7 @@ More information `here <https://redis.io/docs/latest/operate/oss_and_stack/refer
 
 .. code:: python
 
-   >>> with r.pipeline(transaction=True) as pipe:
+   >>> with rc.pipeline(transaction=True) as pipe:
    ...     pipe.set("{tag}foo", "bar")
    ...     pipe.set("{tag}bar", "foo")
    ...     pipe.get("{tag}foo")
@@ -273,7 +274,7 @@ transaction execution.
 
 .. code:: python
 
-   >>> with r.pipeline(transaction=True) as pipe:
+   >>> with rc.pipeline(transaction=True) as pipe:
    ...     pipe.watch("mykey")       # Apply locking by immediately executing command
    ...     val = pipe.get("mykey")   # Immediately retrieves value
    ...     val = val + 1             # Increment value

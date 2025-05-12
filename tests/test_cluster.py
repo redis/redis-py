@@ -3099,7 +3099,7 @@ class TestClusterPipeline:
 
     def test_multi_delete_supported_single_slot(self, r):
         """
-        Test that multi delete operation is unsupported
+        Test that multi delete operation is supported when all keys are in the same hash slot
         """
         with r.pipeline(transaction=True) as pipe:
             r["{key}:a"] = 1
