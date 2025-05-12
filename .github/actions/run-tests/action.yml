@@ -66,6 +66,7 @@ runs:
         
         echo "::group::Starting Redis servers"
         redis_major_version=$(echo "$REDIS_VERSION" | grep -oP '^\d+')
+        echo "REDIS_MAJOR_VERSION=${redis_major_version}" >> $GITHUB_ENV
         
         if (( redis_major_version < 8 )); then
           echo "Using redis-stack for module tests"
@@ -87,8 +88,7 @@ runs:
                   
           if (( redis_major_version < 7 )); then
             export REDIS_STACK_EXTRA_ARGS="--tls-auth-clients optional --save ''"
-            export REDIS_EXTRA_ARGS="--tls-auth-clients optional --save ''"
-            echo "REDIS_MAJOR_VERSION=${redis_major_version}" >> $GITHUB_ENV
+            export REDIS_EXTRA_ARGS="--tls-auth-clients optional --save ''"            
           fi
         
           invoke devenv --endpoints=all-stack
