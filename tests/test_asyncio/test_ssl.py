@@ -1,12 +1,7 @@
-import asyncio
-import ssl
-import socket
 from urllib.parse import urlparse
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
-from redis.exceptions import RedisError, ConnectionError
-import ssl
 
 # Skip test or not based on cryptography installation
 try:
