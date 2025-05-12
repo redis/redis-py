@@ -42,7 +42,6 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_check_hostname=False,
             ssl_cert_reqs="none",
         )
         assert r.ping()
@@ -105,7 +104,6 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_3,
             ssl_ciphers=ssl_ciphers,
@@ -120,7 +118,6 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers="foo:bar",
@@ -145,7 +142,6 @@ class TestSSL:
             host=p[0],
             port=p[1],
             ssl=True,
-            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
@@ -309,3 +305,26 @@ class TestSSL:
             r.ping()
         assert "no ocsp response present" in str(e)
         r.close()
+
+    def test_cert_reqs_none_with_check_hostname(self, request):
+        """Test that when ssl_cert_reqs=none is used with ssl_check_hostname=True,
+        the connection is created successfully with check_hostname internally set to False"""
+        ssl_url = request.config.option.redis_ssl_url
+        parsed_url = urlparse(ssl_url)
+        r = redis.Redis(
+            host=parsed_url.hostname,
+            port=parsed_url.port,
+            ssl=True,
+            ssl_cert_reqs="none",
+            # Check that ssl_check_hostname is ignored, when ssl_cert_reqs=none
+            ssl_check_hostname=True,
+        )
+        try:
+            # Connection should be successful
+            assert r.ping()
+            # check_hostname should have been automatically set to False
+            assert r.connection_pool.connection_class == redis.SSLConnection
+            conn = r.connection_pool.make_connection()
+            assert conn.check_hostname is False
+        finally:
+            r.close()

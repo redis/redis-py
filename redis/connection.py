@@ -1083,7 +1083,9 @@ class SSLConnection(Connection):
         self.ca_certs = ssl_ca_certs
         self.ca_data = ssl_ca_data
         self.ca_path = ssl_ca_path
-        self.check_hostname = ssl_check_hostname
+        self.check_hostname = (
+            ssl_check_hostname if self.cert_reqs != ssl.CERT_NONE else False
+        )
         self.certificate_password = ssl_password
         self.ssl_validate_ocsp = ssl_validate_ocsp
         self.ssl_validate_ocsp_stapled = ssl_validate_ocsp_stapled
