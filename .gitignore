@@ -9,6 +9,7 @@ vagrant/.vagrant
 .cache
 .eggs
 .idea
+.vscode
 .coverage
 env
 venv
