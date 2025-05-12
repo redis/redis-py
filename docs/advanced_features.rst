@@ -1,4 +1,4 @@
-from redis import RedisClusterAdvanced Features
+Advanced Features
 =================
 
 A note about threading
