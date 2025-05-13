@@ -1196,13 +1196,14 @@ class NodesManager:
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.require_full_coverage = require_full_coverage
         self.connection_kwargs = connection_kwargs
-        self._dynamic_startup_nodes = dynamic_startup_nodes
         self.address_remap = address_remap
 
         self.default_node: "ClusterNode" = None
         self.nodes_cache: Dict[str, "ClusterNode"] = {}
         self.slots_cache: Dict[int, List["ClusterNode"]] = {}
-        self.read_load_balancer = LoadBalancer()
+        self.read_load_balancer: LoadBalancer = LoadBalancer()
+
+        self._dynamic_startup_nodes: bool = dynamic_startup_nodes
         self._moved_exception: MovedError = None
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()

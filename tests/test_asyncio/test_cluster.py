@@ -2740,7 +2740,7 @@ class TestNodesManager:
         ]
         startup_nodes = list(rc.nodes_manager.startup_nodes.keys())
         if dynamic_startup_nodes is True:
-            assert startup_nodes.sort() == discovered_nodes.sort()
+            assert sorted(startup_nodes) == sorted(discovered_nodes)
         else:
             assert startup_nodes == ["my@DNS.com:7000"]
 
