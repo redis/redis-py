@@ -45,6 +45,8 @@ def int_or_str(value):
         return value
 
 
+# This is the version of redis-py that is being used
+# for building and installing the lib.
 __version__ = "6.1.0"
 VERSION = tuple(map(int_or_str, __version__.split(".")))
 
