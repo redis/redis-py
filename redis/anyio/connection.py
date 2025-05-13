@@ -718,7 +718,11 @@ class Connection(AbstractConnection):
         return pieces
 
     def _connection_arguments(self) -> Mapping:
-        return {"remote_host": self.host, "remote_port": self.port}
+        return {
+            "remote_host": self.host,
+            "remote_port": self.port,
+            "tls_standard_compatible": False,
+        }
 
     async def _connect(self):
         """Create a TCP socket connection"""

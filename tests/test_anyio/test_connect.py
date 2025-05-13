@@ -166,7 +166,9 @@ async def _assert_connect(
         context.maximum_version = maximum_ssl_version
         context.load_cert_chain(certfile=certfile, keyfile=keyfile)
         tcp_listener = await anyio.create_tcp_listener(local_host=host, local_port=port)
-        listener = TLSListener(tcp_listener, ssl_context=context)
+        listener = TLSListener(
+            tcp_listener, ssl_context=context, standard_compatible=False
+        )
     else:
         host, port = server_address
         listener = await anyio.create_tcp_listener(local_host=host, local_port=port)
