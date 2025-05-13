@@ -129,6 +129,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         | Enable read from replicas in READONLY mode.
           When set to true, read commands will be assigned between the primary and
           its replications in a Round-Robin manner.
+          The data read from replicas is eventually consistent with the data in primary nodes.
     :param load_balancing_strategy:
         | Enable read from replicas in READONLY mode and defines the load balancing
           strategy that will be used for cluster node selection.
