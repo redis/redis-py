@@ -868,7 +868,7 @@ class RedisSSLContext:
         cert_reqs: Optional[Union[str, ssl.VerifyMode]] = None,
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
-        check_hostname: bool = False,
+        check_hostname: bool = True,
         min_version: Optional[TLSVersion] = None,
         ciphers: Optional[str] = None,
     ):
@@ -893,7 +893,9 @@ class RedisSSLContext:
         self.cert_reqs = cert_reqs
         self.ca_certs = ca_certs
         self.ca_data = ca_data
-        self.check_hostname = check_hostname
+        self.check_hostname = (
+            check_hostname if self.cert_reqs != ssl.CERT_NONE else False
+        )
         self.min_version = min_version
         self.ciphers = ciphers
         self.context: Optional[SSLContext] = None
