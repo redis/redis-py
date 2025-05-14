@@ -10,6 +10,8 @@ from tests.conftest import (
     skip_if_server_version_lt,
 )
 
+pytestmark = pytest.mark.asyncio
+
 
 @pytest_asyncio.fixture()
 async def d_client(create_redis, redis_url):
