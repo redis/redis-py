@@ -1,7 +1,16 @@
 from unittest.mock import patch
 
 import pytest
-from redis.backoff import AbstractBackoff, ExponentialBackoff, NoBackoff
+from redis.backoff import (
+    AbstractBackoff,
+    ConstantBackoff,
+    DecorrelatedJitterBackoff,
+    EqualJitterBackoff,
+    ExponentialBackoff,
+    ExponentialWithJitterBackoff,
+    FullJitterBackoff,
+    NoBackoff,
+)
 from redis.client import Redis
 from redis.connection import Connection, UnixDomainSocketConnection
 from redis.exceptions import (
@@ -78,6 +87,40 @@ class TestConnectionConstructorWithRetry:
         assert c.retry_on_error == [ReadOnlyError]
         assert isinstance(c.retry, Retry)
         assert c.retry._retries == retries
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        (ConstantBackoff(0), 0),
+        (ConstantBackoff(10), 5),
+        (NoBackoff(), 0),
+    ]
+    + [
+        backoff
+        for Backoff in (
+            DecorrelatedJitterBackoff,
+            EqualJitterBackoff,
+            ExponentialBackoff,
+            ExponentialWithJitterBackoff,
+            FullJitterBackoff,
+        )
+        for backoff in ((Backoff(), 2), (Backoff(25), 5), (Backoff(25, 5), 5))
+    ],
+)
+def test_retry_eq_and_hashable(args):
+    assert Retry(*args) == Retry(*args)
+
+    # create another retry object with different parameters
+    copy = list(args)
+    if isinstance(copy[0], ConstantBackoff):
+        copy[1] = 9000
+    else:
+        copy[0] = ConstantBackoff(9000)
+
+    assert Retry(*args) != Retry(*copy)
+    assert Retry(*copy) != Retry(*args)
+    assert len({Retry(*args), Retry(*args), Retry(*copy), Retry(*copy)}) == 2
 
 
 class TestRetry:
@@ -159,7 +202,7 @@ class TestRedisClientRetry:
 
     def test_client_retry_on_error_different_error_raised(self, request):
         with patch.object(Redis, "parse_response") as parse_response:
-            parse_response.side_effect = TimeoutError()
+            parse_response.side_effect = OSError()
             retries = 3
             r = _get_client(
                 Redis,
@@ -167,7 +210,7 @@ class TestRedisClientRetry:
                 retry_on_error=[ReadOnlyError],
                 retry=Retry(NoBackoff(), retries),
             )
-            with pytest.raises(TimeoutError):
+            with pytest.raises(OSError):
                 try:
                     r.get("foo")
                 finally:
@@ -203,10 +246,26 @@ class TestRedisClientRetry:
                 finally:
                     assert parse_response.call_count == retries + 1
 
+    @pytest.mark.onlycluster
+    def test_get_set_retry_object_for_cluster_client(self, request):
+        retry = Retry(NoBackoff(), 2)
+        r = _get_client(Redis, request, retry_on_timeout=True, retry=retry)
+        exist_conn = r.connection_pool.get_connection()
+        assert r.retry._retries == retry._retries
+        assert isinstance(r.retry._backoff, NoBackoff)
+        new_retry_policy = Retry(ExponentialBackoff(), 3)
+        r.set_retry(new_retry_policy)
+        assert r.retry._retries == new_retry_policy._retries
+        assert isinstance(r.retry._backoff, ExponentialBackoff)
+        assert exist_conn.retry._retries == new_retry_policy._retries
+        new_conn = r.connection_pool.get_connection()
+        assert new_conn.retry._retries == new_retry_policy._retries
+
+    @pytest.mark.onlynoncluster
     def test_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
         r = _get_client(Redis, request, retry_on_timeout=True, retry=retry)
-        exist_conn = r.connection_pool.get_connection("_")
+        exist_conn = r.connection_pool.get_connection()
         assert r.get_retry()._retries == retry._retries
         assert isinstance(r.get_retry()._backoff, NoBackoff)
         new_retry_policy = Retry(ExponentialBackoff(), 3)
@@ -214,5 +273,5 @@ class TestRedisClientRetry:
         assert r.get_retry()._retries == new_retry_policy._retries
         assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
         assert exist_conn.retry._retries == new_retry_policy._retries
-        new_conn = r.connection_pool.get_connection("_")
+        new_conn = r.connection_pool.get_connection()
         assert new_conn.retry._retries == new_retry_policy._retries

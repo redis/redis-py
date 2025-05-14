@@ -368,6 +368,22 @@ class TestPipeline:
 
         assert await r.get(key) == b"1"
 
+    async def test_exec_error_in_pipeline_truncated(self, r):
+        key = "a" * 50
+        a_value = "a" * 20
+        b_value = "b" * 20
+
+        await r.set(key, 1)
+        async with r.pipeline(transaction=False) as pipe:
+            pipe.hset(key, mapping={"field_a": a_value, "field_b": b_value})
+            pipe.expire(key, 100)
+
+            with pytest.raises(redis.ResponseError) as ex:
+                await pipe.execute()
+
+            expected = f"Command # 1 (HSET {key} field_a {a_value} field_b...) of pipeline caused error: "
+            assert str(ex.value).startswith(expected)
+
     async def test_pipeline_with_bitfield(self, r):
         async with r.pipeline() as pipe:
             pipe.set("a", "1")
@@ -417,3 +433,13 @@ class TestPipeline:
             response = await pipe.execute()
         assert response[0]
         assert await r.get("foo") == b"bar"
+
+    @pytest.mark.onlynoncluster
+    async def test_send_set_commands_over_async_pipeline(self, r: redis.asyncio.Redis):
+        pipe = r.pipeline()
+        pipe.hset("hash:1", "foo", "bar")
+        pipe.hset("hash:1", "bar", "foo")
+        pipe.hset("hash:1", "baz", "bar")
+        pipe.hgetall("hash:1")
+        resp = await pipe.execute()
+        assert resp == [1, 1, 1, {b"bar": b"foo", b"baz": b"bar", b"foo": b"bar"}]

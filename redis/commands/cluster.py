@@ -31,13 +31,11 @@ from .core import (
     AsyncACLCommands,
     AsyncDataAccessCommands,
     AsyncFunctionCommands,
-    AsyncGearsCommands,
     AsyncManagementCommands,
     AsyncModuleCommands,
     AsyncScriptCommands,
     DataAccessCommands,
     FunctionCommands,
-    GearsCommands,
     ManagementCommands,
     ModuleCommands,
     PubSubCommands,
@@ -595,7 +593,7 @@ class ClusterManagementCommands(ManagementCommands):
                 "CLUSTER SETSLOT", slot_id, state, node_id, target_nodes=target_node
             )
         elif state.upper() == "STABLE":
-            raise RedisError('For "stable" state please use ' "cluster_setslot_stable")
+            raise RedisError('For "stable" state please use cluster_setslot_stable')
         else:
             raise RedisError(f"Invalid slot state: {state}")
 
@@ -692,12 +690,6 @@ class ClusterManagementCommands(ManagementCommands):
         # Reset read from replicas flag
         self.read_from_replicas = False
         return self.execute_command("READWRITE", target_nodes=target_nodes)
-
-    def gears_refresh_cluster(self, **kwargs) -> ResponseT:
-        """
-        On an OSS cluster, before executing any gears function, you must call this command. # noqa
-        """
-        return self.execute_command("REDISGEARS_2.REFRESHCLUSTER", **kwargs)
 
 
 class AsyncClusterManagementCommands(
@@ -874,7 +866,6 @@ class RedisClusterCommands(
     ClusterDataAccessCommands,
     ScriptCommands,
     FunctionCommands,
-    GearsCommands,
     ModuleCommands,
     RedisModuleCommands,
 ):
@@ -905,7 +896,6 @@ class AsyncRedisClusterCommands(
     AsyncClusterDataAccessCommands,
     AsyncScriptCommands,
     AsyncFunctionCommands,
-    AsyncGearsCommands,
     AsyncModuleCommands,
     AsyncRedisModuleCommands,
 ):

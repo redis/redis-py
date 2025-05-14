@@ -79,6 +79,7 @@ class ModuleError(ResponseError):
 
 class LockError(RedisError, ValueError):
     "Errors acquiring or releasing a lock"
+
     # NOTE: For backwards compatibility, this class derives from ValueError.
     # This was originally chosen to behave like threading.Lock.
 
@@ -88,12 +89,14 @@ class LockError(RedisError, ValueError):
 
 
 class LockNotOwnedError(LockError):
-    "Error trying to extend or release a lock that is (no longer) owned"
+    "Error trying to extend or release a lock that is not owned (anymore)"
+
     pass
 
 
 class ChildDeadlockedError(Exception):
     "Error indicating that a child process is deadlocked after a fork()"
+
     pass
 
 
@@ -218,3 +221,21 @@ class SlotNotCoveredError(RedisClusterException):
 
 
 class MaxConnectionsError(ConnectionError): ...
+
+
+class CrossSlotTransactionError(RedisClusterException):
+    """
+    Raised when a transaction or watch is triggered in a pipeline
+    and not all keys or all commands belong to the same slot.
+    """
+
+    pass
+
+
+class InvalidPipelineStack(RedisClusterException):
+    """
+    Raised on unexpected response length on pipelines. This is
+    most likely a handling error on the stack.
+    """
+
+    pass

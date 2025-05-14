@@ -7,6 +7,8 @@ import redis.asyncio as redis
 from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
+    skip_if_server_version_gte,
+    skip_if_server_version_lt,
     skip_ifmodversion_lt,
 )
 
@@ -75,7 +77,24 @@ async def test_alter(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
+@skip_if_server_version_lt("7.9.0")
 async def test_alter_duplicate_policy(decoded_r: redis.Redis):
+    assert await decoded_r.ts().create(1)
+    info = await decoded_r.ts().info(1)
+    assert_resp_response(
+        decoded_r, "block", info.get("duplicate_policy"), info.get("duplicatePolicy")
+    )
+    assert await decoded_r.ts().alter(1, duplicate_policy="min")
+    info = await decoded_r.ts().info(1)
+    assert_resp_response(
+        decoded_r, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
+    )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.4.0", "timeseries")
+@skip_if_server_version_gte("7.9.0")
+async def test_alter_duplicate_policy_prior_redis_8(decoded_r: redis.Redis):
     assert await decoded_r.ts().create(1)
     info = await decoded_r.ts().info(1)
     assert_resp_response(
@@ -722,7 +741,27 @@ async def test_info(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
+@skip_if_server_version_lt("7.9.0")
 async def test_info_duplicate_policy(decoded_r: redis.Redis):
+    await decoded_r.ts().create(
+        1, retention_msecs=5, labels={"currentLabel": "currentData"}
+    )
+    info = await decoded_r.ts().info(1)
+    assert_resp_response(
+        decoded_r, "block", info.get("duplicate_policy"), info.get("duplicatePolicy")
+    )
+
+    await decoded_r.ts().create("time-serie-2", duplicate_policy="min")
+    info = await decoded_r.ts().info("time-serie-2")
+    assert_resp_response(
+        decoded_r, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
+    )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.4.0", "timeseries")
+@skip_if_server_version_gte("7.9.0")
+async def test_info_duplicate_policy_prior_redis_8(decoded_r: redis.Redis):
     await decoded_r.ts().create(
         1, retention_msecs=5, labels={"currentLabel": "currentData"}
     )
@@ -765,6 +804,7 @@ async def test_uncompressed(decoded_r: redis.Redis):
         assert compressed_info["memoryUsage"] != uncompressed_info["memoryUsage"]
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 async def test_create_with_insertion_filters(decoded_r: redis.Redis):
     await decoded_r.ts().create(
@@ -788,6 +828,7 @@ async def test_create_with_insertion_filters(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 async def test_alter_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().add("time-series-1", 1000, 1.0)
@@ -812,6 +853,7 @@ async def test_alter_with_insertion_filters(decoded_r: redis.Redis):
     )
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 async def test_add_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().add(
@@ -829,6 +871,7 @@ async def test_add_with_insertion_filters(decoded_r: redis.Redis):
     assert_resp_response(decoded_r, data_points, [(1000, 1.0)], [[1000, 1.0]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 async def test_incrby_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().incrby(
@@ -851,6 +894,7 @@ async def test_incrby_with_insertion_filters(decoded_r: redis.Redis):
     assert_resp_response(decoded_r, data_points, [(1000, 11.1)], [[1000, 11.1]])
 
 
+@pytest.mark.redismod
 @skip_ifmodversion_lt("1.12.0", "timeseries")
 async def test_decrby_with_insertion_filters(decoded_r: redis.Redis):
     assert 1000 == await decoded_r.ts().decrby(
