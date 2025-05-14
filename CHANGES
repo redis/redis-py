@@ -1,3 +1,4 @@
+    * Add AnyIO based async client (and by extension, add support for Trio)
     * Removing support for RedisGraph module. RedisGraph support is deprecated since Redis Stack 7.2 (https://redis.com/blog/redisgraph-eol/)
     * Fix lock.extend() typedef to accept float TTL extension
     * Update URL in the readme linking to Redis University
@@ -63,7 +64,7 @@
     * Fix Sentinel.execute_command doesn't execute across the entire sentinel cluster bug (#2458)
     * Added a replacement for the default cluster node in the event of failure (#2463)
     * Fix for Unhandled exception related to self.host with unix socket (#2496)
-    * Improve error output for master discovery 
+    * Improve error output for master discovery
     * Make `ClusterCommandsProtocol` an actual Protocol
     * Add `sum` to DUPLICATE_POLICY documentation of `TS.CREATE`, `TS.ADD` and `TS.ALTER`
     * Prevent async ClusterPipeline instances from becoming "false-y" in case of empty command stack (#3061)
