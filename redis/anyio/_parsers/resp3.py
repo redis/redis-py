@@ -19,7 +19,7 @@ class _AnyIORESP3Parser(_AnyIORESPBase):
 
     async def handle_pubsub_push_response(self, response):
         logger = getLogger("push_response")
-        logger.info("Push response: %s", response)
+        logger.debug("Push response: %s", response)
         return response
 
     async def read_response(
