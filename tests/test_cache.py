@@ -40,7 +40,6 @@ def r(request):
         yield client
 
 
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
@@ -325,7 +324,6 @@ class TestCache:
         assert cache.size == 0
 
 
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
@@ -568,7 +566,6 @@ class TestClusterCache:
         assert cache.size == 0
 
 
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
@@ -674,7 +671,6 @@ class TestSentinelCache:
         assert cache.size == 0
 
 
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")

@@ -590,7 +590,7 @@ class AbstractConnection:
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding
                     )
-            elif self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
+            elif self.protocol in ["3", 3]:
                 response = await self._parser.read_response(
                     disable_decoding=disable_decoding, push_request=push_request
                 )
