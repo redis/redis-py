@@ -22,6 +22,8 @@ from tests.conftest import get_protocol_version, skip_if_server_version_lt
 
 from .compat import aclosing, create_task, mock
 
+pytestmark = pytest.mark.asyncio
+
 
 def with_timeout(t):
     def wrapper(corofunc):
