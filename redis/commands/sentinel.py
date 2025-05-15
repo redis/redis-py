@@ -32,7 +32,7 @@ class SentinelCommands:
 
         Important: This function is called by the Sentinel implementation and is
         called directly on the Redis standalone client for sentinels,
-        so it doesn'tsupport the "once" and "return_responses" options.
+        so it doesn't support the "once" and "return_responses" options.
         """
         return self.execute_command("SENTINEL MASTERS")
 
@@ -60,7 +60,7 @@ class SentinelCommands:
 
         Important: This function is called by the Sentinel implementation and is
         called directly on the Redis standalone client for sentinels,
-        so it doesn'tsupport the "once" and "return_responses" options.
+        so it doesn't support the "once" and "return_responses" options.
         """
         return self.execute_command("SENTINEL SLAVES", service_name)
 

@@ -258,7 +258,7 @@ class Sentinel(SentinelCommands):
         once = bool(kwargs.pop("once", False))
 
         # Check if command is supposed to return the original
-        # responces instead of boolean value.
+        # responses instead of boolean value.
         return_responses = bool(kwargs.pop("return_responses", False))
 
         if once:
