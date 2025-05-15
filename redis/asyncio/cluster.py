@@ -2,6 +2,7 @@ import asyncio
 import collections
 import random
 import socket
+import threading
 import warnings
 from abc import ABC, abstractmethod
 from copy import copy
@@ -1071,7 +1072,6 @@ class ClusterNode:
         """
         Release connection back to free queue.
         """
-        self._connections.remove(connection)
         self._free.append(connection)
 
     async def parse_response(
@@ -1239,6 +1239,9 @@ class NodesManager:
                     continue
                 task = asyncio.create_task(old[name].disconnect())  # noqa
             old[name] = node
+
+    def update_moved_exception(self, exception):
+        self._moved_exception = exception
 
     def _update_moved_slots(self) -> None:
         e = self._moved_exception
@@ -1505,21 +1508,22 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         | Existing :class:`~.RedisCluster` client
     """
 
-    __slots__ = ("_command_stack", "client")
+    __slots__ = ("_command_stack", "cluster_client")
 
     def __init__(
             self,
             client: RedisCluster,
             transaction: Optional[bool] = None
     ) -> None:
-        self.client = client
+        self.cluster_client = client
+        self._transaction = transaction
         self._execution_strategy: ExecutionStrategy = (
-            PipelineStrategy(self) if not transaction else TransactionStrategy(self)
+            PipelineStrategy(self) if not self._transaction else TransactionStrategy(self)
         )
 
     async def initialize(self) -> "ClusterPipeline":
-        if self.client._initialize:
-            await self.client.initialize()
+        if self.cluster_client._initialize:
+            await self.cluster_client.initialize()
         self._execution_strategy._command_stack = []
         return self
 
@@ -1562,24 +1566,6 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         """
         return self._execution_strategy.execute_command(*args, **kwargs)
 
-    async def execute_command_transactional(
-            self,
-            *args: Union[KeyT, EncodableT],
-            **kwargs: Any
-    ) -> Any:
-        """
-        Executes command in transactional context. Use it only when transaction=True.
-
-        :param args:
-            | Raw command args
-        :param kwargs:
-
-            - target_nodes: :attr:`NODE_FLAGS` or :class:`~.ClusterNode`
-              or List[:class:`~.ClusterNode`] or Dict[Any, :class:`~.ClusterNode`]
-            - Rest of the kwargs are passed to the Redis connection
-        """
-        return await self._execution_strategy.execute_command_transactional(*args, **kwargs)
-
     async def execute(
         self, raise_on_error: bool = True, allow_redirections: bool = True
     ) -> List[Any]:
@@ -1603,18 +1589,26 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         finally:
             await self.reset()
 
+    def _split_command_across_slots(
+        self, command: str, *keys: KeyT
+    ) -> "ClusterPipeline":
+        for slot_keys in self.cluster_client._partition_keys_by_slot(keys).values():
+            self.execute_command(command, *slot_keys)
+
+        return self
+
     async def reset(self):
         """
         Reset back to empty pipeline.
         """
         await self._execution_strategy.reset()
 
-    async def multi(self):
+    def multi(self):
         """
         Start a transactional block of the pipeline after WATCH commands
         are issued. End the transactional block with `execute`.
         """
-        await self._execution_strategy.multi()
+        self._execution_strategy.multi()
 
     async def discard(self):
         """ """
@@ -1627,9 +1621,6 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
     async def unwatch(self):
         """Unwatches all previously specified keys"""
         await self._execution_strategy.unwatch()
-
-    async def delete(self, *names):
-        await self._execution_strategy.delete(*names)
 
     async def unlink(self, *names):
         await self._execution_strategy.unlink(*names)
@@ -1682,17 +1673,6 @@ class ExecutionStrategy(ABC):
         pass
 
     @abstractmethod
-    async def execute_command_transactional(
-        self, *args: Union[KeyT, EncodableT], **kwargs: Any
-    ) -> Any:
-        """
-        Executes command in transactional context
-
-        See ClusterPipeline.execute_command_transactional()
-        """
-        pass
-
-    @abstractmethod
     async def execute(
         self, raise_on_error: bool = True, allow_redirections: bool = True
     ) -> List[Any]:
@@ -1727,7 +1707,7 @@ class ExecutionStrategy(ABC):
         pass
 
     @abstractmethod
-    async def multi(self):
+    def multi(self):
         """
         Starts transactional context.
 
@@ -1755,15 +1735,6 @@ class ExecutionStrategy(ABC):
 
     @abstractmethod
     async def discard(self):
-        pass
-
-    @abstractmethod
-    async def delete(self, *names):
-        """
-        "Delete a key specified by ``names``"
-
-        See: ClusterPipeline.delete()
-        """
         pass
 
     @abstractmethod
@@ -1803,8 +1774,8 @@ class AbstractStrategy(ExecutionStrategy):
         return True
 
     async def initialize(self) -> "ClusterPipeline":
-        if self._pipe.client._initialize:
-            await self._pipe.client.initialize()
+        if self._pipe.cluster_client._initialize:
+            await self._pipe.cluster_client.initialize()
         self._command_queue = []
         return self._pipe
 
@@ -1834,17 +1805,11 @@ class AbstractStrategy(ExecutionStrategy):
         pass
 
     @abstractmethod
-    async def execute_command_transactional(
-        self, *args: Union[KeyT, EncodableT], **kwargs: Any
-    ) -> Any:
-        pass
-
-    @abstractmethod
     async def reset(self):
         pass
 
     @abstractmethod
-    async def multi(self):
+    def multi(self):
         pass
 
     @abstractmethod
@@ -1860,10 +1825,6 @@ class AbstractStrategy(ExecutionStrategy):
         pass
 
     @abstractmethod
-    async def delete(self, *names):
-        pass
-
-    @abstractmethod
     async def unlink(self, *names):
         pass
 
@@ -1872,7 +1833,7 @@ class PipelineStrategy(AbstractStrategy):
         super().__init__(pipe)
 
     def mset_nonatomic(self, mapping: Mapping[AnyKeyT, EncodableT]) -> "ClusterPipeline":
-        encoder = self._pipe.client.encoder
+        encoder = self._pipe.cluster_client.encoder
 
         slots_pairs = {}
         for pair in mapping.items():
@@ -1889,13 +1850,13 @@ class PipelineStrategy(AbstractStrategy):
             return []
 
         try:
-            retry_attempts = self._pipe.client.retry.get_retries()
+            retry_attempts = self._pipe.cluster_client.retry.get_retries()
             while True:
                 try:
-                    if self._pipe.client._initialize:
-                        await self._pipe.client.initialize()
+                    if self._pipe.cluster_client._initialize:
+                        await self._pipe.cluster_client.initialize()
                     return await self._execute(
-                        self._pipe.client,
+                        self._pipe.cluster_client,
                         self._command_queue,
                         raise_on_error=raise_on_error,
                         allow_redirections=allow_redirections,
@@ -1906,7 +1867,7 @@ class PipelineStrategy(AbstractStrategy):
                         # Try again with the new cluster setup. All other errors
                         # should be raised.
                         retry_attempts -= 1
-                        await self._pipe.client.aclose()
+                        await self._pipe.cluster_client.aclose()
                         await asyncio.sleep(0.25)
                     else:
                         # All other errors should be raised.
@@ -1998,20 +1959,13 @@ class PipelineStrategy(AbstractStrategy):
 
         return [cmd.result for cmd in stack]
 
-    async def execute_command_transactional(
-        self, *args: Union[KeyT, EncodableT], **kwargs: Any
-    ) -> Any:
-        raise NotImplementedError(
-            'Method is not allowed beyond transactional context. Set transaction=True'
-        )
-
     async def reset(self):
         """
         Reset back to empty pipeline.
         """
         self._command_queue = []
 
-    async def multi(self):
+    def multi(self):
         raise RedisClusterException(
             "method multi() is not supported outside of transactional context"
         )
@@ -2030,14 +1984,6 @@ class PipelineStrategy(AbstractStrategy):
         raise RedisClusterException(
             "method discard() is not supported outside of transactional context"
         )
-
-    async def delete(self, *names):
-        if len(names) != 1:
-            raise RedisClusterException(
-                "deleting multiple keys is not implemented in pipeline command"
-            )
-
-        return self.execute_command("DEL", names[0])
 
     async def unlink(self, *names):
         if len(names) != 1:
@@ -2067,7 +2013,7 @@ class TransactionStrategy(AbstractStrategy):
         self._transaction_node: Optional[ClusterNode] = None
         self._transaction_connection: Optional[Connection] = None
         self._executing = False
-        self._retry = copy(self._pipe.client.retry)
+        self._retry = copy(self._pipe.cluster_client.retry)
         self._retry.update_supported_errors(
             RedisCluster.ERRORS_ALLOW_RETRY + self.SLOT_REDIRECT_ERRORS
         )
@@ -2086,11 +2032,10 @@ class TransactionStrategy(AbstractStrategy):
                 "At least a command with a key is needed to identify a node"
             )
 
-        if not self._transaction_node:
-            node: ClusterNode = self._pipe.client.nodes_manager.get_node_from_slot(
-                list(self._pipeline_slots)[0], False
-            )
-            self._transaction_node = node
+        node: ClusterNode = self._pipe.cluster_client.nodes_manager.get_node_from_slot(
+            list(self._pipeline_slots)[0], False
+        )
+        self._transaction_node = node
 
         if not self._transaction_connection:
             connection: Connection = self._transaction_node.acquire_connection()
@@ -2098,16 +2043,35 @@ class TransactionStrategy(AbstractStrategy):
 
         return self._transaction_node, self._transaction_connection
 
-    def execute_command(self, *args: Union[KeyT, EncodableT], **kwargs: Any) -> "ClusterPipeline":
-        raise NotImplementedError('Use execute_command_transactional() instead')
+    def execute_command(self, *args: Union[KeyT, EncodableT], **kwargs: Any) -> "Any":
+        # Given the limitation of ClusterPipeline sync API, we have to run it in thread.
+        response = None
+        error = None
 
-    async def execute_command_transactional(self, *args: Union[KeyT, EncodableT], **kwargs: Any) -> Any:
-        if self._pipe.client._initialize:
-            await self._pipe.client.initialize()
+        def runner():
+            nonlocal response
+            nonlocal error
+            try:
+                response = asyncio.run(self._execute_command(*args, **kwargs))
+            except Exception as e:
+                error = e
+
+        thread = threading.Thread(target=runner)
+        thread.start()
+        thread.join()
+
+        if error:
+            raise error
+
+        return response
+
+    async def _execute_command(self, *args: Union[KeyT, EncodableT], **kwargs: Any) -> Any:
+        if self._pipe.cluster_client._initialize:
+            await self._pipe.cluster_client.initialize()
 
         slot_number: Optional[int] = None
         if args[0] not in self.NO_SLOTS_COMMANDS:
-            slot_number = await self._pipe.client._determine_slot(*args)
+            slot_number = await self._pipe.cluster_client._determine_slot(*args)
 
         if (
                 self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
@@ -2128,7 +2092,7 @@ class TransactionStrategy(AbstractStrategy):
                     "it cannot be triggered in a transaction"
                 )
 
-            return await self._immediate_execute_command(*args, **kwargs)
+            return self._immediate_execute_command(*args, **kwargs)
         else:
             if slot_number is not None:
                 self._pipeline_slots.add(slot_number)
@@ -2167,7 +2131,7 @@ class TransactionStrategy(AbstractStrategy):
             self._watching = False
         return output
 
-    def _reinitialize_on_error(self, error):
+    async def _reinitialize_on_error(self, error):
         if self._watching:
             if type(error) in self.SLOT_REDIRECT_ERRORS and self._executing:
                 raise WatchError("Slot rebalancing occurred while watching keys")
@@ -2179,15 +2143,15 @@ class TransactionStrategy(AbstractStrategy):
             if self._transaction_connection:
                 self._transaction_connection = None
 
-            self._pipe.client.reinitialize_counter += 1
+            self._pipe.cluster_client.reinitialize_counter += 1
             if (
-                    self._pipe.client.reinitialize_steps
-                    and self._pipe.client.reinitialize_counter % self._pipe.client.reinitialize_steps == 0
+                    self._pipe.cluster_client.reinitialize_steps
+                    and self._pipe.cluster_client.reinitialize_counter % self._pipe.cluster_client.reinitialize_steps == 0
             ):
-                self._pipe.client.nodes_manager.initialize()
+                await self._pipe.cluster_client.nodes_manager.initialize()
                 self.reinitialize_counter = 0
             else:
-                self._pipe.client.nodes_manager._moved_exception = error
+                self._pipe.cluster_client.nodes_manager.update_moved_exception(error)
 
         self._executing = False
 
@@ -2231,9 +2195,9 @@ class TransactionStrategy(AbstractStrategy):
         redis_node, connection = self._get_client_and_connection_for_transaction()
 
         stack = chain(
-            [PipelineCommand(len(self._command_queue), ("MULTI",))],
+            [PipelineCommand(0, "MULTI")],
             stack,
-            [PipelineCommand(len(self._command_queue), ("EXEC",))],
+            [PipelineCommand(0, 'EXEC')],
         )
         commands = [c.args for c in stack if EMPTY_RESPONSE not in c.kwargs]
         packed_commands = connection.pack_commands(commands)
@@ -2259,7 +2223,7 @@ class TransactionStrategy(AbstractStrategy):
                 errors.append((i, command.kwargs[EMPTY_RESPONSE]))
             else:
                 try:
-                    _ = redis_node.parse_response(connection, "_")
+                    _ = await redis_node.parse_response(connection, "_")
                 except self.SLOT_REDIRECT_ERRORS as slot_error:
                     self._annotate_exception(slot_error, i + 1, command.args)
                     errors.append(slot_error)
@@ -2311,8 +2275,8 @@ class TransactionStrategy(AbstractStrategy):
         for r, cmd in zip(response, self._command_queue):
             if not isinstance(r, Exception):
                 command_name = cmd.args[0]
-                if command_name in self._pipe.client.response_callbacks:
-                    r = self._pipe.client.response_callbacks[command_name](
+                if command_name in self._pipe.cluster_client.response_callbacks:
+                    r = self._pipe.cluster_client.response_callbacks[command_name](
                         r, **cmd.kwargs
                     )
             data.append(r)
@@ -2345,7 +2309,7 @@ class TransactionStrategy(AbstractStrategy):
         self._pipeline_slots = set()
         self._executing = False
 
-    async def multi(self):
+    def multi(self):
         if self._explicit_transaction:
             raise RedisError("Cannot issue nested calls to MULTI")
         if self._command_queue:
@@ -2358,19 +2322,16 @@ class TransactionStrategy(AbstractStrategy):
         if self._explicit_transaction:
             raise RedisError("Cannot issue a WATCH after a MULTI")
 
-        return await self.execute_command_transactional("WATCH", *names)
+        return await self.execute_command("WATCH", *names)
 
     async def unwatch(self):
         if self._watching:
-            return await self.execute_command_transactional("UNWATCH")
+            return await self.execute_command("UNWATCH")
 
         return True
 
     async def discard(self):
         await self.reset()
 
-    async def delete(self, *names):
-        return await self.execute_command_transactional("DEL", *names)
-
     async def unlink(self, *names):
-        return await self.execute_command_transactional("UNLINK", *names)
+        return self.execute_command("UNLINK", *names)
