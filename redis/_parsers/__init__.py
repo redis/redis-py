@@ -1,4 +1,9 @@
-from .base import AsyncPushNotificationsParser, BaseParser, PushNotificationsParser, _AsyncRESPBase
+from .base import (
+    AsyncPushNotificationsParser,
+    BaseParser,
+    PushNotificationsParser,
+    _AsyncRESPBase,
+)
 from .commands import AsyncCommandsParser, CommandsParser
 from .encoders import Encoder
 from .hiredis import _AsyncHiredisParser, _HiredisParser

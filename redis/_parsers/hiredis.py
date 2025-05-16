@@ -14,9 +14,9 @@ from ..typing import EncodableT
 from ..utils import HIREDIS_AVAILABLE
 from .base import (
     AsyncBaseParser,
+    AsyncPushNotificationsParser,
     BaseParser,
     PushNotificationsParser,
-    AsyncPushNotificationsParser,
 )
 from .socket import (
     NONBLOCKING_EXCEPTION_ERROR_NUMBERS,
@@ -137,6 +137,16 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         if self._next_response is not NOT_ENOUGH_DATA:
             response = self._next_response
             self._next_response = NOT_ENOUGH_DATA
+            if self._hiredis_PushNotificationType is not None and isinstance(
+                response, self._hiredis_PushNotificationType
+            ):
+                response = self.handle_push_response(response)
+                if not push_request:
+                    return self.read_response(
+                        disable_decoding=disable_decoding, push_request=push_request
+                    )
+                else:
+                    return response
             return response
 
         if disable_decoding:
@@ -174,7 +184,7 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         return response
 
 
-class _AsyncHiredisParser(AsyncBaseParser):
+class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
     """Async implementation of parser class for connections using Hiredis"""
 
     __slots__ = ("_reader",)

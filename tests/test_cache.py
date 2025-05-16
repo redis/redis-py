@@ -13,7 +13,6 @@ from redis.cache import (
     EvictionPolicyType,
     LRUPolicy,
 )
-from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
 
 

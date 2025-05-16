@@ -9,7 +9,7 @@ import pytest
 import redis
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
-from redis.utils import HIREDIS_AVAILABLE, SSL_AVAILABLE
+from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
     _get_client,
