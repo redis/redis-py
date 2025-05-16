@@ -51,7 +51,6 @@ from redis.exceptions import (
 from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import (
-    HIREDIS_AVAILABLE,
     deprecated_args,
     dict_merge,
     list_keys_to_dict,
@@ -1999,7 +1998,7 @@ class ClusterPubSub(PubSub):
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
-            if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
+            if self.push_handler_func is not None:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
             self._event_dispatcher.dispatch(
                 AfterPubSubConnectionInstantiationEvent(

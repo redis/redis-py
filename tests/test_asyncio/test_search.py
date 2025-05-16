@@ -7,6 +7,7 @@ from io import TextIOWrapper
 import numpy as np
 import pytest
 import pytest_asyncio
+from redis import ResponseError
 import redis.asyncio as redis
 import redis.commands.search.aggregation as aggregations
 import redis.commands.search.reducers as reducers
@@ -60,6 +61,10 @@ async def waitForIndex(env, idx, timeout=None):
                     break
             except ValueError:
                 break
+        except ResponseError:
+            # index doesn't exist yet
+            # continue to sleep and try again
+            pass
 
         await asyncio.sleep(delay)
         if timeout is not None:

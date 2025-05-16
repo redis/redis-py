@@ -9,7 +9,7 @@ import pytest
 import redis
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
-from redis.utils import HIREDIS_AVAILABLE, SSL_AVAILABLE
+from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
     _get_client,
@@ -217,7 +217,6 @@ class TestBlockingConnectionPool:
         expected = "path=abc,db=0,client_name=test-client"
         assert expected in repr(pool)
 
-    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
     @pytest.mark.onlynoncluster
     @skip_if_resp_version(2)
     @skip_if_server_version_lt("7.4.0")
