@@ -1,3 +1,5 @@
+
+    * Fixed sentinel execute command response
     * Support transactions in ClusterPipeline
     * Removing support for RedisGraph module. RedisGraph support is deprecated since Redis Stack 7.2 (https://redis.com/blog/redisgraph-eol/)
     * Fix lock.extend() typedef to accept float TTL extension

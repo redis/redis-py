@@ -13,14 +13,27 @@ class SentinelCommands:
 
     def sentinel_get_master_addr_by_name(self, service_name):
         """Returns a (host, port) pair for the given ``service_name``"""
-        return self.execute_command("SENTINEL GET-MASTER-ADDR-BY-NAME", service_name)
+        return self.execute_command(
+            "SENTINEL GET-MASTER-ADDR-BY-NAME",
+            service_name,
+            once=True,
+            return_responses=True,
+        )
 
     def sentinel_master(self, service_name):
         """Returns a dictionary containing the specified masters state."""
-        return self.execute_command("SENTINEL MASTER", service_name)
+        return self.execute_command(
+            "SENTINEL MASTER", service_name, return_responses=True
+        )
 
     def sentinel_masters(self):
-        """Returns a list of dictionaries containing each master's state."""
+        """
+        Returns a list of dictionaries containing each master's state.
+
+        Important: This function is called by the Sentinel implementation and is
+        called directly on the Redis standalone client for sentinels,
+        so it doesn't support the "once" and "return_responses" options.
+        """
         return self.execute_command("SENTINEL MASTERS")
 
     def sentinel_monitor(self, name, ip, port, quorum):
@@ -33,14 +46,22 @@ class SentinelCommands:
 
     def sentinel_sentinels(self, service_name):
         """Returns a list of sentinels for ``service_name``"""
-        return self.execute_command("SENTINEL SENTINELS", service_name)
+        return self.execute_command(
+            "SENTINEL SENTINELS", service_name, return_responses=True
+        )
 
     def sentinel_set(self, name, option, value):
         """Set Sentinel monitoring parameters for a given master"""
         return self.execute_command("SENTINEL SET", name, option, value)
 
     def sentinel_slaves(self, service_name):
-        """Returns a list of slaves for ``service_name``"""
+        """
+        Returns a list of slaves for ``service_name``
+
+        Important: This function is called by the Sentinel implementation and is
+        called directly on the Redis standalone client for sentinels,
+        so it doesn't support the "once" and "return_responses" options.
+        """
         return self.execute_command("SENTINEL SLAVES", service_name)
 
     def sentinel_reset(self, pattern):
