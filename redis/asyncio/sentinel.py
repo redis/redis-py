@@ -248,7 +248,7 @@ class Sentinel(AsyncSentinelCommands):
         if return_responses:
             return responses
 
-        return reduce(lambda x, y: x and y, responses)
+        return bool(reduce(lambda x, y: x and y, responses))
 
     def __repr__(self):
         sentinel_addresses = []
