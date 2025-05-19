@@ -1,14 +1,16 @@
 from typing import Tuple
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 import pytest
 
 import redis
 from redis import CrossSlotTransactionError, RedisClusterException
-from redis.asyncio import RedisCluster, Redis
+from redis.asyncio import RedisCluster, Connection
 from redis.asyncio.cluster import ClusterNode, NodesManager
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 from redis.cluster import PRIMARY
-from tests.test_asyncio.conftest import create_redis
+from tests.conftest import skip_if_server_version_lt
 
 
 def _find_source_and_target_node_for_slot(
@@ -31,6 +33,7 @@ def _find_source_and_target_node_for_slot(
     assert available_targets, f"No possible target nodes for slot #{slot}"
     return node_migrating, available_targets[0]
 
+
 @pytest.mark.onlycluster
 class TestClusterTransaction:
     @pytest.mark.onlycluster
@@ -41,7 +44,7 @@ class TestClusterTransaction:
 
     @pytest.mark.onlycluster
     async def test_pipeline_empty_transaction(self, r):
-        await r.set('a', 0)
+        await r.set("a", 0)
 
         async with r.pipeline(transaction=True) as pipe:
             assert await pipe.execute() == []
@@ -122,7 +125,9 @@ class TestClusterTransaction:
         slot = r.keyslot(key)
         node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
 
-        with patch.object(ClusterNode, "parse_response") as parse_response, patch.object(
+        with patch.object(
+            ClusterNode, "parse_response"
+        ) as parse_response, patch.object(
             NodesManager, "_update_moved_slots"
         ) as manager_update_moved_slots:
 
@@ -149,7 +154,9 @@ class TestClusterTransaction:
             manager_update_moved_slots.assert_called()
 
     @pytest.mark.onlycluster
-    async def test_retry_transaction_during_slot_migration_successful(self, create_redis):
+    async def test_retry_transaction_during_slot_migration_successful(
+        self, create_redis
+    ):
         """
         If a MovedError or AskError appears when calling EXEC and no key is watched,
         the pipeline is retried after updating the node manager slot table. If the
@@ -160,7 +167,9 @@ class TestClusterTransaction:
         slot = r.keyslot(key)
         node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
 
-        with patch.object(ClusterNode, "parse_response") as parse_response, patch.object(
+        with patch.object(
+            ClusterNode, "parse_response"
+        ) as parse_response, patch.object(
             NodesManager, "_update_moved_slots"
         ) as manager_update_moved_slots:
 
@@ -176,9 +185,7 @@ class TestClusterTransaction:
                 # if the slot table is updated, the next call will go here
                 elif f"{conn.host}:{conn.port}" == node_importing.name:
                     if "EXEC" in args:
-                        return [
-                            "OK"
-                        ]  # mock value to validate this section was called
+                        return ["OK"]  # mock value to validate this section was called
                     return
                 else:
                     assert False, f"unexpected node {conn.host}:{conn.port} was called"
@@ -200,3 +207,191 @@ class TestClusterTransaction:
                 result = await pipe.execute()
 
             assert result and True in result, "Target node was not called"
+
+    @pytest.mark.onlycluster
+    async def test_retry_transaction_with_watch_after_slot_migration(self, r):
+        """
+        If a MovedError or AskError appears when calling WATCH, the client
+        must attempt to recover itself before proceeding and no WatchError
+        should appear.
+        """
+        key = "book"
+        slot = r.keyslot(key)
+        r.reinitialize_steps = 1
+
+        # force a MovedError on the first call to pipe.watch()
+        # by switching the node that owns the slot to another one
+        _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
+        r.nodes_manager.slots_cache[slot] = [node_importing]
+
+        async with r.pipeline(transaction=True) as pipe:
+            await pipe.watch(key)
+            pipe.multi()
+            pipe.set(key, "val")
+            assert await pipe.execute() == [True]
+
+    @pytest.mark.onlycluster
+    async def test_retry_transaction_with_watch_during_slot_migration(self, r):
+        """
+        If a MovedError or AskError appears when calling EXEC and keys were
+        being watched before the migration started, a WatchError should appear.
+        These errors imply resetting the connection and connecting to a new node,
+        so watches are lost anyway and the client code must be notified.
+        """
+        key = "book"
+        slot = r.keyslot(key)
+        node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
+
+        with patch.object(ClusterNode, "parse_response") as parse_response:
+
+            def ask_redirect_effect(conn, *args, **options):
+                if f"{conn.host}:{conn.port}" == node_migrating.name:
+                    # we simulate the watch was sent before the migration started
+                    if "WATCH" in args:
+                        return b"OK"
+                    # but the pipeline was triggered after the migration started
+                    elif "MULTI" in args:
+                        return
+                    elif "EXEC" in args:
+                        raise redis.exceptions.ExecAbortError()
+
+                    raise redis.exceptions.AskError(f"{slot} {node_importing.name}")
+                # we should not try to connect to any other node
+                else:
+                    assert False, f"unexpected node {conn.host}:{conn.port} was called"
+
+            parse_response.side_effect = ask_redirect_effect
+
+            async with r.pipeline(transaction=True) as pipe:
+                await pipe.watch(key)
+
+                pipe.multi()
+                pipe.set(key, "val")
+                with pytest.raises(redis.exceptions.WatchError) as ex:
+                    await pipe.execute()
+
+                assert str(ex.value).startswith(
+                    "Slot rebalancing occurred while watching keys"
+                )
+
+    @pytest.mark.onlycluster
+    async def test_retry_transaction_on_connection_error(self, r):
+        key = "book"
+        slot = r.keyslot(key)
+
+        mock_connection = Mock(spec=Connection)
+        mock_connection.read_response.side_effect = redis.exceptions.ConnectionError(
+            "Conn error"
+        )
+        mock_connection.retry = Retry(NoBackoff(), 0)
+
+        _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
+        node_importing._free.append(mock_connection)
+        r.nodes_manager.slots_cache[slot] = [node_importing]
+        r.reinitialize_steps = 1
+
+        async with r.pipeline(transaction=True) as pipe:
+            pipe.set(key, "val")
+            assert await pipe.execute() == [True]
+
+        assert mock_connection.read_response.call_count == 1
+
+    @pytest.mark.onlycluster
+    async def test_retry_transaction_on_connection_error_with_watched_keys(self, r):
+        key = "book"
+        slot = r.keyslot(key)
+
+        mock_connection = Mock(spec=Connection)
+        mock_connection.read_response.side_effect = redis.exceptions.ConnectionError(
+            "Conn error"
+        )
+        mock_connection.retry = Retry(NoBackoff(), 0)
+
+        _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
+        node_importing._free.append(mock_connection)
+        r.nodes_manager.slots_cache[slot] = [node_importing]
+        r.reinitialize_steps = 1
+
+        async with r.pipeline(transaction=True) as pipe:
+            await pipe.watch(key)
+
+            pipe.multi()
+            pipe.set(key, "val")
+            assert await pipe.execute() == [True]
+
+        assert mock_connection.read_response.call_count == 1
+
+    @pytest.mark.onlycluster
+    async def test_exec_error_raised(self, r):
+        hashkey = "{key}"
+        await r.set(f"{hashkey}:c", "a")
+
+        async with r.pipeline(transaction=True) as pipe:
+            pipe.set(f"{hashkey}:a", 1).set(f"{hashkey}:b", 2)
+            pipe.lpush(f"{hashkey}:c", 3).set(f"{hashkey}:d", 4)
+            with pytest.raises(redis.ResponseError) as ex:
+                await pipe.execute()
+            assert str(ex.value).startswith(
+                "Command # 3 (LPUSH {key}:c 3) of pipeline caused error: "
+            )
+
+            # make sure the pipe was restored to a working state
+            assert await pipe.set(f"{hashkey}:z", "zzz").execute() == [True]
+            assert await r.get(f"{hashkey}:z") == b"zzz"
+
+    @pytest.mark.onlycluster
+    async def test_parse_error_raised(self, r):
+        hashkey = "{key}"
+        async with r.pipeline(transaction=True) as pipe:
+            # the zrem is invalid because we don't pass any keys to it
+            pipe.set(f"{hashkey}:a", 1).zrem(f"{hashkey}:b").set(f"{hashkey}:b", 2)
+            with pytest.raises(redis.ResponseError) as ex:
+                await pipe.execute()
+
+            assert str(ex.value).startswith(
+                "Command # 2 (ZREM {key}:b) of pipeline caused error: wrong number"
+            )
+
+            # make sure the pipe was restored to a working state
+            assert await pipe.set(f"{hashkey}:z", "zzz").execute() == [True]
+            assert await r.get(f"{hashkey}:z") == b"zzz"
+
+    @pytest.mark.onlycluster
+    async def test_transaction_callable(self, r):
+        hashkey = "{key}"
+        await r.set(f"{hashkey}:a", 1)
+        await r.set(f"{hashkey}:b", 2)
+        has_run = []
+
+        async def my_transaction(pipe):
+            a_value = await pipe.get(f"{hashkey}:a")
+            assert a_value in (b"1", b"2")
+            b_value = await pipe.get(f"{hashkey}:b")
+            assert b_value == b"2"
+
+            # silly run-once code... incr's "a" so WatchError should be raised
+            # forcing this all to run again. this should incr "a" once to "2"
+            if not has_run:
+                await r.incr(f"{hashkey}:a")
+                has_run.append("it has")
+
+            pipe.multi()
+            pipe.set(f"{hashkey}:c", int(a_value) + int(b_value))
+
+        result = await r.transaction(my_transaction, f"{hashkey}:a", f"{hashkey}:b")
+        assert result == [True]
+        assert await r.get(f"{hashkey}:c") == b"4"
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("2.0.0")
+    async def test_transaction_discard(self, r):
+        hashkey = "{key}"
+
+        # pipelines enabled as transactions can be discarded at any point
+        async with r.pipeline(transaction=True) as pipe:
+            await pipe.watch(f"{hashkey}:key")
+            await pipe.set(f"{hashkey}:key", "someval")
+            await pipe.discard()
+
+            assert not pipe._execution_strategy._watching
+            assert not pipe._execution_strategy._command_stack

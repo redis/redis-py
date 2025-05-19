@@ -3,6 +3,7 @@ import collections
 import random
 import socket
 import threading
+import time
 import warnings
 from abc import ABC, abstractmethod
 from copy import copy
@@ -19,7 +20,9 @@ from typing import (
     Tuple,
     Type,
     TypeVar,
-    Union, Set,
+    Union,
+    Set,
+    Coroutine,
 )
 
 from redis._parsers import AsyncCommandsParser, Encoder
@@ -65,7 +68,11 @@ from redis.exceptions import (
     ResponseError,
     SlotNotCoveredError,
     TimeoutError,
-    TryAgainError, CrossSlotTransactionError, WatchError, ExecAbortError, InvalidPipelineStack,
+    TryAgainError,
+    CrossSlotTransactionError,
+    WatchError,
+    ExecAbortError,
+    InvalidPipelineStack,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
@@ -947,6 +954,30 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             raise_on_release_error=raise_on_release_error,
         )
 
+    async def transaction(
+        self, func: Coroutine[None, "ClusterPipeline", Any], *watches, **kwargs
+    ):
+        """
+        Convenience method for executing the callable `func` as a transaction
+        while watching all keys specified in `watches`. The 'func' callable
+        should expect a single argument which is a Pipeline object.
+        """
+        shard_hint = kwargs.pop("shard_hint", None)
+        value_from_callable = kwargs.pop("value_from_callable", False)
+        watch_delay = kwargs.pop("watch_delay", None)
+        async with self.pipeline(True, shard_hint) as pipe:
+            while True:
+                try:
+                    if watches:
+                        await pipe.watch(*watches)
+                    func_value = await func(pipe)
+                    exec_value = await pipe.execute()
+                    return func_value if value_from_callable else exec_value
+                except WatchError:
+                    if watch_delay is not None and watch_delay > 0:
+                        time.sleep(watch_delay)
+                    continue
+
 
 class ClusterNode:
     """
@@ -1508,17 +1539,17 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         | Existing :class:`~.RedisCluster` client
     """
 
-    __slots__ = ("_command_stack", "cluster_client")
+    __slots__ = ("cluster_client",)
 
     def __init__(
-            self,
-            client: RedisCluster,
-            transaction: Optional[bool] = None
+        self, client: RedisCluster, transaction: Optional[bool] = None
     ) -> None:
         self.cluster_client = client
         self._transaction = transaction
         self._execution_strategy: ExecutionStrategy = (
-            PipelineStrategy(self) if not self._transaction else TransactionStrategy(self)
+            PipelineStrategy(self)
+            if not self._transaction
+            else TransactionStrategy(self)
         )
 
     async def initialize(self) -> "ClusterPipeline":
@@ -1585,7 +1616,9 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
             can't be mapped to a slot
         """
         try:
-            return await self._execution_strategy.execute(raise_on_error, allow_redirections)
+            return await self._execution_strategy.execute(
+                raise_on_error, allow_redirections
+            )
         finally:
             await self.reset()
 
@@ -1628,7 +1661,6 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
     def mset_nonatomic(
         self, mapping: Mapping[AnyKeyT, EncodableT]
     ) -> "ClusterPipeline":
-
         return self._execution_strategy.mset_nonatomic(mapping)
 
 
@@ -1663,7 +1695,7 @@ class ExecutionStrategy(ABC):
 
     @abstractmethod
     def execute_command(
-            self, *args: Union[KeyT, EncodableT], **kwargs: Any
+        self, *args: Union[KeyT, EncodableT], **kwargs: Any
     ) -> "ClusterPipeline":
         """
         Append a raw command to the pipeline.
@@ -1748,7 +1780,6 @@ class ExecutionStrategy(ABC):
 
 
 class AbstractStrategy(ExecutionStrategy):
-
     def __init__(self, pipe: ClusterPipeline) -> None:
         self._pipe: ClusterPipeline = pipe
         self._command_queue: List["PipelineCommand"] = []
@@ -1779,7 +1810,9 @@ class AbstractStrategy(ExecutionStrategy):
         self._command_queue = []
         return self._pipe
 
-    def execute_command(self, *args: Union[KeyT, EncodableT], **kwargs: Any) -> "ClusterPipeline":
+    def execute_command(
+        self, *args: Union[KeyT, EncodableT], **kwargs: Any
+    ) -> "ClusterPipeline":
         self._command_queue.append(
             PipelineCommand(len(self._command_queue), *args, **kwargs)
         )
@@ -1797,11 +1830,15 @@ class AbstractStrategy(ExecutionStrategy):
         exception.args = (msg,) + exception.args[1:]
 
     @abstractmethod
-    def mset_nonatomic(self, mapping: Mapping[AnyKeyT, EncodableT]) -> "ClusterPipeline":
+    def mset_nonatomic(
+        self, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> "ClusterPipeline":
         pass
 
     @abstractmethod
-    async def execute(self, raise_on_error: bool = True, allow_redirections: bool = True) -> List[Any]:
+    async def execute(
+        self, raise_on_error: bool = True, allow_redirections: bool = True
+    ) -> List[Any]:
         pass
 
     @abstractmethod
@@ -1828,11 +1865,14 @@ class AbstractStrategy(ExecutionStrategy):
     async def unlink(self, *names):
         pass
 
+
 class PipelineStrategy(AbstractStrategy):
     def __init__(self, pipe: ClusterPipeline) -> None:
         super().__init__(pipe)
 
-    def mset_nonatomic(self, mapping: Mapping[AnyKeyT, EncodableT]) -> "ClusterPipeline":
+    def mset_nonatomic(
+        self, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> "ClusterPipeline":
         encoder = self._pipe.cluster_client.encoder
 
         slots_pairs = {}
@@ -1845,7 +1885,9 @@ class PipelineStrategy(AbstractStrategy):
 
         return self._pipe
 
-    async def execute(self, raise_on_error: bool = True, allow_redirections: bool = True) -> List[Any]:
+    async def execute(
+        self, raise_on_error: bool = True, allow_redirections: bool = True
+    ) -> List[Any]:
         if not self._command_queue:
             return []
 
@@ -1993,6 +2035,7 @@ class PipelineStrategy(AbstractStrategy):
 
         return self.execute_command("UNLINK", names[0])
 
+
 class TransactionStrategy(AbstractStrategy):
     NO_SLOTS_COMMANDS = {"UNWATCH"}
     IMMEDIATE_EXECUTE_COMMANDS = {"WATCH", "UNWATCH"}
@@ -2018,7 +2061,9 @@ class TransactionStrategy(AbstractStrategy):
             RedisCluster.ERRORS_ALLOW_RETRY + self.SLOT_REDIRECT_ERRORS
         )
 
-    def _get_client_and_connection_for_transaction(self) -> Tuple[ClusterNode, Connection]:
+    def _get_client_and_connection_for_transaction(
+        self,
+    ) -> Tuple[ClusterNode, Connection]:
         """
         Find a connection for a pipeline transaction.
 
@@ -2065,7 +2110,9 @@ class TransactionStrategy(AbstractStrategy):
 
         return response
 
-    async def _execute_command(self, *args: Union[KeyT, EncodableT], **kwargs: Any) -> Any:
+    async def _execute_command(
+        self, *args: Union[KeyT, EncodableT], **kwargs: Any
+    ) -> Any:
         if self._pipe.cluster_client._initialize:
             await self._pipe.cluster_client.initialize()
 
@@ -2074,7 +2121,7 @@ class TransactionStrategy(AbstractStrategy):
             slot_number = await self._pipe.cluster_client._determine_slot(*args)
 
         if (
-                self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
+            self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
         ) and not self._explicit_transaction:
             if args[0] == "WATCH":
                 self._validate_watch()
@@ -2118,7 +2165,12 @@ class TransactionStrategy(AbstractStrategy):
         )
 
     async def _send_command_parse_response(
-        self, connection: Connection, redis_node: ClusterNode, command_name, *args, **options
+        self,
+        connection: Connection,
+        redis_node: ClusterNode,
+        command_name,
+        *args,
+        **options,
     ):
         """
         Send a command and parse the response
@@ -2145,8 +2197,10 @@ class TransactionStrategy(AbstractStrategy):
 
             self._pipe.cluster_client.reinitialize_counter += 1
             if (
-                    self._pipe.cluster_client.reinitialize_steps
-                    and self._pipe.cluster_client.reinitialize_counter % self._pipe.cluster_client.reinitialize_steps == 0
+                self._pipe.cluster_client.reinitialize_steps
+                and self._pipe.cluster_client.reinitialize_counter
+                % self._pipe.cluster_client.reinitialize_steps
+                == 0
             ):
                 await self._pipe.cluster_client.nodes_manager.initialize()
                 self.reinitialize_counter = 0
@@ -2164,10 +2218,14 @@ class TransactionStrategy(AbstractStrategy):
                 self._annotate_exception(r, cmd.position + 1, cmd.args)
                 raise r
 
-    def mset_nonatomic(self, mapping: Mapping[AnyKeyT, EncodableT]) -> "ClusterPipeline":
-        raise NotImplementedError('Method is not supported in transactional context.')
+    def mset_nonatomic(
+        self, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> "ClusterPipeline":
+        raise NotImplementedError("Method is not supported in transactional context.")
 
-    async def execute(self, raise_on_error: bool = True, allow_redirections: bool = True) -> List[Any]:
+    async def execute(
+        self, raise_on_error: bool = True, allow_redirections: bool = True
+    ) -> List[Any]:
         stack = self._command_queue
         if not stack and (not self._watching or not self._pipeline_slots):
             return []
@@ -2197,7 +2255,7 @@ class TransactionStrategy(AbstractStrategy):
         stack = chain(
             [PipelineCommand(0, "MULTI")],
             stack,
-            [PipelineCommand(0, 'EXEC')],
+            [PipelineCommand(0, "EXEC")],
         )
         commands = [c.args for c in stack if EMPTY_RESPONSE not in c.kwargs]
         packed_commands = connection.pack_commands(commands)
