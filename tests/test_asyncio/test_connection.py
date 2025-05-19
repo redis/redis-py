@@ -303,6 +303,7 @@ async def test_connection_disconect_race(parser_class, connect_args):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.asyncio
 async def test_create_single_connection_client_from_url():
     client = Redis.from_url("redis://localhost:6379/0?", single_connection_client=True)
     assert client.single_connection_client is True
