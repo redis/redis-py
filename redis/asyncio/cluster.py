@@ -11,18 +11,18 @@ from itertools import chain
 from typing import (
     Any,
     Callable,
+    Coroutine,
     Deque,
     Dict,
     Generator,
     List,
     Mapping,
     Optional,
+    Set,
     Tuple,
     Type,
     TypeVar,
     Union,
-    Set,
-    Coroutine,
 )
 
 from redis._parsers import AsyncCommandsParser, Encoder
@@ -60,7 +60,10 @@ from redis.exceptions import (
     ClusterDownError,
     ClusterError,
     ConnectionError,
+    CrossSlotTransactionError,
     DataError,
+    ExecAbortError,
+    InvalidPipelineStack,
     MaxConnectionsError,
     MovedError,
     RedisClusterException,
@@ -69,10 +72,7 @@ from redis.exceptions import (
     SlotNotCoveredError,
     TimeoutError,
     TryAgainError,
-    CrossSlotTransactionError,
     WatchError,
-    ExecAbortError,
-    InvalidPipelineStack,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
