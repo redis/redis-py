@@ -1571,31 +1571,31 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
     async def initialize(self) -> "ClusterPipeline":
         if self.cluster_client._initialize:
             await self.cluster_client.initialize()
-        self._execution_strategy._command_stack = []
+        self._execution_strategy._command_queue = []
         return self
 
     async def __aenter__(self) -> "ClusterPipeline":
         return await self.initialize()
 
     async def __aexit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        self._execution_strategy._command_stack = []
+        self._execution_strategy._command_queue = []
 
     def __await__(self) -> Generator[Any, None, "ClusterPipeline"]:
         return self.initialize().__await__()
 
     def __enter__(self) -> "ClusterPipeline":
-        self._execution_strategy._command_stack = []
+        self._execution_strategy._command_queue = []
         return self
 
     def __exit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        self._execution_strategy._command_stack = []
+        self._execution_strategy._command_queue = []
 
     def __bool__(self) -> bool:
         "Pipeline instances should  always evaluate to True on Python 3+"
         return True
 
     def __len__(self) -> int:
-        return len(self._execution_strategy._command_stack)
+        return len(self._execution_strategy._command_queue)
 
     def execute_command(
         self, *args: Union[KeyT, EncodableT], **kwargs: Any
@@ -1931,7 +1931,7 @@ class PipelineStrategy(AbstractStrategy):
                         # All other errors should be raised.
                         raise e
         finally:
-            self._command_stack = []
+            self._command_queue = []
 
     async def _execute(
         self,
