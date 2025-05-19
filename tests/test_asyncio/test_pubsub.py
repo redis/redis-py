@@ -17,7 +17,6 @@ import pytest_asyncio
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
-from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import get_protocol_version, skip_if_server_version_lt
 
 from .compat import aclosing, create_task, mock

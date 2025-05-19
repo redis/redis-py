@@ -196,6 +196,12 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
         self._reader = None
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
         self.invalidation_push_handler_func = None
+        self._hiredis_PushNotificationType = None
+
+    async def handle_pubsub_push_response(self, response):
+        logger = getLogger("push_response")
+        logger.debug("Push response: " + str(response))
+        return response
 
     def on_connect(self, connection):
         import hiredis
@@ -215,7 +221,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
 
         try:
             self._hiredis_PushNotificationType = getattr(
-                hiredis, "PushNotificationType", None
+                hiredis, "PushNotification", None
             )
         except AttributeError:
             # hiredis < 3.2
@@ -257,6 +263,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
             response = self._reader.gets(False)
         else:
             response = self._reader.gets()
+
         while response is NOT_ENOUGH_DATA:
             await self.read_from_socket()
             if disable_decoding:
