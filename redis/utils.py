@@ -13,9 +13,8 @@ try:
 
     # Only support Hiredis >= 3.0:
     hiredis_version = hiredis.__version__.split(".")
-    HIREDIS_AVAILABLE = (
-        int(hiredis_version[0]) > 3 or
-        (int(hiredis_version[0]) == 3 and int(hiredis_version[1]) >= 2)
+    HIREDIS_AVAILABLE = int(hiredis_version[0]) > 3 or (
+        int(hiredis_version[0]) == 3 and int(hiredis_version[1]) >= 2
     )
     if not HIREDIS_AVAILABLE:
         raise ImportError("hiredis package should be >= 3.2.0")
