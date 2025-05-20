@@ -192,7 +192,7 @@ class AsyncPushNotificationsParser(Protocol):
 
     async def handle_pubsub_push_response(self, response):
         """Handle pubsub push responses asynchronously"""
-        ...
+        raise NotImplementedError()
 
     async def handle_push_response(self, response, **kwargs):
         """Handle push responses asynchronously"""
