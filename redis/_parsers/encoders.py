@@ -1,3 +1,5 @@
+from datetime import date
+
 from ..exceptions import DataError
 
 
@@ -30,8 +32,11 @@ class Encoder:
                 f"Invalid input of type: '{typename}'. "
                 f"Convert to a bytes, string, int or float first."
             )
+        elif isinstance(value, date):
+            value = str(value).encode(self.encoding, self.encoding_errors)
         if isinstance(value, str):
             value = value.encode(self.encoding, self.encoding_errors)
+
         return value
 
     def decode(self, value, force=False):
