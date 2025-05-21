@@ -25,6 +25,8 @@ class Encoder:
             )
         elif isinstance(value, (int, float)):
             value = repr(value).encode()
+        elif isinstance(value, date):
+            value = str(value).encode(self.encoding, self.encoding_errors)
         elif not isinstance(value, str):
             # a value we don't know how to deal with. throw an error
             typename = type(value).__name__
@@ -32,8 +34,6 @@ class Encoder:
                 f"Invalid input of type: '{typename}'. "
                 f"Convert to a bytes, string, int or float first."
             )
-        elif isinstance(value, date):
-            value = str(value).encode(self.encoding, self.encoding_errors)
         if isinstance(value, str):
             value = value.encode(self.encoding, self.encoding_errors)
 
