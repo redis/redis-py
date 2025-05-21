@@ -394,4 +394,4 @@ class TestClusterTransaction:
             await pipe.discard()
 
             assert not pipe._execution_strategy._watching
-            assert not pipe._execution_strategy._command_queue
+            assert not len(pipe)
