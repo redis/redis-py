@@ -1555,7 +1555,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         | Existing :class:`~.RedisCluster` client
     """
 
-    __slots__ = ("cluster_client",)
+    __slots__ = ("cluster_client", "_transaction", "_execution_strategy")
 
     def __init__(
         self, client: RedisCluster, transaction: Optional[bool] = None
@@ -1570,7 +1570,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
 
     async def initialize(self) -> "ClusterPipeline":
         if self.cluster_client._initialize:
-            await self.cluster_client.initialize()
+            await self._execution_strategy.initialize()
         self._execution_strategy._command_queue = []
         return self
 
@@ -1578,7 +1578,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         return await self.initialize()
 
     async def __aexit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        self._execution_strategy._command_queue = []
+        await self.reset()
 
     def __await__(self) -> Generator[Any, None, "ClusterPipeline"]:
         return self.initialize().__await__()
@@ -1595,7 +1595,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         return True
 
     def __len__(self) -> int:
-        return len(self._execution_strategy._command_queue)
+        return len(self._execution_strategy)
 
     def execute_command(
         self, *args: Union[KeyT, EncodableT], **kwargs: Any
@@ -1794,31 +1794,15 @@ class ExecutionStrategy(ABC):
         """
         pass
 
+    @abstractmethod
+    def __len__(self) -> int:
+        pass
+
 
 class AbstractStrategy(ExecutionStrategy):
     def __init__(self, pipe: ClusterPipeline) -> None:
         self._pipe: ClusterPipeline = pipe
         self._command_queue: List["PipelineCommand"] = []
-
-    async def __aenter__(self) -> "ClusterPipeline":
-        return await self._pipe.initialize()
-
-    async def __aexit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        self._command_queue = []
-
-    def __await__(self) -> Generator[Any, None, "ClusterPipeline"]:
-        return self._pipe.initialize().__await__()
-
-    def __enter__(self) -> "ClusterPipeline":
-        self._command_queue = []
-        return self._pipe
-
-    def __exit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        self._command_queue = []
-
-    def __bool__(self) -> bool:
-        "Pipeline instances should  always evaluate to True on Python 3+"
-        return True
 
     async def initialize(self) -> "ClusterPipeline":
         if self._pipe.cluster_client._initialize:
@@ -1881,6 +1865,9 @@ class AbstractStrategy(ExecutionStrategy):
     async def unlink(self, *names):
         pass
 
+    def __len__(self) -> int:
+        return len(self._command_queue)
+
 
 class PipelineStrategy(AbstractStrategy):
     def __init__(self, pipe: ClusterPipeline) -> None:
@@ -1931,7 +1918,7 @@ class PipelineStrategy(AbstractStrategy):
                         # All other errors should be raised.
                         raise e
         finally:
-            self._command_queue = []
+            await self.reset()
 
     async def _execute(
         self,
