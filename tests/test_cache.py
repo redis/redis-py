@@ -122,6 +122,10 @@ class TestCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
+
+        # Add a small delay to allow invalidation to be processed
+        time.sleep(0.1)
+
         # Retrieves a new value from server and cache it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
