@@ -1422,10 +1422,16 @@ class ConnectionPool:
         self._lock = threading.Lock()
         self.reset()
 
-    def __repr__(self) -> (str, str):
+    def __repr__(self) -> str:
+        arg = ""
+        if "host" in self.connection_kwargs:
+            arg = f"{self.connection_kwargs['host']}:{self.connection_kwargs['port']}"
+        elif "path" in self.connection_kwargs:
+            arg = self.connection_kwargs["path"]
+
         return (
             f"<{type(self).__module__}.{type(self).__name__}"
-            f"({repr(self.connection_class(**self.connection_kwargs))})>"
+            f"({self.connection_class.__name__}<{arg}>)>"
         )
 
     def get_protocol(self):
