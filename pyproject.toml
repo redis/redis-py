@@ -33,7 +33,7 @@ dependencies = ['async-timeout>=4.0.3; python_full_version<"3.11.3"']
 
 [project.optional-dependencies]
 hiredis = [
-    "hiredis>=3.0.0",
+    "hiredis>=3.2.0",
 ]
 ocsp = [
     "cryptography>=36.0.1",
