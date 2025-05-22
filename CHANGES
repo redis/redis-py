@@ -71,6 +71,7 @@
     * Close Unix sockets if the connection attempt fails. This prevents `ResourceWarning`s. (#3314)
     * Close SSL sockets if the connection attempt fails, or if validations fail. (#3317)
     * Eliminate mutable default arguments in the `redis.commands.core.Script` class. (#3332)
+    * Fix SSL verification with `ssl_cert_reqs="none"` and `ssl_check_hostname=True` by automatically setting `check_hostname=False` when `verify_mode=ssl.CERT_NONE` (#3635) 
     * Allow newer versions of PyJWT as dependency. (#3630)
 
 * 4.1.3 (Feb 8, 2022)

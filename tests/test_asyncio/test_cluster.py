@@ -2723,6 +2723,27 @@ class TestNodesManager:
                     assert rc.get_node(host=default_host, port=7001) is not None
                     assert rc.get_node(host=default_host, port=7002) is not None
 
+    @pytest.mark.parametrize("dynamic_startup_nodes", [True, False])
+    async def test_init_slots_dynamic_startup_nodes(self, dynamic_startup_nodes):
+        rc = await get_mocked_redis_client(
+            host="my@DNS.com",
+            port=7000,
+            cluster_slots=default_cluster_slots,
+            dynamic_startup_nodes=dynamic_startup_nodes,
+        )
+        # Nodes are taken from default_cluster_slots
+        discovered_nodes = [
+            "127.0.0.1:7000",
+            "127.0.0.1:7001",
+            "127.0.0.1:7002",
+            "127.0.0.1:7003",
+        ]
+        startup_nodes = list(rc.nodes_manager.startup_nodes.keys())
+        if dynamic_startup_nodes is True:
+            assert sorted(startup_nodes) == sorted(discovered_nodes)
+        else:
+            assert startup_nodes == ["my@DNS.com:7000"]
+
 
 class TestClusterPipeline:
     """Tests for the ClusterPipeline class."""
@@ -3118,9 +3139,7 @@ class TestSSL:
     async def test_ssl_connection(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
-        async with await create_client(
-            ssl=True, ssl_check_hostname=False, ssl_cert_reqs="none"
-        ) as rc:
+        async with await create_client(ssl=True, ssl_cert_reqs="none") as rc:
             assert await rc.ping()
 
     @pytest.mark.parametrize(
@@ -3136,7 +3155,6 @@ class TestSSL:
     ) -> None:
         async with await create_client(
             ssl=True,
-            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
@@ -3148,7 +3166,6 @@ class TestSSL:
     ) -> None:
         async with await create_client(
             ssl=True,
-            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers="foo:bar",
@@ -3170,7 +3187,6 @@ class TestSSL:
         # TLSv1.3 does not support changing the ciphers
         async with await create_client(
             ssl=True,
-            ssl_check_hostname=False,
             ssl_cert_reqs="none",
             ssl_min_version=ssl.TLSVersion.TLSv1_2,
             ssl_ciphers=ssl_ciphers,
