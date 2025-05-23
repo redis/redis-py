@@ -17,7 +17,6 @@ import pytest_asyncio
 import redis.asyncio as redis
 from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
-from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import get_protocol_version, skip_if_server_version_lt
 
 from .compat import aclosing, create_task, mock
@@ -464,7 +463,6 @@ class TestPubSubRESP3Handler:
     async def my_handler(self, message):
         self.message = ["my handler", message]
 
-    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
     async def test_push_handler(self, r):
         if get_protocol_version(r) in [2, "2", None]:
             return
