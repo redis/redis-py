@@ -1,12 +1,18 @@
 import random
+import socket
 import weakref
 from typing import Optional
 
 from redis.client import Redis
 from redis.commands import SentinelCommands
 from redis.connection import Connection, ConnectionPool, SSLConnection
-from redis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
-from redis.utils import str_if_bytes
+from redis.exceptions import (
+    ConnectionError,
+    ReadOnlyError,
+    RedisError,
+    ResponseError,
+    TimeoutError,
+)
 
 
 class MasterNotFoundError(ConnectionError):
@@ -35,11 +41,39 @@ class SentinelManagedConnection(Connection):
 
     def connect_to(self, address):
         self.host, self.port = address
-        super().connect()
-        if self.connection_pool.check_connection:
-            self.send_command("PING")
-            if str_if_bytes(self.read_response()) != "PONG":
-                raise ConnectionError("PING failed")
+
+        if self._sock:
+            return
+        try:
+            sock = self._connect()
+        except socket.timeout:
+            raise TimeoutError("Timeout connecting to server")
+        except OSError as e:
+            raise ConnectionError(self._error_message(e))
+
+        self._sock = sock
+        try:
+            if self.redis_connect_func is None:
+                # Use the default on_connect function
+                self.on_connect_check_health(
+                    check_health=self.connection_pool.check_connection
+                )
+            else:
+                # Use the passed function redis_connect_func
+                self.redis_connect_func(self)
+        except RedisError:
+            # clean up after any error in on_connect
+            self.disconnect()
+            raise
+
+        # run any user callbacks. right now the only internal callback
+        # is for pubsub channel/pattern resubscription
+        # first, remove any dead weakrefs
+        self._connect_callbacks = [ref for ref in self._connect_callbacks if ref()]
+        for ref in self._connect_callbacks:
+            callback = ref()
+            if callback:
+                callback(self)
 
     def _connect_retry(self):
         if self._sock:
@@ -294,13 +328,16 @@ class Sentinel(SentinelCommands):
         """
         collected_errors = list()
         for sentinel_no, sentinel in enumerate(self.sentinels):
+            # print(f"Sentinel: {sentinel_no}")
             try:
                 masters = sentinel.sentinel_masters()
             except (ConnectionError, TimeoutError) as e:
                 collected_errors.append(f"{sentinel} - {e!r}")
                 continue
             state = masters.get(service_name)
+            # print(f"Found master: {state}")
             if state and self.check_master_state(state, service_name):
+                # print("Valid state")
                 # Put this sentinel at the top of the list
                 self.sentinels[0], self.sentinels[sentinel_no] = (
                     sentinel,
@@ -313,6 +350,7 @@ class Sentinel(SentinelCommands):
                     else state["ip"]
                 )
                 return ip, state["port"]
+            # print("Ignoring it")
 
         error_info = ""
         if len(collected_errors) > 0:
