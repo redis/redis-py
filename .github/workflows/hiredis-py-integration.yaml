@@ -34,7 +34,7 @@ jobs:
     steps:
       - name: Compute outputs
         run: |
-          echo "CURRENT=${{ env.CURRENT_REDIS_VERSION }}" >> $GITHUB_OUTPUT  
+          echo "CURRENT=${{ env.CURRENT_REDIS_VERSION }}" >> $GITHUB_OUTPUT
 
   hiredis-tests:
     runs-on: ubuntu-latest
@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
-        python-version: [ '3.8', '3.13']
+        python-version: [ '3.9', '3.13']
         parser-backend: [ 'hiredis' ]
         hiredis-version: [ 'unstable' ]
         event-loop: [ 'asyncio' ]
