@@ -15,8 +15,6 @@ from typing import (
 
 if TYPE_CHECKING:
     from redis._parsers import Encoder
-    from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
-    from redis.connection import ConnectionPool
 
 
 Number = Union[int, float]
@@ -52,8 +50,6 @@ ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Except
 
 
 class CommandsProtocol(Protocol):
-    connection_pool: Union["AsyncConnectionPool", "ConnectionPool"]
-
     def execute_command(self, *args, **options) -> ResponseT: ...
 
 
