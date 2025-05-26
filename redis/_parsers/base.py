@@ -1,7 +1,7 @@
 import sys
 from abc import ABC
 from asyncio import IncompleteReadError, StreamReader, TimeoutError
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, Protocol, Union
 
 if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
     from asyncio import timeout as async_timeout
@@ -156,6 +156,58 @@ class AsyncBaseParser(BaseParser):
         self, disable_decoding: bool = False
     ) -> Union[EncodableT, ResponseError, None, List[EncodableT]]:
         raise NotImplementedError()
+
+
+_INVALIDATION_MESSAGE = [b"invalidate", "invalidate"]
+
+
+class PushNotificationsParser(Protocol):
+    """Protocol defining RESP3-specific parsing functionality"""
+
+    pubsub_push_handler_func: Callable
+    invalidation_push_handler_func: Optional[Callable] = None
+
+    def handle_pubsub_push_response(self, response):
+        """Handle pubsub push responses"""
+        raise NotImplementedError()
+
+    def handle_push_response(self, response, **kwargs):
+        if response[0] not in _INVALIDATION_MESSAGE:
+            return self.pubsub_push_handler_func(response)
+        if self.invalidation_push_handler_func:
+            return self.invalidation_push_handler_func(response)
+
+    def set_pubsub_push_handler(self, pubsub_push_handler_func):
+        self.pubsub_push_handler_func = pubsub_push_handler_func
+
+    def set_invalidation_push_handler(self, invalidation_push_handler_func):
+        self.invalidation_push_handler_func = invalidation_push_handler_func
+
+
+class AsyncPushNotificationsParser(Protocol):
+    """Protocol defining async RESP3-specific parsing functionality"""
+
+    pubsub_push_handler_func: Callable
+    invalidation_push_handler_func: Optional[Callable] = None
+
+    async def handle_pubsub_push_response(self, response):
+        """Handle pubsub push responses asynchronously"""
+        raise NotImplementedError()
+
+    async def handle_push_response(self, response, **kwargs):
+        """Handle push responses asynchronously"""
+        if response[0] not in _INVALIDATION_MESSAGE:
+            return await self.pubsub_push_handler_func(response)
+        if self.invalidation_push_handler_func:
+            return await self.invalidation_push_handler_func(response)
+
+    def set_pubsub_push_handler(self, pubsub_push_handler_func):
+        """Set the pubsub push handler function"""
+        self.pubsub_push_handler_func = pubsub_push_handler_func
+
+    def set_invalidation_push_handler(self, invalidation_push_handler_func):
+        """Set the invalidation push handler function"""
+        self.invalidation_push_handler_func = invalidation_push_handler_func
 
 
 class _AsyncRESPBase(AsyncBaseParser):
