@@ -710,7 +710,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.result_callbacks = CaseInsensitiveDict(self.__class__.RESULT_CALLBACKS)
 
         self.commands_parser = CommandsParser(self)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def __enter__(self):
         return self
@@ -1474,7 +1474,7 @@ class NodesManager:
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
         if lock is None:
-            lock = threading.Lock()
+            lock = threading.RLock()
         self._lock = lock
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -2178,7 +2178,7 @@ class ClusterPipeline(RedisCluster):
             kwargs.get("decode_responses", False),
         )
         if lock is None:
-            lock = threading.Lock()
+            lock = threading.RLock()
         self._lock = lock
         self.parent_execute_command = super().execute_command
         self._execution_strategy: ExecutionStrategy = (
