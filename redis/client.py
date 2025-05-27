@@ -450,7 +450,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     def transaction(
         self, func: Callable[["Pipeline"], None], *watches, **kwargs
-    ) -> None:
+    ) -> Optional[Union[List[Any], Any]]:
         """
         Convenience method for executing the callable `func` as a transaction
         while watching all keys specified in `watches`. The 'func' callable
