@@ -368,6 +368,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ]:
             raise RedisError("Client caching is only supported with RESP version 3")
 
+        # TODO: To avoid breaking changes during the bug fix, we have to keep non-reentrant lock.
+        # TODO: Remove this before next major version (7.0.0)
         self.single_connection_lock = threading.Lock()
         self.connection = None
         self._single_connection_client = single_connection_client
@@ -773,6 +775,9 @@ class PubSub:
             self._event_dispatcher = EventDispatcher()
         else:
             self._event_dispatcher = event_dispatcher
+
+        # TODO: To avoid breaking changes during the bug fix, we have to keep non-reentrant lock.
+        # TODO: Remove this before next major version (7.0.0)
         self._lock = threading.Lock()
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
