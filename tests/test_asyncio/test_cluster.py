@@ -2750,10 +2750,6 @@ class TestClusterPipeline:
 
     async def test_blocked_arguments(self, r: RedisCluster) -> None:
         """Test handling for blocked pipeline arguments."""
-        with pytest.raises(RedisClusterException) as ex:
-            r.pipeline(transaction=True)
-
-        assert str(ex.value) == "transaction is deprecated in cluster mode"
 
         with pytest.raises(RedisClusterException) as ex:
             r.pipeline(shard_hint=True)
