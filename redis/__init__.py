@@ -45,6 +45,7 @@ def int_or_str(value):
         return value
 
 
+# This version is used when building the package for publishing
 __version__ = "6.2.0"
 VERSION = tuple(map(int_or_str, __version__.split(".")))
 

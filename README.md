@@ -101,7 +101,7 @@ By default, redis-py uses a connection pool to manage connections. Each instance
 
 ``` python
 >>> pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
->>> r = redis.Redis(connection_pool=pool) 
+>>> r = redis.Redis(connection_pool=pool)
 ```
 
 Alternatively, you might want to look at [Async connections](https://redis.readthedocs.io/en/stable/examples/asyncio_examples.html), or [Cluster connections](https://redis.readthedocs.io/en/stable/connections.html#cluster-client), or even [Async Cluster connections](https://redis.readthedocs.io/en/stable/connections.html#async-cluster-client).
