@@ -1138,9 +1138,11 @@ class TestBaseException:
         assert msg is not None
         # timeout waiting for another message which never arrives
         assert is_connected()
-        with patch("redis._parsers._RESP2Parser.read_response") as mock1, patch(
-            "redis._parsers._HiredisParser.read_response"
-        ) as mock2, patch("redis._parsers._RESP3Parser.read_response") as mock3:
+        with (
+            patch("redis._parsers._RESP2Parser.read_response") as mock1,
+            patch("redis._parsers._HiredisParser.read_response") as mock2,
+            patch("redis._parsers._RESP3Parser.read_response") as mock3,
+        ):
             mock1.side_effect = BaseException("boom")
             mock2.side_effect = BaseException("boom")
             mock3.side_effect = BaseException("boom")
