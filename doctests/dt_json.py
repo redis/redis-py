@@ -72,7 +72,7 @@ res12 = r.json().get("newbike", "$")
 print(res12)  # >>> ['["Deimos", { "crashes": 0 }, null]']
 
 res13 = r.json().get("newbike", "$[1].crashes")
-print(res13)  # >>> ['0']
+print(res13)  # >>> [0]
 
 res14 = r.json().delete("newbike", "$.[-1]")
 print(res14)  # >>> [1]
