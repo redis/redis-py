@@ -1569,9 +1569,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         )
 
     async def initialize(self) -> "ClusterPipeline":
-        if self.cluster_client._initialize:
-            await self._execution_strategy.initialize()
-        self._execution_strategy._command_queue = []
+        await self._execution_strategy.initialize()
         return self
 
     async def __aenter__(self) -> "ClusterPipeline":
@@ -1584,10 +1582,12 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         return self.initialize().__await__()
 
     def __enter__(self) -> "ClusterPipeline":
+        # TODO: Remove this method before 7.0.0
         self._execution_strategy._command_queue = []
         return self
 
     def __exit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
+        # TODO: Remove this method before 7.0.0
         self._execution_strategy._command_queue = []
 
     def __bool__(self) -> bool:
