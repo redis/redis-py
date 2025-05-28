@@ -576,11 +576,7 @@ class AbstractConnection:
         read_timeout = timeout if timeout is not None else self.socket_timeout
         host_error = self._host_error()
         try:
-            if (
-                read_timeout is not None
-                and self.protocol in ["3", 3]
-                and not HIREDIS_AVAILABLE
-            ):
+            if read_timeout is not None and self.protocol in ["3", 3]:
                 async with async_timeout(read_timeout):
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding, push_request=push_request
@@ -590,7 +586,7 @@ class AbstractConnection:
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding
                     )
-            elif self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
+            elif self.protocol in ["3", 3]:
                 response = await self._parser.read_response(
                     disable_decoding=disable_decoding, push_request=push_request
                 )
@@ -868,7 +864,7 @@ class RedisSSLContext:
         cert_reqs: Optional[Union[str, ssl.VerifyMode]] = None,
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
-        check_hostname: bool = True,
+        check_hostname: bool = False,
         min_version: Optional[TLSVersion] = None,
         ciphers: Optional[str] = None,
     ):
