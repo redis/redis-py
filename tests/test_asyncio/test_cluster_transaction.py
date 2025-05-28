@@ -125,11 +125,12 @@ class TestClusterTransaction:
         slot = r.keyslot(key)
         node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
 
-        with patch.object(
-            ClusterNode, "parse_response"
-        ) as parse_response, patch.object(
-            NodesManager, "_update_moved_slots"
-        ) as manager_update_moved_slots:
+        with (
+            patch.object(ClusterNode, "parse_response") as parse_response,
+            patch.object(
+                NodesManager, "_update_moved_slots"
+            ) as manager_update_moved_slots,
+        ):
 
             def ask_redirect_effect(connection, *args, **options):
                 if "MULTI" in args:
@@ -167,11 +168,12 @@ class TestClusterTransaction:
         slot = r.keyslot(key)
         node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
 
-        with patch.object(
-            ClusterNode, "parse_response"
-        ) as parse_response, patch.object(
-            NodesManager, "_update_moved_slots"
-        ) as manager_update_moved_slots:
+        with (
+            patch.object(ClusterNode, "parse_response") as parse_response,
+            patch.object(
+                NodesManager, "_update_moved_slots"
+            ) as manager_update_moved_slots,
+        ):
 
             def ask_redirect_effect(conn, *args, **options):
                 # first call should go here, we trigger an AskError
