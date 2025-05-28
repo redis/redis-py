@@ -1435,9 +1435,9 @@ class ConnectionPool:
     def __repr__(self) -> str:
         conn_kwargs = ",".join([f"{k}={v}" for k, v in self.connection_kwargs.items()])
         return (
-            f"<{type(self).__module__}.{type(self).__name__}"
-            f"({self.connection_class.__module__}.{self.connection_class.__name__}"
-            f"({conn_kwargs}))>"
+            f"<{self.__class__.__module__}.{self.__class__.__name__}"
+            f"(<{self.connection_class.__module__}.{self.connection_class.__name__}"
+            f"({conn_kwargs})>)>"
         )
 
     def get_protocol(self):
