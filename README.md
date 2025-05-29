@@ -13,31 +13,34 @@ The Python interface to the Redis key-value store.
 
 ---------------------------------------------
 
-**Note: ** redis-py 5.0 will be the last version of redis-py to support Python 3.7, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 5.1 will support Python 3.8+.
-
+**Note:** redis-py 5.0 will be the last version of redis-py to support Python 3.7, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 5.1 will support Python 3.8+.
+**Note:** redis-py 6.1.0 will be the last version of redis-py to support Python 3.8, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 6.2.0 will support Python 3.9+.
 ---------------------------------------------
 
 ## How do I Redis?
 
-[Learn for free at Redis University](https://university.redis.com/)
+[Learn for free at Redis University](https://redis.io/learn/university)
 
-[Build faster with the Redis Launchpad](https://launchpad.redis.com/)
+[Try the Redis Cloud](https://redis.io/try-free/)
 
-[Try the Redis Cloud](https://redis.com/try-free/)
+[Dive in developer tutorials](https://redis.io/learn)
 
-[Dive in developer tutorials](https://developer.redis.com/)
+[Join the Redis community](https://redis.io/community/)
 
-[Join the Redis community](https://redis.com/community/)
-
-[Work at Redis](https://redis.com/company/careers/jobs/)
+[Work at Redis](https://redis.io/careers/)
 
 ## Installation
 
-Start a redis via docker:
+Start a redis via docker (for Redis versions >= 8.0):
+
+``` bash
+docker run -p 6379:6379 -it redis:latest
+```
+
+Start a redis via docker (for Redis versions < 8.0):
 
 ``` bash
 docker run -p 6379:6379 -it redis/redis-stack:latest
-```
 
 To install redis-py, simply:
 
@@ -56,7 +59,7 @@ Looking for a high-level library to handle object mapping? See [redis-om-python]
 
 ## Supported Redis Versions
 
-The most recent version of this library supports redis version [5.0](https://github.com/redis/redis/blob/5.0/00-RELEASENOTES), [6.0](https://github.com/redis/redis/blob/6.0/00-RELEASENOTES), [6.2](https://github.com/redis/redis/blob/6.2/00-RELEASENOTES), [7.0](https://github.com/redis/redis/blob/7.0/00-RELEASENOTES) and [7.2](https://github.com/redis/redis/blob/7.2/00-RELEASENOTES).
+The most recent version of this library supports Redis version [7.2](https://github.com/redis/redis/blob/7.2/00-RELEASENOTES), [7.4](https://github.com/redis/redis/blob/7.4/00-RELEASENOTES) and [8.0](https://github.com/redis/redis/blob/8.0/00-RELEASENOTES).
 
 The table below highlights version compatibility of the most-recent library versions and redis versions.
 
@@ -64,7 +67,8 @@ The table below highlights version compatibility of the most-recent library vers
 |-----------------|-------------------|
 | 3.5.3 | <= 6.2 Family of releases |
 | >= 4.5.0 | Version 5.0 to 7.0 |
-| >= 5.0.0 | Version 5.0 to current |
+| >= 5.0.0 | Version 5.0 to 7.4 |
+| >= 6.0.0 | Version 7.2 to current |
 
 
 ## Usage
@@ -154,12 +158,46 @@ The following example shows how to utilize [Redis Pub/Sub](https://redis.io/docs
 {'pattern': None, 'type': 'subscribe', 'channel': b'my-second-channel', 'data': 1}
 ```
 
+### Redis’ search and query capabilities default dialect
 
---------------------------
+Release 6.0.0 introduces a client-side default dialect for Redis’ search and query capabilities.
+By default, the client now overrides the server-side dialect with version 2, automatically appending *DIALECT 2* to commands like *FT.AGGREGATE* and *FT.SEARCH*.
+
+**Important**: Be aware that the query dialect may impact the results returned. If needed, you can revert to a different dialect version by configuring the client accordingly.
+
+``` python
+>>> from redis.commands.search.field import TextField
+>>> from redis.commands.search.query import Query
+>>> from redis.commands.search.index_definition import IndexDefinition
+>>> import redis
+
+>>> r = redis.Redis(host='localhost', port=6379, db=0)
+>>> r.ft().create_index(
+>>>     (TextField("name"), TextField("lastname")),
+>>>     definition=IndexDefinition(prefix=["test:"]),
+>>> )
+
+>>> r.hset("test:1", "name", "James")
+>>> r.hset("test:1", "lastname", "Brown")
+
+>>> # Query with default DIALECT 2
+>>> query = "@name: James Brown"
+>>> q = Query(query)
+>>> res = r.ft().search(q)
+
+>>> # Query with explicit DIALECT 1
+>>> query = "@name: James Brown"
+>>> q = Query(query).dialect(1)
+>>> res = r.ft().search(q)
+```
+
+You can find further details in the [query dialect documentation](https://redis.io/docs/latest/develop/interact/search-and-query/advanced-concepts/dialects/).
+
+---------------------------------------------
 
 ### Author
 
-redis-py is developed and maintained by [Redis Inc](https://redis.com). It can be found [here](
+redis-py is developed and maintained by [Redis Inc](https://redis.io). It can be found [here](
 https://github.com/redis/redis-py), or downloaded from [pypi](https://pypi.org/project/redis/).
 
 Special thanks to:
@@ -171,4 +209,4 @@ Special thanks to:
     system.
 -   Paul Hubbard for initial packaging support.
 
-[![Redis](./docs/logo-redis.png)](https://www.redis.com)
+[![Redis](./docs/_static/logo-redis.svg)](https://redis.io)

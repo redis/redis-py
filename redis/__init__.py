@@ -1,5 +1,3 @@
-import sys
-
 from redis import asyncio  # noqa
 from redis.backoff import default_backoff
 from redis.client import Redis, StrictRedis
@@ -18,11 +16,14 @@ from redis.exceptions import (
     BusyLoadingError,
     ChildDeadlockedError,
     ConnectionError,
+    CrossSlotTransactionError,
     DataError,
+    InvalidPipelineStack,
     InvalidResponse,
     OutOfMemoryError,
     PubSubError,
     ReadOnlyError,
+    RedisClusterException,
     RedisError,
     ResponseError,
     TimeoutError,
@@ -36,11 +37,6 @@ from redis.sentinel import (
 )
 from redis.utils import from_url
 
-if sys.version_info >= (3, 8):
-    from importlib import metadata
-else:
-    import importlib_metadata as metadata
-
 
 def int_or_str(value):
     try:
@@ -49,16 +45,9 @@ def int_or_str(value):
         return value
 
 
-try:
-    __version__ = metadata.version("redis")
-except metadata.PackageNotFoundError:
-    __version__ = "99.99.99"
+__version__ = "6.2.0"
+VERSION = tuple(map(int_or_str, __version__.split(".")))
 
-
-try:
-    VERSION = tuple(map(int_or_str, __version__.split(".")))
-except AttributeError:
-    VERSION = tuple([99, 99, 99])
 
 __all__ = [
     "AuthenticationError",
@@ -70,15 +59,18 @@ __all__ = [
     "ConnectionError",
     "ConnectionPool",
     "CredentialProvider",
+    "CrossSlotTransactionError",
     "DataError",
     "from_url",
     "default_backoff",
+    "InvalidPipelineStack",
     "InvalidResponse",
     "OutOfMemoryError",
     "PubSubError",
     "ReadOnlyError",
     "Redis",
     "RedisCluster",
+    "RedisClusterException",
     "RedisError",
     "ResponseError",
     "Sentinel",

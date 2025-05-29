@@ -4,6 +4,7 @@ import select
 import socket
 import socketserver
 import threading
+from typing import List
 import warnings
 from queue import LifoQueue, Queue
 from time import sleep
@@ -13,12 +14,17 @@ import pytest
 import redis
 from redis import Redis
 from redis._parsers import CommandsParser
-from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
+from redis.backoff import (
+    ExponentialBackoff,
+    ExponentialWithJitterBackoff,
+    NoBackoff,
+)
 from redis.cluster import (
     PRIMARY,
     REDIS_CLUSTER_HASH_SLOTS,
     REPLICA,
     ClusterNode,
+    LoadBalancingStrategy,
     NodesManager,
     RedisCluster,
     get_node_name,
@@ -202,13 +208,23 @@ def get_mocked_redis_client(
 
             cmd_parser_initialize.side_effect = cmd_init_mock
 
-            return RedisCluster(*args, **kwargs)
+            # Create a subclass of RedisCluster that overrides __del__
+            class MockedRedisCluster(RedisCluster):
+                def __del__(self):
+                    # Override to prevent connection cleanup attempts
+                    pass
+
+                @property
+                def connection_pool(self):
+                    # Required abstract property implementation
+                    return self.nodes_manager.get_default_node().redis_connection.connection_pool
+
+            return MockedRedisCluster(*args, **kwargs)
 
 
 def mock_node_resp(node, response):
     connection = Mock()
     connection.read_response.return_value = response
-    connection._get_from_local_cache.return_value = None
     node.redis_connection.connection = connection
     return node
 
@@ -216,7 +232,6 @@ def mock_node_resp(node, response):
 def mock_node_resp_func(node, func):
     connection = Mock()
     connection.read_response.side_effect = func
-    connection._get_from_local_cache.return_value = None
     node.redis_connection.connection = connection
     return node
 
@@ -485,7 +500,6 @@ class TestRedisClusterObj:
         redis_mock_node.execute_command.side_effect = mock_execute_command
         # Mock response value for all other commands
         redis_mock_node.parse_response.return_value = "MOCK_OK"
-        redis_mock_node.connection._get_from_local_cache.return_value = None
         for node in r.get_nodes():
             if node.port != primary.port:
                 node.redis_connection = redis_mock_node
@@ -593,7 +607,24 @@ class TestRedisClusterObj:
                         assert parse_response.failed_calls == 1
                         assert parse_response.successful_calls == 1
 
-    def test_reading_from_replicas_in_round_robin(self):
+    @pytest.mark.parametrize(
+        "read_from_replicas,load_balancing_strategy,mocks_srv_ports",
+        [
+            (True, None, [7001, 7002, 7001]),
+            (True, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
+            (True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (True, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
+            (False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
+        ],
+    )
+    def test_reading_with_load_balancing_strategies(
+        self,
+        read_from_replicas: bool,
+        load_balancing_strategy: LoadBalancingStrategy,
+        mocks_srv_ports: List[int],
+    ):
         with patch.multiple(
             Connection,
             send_command=DEFAULT,
@@ -606,19 +637,19 @@ class TestRedisClusterObj:
 
                 def parse_response_mock_first(connection, *args, **options):
                     # Primary
-                    assert connection.port == 7001
+                    assert connection.port == mocks_srv_ports[0]
                     parse_response.side_effect = parse_response_mock_second
                     return "MOCK_OK"
 
                 def parse_response_mock_second(connection, *args, **options):
                     # Replica
-                    assert connection.port == 7002
+                    assert connection.port == mocks_srv_ports[1]
                     parse_response.side_effect = parse_response_mock_third
                     return "MOCK_OK"
 
                 def parse_response_mock_third(connection, *args, **options):
                     # Primary
-                    assert connection.port == 7001
+                    assert connection.port == mocks_srv_ports[2]
                     return "MOCK_OK"
 
                 # We don't need to create a real cluster connection but we
@@ -633,9 +664,13 @@ class TestRedisClusterObj:
 
                 # Create a cluster with reading from replications
                 read_cluster = get_mocked_redis_client(
-                    host=default_host, port=default_port, read_from_replicas=True
+                    host=default_host,
+                    port=default_port,
+                    read_from_replicas=read_from_replicas,
+                    load_balancing_strategy=load_balancing_strategy,
                 )
-                assert read_cluster.read_from_replicas is True
+                assert read_cluster.read_from_replicas is read_from_replicas
+                assert read_cluster.load_balancing_strategy is load_balancing_strategy
                 # Check that we read from the slot's nodes in a round robin
                 # matter.
                 # 'foo' belongs to slot 12182 and the slot's nodes are:
@@ -643,15 +678,26 @@ class TestRedisClusterObj:
                 read_cluster.get("foo")
                 read_cluster.get("foo")
                 read_cluster.get("foo")
-                mocks["send_command"].assert_has_calls(
+                expected_calls_list = []
+                expected_calls_list.append(call("READONLY"))
+                expected_calls_list.append(call("GET", "foo", keys=["foo"]))
+
+                if (
+                    load_balancing_strategy is None
+                    or load_balancing_strategy == LoadBalancingStrategy.ROUND_ROBIN
+                ):
+                    # in the round robin strategy the primary node can also receive read
+                    # requests and this means that there will be second node connected
+                    expected_calls_list.append(call("READONLY"))
+
+                expected_calls_list.extend(
                     [
-                        call("READONLY"),
-                        call("GET", "foo"),
-                        call("READONLY"),
-                        call("GET", "foo"),
-                        call("GET", "foo"),
+                        call("GET", "foo", keys=["foo"]),
+                        call("GET", "foo", keys=["foo"]),
                     ]
                 )
+
+                mocks["send_command"].assert_has_calls(expected_calls_list)
 
     def test_keyslot(self, r):
         """
@@ -842,45 +888,48 @@ class TestRedisClusterObj:
     def test_cluster_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
         r = _get_client(RedisCluster, request, retry=retry)
-        assert r.get_retry()._retries == retry._retries
-        assert isinstance(r.get_retry()._backoff, NoBackoff)
+        assert r.retry.get_retries() == retry.get_retries()
+        assert isinstance(r.retry._backoff, NoBackoff)
         for node in r.get_nodes():
-            assert node.redis_connection.get_retry()._retries == retry._retries
+            assert node.redis_connection.get_retry().get_retries() == 0
             assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
         rand_node = r.get_random_node()
-        existing_conn = rand_node.redis_connection.connection_pool.get_connection("_")
+        existing_conn = rand_node.redis_connection.connection_pool.get_connection()
         # Change retry policy
         new_retry = Retry(ExponentialBackoff(), 3)
         r.set_retry(new_retry)
-        assert r.get_retry()._retries == new_retry._retries
-        assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
+        assert r.retry.get_retries() == new_retry.get_retries()
+        assert isinstance(r.retry._backoff, ExponentialBackoff)
         for node in r.get_nodes():
-            assert node.redis_connection.get_retry()._retries == new_retry._retries
-            assert isinstance(
-                node.redis_connection.get_retry()._backoff, ExponentialBackoff
-            )
-        assert existing_conn.retry._retries == new_retry._retries
-        new_conn = rand_node.redis_connection.connection_pool.get_connection("_")
-        assert new_conn.retry._retries == new_retry._retries
+            assert node.redis_connection.get_retry()._retries == 0
+            assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
+        assert existing_conn.retry._retries == 0
+        new_conn = rand_node.redis_connection.connection_pool.get_connection()
+        assert new_conn.retry._retries == 0
 
     def test_cluster_retry_object(self, r) -> None:
         # Test default retry
-        retry = r.get_connection_kwargs().get("retry")
-        assert isinstance(retry, Retry)
-        assert retry._retries == 0
-        assert isinstance(retry._backoff, type(default_backoff()))
-        node1 = r.get_node("127.0.0.1", 16379).redis_connection
-        node2 = r.get_node("127.0.0.1", 16380).redis_connection
-        assert node1.get_retry()._retries == node2.get_retry()._retries
+        # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
+        host = r.get_default_node().host
 
-        # Test custom retry
+        # test default retry config
+        retry = r.retry
+        assert isinstance(retry, Retry)
+        assert retry.get_retries() == 3
+        assert isinstance(retry._backoff, type(ExponentialWithJitterBackoff()))
+        node1_connection = r.get_node(host, 16379).redis_connection
+        node2_connection = r.get_node(host, 16380).redis_connection
+        assert node1_connection.get_retry()._retries == 0
+        assert node2_connection.get_retry()._retries == 0
+
+        # Test custom retry is not applied to nodes
         retry = Retry(ExponentialBackoff(10, 5), 5)
-        rc_custom_retry = RedisCluster("127.0.0.1", 16379, retry=retry)
+        rc_custom_retry = RedisCluster(host, 16379, retry=retry)
         assert (
-            rc_custom_retry.get_node("127.0.0.1", 16379)
+            rc_custom_retry.get_node(host, 16379)
             .redis_connection.get_retry()
-            ._retries
-            == retry._retries
+            .get_retries()
+            == 0
         )
 
     def test_replace_cluster_node(self, r) -> None:
@@ -976,6 +1025,35 @@ class TestClusterRedisCommands:
         assert r.get("byte_string") == byte_string
         assert r.get("integer") == str(integer).encode()
         assert r.get("unicode_string").decode("utf-8") == unicode_string
+
+    @pytest.mark.parametrize(
+        "load_balancing_strategy",
+        [
+            LoadBalancingStrategy.ROUND_ROBIN,
+            LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM_REPLICA,
+        ],
+    )
+    def test_get_and_set_with_load_balanced_client(
+        self, request, load_balancing_strategy: LoadBalancingStrategy
+    ) -> None:
+        r = _get_client(
+            cls=RedisCluster,
+            request=request,
+            load_balancing_strategy=load_balancing_strategy,
+        )
+
+        # get and set can't be tested independently of each other
+        assert r.get("a") is None
+
+        byte_string = b"value"
+        assert r.set("byte_string", byte_string)
+
+        # run the get command for the same key several times
+        # to iterate over the read nodes
+        assert r.get("byte_string") == byte_string
+        assert r.get("byte_string") == byte_string
+        assert r.get("byte_string") == byte_string
 
     def test_mget_nonatomic(self, r):
         assert r.mget_nonatomic([]) == []
@@ -1577,7 +1655,7 @@ class TestClusterRedisCommands:
         assert isinstance(stats, dict)
         for key, value in stats.items():
             if key.startswith("db."):
-                assert isinstance(value, dict)
+                assert not isinstance(value, list)
 
     @skip_if_server_version_lt("4.0.0")
     def test_memory_help(self, r):
@@ -1694,7 +1772,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_not(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["{foo}a"] = test_str
         r.bitop("not", "{foo}r", "{foo}a")
@@ -1702,7 +1780,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_not_in_place(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["{foo}a"] = test_str
         r.bitop("not", "{foo}a", "{foo}a")
@@ -1710,7 +1788,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_single_string(self, r):
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         r["{foo}a"] = test_str
         r.bitop("and", "{foo}res1", "{foo}a")
         r.bitop("or", "{foo}res2", "{foo}a")
@@ -1721,8 +1799,8 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     def test_cluster_bitop_string_operands(self, r):
-        r["{foo}a"] = b"\x01\x02\xFF\xFF"
-        r["{foo}b"] = b"\x01\x02\xFF"
+        r["{foo}a"] = b"\x01\x02\xff\xff"
+        r["{foo}b"] = b"\x01\x02\xff"
         r.bitop("and", "{foo}res1", "{foo}a", "{foo}b")
         r.bitop("or", "{foo}res2", "{foo}a", "{foo}b")
         r.bitop("xor", "{foo}res3", "{foo}a", "{foo}b")
@@ -2450,47 +2528,6 @@ class TestClusterRedisCommands:
             except Exception:
                 pass
 
-    @skip_if_server_version_lt("7.1.140")
-    def test_tfunction_load_delete(self, r):
-        r.gears_refresh_cluster()
-        self.try_delete_libs(r, "lib1")
-        lib_code = self.generate_lib_code("lib1")
-        assert r.tfunction_load(lib_code)
-        assert r.tfunction_delete("lib1")
-
-    @skip_if_server_version_lt("7.1.140")
-    def test_tfunction_list(self, r):
-        r.gears_refresh_cluster()
-        self.try_delete_libs(r, "lib1", "lib2", "lib3")
-        assert r.tfunction_load(self.generate_lib_code("lib1"))
-        assert r.tfunction_load(self.generate_lib_code("lib2"))
-        assert r.tfunction_load(self.generate_lib_code("lib3"))
-
-        # test error thrown when verbose > 4
-        with pytest.raises(DataError):
-            assert r.tfunction_list(verbose=8)
-
-        functions = r.tfunction_list(verbose=1)
-        assert len(functions) == 3
-
-        expected_names = [b"lib1", b"lib2", b"lib3"]
-        actual_names = [functions[0][13], functions[1][13], functions[2][13]]
-
-        assert sorted(expected_names) == sorted(actual_names)
-        assert r.tfunction_delete("lib1")
-        assert r.tfunction_delete("lib2")
-        assert r.tfunction_delete("lib3")
-
-    @skip_if_server_version_lt("7.1.140")
-    def test_tfcall(self, r):
-        r.gears_refresh_cluster()
-        self.try_delete_libs(r, "lib1")
-        assert r.tfunction_load(self.generate_lib_code("lib1"))
-        assert r.tfcall("lib1", "foo") == b"bar"
-        assert r.tfcall_async("lib1", "foo") == b"bar"
-
-        assert r.tfunction_delete("lib1")
-
 
 @pytest.mark.onlycluster
 class TestNodesManager:
@@ -2516,6 +2553,8 @@ class TestNodesManager:
         primary2_name = n_manager.slots_cache[slot_2][0].name
         list1_size = len(n_manager.slots_cache[slot_1])
         list2_size = len(n_manager.slots_cache[slot_2])
+
+        # default load balancer strategy: LoadBalancerStrategy.ROUND_ROBIN
         # slot 1
         assert lb.get_server_index(primary1_name, list1_size) == 0
         assert lb.get_server_index(primary1_name, list1_size) == 1
@@ -2529,6 +2568,29 @@ class TestNodesManager:
         lb.reset()
         assert lb.get_server_index(primary1_name, list1_size) == 0
         assert lb.get_server_index(primary2_name, list2_size) == 0
+
+        # reset the indexes before load balancing strategy test
+        lb.reset()
+        # load balancer strategy: LoadBalancerStrategy.ROUND_ROBIN_REPLICAS
+        for i in [1, 2, 1]:
+            srv_index = lb.get_server_index(
+                primary1_name,
+                list1_size,
+                load_balancing_strategy=LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            )
+            assert srv_index == i
+
+        # reset the indexes before load balancing strategy test
+        lb.reset()  # reset the indexes
+        # load balancer strategy: LoadBalancerStrategy.RANDOM_REPLICA
+        for i in range(5):
+            srv_index = lb.get_server_index(
+                primary1_name,
+                list1_size,
+                load_balancing_strategy=LoadBalancingStrategy.RANDOM_REPLICA,
+            )
+
+            assert srv_index > 0 and srv_index <= 2
 
     def test_init_slots_cache_not_all_slots_covered(self):
         """
@@ -2692,7 +2754,7 @@ class TestNodesManager:
 
             def create_mocked_redis_node(host, port, **kwargs):
                 """
-                Helper function to return custom slots cache data from
+                Helper function to return custom slots cache_data data from
                 different redis nodes
                 """
                 if port == 7000:
@@ -2953,23 +3015,9 @@ class TestClusterPipeline:
         They maybe implemented in the future.
         """
         pipe = r.pipeline()
-        with pytest.raises(RedisClusterException):
-            pipe.multi()
-
-        with pytest.raises(RedisClusterException):
-            pipe.immediate_execute_command()
-
-        with pytest.raises(RedisClusterException):
-            pipe._execute_transaction(None, None, None)
 
         with pytest.raises(RedisClusterException):
             pipe.load_scripts()
-
-        with pytest.raises(RedisClusterException):
-            pipe.watch()
-
-        with pytest.raises(RedisClusterException):
-            pipe.unwatch()
 
         with pytest.raises(RedisClusterException):
             pipe.script_load_for_pipeline(None)
@@ -2982,14 +3030,6 @@ class TestClusterPipeline:
         Currently some arguments is blocked when using in cluster mode.
         They maybe implemented in the future.
         """
-        with pytest.raises(RedisClusterException) as ex:
-            r.pipeline(transaction=True)
-
-        assert (
-            str(ex.value).startswith("transaction is deprecated in cluster mode")
-            is True
-        )
-
         with pytest.raises(RedisClusterException) as ex:
             r.pipeline(shard_hint=True)
 
@@ -3047,7 +3087,7 @@ class TestClusterPipeline:
             pipe.delete("a")
             assert pipe.execute() == [1]
 
-    def test_multi_delete_unsupported(self, r):
+    def test_multi_delete_unsupported_cross_slot(self, r):
         """
         Test that multi delete operation is unsupported
         """
@@ -3056,6 +3096,16 @@ class TestClusterPipeline:
             r["b"] = 2
             with pytest.raises(RedisClusterException):
                 pipe.delete("a", "b")
+
+    def test_multi_delete_supported_single_slot(self, r):
+        """
+        Test that multi delete operation is supported when all keys are in the same hash slot
+        """
+        with r.pipeline(transaction=True) as pipe:
+            r["{key}:a"] = 1
+            r["{key}:b"] = 2
+            pipe.delete("{key}:a", "{key}:b")
+            assert pipe.execute()
 
     def test_unlink_single(self, r):
         """
@@ -3259,6 +3309,25 @@ class TestClusterPipeline:
             assert ask_node.redis_connection.connection.read_response.called
             assert res == ["MOCK_OK"]
 
+    def test_error_is_truncated(self, r):
+        """
+        Test that an error from the pipeline is truncated correctly.
+        """
+        key = "a" * 50
+        a_value = "a" * 20
+        b_value = "b" * 20
+
+        with r.pipeline() as pipe:
+            pipe.set(key, 1)
+            pipe.hset(key, mapping={"field_a": a_value, "field_b": b_value})
+            pipe.expire(key, 100)
+
+            with pytest.raises(Exception) as ex:
+                pipe.execute()
+
+            expected = f"Command # 2 (HSET {key} field_a {a_value} field_b...) of pipeline caused error: "
+            assert str(ex.value).startswith(expected)
+
     def test_return_previously_acquired_connections(self, r):
         # in order to ensure that a pipeline will make use of connections
         #   from different nodes
@@ -3292,6 +3361,87 @@ class TestClusterPipeline:
         p = r.pipeline()
         result = p.execute()
         assert result == []
+
+    @pytest.mark.onlycluster
+    def test_exec_error_in_response(self, r):
+        """
+        an invalid pipeline command at exec time adds the exception instance
+        to the list of returned values
+        """
+        hashkey = "{key}"
+        r[f"{hashkey}:c"] = "a"
+        with r.pipeline() as pipe:
+            pipe.set(f"{hashkey}:a", 1).set(f"{hashkey}:b", 2)
+            pipe.lpush(f"{hashkey}:c", 3).set(f"{hashkey}:d", 4)
+            result = pipe.execute(raise_on_error=False)
+
+            assert result[0]
+            assert r[f"{hashkey}:a"] == b"1"
+            assert result[1]
+            assert r[f"{hashkey}:b"] == b"2"
+
+            # we can't lpush to a key that's a string value, so this should
+            # be a ResponseError exception
+            assert isinstance(result[2], redis.ResponseError)
+            assert r[f"{hashkey}:c"] == b"a"
+
+            # since this isn't a transaction, the other commands after the
+            # error are still executed
+            assert result[3]
+            assert r[f"{hashkey}:d"] == b"4"
+
+            # make sure the pipe was restored to a working state
+            assert pipe.set(f"{hashkey}:z", "zzz").execute() == [True]
+            assert r[f"{hashkey}:z"] == b"zzz"
+
+    def test_exec_error_in_no_transaction_pipeline(self, r):
+        r["a"] = 1
+        with r.pipeline(transaction=False) as pipe:
+            pipe.llen("a")
+            pipe.expire("a", 100)
+
+            with pytest.raises(redis.ResponseError) as ex:
+                pipe.execute()
+
+            assert str(ex.value).startswith(
+                "Command # 1 (LLEN a) of pipeline caused error: "
+            )
+
+        assert r["a"] == b"1"
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("2.0.0")
+    def test_pipeline_discard(self, r):
+        hashkey = "{key}"
+
+        # empty pipeline should raise an error
+        with r.pipeline() as pipe:
+            pipe.set(f"{hashkey}:key", "someval")
+            with pytest.raises(redis.exceptions.RedisClusterException) as ex:
+                pipe.discard()
+
+            assert str(ex.value).startswith(
+                "method discard() is not supported outside of transactional context"
+            )
+
+        # setting a pipeline and discarding should do the same
+        with r.pipeline() as pipe:
+            pipe.set(f"{hashkey}:key", "someval")
+            pipe.set(f"{hashkey}:someotherkey", "val")
+            response = pipe.execute()
+            pipe.set(f"{hashkey}:key", "another value!")
+            with pytest.raises(redis.exceptions.RedisClusterException) as ex:
+                pipe.discard()
+
+            assert str(ex.value).startswith(
+                "method discard() is not supported outside of transactional context"
+            )
+
+            pipe.set(f"{hashkey}:foo", "bar")
+            response = pipe.execute()
+
+        assert response[0]
+        assert r.get(f"{hashkey}:foo") == b"bar"
 
 
 @pytest.mark.onlycluster
@@ -3375,6 +3525,45 @@ class TestReadOnlyPipeline:
                         if executed_on_replica:
                             break
                 assert executed_on_replica is True
+
+    @pytest.mark.parametrize(
+        "load_balancing_strategy",
+        [
+            LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM_REPLICA,
+        ],
+    )
+    def test_readonly_pipeline_with_reading_from_replicas_strategies(
+        self, request, load_balancing_strategy: LoadBalancingStrategy
+    ) -> None:
+        """
+        Test that the pipeline uses replicas for different replica-based
+        load balancing strategies.
+        """
+        ro = _get_client(
+            RedisCluster,
+            request,
+            load_balancing_strategy=load_balancing_strategy,
+        )
+        key = "bar"
+        ro.set(key, "foo")
+        import time
+
+        time.sleep(0.2)
+
+        with ro.pipeline() as readonly_pipe:
+            mock_all_nodes_resp(ro, "MOCK_OK")
+            assert readonly_pipe.load_balancing_strategy == load_balancing_strategy
+            assert readonly_pipe.get(key).get(key).execute() == ["MOCK_OK", "MOCK_OK"]
+            slot_nodes = ro.nodes_manager.slots_cache[ro.keyslot(key)]
+            executed_on_replicas_only = True
+            for node in slot_nodes:
+                if node.server_type == PRIMARY:
+                    conn = node.redis_connection.connection
+                    if conn.read_response.called:
+                        executed_on_replicas_only = False
+                        break
+            assert executed_on_replicas_only
 
 
 @pytest.mark.onlycluster

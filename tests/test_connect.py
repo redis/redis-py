@@ -1,4 +1,3 @@
-import logging
 import re
 import socket
 import socketserver
@@ -7,12 +6,9 @@ import threading
 
 import pytest
 from redis.connection import Connection, SSLConnection, UnixDomainSocketConnection
-from redis.exceptions import ConnectionError
+from redis.exceptions import RedisError
 
-from .ssl_utils import get_ssl_filename
-
-_logger = logging.getLogger(__name__)
-
+from .ssl_utils import CertificateType, get_tls_certificates
 
 _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"
@@ -58,40 +54,95 @@ def test_uds_connect(uds_address):
 )
 def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     host, port = tcp_address
-    certfile = get_ssl_filename("server-cert.pem")
-    keyfile = get_ssl_filename("server-key.pem")
+
+    # in order to have working hostname verification, we need to use "localhost"
+    # as redis host as the server certificate is self-signed and only valid for "localhost"
+    host = "localhost"
+    server_certs = get_tls_certificates(cert_type=CertificateType.server)
+
+    conn = SSLConnection(
+        host=host,
+        port=port,
+        ssl_check_hostname=True,
+        client_name=_CLIENT_NAME,
+        ssl_ca_certs=server_certs.ca_certfile,
+        socket_timeout=10,
+        ssl_min_version=ssl_min_version,
+    )
+    _assert_connect(
+        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+    )
+
+
+@pytest.mark.ssl
+@pytest.mark.parametrize(
+    "ssl_ciphers",
+    [
+        "AES256-SHA:DHE-RSA-AES256-SHA:AES128-SHA:DHE-RSA-AES128-SHA",
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "ECDHE-RSA-AES128-GCM-SHA256",
+    ],
+)
+def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
+    host, port = tcp_address
+
+    # in order to have working hostname verification, we need to use "localhost"
+    # as redis host as the server certificate is self-signed and only valid for "localhost"
+    host = "localhost"
+
+    server_certs = get_tls_certificates(cert_type=CertificateType.server)
+
     conn = SSLConnection(
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
-        ssl_ca_certs=certfile,
+        ssl_ca_certs=server_certs.ca_certfile,
         socket_timeout=10,
-        ssl_min_version=ssl_min_version,
+        ssl_min_version=ssl.TLSVersion.TLSv1_2,
+        ssl_ciphers=ssl_ciphers,
     )
-    _assert_connect(conn, tcp_address, certfile=certfile, keyfile=keyfile)
+    _assert_connect(
+        conn, tcp_address, certfile=server_certs.certfile, keyfile=server_certs.keyfile
+    )
+
+
+"""
+Addresses bug CAE-333 which uncovered that the init method of the base
+class did override the initialization of the socket_timeout parameter.
+"""
+
+
+def test_unix_socket_with_timeout():
+    conn = UnixDomainSocketConnection(socket_timeout=1000)
+
+    # Check if the base class defaults were taken over.
+    assert conn.db == 0
+
+    # Verify if the timeout and the path is set correctly.
+    assert conn.socket_timeout == 1000
+    assert conn.path == ""
 
 
 @pytest.mark.ssl
 @pytest.mark.skipif(not ssl.HAS_TLSv1_3, reason="requires TLSv1.3")
 def test_tcp_ssl_version_mismatch(tcp_address):
     host, port = tcp_address
-    certfile = get_ssl_filename("server-cert.pem")
-    keyfile = get_ssl_filename("server-key.pem")
+    certfile, keyfile, _ = get_tls_certificates(cert_type=CertificateType.server)
     conn = SSLConnection(
         host=host,
         port=port,
         client_name=_CLIENT_NAME,
         ssl_ca_certs=certfile,
-        socket_timeout=10,
+        socket_timeout=3,
         ssl_min_version=ssl.TLSVersion.TLSv1_3,
     )
-    with pytest.raises(ConnectionError):
+    with pytest.raises(RedisError):
         _assert_connect(
             conn,
             tcp_address,
             certfile=certfile,
             keyfile=keyfile,
-            ssl_version=ssl.PROTOCOL_TLSv1_2,
+            maximum_ssl_version=ssl.TLSVersion.TLSv1_2,
         )
 
 
@@ -120,14 +171,16 @@ class _RedisTCPServer(socketserver.TCPServer):
         *args,
         certfile=None,
         keyfile=None,
-        ssl_version=ssl.PROTOCOL_TLS,
+        minimum_ssl_version=ssl.TLSVersion.TLSv1_2,
+        maximum_ssl_version=ssl.TLSVersion.TLSv1_3,
         **kw,
     ) -> None:
         self._ready_event = threading.Event()
         self._stop_requested = False
         self._certfile = certfile
         self._keyfile = keyfile
-        self._ssl_version = ssl_version
+        self._minimum_ssl_version = minimum_ssl_version
+        self._maximum_ssl_version = maximum_ssl_version
         super().__init__(*args, **kw)
 
     def service_actions(self):
@@ -147,13 +200,11 @@ class _RedisTCPServer(socketserver.TCPServer):
         if self._certfile is None:
             return super().get_request()
         newsocket, fromaddr = self.socket.accept()
-        connstream = ssl.wrap_socket(
-            newsocket,
-            server_side=True,
-            certfile=self._certfile,
-            keyfile=self._keyfile,
-            ssl_version=self._ssl_version,
-        )
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.load_cert_chain(certfile=self._certfile, keyfile=self._keyfile)
+        context.minimum_version = self._minimum_ssl_version
+        context.maximum_version = self._maximum_ssl_version
+        connstream = context.wrap_socket(newsocket, server_side=True)
         return connstream, fromaddr
 
 
@@ -184,10 +235,10 @@ else:
 
 class _RedisRequestHandler(socketserver.StreamRequestHandler):
     def setup(self):
-        _logger.info("%s connected", self.client_address)
+        pass
 
     def finish(self):
-        _logger.info("%s disconnected", self.client_address)
+        pass
 
     def handle(self):
         buffer = b""
@@ -205,7 +256,6 @@ class _RedisRequestHandler(socketserver.StreamRequestHandler):
             buffer = parts[-1]
             for fragment in parts[:-1]:
                 fragment = fragment.decode()
-                _logger.info("Command fragment: %s", fragment)
 
                 if fragment.startswith("*") and command is None:
                     command = [None for _ in range(int(fragment[1:]))]
@@ -225,9 +275,6 @@ class _RedisRequestHandler(socketserver.StreamRequestHandler):
                     continue
 
                 command = " ".join(command)
-                _logger.info("Command %s", command)
                 resp = _SUPPORTED_CMDS.get(command, _ERROR_RESP)
-                _logger.info("Response %s", resp)
                 self.request.sendall(resp)
                 command = None
-        _logger.info("Exit handler")

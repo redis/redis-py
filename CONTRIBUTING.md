@@ -32,13 +32,13 @@ Here's how to get started with your code contribution:
 
 1.  Create your own fork of redis-py
 2.  Do the changes in your fork
-3.
-    *Create a virtualenv and install the development dependencies from the dev_requirements.txt file:*
-
-        a.  python -m venv .venv
-        b.  source .venv/bin/activate
-        c.  pip install -r dev_requirements.txt
-        c.  pip install -r requirements.txt
+3.  Create a virtualenv and install the development dependencies from the dev_requirements.txt file:
+    ```
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -r dev_requirements.txt
+    pip install -e .[jwt]
+    ```
 
 4.  If you need a development environment, run `invoke devenv`. Note: this relies on docker-compose to build environments, and assumes that you have a version supporting [docker profiles](https://docs.docker.com/compose/profiles/).
 5.  While developing, make sure the tests pass by running `invoke tests`
@@ -80,6 +80,19 @@ using `invoke standalone-tests`; similarly, RedisCluster tests can be run by usi
 
 Each run of tests starts and stops the various dockers required. Sometimes
 things get stuck, an `invoke clean` can help.
+
+## Documentation
+
+If relevant, update the code documentation, via docstrings, or in `/docs`.
+
+You can check how the documentation looks locally by running `invoke build-docs`
+and loading the generated HTML files in a browser.
+
+Historically there is a mix of styles in the docstrings, but the preferred way
+of documenting code is by applying the
+[Google style](https://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html).
+Type hints should be added according to PEP484, and should not be repeated in
+the docstrings.
 
 ### Docker Tips
 

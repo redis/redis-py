@@ -1,7 +1,7 @@
 import sys
 from abc import ABC
 from asyncio import IncompleteReadError, StreamReader, TimeoutError
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, Protocol, Union
 
 if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
     from asyncio import timeout as async_timeout
@@ -9,26 +9,32 @@ else:
     from async_timeout import timeout as async_timeout
 
 from ..exceptions import (
+    AskError,
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
     BusyLoadingError,
+    ClusterCrossSlotError,
+    ClusterDownError,
     ConnectionError,
     ExecAbortError,
+    MasterDownError,
     ModuleError,
+    MovedError,
     NoPermissionError,
     NoScriptError,
     OutOfMemoryError,
     ReadOnlyError,
     RedisError,
     ResponseError,
+    TryAgainError,
 )
 from ..typing import EncodableT
 from .encoders import Encoder
 from .socket import SERVER_CLOSED_CONNECTION_ERROR, SocketBuffer
 
-MODULE_LOAD_ERROR = "Error loading the extension. " "Please check the server logs."
+MODULE_LOAD_ERROR = "Error loading the extension. Please check the server logs."
 NO_SUCH_MODULE_ERROR = "Error unloading module: no such module with that name"
-MODULE_UNLOAD_NOT_POSSIBLE_ERROR = "Error unloading module: operation not " "possible."
+MODULE_UNLOAD_NOT_POSSIBLE_ERROR = "Error unloading module: operation not possible."
 MODULE_EXPORTS_DATA_TYPES_ERROR = (
     "Error unloading module: the module "
     "exports one or more module-side data "
@@ -72,6 +78,12 @@ class BaseParser(ABC):
         "READONLY": ReadOnlyError,
         "NOAUTH": AuthenticationError,
         "NOPERM": NoPermissionError,
+        "ASK": AskError,
+        "TRYAGAIN": TryAgainError,
+        "MOVED": MovedError,
+        "CLUSTERDOWN": ClusterDownError,
+        "CROSSSLOT": ClusterCrossSlotError,
+        "MASTERDOWN": MasterDownError,
     }
 
     @classmethod
@@ -144,6 +156,58 @@ class AsyncBaseParser(BaseParser):
         self, disable_decoding: bool = False
     ) -> Union[EncodableT, ResponseError, None, List[EncodableT]]:
         raise NotImplementedError()
+
+
+_INVALIDATION_MESSAGE = [b"invalidate", "invalidate"]
+
+
+class PushNotificationsParser(Protocol):
+    """Protocol defining RESP3-specific parsing functionality"""
+
+    pubsub_push_handler_func: Callable
+    invalidation_push_handler_func: Optional[Callable] = None
+
+    def handle_pubsub_push_response(self, response):
+        """Handle pubsub push responses"""
+        raise NotImplementedError()
+
+    def handle_push_response(self, response, **kwargs):
+        if response[0] not in _INVALIDATION_MESSAGE:
+            return self.pubsub_push_handler_func(response)
+        if self.invalidation_push_handler_func:
+            return self.invalidation_push_handler_func(response)
+
+    def set_pubsub_push_handler(self, pubsub_push_handler_func):
+        self.pubsub_push_handler_func = pubsub_push_handler_func
+
+    def set_invalidation_push_handler(self, invalidation_push_handler_func):
+        self.invalidation_push_handler_func = invalidation_push_handler_func
+
+
+class AsyncPushNotificationsParser(Protocol):
+    """Protocol defining async RESP3-specific parsing functionality"""
+
+    pubsub_push_handler_func: Callable
+    invalidation_push_handler_func: Optional[Callable] = None
+
+    async def handle_pubsub_push_response(self, response):
+        """Handle pubsub push responses asynchronously"""
+        raise NotImplementedError()
+
+    async def handle_push_response(self, response, **kwargs):
+        """Handle push responses asynchronously"""
+        if response[0] not in _INVALIDATION_MESSAGE:
+            return await self.pubsub_push_handler_func(response)
+        if self.invalidation_push_handler_func:
+            return await self.invalidation_push_handler_func(response)
+
+    def set_pubsub_push_handler(self, pubsub_push_handler_func):
+        """Set the pubsub push handler function"""
+        self.pubsub_push_handler_func = pubsub_push_handler_func
+
+    def set_invalidation_push_handler(self, invalidation_push_handler_func):
+        """Set the invalidation push handler function"""
+        self.invalidation_push_handler_func = invalidation_push_handler_func
 
 
 class _AsyncRESPBase(AsyncBaseParser):

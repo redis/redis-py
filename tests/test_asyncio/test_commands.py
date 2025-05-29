@@ -1,6 +1,7 @@
 """
 Tests async overrides of commands from their mixins
 """
+
 import asyncio
 import binascii
 import datetime
@@ -19,6 +20,9 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis.commands.json.path import Path
+from redis.commands.search.field import TextField
+from redis.commands.search.query import Query
 from tests.conftest import (
     assert_resp_response,
     assert_resp_response_in,
@@ -27,6 +31,7 @@ from tests.conftest import (
     skip_if_server_version_lt,
     skip_unless_arch_bits,
 )
+from tests.test_asyncio.test_utils import redis_server_time
 
 if sys.version_info >= (3, 11, 3):
     from asyncio import timeout as async_timeout
@@ -48,6 +53,12 @@ async def r_teardown(r: redis.Redis):
         return r
 
     yield factory
+    try:
+        client_info = await r.client_info()
+    except exceptions.NoPermissionError:
+        client_info = {}
+    if "default" != client_info.get("user", ""):
+        await r.auth("", "default")
     for username in usernames:
         await r.acl_deluser(username)
 
@@ -65,12 +76,6 @@ async def slowlog(r: redis.Redis):
 
     await r.config_set("slowlog-log-slower-than", old_slower_than_value)
     await r.config_set("slowlog-max-len", old_max_legnth_value)
-
-
-async def redis_server_time(client: redis.Redis):
-    seconds, milliseconds = await client.time()
-    timestamp = float(f"{seconds}.{milliseconds}")
-    return datetime.datetime.fromtimestamp(timestamp)
 
 
 async def get_stream_message(client: redis.Redis, stream: str, message_id: str):
@@ -114,11 +119,64 @@ class TestRedisCommands:
         assert isinstance(categories, list)
         assert "read" in categories or b"read" in categories
 
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    async def test_acl_cat_contain_modules_no_category(self, r: redis.Redis):
+        modules_list = [
+            "search",
+            "bloom",
+            "json",
+            "cuckoo",
+            "timeseries",
+            "cms",
+            "topk",
+            "tdigest",
+        ]
+        categories = await r.acl_cat()
+        assert isinstance(categories, list)
+        for module_cat in modules_list:
+            assert module_cat in categories or module_cat.encode() in categories
+
     @skip_if_server_version_lt(REDIS_6_VERSION)
     async def test_acl_cat_with_category(self, r: redis.Redis):
         commands = await r.acl_cat("read")
         assert isinstance(commands, list)
         assert "get" in commands or b"get" in commands
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    async def test_acl_modules_cat_with_category(self, r: redis.Redis):
+        search_commands = await r.acl_cat("search")
+        assert isinstance(search_commands, list)
+        assert "FT.SEARCH" in search_commands or b"FT.SEARCH" in search_commands
+
+        bloom_commands = await r.acl_cat("bloom")
+        assert isinstance(bloom_commands, list)
+        assert "bf.add" in bloom_commands or b"bf.add" in bloom_commands
+
+        json_commands = await r.acl_cat("json")
+        assert isinstance(json_commands, list)
+        assert "json.get" in json_commands or b"json.get" in json_commands
+
+        cuckoo_commands = await r.acl_cat("cuckoo")
+        assert isinstance(cuckoo_commands, list)
+        assert "cf.insert" in cuckoo_commands or b"cf.insert" in cuckoo_commands
+
+        cms_commands = await r.acl_cat("cms")
+        assert isinstance(cms_commands, list)
+        assert "cms.query" in cms_commands or b"cms.query" in cms_commands
+
+        topk_commands = await r.acl_cat("topk")
+        assert isinstance(topk_commands, list)
+        assert "topk.list" in topk_commands or b"topk.list" in topk_commands
+
+        tdigest_commands = await r.acl_cat("tdigest")
+        assert isinstance(tdigest_commands, list)
+        assert "tdigest.rank" in tdigest_commands or b"tdigest.rank" in tdigest_commands
+
+        timeseries_commands = await r.acl_cat("timeseries")
+        assert isinstance(timeseries_commands, list)
+        assert "ts.range" in timeseries_commands or b"ts.range" in timeseries_commands
 
     @skip_if_server_version_lt(REDIS_6_VERSION)
     async def test_acl_deluser(self, r_teardown):
@@ -314,6 +372,116 @@ class TestRedisCommands:
     async def test_acl_whoami(self, r: redis.Redis):
         username = await r.acl_whoami()
         assert isinstance(username, (str, bytes))
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    async def test_acl_modules_commands(self, r_teardown):
+        username = "redis-py-user"
+        password = "pass-for-test-user"
+
+        r = r_teardown(username)
+        await r.flushdb()
+
+        await r.ft().create_index((TextField("txt"),))
+        await r.hset("doc1", mapping={"txt": "foo baz"})
+        await r.hset("doc2", mapping={"txt": "foo bar"})
+
+        await r.acl_setuser(
+            username,
+            enabled=True,
+            reset=True,
+            passwords=[f"+{password}"],
+            categories=["-all"],
+            commands=[
+                "+FT.SEARCH",
+                "-FT.DROPINDEX",
+                "+json.set",
+                "+json.get",
+                "-json.clear",
+                "+bf.reserve",
+                "-bf.info",
+                "+cf.reserve",
+                "+cms.initbydim",
+                "+topk.reserve",
+                "+tdigest.create",
+                "+ts.create",
+                "-ts.info",
+            ],
+            keys=["*"],
+        )
+
+        await r.auth(password, username)
+
+        assert await r.ft().search(Query("foo ~bar"))
+        with pytest.raises(exceptions.NoPermissionError):
+            await r.ft().dropindex()
+
+        await r.json().set("foo", Path.root_path(), "bar")
+        assert await r.json().get("foo") == "bar"
+        with pytest.raises(exceptions.NoPermissionError):
+            await r.json().clear("foo")
+
+        assert await r.bf().create("bloom", 0.01, 1000)
+        assert await r.cf().create("cuckoo", 1000)
+        assert await r.cms().initbydim("cmsDim", 100, 5)
+        assert await r.topk().reserve("topk", 5, 100, 5, 0.9)
+        assert await r.tdigest().create("to-tDigest", 10)
+        with pytest.raises(exceptions.NoPermissionError):
+            await r.bf().info("bloom")
+
+        assert await r.ts().create(1, labels={"Redis": "Labs"})
+        with pytest.raises(exceptions.NoPermissionError):
+            await r.ts().info(1)
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    async def test_acl_modules_category_commands(self, r_teardown):
+        username = "redis-py-user"
+        password = "pass-for-test-user"
+
+        r = r_teardown(username)
+        await r.flushdb()
+
+        # validate modules categories acl config
+        await r.acl_setuser(
+            username,
+            enabled=True,
+            reset=True,
+            passwords=[f"+{password}"],
+            categories=[
+                "-all",
+                "+@search",
+                "+@json",
+                "+@bloom",
+                "+@cuckoo",
+                "+@topk",
+                "+@cms",
+                "+@timeseries",
+                "+@tdigest",
+            ],
+            keys=["*"],
+        )
+        await r.ft().create_index((TextField("txt"),))
+        await r.hset("doc1", mapping={"txt": "foo baz"})
+        await r.hset("doc2", mapping={"txt": "foo bar"})
+
+        await r.auth(password, username)
+
+        assert await r.ft().search(Query("foo ~bar"))
+        assert await r.ft().dropindex()
+
+        assert await r.json().set("foo", Path.root_path(), "bar")
+        assert await r.json().get("foo") == "bar"
+
+        assert await r.bf().create("bloom", 0.01, 1000)
+        assert await r.bf().info("bloom")
+        assert await r.cf().create("cuckoo", 1000)
+        assert await r.cms().initbydim("cmsDim", 100, 5)
+        assert await r.topk().reserve("topk", 5, 100, 5, 0.9)
+        assert await r.tdigest().create("to-tDigest", 10)
+
+        assert await r.ts().create(1, labels={"Redis": "Labs"})
+        assert await r.ts().info(1)
 
     @pytest.mark.onlynoncluster
     async def test_client_list(self, r: redis.Redis):
@@ -511,6 +679,45 @@ class TestRedisCommands:
         assert await r.config_set("timeout", 0)
         assert (await r.config_get())["timeout"] == "0"
 
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    async def test_config_get_for_modules(self, r: redis.Redis):
+        search_module_configs = await r.config_get("search-*")
+        assert "search-timeout" in search_module_configs
+
+        ts_module_configs = await r.config_get("ts-*")
+        assert "ts-retention-policy" in ts_module_configs
+
+        bf_module_configs = await r.config_get("bf-*")
+        assert "bf-error-rate" in bf_module_configs
+
+        cf_module_configs = await r.config_get("cf-*")
+        assert "cf-initial-size" in cf_module_configs
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("7.9.0")
+    async def test_config_set_for_search_module(self, r: redis.Redis):
+        config = await r.config_get("*")
+        initial_default_search_dialect = config["search-default-dialect"]
+        try:
+            default_dialect_new = "3"
+            assert await r.config_set("search-default-dialect", default_dialect_new)
+            assert (await r.config_get("*"))[
+                "search-default-dialect"
+            ] == default_dialect_new
+            assert (
+                ((await r.ft().config_get("*"))[b"DEFAULT_DIALECT"]).decode()
+                == default_dialect_new
+            )
+        except AssertionError as ex:
+            raise ex
+        finally:
+            assert await r.config_set(
+                "search-default-dialect", initial_default_search_dialect
+            )
+        with pytest.raises(exceptions.ResponseError):
+            await r.config_set("search-max-doctablesize", 2000000)
+
     @pytest.mark.onlynoncluster
     async def test_dbsize(self, r: redis.Redis):
         await r.set("a", "foo")
@@ -633,7 +840,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("2.6.0")
     @pytest.mark.onlynoncluster
     async def test_bitop_not(self, r: redis.Redis):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         await r.set("a", test_str)
         await r.bitop("not", "r", "a")
@@ -642,7 +849,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("2.6.0")
     @pytest.mark.onlynoncluster
     async def test_bitop_not_in_place(self, r: redis.Redis):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         await r.set("a", test_str)
         await r.bitop("not", "a", "a")
@@ -651,7 +858,7 @@ class TestRedisCommands:
     @skip_if_server_version_lt("2.6.0")
     @pytest.mark.onlynoncluster
     async def test_bitop_single_string(self, r: redis.Redis):
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         await r.set("a", test_str)
         await r.bitop("and", "res1", "a")
         await r.bitop("or", "res2", "a")
@@ -663,8 +870,8 @@ class TestRedisCommands:
     @skip_if_server_version_lt("2.6.0")
     @pytest.mark.onlynoncluster
     async def test_bitop_string_operands(self, r: redis.Redis):
-        await r.set("a", b"\x01\x02\xFF\xFF")
-        await r.set("b", b"\x01\x02\xFF")
+        await r.set("a", b"\x01\x02\xff\xff")
+        await r.set("b", b"\x01\x02\xff")
         await r.bitop("and", "res1", "a", "b")
         await r.bitop("or", "res2", "a", "b")
         await r.bitop("xor", "res3", "a", "b")
@@ -1348,6 +1555,19 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         _, dic = await r.hscan("a", match="a")
         assert dic == {b"a": b"1"}
+        _, dic = await r.hscan("a_notset", match="a")
+        assert dic == {}
+
+    @skip_if_server_version_lt("7.3.240")
+    async def test_hscan_novalues(self, r: redis.Redis):
+        await r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
+        cursor, keys = await r.hscan("a", no_values=True)
+        assert cursor == 0
+        assert sorted(keys) == [b"a", b"b", b"c"]
+        _, keys = await r.hscan("a", match="a", no_values=True)
+        assert keys == [b"a"]
+        _, keys = await r.hscan("a_notset", match="a", no_values=True)
+        assert keys == []
 
     @skip_if_server_version_lt("2.8.0")
     async def test_hscan_iter(self, r: redis.Redis):
@@ -1356,6 +1576,20 @@ class TestRedisCommands:
         assert dic == {b"a": b"1", b"b": b"2", b"c": b"3"}
         dic = {k: v async for k, v in r.hscan_iter("a", match="a")}
         assert dic == {b"a": b"1"}
+        dic = {k: v async for k, v in r.hscan_iter("a_notset", match="a")}
+        assert dic == {}
+
+    @skip_if_server_version_lt("7.3.240")
+    async def test_hscan_iter_novalues(self, r: redis.Redis):
+        await r.hset("a", mapping={"a": 1, "b": 2, "c": 3})
+        keys = list([k async for k in r.hscan_iter("a", no_values=True)])
+        assert sorted(keys) == [b"a", b"b", b"c"]
+        keys = list([k async for k in r.hscan_iter("a", match="a", no_values=True)])
+        assert keys == [b"a"]
+        keys = list(
+            [k async for k in r.hscan_iter("a", match="a_notset", no_values=True)]
+        )
+        assert keys == []
 
     @skip_if_server_version_lt("2.8.0")
     async def test_zscan(self, r: redis.Redis):
@@ -1378,7 +1612,7 @@ class TestRedisCommands:
     async def test_sadd(self, r: redis.Redis):
         members = {b"1", b"2", b"3"}
         await r.sadd("a", *members)
-        assert await r.smembers("a") == members
+        assert set(await r.smembers("a")) == members
 
     async def test_scard(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
@@ -1425,7 +1659,7 @@ class TestRedisCommands:
 
     async def test_smembers(self, r: redis.Redis):
         await r.sadd("a", "1", "2", "3")
-        assert await r.smembers("a") == {b"1", b"2", b"3"}
+        assert set(await r.smembers("a")) == {b"1", b"2", b"3"}
 
     @pytest.mark.onlynoncluster
     async def test_smove(self, r: redis.Redis):
@@ -1440,7 +1674,7 @@ class TestRedisCommands:
         await r.sadd("a", *s)
         value = await r.spop("a")
         assert value in s
-        assert await r.smembers("a") == set(s) - {value}
+        assert set(await r.smembers("a")) == set(s) - {value}
 
     @skip_if_server_version_lt("3.2.0")
     async def test_spop_multi_value(self, r: redis.Redis):
@@ -1453,9 +1687,7 @@ class TestRedisCommands:
             assert value in s
 
         response = await r.spop("a", 1)
-        assert_resp_response(
-            r, response, list(set(s) - set(values)), set(s) - set(values)
-        )
+        assert set(response) == set(s) - set(values)
 
     async def test_srandmember(self, r: redis.Redis):
         s = [b"1", b"2", b"3"]
@@ -1474,20 +1706,20 @@ class TestRedisCommands:
         await r.sadd("a", "1", "2", "3", "4")
         assert await r.srem("a", "5") == 0
         assert await r.srem("a", "2", "4") == 2
-        assert await r.smembers("a") == {b"1", b"3"}
+        assert set(await r.smembers("a")) == {b"1", b"3"}
 
     @pytest.mark.onlynoncluster
     async def test_sunion(self, r: redis.Redis):
         await r.sadd("a", "1", "2")
         await r.sadd("b", "2", "3")
-        assert await r.sunion("a", "b") == {b"1", b"2", b"3"}
+        assert set(await r.sunion("a", "b")) == {b"1", b"2", b"3"}
 
     @pytest.mark.onlynoncluster
     async def test_sunionstore(self, r: redis.Redis):
         await r.sadd("a", "1", "2")
         await r.sadd("b", "2", "3")
         assert await r.sunionstore("c", "a", "b") == 3
-        assert await r.smembers("c") == {b"1", b"2", b"3"}
+        assert set(await r.smembers("c")) == {b"1", b"2", b"3"}
 
     # SORTED SET COMMANDS
     async def test_zadd(self, r: redis.Redis):
@@ -2091,12 +2323,8 @@ class TestRedisCommands:
         assert await r.hmget("a", "a", "b", "c") == [b"1", b"2", b"3"]
 
     async def test_hmset(self, r: redis.Redis):
-        warning_message = (
-            r"^Redis(?:Cluster)*\.hmset\(\) is deprecated\. "
-            r"Use Redis(?:Cluster)*\.hset\(\) instead\.$"
-        )
         h = {b"a": b"1", b"b": b"2", b"c": b"3"}
-        with pytest.warns(DeprecationWarning, match=warning_message):
+        with pytest.warns(DeprecationWarning):
             assert await r.hmset("a", h)
         assert await r.hgetall("a") == h
 
@@ -2891,6 +3119,31 @@ class TestRedisCommands:
         assert info["first-entry"] == await get_stream_message(r, stream, m1)
         assert info["last-entry"] == await get_stream_message(r, stream, m2)
 
+        await r.xtrim(stream, 0)
+        info = await r.xinfo_stream(stream)
+        assert info["length"] == 0
+        assert info["first-entry"] is None
+        assert info["last-entry"] is None
+
+    @skip_if_server_version_lt("6.0.0")
+    async def test_xinfo_stream_full(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+
+        await r.xadd(stream, {"foo": "bar"})
+        info = await r.xinfo_stream(stream, full=True)
+        assert info["length"] == 1
+        assert len(info["groups"]) == 0
+
+        await r.xgroup_create(stream, group, 0)
+        info = await r.xinfo_stream(stream, full=True)
+        assert info["length"] == 1
+
+        await r.xreadgroup(group, "consumer", streams={stream: ">"})
+        info = await r.xinfo_stream(stream, full=True)
+        consumer = info["groups"][0]["consumers"][0]
+        assert isinstance(consumer, dict)
+
     @skip_if_server_version_lt("5.0.0")
     async def test_xlen(self, r: redis.Redis):
         stream = "stream"
@@ -3207,7 +3460,7 @@ class TestRedisCommands:
         assert isinstance(stats, dict)
         for key, value in stats.items():
             if key.startswith("db."):
-                assert isinstance(value, dict)
+                assert not isinstance(value, list)
 
     @skip_if_server_version_lt("4.0.0")
     async def test_memory_usage(self, r: redis.Redis):
