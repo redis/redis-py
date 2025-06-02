@@ -1112,9 +1112,11 @@ class ConnectionPool:
             self._event_dispatcher = EventDispatcher()
 
     def __repr__(self):
+        conn_kwargs = ",".join([f"{k}={v}" for k, v in self.connection_kwargs.items()])
         return (
             f"<{self.__class__.__module__}.{self.__class__.__name__}"
-            f"({self.connection_class(**self.connection_kwargs)!r})>"
+            f"(<{self.connection_class.__module__}.{self.connection_class.__name__}"
+            f"({conn_kwargs})>)>"
         )
 
     def reset(self):
