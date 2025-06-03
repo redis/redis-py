@@ -1,62 +1,20 @@
 from asyncio import sleep
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Tuple, Type, TypeVar
+from typing import Any, Awaitable, Callable, Tuple, Type, TypeVar
 
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
-
-if TYPE_CHECKING:
-    from redis.backoff import AbstractBackoff
-
+from redis.retry import AbstractRetry
 
 T = TypeVar("T")
 
 
-class Retry:
-    """Retry a specific number of times after a failure"""
-
-    __slots__ = "_backoff", "_retries", "_supported_errors"
-
-    def __init__(
-        self,
-        backoff: "AbstractBackoff",
-        retries: int,
-        supported_errors: Tuple[Type[RedisError], ...] = (
-            ConnectionError,
-            TimeoutError,
-        ),
-    ):
-        """
-        Initialize a `Retry` object with a `Backoff` object
-        that retries a maximum of `retries` times.
-        `retries` can be negative to retry forever.
-        You can specify the types of supported errors which trigger
-        a retry with the `supported_errors` parameter.
-        """
-        self._backoff = backoff
-        self._retries = retries
-        self._supported_errors = supported_errors
-
-    def update_supported_errors(self, specified_errors: list):
-        """
-        Updates the supported errors with the specified error types
-        """
-        self._supported_errors = tuple(
-            set(self._supported_errors + tuple(specified_errors))
-        )
-
-    def get_retries(self) -> int:
-        """
-        Get the number of retries.
-        """
-        return self._retries
-
-    def update_retries(self, value: int) -> None:
-        """
-        Set the number of retries.
-        """
-        self._retries = value
+class Retry(AbstractRetry):
+    _supported_errors: Tuple[Type[RedisError], ...] = (
+        ConnectionError,
+        TimeoutError,
+    )
 
     async def call_with_retry(
-        self, do: Callable[[], Awaitable[T]], fail: Callable[[RedisError], Any]
+        self, do: Callable[[], Awaitable[T]], fail: Callable[[Exception], Any]
     ) -> T:
         """
         Execute an operation that might fail and returns its result, or
