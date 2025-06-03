@@ -170,7 +170,7 @@ class ExponentialWithJitterBackoff(AbstractBackoff):
         return hash((self._base, self._cap))
 
     def __eq__(self, other) -> bool:
-        if not isinstance(other, EqualJitterBackoff):
+        if not isinstance(other, ExponentialWithJitterBackoff):
             return NotImplemented
 
         return self._base == other._base and self._cap == other._cap
