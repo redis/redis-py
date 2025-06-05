@@ -1,6 +1,5 @@
 import random
 import weakref
-from functools import reduce
 from typing import Optional
 
 from redis.client import Redis
@@ -275,7 +274,7 @@ class Sentinel(SentinelCommands):
         if return_responses:
             return responses
 
-        return bool(reduce(lambda x, y: x and y, responses))
+        return all(responses)
 
     def __repr__(self):
         sentinel_addresses = []

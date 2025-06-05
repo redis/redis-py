@@ -1,7 +1,6 @@
 import asyncio
 import random
 import weakref
-from functools import reduce
 from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type
 
 from redis.asyncio.client import Redis
@@ -248,7 +247,7 @@ class Sentinel(AsyncSentinelCommands):
         if return_responses:
             return responses
 
-        return bool(reduce(lambda x, y: x and y, responses))
+        return all(responses)
 
     def __repr__(self):
         sentinel_addresses = []
