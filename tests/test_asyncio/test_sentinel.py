@@ -321,7 +321,9 @@ async def test_repr_correctly_represents_connection_object(sentinel):
 # Tests against real sentinel instances
 @pytest.mark.onlynoncluster
 async def test_get_sentinels(deployed_sentinel):
-    resps = await deployed_sentinel.sentinel_sentinels("redis-py-test")
+    resps = await deployed_sentinel.sentinel_sentinels(
+        "redis-py-test", return_responses=True
+    )
 
     # validate that the original command response is returned
     assert isinstance(resps, list)
@@ -330,10 +332,17 @@ async def test_get_sentinels(deployed_sentinel):
     # each response from each sentinel is returned
     assert len(resps) > 1
 
+    # validate default behavior
+    resps = await deployed_sentinel.sentinel_sentinels("redis-py-test")
+    assert isinstance(resps, bool)
+
 
 @pytest.mark.onlynoncluster
 async def test_get_master_addr_by_name(deployed_sentinel):
-    resps = await deployed_sentinel.sentinel_get_master_addr_by_name("redis-py-test")
+    resps = await deployed_sentinel.sentinel_get_master_addr_by_name(
+        "redis-py-test",
+        return_responses=True,
+    )
 
     # validate that the original command response is returned
     assert isinstance(resps, list)
@@ -343,6 +352,10 @@ async def test_get_master_addr_by_name(deployed_sentinel):
     assert len(resps) == 1
 
     assert isinstance(resps[0], tuple)
+
+    # validate default behavior
+    resps = await deployed_sentinel.sentinel_get_master_addr_by_name("redis-py-test")
+    assert isinstance(resps, bool)
 
 
 @pytest.mark.onlynoncluster

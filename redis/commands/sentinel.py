@@ -11,19 +11,25 @@ class SentinelCommands:
         """Redis Sentinel's SENTINEL command."""
         warnings.warn(DeprecationWarning("Use the individual sentinel_* methods"))
 
-    def sentinel_get_master_addr_by_name(self, service_name):
-        """Returns a (host, port) pair for the given ``service_name``"""
+    def sentinel_get_master_addr_by_name(self, service_name, return_responses=False):
+        """
+        Returns a (host, port) pair for the given ``service_name`` when return_responses is True,
+        otherwise returns a boolean value that indicates if the command was successful.
+        """
         return self.execute_command(
             "SENTINEL GET-MASTER-ADDR-BY-NAME",
             service_name,
             once=True,
-            return_responses=True,
+            return_responses=return_responses,
         )
 
-    def sentinel_master(self, service_name):
-        """Returns a dictionary containing the specified masters state."""
+    def sentinel_master(self, service_name, return_responses=False):
+        """
+        Returns a dictionary containing the specified masters state, when return_responses is True,
+        otherwise returns a boolean value that indicates if the command was successful.
+        """
         return self.execute_command(
-            "SENTINEL MASTER", service_name, return_responses=True
+            "SENTINEL MASTER", service_name, return_responses=return_responses
         )
 
     def sentinel_masters(self):
@@ -44,10 +50,13 @@ class SentinelCommands:
         """Remove a master from Sentinel's monitoring"""
         return self.execute_command("SENTINEL REMOVE", name)
 
-    def sentinel_sentinels(self, service_name):
-        """Returns a list of sentinels for ``service_name``"""
+    def sentinel_sentinels(self, service_name, return_responses=False):
+        """
+        Returns a list of sentinels for ``service_name``, when return_responses is True,
+        otherwise returns a boolean value that indicates if the command was successful.
+        """
         return self.execute_command(
-            "SENTINEL SENTINELS", service_name, return_responses=True
+            "SENTINEL SENTINELS", service_name, return_responses=return_responses
         )
 
     def sentinel_set(self, name, option, value):

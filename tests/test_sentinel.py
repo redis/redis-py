@@ -303,7 +303,7 @@ def test_auto_close_pool(cluster, sentinel, method_name):
 # Tests against real sentinel instances
 @pytest.mark.onlynoncluster
 def test_get_sentinels(deployed_sentinel):
-    resps = deployed_sentinel.sentinel_sentinels("redis-py-test")
+    resps = deployed_sentinel.sentinel_sentinels("redis-py-test", return_responses=True)
 
     # validate that the original command response is returned
     assert isinstance(resps, list)
@@ -312,10 +312,16 @@ def test_get_sentinels(deployed_sentinel):
     # each response from each sentinel is returned
     assert len(resps) > 1
 
+    # validate default behavior
+    resps = deployed_sentinel.sentinel_sentinels("redis-py-test")
+    assert isinstance(resps, bool)
+
 
 @pytest.mark.onlynoncluster
 def test_get_master_addr_by_name(deployed_sentinel):
-    resps = deployed_sentinel.sentinel_get_master_addr_by_name("redis-py-test")
+    resps = deployed_sentinel.sentinel_get_master_addr_by_name(
+        "redis-py-test", return_responses=True
+    )
 
     # validate that the original command response is returned
     assert isinstance(resps, list)
@@ -325,6 +331,10 @@ def test_get_master_addr_by_name(deployed_sentinel):
     assert len(resps) == 1
 
     assert isinstance(resps[0], tuple)
+
+    # validate default behavior
+    resps = deployed_sentinel.sentinel_get_master_addr_by_name("redis-py-test")
+    assert isinstance(resps, bool)
 
 
 @pytest.mark.onlynoncluster
