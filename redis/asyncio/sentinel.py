@@ -223,19 +223,31 @@ class Sentinel(AsyncSentinelCommands):
         once - If set to True, then execute the resulting command on a single
                node at random, rather than across the entire sentinel cluster.
         """
-        once = bool(kwargs.get("once", False))
-        if "once" in kwargs.keys():
-            kwargs.pop("once")
+        once = bool(kwargs.pop("once", False))
+
+        # Check if command is supposed to return the original
+        # responses instead of boolean value.
+        return_responses = bool(kwargs.pop("return_responses", False))
 
         if once:
-            await random.choice(self.sentinels).execute_command(*args, **kwargs)
-        else:
-            tasks = [
-                asyncio.Task(sentinel.execute_command(*args, **kwargs))
-                for sentinel in self.sentinels
-            ]
-            await asyncio.gather(*tasks)
-        return True
+            response = await random.choice(self.sentinels).execute_command(
+                *args, **kwargs
+            )
+            if return_responses:
+                return [response]
+            else:
+                return True if response else False
+
+        tasks = [
+            asyncio.Task(sentinel.execute_command(*args, **kwargs))
+            for sentinel in self.sentinels
+        ]
+        responses = await asyncio.gather(*tasks)
+
+        if return_responses:
+            return responses
+
+        return all(responses)
 
     def __repr__(self):
         sentinel_addresses = []
