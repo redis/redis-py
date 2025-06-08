@@ -4,7 +4,9 @@ import os
 import time
 from io import TextIOWrapper
 
+import numpy as np
 import pytest
+from redis import ResponseError
 import redis
 import redis.commands.search
 import redis.commands.search.aggregation as aggregations
@@ -19,16 +21,18 @@ from redis.commands.search.field import (
     TextField,
     VectorField,
 )
-from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
 
 from .conftest import (
     _get_client,
-    assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
+    skip_if_resp_version,
+    skip_if_server_version_gte,
+    skip_if_server_version_lt,
     skip_ifmodversion_lt,
 )
 
@@ -44,8 +48,8 @@ TITLES_CSV = os.path.abspath(
 def waitForIndex(env, idx, timeout=None):
     delay = 0.1
     while True:
-        res = env.execute_command("FT.INFO", idx)
         try:
+            res = env.execute_command("FT.INFO", idx)
             if int(res[res.index("indexing") + 1]) == 0:
                 break
         except ValueError:
@@ -56,6 +60,10 @@ def waitForIndex(env, idx, timeout=None):
                     break
             except ValueError:
                 break
+        except ResponseError:
+            # index doesn't exist yet
+            # continue to sleep and try again
+            pass
 
         time.sleep(delay)
         if timeout is not None:
@@ -311,6 +319,7 @@ def test_client(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_server_version_gte("7.9.0")
 def test_scores(client):
     client.ft().create_index((TextField("txt"),))
 
@@ -328,6 +337,29 @@ def test_scores(client):
         assert 2 == res["total_results"]
         assert "doc2" == res["results"][0]["id"]
         assert 3.0 == res["results"][0]["score"]
+        assert "doc1" == res["results"][1]["id"]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.9.0")
+def test_scores_with_new_default_scorer(client):
+    client.ft().create_index((TextField("txt"),))
+
+    client.hset("doc1", mapping={"txt": "foo baz"})
+    client.hset("doc2", mapping={"txt": "foo bar"})
+
+    q = Query("foo ~bar").with_scores()
+    res = client.ft().search(q)
+    if is_resp2_connection(client):
+        assert 2 == res.total
+        assert "doc2" == res.docs[0].id
+        assert 0.87 == pytest.approx(res.docs[0].score, 0.01)
+        assert "doc1" == res.docs[1].id
+    else:
+        assert 2 == res["total_results"]
+        assert "doc2" == res["results"][0]["id"]
+        assert 0.87 == pytest.approx(res["results"][0]["score"], 0.01)
         assert "doc1" == res["results"][1]["id"]
 
 
@@ -620,7 +652,7 @@ def test_summarize(client):
     createIndex(client.ft())
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
 
-    q = Query("king henry").paging(0, 1)
+    q = Query('"king henry"').paging(0, 1)
     q.highlight(fields=("play", "txt"), tags=("<b>", "</b>"))
     q.summarize("txt")
 
@@ -632,7 +664,7 @@ def test_summarize(client):
             == doc.txt
         )
 
-        q = Query("king henry").paging(0, 1).summarize().highlight()
+        q = Query('"king henry"').paging(0, 1).summarize().highlight()
 
         doc = sorted(client.ft().search(q).docs)[0]
         assert "<b>Henry</b> ... " == doc.play
@@ -648,7 +680,7 @@ def test_summarize(client):
             == doc["extra_attributes"]["txt"]
         )
 
-        q = Query("king henry").paging(0, 1).summarize().highlight()
+        q = Query('"king henry"').paging(0, 1).summarize().highlight()
 
         doc = sorted(client.ft().search(q)["results"])[0]
         assert "<b>Henry</b> ... " == doc["extra_attributes"]["play"]
@@ -891,7 +923,7 @@ def test_dict_operations(client):
 
     # Dump dict and inspect content
     res = client.ft().dict_dump("custom_dict")
-    assert_resp_response(client, res, ["item1", "item3"], {"item1", "item3"})
+    assert res == ["item1", "item3"]
 
     # Remove rest of the items before reload
     client.ft().dict_del("custom_dict", *res)
@@ -931,6 +963,9 @@ def test_phonetic_matcher(client):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+# NOTE(imalinovskyi): This test contains hardcoded scores valid only for RediSearch 2.8+
+@skip_ifmodversion_lt("2.8.0", "search")
+@skip_if_server_version_gte("7.9.0")
 def test_scorer(client):
     client.ft().create_index((TextField("description"),))
 
@@ -978,6 +1013,55 @@ def test_scorer(client):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.9.0")
+def test_scorer_with_new_default_scorer(client):
+    client.ft().create_index((TextField("description"),))
+
+    client.hset(
+        "doc1", mapping={"description": "The quick brown fox jumps over the lazy dog"}
+    )
+    client.hset(
+        "doc2",
+        mapping={
+            "description": "Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do."  # noqa
+        },
+    )
+
+    # default scorer is BM25STD
+    if is_resp2_connection(client):
+        res = client.ft().search(Query("quick").with_scores())
+        assert 0.23 == pytest.approx(res.docs[0].score, 0.05)
+        res = client.ft().search(Query("quick").scorer("TFIDF").with_scores())
+        assert 1.0 == res.docs[0].score
+        res = client.ft().search(Query("quick").scorer("TFIDF.DOCNORM").with_scores())
+        assert 0.14285714285714285 == res.docs[0].score
+        res = client.ft().search(Query("quick").scorer("BM25").with_scores())
+        assert 0.22471909420069797 == res.docs[0].score
+        res = client.ft().search(Query("quick").scorer("DISMAX").with_scores())
+        assert 2.0 == res.docs[0].score
+        res = client.ft().search(Query("quick").scorer("DOCSCORE").with_scores())
+        assert 1.0 == res.docs[0].score
+        res = client.ft().search(Query("quick").scorer("HAMMING").with_scores())
+        assert 0.0 == res.docs[0].score
+    else:
+        res = client.ft().search(Query("quick").with_scores())
+        assert 0.23 == pytest.approx(res["results"][0]["score"], 0.05)
+        res = client.ft().search(Query("quick").scorer("TFIDF").with_scores())
+        assert 1.0 == res["results"][0]["score"]
+        res = client.ft().search(Query("quick").scorer("TFIDF.DOCNORM").with_scores())
+        assert 0.14285714285714285 == res["results"][0]["score"]
+        res = client.ft().search(Query("quick").scorer("BM25").with_scores())
+        assert 0.22471909420069797 == res["results"][0]["score"]
+        res = client.ft().search(Query("quick").scorer("DISMAX").with_scores())
+        assert 2.0 == res["results"][0]["score"]
+        res = client.ft().search(Query("quick").scorer("DOCSCORE").with_scores())
+        assert 1.0 == res["results"][0]["score"]
+        res = client.ft().search(Query("quick").scorer("HAMMING").with_scores())
+        assert 0.0 == res["results"][0]["score"]
+
+
+@pytest.mark.redismod
 def test_get(client):
     client.ft().create_index((TextField("f1"), TextField("f2")))
 
@@ -1003,6 +1087,7 @@ def test_get(client):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
+@skip_if_server_version_gte("7.9.0")
 def test_config(client):
     assert client.ft().config_set("TIMEOUT", "100")
     with pytest.raises(redis.ResponseError):
@@ -1011,6 +1096,19 @@ def test_config(client):
     assert "100" == res["TIMEOUT"]
     res = client.ft().config_get("TIMEOUT")
     assert "100" == res["TIMEOUT"]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.9.0")
+def test_config_with_removed_ftconfig(client):
+    assert client.config_set("timeout", "100")
+    with pytest.raises(redis.ResponseError):
+        client.config_set("timeout", "null")
+    res = client.config_get("*")
+    assert "100" == res["timeout"]
+    res = client.config_get("timeout")
+    assert "100" == res["timeout"]
 
 
 @pytest.mark.redismod
@@ -1440,6 +1538,87 @@ def test_aggregations_filter(client):
 
 
 @pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+def test_aggregations_add_scores(client):
+    client.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            NumericField("age", sortable=True),
+        )
+    )
+
+    client.hset("doc1", mapping={"name": "bar", "age": "25"})
+    client.hset("doc2", mapping={"name": "foo", "age": "19"})
+
+    req = aggregations.AggregateRequest("*").add_scores()
+    res = client.ft().aggregate(req)
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+        assert res["results"][0]["extra_attributes"] == {"__score": "0.2"}
+        assert res["results"][1]["extra_attributes"] == {"__score": "0.2"}
+    else:
+        assert len(res.rows) == 2
+        assert res.rows[0] == ["__score", "0.2"]
+        assert res.rows[1] == ["__score", "0.2"]
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+async def test_aggregations_hybrid_scoring(client):
+    client.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            TextField("description", sortable=True, weight=5.0),
+            VectorField(
+                "vector",
+                "HNSW",
+                {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "COSINE"},
+            ),
+        )
+    )
+
+    client.hset(
+        "doc1",
+        mapping={
+            "name": "cat book",
+            "description": "an animal book about cats",
+            "vector": np.array([0.1, 0.2]).astype(np.float32).tobytes(),
+        },
+    )
+    client.hset(
+        "doc2",
+        mapping={
+            "name": "dog book",
+            "description": "an animal book about dogs",
+            "vector": np.array([0.2, 0.1]).astype(np.float32).tobytes(),
+        },
+    )
+
+    query_string = "(@description:animal)=>[KNN 3 @vector $vec_param AS dist]"
+    req = (
+        aggregations.AggregateRequest(query_string)
+        .scorer("BM25")
+        .add_scores()
+        .apply(hybrid_score="@__score + @dist")
+        .load("*")
+        .dialect(4)
+    )
+
+    res = client.ft().aggregate(
+        req,
+        query_params={"vec_param": np.array([0.11, 0.21]).astype(np.float32).tobytes()},
+    )
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+    else:
+        assert len(res.rows) == 2
+        for row in res.rows:
+            len(row) == 6
+
+
+@pytest.mark.redismod
 @skip_ifmodversion_lt("2.0.0", "search")
 def test_index_definition(client):
     """
@@ -1486,6 +1665,7 @@ def test_index_definition(client):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_if_redis_enterprise()
+@skip_if_server_version_gte("7.9.0")
 def test_expire(client):
     client.ft().create_index((TextField("txt", sortable=True),), temporary=4)
     ttl = client.execute_command("ft.debug", "TTL", "idx")
@@ -1536,7 +1716,7 @@ def test_max_text_fields(client):
     with pytest.raises(redis.ResponseError):
         client.ft().alter_schema_add((TextField(f"f{x}"),))
 
-    client.ft().dropindex("idx")
+    client.ft().dropindex()
     # Creating the index definition
     client.ft().create_index((TextField("f0"),), max_text_fields=True)
     # Fill the index with fields
@@ -1703,6 +1883,56 @@ def test_search_return_fields(client):
         assert 1 == len(total["results"])
         assert "doc:1" == total["results"][0]["id"]
         assert "telmatosaurus" == total["results"][0]["extra_attributes"]["txt"]
+
+
+@pytest.mark.redismod
+@skip_if_resp_version(3)
+def test_binary_and_text_fields(client):
+    fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+
+    index_name = "mixed_index"
+    mixed_data = {"first_name": "🐍python", "vector_emb": fake_vec.tobytes()}
+    client.hset(f"{index_name}:1", mapping=mixed_data)
+
+    schema = (
+        TagField("first_name"),
+        VectorField(
+            "embeddings_bio",
+            algorithm="HNSW",
+            attributes={
+                "TYPE": "FLOAT32",
+                "DIM": 4,
+                "DISTANCE_METRIC": "COSINE",
+            },
+        ),
+    )
+
+    client.ft(index_name).create_index(
+        fields=schema,
+        definition=IndexDefinition(
+            prefix=[f"{index_name}:"], index_type=IndexType.HASH
+        ),
+    )
+
+    waitForIndex(client, index_name)
+
+    query = (
+        Query("*")
+        .return_field("vector_emb", decode_field=False)
+        .return_field("first_name")
+    )
+    docs = client.ft(index_name).search(query=query, query_params={}).docs
+    decoded_vec_from_search_results = np.frombuffer(
+        docs[0]["vector_emb"], dtype=np.float32
+    )
+
+    assert np.array_equal(decoded_vec_from_search_results, fake_vec), (
+        "The vectors are not equal"
+    )
+
+    assert docs[0]["first_name"] == mixed_data["first_name"], (
+        "The text field is not decoded correctly"
+    )
 
 
 @pytest.mark.redismod
@@ -1892,6 +2122,8 @@ def test_json_with_jsonpath(client):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_if_redis_enterprise()
+@skip_if_server_version_gte("7.9.0")
+@skip_if_server_version_lt("6.3.0")
 def test_profile(client):
     client.ft().create_index((TextField("t"),))
     client.ft().client.hset("1", "t", "hello")
@@ -1901,10 +2133,9 @@ def test_profile(client):
     q = Query("hello|world").no_content()
     if is_resp2_connection(client):
         res, det = client.ft().profile(q)
-        assert det["Iterators profile"]["Counter"] == 2.0
-        assert len(det["Iterators profile"]["Child iterators"]) == 2
-        assert det["Iterators profile"]["Type"] == "UNION"
-        assert det["Parsing time"] < 0.5
+        det = det.info
+
+        assert isinstance(det, list)
         assert len(res.docs) == 2  # check also the search result
 
         # check using AggregateRequest
@@ -1914,15 +2145,14 @@ def test_profile(client):
             .apply(prefix="startswith(@t, 'hel')")
         )
         res, det = client.ft().profile(req)
-        assert det["Iterators profile"]["Counter"] == 2
-        assert det["Iterators profile"]["Type"] == "WILDCARD"
-        assert isinstance(det["Parsing time"], float)
+        det = det.info
+        assert isinstance(det, list)
         assert len(res.rows) == 2  # check also the search result
     else:
         res = client.ft().profile(q)
-        assert res["profile"]["Iterators profile"][0]["Counter"] == 2.0
-        assert res["profile"]["Iterators profile"][0]["Type"] == "UNION"
-        assert res["profile"]["Parsing time"] < 0.5
+        res = res.info
+
+        assert isinstance(res, dict)
         assert len(res["results"]) == 2  # check also the search result
 
         # check using AggregateRequest
@@ -1932,14 +2162,97 @@ def test_profile(client):
             .apply(prefix="startswith(@t, 'hel')")
         )
         res = client.ft().profile(req)
-        assert res["profile"]["Iterators profile"][0]["Counter"] == 2
-        assert res["profile"]["Iterators profile"][0]["Type"] == "WILDCARD"
-        assert isinstance(res["profile"]["Parsing time"], float)
+        res = res.info
+
+        assert isinstance(res, dict)
         assert len(res["results"]) == 2  # check also the search result
 
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
+@skip_if_server_version_lt("7.9.0")
+def test_profile_with_coordinator(client):
+    client.ft().create_index((TextField("t"),))
+    client.ft().client.hset("1", "t", "hello")
+    client.ft().client.hset("2", "t", "world")
+
+    # check using Query
+    q = Query("hello|world").no_content()
+    if is_resp2_connection(client):
+        res, det = client.ft().profile(q)
+        det = det.info
+
+        assert isinstance(det, list)
+        assert len(res.docs) == 2  # check also the search result
+
+        # check using AggregateRequest
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("t")
+            .apply(prefix="startswith(@t, 'hel')")
+        )
+        res, det = client.ft().profile(req)
+        det = det.info
+
+        assert isinstance(det, list)
+        assert det[0] == "Shards"
+        assert det[2] == "Coordinator"
+        assert len(res.rows) == 2  # check also the search result
+    else:
+        res = client.ft().profile(q)
+        res = res.info
+
+        assert isinstance(res, dict)
+        assert len(res["Results"]["results"]) == 2  # check also the search result
+
+        # check using AggregateRequest
+        req = (
+            aggregations.AggregateRequest("*")
+            .load("t")
+            .apply(prefix="startswith(@t, 'hel')")
+        )
+        res = client.ft().profile(req)
+        res = res.info
+
+        assert isinstance(res, dict)
+        assert len(res["Results"]["results"]) == 2  # check also the search result
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_redis_enterprise()
+@skip_if_server_version_gte("6.3.0")
+def test_profile_with_no_warnings(client):
+    client.ft().create_index((TextField("t"),))
+    client.ft().client.hset("1", "t", "hello")
+    client.ft().client.hset("2", "t", "world")
+
+    # check using Query
+    q = Query("hello|world").no_content()
+    res, det = client.ft().profile(q)
+    det = det.info
+
+    assert isinstance(det, list)
+    assert len(res.docs) == 2  # check also the search result
+
+    # check using AggregateRequest
+    req = (
+        aggregations.AggregateRequest("*")
+        .load("t")
+        .apply(prefix="startswith(@t, 'hel')")
+    )
+    res, det = client.ft().profile(req)
+    det = det.info
+
+    assert isinstance(det, list)
+    assert len(res.rows) == 2  # check also the search result
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_gte("7.9.0")
+@skip_if_server_version_lt("6.3.0")
 def test_profile_limited(client):
     client.ft().create_index((TextField("t"),))
     client.ft().client.hset("1", "t", "hello")
@@ -1950,18 +2263,14 @@ def test_profile_limited(client):
     q = Query("%hell% hel*")
     if is_resp2_connection(client):
         res, det = client.ft().profile(q, limited=True)
-        assert (
-            det["Iterators profile"]["Child iterators"][0]["Child iterators"]
-            == "The number of iterators in the union is 3"
-        )
-        assert (
-            det["Iterators profile"]["Child iterators"][1]["Child iterators"]
-            == "The number of iterators in the union is 4"
-        )
-        assert det["Iterators profile"]["Type"] == "INTERSECT"
+        det = det.info
+        assert det[4][1][7][9] == "The number of iterators in the union is 3"
+        assert det[4][1][8][9] == "The number of iterators in the union is 4"
+        assert det[4][1][1] == "INTERSECT"
         assert len(res.docs) == 3  # check also the search result
     else:
         res = client.ft().profile(q, limited=True)
+        res = res.info
         iterators_profile = res["profile"]["Iterators profile"]
         assert (
             iterators_profile[0]["Child iterators"][0]["Child iterators"]
@@ -1977,6 +2286,8 @@ def test_profile_limited(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_gte("7.9.0")
+@skip_if_server_version_lt("6.3.0")
 def test_profile_query_params(client):
     client.ft().create_index(
         (
@@ -1989,16 +2300,18 @@ def test_profile_query_params(client):
     client.hset("b", "v", "aaaabaaa")
     client.hset("c", "v", "aaaaabaa")
     query = "*=>[KNN 2 @v $vec]"
-    q = Query(query).return_field("__v_score").sort_by("__v_score", True).dialect(2)
+    q = Query(query).return_field("__v_score").sort_by("__v_score", True)
     if is_resp2_connection(client):
         res, det = client.ft().profile(q, query_params={"vec": "aaaaaaaa"})
-        assert det["Iterators profile"]["Counter"] == 2.0
-        assert det["Iterators profile"]["Type"] == "VECTOR"
+        det = det.info
+        assert det[4][1][5] == 2.0
+        assert det[4][1][1] == "VECTOR"
         assert res.total == 2
         assert "a" == res.docs[0].id
         assert "0" == res.docs[0].__getattribute__("__v_score")
     else:
         res = client.ft().profile(q, query_params={"vec": "aaaaaaaa"})
+        res = res.info
         assert res["profile"]["Iterators profile"][0]["Counter"] == 2
         assert res["profile"]["Iterators profile"][0]["Type"] == "VECTOR"
         assert res["total_results"] == 2
@@ -2022,7 +2335,7 @@ def test_vector_field(client):
     client.hset("c", "v", "aaaaabaa")
 
     query = "*=>[KNN 2 @v $vec]"
-    q = Query(query).return_field("__v_score").sort_by("__v_score", True).dialect(2)
+    q = Query(query).return_field("__v_score").sort_by("__v_score", True)
     res = client.ft().search(q, query_params={"vec": "aaaaaaaa"})
 
     if is_resp2_connection(client):
@@ -2058,7 +2371,7 @@ def test_text_params(client):
     client.hset("doc3", mapping={"name": "Carol"})
 
     params_dict = {"name1": "Alice", "name2": "Bob"}
-    q = Query("@name:($name1 | $name2 )").dialect(2)
+    q = Query("@name:($name1 | $name2 )")
     res = client.ft().search(q, query_params=params_dict)
     if is_resp2_connection(client):
         assert 2 == res.total
@@ -2081,7 +2394,7 @@ def test_numeric_params(client):
     client.hset("doc3", mapping={"numval": 103})
 
     params_dict = {"min": 101, "max": 102}
-    q = Query("@numval:[$min $max]").dialect(2)
+    q = Query("@numval:[$min $max]")
     res = client.ft().search(q, query_params=params_dict)
 
     if is_resp2_connection(client):
@@ -2103,18 +2416,64 @@ def test_geo_params(client):
     client.hset("doc3", mapping={"g": "29.68746, 34.94882"})
 
     params_dict = {"lat": "34.95126", "lon": "29.69465", "radius": 1000, "units": "km"}
-    q = Query("@g:[$lon $lat $radius $units]").dialect(2)
+    q = Query("@g:[$lon $lat $radius $units]")
     res = client.ft().search(q, query_params=params_dict)
-    if is_resp2_connection(client):
-        assert 3 == res.total
-        assert "doc1" == res.docs[0].id
-        assert "doc2" == res.docs[1].id
-        assert "doc3" == res.docs[2].id
-    else:
-        assert 3 == res["total_results"]
-        assert "doc1" == res["results"][0]["id"]
-        assert "doc2" == res["results"][1]["id"]
-        assert "doc3" == res["results"][2]["id"]
+    _assert_search_result(client, res, ["doc1", "doc2", "doc3"])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("7.4.0")
+@skip_ifmodversion_lt("2.10.0", "search")
+def test_geoshapes_query_intersects_and_disjoint(client):
+    client.ft().create_index((GeoShapeField("g", coord_system=GeoShapeField.FLAT)))
+    client.hset("doc_point1", mapping={"g": "POINT (10 10)"})
+    client.hset("doc_point2", mapping={"g": "POINT (50 50)"})
+    client.hset("doc_polygon1", mapping={"g": "POLYGON ((20 20, 25 35, 35 25, 20 20))"})
+    client.hset(
+        "doc_polygon2", mapping={"g": "POLYGON ((60 60, 65 75, 70 70, 65 55, 60 60))"}
+    )
+
+    intersection = client.ft().search(
+        Query("@g:[intersects $shape]").dialect(3),
+        query_params={"shape": "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))"},
+    )
+    _assert_search_result(client, intersection, ["doc_point2", "doc_polygon1"])
+
+    disjunction = client.ft().search(
+        Query("@g:[disjoint $shape]").dialect(3),
+        query_params={"shape": "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))"},
+    )
+    _assert_search_result(client, disjunction, ["doc_point1", "doc_polygon2"])
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.0", "search")
+def test_geoshapes_query_contains_and_within(client):
+    client.ft().create_index((GeoShapeField("g", coord_system=GeoShapeField.FLAT)))
+    client.hset("doc_point1", mapping={"g": "POINT (10 10)"})
+    client.hset("doc_point2", mapping={"g": "POINT (50 50)"})
+    client.hset("doc_polygon1", mapping={"g": "POLYGON ((20 20, 25 35, 35 25, 20 20))"})
+    client.hset(
+        "doc_polygon2", mapping={"g": "POLYGON ((60 60, 65 75, 70 70, 65 55, 60 60))"}
+    )
+
+    contains_a = client.ft().search(
+        Query("@g:[contains $shape]").dialect(3),
+        query_params={"shape": "POINT(25 25)"},
+    )
+    _assert_search_result(client, contains_a, ["doc_polygon1"])
+
+    contains_b = client.ft().search(
+        Query("@g:[contains $shape]").dialect(3),
+        query_params={"shape": "POLYGON((24 24, 24 26, 25 25, 24 24))"},
+    )
+    _assert_search_result(client, contains_b, ["doc_polygon1"])
+
+    within = client.ft().search(
+        Query("@g:[within $shape]").dialect(3),
+        query_params={"shape": "POLYGON((15 15, 75 15, 50 70, 20 40, 15 15))"},
+    )
+    _assert_search_result(client, within, ["doc_point2", "doc_polygon1"])
 
 
 @pytest.mark.redismod
@@ -2176,19 +2535,19 @@ def test_dialect(client):
     with pytest.raises(redis.ResponseError) as err:
         client.ft().explain(Query("(*)").dialect(1))
     assert "Syntax error" in str(err)
-    assert "WILDCARD" in client.ft().explain(Query("(*)").dialect(2))
+    assert "WILDCARD" in client.ft().explain(Query("(*)"))
 
     with pytest.raises(redis.ResponseError) as err:
         client.ft().explain(Query("$hello").dialect(1))
     assert "Syntax error" in str(err)
-    q = Query("$hello").dialect(2)
+    q = Query("$hello")
     expected = "UNION {\n  hello\n  +hello(expanded)\n}\n"
     assert expected in client.ft().explain(q, query_params={"hello": "hello"})
 
     expected = "NUMERIC {0.000000 <= @num <= 10.000000}\n"
     assert expected in client.ft().explain(Query("@title:(@num:[0 10])").dialect(1))
     with pytest.raises(redis.ResponseError) as err:
-        client.ft().explain(Query("@title:(@num:[0 10])").dialect(2))
+        client.ft().explain(Query("@title:(@num:[0 10])"))
     assert "Syntax error" in str(err)
 
 
@@ -2223,14 +2582,14 @@ def test_withsuffixtrie(client: redis.Redis):
     if is_resp2_connection(client):
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]
-        assert client.ft().dropindex("idx")
+        assert client.ft().dropindex()
 
         # create withsuffixtrie index (text fields)
         assert client.ft().create_index(TextField("t", withsuffixtrie=True))
         waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]
-        assert client.ft().dropindex("idx")
+        assert client.ft().dropindex()
 
         # create withsuffixtrie index (tag field)
         assert client.ft().create_index(TagField("t", withsuffixtrie=True))
@@ -2240,14 +2599,14 @@ def test_withsuffixtrie(client: redis.Redis):
     else:
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]["flags"]
-        assert client.ft().dropindex("idx")
+        assert client.ft().dropindex()
 
         # create withsuffixtrie index (text fields)
         assert client.ft().create_index(TextField("t", withsuffixtrie=True))
         waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
         info = client.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
-        assert client.ft().dropindex("idx")
+        assert client.ft().dropindex()
 
         # create withsuffixtrie index (tag field)
         assert client.ft().create_index(TagField("t", withsuffixtrie=True))
@@ -2259,15 +2618,17 @@ def test_withsuffixtrie(client: redis.Redis):
 @pytest.mark.redismod
 def test_query_timeout(r: redis.Redis):
     q1 = Query("foo").timeout(5000)
-    assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
+    assert q1.get_args() == ["foo", "TIMEOUT", 5000, "DIALECT", 2, "LIMIT", 0, 10]
     q1 = Query("foo").timeout(0)
-    assert q1.get_args() == ["foo", "TIMEOUT", 0, "LIMIT", 0, 10]
+    assert q1.get_args() == ["foo", "TIMEOUT", 0, "DIALECT", 2, "LIMIT", 0, 10]
     q2 = Query("foo").timeout("not_a_number")
     with pytest.raises(redis.ResponseError):
         r.ft().search(q2)
 
 
 @pytest.mark.redismod
+@skip_if_server_version_lt("7.2.0")
+@skip_ifmodversion_lt("2.8.4", "search")
 def test_geoshape(client: redis.Redis):
     client.ft().create_index(GeoShapeField("geom", GeoShapeField.FLAT))
     waitForIndex(client, getattr(client.ft(), "index_name", "idx"))
@@ -2278,7 +2639,330 @@ def test_geoshape(client: redis.Redis):
     q2 = Query("@geom:[CONTAINS $poly]").dialect(3)
     qp2 = {"poly": "POLYGON((2 2, 2 50, 50 50, 50 2, 2 2))"}
     result = client.ft().search(q1, query_params=qp1)
-    assert len(result.docs) == 1
-    assert result.docs[0]["id"] == "small"
+    _assert_search_result(client, result, ["small"])
     result = client.ft().search(q2, query_params=qp2)
-    assert len(result.docs) == 2
+    _assert_search_result(client, result, ["small", "large"])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("7.4.0")
+@skip_ifmodversion_lt("2.10.0", "search")
+def test_search_missing_fields(client):
+    definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
+
+    fields = [
+        TextField("title", sortable=True),
+        TagField("features", index_missing=True),
+        TextField("description", index_missing=True),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+    # All fields present
+    client.hset(
+        "property:1",
+        mapping={
+            "title": "Luxury Villa in Malibu",
+            "features": "pool,sea view,modern",
+            "description": "A stunning modern villa overlooking the Pacific Ocean.",
+        },
+    )
+
+    # Missing features
+    client.hset(
+        "property:2",
+        mapping={
+            "title": "Downtown Flat",
+            "description": "Modern flat in central Paris with easy access to metro.",
+        },
+    )
+
+    # Missing description
+    client.hset(
+        "property:3",
+        mapping={
+            "title": "Beachfront Bungalow",
+            "features": "beachfront,sun deck",
+        },
+    )
+
+    with pytest.raises(redis.exceptions.ResponseError):
+        client.ft().search(Query("ismissing(@title)").return_field("id").no_content())
+
+    res = client.ft().search(
+        Query("ismissing(@features)").return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:2"])
+
+    res = client.ft().search(
+        Query("-ismissing(@features)").return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:3"])
+
+    res = client.ft().search(
+        Query("ismissing(@description)").return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:3"])
+
+    res = client.ft().search(
+        Query("-ismissing(@description)").return_field("id").no_content()
+    )
+    _assert_search_result(client, res, ["property:1", "property:2"])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("7.4.0")
+@skip_ifmodversion_lt("2.10.0", "search")
+def test_search_empty_fields(client):
+    definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
+
+    fields = [
+        TextField("title", sortable=True),
+        TagField("features", index_empty=True),
+        TextField("description", index_empty=True),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+    # All fields present
+    client.hset(
+        "property:1",
+        mapping={
+            "title": "Luxury Villa in Malibu",
+            "features": "pool,sea view,modern",
+            "description": "A stunning modern villa overlooking the Pacific Ocean.",
+        },
+    )
+
+    # Empty features
+    client.hset(
+        "property:2",
+        mapping={
+            "title": "Downtown Flat",
+            "features": "",
+            "description": "Modern flat in central Paris with easy access to metro.",
+        },
+    )
+
+    # Empty description
+    client.hset(
+        "property:3",
+        mapping={
+            "title": "Beachfront Bungalow",
+            "features": "beachfront,sun deck",
+            "description": "",
+        },
+    )
+
+    with pytest.raises(redis.exceptions.ResponseError) as e:
+        client.ft().search(Query("@title:''").return_field("id").no_content())
+    assert "Use `INDEXEMPTY` in field creation" in e.value.args[0]
+
+    res = client.ft().search(
+        Query("@features:{$empty}").return_field("id").no_content(),
+        query_params={"empty": ""},
+    )
+    _assert_search_result(client, res, ["property:2"])
+
+    res = client.ft().search(
+        Query("-@features:{$empty}").return_field("id").no_content(),
+        query_params={"empty": ""},
+    )
+    _assert_search_result(client, res, ["property:1", "property:3"])
+
+    res = client.ft().search(Query("@description:''").return_field("id").no_content())
+    _assert_search_result(client, res, ["property:3"])
+
+    res = client.ft().search(Query("-@description:''").return_field("id").no_content())
+    _assert_search_result(client, res, ["property:1", "property:2"])
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("7.4.0")
+@skip_ifmodversion_lt("2.10.0", "search")
+def test_special_characters_in_fields(client):
+    definition = IndexDefinition(prefix=["resource:"], index_type=IndexType.HASH)
+
+    fields = [
+        TagField("uuid"),
+        TagField("tags", separator="|"),
+        TextField("description"),
+        NumericField("rating"),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+    client.hset(
+        "resource:1",
+        mapping={
+            "uuid": "123e4567-e89b-12d3-a456-426614174000",
+            "tags": "finance|crypto|$btc|blockchain",
+            "description": "Analysis of blockchain technologies & Bitcoin's potential.",
+            "rating": 5,
+        },
+    )
+
+    client.hset(
+        "resource:2",
+        mapping={
+            "uuid": "987e6543-e21c-12d3-a456-426614174999",
+            "tags": "health|well-being|fitness|new-year's-resolutions",
+            "description": "Health trends for the new year, including fitness regimes.",
+            "rating": 4,
+        },
+    )
+
+    # no need to escape - when using params
+    res = client.ft().search(
+        Query("@uuid:{$uuid}"),
+        query_params={"uuid": "123e4567-e89b-12d3-a456-426614174000"},
+    )
+    _assert_search_result(client, res, ["resource:1"])
+
+    # with double quotes exact match no need to escape the - even without params
+    res = client.ft().search(Query('@uuid:{"123e4567-e89b-12d3-a456-426614174000"}'))
+    _assert_search_result(client, res, ["resource:1"])
+
+    res = client.ft().search(Query('@tags:{"new-year\'s-resolutions"}'))
+    _assert_search_result(client, res, ["resource:2"])
+
+    # possible to search numeric fields by single value
+    res = client.ft().search(Query("@rating:[4]"))
+    _assert_search_result(client, res, ["resource:2"])
+
+    # some chars still need escaping
+    res = client.ft().search(Query(r"@tags:{\$btc}"))
+    _assert_search_result(client, res, ["resource:1"])
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.4.3", "search")
+def test_vector_search_with_default_dialect(client):
+    client.ft().create_index(
+        (
+            VectorField(
+                "v", "HNSW", {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "L2"}
+            ),
+        )
+    )
+
+    client.hset("a", "v", "aaaaaaaa")
+    client.hset("b", "v", "aaaabaaa")
+    client.hset("c", "v", "aaaaabaa")
+
+    query = "*=>[KNN 2 @v $vec]"
+    q = Query(query)
+
+    assert "DIALECT" in q.get_args()
+    assert 2 in q.get_args()
+
+    res = client.ft().search(q, query_params={"vec": "aaaaaaaa"})
+    if is_resp2_connection(client):
+        assert res.total == 2
+    else:
+        assert res["total_results"] == 2
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("7.9.0")
+def test_vector_search_with_int8_type(client):
+    client.ft().create_index(
+        (VectorField("v", "FLAT", {"TYPE": "INT8", "DIM": 2, "DISTANCE_METRIC": "L2"}),)
+    )
+
+    a = [1.5, 10]
+    b = [123, 100]
+    c = [1, 1]
+
+    client.hset("a", "v", np.array(a, dtype=np.int8).tobytes())
+    client.hset("b", "v", np.array(b, dtype=np.int8).tobytes())
+    client.hset("c", "v", np.array(c, dtype=np.int8).tobytes())
+
+    query = Query("*=>[KNN 2 @v $vec as score]")
+    query_params = {"vec": np.array(a, dtype=np.int8).tobytes()}
+
+    assert 2 in query.get_args()
+
+    res = client.ft().search(query, query_params=query_params)
+    if is_resp2_connection(client):
+        assert res.total == 2
+    else:
+        assert res["total_results"] == 2
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("7.9.0")
+def test_vector_search_with_uint8_type(client):
+    client.ft().create_index(
+        (
+            VectorField(
+                "v", "FLAT", {"TYPE": "UINT8", "DIM": 2, "DISTANCE_METRIC": "L2"}
+            ),
+        )
+    )
+
+    a = [1.5, 10]
+    b = [123, 100]
+    c = [1, 1]
+
+    client.hset("a", "v", np.array(a, dtype=np.uint8).tobytes())
+    client.hset("b", "v", np.array(b, dtype=np.uint8).tobytes())
+    client.hset("c", "v", np.array(c, dtype=np.uint8).tobytes())
+
+    query = Query("*=>[KNN 2 @v $vec as score]")
+    query_params = {"vec": np.array(a, dtype=np.uint8).tobytes()}
+
+    assert 2 in query.get_args()
+
+    res = client.ft().search(query, query_params=query_params)
+    if is_resp2_connection(client):
+        assert res.total == 2
+    else:
+        assert res["total_results"] == 2
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.4.3", "search")
+def test_search_query_with_different_dialects(client):
+    client.ft().create_index(
+        (TextField("name"), TextField("lastname")),
+        definition=IndexDefinition(prefix=["test:"]),
+    )
+
+    client.hset("test:1", "name", "James")
+    client.hset("test:1", "lastname", "Brown")
+
+    # Query with default DIALECT 2
+    query = "@name: James Brown"
+    q = Query(query)
+    res = client.ft().search(q)
+    if is_resp2_connection(client):
+        assert res.total == 1
+    else:
+        assert res["total_results"] == 1
+
+    # Query with explicit DIALECT 1
+    query = "@name: James Brown"
+    q = Query(query).dialect(1)
+    res = client.ft().search(q)
+    if is_resp2_connection(client):
+        assert res.total == 0
+    else:
+        assert res["total_results"] == 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("7.9.0")
+def test_info_exposes_search_info(client):
+    assert len(client.info("search")) > 0
+
+
+def _assert_search_result(client, result, expected_doc_ids):
+    """
+    Make sure the result of a geo search is as expected, taking into account the RESP
+    version being used.
+    """
+    if is_resp2_connection(client):
+        assert set([doc.id for doc in result.docs]) == set(expected_doc_ids)
+    else:
+        assert set([doc["id"] for doc in result["results"]]) == set(expected_doc_ids)

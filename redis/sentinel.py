@@ -229,6 +229,7 @@ class Sentinel(SentinelCommands):
         sentinels,
         min_other_sentinels=0,
         sentinel_kwargs=None,
+        force_master_ip=None,
         **connection_kwargs,
     ):
         # if sentinel_kwargs isn't defined, use the socket_* options from
@@ -245,6 +246,7 @@ class Sentinel(SentinelCommands):
         ]
         self.min_other_sentinels = min_other_sentinels
         self.connection_kwargs = connection_kwargs
+        self._force_master_ip = force_master_ip
 
     def execute_command(self, *args, **kwargs):
         """
@@ -252,17 +254,27 @@ class Sentinel(SentinelCommands):
         once - If set to True, then execute the resulting command on a single
         node at random, rather than across the entire sentinel cluster.
         """
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
-        once = bool(kwargs.get("once", False))
-        if "once" in kwargs.keys():
-            kwargs.pop("once")
+        once = bool(kwargs.pop("once", False))
+
+        # Check if command is supposed to return the original
+        # responses instead of boolean value.
+        return_responses = bool(kwargs.pop("return_responses", False))
 
         if once:
-            random.choice(self.sentinels).execute_command(*args, **kwargs)
-        else:
-            for sentinel in self.sentinels:
-                sentinel.execute_command(*args, **kwargs)
-        return True
+            response = random.choice(self.sentinels).execute_command(*args, **kwargs)
+            if return_responses:
+                return [response]
+            else:
+                return True if response else False
+
+        responses = []
+        for sentinel in self.sentinels:
+            responses.append(sentinel.execute_command(*args, **kwargs))
+
+        if return_responses:
+            return responses
+
+        return all(responses)
 
     def __repr__(self):
         sentinel_addresses = []
@@ -272,7 +284,7 @@ class Sentinel(SentinelCommands):
             )
         return (
             f"<{type(self).__module__}.{type(self).__name__}"
-            f'(sentinels=[{",".join(sentinel_addresses)}])>'
+            f"(sentinels=[{','.join(sentinel_addresses)}])>"
         )
 
     def check_master_state(self, state, service_name):
@@ -305,7 +317,13 @@ class Sentinel(SentinelCommands):
                     sentinel,
                     self.sentinels[0],
                 )
-                return state["ip"], state["port"]
+
+                ip = (
+                    self._force_master_ip
+                    if self._force_master_ip is not None
+                    else state["ip"]
+                )
+                return ip, state["port"]
 
         error_info = ""
         if len(collected_errors) > 0:
@@ -342,6 +360,8 @@ class Sentinel(SentinelCommands):
     ):
         """
         Returns a redis client instance for the ``service_name`` master.
+        Sentinel client will detect failover and reconnect Redis clients
+        automatically.
 
         A :py:class:`~redis.sentinel.SentinelConnectionPool` class is
         used to retrieve the master's address before establishing a new

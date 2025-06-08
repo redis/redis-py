@@ -6,14 +6,13 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as redis
 from packaging.version import Version
-from redis._parsers import _AsyncHiredisParser, _AsyncRESP2Parser
 from redis.asyncio import Sentinel
 from redis.asyncio.client import Monitor
 from redis.asyncio.connection import Connection, parse_url
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.utils import HIREDIS_AVAILABLE
-from tests.conftest import REDIS_INFO
+from redis.credentials import CredentialProvider
+from tests.conftest import REDIS_INFO, get_credential_provider
 
 from .compat import mock
 
@@ -28,41 +27,21 @@ async def _get_info(redis_url):
 @pytest_asyncio.fixture(
     params=[
         pytest.param(
-            (True, _AsyncRESP2Parser),
+            (True,),
             marks=pytest.mark.skipif(
                 'config.REDIS_INFO["cluster_enabled"]', reason="cluster mode enabled"
             ),
         ),
-        (False, _AsyncRESP2Parser),
-        pytest.param(
-            (True, _AsyncHiredisParser),
-            marks=[
-                pytest.mark.skipif(
-                    'config.REDIS_INFO["cluster_enabled"]',
-                    reason="cluster mode enabled",
-                ),
-                pytest.mark.skipif(
-                    not HIREDIS_AVAILABLE, reason="hiredis is not installed"
-                ),
-            ],
-        ),
-        pytest.param(
-            (False, _AsyncHiredisParser),
-            marks=pytest.mark.skipif(
-                not HIREDIS_AVAILABLE, reason="hiredis is not installed"
-            ),
-        ),
+        (False,),
     ],
     ids=[
-        "single-python-parser",
-        "pool-python-parser",
-        "single-hiredis",
-        "pool-hiredis",
+        "single",
+        "pool",
     ],
 )
 async def create_redis(request):
     """Wrapper around redis.create_redis."""
-    single_connection, parser_cls = request.param
+    (single_connection,) = request.param
 
     teardown_clients = []
 
@@ -78,10 +57,9 @@ async def create_redis(request):
         cluster_mode = REDIS_INFO["cluster_enabled"]
         if not cluster_mode:
             single = kwargs.pop("single_connection_client", False) or single_connection
-            parser_class = kwargs.pop("parser_class", None) or parser_cls
             url_options = parse_url(url)
             url_options.update(kwargs)
-            pool = redis.ConnectionPool(parser_class=parser_class, **url_options)
+            pool = redis.ConnectionPool(**url_options)
             client = cls(connection_pool=pool)
         else:
             client = redis.RedisCluster.from_url(url, **kwargs)
@@ -145,8 +123,10 @@ async def sentinel_setup(local_cache, request):
         for ip, port in (endpoint.split(":") for endpoint in sentinel_ips.split(","))
     ]
     kwargs = request.param.get("kwargs", {}) if hasattr(request, "param") else {}
+    force_master_ip = request.param.get("force_master_ip", None)
     sentinel = Sentinel(
         sentinel_endpoints,
+        force_master_ip=force_master_ip,
         socket_timeout=0.1,
         client_cache=local_cache,
         protocol=3,
@@ -169,7 +149,6 @@ def _gen_cluster_mock_resp(r, response):
     connection = mock.AsyncMock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
-    connection._get_from_local_cache.return_value = None
     with mock.patch.object(r, "connection", connection):
         yield r
 
@@ -240,6 +219,11 @@ async def mock_cluster_resp_slaves(create_redis, **kwargs):
         yield mocked
 
 
+@pytest_asyncio.fixture()
+async def credential_provider(request) -> CredentialProvider:
+    return get_credential_provider(request)
+
+
 async def wait_for_command(
     client: redis.Redis, monitor: Monitor, command: str, key: Union[str, None] = None
 ):
@@ -252,7 +236,7 @@ async def wait_for_command(
         if Version(redis_version) >= Version("5.0.0"):
             id_str = str(await client.client_id())
         else:
-            id_str = f"{random.randrange(2 ** 32):08x}"
+            id_str = f"{random.randrange(2**32):08x}"
         key = f"__REDIS-PY-{id_str}__"
     await client.get(key)
     while True:

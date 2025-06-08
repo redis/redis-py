@@ -1,7 +1,13 @@
 import socket
 from time import sleep
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Tuple, Type, TypeVar
 
 from redis.exceptions import ConnectionError, TimeoutError
+
+T = TypeVar("T")
+
+if TYPE_CHECKING:
+    from redis.backoff import AbstractBackoff
 
 
 class Retry:
@@ -9,9 +15,13 @@ class Retry:
 
     def __init__(
         self,
-        backoff,
-        retries,
-        supported_errors=(ConnectionError, TimeoutError, socket.timeout),
+        backoff: "AbstractBackoff",
+        retries: int,
+        supported_errors: Tuple[Type[Exception], ...] = (
+            ConnectionError,
+            TimeoutError,
+            socket.timeout,
+        ),
     ):
         """
         Initialize a `Retry` object with a `Backoff` object
@@ -24,7 +34,22 @@ class Retry:
         self._retries = retries
         self._supported_errors = supported_errors
 
-    def update_supported_errors(self, specified_errors: list):
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Retry):
+            return NotImplemented
+
+        return (
+            self._backoff == other._backoff
+            and self._retries == other._retries
+            and set(self._supported_errors) == set(other._supported_errors)
+        )
+
+    def __hash__(self) -> int:
+        return hash((self._backoff, self._retries, frozenset(self._supported_errors)))
+
+    def update_supported_errors(
+        self, specified_errors: Iterable[Type[Exception]]
+    ) -> None:
         """
         Updates the supported errors with the specified error types
         """
@@ -32,7 +57,23 @@ class Retry:
             set(self._supported_errors + tuple(specified_errors))
         )
 
-    def call_with_retry(self, do, fail):
+    def get_retries(self) -> int:
+        """
+        Get the number of retries.
+        """
+        return self._retries
+
+    def update_retries(self, value: int) -> None:
+        """
+        Set the number of retries.
+        """
+        self._retries = value
+
+    def call_with_retry(
+        self,
+        do: Callable[[], T],
+        fail: Callable[[Exception], Any],
+    ) -> T:
         """
         Execute an operation that might fail and returns its result, or
         raise the exception that was thrown depending on the `Backoff` object.

@@ -2,8 +2,7 @@ from math import inf
 
 import pytest
 import redis.commands.bf
-from redis.exceptions import ModuleError, RedisError
-from redis.utils import HIREDIS_AVAILABLE
+from redis.exceptions import RedisError
 
 from .conftest import (
     _get_client,
@@ -136,10 +135,6 @@ def test_bf_scandump_and_loadchunk(client):
 
     do_verify()
     cmds = []
-    if HIREDIS_AVAILABLE:
-        with pytest.raises(ModuleError):
-            cur = client.bf().scandump("myBloom", 0)
-        return
 
     cur = client.bf().scandump("myBloom", 0)
     first = cur[0]
@@ -367,6 +362,34 @@ def test_topk(client):
     assert 50 == info["width"]
     assert 3 == info["depth"]
     assert 0.9 == round(float(info["decay"]), 1)
+
+
+@pytest.mark.redismod
+def test_topk_list_with_special_words(client):
+    # test list with empty buckets
+    assert client.topk().reserve("topklist:specialwords", 5, 20, 4, 0.9)
+    assert client.topk().add(
+        "topklist:specialwords",
+        "infinity",
+        "B",
+        "nan",
+        "D",
+        "-infinity",
+        "infinity",
+        "infinity",
+        "B",
+        "nan",
+        "G",
+        "D",
+        "B",
+        "D",
+        "infinity",
+        "-infinity",
+        "-infinity",
+    )
+    assert ["infinity", "B", "D", "-infinity", "nan"] == client.topk().list(
+        "topklist:specialwords"
+    )
 
 
 @pytest.mark.redismod

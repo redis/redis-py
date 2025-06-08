@@ -3,8 +3,7 @@ from math import inf
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
-from redis.exceptions import ModuleError, RedisError
-from redis.utils import HIREDIS_AVAILABLE
+from redis.exceptions import RedisError
 from tests.conftest import (
     assert_resp_response,
     is_resp2_connection,
@@ -105,10 +104,6 @@ async def test_bf_scandump_and_loadchunk(decoded_r: redis.Redis):
 
     await do_verify()
     cmds = []
-    if HIREDIS_AVAILABLE:
-        with pytest.raises(ModuleError):
-            cur = await decoded_r.bf().scandump("myBloom", 0)
-        return
 
     cur = await decoded_r.bf().scandump("myBloom", 0)
     first = cur[0]
@@ -336,6 +331,34 @@ async def test_topk(decoded_r: redis.Redis):
     assert 50 == info["width"]
     assert 3 == info["depth"]
     assert 0.9 == round(float(info["decay"]), 1)
+
+
+@pytest.mark.redismod
+async def test_topk_list_with_special_words(decoded_r: redis.Redis):
+    # test list with empty buckets
+    assert await decoded_r.topk().reserve("topklist:specialwords", 5, 20, 4, 0.9)
+    assert await decoded_r.topk().add(
+        "topklist:specialwords",
+        "infinity",
+        "B",
+        "nan",
+        "D",
+        "-infinity",
+        "infinity",
+        "infinity",
+        "B",
+        "nan",
+        "G",
+        "D",
+        "B",
+        "D",
+        "infinity",
+        "-infinity",
+        "-infinity",
+    )
+    assert ["infinity", "B", "D", "-infinity", "nan"] == await decoded_r.topk().list(
+        "topklist:specialwords"
+    )
 
 
 @pytest.mark.redismod

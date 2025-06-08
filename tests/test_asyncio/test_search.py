@@ -1,25 +1,34 @@
 import bz2
 import csv
 import os
-import time
+import asyncio
 from io import TextIOWrapper
 
+import numpy as np
 import pytest
 import pytest_asyncio
+from redis import ResponseError
 import redis.asyncio as redis
-import redis.commands.search
 import redis.commands.search.aggregation as aggregations
 import redis.commands.search.reducers as reducers
 from redis.commands.search import AsyncSearch
-from redis.commands.search.field import GeoField, NumericField, TagField, TextField
-from redis.commands.search.indexDefinition import IndexDefinition
+from redis.commands.search.field import (
+    GeoField,
+    NumericField,
+    TagField,
+    TextField,
+    VectorField,
+)
+from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import GeoFilter, NumericFilter, Query
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
 from tests.conftest import (
-    assert_resp_response,
     is_resp2_connection,
     skip_if_redis_enterprise,
+    skip_if_resp_version,
+    skip_if_server_version_gte,
+    skip_if_server_version_lt,
     skip_ifmodversion_lt,
 )
 
@@ -40,8 +49,8 @@ async def decoded_r(create_redis, stack_url):
 async def waitForIndex(env, idx, timeout=None):
     delay = 0.1
     while True:
-        res = await env.execute_command("FT.INFO", idx)
         try:
+            res = await env.execute_command("FT.INFO", idx)
             if int(res[res.index("indexing") + 1]) == 0:
                 break
         except ValueError:
@@ -52,8 +61,12 @@ async def waitForIndex(env, idx, timeout=None):
                     break
             except ValueError:
                 break
+        except ResponseError:
+            # index doesn't exist yet
+            # continue to sleep and try again
+            pass
 
-        time.sleep(delay)
+        await asyncio.sleep(delay)
         if timeout is not None:
             timeout -= delay
             if timeout <= 0:
@@ -332,6 +345,7 @@ async def test_client(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@skip_if_server_version_gte("7.9.0")
 async def test_scores(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("txt"),))
 
@@ -349,6 +363,29 @@ async def test_scores(decoded_r: redis.Redis):
         assert 2 == res["total_results"]
         assert "doc2" == res["results"][0]["id"]
         assert 3.0 == res["results"][0]["score"]
+        assert "doc1" == res["results"][1]["id"]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.9.0")
+async def test_scores_with_new_default_scorer(decoded_r: redis.Redis):
+    await decoded_r.ft().create_index((TextField("txt"),))
+
+    await decoded_r.hset("doc1", mapping={"txt": "foo baz"})
+    await decoded_r.hset("doc2", mapping={"txt": "foo bar"})
+
+    q = Query("foo ~bar").with_scores()
+    res = await decoded_r.ft().search(q)
+    if is_resp2_connection(decoded_r):
+        assert 2 == res.total
+        assert "doc2" == res.docs[0].id
+        assert 0.87 == pytest.approx(res.docs[0].score, 0.01)
+        assert "doc1" == res.docs[1].id
+    else:
+        assert 2 == res["total_results"]
+        assert "doc2" == res["results"][0]["id"]
+        assert 0.87 == pytest.approx(res["results"][0]["score"], 0.01)
         assert "doc1" == res["results"][1]["id"]
 
 
@@ -654,7 +691,7 @@ async def test_summarize(decoded_r: redis.Redis):
     await createIndex(decoded_r.ft())
     await waitForIndex(decoded_r, "idx")
 
-    q = Query("king henry").paging(0, 1)
+    q = Query('"king henry"').paging(0, 1)
     q.highlight(fields=("play", "txt"), tags=("<b>", "</b>"))
     q.summarize("txt")
 
@@ -666,7 +703,7 @@ async def test_summarize(decoded_r: redis.Redis):
             == doc.txt
         )
 
-        q = Query("king henry").paging(0, 1).summarize().highlight()
+        q = Query('"king henry"').paging(0, 1).summarize().highlight()
 
         doc = sorted((await decoded_r.ft().search(q)).docs)[0]
         assert "<b>Henry</b> ... " == doc.play
@@ -682,7 +719,7 @@ async def test_summarize(decoded_r: redis.Redis):
             == doc["extra_attributes"]["txt"]
         )
 
-        q = Query("king henry").paging(0, 1).summarize().highlight()
+        q = Query('"king henry"').paging(0, 1).summarize().highlight()
 
         doc = sorted((await decoded_r.ft().search(q))["results"])[0]
         assert "<b>Henry</b> ... " == doc["extra_attributes"]["play"]
@@ -854,7 +891,7 @@ async def test_tags(decoded_r: redis.Redis):
         assert 1 == res["total_results"]
 
         q2 = await decoded_r.ft().tagvals("tags")
-        assert set(tags.split(",") + tags2.split(",")) == q2
+        assert set(tags.split(",") + tags2.split(",")) == set(q2)
 
 
 @pytest.mark.redismod
@@ -978,7 +1015,7 @@ async def test_dict_operations(decoded_r: redis.Redis):
 
     # Dump dict and inspect content
     res = await decoded_r.ft().dict_dump("custom_dict")
-    assert_resp_response(decoded_r, res, ["item1", "item3"], {"item1", "item3"})
+    assert res == ["item1", "item3"]
 
     # Remove rest of the items before reload
     await decoded_r.ft().dict_del("custom_dict", *res)
@@ -1018,6 +1055,9 @@ async def test_phonetic_matcher(decoded_r: redis.Redis):
 
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+# NOTE(imalinovskyi): This test contains hardcoded scores valid only for RediSearch 2.8+
+@skip_ifmodversion_lt("2.8.0", "search")
+@skip_if_server_version_gte("7.9.0")
 async def test_scorer(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("description"),))
 
@@ -1077,6 +1117,69 @@ async def test_scorer(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@pytest.mark.onlynoncluster
+# NOTE(imalinovskyi): This test contains hardcoded scores valid only for RediSearch 2.8+
+@skip_ifmodversion_lt("2.8.0", "search")
+@skip_if_server_version_lt("7.9.0")
+async def test_scorer_with_new_default_scorer(decoded_r: redis.Redis):
+    await decoded_r.ft().create_index((TextField("description"),))
+
+    await decoded_r.hset(
+        "doc1", mapping={"description": "The quick brown fox jumps over the lazy dog"}
+    )
+    await decoded_r.hset(
+        "doc2",
+        mapping={
+            "description": "Quick alice was beginning to get very tired of sitting by her quick sister on the bank, and of having nothing to do."  # noqa
+        },
+    )
+
+    if is_resp2_connection(decoded_r):
+        # default scorer is BM25STD
+        res = await decoded_r.ft().search(Query("quick").with_scores())
+        assert 0.23 == pytest.approx(res.docs[0].score, 0.05)
+        res = await decoded_r.ft().search(Query("quick").scorer("TFIDF").with_scores())
+        assert 1.0 == res.docs[0].score
+        res = await decoded_r.ft().search(
+            Query("quick").scorer("TFIDF.DOCNORM").with_scores()
+        )
+        assert 0.14285714285714285 == res.docs[0].score
+        res = await decoded_r.ft().search(Query("quick").scorer("BM25").with_scores())
+        assert 0.22471909420069797 == res.docs[0].score
+        res = await decoded_r.ft().search(Query("quick").scorer("DISMAX").with_scores())
+        assert 2.0 == res.docs[0].score
+        res = await decoded_r.ft().search(
+            Query("quick").scorer("DOCSCORE").with_scores()
+        )
+        assert 1.0 == res.docs[0].score
+        res = await decoded_r.ft().search(
+            Query("quick").scorer("HAMMING").with_scores()
+        )
+        assert 0.0 == res.docs[0].score
+    else:
+        res = await decoded_r.ft().search(Query("quick").with_scores())
+        assert 0.23 == pytest.approx(res["results"][0]["score"], 0.05)
+        res = await decoded_r.ft().search(Query("quick").scorer("TFIDF").with_scores())
+        assert 1.0 == res["results"][0]["score"]
+        res = await decoded_r.ft().search(
+            Query("quick").scorer("TFIDF.DOCNORM").with_scores()
+        )
+        assert 0.14285714285714285 == res["results"][0]["score"]
+        res = await decoded_r.ft().search(Query("quick").scorer("BM25").with_scores())
+        assert 0.22471909420069797 == res["results"][0]["score"]
+        res = await decoded_r.ft().search(Query("quick").scorer("DISMAX").with_scores())
+        assert 2.0 == res["results"][0]["score"]
+        res = await decoded_r.ft().search(
+            Query("quick").scorer("DOCSCORE").with_scores()
+        )
+        assert 1.0 == res["results"][0]["score"]
+        res = await decoded_r.ft().search(
+            Query("quick").scorer("HAMMING").with_scores()
+        )
+        assert 0.0 == res["results"][0]["score"]
+
+
+@pytest.mark.redismod
 async def test_get(decoded_r: redis.Redis):
     await decoded_r.ft().create_index((TextField("f1"), TextField("f2")))
 
@@ -1102,6 +1205,7 @@ async def test_get(decoded_r: redis.Redis):
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
 @skip_ifmodversion_lt("2.2.0", "search")
+@skip_if_server_version_gte("7.9.0")
 async def test_config(decoded_r: redis.Redis):
     assert await decoded_r.ft().config_set("TIMEOUT", "100")
     with pytest.raises(redis.ResponseError):
@@ -1110,6 +1214,19 @@ async def test_config(decoded_r: redis.Redis):
     assert "100" == res["TIMEOUT"]
     res = await decoded_r.ft().config_get("TIMEOUT")
     assert "100" == res["TIMEOUT"]
+
+
+@pytest.mark.redismod
+@pytest.mark.onlynoncluster
+@skip_if_server_version_lt("7.9.0")
+async def test_config_with_removed_ftconfig(decoded_r: redis.Redis):
+    assert await decoded_r.config_set("timeout", "100")
+    with pytest.raises(redis.ResponseError):
+        await decoded_r.config_set("timeout", "null")
+    res = await decoded_r.config_get("*")
+    assert "100" == res["timeout"]
+    res = await decoded_r.config_get("timeout")
+    assert "100" == res["timeout"]
 
 
 @pytest.mark.redismod
@@ -1490,14 +1607,14 @@ async def test_withsuffixtrie(decoded_r: redis.Redis):
     if is_resp2_connection(decoded_r):
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]
-        assert await decoded_r.ft().dropindex("idx")
+        assert await decoded_r.ft().dropindex()
 
         # create withsuffixtrie index (text field)
         assert await decoded_r.ft().create_index(TextField("t", withsuffixtrie=True))
         await waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]
-        assert await decoded_r.ft().dropindex("idx")
+        assert await decoded_r.ft().dropindex()
 
         # create withsuffixtrie index (tag field)
         assert await decoded_r.ft().create_index(TagField("t", withsuffixtrie=True))
@@ -1507,20 +1624,101 @@ async def test_withsuffixtrie(decoded_r: redis.Redis):
     else:
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" not in info["attributes"][0]["flags"]
-        assert await decoded_r.ft().dropindex("idx")
+        assert await decoded_r.ft().dropindex()
 
         # create withsuffixtrie index (text fields)
         assert await decoded_r.ft().create_index(TextField("t", withsuffixtrie=True))
-        waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
+        await waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
-        assert await decoded_r.ft().dropindex("idx")
+        assert await decoded_r.ft().dropindex()
 
         # create withsuffixtrie index (tag field)
         assert await decoded_r.ft().create_index(TagField("t", withsuffixtrie=True))
-        waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
+        await waitForIndex(decoded_r, getattr(decoded_r.ft(), "index_name", "idx"))
         info = await decoded_r.ft().info()
         assert "WITHSUFFIXTRIE" in info["attributes"][0]["flags"]
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+async def test_aggregations_add_scores(decoded_r: redis.Redis):
+    assert await decoded_r.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            NumericField("age", sortable=True),
+        )
+    )
+
+    assert await decoded_r.hset("doc1", mapping={"name": "bar", "age": "25"})
+    assert await decoded_r.hset("doc2", mapping={"name": "foo", "age": "19"})
+
+    req = aggregations.AggregateRequest("*").add_scores()
+    res = await decoded_r.ft().aggregate(req)
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+        assert res["results"][0]["extra_attributes"] == {"__score": "0.2"}
+        assert res["results"][1]["extra_attributes"] == {"__score": "0.2"}
+    else:
+        assert len(res.rows) == 2
+        assert res.rows[0] == ["__score", "0.2"]
+        assert res.rows[1] == ["__score", "0.2"]
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.10.05", "search")
+async def test_aggregations_hybrid_scoring(decoded_r: redis.Redis):
+    assert await decoded_r.ft().create_index(
+        (
+            TextField("name", sortable=True, weight=5.0),
+            TextField("description", sortable=True, weight=5.0),
+            VectorField(
+                "vector",
+                "HNSW",
+                {"TYPE": "FLOAT32", "DIM": 2, "DISTANCE_METRIC": "COSINE"},
+            ),
+        )
+    )
+
+    assert await decoded_r.hset(
+        "doc1",
+        mapping={
+            "name": "cat book",
+            "description": "an animal book about cats",
+            "vector": np.array([0.1, 0.2]).astype(np.float32).tobytes(),
+        },
+    )
+    assert await decoded_r.hset(
+        "doc2",
+        mapping={
+            "name": "dog book",
+            "description": "an animal book about dogs",
+            "vector": np.array([0.2, 0.1]).astype(np.float32).tobytes(),
+        },
+    )
+
+    query_string = "(@description:animal)=>[KNN 3 @vector $vec_param AS dist]"
+    req = (
+        aggregations.AggregateRequest(query_string)
+        .scorer("BM25")
+        .add_scores()
+        .apply(hybrid_score="@__score + @dist")
+        .load("*")
+        .dialect(4)
+    )
+
+    res = await decoded_r.ft().aggregate(
+        req,
+        query_params={"vec_param": np.array([0.11, 0.22]).astype(np.float32).tobytes()},
+    )
+
+    if isinstance(res, dict):
+        assert len(res["results"]) == 2
+    else:
+        assert len(res.rows) == 2
+        for row in res.rows:
+            len(row) == 6
 
 
 @pytest.mark.redismod
@@ -1556,7 +1754,64 @@ async def test_search_commands_in_pipeline(decoded_r: redis.Redis):
 @pytest.mark.redismod
 async def test_query_timeout(decoded_r: redis.Redis):
     q1 = Query("foo").timeout(5000)
-    assert q1.get_args() == ["foo", "TIMEOUT", 5000, "LIMIT", 0, 10]
+    assert q1.get_args() == ["foo", "TIMEOUT", 5000, "DIALECT", 2, "LIMIT", 0, 10]
     q2 = Query("foo").timeout("not_a_number")
     with pytest.raises(redis.ResponseError):
         await decoded_r.ft().search(q2)
+
+
+@pytest.mark.redismod
+@skip_if_resp_version(3)
+async def test_binary_and_text_fields(decoded_r: redis.Redis):
+    fake_vec = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+
+    index_name = "mixed_index"
+    mixed_data = {"first_name": "🐍python", "vector_emb": fake_vec.tobytes()}
+    await decoded_r.hset(f"{index_name}:1", mapping=mixed_data)
+
+    schema = [
+        TagField("first_name"),
+        VectorField(
+            "embeddings_bio",
+            algorithm="HNSW",
+            attributes={
+                "TYPE": "FLOAT32",
+                "DIM": 4,
+                "DISTANCE_METRIC": "COSINE",
+            },
+        ),
+    ]
+
+    await decoded_r.ft(index_name).create_index(
+        fields=schema,
+        definition=IndexDefinition(
+            prefix=[f"{index_name}:"], index_type=IndexType.HASH
+        ),
+    )
+    await waitForIndex(decoded_r, index_name)
+
+    query = (
+        Query("*")
+        .return_field("vector_emb", decode_field=False)
+        .return_field("first_name")
+    )
+    result = await decoded_r.ft(index_name).search(query=query, query_params={})
+    docs = result.docs
+
+    if len(docs) == 0:
+        hash_content = await decoded_r.hget(f"{index_name}:1", "first_name")
+    assert len(docs) > 0, (
+        f"Returned search results are empty. Result: {result}; Hash: {hash_content}"
+    )
+
+    decoded_vec_from_search_results = np.frombuffer(
+        docs[0]["vector_emb"], dtype=np.float32
+    )
+
+    assert np.array_equal(decoded_vec_from_search_results, fake_vec), (
+        "The vectors are not equal"
+    )
+
+    assert docs[0]["first_name"] == mixed_data["first_name"], (
+        "The text field is not decoded correctly"
+    )

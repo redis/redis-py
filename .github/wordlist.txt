@@ -1,6 +1,8 @@
 APM
 ARGV
 BFCommands
+CacheImpl
+CAS
 CFCommands
 CMSCommands
 ClusterNode
@@ -11,7 +13,6 @@ ConnectionPool
 CoreCommands
 EVAL
 EVALSHA
-GraphCommands
 Grokzen's
 INCR
 IOError
@@ -38,7 +39,6 @@ RedisCluster
 RedisClusterCommands
 RedisClusterException
 RedisClusters
-RedisGraph
 RedisInstrumentor
 RedisJSON
 RedisTimeSeries
@@ -141,3 +141,4 @@ unicode
 url
 virtualenv
 www
+yaml

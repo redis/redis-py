@@ -4,6 +4,10 @@ from redis import DataError
 
 
 class Field:
+    """
+    A class representing a field in a document.
+    """
+
     NUMERIC = "NUMERIC"
     TEXT = "TEXT"
     WEIGHT = "WEIGHT"
@@ -14,6 +18,8 @@ class Field:
     NOINDEX = "NOINDEX"
     AS = "AS"
     GEOSHAPE = "GEOSHAPE"
+    INDEX_MISSING = "INDEXMISSING"
+    INDEX_EMPTY = "INDEXEMPTY"
 
     def __init__(
         self,
@@ -21,8 +27,24 @@ class Field:
         args: List[str] = None,
         sortable: bool = False,
         no_index: bool = False,
+        index_missing: bool = False,
+        index_empty: bool = False,
         as_name: str = None,
     ):
+        """
+        Create a new field object.
+
+        Args:
+            name: The name of the field.
+            args:
+            sortable: If `True`, the field will be sortable.
+            no_index: If `True`, the field will not be indexed.
+            index_missing: If `True`, it will be possible to search for documents that
+                           have this field missing.
+            index_empty: If `True`, it will be possible to search for documents that
+                         have this field empty.
+            as_name: If provided, this alias will be used for the field.
+        """
         if args is None:
             args = []
         self.name = name
@@ -34,6 +56,10 @@ class Field:
             self.args_suffix.append(Field.SORTABLE)
         if no_index:
             self.args_suffix.append(Field.NOINDEX)
+        if index_missing:
+            self.args_suffix.append(Field.INDEX_MISSING)
+        if index_empty:
+            self.args_suffix.append(Field.INDEX_EMPTY)
 
         if no_index and not sortable:
             raise ValueError("Non-Sortable non-Indexable fields are ignored")
