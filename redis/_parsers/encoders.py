@@ -1,3 +1,5 @@
+from datetime import date
+
 from ..exceptions import DataError
 
 
@@ -23,6 +25,8 @@ class Encoder:
             )
         elif isinstance(value, (int, float)):
             value = repr(value).encode()
+        elif isinstance(value, date):
+            value = str(value).encode(self.encoding, self.encoding_errors)
         elif not isinstance(value, str):
             # a value we don't know how to deal with. throw an error
             typename = type(value).__name__
@@ -32,6 +36,7 @@ class Encoder:
             )
         if isinstance(value, str):
             value = value.encode(self.encoding, self.encoding_errors)
+
         return value
 
     def decode(self, value, force=False):
