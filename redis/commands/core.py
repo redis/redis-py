@@ -3352,7 +3352,7 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SINTERCARD", *args, keys=keys)
 
     def sinterstore(
-        self, dest: str, keys: List, *args: List
+        self, dest: KeyT, keys: List, *args: List
     ) -> Union[Awaitable[int], int]:
         """
         Store the intersection of sets specified by ``keys`` into a new
