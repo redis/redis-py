@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 from redis.commands.search.dialect import DEFAULT_DIALECT
 
@@ -31,7 +31,7 @@ class Query:
         self._with_scores: bool = False
         self._scorer: Optional[str] = None
         self._filters: List = list()
-        self._ids: Optional[Tuple[str]] = None
+        self._ids: Optional[List[str]] = None
         self._slop: int = -1
         self._timeout: Optional[float] = None
         self._in_order: bool = False
@@ -81,7 +81,7 @@ class Query:
             self._return_fields += ("AS", as_field)
         return self
 
-    def _mk_field_list(self, fields: Optional[Union[List[str], str]]) -> List:
+    def _mk_field_list(self, fields: List[str]) -> List:
         if not fields:
             return []
         return [fields] if isinstance(fields, str) else list(fields)
@@ -126,7 +126,7 @@ class Query:
 
     def highlight(
         self, fields: Optional[List[str]] = None, tags: Optional[List[str]] = None
-    ) -> "Query":
+    ) -> None:
         """
         Apply specified markup to matched term(s) within the returned field(s).
 
@@ -187,16 +187,16 @@ class Query:
         self._scorer = scorer
         return self
 
-    def get_args(self) -> List[Union[str, int, float]]:
+    def get_args(self) -> List[str]:
         """Format the redis arguments for this query and return them."""
-        args: List[Union[str, int, float]] = [self._query_string]
+        args = [self._query_string]
         args += self._get_args_tags()
         args += self._summarize_fields + self._highlight_fields
         args += ["LIMIT", self._offset, self._num]
         return args
 
-    def _get_args_tags(self) -> List[Union[str, int, float]]:
-        args: List[Union[str, int, float]] = []
+    def _get_args_tags(self) -> List[str]:
+        args = []
         if self._no_content:
             args.append("NOCONTENT")
         if self._fields:
@@ -288,14 +288,14 @@ class Query:
         self._with_scores = True
         return self
 
-    def limit_fields(self, *fields: str) -> "Query":
+    def limit_fields(self, *fields: List[str]) -> "Query":
         """
         Limit the search to specific TEXT fields only.
 
-        - **fields**: Each element should be a string, case sensitive field name
+        - **fields**: A list of strings, case sensitive field names
         from the defined schema.
         """
-        self._fields = list(fields)
+        self._fields = fields
         return self
 
     def add_filter(self, flt: "Filter") -> "Query":
@@ -340,7 +340,7 @@ class Query:
 
 
 class Filter:
-    def __init__(self, keyword: str, field: str, *args: Union[str, float]) -> None:
+    def __init__(self, keyword: str, field: str, *args: List[str]) -> None:
         self.args = [keyword, field] + list(args)
 
 
