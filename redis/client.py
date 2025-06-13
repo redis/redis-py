@@ -45,7 +45,7 @@ from redis.event import (
     AfterPubSubConnectionInstantiationEvent,
     AfterSingleConnectionInstantiationEvent,
     ClientType,
-    EventDispatcher,
+    EventDispatcher, OnCommandFailEvent,
 )
 from redis.exceptions import (
     ConnectionError,
@@ -605,7 +605,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         conn.send_command(*args, **options)
         return self.parse_response(conn, command_name, **options)
 
-    def _close_connection(self, conn) -> None:
+    def _close_connection(self, conn, error, *args) -> None:
         """
         Close the connection before retrying.
 
@@ -616,6 +616,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         do a health check as part of the send_command logic(on connection level).
         """
 
+        self._event_dispatcher.dispatch(OnCommandFailEvent(args, error))
         conn.disconnect()
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
@@ -635,7 +636,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 lambda: self._send_command_parse_response(
                     conn, command_name, *args, **options
                 ),
-                lambda _: self._close_connection(conn),
+                lambda error: self._close_connection(conn, error, *args),
             )
         finally:
             if self._single_connection_client:
