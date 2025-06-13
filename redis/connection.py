@@ -810,7 +810,7 @@ class CacheProxyConnection(ConnectionInterface):
         self,
         conn: ConnectionInterface,
         cache: CacheInterface,
-        pool_lock: threading.Lock,
+        pool_lock: threading.RLock,
     ):
         self.pid = os.getpid()
         self._conn = conn
@@ -1422,13 +1422,7 @@ class ConnectionPool:
         # release the lock.
 
         self._fork_lock = threading.RLock()
-
-        if self.cache is None:
-            self._lock = threading.RLock()
-        else:
-            # TODO: To avoid breaking changes during the bug fix, we have to keep non-reentrant lock.
-            # TODO: Remove this before next major version (7.0.0)
-            self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
         self.reset()
 

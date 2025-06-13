@@ -285,7 +285,7 @@ class TestClusterTransaction:
         mock_pool = Mock(spec=ConnectionPool)
         mock_pool.get_connection.return_value = mock_connection
         mock_pool._available_connections = [mock_connection]
-        mock_pool._lock = threading.Lock()
+        mock_pool._lock = threading.RLock()
 
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
         node_importing.redis_connection.connection_pool = mock_pool
@@ -310,7 +310,7 @@ class TestClusterTransaction:
         mock_pool = Mock(spec=ConnectionPool)
         mock_pool.get_connection.return_value = mock_connection
         mock_pool._available_connections = [mock_connection]
-        mock_pool._lock = threading.Lock()
+        mock_pool._lock = threading.RLock()
 
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
         node_importing.redis_connection.connection_pool = mock_pool

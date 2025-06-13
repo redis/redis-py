@@ -152,7 +152,7 @@ class AfterSingleConnectionInstantiationEvent:
         self,
         connection,
         client_type: ClientType,
-        connection_lock: Union[threading.Lock, asyncio.Lock],
+        connection_lock: Union[threading.RLock, asyncio.Lock],
     ):
         self._connection = connection
         self._client_type = client_type
@@ -167,7 +167,7 @@ class AfterSingleConnectionInstantiationEvent:
         return self._client_type
 
     @property
-    def connection_lock(self) -> Union[threading.Lock, asyncio.Lock]:
+    def connection_lock(self) -> Union[threading.RLock, asyncio.Lock]:
         return self._connection_lock
 
 
@@ -177,7 +177,7 @@ class AfterPubSubConnectionInstantiationEvent:
         pubsub_connection,
         connection_pool,
         client_type: ClientType,
-        connection_lock: Union[threading.Lock, asyncio.Lock],
+        connection_lock: Union[threading.RLock, asyncio.Lock],
     ):
         self._pubsub_connection = pubsub_connection
         self._connection_pool = connection_pool
@@ -197,7 +197,7 @@ class AfterPubSubConnectionInstantiationEvent:
         return self._client_type
 
     @property
-    def connection_lock(self) -> Union[threading.Lock, asyncio.Lock]:
+    def connection_lock(self) -> Union[threading.RLock, asyncio.Lock]:
         return self._connection_lock
 
 
