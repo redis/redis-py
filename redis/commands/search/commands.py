@@ -542,7 +542,7 @@ class SearchCommands:
 
     def aggregate(
         self,
-        query: Union[str, Query],
+        query: Union[AggregateRequest, Cursor],
         query_params: Dict[str, Union[str, int, float]] = None,
     ):
         """
@@ -573,7 +573,7 @@ class SearchCommands:
         )
 
     def _get_aggregate_result(
-        self, raw: List, query: Union[str, Query, AggregateRequest], has_cursor: bool
+        self, raw: List, query: Union[AggregateRequest, Cursor], has_cursor: bool
     ):
         if has_cursor:
             if isinstance(query, Cursor):
@@ -967,7 +967,7 @@ class AsyncSearchCommands(SearchCommands):
 
     async def aggregate(
         self,
-        query: Union[str, Query],
+        query: Union[AggregateResult, Cursor],
         query_params: Dict[str, Union[str, int, float]] = None,
     ):
         """
