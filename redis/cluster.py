@@ -856,7 +856,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             startup_nodes=self.nodes_manager.startup_nodes,
             result_callbacks=self.result_callbacks,
             cluster_response_callbacks=self.cluster_response_callbacks,
-            cluster_error_retry_attempts=self.retry.get_retries(),
             read_from_replicas=self.read_from_replicas,
             load_balancing_strategy=self.load_balancing_strategy,
             reinitialize_steps=self.reinitialize_steps,
@@ -3290,10 +3289,11 @@ class TransactionStrategy(AbstractStrategy):
         # watching something
         if self._transaction_connection:
             try:
-                # call this manually since our unwatch or
-                # immediate_execute_command methods can call reset()
-                self._transaction_connection.send_command("UNWATCH")
-                self._transaction_connection.read_response()
+                if self._watching:
+                    # call this manually since our unwatch or
+                    # immediate_execute_command methods can call reset()
+                    self._transaction_connection.send_command("UNWATCH")
+                    self._transaction_connection.read_response()
                 # we can safely return the connection to the pool here since we're
                 # sure we're no longer WATCHing anything
                 node = self._nodes_manager.find_connection_owner(

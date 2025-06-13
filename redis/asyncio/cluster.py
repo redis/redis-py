@@ -2350,10 +2350,11 @@ class TransactionStrategy(AbstractStrategy):
         # watching something
         if self._transaction_connection:
             try:
-                # call this manually since our unwatch or
-                # immediate_execute_command methods can call reset()
-                await self._transaction_connection.send_command("UNWATCH")
-                await self._transaction_connection.read_response()
+                if self._watching:
+                    # call this manually since our unwatch or
+                    # immediate_execute_command methods can call reset()
+                    await self._transaction_connection.send_command("UNWATCH")
+                    await self._transaction_connection.read_response()
                 # we can safely return the connection to the pool here since we're
                 # sure we're no longer WATCHing anything
                 self._transaction_node.release(self._transaction_connection)
