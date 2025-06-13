@@ -1,3 +1,5 @@
-from typing import Any, Dict, List, Union
+from typing import List, Mapping, Union
 
-JsonType = Union[str, int, float, bool, None, Dict[str, Any], List[Any]]
+JsonType = Union[
+    str, int, float, bool, None, Mapping[str, "JsonType"], List["JsonType"]
+]
