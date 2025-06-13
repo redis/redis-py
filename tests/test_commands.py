@@ -1,6 +1,8 @@
 import binascii
 import datetime
+import logging
 import re
+import sys
 import threading
 import time
 from asyncio import CancelledError
@@ -1093,6 +1095,8 @@ class TestRedisCommands:
         assert "Redis ver." in lolwut
 
         lolwut = r.lolwut(5, 6, 7, 8).decode("utf-8")
+        print(lolwut, file=sys.stderr)
+        logging.error(lolwut)
         assert "Redis ver." in lolwut
 
     @pytest.mark.onlynoncluster
