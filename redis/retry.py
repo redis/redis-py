@@ -1,3 +1,4 @@
+import abc
 import socket
 from time import sleep
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Tuple, Type, TypeVar, Union
@@ -10,10 +11,9 @@ if TYPE_CHECKING:
     from redis.backoff import AbstractBackoff
 
 
-class AbstractRetry:
+class AbstractRetry(abc.ABC):
     """Retry a specific number of times after a failure"""
 
-    __slots__ = "_backoff", "_retries", "_supported_errors"
     _supported_errors: Tuple[Type[Exception], ...]
 
     def __init__(
@@ -34,15 +34,9 @@ class AbstractRetry:
         if supported_errors:
             self._supported_errors = supported_errors
 
+    @abc.abstractmethod
     def __eq__(self, other: Any) -> bool:
-        if not isinstance(other, AbstractRetry):
-            return NotImplemented
-
-        return (
-            self._backoff == other._backoff
-            and self._retries == other._retries
-            and set(self._supported_errors) == set(other._supported_errors)
-        )
+        return NotImplemented
 
     def __hash__(self) -> int:
         return hash((self._backoff, self._retries, frozenset(self._supported_errors)))
@@ -76,6 +70,17 @@ class Retry(AbstractRetry):
         TimeoutError,
         socket.timeout,
     )
+    __hash__ = AbstractRetry.__hash__
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Retry):
+            return NotImplemented
+
+        return (
+            self._backoff == other._backoff
+            and self._retries == other._retries
+            and set(self._supported_errors) == set(other._supported_errors)
+        )
 
     def call_with_retry(
         self,

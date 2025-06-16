@@ -12,6 +12,17 @@ class Retry(AbstractRetry):
         ConnectionError,
         TimeoutError,
     )
+    __hash__ = AbstractRetry.__hash__
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Retry):
+            return NotImplemented
+
+        return (
+            self._backoff == other._backoff
+            and self._retries == other._retries
+            and set(self._supported_errors) == set(other._supported_errors)
+        )
 
     async def call_with_retry(
         self, do: Callable[[], Awaitable[T]], fail: Callable[[Exception], Any]
