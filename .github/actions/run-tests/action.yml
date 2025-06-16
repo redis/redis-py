@@ -73,8 +73,8 @@ runs:
 
           # Mapping of redis version to stack version
           declare -A redis_stack_version_mapping=(
-            ["7.4.2"]="rs-7.4.0-v2"
-            ["7.2.7"]="rs-7.2.0-v14"
+            ["7.4.4"]="rs-7.4.0-v5"
+            ["7.2.9"]="rs-7.2.0-v17"
           )
 
           if [[ -v redis_stack_version_mapping[$REDIS_VERSION] ]]; then
@@ -91,8 +91,10 @@ runs:
           fi
 
           invoke devenv --endpoints=all-stack
+
         else
           echo "Using redis CE for module tests"
+          export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=$REDIS_VERSION
           echo "REDIS_MOD_URL=redis://127.0.0.1:6379" >> $GITHUB_ENV
           invoke devenv --endpoints all
         fi
