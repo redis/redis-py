@@ -464,7 +464,7 @@ class SearchCommands:
         return self._parse_results(INFO_CMD, res)
 
     def get_params_args(
-        self, query_params: Union[Dict[str, Union[str, int, float, bytes]], None]
+        self, query_params: Optional[Dict[str, Union[str, int, float, bytes]]]
     ):
         if query_params is None:
             return []
@@ -543,7 +543,7 @@ class SearchCommands:
     def aggregate(
         self,
         query: Union[AggregateRequest, Cursor],
-        query_params: Dict[str, Union[str, int, float]] = None,
+        query_params: Optional[Dict[str, Union[str, int, float]]] = None,
     ):
         """
         Issue an aggregation query.
