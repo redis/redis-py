@@ -1,9 +1,6 @@
 from unittest.mock import Mock
-
 from redis.connection import ConnectionPool
-
-from redis import Redis
-from redis.multidb.circuit import CircuitBreaker
+from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter
 from redis.multidb.config import MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
     DEFAULT_AUTO_FALLBACK_INTERVAL, DatabaseConfig, DEFAULT_GRACE_PERIOD
 from redis.multidb.database import Database
@@ -102,3 +99,23 @@ class TestMultiDbConfig:
         assert config.health_check_interval == health_check_interval
         assert config.database_selector == mock_database_selector
         assert config.auto_fallback_interval == auto_fallback_interval
+
+class TestDatabaseConfig:
+    def test_default_config(self):
+        config = DatabaseConfig(client_kwargs={'host': 'host1', 'port': 'port1'}, weight=1.0)
+
+        assert config.client_kwargs == {'host': 'host1', 'port': 'port1'}
+        assert config.weight == 1.0
+        assert isinstance(config.circuit, PBCircuitBreakerAdapter)
+
+    def test_overridden_config(self):
+        mock_connection_pool = Mock(spec=ConnectionPool)
+        mock_circuit = Mock(spec=CircuitBreaker)
+
+        config = DatabaseConfig(
+            client_kwargs={'connection_pool': mock_connection_pool}, weight=1.0, circuit=mock_circuit
+        )
+
+        assert config.client_kwargs == {'connection_pool': mock_connection_pool}
+        assert config.weight == 1.0
+        assert config.circuit == mock_circuit
