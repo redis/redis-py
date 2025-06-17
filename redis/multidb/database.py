@@ -64,9 +64,9 @@ class Database(AbstractDatabase):
     def __init__(
             self,
             client: Union[redis.Redis, RedisCluster, Sentinel],
-            cb: CircuitBreaker,
+            circuit: CircuitBreaker,
             weight: float,
-            state: State,
+            state: State = State.DISCONNECTED,
     ):
         """
         param: client: Client instance for communication with the database.
@@ -76,7 +76,7 @@ class Database(AbstractDatabase):
         param: health_checks: List of health cheks to determine if the current database is healthy.
         """
         self._client = client
-        self._cb = cb
+        self._cb = circuit
         self._weight = weight
         self._state = state
 
