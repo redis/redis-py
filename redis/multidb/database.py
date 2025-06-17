@@ -1,14 +1,10 @@
 import redis
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Union, List
-
-from typing_extensions import Optional
+from typing import Union
 
 from redis import RedisCluster, Sentinel
-from redis.multidb.circuit import CircuitBreaker, State as CBState
-from redis.multidb.healthcheck import HealthCheck, AbstractHealthCheck
-
+from redis.multidb.circuit import CircuitBreaker
 
 class State(Enum):
     ACTIVE = 0
@@ -22,10 +18,22 @@ class AbstractDatabase(ABC):
         """The underlying redis client."""
         pass
 
+    @client.setter
+    @abstractmethod
+    def client(self, client: Union[redis.Redis, RedisCluster]):
+        """Set the underlying redis client."""
+        pass
+
     @property
     @abstractmethod
     def weight(self) -> float:
         """The weight of this database in compare to others. Used to determine the database failover to."""
+        pass
+
+    @weight.setter
+    @abstractmethod
+    def weight(self, weight: float):
+        """Set the weight of this database in compare to others."""
         pass
 
     @property
@@ -34,20 +42,22 @@ class AbstractDatabase(ABC):
         """The state of the current database."""
         pass
 
+    @state.setter
+    @abstractmethod
+    def state(self, state: State):
+        """Set the state of the current database."""
+        pass
+
     @property
     @abstractmethod
     def circuit(self) -> CircuitBreaker:
         """Circuit breaker for the current database."""
         pass
 
+    @circuit.setter
     @abstractmethod
-    def add_health_check(self, health_check: HealthCheck) -> None:
-        """Adds a new healthcheck to the current database."""
-        pass
-
-    @abstractmethod
-    def is_healthy(self) -> bool:
-        """Checks if the current database is healthy."""
+    def circuit(self, circuit: CircuitBreaker):
+        """Set the circuit breaker for the current database."""
         pass
 
 class Database(AbstractDatabase):
@@ -57,7 +67,6 @@ class Database(AbstractDatabase):
             cb: CircuitBreaker,
             weight: float,
             state: State,
-            health_checks: Optional[List[HealthCheck]] = None,
     ):
         """
         param: client: Client instance for communication with the database.
@@ -70,11 +79,14 @@ class Database(AbstractDatabase):
         self._cb = cb
         self._weight = weight
         self._state = state
-        self._health_checks = health_checks or []
 
     @property
     def client(self) -> Union[redis.Redis, RedisCluster, Sentinel]:
         return self._client
+
+    @client.setter
+    def client(self, client: Union[redis.Redis, RedisCluster, Sentinel]):
+        self._client = client
 
     @property
     def weight(self) -> float:
@@ -96,17 +108,6 @@ class Database(AbstractDatabase):
     def circuit(self) -> CircuitBreaker:
         return self._cb
 
-    def add_health_check(self, health_check: HealthCheck) -> None:
-        self._health_checks.append(health_check)
-
-    def is_healthy(self) -> bool:
-        is_healthy = True
-
-        for health_check in self._health_checks:
-            is_healthy = health_check.check_health(self)
-
-            if not is_healthy:
-                self._cb.state = CBState.OPEN
-                break
-
-        return is_healthy
+    @circuit.setter
+    def circuit(self, circuit: CircuitBreaker):
+        self._cb = circuit

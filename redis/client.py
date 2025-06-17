@@ -616,7 +616,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         do a health check as part of the send_command logic(on connection level).
         """
 
-        self._event_dispatcher.dispatch(OnCommandFailEvent(args, error))
+        self._event_dispatcher.dispatch(OnCommandFailEvent(args, error, self))
         conn.disconnect()
 
     # COMMAND EXECUTION AND PROTOCOL PARSING

@@ -16,6 +16,11 @@ class CircuitBreaker(ABC):
         """The grace period in seconds when the circle should be kept open."""
         pass
 
+    @grace_period.setter
+    @abstractmethod
+    def grace_period(self, grace_period: float):
+        """Set the grace period in seconds."""
+
     @property
     @abstractmethod
     def state(self) -> State:

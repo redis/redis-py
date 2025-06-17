@@ -1,0 +1,2 @@
+class NoValidDatabaseException(Exception):
+    pass

@@ -251,9 +251,11 @@ class OnCommandFailEvent:
             self,
             command: tuple,
             exception: Exception,
+            client,
     ):
         self._command = command
         self._exception = exception
+        self._client = client
 
     @property
     def command(self) -> tuple:
@@ -263,6 +265,9 @@ class OnCommandFailEvent:
     def exception(self) -> Exception:
         return self._exception
 
+    @property
+    def client(self):
+        return self._client
 
 class ReAuthConnectionListener(EventListenerInterface):
     """
