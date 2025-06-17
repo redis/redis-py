@@ -1,5 +1,7 @@
 import asyncio
+import inspect
 import random
+import socket
 import weakref
 from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type
 
@@ -11,8 +13,13 @@ from redis.asyncio.connection import (
     SSLConnection,
 )
 from redis.commands import AsyncSentinelCommands
-from redis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
-from redis.utils import str_if_bytes
+from redis.exceptions import (
+    ConnectionError,
+    ReadOnlyError,
+    RedisError,
+    ResponseError,
+    TimeoutError,
+)
 
 
 class MasterNotFoundError(ConnectionError):
@@ -37,11 +44,47 @@ class SentinelManagedConnection(Connection):
 
     async def connect_to(self, address):
         self.host, self.port = address
-        await super().connect()
-        if self.connection_pool.check_connection:
-            await self.send_command("PING")
-            if str_if_bytes(await self.read_response()) != "PONG":
-                raise ConnectionError("PING failed")
+
+        if self.is_connected:
+            return
+        try:
+            await self._connect()
+        except asyncio.CancelledError:
+            raise  # in 3.7 and earlier, this is an Exception, not BaseException
+        except (socket.timeout, asyncio.TimeoutError):
+            raise TimeoutError("Timeout connecting to server")
+        except OSError as e:
+            raise ConnectionError(self._error_message(e))
+        except Exception as exc:
+            raise ConnectionError(exc) from exc
+
+        try:
+            if not self.redis_connect_func:
+                # Use the default on_connect function
+                await self.on_connect_check_health(
+                    check_health=self.connection_pool.check_connection
+                )
+            else:
+                # Use the passed function redis_connect_func
+                (
+                    await self.redis_connect_func(self)
+                    if asyncio.iscoroutinefunction(self.redis_connect_func)
+                    else self.redis_connect_func(self)
+                )
+        except RedisError:
+            # clean up after any error in on_connect
+            await self.disconnect()
+            raise
+
+        # run any user callbacks. right now the only internal callback
+        # is for pubsub channel/pattern resubscription
+        # first, remove any dead weakrefs
+        self._connect_callbacks = [ref for ref in self._connect_callbacks if ref()]
+        for ref in self._connect_callbacks:
+            callback = ref()
+            task = callback(self)
+            if task and inspect.isawaitable(task):
+                await task
 
     async def _connect_retry(self):
         if self._reader:
