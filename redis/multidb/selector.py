@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import List
 
 from redis.data_structure import WeightedList
 from redis.multidb.database import AbstractDatabase
@@ -28,15 +27,11 @@ class WeightBasedDatabaseSelector(DatabaseSelector):
     """
     def __init__(
             self,
-            databases: List[AbstractDatabase],
             retry: Retry,
     ):
         self._retry = retry
         self._retry.update_supported_errors([NoValidDatabaseException])
         self._databases = WeightedList()
-
-        for database in databases:
-            self._databases.add(database, database.weight)
 
     @property
     def database(self) -> AbstractDatabase:
