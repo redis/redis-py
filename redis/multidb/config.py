@@ -56,7 +56,7 @@ class MultiDbConfig:
     health_checks: List[HealthCheck] = field(default_factory=default_health_checks)
     health_check_interval: int = DEFAULT_HEALTH_CHECK_INTERVAL
     failover_strategy: FailoverStrategy = field(default_factory=default_failover_strategy)
-    auto_fallback_interval: int = DEFAULT_AUTO_FALLBACK_INTERVAL
+    auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL
 
     def databases(self) -> List[AbstractDatabase]:
         databases = []

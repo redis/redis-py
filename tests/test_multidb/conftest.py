@@ -5,15 +5,25 @@ import pytest
 from redis import Redis
 from redis.multidb.circuit import CircuitBreaker, State as CBState
 from redis.multidb.database import Database, State
+from redis.multidb.failover import FailoverStrategy
+from redis.multidb.failure_detector import FailureDetector
 
 
 @pytest.fixture()
 def mock_client() -> Redis:
     return Mock(spec=Redis)
 
-@pytest.fixture(scope='function')
+@pytest.fixture()
 def mock_cb() -> CircuitBreaker:
     return Mock(spec=CircuitBreaker)
+
+@pytest.fixture()
+def mock_fd() -> FailureDetector:
+     return Mock(spec=FailureDetector)
+
+@pytest.fixture()
+def mock_fs() -> FailoverStrategy:
+     return Mock(spec=FailoverStrategy)
 
 @pytest.fixture()
 def mock_db(request) -> Database:

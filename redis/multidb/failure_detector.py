@@ -34,7 +34,7 @@ class CommandFailureDetector(FailureDetector):
         self._error_types = error_types
         self._start_time: datetime = datetime.now()
         self._end_time: datetime = self._start_time + timedelta(seconds=self._duration)
-        self._failures_within_duration: Dict[Exception, Dict[datetime, tuple]] = {}
+        self._failures_within_duration: List[tuple[datetime, tuple]] = []
 
     def register_failure(self, database, exception: Exception, cmd: tuple) -> None:
         failure_time = datetime.now()
@@ -44,18 +44,18 @@ class CommandFailureDetector(FailureDetector):
 
         if self._error_types:
             if type(exception) in self._error_types:
-                self._failures_within_duration[exception] = {datetime.now(): cmd}
+                self._failures_within_duration.append((datetime.now(), cmd))
         else:
-            self._failures_within_duration[exception] = {datetime.now(): cmd}
+            self._failures_within_duration.append((datetime.now(), cmd))
 
         self._check_threshold(database)
 
     def _check_threshold(self, database):
-        if len(self._failures_within_duration.keys()) >= self._threshold:
+        if len(self._failures_within_duration) >= self._threshold:
             database.circuit.state = CBState.OPEN
             self._reset()
 
     def _reset(self) -> None:
         self._start_time = datetime.now()
         self._end_time = self._start_time + timedelta(seconds=self._duration)
-        self._failures_within_duration = {}
+        self._failures_within_duration = []
