@@ -44,3 +44,13 @@ class TestEchoHealthCheck:
         assert hc.check_health(db) == False
         assert mock_client.execute_command.call_count == 4
         assert db.circuit.state == CBState.OPEN
+
+    def test_database_close_circuit_on_successful_healthcheck(self, mock_client, mock_cb):
+        mock_client.execute_command.side_effect = [ConnectionError, ConnectionError, 'healthcheck']
+        mock_cb.state = CBState.HALF_OPEN
+        hc = EchoHealthCheck(Retry(backoff=ExponentialBackoff(cap=1.0), retries=3))
+        db = Database(mock_client, mock_cb, 0.9, State.ACTIVE)
+
+        assert hc.check_health(db) == True
+        assert mock_client.execute_command.call_count == 3
+        assert db.circuit.state == CBState.CLOSED

@@ -53,6 +53,8 @@ class EchoHealthCheck(AbstractHealthCheck):
 
             if not is_healthy:
                 database.circuit.state = CBState.OPEN
+            elif is_healthy and database.circuit.state != CBState.CLOSED:
+                database.circuit.state = CBState.CLOSED
 
             return is_healthy
         except Exception:
