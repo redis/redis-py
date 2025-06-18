@@ -5,11 +5,11 @@ import pytest
 from redis.backoff import NoBackoff, ExponentialBackoff
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import NoValidDatabaseException
-from redis.multidb.selector import WeightBasedDatabaseSelector
+from redis.multidb.failover import WeightBasedFailoverStrategy
 from redis.retry import Retry
 
 
-class TestWeightBasedDatabaseSelector:
+class TestWeightBasedFailoverStrategy:
     @pytest.mark.parametrize(
         'mock_db,mock_db1,mock_db2',
         [
@@ -29,12 +29,12 @@ class TestWeightBasedDatabaseSelector:
     )
     def test_get_valid_database(self, mock_db, mock_db1, mock_db2):
         retry = Retry(NoBackoff(), 0)
-        selector = WeightBasedDatabaseSelector(retry=retry)
-        selector.add_database(mock_db)
-        selector.add_database(mock_db1)
-        selector.add_database(mock_db2)
+        failover_strategy = WeightBasedFailoverStrategy(retry=retry)
+        failover_strategy.add_database(mock_db)
+        failover_strategy.add_database(mock_db1)
+        failover_strategy.add_database(mock_db2)
 
-        assert selector.database == mock_db1
+        assert failover_strategy.database == mock_db1
 
     @pytest.mark.parametrize(
         'mock_db,mock_db1,mock_db2',
@@ -54,12 +54,12 @@ class TestWeightBasedDatabaseSelector:
         type(mock_db.circuit).state = state_mock
 
         retry = Retry(ExponentialBackoff(cap=1), 3)
-        selector = WeightBasedDatabaseSelector(retry=retry)
-        selector.add_database(mock_db)
-        selector.add_database(mock_db1)
-        selector.add_database(mock_db2)
+        failover_strategy = WeightBasedFailoverStrategy(retry=retry)
+        failover_strategy.add_database(mock_db)
+        failover_strategy.add_database(mock_db1)
+        failover_strategy.add_database(mock_db2)
 
-        assert selector.database == mock_db
+        assert failover_strategy.database == mock_db
         assert state_mock.call_count == 4
 
     @pytest.mark.parametrize(
@@ -80,13 +80,13 @@ class TestWeightBasedDatabaseSelector:
         type(mock_db.circuit).state = state_mock
 
         retry = Retry(ExponentialBackoff(cap=1), 3)
-        selector = WeightBasedDatabaseSelector(retry=retry)
-        selector.add_database(mock_db)
-        selector.add_database(mock_db1)
-        selector.add_database(mock_db2)
+        failover_strategy = WeightBasedFailoverStrategy(retry=retry)
+        failover_strategy.add_database(mock_db)
+        failover_strategy.add_database(mock_db1)
+        failover_strategy.add_database(mock_db2)
 
         with pytest.raises(NoValidDatabaseException, match='No valid database available for communication'):
-            assert selector.database
+            assert failover_strategy.database
 
         assert state_mock.call_count == 4
 
@@ -103,10 +103,10 @@ class TestWeightBasedDatabaseSelector:
     )
     def test_throws_exception_on_empty_databases(self, mock_db, mock_db1, mock_db2):
         retry = Retry(NoBackoff(), 0)
-        selector = WeightBasedDatabaseSelector(retry=retry)
+        failover_strategy = WeightBasedFailoverStrategy(retry=retry)
 
         with pytest.raises(NoValidDatabaseException, match='No valid database available for communication'):
-            assert selector.database
+            assert failover_strategy.database
 
     @pytest.mark.parametrize(
         'mock_db,mock_db1,mock_db2',
@@ -121,10 +121,10 @@ class TestWeightBasedDatabaseSelector:
     )
     def test_add_database_return_valid_database(self, mock_db, mock_db1, mock_db2):
         retry = Retry(ExponentialBackoff(cap=1), 3)
-        selector = WeightBasedDatabaseSelector(retry=retry)
-        selector.add_database(mock_db)
-        selector.add_database(mock_db2)
-        assert selector.database == mock_db2
+        failover_strategy = WeightBasedFailoverStrategy(retry=retry)
+        failover_strategy.add_database(mock_db)
+        failover_strategy.add_database(mock_db2)
+        assert failover_strategy.database == mock_db2
 
-        selector.add_database(mock_db1)
-        assert selector.database == mock_db1
+        failover_strategy.add_database(mock_db1)
+        assert failover_strategy.database == mock_db1

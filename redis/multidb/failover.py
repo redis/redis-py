@@ -7,7 +7,7 @@ from redis.multidb.exception import NoValidDatabaseException
 from redis.retry import Retry
 
 
-class DatabaseSelector(ABC):
+class FailoverStrategy(ABC):
 
     @property
     @abstractmethod
@@ -21,7 +21,7 @@ class DatabaseSelector(ABC):
         pass
 
 
-class WeightBasedDatabaseSelector(DatabaseSelector):
+class WeightBasedFailoverStrategy(FailoverStrategy):
     """
     Choose the active database with the highest weight.
     """

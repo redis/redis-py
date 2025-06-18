@@ -6,7 +6,7 @@ from redis.multidb.config import MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
 from redis.multidb.database import Database
 from redis.multidb.failure_detector import CommandFailureDetector, FailureDetector
 from redis.multidb.healthcheck import EchoHealthCheck, HealthCheck
-from redis.multidb.selector import WeightBasedDatabaseSelector, DatabaseSelector
+from redis.multidb.failover import WeightBasedFailoverStrategy, FailoverStrategy
 
 
 class TestMultiDbConfig:
@@ -37,7 +37,7 @@ class TestMultiDbConfig:
         assert len(config.health_checks) == 1
         assert isinstance(config.health_checks[0], EchoHealthCheck)
         assert config.health_check_interval == DEFAULT_HEALTH_CHECK_INTERVAL
-        assert isinstance(config.database_selector, WeightBasedDatabaseSelector)
+        assert isinstance(config.failover_strategy, WeightBasedFailoverStrategy)
         assert config.auto_fallback_interval == DEFAULT_AUTO_FALLBACK_INTERVAL
 
     def test_overridden_config(self):
@@ -55,7 +55,7 @@ class TestMultiDbConfig:
         mock_failure_detectors = [Mock(spec=FailureDetector), Mock(spec=FailureDetector)]
         mock_health_checks = [Mock(spec=HealthCheck), Mock(spec=HealthCheck)]
         health_check_interval = 10
-        mock_database_selector = Mock(spec=DatabaseSelector)
+        mock_failover_strategy = Mock(spec=FailoverStrategy)
         auto_fallback_interval = 10
         db_configs = [
                 DatabaseConfig(
@@ -74,7 +74,7 @@ class TestMultiDbConfig:
             failure_detectors=mock_failure_detectors,
             health_checks=mock_health_checks,
             health_check_interval=health_check_interval,
-            database_selector=mock_database_selector,
+            failover_strategy=mock_failover_strategy,
             auto_fallback_interval=auto_fallback_interval,
         )
 
@@ -97,7 +97,7 @@ class TestMultiDbConfig:
         assert config.health_checks[0] == mock_health_checks[0]
         assert config.health_checks[1] == mock_health_checks[1]
         assert config.health_check_interval == health_check_interval
-        assert config.database_selector == mock_database_selector
+        assert config.failover_strategy == mock_failover_strategy
         assert config.auto_fallback_interval == auto_fallback_interval
 
 class TestDatabaseConfig:

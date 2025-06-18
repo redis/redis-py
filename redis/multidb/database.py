@@ -70,10 +70,9 @@ class Database(AbstractDatabase):
     ):
         """
         param: client: Client instance for communication with the database.
-        param: cb: Circuit breaker for the current database.
+        param: circuit: Circuit breaker for the current database.
         param: weight: Weight of current database. Database with the highest weight becomes Active.
         param: state: State of the current database.
-        param: health_checks: List of health cheks to determine if the current database is healthy.
         """
         self._client = client
         self._cb = circuit
