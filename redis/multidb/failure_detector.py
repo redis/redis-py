@@ -54,11 +54,13 @@ class CommandFailureDetector(FailureDetector):
         self._check_threshold(database)
 
     def _check_threshold(self, database):
-        if len(self._failures_within_duration) >= self._threshold:
-            database.circuit.state = CBState.OPEN
-            self._reset()
+        with self._lock:
+            if len(self._failures_within_duration) >= self._threshold:
+                database.circuit.state = CBState.OPEN
+                self._reset()
 
     def _reset(self) -> None:
-        self._start_time = datetime.now()
-        self._end_time = self._start_time + timedelta(seconds=self._duration)
-        self._failures_within_duration = []
+        with self._lock:
+            self._start_time = datetime.now()
+            self._end_time = self._start_time + timedelta(seconds=self._duration)
+            self._failures_within_duration = []
