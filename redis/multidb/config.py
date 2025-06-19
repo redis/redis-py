@@ -1,13 +1,15 @@
 from dataclasses import dataclass, field
-from typing import List, Type, Union
+from typing import List, Type, Union, Set
 
 import pybreaker
 
 from redis import Redis, Sentinel
 from redis.asyncio import RedisCluster
 from redis.backoff import ExponentialWithJitterBackoff
+from redis.data_structure import WeightedList
+from redis.event import EventDispatcher, EventDispatcherInterface
 from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter
-from redis.multidb.database import Database, AbstractDatabase
+from redis.multidb.database import Database, Databases
 from redis.multidb.failure_detector import FailureDetector, CommandFailureDetector
 from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
 from redis.multidb.failover import FailoverStrategy, WeightBasedFailoverStrategy
@@ -42,6 +44,9 @@ def default_circuit_breaker() -> CircuitBreaker:
     circuit_breaker = pybreaker.CircuitBreaker(reset_timeout=DEFAULT_GRACE_PERIOD)
     return PBCircuitBreakerAdapter(circuit_breaker)
 
+def default_event_dispatcher() -> EventDispatcherInterface:
+    return EventDispatcher()
+
 @dataclass
 class DatabaseConfig:
     client_kwargs: dict
@@ -57,14 +62,16 @@ class MultiDbConfig:
     health_check_interval: int = DEFAULT_HEALTH_CHECK_INTERVAL
     failover_strategy: FailoverStrategy = field(default_factory=default_failover_strategy)
     auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL
+    event_dispatcher: EventDispatcherInterface = field(default_factory=default_event_dispatcher)
 
-    def databases(self) -> List[AbstractDatabase]:
-        databases = []
+    def databases(self) -> Databases:
+        databases = WeightedList()
 
         for database_config in self.databases_config:
             client = self.client_class(**database_config.client_kwargs)
-            databases.append(
-                Database(client=client, circuit=database_config.circuit, weight=database_config.weight)
+            databases.add(
+                Database(client=client, circuit=database_config.circuit, weight=database_config.weight),
+                database_config.weight
             )
 
         return databases

@@ -4,6 +4,7 @@ from enum import Enum
 from typing import Union
 
 from redis import RedisCluster, Sentinel
+from redis.data_structure import WeightedList
 from redis.multidb.circuit import CircuitBreaker
 
 class State(Enum):
@@ -59,6 +60,8 @@ class AbstractDatabase(ABC):
     def circuit(self, circuit: CircuitBreaker):
         """Set the circuit breaker for the current database."""
         pass
+
+Databases = WeightedList[tuple[AbstractDatabase, int]]
 
 class Database(AbstractDatabase):
     def __init__(

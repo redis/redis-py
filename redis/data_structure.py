@@ -1,8 +1,9 @@
 import threading
-from typing import List
+from typing import List, Any, TypeVar, Generic
 
+T = TypeVar('T')
 
-class WeightedList:
+class WeightedList(Generic[T]):
     """
     Thread-safe weighted list.
     """
@@ -66,7 +67,7 @@ class WeightedList:
         with self._lock:
             return len(self._items)
 
-    def __getitem__(self, index):
+    def __getitem__(self, index) -> tuple[Any, int]:
         with self._lock:
             weight, item = self._items[index]
             return item, weight

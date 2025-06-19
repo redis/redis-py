@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import List, Union
+from typing import List, Union, Optional
 
 from redis.event import EventDispatcherInterface, OnCommandFailEvent
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
-from redis.multidb.database import Database
+from redis.multidb.database import Database, AbstractDatabase, Databases
 from redis.multidb.circuit import State as CBState
 from redis.multidb.event import RegisterCommandFailure
 from redis.multidb.failover import FailoverStrategy
@@ -26,13 +26,8 @@ class CommandExecutor(ABC):
 
     @property
     @abstractmethod
-    def databases(self) -> List[Database]:
+    def databases(self) -> Databases:
         """Returns a list of databases."""
-        pass
-
-    @abstractmethod
-    def add_database(self, database: Database) -> None:
-        """Adds new database to the list of databases."""
         pass
 
     @property
@@ -43,7 +38,7 @@ class CommandExecutor(ABC):
 
     @active_database.setter
     @abstractmethod
-    def active_database(self, database: Database) -> None:
+    def active_database(self, database: AbstractDatabase) -> None:
         """Sets currently active database."""
         pass
 
@@ -76,7 +71,7 @@ class DefaultCommandExecutor(CommandExecutor):
     def __init__(
             self,
             failure_detectors: List[FailureDetector],
-            databases: List[Database],
+            databases: Databases,
             failover_strategy: FailoverStrategy,
             event_dispatcher: EventDispatcherInterface,
             auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
@@ -106,19 +101,15 @@ class DefaultCommandExecutor(CommandExecutor):
         self._failure_detectors.append(failure_detector)
 
     @property
-    def databases(self) -> List[Database]:
+    def databases(self) -> Databases:
         return self._databases
 
-    def add_database(self, database: Database) -> None:
-        self._failover_strategy.add_database(database)
-        self._databases.append(database)
-
     @property
-    def active_database(self) -> Union[Database, None]:
+    def active_database(self) -> Optional[AbstractDatabase]:
         return self._active_database
 
     @active_database.setter
-    def active_database(self, database: Database) -> None:
+    def active_database(self, database: AbstractDatabase) -> None:
         self._active_database = database
 
     @property

@@ -26,9 +26,9 @@ class TestMultiDbConfig:
         assert len(databases) == 3
 
         i = 0
-        for db in databases:
+        for db, weight in databases:
             assert isinstance(db, Database)
-            assert db.weight == db_configs[i].weight
+            assert weight == db_configs[i].weight
             assert db.circuit.grace_period == DEFAULT_GRACE_PERIOD
             i+=1
 
@@ -83,9 +83,9 @@ class TestMultiDbConfig:
         assert len(databases) == 3
 
         i = 0
-        for db in databases:
+        for db, weight in databases:
             assert isinstance(db, Database)
-            assert db.weight == db_configs[i].weight
+            assert weight == db_configs[i].weight
             assert db.client.connection_pool == mock_connection_pools[i]
             assert db.circuit.grace_period == grace_period
             i+=1

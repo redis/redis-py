@@ -1,7 +1,7 @@
-from typing import List
+from typing import List, Set
 
 from redis.event import EventListenerInterface, OnCommandFailEvent
-from redis.multidb.database import Database
+from redis.multidb.config import Databases
 from redis.multidb.failure_detector import FailureDetector
 
 
@@ -9,7 +9,7 @@ class RegisterCommandFailure(EventListenerInterface):
     """
     Event listener that registers command failures and passing it to the failure detectors.
     """
-    def __init__(self, failure_detectors: List[FailureDetector], databases: List[Database]):
+    def __init__(self, failure_detectors: List[FailureDetector], databases: Databases):
         self._failure_detectors = failure_detectors
         self._databases = databases
 

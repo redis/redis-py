@@ -1,7 +1,7 @@
-import threading
 from abc import ABC, abstractmethod
 
 from redis.data_structure import WeightedList
+from redis.multidb.database import Databases
 from redis.multidb.database import AbstractDatabase
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import NoValidDatabaseException
@@ -17,10 +17,9 @@ class FailoverStrategy(ABC):
         pass
 
     @abstractmethod
-    def add_database(self, database: AbstractDatabase) -> None:
-        """Add the database."""
+    def set_databases(self, databases: Databases) -> None:
+        """Set the databases."""
         pass
-
 
 class WeightBasedFailoverStrategy(FailoverStrategy):
     """
@@ -28,7 +27,7 @@ class WeightBasedFailoverStrategy(FailoverStrategy):
     """
     def __init__(
             self,
-            retry: Retry,
+            retry: Retry
     ):
         self._retry = retry
         self._retry.update_supported_errors([NoValidDatabaseException])
@@ -41,8 +40,8 @@ class WeightBasedFailoverStrategy(FailoverStrategy):
             lambda _: self._dummy_fail()
         )
 
-    def add_database(self, database: AbstractDatabase) -> None:
-        self._databases.add(database, database.weight)
+    def set_databases(self, databases: Databases) -> None:
+        self._databases = databases
 
     def _get_active_database(self) -> AbstractDatabase:
         for database, _ in self._databases:
