@@ -1,6 +1,7 @@
+import threading
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import List, Dict, Type
+from typing import List, Type
 
 from typing_extensions import Optional
 
@@ -35,6 +36,7 @@ class CommandFailureDetector(FailureDetector):
         self._start_time: datetime = datetime.now()
         self._end_time: datetime = self._start_time + timedelta(seconds=self._duration)
         self._failures_within_duration: List[tuple[datetime, tuple]] = []
+        self._lock = threading.RLock()
 
     def register_failure(self, database, exception: Exception, cmd: tuple) -> None:
         failure_time = datetime.now()
@@ -42,11 +44,12 @@ class CommandFailureDetector(FailureDetector):
         if not self._start_time < failure_time < self._end_time:
             self._reset()
 
-        if self._error_types:
-            if type(exception) in self._error_types:
+        with self._lock:
+            if self._error_types:
+                if type(exception) in self._error_types:
+                    self._failures_within_duration.append((datetime.now(), cmd))
+            else:
                 self._failures_within_duration.append((datetime.now(), cmd))
-        else:
-            self._failures_within_duration.append((datetime.now(), cmd))
 
         self._check_threshold(database)
 

@@ -145,7 +145,11 @@ class DefaultCommandExecutor(CommandExecutor):
             self._active_database = self._failover_strategy.database
             self._schedule_next_fallback()
 
-        return self._active_database.client.execute_command(*args, **options)
+        try:
+            return self._active_database.client.execute_command(*args, **options)
+        except Exception:
+            # Retry until failure detector will trigger opening of circuit
+            return self.execute_command(*args, **options)
 
     def _schedule_next_fallback(self) -> None:
         if self._auto_fallback_interval == DEFAULT_AUTO_FALLBACK_INTERVAL:
