@@ -85,27 +85,33 @@ class EventDispatcher(EventDispatcherInterface):
             ],
         }
 
+        self._lock = threading.Lock()
+        self._async_lock = asyncio.Lock()
+
         if event_listeners:
             self.register_listeners(event_listeners)
 
     def dispatch(self, event: object):
-        listeners = self._event_listeners_mapping.get(type(event), [])
+        with self._lock:
+            listeners = self._event_listeners_mapping.get(type(event), [])
 
-        for listener in listeners:
-            listener.listen(event)
+            for listener in listeners:
+                listener.listen(event)
 
     async def dispatch_async(self, event: object):
-        listeners = self._event_listeners_mapping.get(type(event), [])
+        with self._async_lock:
+            listeners = self._event_listeners_mapping.get(type(event), [])
 
-        for listener in listeners:
-            await listener.listen(event)
+            for listener in listeners:
+                await listener.listen(event)
 
     def register_listeners(self, event_listeners: Dict[Type[object], List[EventListenerInterface]]):
-        for event in event_listeners:
-            if event in self._event_listeners_mapping:
-                self._event_listeners_mapping[event] = list(set(self._event_listeners_mapping[event] + event_listeners[event]))
-            else:
-                self._event_listeners_mapping[event] = event_listeners[event]
+        with self._lock:
+            for event in event_listeners:
+                if event in self._event_listeners_mapping:
+                    self._event_listeners_mapping[event] = list(set(self._event_listeners_mapping[event] + event_listeners[event]))
+                else:
+                    self._event_listeners_mapping[event] = event_listeners[event]
 
 
 class AfterConnectionReleasedEvent:
