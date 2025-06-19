@@ -1835,7 +1835,6 @@ class NodesManager:
 
     def reset(self):
         pass
-    
 
     def remap_host_port(self, host: str, port: int) -> Tuple[str, int]:
         """
