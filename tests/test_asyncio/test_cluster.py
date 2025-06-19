@@ -2444,33 +2444,31 @@ class TestNodesManager:
             slot_1: [node_1, node_2, node_3],
             slot_2: [node_4, node_5],
         }
-        primary1_name = n_manager.slots_cache[slot_1][0].name
-        primary2_name = n_manager.slots_cache[slot_2][0].name
         list1_size = len(n_manager.slots_cache[slot_1])
         list2_size = len(n_manager.slots_cache[slot_2])
 
         # default load balancer strategy: LoadBalancerStrategy.ROUND_ROBIN
         # slot 1
-        assert lb.get_server_index(primary1_name, list1_size) == 0
-        assert lb.get_server_index(primary1_name, list1_size) == 1
-        assert lb.get_server_index(primary1_name, list1_size) == 2
-        assert lb.get_server_index(primary1_name, list1_size) == 0
+        assert lb.get_server_index(slot_1, list1_size) == 0
+        assert lb.get_server_index(slot_1, list1_size) == 1
+        assert lb.get_server_index(slot_1, list1_size) == 2
+        assert lb.get_server_index(slot_1, list1_size) == 0
 
         # slot 2
-        assert lb.get_server_index(primary2_name, list2_size) == 0
-        assert lb.get_server_index(primary2_name, list2_size) == 1
-        assert lb.get_server_index(primary2_name, list2_size) == 0
+        assert lb.get_server_index(slot_2, list2_size) == 0
+        assert lb.get_server_index(slot_2, list2_size) == 1
+        assert lb.get_server_index(slot_2, list2_size) == 0
 
         lb.reset()
-        assert lb.get_server_index(primary1_name, list1_size) == 0
-        assert lb.get_server_index(primary2_name, list2_size) == 0
+        assert lb.get_server_index(slot_1, list1_size) == 0
+        assert lb.get_server_index(slot_2, list2_size) == 0
 
         # reset the indexes before load balancing strategy test
         lb.reset()
         # load balancer strategy: LoadBalancerStrategy.ROUND_ROBIN_REPLICAS
         for i in [1, 2, 1]:
             srv_index = lb.get_server_index(
-                primary1_name,
+                slot_1,
                 list1_size,
                 load_balancing_strategy=LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
             )
@@ -2481,7 +2479,7 @@ class TestNodesManager:
         # load balancer strategy: LoadBalancerStrategy.RANDOM_REPLICA
         for i in range(5):
             srv_index = lb.get_server_index(
-                primary1_name,
+                slot_1,
                 list1_size,
                 load_balancing_strategy=LoadBalancingStrategy.RANDOM_REPLICA,
             )
