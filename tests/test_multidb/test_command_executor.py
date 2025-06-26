@@ -7,6 +7,7 @@ from redis.event import EventDispatcher, OnCommandFailEvent
 from redis.multidb.circuit import State as CBState
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.failure_detector import CommandFailureDetector
+from tests.test_multidb.conftest import create_weighted_list
 
 
 class TestDefaultCommandExecutor:
@@ -24,10 +25,11 @@ class TestDefaultCommandExecutor:
     def test_execute_command_on_active_database(self, mock_db, mock_db1, mock_db2, mock_fd, mock_fs, mock_ed):
         mock_db1.client.execute_command.return_value = 'OK1'
         mock_db2.client.execute_command.return_value = 'OK2'
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
         executor = DefaultCommandExecutor(
             failure_detectors=[mock_fd],
-            databases=[mock_db, mock_db1, mock_db2],
+            databases=databases,
             failover_strategy=mock_fs,
             event_dispatcher=mock_ed
         )
@@ -57,10 +59,11 @@ class TestDefaultCommandExecutor:
         mock_db2.client.execute_command.return_value = 'OK2'
         mock_selector = PropertyMock(side_effect=[mock_db1, mock_db2])
         type(mock_fs).database = mock_selector
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
         executor = DefaultCommandExecutor(
             failure_detectors=[mock_fd],
-            databases=[mock_db, mock_db1, mock_db2],
+            databases=databases,
             failover_strategy=mock_fs,
             event_dispatcher=mock_ed
         )
@@ -90,10 +93,11 @@ class TestDefaultCommandExecutor:
         mock_db2.client.execute_command.return_value = 'OK2'
         mock_selector = PropertyMock(side_effect=[mock_db1, mock_db2, mock_db1])
         type(mock_fs).database = mock_selector
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
         executor = DefaultCommandExecutor(
             failure_detectors=[mock_fd],
-            databases=[mock_db, mock_db1, mock_db2],
+            databases=databases,
             failover_strategy=mock_fs,
             event_dispatcher=mock_ed,
             auto_fallback_interval=0.1,
@@ -132,6 +136,7 @@ class TestDefaultCommandExecutor:
         threshold = 5
         fd = CommandFailureDetector(threshold, 1)
         ed = EventDispatcher()
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
         # Event fired if command against mock_db1 would fail
         command_fail_event = OnCommandFailEvent(
@@ -142,7 +147,7 @@ class TestDefaultCommandExecutor:
 
         executor = DefaultCommandExecutor(
             failure_detectors=[fd],
-            databases=[mock_db, mock_db1, mock_db2],
+            databases=databases,
             failover_strategy=mock_fs,
             event_dispatcher=ed,
             auto_fallback_interval=0.1,

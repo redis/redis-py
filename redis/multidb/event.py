@@ -16,7 +16,7 @@ class RegisterCommandFailure(EventListenerInterface):
     def listen(self, event: OnCommandFailEvent) -> None:
         matching_database = None
 
-        for database in self._databases:
+        for database, _ in self._databases:
             if event.client == database.client:
                 matching_database = database
                 break

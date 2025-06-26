@@ -1,9 +1,13 @@
+import threading
+
 from redis.commands import RedisModuleCommands, CoreCommands, SentinelCommands
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.config import MultiDbConfig
 from redis.multidb.circuit import State as CBState
 from redis.multidb.database import State as DBState, Database, AbstractDatabase, Databases
 from redis.multidb.exception import NoValidDatabaseException
+from redis.multidb.failure_detector import FailureDetector
+from redis.multidb.healthcheck import HealthCheck
 
 
 class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
@@ -28,6 +32,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
             auto_fallback_interval=self._auto_fallback_interval,
         )
         self._initialized = False
+        self._hc_lock = threading.RLock()
 
     def _initialize(self):
         """
@@ -59,7 +64,31 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         return self._databases
 
-    def add_database(self, database: Database):
+    def set_active_database(self, database: AbstractDatabase) -> None:
+        """
+        Promote one of the existing databases to become an active.
+        """
+        exists = None
+
+        for existing_db, _ in self._databases:
+            if existing_db == database:
+                exists = True
+
+        if not exists:
+            raise ValueError('Given database is not a member of database list')
+
+        self._check_db_health(database)
+
+        if database.circuit.state == CBState.CLOSED:
+            highest_weighted_db, _ = self._databases.get_top_n(1)[0]
+            highest_weighted_db.state = DBState.PASSIVE
+            database.state = DBState.ACTIVE
+            self._command_executor.active_database = database
+            return
+
+        raise NoValidDatabaseException('Cannot set active database, database is unhealthy')
+
+    def add_database(self, database: AbstractDatabase):
         """
         Adds a new database to the database list.
         """
@@ -88,7 +117,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
             highest_weighted_db.state = DBState.ACTIVE
             self._command_executor.active_database = highest_weighted_db
 
-    def update_database_weight(self, database: Database, weight: float):
+    def update_database_weight(self, database: AbstractDatabase, weight: float):
         """
         Updates a database from the database list.
         """
@@ -109,6 +138,19 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
             self._command_executor.active_database = database
             highest_weighted_db.state = DBState.PASSIVE
 
+    def add_failure_detector(self, failure_detector: FailureDetector):
+        """
+        Adds a new failure detector to the database.
+        """
+        self._failure_detectors.append(failure_detector)
+
+    def add_health_check(self, healthcheck: HealthCheck):
+        """
+        Adds a new health check to the database.
+        """
+        with self._hc_lock:
+            self._health_checks.append(healthcheck)
+
     def execute_command(self, *args, **options):
         """
         Executes a single command and return its result.
@@ -124,11 +166,12 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         is_healthy = True
 
-        # Health check will setup circuit state
-        for health_check in self._health_checks:
-            if not is_healthy:
-                # If one of the health checks failed, it's considered unhealthy
-                break
+        with self._hc_lock:
+            # Health check will setup circuit state
+            for health_check in self._health_checks:
+                if not is_healthy:
+                    # If one of the health checks failed, it's considered unhealthy
+                    break
 
-            is_healthy = health_check.check_health(database)
+                is_healthy = health_check.check_health(database)
 
