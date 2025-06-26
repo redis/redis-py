@@ -12,6 +12,8 @@ if sys.version_info >= (3, 11, 3):
 else:
     from async_timeout import timeout as async_timeout
 
+from unittest import mock
+
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
@@ -19,7 +21,7 @@ from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
 from tests.conftest import get_protocol_version, skip_if_server_version_lt
 
-from .compat import aclosing, create_task, mock
+from .compat import aclosing, create_task
 
 
 def with_timeout(t):
