@@ -636,7 +636,7 @@ class AbstractConnection(ConnectionInterface):
         host_error = self._host_error()
 
         try:
-            if self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
+            if self.protocol in ["3", 3]:
                 response = self._parser.read_response(
                     disable_decoding=disable_decoding, push_request=push_request
                 )
@@ -810,7 +810,7 @@ class CacheProxyConnection(ConnectionInterface):
         self,
         conn: ConnectionInterface,
         cache: CacheInterface,
-        pool_lock: threading.Lock,
+        pool_lock: threading.RLock,
     ):
         self.pid = os.getpid()
         self._conn = conn
@@ -820,7 +820,7 @@ class CacheProxyConnection(ConnectionInterface):
         self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
         self._cache = cache
-        self._cache_lock = threading.Lock()
+        self._cache_lock = threading.RLock()
         self._current_command_cache_key = None
         self._current_options = None
         self.register_connect_callback(self._enable_tracking_callback)
@@ -1028,7 +1028,7 @@ class SSLConnection(Connection):
         ssl_cert_reqs="required",
         ssl_ca_certs=None,
         ssl_ca_data=None,
-        ssl_check_hostname=False,
+        ssl_check_hostname=True,
         ssl_ca_path=None,
         ssl_password=None,
         ssl_validate_ocsp=False,
@@ -1083,7 +1083,9 @@ class SSLConnection(Connection):
         self.ca_certs = ssl_ca_certs
         self.ca_data = ssl_ca_data
         self.ca_path = ssl_ca_path
-        self.check_hostname = ssl_check_hostname
+        self.check_hostname = (
+            ssl_check_hostname if self.cert_reqs != ssl.CERT_NONE else False
+        )
         self.certificate_password = ssl_password
         self.ssl_validate_ocsp = ssl_validate_ocsp
         self.ssl_validate_ocsp_stapled = ssl_validate_ocsp_stapled
@@ -1418,14 +1420,18 @@ class ConnectionPool:
         # object of this pool. subsequent threads acquiring this lock
         # will notice the first thread already did the work and simply
         # release the lock.
-        self._fork_lock = threading.Lock()
-        self._lock = threading.Lock()
+
+        self._fork_lock = threading.RLock()
+        self._lock = threading.RLock()
+
         self.reset()
 
-    def __repr__(self) -> (str, str):
+    def __repr__(self) -> str:
+        conn_kwargs = ",".join([f"{k}={v}" for k, v in self.connection_kwargs.items()])
         return (
-            f"<{type(self).__module__}.{type(self).__name__}"
-            f"({repr(self.connection_class(**self.connection_kwargs))})>"
+            f"<{self.__class__.__module__}.{self.__class__.__name__}"
+            f"(<{self.connection_class.__module__}.{self.connection_class.__name__}"
+            f"({conn_kwargs})>)>"
         )
 
     def get_protocol(self):
@@ -1502,7 +1508,7 @@ class ConnectionPool:
     @deprecated_args(
         args_to_warn=["*"],
         reason="Use get_connection() without args instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def get_connection(self, command_name=None, *keys, **options) -> "Connection":
         "Get a connection from the pool"
@@ -1611,7 +1617,7 @@ class ConnectionPool:
         """Close the pool, disconnecting all connections"""
         self.disconnect()
 
-    def set_retry(self, retry: "Retry") -> None:
+    def set_retry(self, retry: Retry) -> None:
         self.connection_kwargs.update({"retry": retry})
         for conn in self._available_connections:
             conn.retry = retry
@@ -1730,7 +1736,7 @@ class BlockingConnectionPool(ConnectionPool):
     @deprecated_args(
         args_to_warn=["*"],
         reason="Use get_connection() without args instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def get_connection(self, command_name=None, *keys, **options):
         """

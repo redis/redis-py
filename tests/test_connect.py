@@ -54,10 +54,16 @@ def test_uds_connect(uds_address):
 )
 def test_tcp_ssl_connect(tcp_address, ssl_min_version):
     host, port = tcp_address
+
+    # in order to have working hostname verification, we need to use "localhost"
+    # as redis host as the server certificate is self-signed and only valid for "localhost"
+    host = "localhost"
     server_certs = get_tls_certificates(cert_type=CertificateType.server)
+
     conn = SSLConnection(
         host=host,
         port=port,
+        ssl_check_hostname=True,
         client_name=_CLIENT_NAME,
         ssl_ca_certs=server_certs.ca_certfile,
         socket_timeout=10,
@@ -79,6 +85,10 @@ def test_tcp_ssl_connect(tcp_address, ssl_min_version):
 )
 def test_tcp_ssl_tls12_custom_ciphers(tcp_address, ssl_ciphers):
     host, port = tcp_address
+
+    # in order to have working hostname verification, we need to use "localhost"
+    # as redis host as the server certificate is self-signed and only valid for "localhost"
+    host = "localhost"
 
     server_certs = get_tls_certificates(cert_type=CertificateType.server)
 

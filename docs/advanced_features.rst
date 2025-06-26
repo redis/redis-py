@@ -167,6 +167,7 @@ the server.
 
 .. code:: python
 
+   >>> rc = RedisCluster()
    >>> with rc.pipeline() as pipe:
    ...     pipe.set('foo', 'value1')
    ...     pipe.set('bar', 'value2')
@@ -177,20 +178,110 @@ the server.
    ...     pipe.set('foo1', 'bar1').get('foo1').execute()
    [True, b'bar1']
 
-Please note: - RedisCluster pipelines currently only support key-based
-commands. - The pipeline gets its ‘read_from_replicas’ value from the
-cluster’s parameter. Thus, if read from replications is enabled in the
-cluster instance, the pipeline will also direct read commands to
-replicas. - The ‘transaction’ option is NOT supported in cluster-mode.
-In non-cluster mode, the ‘transaction’ option is available when
-executing pipelines. This wraps the pipeline commands with MULTI/EXEC
-commands, and effectively turns the pipeline commands into a single
-transaction block. This means that all commands are executed
-sequentially without any interruptions from other clients. However, in
-cluster-mode this is not possible, because commands are partitioned
-according to their respective destination nodes. This means that we can
-not turn the pipeline commands into one transaction block, because in
-most cases they are split up into several smaller pipelines.
+Please note:
+
+-  RedisCluster pipelines currently only support key-based commands.
+-  The pipeline gets its ‘load_balancing_strategy’ value from the
+   cluster’s parameter. Thus, if read from replications is enabled in
+   the cluster instance, the pipeline will also direct read commands to
+   replicas.
+
+
+Transactions in clusters
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Transactions are supported in cluster-mode with one caveat: all keys of
+all commands issued on a transaction pipeline must reside on the
+same slot. This is similar to the limitation of multikey commands in
+cluster. The reason behind this is that the Redis engine does not offer
+a mechanism to block or exchange key data across nodes on the fly. A
+client may add some logic to abstract engine limitations when running
+on a cluster, such as the pipeline behavior explained on the previous
+block, but there is no simple way that a client can enforce atomicity
+across nodes on a distributed system.
+
+The compromise of limiting the transaction pipeline to same-slot keys
+is exactly that: a compromise. While this behavior is different from
+non-transactional cluster pipelines, it simplifies migration of clients
+from standalone to cluster under some circumstances. Note that application
+code that issues multi/exec commands on a standalone client without
+embedding them within a pipeline would eventually get ‘AttributeError’.
+With this approach, if the application uses ‘client.pipeline(transaction=True)’,
+then switching the client with a cluster-aware instance would simplify
+code changes (to some extent). This may be true for application code that
+makes use of hash keys, since its transactions may already be
+mapping all commands to the same slot.
+
+An alternative is some kind of two-step commit solution, where a slot
+validation is run before the actual commands are run. This could work
+with controlled node maintenance but does not cover single node failures.
+
+Given the cluster limitations for transactions, by default pipeline isn't in
+transactional mode. To enable transactional context set:
+
+.. code:: python
+
+   >>> p = rc.pipeline(transaction=True)
+
+After entering the transactional context you can add commands to a transactional
+context, by one of the following ways:
+
+.. code:: python
+
+   >>> p = rc.pipeline(transaction=True) # Chaining commands
+   >>> p.set("key", "value")
+   >>> p.get("key")
+   >>> response = p.execute()
+
+Or
+
+.. code:: python
+
+   >>> with rc.pipeline(transaction=True) as pipe: # Using context manager
+   ...     pipe.set("key", "value")
+   ...     pipe.get("key")
+   ...     response = pipe.execute()
+
+As you see there's no need to explicitly send `MULTI/EXEC` commands to control context start/end
+`ClusterPipeline` will take care of it.
+
+To ensure that different keys will be mapped to a same hash slot on the server side
+prepend your keys with the same hash tag, the technique that allows you to control
+keys distribution.
+More information `here <https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/#hash-tags>`_
+
+.. code:: python
+
+   >>> with rc.pipeline(transaction=True) as pipe:
+   ...     pipe.set("{tag}foo", "bar")
+   ...     pipe.set("{tag}bar", "foo")
+   ...     pipe.get("{tag}foo")
+   ...     pipe.get("{tag}bar")
+   ...     response = pipe.execute()
+
+CAS Transactions
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you want to apply optimistic locking for certain keys, you have to execute
+`WATCH` command in transactional context. `WATCH` command follows the same limitations
+as any other multi key command - all keys should be mapped to the same hash slot.
+
+However, the difference between CAS transaction and normal one is that you have to
+explicitly call MULTI command to indicate the start of transactional context, WATCH
+command itself and any subsequent commands before MULTI will be immediately executed
+on the server side so you can apply optimistic locking and get necessary data before
+transaction execution.
+
+.. code:: python
+
+   >>> with rc.pipeline(transaction=True) as pipe:
+   ...     pipe.watch("mykey")       # Apply locking by immediately executing command
+   ...     val = pipe.get("mykey")   # Immediately retrieves value
+   ...     val = val + 1             # Increment value
+   ...     pipe.multi()              # Starting transaction context
+   ...     pipe.set("mykey", val)    # Command will be pipelined
+   ...     response = pipe.execute() # Returns OK or None if key was modified in the meantime
+
 
 Publish / Subscribe
 -------------------

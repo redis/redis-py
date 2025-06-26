@@ -576,11 +576,7 @@ class AbstractConnection:
         read_timeout = timeout if timeout is not None else self.socket_timeout
         host_error = self._host_error()
         try:
-            if (
-                read_timeout is not None
-                and self.protocol in ["3", 3]
-                and not HIREDIS_AVAILABLE
-            ):
+            if read_timeout is not None and self.protocol in ["3", 3]:
                 async with async_timeout(read_timeout):
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding, push_request=push_request
@@ -590,7 +586,7 @@ class AbstractConnection:
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding
                     )
-            elif self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
+            elif self.protocol in ["3", 3]:
                 response = await self._parser.read_response(
                     disable_decoding=disable_decoding, push_request=push_request
                 )
@@ -794,7 +790,7 @@ class SSLConnection(Connection):
         ssl_cert_reqs: Union[str, ssl.VerifyMode] = "required",
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
-        ssl_check_hostname: bool = False,
+        ssl_check_hostname: bool = True,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
         **kwargs,
@@ -893,7 +889,9 @@ class RedisSSLContext:
         self.cert_reqs = cert_reqs
         self.ca_certs = ca_certs
         self.ca_data = ca_data
-        self.check_hostname = check_hostname
+        self.check_hostname = (
+            check_hostname if self.cert_reqs != ssl.CERT_NONE else False
+        )
         self.min_version = min_version
         self.ciphers = ciphers
         self.context: Optional[SSLContext] = None
@@ -1114,9 +1112,11 @@ class ConnectionPool:
             self._event_dispatcher = EventDispatcher()
 
     def __repr__(self):
+        conn_kwargs = ",".join([f"{k}={v}" for k, v in self.connection_kwargs.items()])
         return (
             f"<{self.__class__.__module__}.{self.__class__.__name__}"
-            f"({self.connection_class(**self.connection_kwargs)!r})>"
+            f"(<{self.connection_class.__module__}.{self.connection_class.__name__}"
+            f"({conn_kwargs})>)>"
         )
 
     def reset(self):
@@ -1133,7 +1133,7 @@ class ConnectionPool:
     @deprecated_args(
         args_to_warn=["*"],
         reason="Use get_connection() without args instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     async def get_connection(self, command_name=None, *keys, **options):
         async with self._lock:
@@ -1306,7 +1306,7 @@ class BlockingConnectionPool(ConnectionPool):
     @deprecated_args(
         args_to_warn=["*"],
         reason="Use get_connection() without args instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     async def get_connection(self, command_name=None, *keys, **options):
         """Gets a connection from the pool, blocking until one is available"""

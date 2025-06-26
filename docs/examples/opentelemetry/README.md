@@ -4,7 +4,7 @@ This example demonstrates how to monitor Redis using [OpenTelemetry](https://ope
 [Uptrace](https://github.com/uptrace/uptrace). It requires Docker to start Redis Server and Uptrace.
 
 See
-[Monitoring redis-py performance with OpenTelemetry](https://redis-py.readthedocs.io/en/latest/opentelemetry.html)
+[Monitoring redis-py performance with OpenTelemetry](https://redis.readthedocs.io/en/latest/opentelemetry.html)
 for details.
 
 **Step 1**. Download the example using Git:

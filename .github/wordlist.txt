@@ -2,6 +2,7 @@ APM
 ARGV
 BFCommands
 CacheImpl
+CAS
 CFCommands
 CMSCommands
 ClusterNode

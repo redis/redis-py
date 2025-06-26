@@ -3,13 +3,16 @@ from typing import Any, Union
 
 from ..exceptions import ConnectionError, InvalidResponse, ResponseError
 from ..typing import EncodableT
-from .base import _AsyncRESPBase, _RESPBase
+from .base import (
+    AsyncPushNotificationsParser,
+    PushNotificationsParser,
+    _AsyncRESPBase,
+    _RESPBase,
+)
 from .socket import SERVER_CLOSED_CONNECTION_ERROR
 
-_INVALIDATION_MESSAGE = [b"invalidate", "invalidate"]
 
-
-class _RESP3Parser(_RESPBase):
+class _RESP3Parser(_RESPBase, PushNotificationsParser):
     """RESP3 protocol implementation"""
 
     def __init__(self, socket_read_size):
@@ -113,9 +116,7 @@ class _RESP3Parser(_RESPBase):
                 )
                 for _ in range(int(response))
             ]
-            response = self.handle_push_response(
-                response, disable_decoding, push_request
-            )
+            response = self.handle_push_response(response)
             if not push_request:
                 return self._read_response(
                     disable_decoding=disable_decoding, push_request=push_request
@@ -129,20 +130,8 @@ class _RESP3Parser(_RESPBase):
             response = self.encoder.decode(response)
         return response
 
-    def handle_push_response(self, response, disable_decoding, push_request):
-        if response[0] not in _INVALIDATION_MESSAGE:
-            return self.pubsub_push_handler_func(response)
-        if self.invalidation_push_handler_func:
-            return self.invalidation_push_handler_func(response)
 
-    def set_pubsub_push_handler(self, pubsub_push_handler_func):
-        self.pubsub_push_handler_func = pubsub_push_handler_func
-
-    def set_invalidation_push_handler(self, invalidation_push_handler_func):
-        self.invalidation_push_handler_func = invalidation_push_handler_func
-
-
-class _AsyncRESP3Parser(_AsyncRESPBase):
+class _AsyncRESP3Parser(_AsyncRESPBase, AsyncPushNotificationsParser):
     def __init__(self, socket_read_size):
         super().__init__(socket_read_size)
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
@@ -253,9 +242,7 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
                 )
                 for _ in range(int(response))
             ]
-            response = await self.handle_push_response(
-                response, disable_decoding, push_request
-            )
+            response = await self.handle_push_response(response)
             if not push_request:
                 return await self._read_response(
                     disable_decoding=disable_decoding, push_request=push_request
@@ -268,15 +255,3 @@ class _AsyncRESP3Parser(_AsyncRESPBase):
         if isinstance(response, bytes) and disable_decoding is False:
             response = self.encoder.decode(response)
         return response
-
-    async def handle_push_response(self, response, disable_decoding, push_request):
-        if response[0] not in _INVALIDATION_MESSAGE:
-            return await self.pubsub_push_handler_func(response)
-        if self.invalidation_push_handler_func:
-            return await self.invalidation_push_handler_func(response)
-
-    def set_pubsub_push_handler(self, pubsub_push_handler_func):
-        self.pubsub_push_handler_func = pubsub_push_handler_func
-
-    def set_invalidation_push_handler(self, invalidation_push_handler_func):
-        self.invalidation_push_handler_func = invalidation_push_handler_func

@@ -86,6 +86,35 @@ def sentinel(request, cluster):
     return Sentinel([("foo", 26379), ("bar", 26379)])
 
 
+@pytest.fixture()
+def deployed_sentinel(request):
+    sentinel_ips = request.config.getoption("--sentinels")
+    sentinel_endpoints = [
+        (ip.strip(), int(port.strip()))
+        for ip, port in (endpoint.split(":") for endpoint in sentinel_ips.split(","))
+    ]
+    kwargs = {}
+    decode_responses = True
+
+    sentinel_kwargs = {"decode_responses": decode_responses}
+    force_master_ip = "localhost"
+
+    protocol = request.config.getoption("--protocol", 2)
+
+    sentinel = Sentinel(
+        sentinel_endpoints,
+        force_master_ip=force_master_ip,
+        sentinel_kwargs=sentinel_kwargs,
+        socket_timeout=0.1,
+        protocol=protocol,
+        decode_responses=decode_responses,
+        **kwargs,
+    )
+    yield sentinel
+    for s in sentinel.sentinels:
+        s.close()
+
+
 @pytest.mark.onlynoncluster
 def test_discover_master(sentinel, master_ip):
     address = sentinel.discover_master("mymaster")
@@ -184,7 +213,7 @@ def test_discover_slaves(cluster, sentinel):
 
 
 @pytest.mark.onlynoncluster
-def test_master_for(cluster, sentinel, master_ip):
+def test_master_for(sentinel, master_ip):
     master = sentinel.master_for("mymaster", db=9)
     assert master.ping()
     assert master.connection_pool.master_address == (master_ip, 6379)
@@ -228,19 +257,22 @@ def test_slave_round_robin(cluster, sentinel, master_ip):
 
 
 @pytest.mark.onlynoncluster
-def test_ckquorum(cluster, sentinel):
-    assert sentinel.sentinel_ckquorum("mymaster")
+def test_ckquorum(sentinel):
+    resp = sentinel.sentinel_ckquorum("mymaster")
+    assert resp is True
 
 
 @pytest.mark.onlynoncluster
-def test_flushconfig(cluster, sentinel):
-    assert sentinel.sentinel_flushconfig()
+def test_flushconfig(sentinel):
+    resp = sentinel.sentinel_flushconfig()
+    assert resp is True
 
 
 @pytest.mark.onlynoncluster
 def test_reset(cluster, sentinel):
     cluster.master["is_odown"] = True
-    assert sentinel.sentinel_reset("mymaster")
+    resp = sentinel.sentinel_reset("mymaster")
+    assert resp is True
 
 
 @pytest.mark.onlynoncluster
@@ -266,3 +298,47 @@ def test_auto_close_pool(cluster, sentinel, method_name):
 
     assert calls == 1
     pool.disconnect()
+
+
+# Tests against real sentinel instances
+@pytest.mark.onlynoncluster
+def test_get_sentinels(deployed_sentinel):
+    resps = deployed_sentinel.sentinel_sentinels("redis-py-test", return_responses=True)
+
+    # validate that the original command response is returned
+    assert isinstance(resps, list)
+
+    # validate that the command has been executed against all sentinels
+    # each response from each sentinel is returned
+    assert len(resps) > 1
+
+    # validate default behavior
+    resps = deployed_sentinel.sentinel_sentinels("redis-py-test")
+    assert isinstance(resps, bool)
+
+
+@pytest.mark.onlynoncluster
+def test_get_master_addr_by_name(deployed_sentinel):
+    resps = deployed_sentinel.sentinel_get_master_addr_by_name(
+        "redis-py-test", return_responses=True
+    )
+
+    # validate that the original command response is returned
+    assert isinstance(resps, list)
+
+    # validate that the command has been executed just once
+    # when executed once, only one response element is returned
+    assert len(resps) == 1
+
+    assert isinstance(resps[0], tuple)
+
+    # validate default behavior
+    resps = deployed_sentinel.sentinel_get_master_addr_by_name("redis-py-test")
+    assert isinstance(resps, bool)
+
+
+@pytest.mark.onlynoncluster
+def test_redis_master_usage(deployed_sentinel):
+    r = deployed_sentinel.master_for("redis-py-test", db=0)
+    r.set("foo", "bar")
+    assert r.get("foo") == "bar"

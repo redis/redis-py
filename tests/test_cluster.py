@@ -14,7 +14,11 @@ import pytest
 import redis
 from redis import Redis
 from redis._parsers import CommandsParser
-from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
+from redis.backoff import (
+    ExponentialBackoff,
+    ExponentialWithJitterBackoff,
+    NoBackoff,
+)
 from redis.cluster import (
     PRIMARY,
     REDIS_CLUSTER_HASH_SLOTS,
@@ -884,46 +888,48 @@ class TestRedisClusterObj:
     def test_cluster_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
         r = _get_client(RedisCluster, request, retry=retry)
-        assert r.get_retry()._retries == retry._retries
-        assert isinstance(r.get_retry()._backoff, NoBackoff)
+        assert r.retry.get_retries() == retry.get_retries()
+        assert isinstance(r.retry._backoff, NoBackoff)
         for node in r.get_nodes():
-            assert node.redis_connection.get_retry()._retries == retry._retries
+            assert node.redis_connection.get_retry().get_retries() == 0
             assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
         rand_node = r.get_random_node()
         existing_conn = rand_node.redis_connection.connection_pool.get_connection()
         # Change retry policy
         new_retry = Retry(ExponentialBackoff(), 3)
         r.set_retry(new_retry)
-        assert r.get_retry()._retries == new_retry._retries
-        assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
+        assert r.retry.get_retries() == new_retry.get_retries()
+        assert isinstance(r.retry._backoff, ExponentialBackoff)
         for node in r.get_nodes():
-            assert node.redis_connection.get_retry()._retries == new_retry._retries
-            assert isinstance(
-                node.redis_connection.get_retry()._backoff, ExponentialBackoff
-            )
-        assert existing_conn.retry._retries == new_retry._retries
+            assert node.redis_connection.get_retry()._retries == 0
+            assert isinstance(node.redis_connection.get_retry()._backoff, NoBackoff)
+        assert existing_conn.retry._retries == 0
         new_conn = rand_node.redis_connection.connection_pool.get_connection()
-        assert new_conn.retry._retries == new_retry._retries
+        assert new_conn.retry._retries == 0
 
     def test_cluster_retry_object(self, r) -> None:
         # Test default retry
         # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
         host = r.get_default_node().host
 
-        retry = r.get_connection_kwargs().get("retry")
+        # test default retry config
+        retry = r.retry
         assert isinstance(retry, Retry)
-        assert retry._retries == 0
-        assert isinstance(retry._backoff, type(default_backoff()))
-        node1 = r.get_node(host, 16379).redis_connection
-        node2 = r.get_node(host, 16380).redis_connection
-        assert node1.get_retry()._retries == node2.get_retry()._retries
+        assert retry.get_retries() == 3
+        assert isinstance(retry._backoff, type(ExponentialWithJitterBackoff()))
+        node1_connection = r.get_node(host, 16379).redis_connection
+        node2_connection = r.get_node(host, 16380).redis_connection
+        assert node1_connection.get_retry()._retries == 0
+        assert node2_connection.get_retry()._retries == 0
 
-        # Test custom retry
+        # Test custom retry is not applied to nodes
         retry = Retry(ExponentialBackoff(10, 5), 5)
         rc_custom_retry = RedisCluster(host, 16379, retry=retry)
         assert (
-            rc_custom_retry.get_node(host, 16379).redis_connection.get_retry()._retries
-            == retry._retries
+            rc_custom_retry.get_node(host, 16379)
+            .redis_connection.get_retry()
+            .get_retries()
+            == 0
         )
 
     def test_replace_cluster_node(self, r) -> None:
@@ -3009,23 +3015,9 @@ class TestClusterPipeline:
         They maybe implemented in the future.
         """
         pipe = r.pipeline()
-        with pytest.raises(RedisClusterException):
-            pipe.multi()
-
-        with pytest.raises(RedisClusterException):
-            pipe.immediate_execute_command()
-
-        with pytest.raises(RedisClusterException):
-            pipe._execute_transaction(None, None, None)
 
         with pytest.raises(RedisClusterException):
             pipe.load_scripts()
-
-        with pytest.raises(RedisClusterException):
-            pipe.watch()
-
-        with pytest.raises(RedisClusterException):
-            pipe.unwatch()
 
         with pytest.raises(RedisClusterException):
             pipe.script_load_for_pipeline(None)
@@ -3038,14 +3030,6 @@ class TestClusterPipeline:
         Currently some arguments is blocked when using in cluster mode.
         They maybe implemented in the future.
         """
-        with pytest.raises(RedisClusterException) as ex:
-            r.pipeline(transaction=True)
-
-        assert (
-            str(ex.value).startswith("transaction is deprecated in cluster mode")
-            is True
-        )
-
         with pytest.raises(RedisClusterException) as ex:
             r.pipeline(shard_hint=True)
 
@@ -3103,7 +3087,7 @@ class TestClusterPipeline:
             pipe.delete("a")
             assert pipe.execute() == [1]
 
-    def test_multi_delete_unsupported(self, r):
+    def test_multi_delete_unsupported_cross_slot(self, r):
         """
         Test that multi delete operation is unsupported
         """
@@ -3112,6 +3096,16 @@ class TestClusterPipeline:
             r["b"] = 2
             with pytest.raises(RedisClusterException):
                 pipe.delete("a", "b")
+
+    def test_multi_delete_supported_single_slot(self, r):
+        """
+        Test that multi delete operation is supported when all keys are in the same hash slot
+        """
+        with r.pipeline(transaction=True) as pipe:
+            r["{key}:a"] = 1
+            r["{key}:b"] = 2
+            pipe.delete("{key}:a", "{key}:b")
+            assert pipe.execute()
 
     def test_unlink_single(self, r):
         """
@@ -3367,6 +3361,87 @@ class TestClusterPipeline:
         p = r.pipeline()
         result = p.execute()
         assert result == []
+
+    @pytest.mark.onlycluster
+    def test_exec_error_in_response(self, r):
+        """
+        an invalid pipeline command at exec time adds the exception instance
+        to the list of returned values
+        """
+        hashkey = "{key}"
+        r[f"{hashkey}:c"] = "a"
+        with r.pipeline() as pipe:
+            pipe.set(f"{hashkey}:a", 1).set(f"{hashkey}:b", 2)
+            pipe.lpush(f"{hashkey}:c", 3).set(f"{hashkey}:d", 4)
+            result = pipe.execute(raise_on_error=False)
+
+            assert result[0]
+            assert r[f"{hashkey}:a"] == b"1"
+            assert result[1]
+            assert r[f"{hashkey}:b"] == b"2"
+
+            # we can't lpush to a key that's a string value, so this should
+            # be a ResponseError exception
+            assert isinstance(result[2], redis.ResponseError)
+            assert r[f"{hashkey}:c"] == b"a"
+
+            # since this isn't a transaction, the other commands after the
+            # error are still executed
+            assert result[3]
+            assert r[f"{hashkey}:d"] == b"4"
+
+            # make sure the pipe was restored to a working state
+            assert pipe.set(f"{hashkey}:z", "zzz").execute() == [True]
+            assert r[f"{hashkey}:z"] == b"zzz"
+
+    def test_exec_error_in_no_transaction_pipeline(self, r):
+        r["a"] = 1
+        with r.pipeline(transaction=False) as pipe:
+            pipe.llen("a")
+            pipe.expire("a", 100)
+
+            with pytest.raises(redis.ResponseError) as ex:
+                pipe.execute()
+
+            assert str(ex.value).startswith(
+                "Command # 1 (LLEN a) of pipeline caused error: "
+            )
+
+        assert r["a"] == b"1"
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("2.0.0")
+    def test_pipeline_discard(self, r):
+        hashkey = "{key}"
+
+        # empty pipeline should raise an error
+        with r.pipeline() as pipe:
+            pipe.set(f"{hashkey}:key", "someval")
+            with pytest.raises(redis.exceptions.RedisClusterException) as ex:
+                pipe.discard()
+
+            assert str(ex.value).startswith(
+                "method discard() is not supported outside of transactional context"
+            )
+
+        # setting a pipeline and discarding should do the same
+        with r.pipeline() as pipe:
+            pipe.set(f"{hashkey}:key", "someval")
+            pipe.set(f"{hashkey}:someotherkey", "val")
+            response = pipe.execute()
+            pipe.set(f"{hashkey}:key", "another value!")
+            with pytest.raises(redis.exceptions.RedisClusterException) as ex:
+                pipe.discard()
+
+            assert str(ex.value).startswith(
+                "method discard() is not supported outside of transactional context"
+            )
+
+            pipe.set(f"{hashkey}:foo", "bar")
+            response = pipe.execute()
+
+        assert response[0]
+        assert r.get(f"{hashkey}:foo") == b"bar"
 
 
 @pytest.mark.onlycluster

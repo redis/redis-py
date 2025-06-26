@@ -10,7 +10,7 @@ import redis.commands.search.aggregation as aggregations
 import redis.commands.search.reducers as reducers
 from redis.commands.json.path import Path
 from redis.commands.search.field import NumericField, TagField, TextField
-from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 
 # HIDE_END

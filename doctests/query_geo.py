@@ -5,7 +5,7 @@ import sys
 import redis
 from redis.commands.json.path import Path
 from redis.commands.search.field import GeoField, GeoShapeField
-from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 
 r = redis.Redis(decode_responses=True)

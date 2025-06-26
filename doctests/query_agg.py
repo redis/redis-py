@@ -6,7 +6,7 @@ from redis.commands.json.path import Path
 from redis.commands.search import Search
 from redis.commands.search.aggregation import AggregateRequest
 from redis.commands.search.field import NumericField, TagField
-from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+from redis.commands.search.index_definition import IndexDefinition, IndexType
 import redis.commands.search.reducers as reducers
 
 r = redis.Redis(decode_responses=True)
