@@ -1,10 +1,8 @@
-import threading
-
 from redis.commands import RedisModuleCommands, CoreCommands, SentinelCommands
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.config import MultiDbConfig
 from redis.multidb.circuit import State as CBState
-from redis.multidb.database import State as DBState, Database, AbstractDatabase
+from redis.multidb.database import State as DBState, Database, AbstractDatabase, Databases
 from redis.multidb.exception import NoValidDatabaseException
 
 
@@ -30,13 +28,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
             auto_fallback_interval=self._auto_fallback_interval,
         )
         self._initialized = False
-        self._lock = threading.RLock()
 
     def _initialize(self):
         """
         Perform initialization of databases to define their initial state.
         """
-
         is_active_db = False
 
         for database, weight in self._databases:
@@ -57,14 +53,61 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         self._initialized = True
 
+    def get_databases(self) -> Databases:
+        """
+        Returns a sorted (by weight) list of all databases.
+        """
+        return self._databases
+
     def add_database(self, database: Database):
         """
         Adds a new database to the database list.
         """
-        with self._lock:
-            if database in self._databases:
+        for existing_db, _ in self._databases:
+            if existing_db == database:
                 raise ValueError('Given database already exists')
 
+        self._check_db_health(database)
+
+        highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
+        self._databases.add(database, database.weight)
+
+        if database.weight > highest_weight and database.circuit.state == CBState.CLOSED:
+            database.state = DBState.ACTIVE
+            self._command_executor.active_database = database
+            highest_weighted_db.state = DBState.PASSIVE
+
+    def remove_database(self, database: Database):
+        """
+        Removes a database from the database list.
+        """
+        weight = self._databases.remove(database)
+        highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
+
+        if highest_weight <= weight and highest_weighted_db.circuit.state == CBState.CLOSED:
+            highest_weighted_db.state = DBState.ACTIVE
+            self._command_executor.active_database = highest_weighted_db
+
+    def update_database_weight(self, database: Database, weight: float):
+        """
+        Updates a database from the database list.
+        """
+        exists = None
+
+        for existing_db, _ in self._databases:
+            if existing_db == database:
+                exists = True
+
+        if not exists:
+            raise ValueError('Given database is not a member of database list')
+
+        highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
+        self._databases.update_weight(database, weight)
+
+        if weight > highest_weight and database.circuit.state == CBState.CLOSED:
+            database.state = DBState.ACTIVE
+            self._command_executor.active_database = database
+            highest_weighted_db.state = DBState.PASSIVE
 
     def execute_command(self, *args, **options):
         """
@@ -73,8 +116,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         if not self._initialized:
             self._initialize()
 
-        with self._lock:
-            return self._command_executor.execute_command(*args, **options)
+        return self._command_executor.execute_command(*args, **options)
 
     def _check_db_health(self, database: AbstractDatabase) -> None:
         """

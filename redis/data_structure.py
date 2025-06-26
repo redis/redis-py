@@ -1,5 +1,5 @@
 import threading
-from typing import List, Any, TypeVar, Generic
+from typing import List, Any, TypeVar, Generic, Union
 
 T = TypeVar('T')
 
@@ -8,10 +8,10 @@ class WeightedList(Generic[T]):
     Thread-safe weighted list.
     """
     def __init__(self):
-        self._items = []
+        self._items: List[tuple[Any, Union[int, float]]] = []
         self._lock = threading.RLock()
 
-    def add(self, item, weight: float) -> None:
+    def add(self, item: Any, weight: float) -> None:
         """Add item with weight, maintaining sorted order"""
         with self._lock:
             # Find insertion point using binary search
@@ -34,7 +34,7 @@ class WeightedList(Generic[T]):
                     return weight
             raise ValueError("Item not found")
 
-    def get_by_weight_range(self, min_weight: float, max_weight: float) -> List[tuple]:
+    def get_by_weight_range(self, min_weight: float, max_weight: float) -> List[tuple[Any, Union[int, float]]]:
         """Get all items within weight range"""
         with self._lock:
             result = []
@@ -43,7 +43,7 @@ class WeightedList(Generic[T]):
                     result.append((item, weight))
             return result
 
-    def get_top_n(self, n: int) -> List[tuple]:
+    def get_top_n(self, n: int) -> List[tuple[Any, Union[int, float]]]:
         """Get top N the highest weighted items"""
         with self._lock:
             return [(item, weight) for weight, item in self._items[:n]]
@@ -67,7 +67,7 @@ class WeightedList(Generic[T]):
         with self._lock:
             return len(self._items)
 
-    def __getitem__(self, index) -> tuple[Any, int]:
+    def __getitem__(self, index) -> tuple[Any, Union[int, float]]:
         with self._lock:
             weight, item = self._items[index]
             return item, weight

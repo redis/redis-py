@@ -24,8 +24,8 @@ class TestWeightedList:
         wlist.add('item3', 4.0)
         wlist.add('item4', 4.0)
 
-        wlist.remove('item2')
-        wlist.remove('item4')
+        assert wlist.remove('item2') == 2.0
+        assert wlist.remove('item4') == 4.0
 
         assert wlist.get_top_n(4) == [('item3', 4.0), ('item1', 3.0)]
 

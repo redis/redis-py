@@ -102,3 +102,11 @@ def mock_multi_db_config(
      )
 
      return config
+
+def create_weighted_list(*databases) -> Databases:
+     dbs = WeightedList()
+
+     for db in databases:
+          dbs.add(db, db.weight)
+
+     return dbs

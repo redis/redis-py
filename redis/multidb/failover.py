@@ -13,12 +13,12 @@ class FailoverStrategy(ABC):
     @property
     @abstractmethod
     def database(self) -> AbstractDatabase:
-        """Select the database."""
+        """Select the database according to the strategy."""
         pass
 
     @abstractmethod
     def set_databases(self, databases: Databases) -> None:
-        """Set the databases."""
+        """Set the databases strategy operates on."""
         pass
 
 class WeightBasedFailoverStrategy(FailoverStrategy):
