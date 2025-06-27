@@ -1,3 +1,4 @@
+import logging
 import socket
 from time import sleep
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Tuple, Type, TypeVar
@@ -86,6 +87,7 @@ class Retry:
             try:
                 return do()
             except self._supported_errors as error:
+                logging.warning(f"********  Retry.call_with_retry: {error}")
                 failures += 1
                 fail(error)
                 if self._retries >= 0 and failures > self._retries:
