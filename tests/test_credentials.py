@@ -323,7 +323,7 @@ class TestStreamingCredentialProvider:
         }
         mock_pool.get_connection.return_value = mock_connection
         mock_pool._available_connections = [mock_connection, mock_another_connection]
-        mock_pool._lock = threading.Lock()
+        mock_pool._lock = threading.RLock()
         auth_token = None
 
         def re_auth_callback(token):
@@ -382,7 +382,7 @@ class TestStreamingCredentialProvider:
             mock_another_connection,
             mock_failed_connection,
         ]
-        mock_pool._lock = threading.Lock()
+        mock_pool._lock = threading.RLock()
 
         def _raise(error: RedisError):
             pass
@@ -442,7 +442,7 @@ class TestStreamingCredentialProvider:
             mock_another_connection,
         ]
         mock_pool._available_connections = [mock_another_connection]
-        mock_pool._lock = threading.Lock()
+        mock_pool._lock = threading.RLock()
         auth_token = None
 
         def re_auth_callback(token):
@@ -502,7 +502,7 @@ class TestStreamingCredentialProvider:
             mock_another_connection,
         ]
         mock_pool._available_connections = [mock_another_connection]
-        mock_pool._lock = threading.Lock()
+        mock_pool._lock = threading.RLock()
         auth_token = None
 
         def re_auth_callback(token):
@@ -560,7 +560,7 @@ class TestStreamingCredentialProvider:
         }
         mock_pool.get_connection.return_value = mock_connection
         mock_pool._available_connections = [mock_connection, mock_another_connection]
-        mock_pool._lock = threading.Lock()
+        mock_pool._lock = threading.RLock()
 
         Redis(
             connection_pool=mock_pool,
