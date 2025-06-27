@@ -1,4 +1,5 @@
 import copy
+import logging
 import os
 import socket
 import sys
@@ -19,10 +20,11 @@ from redis.cache import (
     CacheInterface,
     CacheKey,
 )
+from redis.typing import Number
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
-from .backoff import NoBackoff
+from .backoff import ExponentialWithJitterBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from .event import AfterConnectionReleasedEvent, EventDispatcher
 from .exceptions import (
@@ -35,6 +37,11 @@ from .exceptions import (
     RedisError,
     ResponseError,
     TimeoutError,
+)
+from .maintenance_events import (
+    MaintenanceEventConnectionHandler,
+    MaintenanceEventPoolHandler,
+    MaintenanceEventsConfig,
 )
 from .retry import Retry
 from .utils import (
@@ -160,6 +167,10 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
+    def set_maintenance_event_pool_handler(self, maintenance_event_pool_handler):
+        pass
+
+    @abstractmethod
     def get_protocol(self):
         pass
 
@@ -222,6 +233,26 @@ class ConnectionInterface:
     def re_auth(self):
         pass
 
+    @abstractmethod
+    def mark_for_reconnect(self):
+        pass
+
+    @abstractmethod
+    def should_reconnect(self):
+        pass
+
+    @abstractmethod
+    def update_current_socket_timeout(self, relax_timeout: Optional[float] = None):
+        pass
+
+    @abstractmethod
+    def update_tmp_settings(
+        self,
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[float] = None,
+    ):
+        pass
+
 
 class AbstractConnection(ConnectionInterface):
     "Manages communication to and from a Redis server"
@@ -250,6 +281,10 @@ class AbstractConnection(ConnectionInterface):
         protocol: Optional[int] = 2,
         command_packer: Optional[Callable[[], None]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
+        maintenance_events_pool_handler: Optional[MaintenanceEventPoolHandler] = None,
+        maintenance_events_config: Optional[MaintenanceEventsConfig] = None,
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[float] = -1,
     ):
         """
         Initialize a new Connection.
@@ -288,16 +323,15 @@ class AbstractConnection(ConnectionInterface):
             # Add TimeoutError to the errors list to retry on
             retry_on_error.append(TimeoutError)
         self.retry_on_error = retry_on_error
-        if retry or retry_on_error:
-            if retry is None:
-                self.retry = Retry(NoBackoff(), 1)
-            else:
-                # deep-copy the Retry object as it is mutable
-                self.retry = copy.deepcopy(retry)
-            # Update the retry's supported errors with the specified errors
-            self.retry.update_supported_errors(retry_on_error)
+        if retry is None:
+            self.retry = Retry(
+                backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+            )
         else:
-            self.retry = Retry(NoBackoff(), 0)
+            # deep-copy the Retry object as it is mutable
+            self.retry = copy.deepcopy(retry)
+        if retry_on_error:
+            self.retry.update_supported_errors(retry_on_error)
         self.health_check_interval = health_check_interval
         self.next_health_check = 0
         self.redis_connect_func = redis_connect_func
@@ -305,7 +339,6 @@ class AbstractConnection(ConnectionInterface):
         self.handshake_metadata = None
         self._sock = None
         self._socket_read_size = socket_read_size
-        self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
@@ -320,7 +353,26 @@ class AbstractConnection(ConnectionInterface):
                 raise ConnectionError("protocol must be either 2 or 3")
                 # p = DEFAULT_RESP_VERSION
             self.protocol = p
+        if self.protocol == 3 and parser_class == DefaultParser:
+            parser_class = _RESP3Parser
+        self.set_parser(parser_class)
+
+        if maintenance_events_config and maintenance_events_config.enabled:
+            if maintenance_events_pool_handler:
+                self._parser.set_node_moving_push_handler(
+                    maintenance_events_pool_handler.handle_event
+                )
+            self._maintenance_event_connection_handler = (
+                MaintenanceEventConnectionHandler(self, maintenance_events_config)
+            )
+            self._parser.set_maintenance_push_handler(
+                self._maintenance_event_connection_handler.handle_event
+            )
+
         self._command_packer = self._construct_command_packer(command_packer)
+        self._should_reconnect = False
+        self.tmp_host_address = tmp_host_address
+        self.tmp_relax_timeout = tmp_relax_timeout
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -374,6 +426,11 @@ class AbstractConnection(ConnectionInterface):
         :param parser_class: The required parser class
         """
         self._parser = parser_class(socket_read_size=self._socket_read_size)
+
+    def set_maintenance_event_pool_handler(
+        self, maintenance_event_pool_handler: MaintenanceEventPoolHandler
+    ):
+        self._parser.set_node_moving_push_handler(maintenance_event_pool_handler)
 
     def connect(self):
         "Connects to the Redis server if not already connected"
@@ -549,6 +606,8 @@ class AbstractConnection(ConnectionInterface):
 
         conn_sock = self._sock
         self._sock = None
+        # reset the reconnect flag
+        self._should_reconnect = False
         if conn_sock is None:
             return
 
@@ -626,6 +685,7 @@ class AbstractConnection(ConnectionInterface):
 
         try:
             return self._parser.can_read(timeout)
+
         except OSError as e:
             self.disconnect()
             raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
@@ -732,6 +792,35 @@ class AbstractConnection(ConnectionInterface):
             self.read_response()
             self._re_auth_token = None
 
+    def mark_for_reconnect(self):
+        self._should_reconnect = True
+
+    def should_reconnect(self):
+        return self._should_reconnect
+
+    def update_current_socket_timeout(self, relax_timeout: Optional[float] = None):
+        if self._sock:
+            timeout = relax_timeout if relax_timeout != -1 else self.socket_timeout
+            logging.debug(
+                f"***** Connection --> Updating timeout for {self._sock.getpeername()}"
+                f" to timeout {timeout}; relax_timeout: {relax_timeout}"
+            )
+            self._sock.settimeout(timeout)
+            self._parser._buffer.socket_timeout = timeout
+
+    def update_tmp_settings(
+        self,
+        tmp_host_address: Optional[str | object] = SENTINEL,
+        tmp_relax_timeout: Optional[float | object] = SENTINEL,
+    ):
+        """
+        The value of SENTINEL is used to indicate that the property should not be updated.
+        """
+        if tmp_host_address is not SENTINEL:
+            self.tmp_host_address = tmp_host_address
+        if tmp_relax_timeout is not SENTINEL:
+            self.tmp_relax_timeout = tmp_relax_timeout
+
 
 class Connection(AbstractConnection):
     "Manages TCP communication to and from a Redis server"
@@ -764,8 +853,14 @@ class Connection(AbstractConnection):
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
         err = None
+        if self.tmp_host_address is not None:
+            logging.debug(
+                f"***** Connection --> Using tmp_host_address: {self.tmp_host_address}"
+            )
+        host = self.tmp_host_address or self.host
+
         for res in socket.getaddrinfo(
-            self.host, self.port, self.socket_type, socket.SOCK_STREAM
+            host, self.port, self.socket_type, socket.SOCK_STREAM
         ):
             family, socktype, proto, canonname, socket_address = res
             sock = None
@@ -781,13 +876,32 @@ class Connection(AbstractConnection):
                         sock.setsockopt(socket.IPPROTO_TCP, k, v)
 
                 # set the socket_connect_timeout before we connect
-                sock.settimeout(self.socket_connect_timeout)
+                if self.tmp_relax_timeout != -1:
+                    logging.debug(
+                        f"***** Connection connect --> Using relax_timeout: {self.tmp_relax_timeout}"
+                    )
+                    sock.settimeout(self.tmp_relax_timeout)
+                else:
+                    logging.debug(
+                        f"***** Connection connect --> Using default socket_connect_timeout: {self.socket_connect_timeout}"
+                    )
+                    sock.settimeout(self.socket_connect_timeout)
 
                 # connect
                 sock.connect(socket_address)
 
                 # set the socket_timeout now that we're connected
-                sock.settimeout(self.socket_timeout)
+                if self.tmp_relax_timeout != -1:
+                    logging.debug(
+                        f"***** Connection --> Using relax_timeout: {self.tmp_relax_timeout}"
+                    )
+                    sock.settimeout(self.tmp_relax_timeout)
+                else:
+                    logging.debug(
+                        f"***** Connection --> Using default socket_timeout: {self.socket_timeout}"
+                    )
+                    sock.settimeout(self.socket_timeout)
+                logging.debug(f"Connected to {sock.getpeername()}")
                 return sock
 
             except OSError as _:
@@ -1415,6 +1529,14 @@ class ConnectionPool:
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
 
+        if connection_kwargs.get(
+            "maintenance_events_pool_handler"
+        ) or connection_kwargs.get("maintenance_events_config"):
+            if connection_kwargs.get("protocol") not in [3, "3"]:
+                raise RedisError(
+                    "Push handlers on connection are only supported with RESP version 3"
+                )
+
         self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -1448,6 +1570,46 @@ class ConnectionPool:
             in which case the server default will be used.
         """
         return self.connection_kwargs.get("protocol", None)
+
+    def maintenance_events_pool_handler_enabled(self):
+        """
+        Returns:
+            True if the maintenance events pool handler is enabled, False otherwise.
+        """
+        maintenance_events_config = self.connection_kwargs.get(
+            "maintenance_events_config", False
+        )
+
+        return maintenance_events_config and maintenance_events_config.enabled
+
+    def set_maintenance_events_pool_handler(
+        self, maintenance_events_pool_handler: MaintenanceEventPoolHandler
+    ):
+        self.connection_kwargs.update(
+            {
+                "maintenance_events_pool_handler": maintenance_events_pool_handler,
+                "maintenance_events_config": maintenance_events_pool_handler.config,
+            }
+        )
+
+        self._update_maintenance_events_configs_for_connections(
+            maintenance_events_pool_handler
+        )
+
+    def _update_maintenance_events_configs_for_connections(
+        self, maintenance_events_pool_handler
+    ):
+        with self._lock:
+            for conn in self._available_connections:
+                conn.set_maintenance_events_pool_handler(
+                    maintenance_events_pool_handler
+                )
+                conn.maintenance_events_config = maintenance_events_pool_handler.config
+            for conn in self._in_use_connections:
+                conn.set_maintenance_events_pool_handler(
+                    maintenance_events_pool_handler
+                )
+                conn.maintenance_events_config = maintenance_events_pool_handler.config
 
     def reset(self) -> None:
         self._created_connections = 0
@@ -1536,7 +1698,11 @@ class ConnectionPool:
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
             try:
-                if connection.can_read() and self.cache is None:
+                if (
+                    connection.can_read()
+                    and self.cache is None
+                    and not self.maintenance_events_pool_handler_enabled()
+                ):
                     raise ConnectionError("Connection has data")
             except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
@@ -1548,7 +1714,6 @@ class ConnectionPool:
             # leak it
             self.release(connection)
             raise
-
         return connection
 
     def get_encoder(self) -> Encoder:
@@ -1570,7 +1735,6 @@ class ConnectionPool:
             return CacheProxyConnection(
                 self.connection_class(**self.connection_kwargs), self.cache, self._lock
             )
-
         return self.connection_class(**self.connection_kwargs)
 
     def release(self, connection: "Connection") -> None:
@@ -1585,6 +1749,11 @@ class ConnectionPool:
                 return
 
             if self.owns_connection(connection):
+                if connection.should_reconnect():
+                    logging.debug(
+                        f"***** Pool--> disconnecting in release {connection._sock.getpeername()}"
+                    )
+                    connection.disconnect()
                 self._available_connections.append(connection)
                 self._event_dispatcher.dispatch(
                     AfterConnectionReleasedEvent(connection)
@@ -1645,6 +1814,154 @@ class ConnectionPool:
                 )
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
+
+    def update_connection_kwargs_with_tmp_settings(
+        self,
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[float] = None,
+    ):
+        """
+        Update the connection kwargs with the temporary host address and the
+        relax timeout(if enabled).
+        This is used when a cluster node is rebind to a different address.
+
+        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
+        This new address will be used to create new connections until the old node is decomissioned.
+
+        :param tmp_host_address: The temporary host address to use for the connection.
+        :param tmp_relax_timeout: The relax timeout to use for the connection.
+                              If -1 is provided - the relax timeout is disabled, so the tmp property is not set
+        """
+        self.connection_kwargs.update({"tmp_host_address": tmp_host_address})
+        self.connection_kwargs.update({"tmp_relax_timeout": tmp_relax_timeout})
+
+    def update_connections_tmp_settings(
+        self,
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[float] = None,
+    ):
+        """
+        Update the tmp settings for all connections in the pool.
+        This is used when a cluster node is rebind to a different address.
+
+        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
+
+        :param tmp_host_address: The temporary host address to use for the connection.
+        :param tmp_relax_timeout: The relax timeout to use for the connection.
+        """
+        with self._lock:
+            for conn in self._available_connections:
+                self._update_connection_tmp_settings(
+                    conn, tmp_host_address, tmp_relax_timeout
+                )
+            for conn in self._in_use_connections:
+                self._update_connection_tmp_settings(
+                    conn, tmp_host_address, tmp_relax_timeout
+                )
+
+    def update_active_connections_for_reconnect(
+        self,
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[float] = None,
+    ):
+        """
+        Mark all active connections for reconnect.
+        This is used when a cluster node is migrated to a different address.
+
+        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
+
+        :param tmp_host_address: The temporary host address to use for the connection.
+        """
+        for conn in self._in_use_connections:
+            self._update_connection_for_reconnect(
+                conn, tmp_host_address, tmp_relax_timeout
+            )
+
+    def disconnect_and_reconfigure_free_connections(
+        self,
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[float] = None,
+    ):
+        """
+        Disconnect all free/available connections.
+        This is used when a cluster node is migrated to a different address.
+
+        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
+
+        :param tmp_host_address: The temporary host address to use for the connection.
+        :param tmp_relax_timeout: The relax timeout to use for the connection.
+        """
+
+        for conn in self._available_connections:
+            self._disconnect_and_update_connection_for_reconnect(
+                conn, tmp_host_address, tmp_relax_timeout
+            )
+
+    def update_connections_current_timeout(
+        self,
+        relax_timeout: Optional[float],
+        include_available_connections: bool = False,
+    ):
+        """
+        Update the timeout either for all connections in the pool or just for the ones in use.
+        This is used when a cluster node is migrated to a different address.
+
+        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
+
+        :param relax_timeout: The relax timeout to use for the connection.
+                              If -1 is provided - the relax timeout is disabled.
+        :param include_available_connections: Whether to include available connections in the update.
+        """
+        logging.debug(f"***** Pool --> Updating timeouts. New value: {relax_timeout}")
+        start_time = time.time()
+
+        for conn in self._in_use_connections:
+            self._update_connection_timeout(conn, relax_timeout)
+
+        if include_available_connections:
+            for conn in self._available_connections:
+                self._update_connection_timeout(conn, relax_timeout)
+
+        execution_time_us = (time.time() - start_time) * 1000000
+        logging.error(
+            f"###### TIMEOUTS execution time: {execution_time_us:.0f} microseconds"
+        )
+
+    def _update_connection_for_reconnect(
+        self,
+        connection: "Connection",
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[float] = None,
+    ):
+        connection.mark_for_reconnect()
+        self._update_connection_tmp_settings(
+            connection, tmp_host_address, tmp_relax_timeout
+        )
+
+    def _disconnect_and_update_connection_for_reconnect(
+        self,
+        connection: "Connection",
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[float] = None,
+    ):
+        connection.disconnect()
+        self._update_connection_tmp_settings(
+            connection, tmp_host_address, tmp_relax_timeout
+        )
+
+    def _update_connection_tmp_settings(
+        self,
+        connection: "Connection",
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[float] = None,
+    ):
+        connection.tmp_host_address = tmp_host_address
+        connection.tmp_relax_timeout = tmp_relax_timeout
+
+    def _update_connection_timeout(
+        self, connection: "Connection", relax_timeout: Optional[Number]
+    ):
+        connection.update_current_socket_timeout(relax_timeout)
 
     async def _mock(self, error: RedisError):
         """
@@ -1707,16 +2024,17 @@ class BlockingConnectionPool(ConnectionPool):
 
     def reset(self):
         # Create and fill up a thread safe queue with ``None`` values.
-        self.pool = self.queue_class(self.max_connections)
-        while True:
-            try:
-                self.pool.put_nowait(None)
-            except Full:
-                break
+        with self._lock:
+            self.pool = self.queue_class(self.max_connections)
+            while True:
+                try:
+                    self.pool.put_nowait(None)
+                except Full:
+                    break
 
-        # Keep a list of actual connection instances so that we can
-        # disconnect them later.
-        self._connections = []
+            # Keep a list of actual connection instances so that we can
+            # disconnect them later.
+            self._connections = []
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
@@ -1731,14 +2049,18 @@ class BlockingConnectionPool(ConnectionPool):
 
     def make_connection(self):
         "Make a fresh connection."
-        if self.cache is not None:
-            connection = CacheProxyConnection(
-                self.connection_class(**self.connection_kwargs), self.cache, self._lock
-            )
-        else:
-            connection = self.connection_class(**self.connection_kwargs)
-        self._connections.append(connection)
-        return connection
+        with self._lock:
+            if self.cache is not None:
+                connection = CacheProxyConnection(
+                    self.connection_class(**self.connection_kwargs),
+                    self.cache,
+                    self._lock,
+                )
+            else:
+                connection = self.connection_class(**self.connection_kwargs)
+
+                self._connections.append(connection)
+            return connection
 
     @deprecated_args(
         args_to_warn=["*"],
@@ -1763,17 +2085,18 @@ class BlockingConnectionPool(ConnectionPool):
         # Try and get a connection from the pool. If one isn't available within
         # self.timeout then raise a ``ConnectionError``.
         connection = None
-        try:
-            connection = self.pool.get(block=True, timeout=self.timeout)
-        except Empty:
-            # Note that this is not caught by the redis client and will be
-            # raised unless handled by application code. If you want never to
-            raise ConnectionError("No connection available.")
+        with self._lock:
+            try:
+                connection = self.pool.get(block=True, timeout=self.timeout)
+            except Empty:
+                # Note that this is not caught by the redis client and will be
+                # raised unless handled by application code. If you want never to
+                raise ConnectionError("No connection available.")
 
-        # If the ``connection`` is actually ``None`` then that's a cue to make
-        # a new connection to add to the pool.
-        if connection is None:
-            connection = self.make_connection()
+            # If the ``connection`` is actually ``None`` then that's a cue to make
+            # a new connection to add to the pool.
+            if connection is None:
+                connection = self.make_connection()
 
         try:
             # ensure this connection is connected to Redis
@@ -1801,25 +2124,88 @@ class BlockingConnectionPool(ConnectionPool):
         "Releases the connection back to the pool."
         # Make sure we haven't changed process.
         self._checkpid()
-        if not self.owns_connection(connection):
-            # pool doesn't own this connection. do not add it back
-            # to the pool. instead add a None value which is a placeholder
-            # that will cause the pool to recreate the connection if
-            # its needed.
-            connection.disconnect()
-            self.pool.put_nowait(None)
-            return
 
-        # Put the connection back into the pool.
-        try:
-            self.pool.put_nowait(connection)
-        except Full:
-            # perhaps the pool has been reset() after a fork? regardless,
-            # we don't want this connection
-            pass
+        with self._lock:
+            if not self.owns_connection(connection):
+                # pool doesn't own this connection. do not add it back
+                # to the pool. instead add a None value which is a placeholder
+                # that will cause the pool to recreate the connection if
+                # its needed.
+                connection.disconnect()
+                self.pool.put_nowait(None)
+                return
+            if connection.should_reconnect():
+                logging.debug(
+                    f"***** Blocking Pool--> disconnecting in release {connection._sock.getpeername()}"
+                )
+                connection.disconnect()
+            # Put the connection back into the pool.
+            try:
+                self.pool.put_nowait(connection)
+            except Full:
+                # perhaps the pool has been reset() after a fork? regardless,
+                # we don't want this connection
+                pass
 
     def disconnect(self):
         "Disconnects all connections in the pool."
         self._checkpid()
-        for connection in self._connections:
-            connection.disconnect()
+        with self._lock:
+            for connection in self._connections:
+                connection.disconnect()
+
+    def update_active_connections_for_reconnect(
+        self,
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[float] = None,
+    ):
+        with self._lock:
+            connections_in_queue = {conn for conn in self.pool.queue if conn}
+            for conn in self._connections:
+                if conn not in connections_in_queue:
+                    if tmp_relax_timeout != -1:
+                        conn.update_socket_timeout(tmp_relax_timeout)
+                    self._update_connection_for_reconnect(
+                        conn, tmp_host_address, tmp_relax_timeout
+                    )
+
+    def disconnect_and_reconfigure_free_connections(
+        self,
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[Number] = None,
+    ):
+        with self._lock:
+            existing_connections = self.pool.queue
+
+            for conn in existing_connections:
+                if conn:
+                    self._disconnect_and_update_connection_for_reconnect(
+                        conn, tmp_host_address, tmp_relax_timeout
+                    )
+
+    def update_connections_current_timeout(self, relax_timeout: Optional[float] = None):
+        logging.debug(
+            f"***** Blocking Pool --> Updating timeouts. relax_timeout: {relax_timeout}"
+        )
+
+        with self._lock:
+            for conn in tuple(self._connections):
+                self._update_connection_timeout(conn, relax_timeout)
+
+    def update_connections_tmp_settings(
+        self,
+        tmp_host_address: Optional[str] = None,
+        tmp_relax_timeout: Optional[float] = None,
+    ):
+        with self._lock:
+            for conn in tuple(self._connections):
+                self._update_connection_tmp_settings(
+                    conn, tmp_host_address, tmp_relax_timeout
+                )
+
+    def _update_maintenance_events_config_for_connections(
+        self, maintenance_events_config
+    ):
+        with self._lock:
+            for conn in tuple(self._connections):
+                conn.maintenance_events_config = maintenance_events_config
