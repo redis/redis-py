@@ -1,3 +1,4 @@
+import asyncio
 import threading
 
 from redis.commands import RedisModuleCommands, CoreCommands, SentinelCommands
@@ -33,16 +34,43 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         )
         self._initialized = False
         self._hc_lock = threading.RLock()
+        self._init_timer = None
+        self._next_timer = None
+
+    def __del__(self):
+        if self._init_timer is not None:
+            self._init_timer.cancel()
+        if self._next_timer is not None:
+            self._next_timer.cancel()
 
     def _initialize(self):
         """
         Perform initialization of databases to define their initial state.
         """
+
+        # Starts recurring
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # Run loop in a separate thread to unblock main thread.
+            loop = asyncio.new_event_loop()
+            thread = threading.Thread(
+                target=_start_event_loop_in_thread, args=(loop,), daemon=True
+            )
+            thread.start()
+
+        # Event to block for initial execution.
+        init_event = asyncio.Event()
+        self._init_timer = loop.call_later(
+            0, self._run_health_check_recurring, init_event
+        )
+
+        # Blocks in thread-safe manner.
+        asyncio.run_coroutine_threadsafe(init_event.wait(), loop).result()
+
         is_active_db = False
 
         for database, weight in self._databases:
-            self._check_db_health(database)
-
             # Set states according to a weights and circuit state
             if database.circuit.state == CBState.CLOSED and not is_active_db:
                 database.state = DBState.ACTIVE
@@ -174,4 +202,33 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
                     break
 
                 is_healthy = health_check.check_health(database)
+
+    def _run_health_check_recurring(self, init_event: asyncio.Event = None):
+        """
+        Runs health checks as recurring task.
+        """
+        try:
+            for database, _ in self._databases:
+                self._check_db_health(database)
+
+            loop = asyncio.get_running_loop()
+            self._next_timer = loop.call_later(
+                self._health_check_interval,
+                self._run_health_check_recurring,
+                None
+            )
+        finally:
+            if init_event:
+                init_event.set()
+
+def _start_event_loop_in_thread(event_loop: asyncio.AbstractEventLoop):
+    """
+    Starts event loop in a thread.
+    Used to be able to schedule tasks using loop.call_later.
+
+    :param event_loop:
+    :return:
+    """
+    asyncio.set_event_loop(event_loop)
+    event_loop.run_forever()
 

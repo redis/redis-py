@@ -1,4 +1,6 @@
+import socket
 from abc import abstractmethod, ABC
+from redis.exceptions import ConnectionError, TimeoutError
 
 from redis.retry import Retry
 from redis.multidb.circuit import State as CBState
@@ -57,7 +59,7 @@ class EchoHealthCheck(AbstractHealthCheck):
                 database.circuit.state = CBState.CLOSED
 
             return is_healthy
-        except Exception:
+        except (ConnectionError, TimeoutError, socket.timeout):
             database.circuit.state = CBState.OPEN
             return False
 

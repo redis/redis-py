@@ -1,14 +1,19 @@
+from time import sleep
 from unittest.mock import patch, Mock
 
 import pytest
 
 from redis.event import EventDispatcher, OnCommandFailEvent
 from redis.multidb.circuit import State as CBState
+from redis.multidb.config import DEFAULT_HEALTH_CHECK_RETRIES, DEFAULT_HEALTH_CHECK_BACKOFF, DEFAULT_FAILOVER_RETRIES, \
+    DEFAULT_FAILOVER_BACKOFF
 from redis.multidb.database import State as DBState, AbstractDatabase
 from redis.multidb.client import MultiDBClient
 from redis.multidb.exception import NoValidDatabaseException
+from redis.multidb.failover import WeightBasedFailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
-from redis.multidb.healthcheck import HealthCheck
+from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
+from redis.retry import Retry
 from tests.test_multidb.conftest import create_weighted_list
 
 
@@ -57,6 +62,197 @@ class TestMultiDbClient:
             assert mock_db.state == DBState.PASSIVE
             assert mock_db1.state == DBState.ACTIVE
             assert mock_db2.state == DBState.PASSIVE or mock_db2.state == DBState.DISCONNECTED
+
+    @pytest.mark.parametrize(
+        'mock_multi_db_config,mock_db, mock_db1, mock_db2',
+        [
+            (
+                    {},
+                    {'weight': 0.2, 'circuit': {'state': CBState.CLOSED}},
+                    {'weight': 0.7, 'circuit': {'state': CBState.CLOSED}},
+                    {'weight': 0.5, 'circuit': {'state': CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_execute_command_against_correct_db_on_background_health_check_determine_active_db_unhealthy(
+            self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        with patch.object(
+                mock_multi_db_config,
+                'databases',
+                return_value=databases
+        ):
+            mock_db.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'healthcheck', 'OK', 'error']
+            mock_db1.client.execute_command.side_effect = ['healthcheck', 'OK1', 'error', 'error', 'healthcheck', 'OK1']
+            mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'OK2', 'error', 'error']
+            mock_multi_db_config.health_check_interval = 0.1
+            mock_multi_db_config.health_checks = [
+                EchoHealthCheck(
+                    retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
+                )
+            ]
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
+                retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
+            )
+
+            client = MultiDBClient(mock_multi_db_config)
+            assert client.set('key', 'value') == 'OK1'
+
+            assert mock_db.state == DBState.PASSIVE
+            assert mock_db1.state == DBState.ACTIVE
+            assert mock_db2.state == DBState.PASSIVE
+
+            sleep(0.15)
+
+            assert client.set('key', 'value') == 'OK2'
+
+            assert mock_db.state == DBState.PASSIVE
+            assert mock_db1.state == DBState.ACTIVE
+            assert mock_db2.state == DBState.PASSIVE
+
+            sleep(0.1)
+
+            assert client.set('key', 'value') == 'OK'
+
+            assert mock_db.state == DBState.PASSIVE
+            assert mock_db1.state == DBState.ACTIVE
+            assert mock_db2.state == DBState.PASSIVE
+
+            sleep(0.1)
+
+            assert client.set('key', 'value') == 'OK1'
+
+            assert mock_db.state == DBState.PASSIVE
+            assert mock_db1.state == DBState.ACTIVE
+            assert mock_db2.state == DBState.PASSIVE
+
+    @pytest.mark.parametrize(
+        'mock_multi_db_config,mock_db, mock_db1, mock_db2',
+        [
+            (
+                    {},
+                    {'weight': 0.2, 'circuit': {'state': CBState.CLOSED}},
+                    {'weight': 0.7, 'circuit': {'state': CBState.CLOSED}},
+                    {'weight': 0.5, 'circuit': {'state': CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_execute_command_against_correct_db_on_background_health_check_determine_active_db_unhealthy(
+            self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        with patch.object(
+                mock_multi_db_config,
+                'databases',
+                return_value=databases
+        ):
+            mock_db.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'healthcheck', 'OK', 'error']
+            mock_db1.client.execute_command.side_effect = ['healthcheck', 'OK1', 'error', 'error', 'healthcheck', 'OK1']
+            mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'OK2', 'error', 'error']
+            mock_multi_db_config.health_check_interval = 0.1
+            mock_multi_db_config.health_checks = [
+                EchoHealthCheck(
+                    retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
+                )
+            ]
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
+                retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
+            )
+
+            client = MultiDBClient(mock_multi_db_config)
+            assert client.set('key', 'value') == 'OK1'
+
+            assert mock_db.state == DBState.PASSIVE
+            assert mock_db1.state == DBState.ACTIVE
+            assert mock_db2.state == DBState.PASSIVE
+
+            sleep(0.15)
+
+            assert client.set('key', 'value') == 'OK2'
+
+            assert mock_db.state == DBState.PASSIVE
+            assert mock_db1.state == DBState.ACTIVE
+            assert mock_db2.state == DBState.PASSIVE
+
+            sleep(0.1)
+
+            assert client.set('key', 'value') == 'OK'
+
+            assert mock_db.state == DBState.PASSIVE
+            assert mock_db1.state == DBState.ACTIVE
+            assert mock_db2.state == DBState.PASSIVE
+
+            sleep(0.1)
+
+            assert client.set('key', 'value') == 'OK1'
+
+            assert mock_db.state == DBState.PASSIVE
+            assert mock_db1.state == DBState.ACTIVE
+            assert mock_db2.state == DBState.PASSIVE
+
+    @pytest.mark.parametrize(
+        'mock_multi_db_config,mock_db, mock_db1, mock_db2',
+        [
+            (
+                    {},
+                    {'weight': 0.2, 'circuit': {'state': CBState.CLOSED}},
+                    {'weight': 0.7, 'circuit': {'state': CBState.CLOSED}},
+                    {'weight': 0.5, 'circuit': {'state': CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_execute_command_auto_fallback_to_highest_weight_db(
+            self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+
+        with patch.object(
+                mock_multi_db_config,
+                'databases',
+                return_value=databases
+        ):
+            mock_db.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'healthcheck', 'healthcheck', 'healthcheck']
+            mock_db1.client.execute_command.side_effect = ['healthcheck', 'OK1', 'error', 'healthcheck', 'healthcheck', 'OK1']
+            mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'OK2', 'healthcheck', 'healthcheck', 'healthcheck']
+            mock_multi_db_config.health_check_interval = 0.1
+            mock_multi_db_config.auto_fallback_interval = 0.2
+            mock_multi_db_config.health_checks = [
+                EchoHealthCheck(
+                    retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
+                )
+            ]
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
+                retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
+            )
+
+            client = MultiDBClient(mock_multi_db_config)
+            assert client.set('key', 'value') == 'OK1'
+
+            assert mock_db.state == DBState.PASSIVE
+            assert mock_db1.state == DBState.ACTIVE
+            assert mock_db2.state == DBState.PASSIVE
+
+            sleep(0.15)
+
+            assert client.set('key', 'value') == 'OK2'
+
+            assert mock_db.state == DBState.PASSIVE
+            assert mock_db1.state == DBState.ACTIVE
+            assert mock_db2.state == DBState.PASSIVE
+
+            sleep(0.22)
+
+            assert client.set('key', 'value') == 'OK1'
+
+            assert mock_db.state == DBState.PASSIVE
+            assert mock_db1.state == DBState.ACTIVE
+            assert mock_db2.state == DBState.PASSIVE
 
     @pytest.mark.parametrize(
         'mock_multi_db_config,mock_db, mock_db1, mock_db2',

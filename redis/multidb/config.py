@@ -59,7 +59,7 @@ class MultiDbConfig:
     client_class: Type[Union[Redis, RedisCluster, Sentinel]] = Redis
     failure_detectors: List[FailureDetector] = field(default_factory=default_failure_detectors)
     health_checks: List[HealthCheck] = field(default_factory=default_health_checks)
-    health_check_interval: int = DEFAULT_HEALTH_CHECK_INTERVAL
+    health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL
     failover_strategy: FailoverStrategy = field(default_factory=default_failover_strategy)
     auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL
     event_dispatcher: EventDispatcherInterface = field(default_factory=default_event_dispatcher)
