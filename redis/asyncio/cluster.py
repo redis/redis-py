@@ -1581,15 +1581,6 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
     def __await__(self) -> Generator[Any, None, "ClusterPipeline"]:
         return self.initialize().__await__()
 
-    def __enter__(self) -> "ClusterPipeline":
-        # TODO: Remove this method before 7.0.0
-        self._execution_strategy._command_queue = []
-        return self
-
-    def __exit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        # TODO: Remove this method before 7.0.0
-        self._execution_strategy._command_queue = []
-
     def __bool__(self) -> bool:
         "Pipeline instances should  always evaluate to True on Python 3+"
         return True
