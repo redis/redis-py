@@ -61,7 +61,7 @@ class AbstractDatabase(ABC):
         """Set the circuit breaker for the current database."""
         pass
 
-Databases = WeightedList[tuple[AbstractDatabase, int]]
+Databases = WeightedList[tuple[AbstractDatabase, Union[int, float]]]
 
 class Database(AbstractDatabase):
     def __init__(
@@ -79,6 +79,7 @@ class Database(AbstractDatabase):
         """
         self._client = client
         self._cb = circuit
+        self._cb.database = self
         self._weight = weight
         self._state = state
 

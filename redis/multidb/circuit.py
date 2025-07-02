@@ -33,6 +33,18 @@ class CircuitBreaker(ABC):
         """Set current state of the circuit."""
         pass
 
+    @property
+    @abstractmethod
+    def database(self):
+        """Database associated with this circuit."""
+        pass
+
+    @database.setter
+    @abstractmethod
+    def database(self, database):
+        """Set database associated with this circuit."""
+        pass
+
     @abstractmethod
     def on_state_changed(self, cb: Callable[["CircuitBreaker", State, State], None]):
         """Callback called when the state of the circuit changes."""
@@ -41,13 +53,16 @@ class CircuitBreaker(ABC):
 class PBListener(pybreaker.CircuitBreakerListener):
     def __init__(
             self,
-            cb: Callable[[CircuitBreaker, State, State], None]
+            cb: Callable[[CircuitBreaker, State, State], None],
+            database,
     ):
         """Wrapper for callback to be compatible with pybreaker implementation."""
         self._cb = cb
+        self._database = database
 
     def state_change(self, cb, old_state, new_state):
         cb = PBCircuitBreakerAdapter(cb)
+        cb.database = self._database
         old_state = State(value=old_state.name)
         new_state = State(value=new_state.name)
         self._cb(cb, old_state, new_state)
@@ -62,6 +77,7 @@ class PBCircuitBreakerAdapter(CircuitBreaker):
             State.OPEN: self._cb.open,
             State.HALF_OPEN: self._cb.half_open,
         }
+        self._database = None
 
     @property
     def grace_period(self) -> float:
@@ -79,6 +95,14 @@ class PBCircuitBreakerAdapter(CircuitBreaker):
     def state(self, state: State):
         self._state_pb_mapper[state]()
 
+    @property
+    def database(self):
+        return self._database
+
+    @database.setter
+    def database(self, database):
+        self._database = database
+
     def on_state_changed(self, cb: Callable[["CircuitBreaker", State, State], None]):
-        listener = PBListener(cb)
+        listener = PBListener(cb, self.database)
         self._cb.add_listener(listener)

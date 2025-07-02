@@ -141,7 +141,10 @@ class DefaultCommandExecutor(CommandExecutor):
 
         try:
             return self._active_database.client.execute_command(*args, **options)
-        except (ConnectionError, TimeoutError, socket.timeout):
+        except (ConnectionError, TimeoutError, socket.timeout) as e:
+            # Register command failure
+            self._event_dispatcher.dispatch(OnCommandFailEvent(args, e, self.active_database.client))
+
             # Retry until failure detector will trigger opening of circuit
             return self.execute_command(*args, **options)
 

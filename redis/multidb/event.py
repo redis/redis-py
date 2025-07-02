@@ -1,4 +1,4 @@
-from typing import List, Set
+from typing import List
 
 from redis.event import EventListenerInterface, OnCommandFailEvent
 from redis.multidb.config import Databases

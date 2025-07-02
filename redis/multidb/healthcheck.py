@@ -53,20 +53,21 @@ class EchoHealthCheck(AbstractHealthCheck):
                 lambda _: self._dummy_fail()
             )
 
-            if not is_healthy:
+            if not is_healthy and database.circuit.state != CBState.OPEN:
                 database.circuit.state = CBState.OPEN
             elif is_healthy and database.circuit.state != CBState.CLOSED:
                 database.circuit.state = CBState.CLOSED
 
             return is_healthy
         except (ConnectionError, TimeoutError, socket.timeout):
-            database.circuit.state = CBState.OPEN
+            if database.circuit.state != CBState.OPEN:
+                database.circuit.state = CBState.OPEN
             return False
 
     def _returns_echoed_message(self, database) -> bool:
-        expected_message = "healthcheck"
-        actual_message = database.client.execute_command('ECHO', expected_message)
-        return actual_message == expected_message
+        expected_message = ["healthcheck", b"healthcheck"]
+        actual_message = database.client.execute_command('ECHO', "healthcheck")
+        return actual_message in expected_message
 
     def _dummy_fail(self):
         pass

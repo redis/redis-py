@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Type, Union, Set
+from typing import List, Type, Union, Set, Optional
 
 import pybreaker
 
@@ -15,7 +15,7 @@ from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
 from redis.multidb.failover import FailoverStrategy, WeightBasedFailoverStrategy
 from redis.retry import Retry
 
-DEFAULT_GRACE_PERIOD = 1
+DEFAULT_GRACE_PERIOD = 5
 DEFAULT_HEALTH_CHECK_INTERVAL = 5
 DEFAULT_HEALTH_CHECK_RETRIES = 3
 DEFAULT_HEALTH_CHECK_BACKOFF = ExponentialWithJitterBackoff(cap=10)
@@ -49,8 +49,8 @@ def default_event_dispatcher() -> EventDispatcherInterface:
 
 @dataclass
 class DatabaseConfig:
-    client_kwargs: dict
     weight: float
+    client_kwargs: dict = field(default_factory=dict)
     circuit: CircuitBreaker = field(default_factory=default_circuit_breaker)
 
 @dataclass

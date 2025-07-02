@@ -4,7 +4,7 @@ import threading
 from redis.commands import RedisModuleCommands, CoreCommands, SentinelCommands
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.config import MultiDbConfig
-from redis.multidb.circuit import State as CBState
+from redis.multidb.circuit import State as CBState, CircuitBreaker
 from redis.multidb.database import State as DBState, Database, AbstractDatabase, Databases
 from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failure_detector import FailureDetector
@@ -71,6 +71,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         is_active_db = False
 
         for database, weight in self._databases:
+            # Set on state changed callback for each circuit.
+            database.circuit.on_state_changed(self._on_circuit_state_change_callback)
+
             # Set states according to a weights and circuit state
             if database.circuit.state == CBState.CLOSED and not is_active_db:
                 database.state = DBState.ACTIVE
@@ -220,6 +223,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         finally:
             if init_event:
                 init_event.set()
+
+    def _on_circuit_state_change_callback(self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState):
+        if new_state == CBState.HALF_OPEN:
+            self._check_db_health(circuit.database)
+            return
 
 def _start_event_loop_in_thread(event_loop: asyncio.AbstractEventLoop):
     """
