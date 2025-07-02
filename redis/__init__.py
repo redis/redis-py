@@ -1,4 +1,5 @@
 from redis import asyncio  # noqa
+from redis import anyio  # noqa
 from redis.backoff import default_backoff
 from redis.client import Redis, StrictRedis
 from redis.cluster import RedisCluster
