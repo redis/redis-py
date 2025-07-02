@@ -882,103 +882,78 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.2.0")
     async def test_bitop_diff(self, r: redis.Redis):
-        """Test BITOP DIFF operation"""
-        # Set up test data: a=0b11110000, b=0b11000000, c=0b10000000
-        await r.set("a", b"\xf0")  # 11110000
-        await r.set("b", b"\xc0")  # 11000000
-        await r.set("c", b"\x80")  # 10000000
+        await r.set("a", b"\xf0")
+        await r.set("b", b"\xc0")
+        await r.set("c", b"\x80")
 
-        # DIFF: a AND NOT(b OR c) = 11110000 AND NOT(11000000) = 11110000 AND 00111111 = 00110000
         result = await r.bitop("DIFF", "result", "a", "b", "c")
-        assert result == 1  # Length of result
-        assert await r.get("result") == b"\x30"  # 00110000
+        assert result == 1
+        assert await r.get("result") == b"\x30"
 
-        # Test with non-existent keys
         await r.bitop("DIFF", "result2", "a", "nonexistent")
-        assert await r.get("result2") == b"\xf0"  # Should be same as 'a'
+        assert await r.get("result2") == b"\xf0"
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.2.0")
     async def test_bitop_diff1(self, r: redis.Redis):
-        """Test BITOP DIFF1 operation"""
-        # Set up test data: a=0b11110000, b=0b11000000, c=0b10000000
-        await r.set("a", b"\xf0")  # 11110000
-        await r.set("b", b"\xc0")  # 11000000
-        await r.set("c", b"\x80")  # 10000000
+        await r.set("a", b"\xf0")
+        await r.set("b", b"\xc0")
+        await r.set("c", b"\x80")
 
-        # DIFF1: NOT(a) AND (b OR c) = NOT(11110000) AND (11000000) = 00001111 AND 11000000 = 00000000
         result = await r.bitop("DIFF1", "result", "a", "b", "c")
-        assert result == 1  # Length of result
-        assert await r.get("result") == b"\x00"  # 00000000
+        assert result == 1
+        assert await r.get("result") == b"\x00"
 
-        # Test with different data where result is non-zero
-        await r.set("d", b"\x0f")  # 00001111
-        await r.set("e", b"\x03")  # 00000011
-        # DIFF1: NOT(d) AND e = NOT(00001111) AND 00000011 = 11110000 AND 00000011 = 00000000
+        await r.set("d", b"\x0f")
+        await r.set("e", b"\x03")
         await r.bitop("DIFF1", "result2", "d", "e")
         assert await r.get("result2") == b"\x00"
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.2.0")
     async def test_bitop_andor(self, r: redis.Redis):
-        """Test BITOP ANDOR operation"""
-        # Set up test data: a=0b11110000, b=0b11000000, c=0b10000000
-        await r.set("a", b"\xf0")  # 11110000
-        await r.set("b", b"\xc0")  # 11000000
-        await r.set("c", b"\x80")  # 10000000
+        await r.set("a", b"\xf0")
+        await r.set("b", b"\xc0")
+        await r.set("c", b"\x80")
 
-        # ANDOR: a AND (b OR c) = 11110000 AND (11000000) = 11110000 AND 11000000 = 11000000
         result = await r.bitop("ANDOR", "result", "a", "b", "c")
-        assert result == 1  # Length of result
-        assert await r.get("result") == b"\xc0"  # 11000000
+        assert result == 1
+        assert await r.get("result") == b"\xc0"
 
-        # Test with non-overlapping bits
-        await r.set("x", b"\xf0")  # 11110000
-        await r.set("y", b"\x0f")  # 00001111
+        await r.set("x", b"\xf0")
+        await r.set("y", b"\x0f")
         await r.bitop("ANDOR", "result2", "x", "y")
-        assert await r.get("result2") == b"\x00"  # No overlap
+        assert await r.get("result2") == b"\x00"
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.2.0")
     async def test_bitop_one(self, r: redis.Redis):
-        """Test BITOP ONE operation"""
-        # Set up test data: a=0b11110000, b=0b11000000, c=0b10000000
-        await r.set("a", b"\xf0")  # 11110000
-        await r.set("b", b"\xc0")  # 11000000
-        await r.set("c", b"\x80")  # 10000000
+        await r.set("a", b"\xf0")
+        await r.set("b", b"\xc0")
+        await r.set("c", b"\x80")
 
-        # ONE: bits set in exactly one key
-        # Position analysis:
-        # Bit 7: a=1, b=1, c=1 -> count=3 -> not included
-        # Bit 6: a=1, b=1, c=0 -> count=2 -> not included
-        # Bit 5: a=1, b=0, c=0 -> count=1 -> included
-        # Bit 4: a=1, b=0, c=0 -> count=1 -> included
-        # Expected result: 00110000 = 0x30
         result = await r.bitop("ONE", "result", "a", "b", "c")
-        assert result == 1  # Length of result
-        assert await r.get("result") == b"\x30"  # 00110000
+        assert result == 1
+        assert await r.get("result") == b"\x30"
 
-        # Test with two keys (should be equivalent to XOR)
-        await r.set("x", b"\xf0")  # 11110000
-        await r.set("y", b"\x0f")  # 00001111
+        await r.set("x", b"\xf0")
+        await r.set("y", b"\x0f")
         await r.bitop("ONE", "result2", "x", "y")
-        assert await r.get("result2") == b"\xff"  # 11111111 (XOR result)
+        assert await r.get("result2") == b"\xff"
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.2.0")
     async def test_bitop_new_operations_with_empty_keys(self, r: redis.Redis):
-        """Test new BITOP operations with empty/non-existent keys"""
-        await r.set("a", b"\xff")  # 11111111
+        await r.set("a", b"\xff")
 
-        # Test with empty destination
         await r.bitop("DIFF", "empty_result", "nonexistent", "a")
-        assert await r.get("empty_result") is None
+        assert await r.get("empty_result") == b"\x00"
 
         await r.bitop("DIFF1", "empty_result2", "a", "nonexistent")
-        assert await r.get("empty_result2") is None
+        assert await r.get("empty_result2") == b"\x00"
 
         await r.bitop("ANDOR", "empty_result3", "a", "nonexistent")
-        assert await r.get("empty_result3") is None
+        assert await r.get("empty_result3") == b"\x00"
 
         await r.bitop("ONE", "empty_result4", "nonexistent")
         assert await r.get("empty_result4") is None
@@ -986,13 +961,11 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.2.0")
     async def test_bitop_new_operations_return_values(self, r: redis.Redis):
-        """Test that new BITOP operations return correct length values"""
-        await r.set("a", b"\xff\x00\xff")  # 3 bytes
-        await r.set("b", b"\x00\xff")      # 2 bytes
+        await r.set("a", b"\xff\x00\xff")
+        await r.set("b", b"\x00\xff")
 
-        # All operations should return the length of the result string
         result1 = await r.bitop("DIFF", "result1", "a", "b")
-        assert result1 == 3  # Length of longest input
+        assert result1 == 3
 
         result2 = await r.bitop("DIFF1", "result2", "a", "b")
         assert result2 == 3

@@ -1316,8 +1316,8 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.2.0")
     def test_bitop_diff(self, r):
-        r["a"] = b"\xf0" 
-        r["b"] = b"\xc0" 
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
         r["c"] = b"\x80"
 
         result = r.bitop("DIFF", "result", "a", "b", "c")
@@ -1330,15 +1330,15 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.2.0")
     def test_bitop_diff1(self, r):
-        r["a"] = b"\xf0" 
-        r["b"] = b"\xc0" 
-        r["c"] = b"\x80" 
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
+        r["c"] = b"\x80"
 
         result = r.bitop("DIFF1", "result", "a", "b", "c")
         assert result == 1
         assert r["result"] == b"\x00"
 
-        r["d"] = b"\x0f" 
+        r["d"] = b"\x0f"
         r["e"] = b"\x03"
         r.bitop("DIFF1", "result2", "d", "e")
         assert r["result2"] == b"\x00"
@@ -1346,16 +1346,16 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.2.0")
     def test_bitop_andor(self, r):
-        r["a"] = b"\xf0" 
-        r["b"] = b"\xc0" 
-        r["c"] = b"\x80" 
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
+        r["c"] = b"\x80"
 
         result = r.bitop("ANDOR", "result", "a", "b", "c")
-        assert result == 1 
-        assert r["result"] == b"\xc0" 
+        assert result == 1
+        assert r["result"] == b"\xc0"
 
-        r["x"] = b"\xf0" 
-        r["y"] = b"\x0f" 
+        r["x"] = b"\xf0"
+        r["y"] = b"\x0f"
         r.bitop("ANDOR", "result2", "x", "y")
         assert r["result2"] == b"\x00"
 
@@ -1371,7 +1371,7 @@ class TestRedisCommands:
         assert r["result"] == b"\x30"
 
         r["x"] = b"\xf0"
-        r["y"] = b"\x0f" 
+        r["y"] = b"\x0f"
         r.bitop("ONE", "result2", "x", "y")
         assert r["result2"] == b"\xff"
 
@@ -1381,13 +1381,13 @@ class TestRedisCommands:
         r["a"] = b"\xff"
 
         r.bitop("DIFF", "empty_result", "nonexistent", "a")
-        assert r.get("empty_result") is None
+        assert r.get("empty_result") == b"\x00"
 
         r.bitop("DIFF1", "empty_result2", "a", "nonexistent")
-        assert r.get("empty_result2") is None
+        assert r.get("empty_result2") == b"\x00"
 
         r.bitop("ANDOR", "empty_result3", "a", "nonexistent")
-        assert r.get("empty_result3") is None
+        assert r.get("empty_result3") == b"\x00"
 
         r.bitop("ONE", "empty_result4", "nonexistent")
         assert r.get("empty_result4") is None
