@@ -6,6 +6,7 @@ from io import TextIOWrapper
 
 import numpy as np
 import pytest
+from redis import ResponseError
 import redis
 import redis.commands.search
 import redis.commands.search.aggregation as aggregations
@@ -47,8 +48,8 @@ TITLES_CSV = os.path.abspath(
 def waitForIndex(env, idx, timeout=None):
     delay = 0.1
     while True:
-        res = env.execute_command("FT.INFO", idx)
         try:
+            res = env.execute_command("FT.INFO", idx)
             if int(res[res.index("indexing") + 1]) == 0:
                 break
         except ValueError:
@@ -59,6 +60,10 @@ def waitForIndex(env, idx, timeout=None):
                     break
             except ValueError:
                 break
+        except ResponseError:
+            # index doesn't exist yet
+            # continue to sleep and try again
+            pass
 
         time.sleep(delay)
         if timeout is not None:
@@ -1908,6 +1913,8 @@ def test_binary_and_text_fields(client):
             prefix=[f"{index_name}:"], index_type=IndexType.HASH
         ),
     )
+
+    waitForIndex(client, index_name)
 
     query = (
         Query("*")

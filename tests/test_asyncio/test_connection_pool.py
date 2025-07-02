@@ -1,5 +1,6 @@
 import asyncio
 import re
+from unittest import mock
 
 import pytest
 import pytest_asyncio
@@ -8,7 +9,7 @@ from redis.asyncio.connection import Connection, to_bool
 from redis.auth.token import TokenInterface
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
-from .compat import aclosing, mock
+from .compat import aclosing
 from .conftest import asynccontextmanager
 from .test_pubsub import wait_for_message
 
@@ -312,13 +313,14 @@ class TestBlockingConnectionPool:
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
         )
-        expected = "host=localhost,port=6379,db=0,client_name=test-client"
+        expected = "host=localhost,port=6379,client_name=test-client"
         assert expected in repr(pool)
 
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
             connection_class=redis.UnixDomainSocketConnection,
             path="abc",
+            db=0,
             client_name="test-client",
         )
         expected = "path=abc,db=0,client_name=test-client"
@@ -675,7 +677,7 @@ class TestConnection:
             await r.execute_command("DEBUG", "ERROR", "OOM blah blah")
 
     def test_connect_from_url_tcp(self):
-        connection = redis.Redis.from_url("redis://localhost")
+        connection = redis.Redis.from_url("redis://localhost:6379?db=0")
         pool = connection.connection_pool
 
         assert re.match(
@@ -683,7 +685,7 @@ class TestConnection:
         ).groups() == (
             "ConnectionPool",
             "Connection",
-            "host=localhost,port=6379,db=0",
+            "db=0,host=localhost,port=6379",
         )
 
     def test_connect_from_url_unix(self):
@@ -695,7 +697,7 @@ class TestConnection:
         ).groups() == (
             "ConnectionPool",
             "UnixDomainSocketConnection",
-            "path=/path/to/socket,db=0",
+            "path=/path/to/socket",
         )
 
     @skip_if_redis_enterprise()

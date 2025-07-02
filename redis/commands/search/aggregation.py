@@ -26,7 +26,7 @@ class Reducer:
 
     NAME = None
 
-    def __init__(self, *args: List[str]) -> None:
+    def __init__(self, *args: str) -> None:
         self._args = args
         self._field = None
         self._alias = None
@@ -116,7 +116,7 @@ class AggregateRequest:
         self._add_scores = False
         self._scorer = "TFIDF"
 
-    def load(self, *fields: List[str]) -> "AggregateRequest":
+    def load(self, *fields: str) -> "AggregateRequest":
         """
         Indicate the fields to be returned in the response. These fields are
         returned in addition to any others implicitly specified.
@@ -223,7 +223,7 @@ class AggregateRequest:
         self._aggregateplan.extend(_limit.build_args())
         return self
 
-    def sort_by(self, *fields: List[str], **kwargs) -> "AggregateRequest":
+    def sort_by(self, *fields: str, **kwargs) -> "AggregateRequest":
         """
         Indicate how the results should be sorted. This can also be used for
         *top-N* style queries

@@ -10,7 +10,6 @@ from unittest.mock import patch
 import pytest
 import redis
 from redis.exceptions import ConnectionError
-from redis.utils import HIREDIS_AVAILABLE
 
 from .conftest import (
     _get_client,
@@ -593,7 +592,6 @@ class TestPubSubRESP3Handler:
     def my_handler(self, message):
         self.message = ["my handler", message]
 
-    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
     def test_push_handler(self, r):
         if is_resp2_connection(r):
             return
@@ -605,7 +603,6 @@ class TestPubSubRESP3Handler:
         assert wait_for_message(p) is None
         assert self.message == ["my handler", [b"message", b"foo", b"test message"]]
 
-    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
     @skip_if_server_version_lt("7.0.0")
     def test_push_handler_sharded_pubsub(self, r):
         if is_resp2_connection(r):
@@ -1141,9 +1138,11 @@ class TestBaseException:
         assert msg is not None
         # timeout waiting for another message which never arrives
         assert is_connected()
-        with patch("redis._parsers._RESP2Parser.read_response") as mock1, patch(
-            "redis._parsers._HiredisParser.read_response"
-        ) as mock2, patch("redis._parsers._RESP3Parser.read_response") as mock3:
+        with (
+            patch("redis._parsers._RESP2Parser.read_response") as mock1,
+            patch("redis._parsers._HiredisParser.read_response") as mock2,
+            patch("redis._parsers._RESP3Parser.read_response") as mock3,
+        ):
             mock1.side_effect = BaseException("boom")
             mock2.side_effect = BaseException("boom")
             mock3.side_effect = BaseException("boom")

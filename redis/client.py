@@ -58,7 +58,6 @@ from redis.exceptions import (
 from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import (
-    HIREDIS_AVAILABLE,
     _set_info_logger,
     deprecated_args,
     get_lib_version,
@@ -369,7 +368,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ]:
             raise RedisError("Client caching is only supported with RESP version 3")
 
-        self.single_connection_lock = threading.Lock()
+        self.single_connection_lock = threading.RLock()
         self.connection = None
         self._single_connection_client = single_connection_client
         if self._single_connection_client:
@@ -449,7 +448,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     def transaction(
         self, func: Callable[["Pipeline"], None], *watches, **kwargs
-    ) -> None:
+    ) -> Union[List[Any], Any, None]:
         """
         Convenience method for executing the callable `func` as a transaction
         while watching all keys specified in `watches`. The 'func' callable
@@ -774,7 +773,8 @@ class PubSub:
             self._event_dispatcher = EventDispatcher()
         else:
             self._event_dispatcher = event_dispatcher
-        self._lock = threading.Lock()
+
+        self._lock = threading.RLock()
         if self.encoder is None:
             self.encoder = self.connection_pool.get_encoder()
         self.health_check_response_b = self.encoder.encode(self.HEALTH_CHECK_MESSAGE)
@@ -861,7 +861,7 @@ class PubSub:
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
-            if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
+            if self.push_handler_func is not None:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
             self._event_dispatcher.dispatch(
                 AfterPubSubConnectionInstantiationEvent(

@@ -9,7 +9,7 @@ import pytest
 import redis
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
-from redis.utils import HIREDIS_AVAILABLE, SSL_AVAILABLE
+from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
     _get_client,
@@ -205,19 +205,19 @@ class TestBlockingConnectionPool:
         pool = redis.ConnectionPool(
             host="localhost", port=6379, client_name="test-client"
         )
-        expected = "host=localhost,port=6379,db=0,client_name=test-client"
+        expected = "host=localhost,port=6379,client_name=test-client"
         assert expected in repr(pool)
 
     def test_repr_contains_db_info_unix(self):
         pool = redis.ConnectionPool(
             connection_class=redis.UnixDomainSocketConnection,
             path="abc",
+            db=0,
             client_name="test-client",
         )
         expected = "path=abc,db=0,client_name=test-client"
         assert expected in repr(pool)
 
-    @pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
     @pytest.mark.onlynoncluster
     @skip_if_resp_version(2)
     @skip_if_server_version_lt("7.4.0")
@@ -599,7 +599,7 @@ class TestConnection:
             r.execute_command("DEBUG", "ERROR", "OOM blah blah")
 
     def test_connect_from_url_tcp(self):
-        connection = redis.Redis.from_url("redis://localhost")
+        connection = redis.Redis.from_url("redis://localhost:6379?db=0")
         pool = connection.connection_pool
 
         assert re.match(
@@ -607,7 +607,7 @@ class TestConnection:
         ).groups() == (
             "ConnectionPool",
             "Connection",
-            "host=localhost,port=6379,db=0",
+            "db=0,host=localhost,port=6379",
         )
 
     def test_connect_from_url_unix(self):
@@ -619,7 +619,7 @@ class TestConnection:
         ).groups() == (
             "ConnectionPool",
             "UnixDomainSocketConnection",
-            "path=/path/to/socket,db=0",
+            "path=/path/to/socket",
         )
 
     @skip_if_redis_enterprise()

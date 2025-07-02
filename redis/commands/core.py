@@ -3303,7 +3303,7 @@ class SetCommands(CommandsProtocol):
     see: https://redis.io/topics/data-types#sets
     """
 
-    def sadd(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
+    def sadd(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Add ``value(s)`` to set ``name``
 
@@ -3311,7 +3311,7 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SADD", name, *values)
 
-    def scard(self, name: str) -> Union[Awaitable[int], int]:
+    def scard(self, name: KeyT) -> Union[Awaitable[int], int]:
         """
         Return the number of elements in set ``name``
 
@@ -3350,7 +3350,7 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SINTER", *args, keys=args)
 
     def sintercard(
-        self, numkeys: int, keys: List[str], limit: int = 0
+        self, numkeys: int, keys: List[KeyT], limit: int = 0
     ) -> Union[Awaitable[int], int]:
         """
         Return the cardinality of the intersect of multiple sets specified by ``keys``.
@@ -3365,7 +3365,7 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SINTERCARD", *args, keys=keys)
 
     def sinterstore(
-        self, dest: str, keys: List, *args: List
+        self, dest: KeyT, keys: List, *args: List
     ) -> Union[Awaitable[int], int]:
         """
         Store the intersection of sets specified by ``keys`` into a new
@@ -3377,7 +3377,7 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SINTERSTORE", dest, *args)
 
     def sismember(
-        self, name: str, value: str
+        self, name: KeyT, value: str
     ) -> Union[Awaitable[Union[Literal[0], Literal[1]]], Union[Literal[0], Literal[1]]]:
         """
         Return whether ``value`` is a member of set ``name``:
@@ -3388,7 +3388,7 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SISMEMBER", name, value, keys=[name])
 
-    def smembers(self, name: str) -> Union[Awaitable[Set], Set]:
+    def smembers(self, name: KeyT) -> Union[Awaitable[Set], Set]:
         """
         Return all members of the set ``name``
 
@@ -3397,7 +3397,7 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SMEMBERS", name, keys=[name])
 
     def smismember(
-        self, name: str, values: List, *args: List
+        self, name: KeyT, values: List, *args: List
     ) -> Union[
         Awaitable[List[Union[Literal[0], Literal[1]]]],
         List[Union[Literal[0], Literal[1]]],
@@ -3413,7 +3413,7 @@ class SetCommands(CommandsProtocol):
         args = list_or_args(values, args)
         return self.execute_command("SMISMEMBER", name, *args, keys=[name])
 
-    def smove(self, src: str, dst: str, value: str) -> Union[Awaitable[bool], bool]:
+    def smove(self, src: KeyT, dst: KeyT, value: str) -> Union[Awaitable[bool], bool]:
         """
         Move ``value`` from set ``src`` to set ``dst`` atomically
 
@@ -3421,7 +3421,7 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMOVE", src, dst, value)
 
-    def spop(self, name: str, count: Optional[int] = None) -> Union[str, List, None]:
+    def spop(self, name: KeyT, count: Optional[int] = None) -> Union[str, List, None]:
         """
         Remove and return a random member of set ``name``
 
@@ -3431,7 +3431,7 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SPOP", name, *args)
 
     def srandmember(
-        self, name: str, number: Optional[int] = None
+        self, name: KeyT, number: Optional[int] = None
     ) -> Union[str, List, None]:
         """
         If ``number`` is None, returns a random member of set ``name``.
@@ -3445,7 +3445,7 @@ class SetCommands(CommandsProtocol):
         args = (number is not None) and [number] or []
         return self.execute_command("SRANDMEMBER", name, *args)
 
-    def srem(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
+    def srem(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Remove ``values`` from set ``name``
 
@@ -3463,7 +3463,7 @@ class SetCommands(CommandsProtocol):
         return self.execute_command("SUNION", *args, keys=args)
 
     def sunionstore(
-        self, dest: str, keys: List, *args: List
+        self, dest: KeyT, keys: List, *args: List
     ) -> Union[Awaitable[int], int]:
         """
         Store the union of sets specified by ``keys`` into a new

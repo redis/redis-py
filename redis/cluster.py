@@ -51,7 +51,6 @@ from redis.exceptions import (
 from redis.lock import Lock
 from redis.retry import Retry
 from redis.utils import (
-    HIREDIS_AVAILABLE,
     deprecated_args,
     dict_merge,
     list_keys_to_dict,
@@ -710,7 +709,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         self.result_callbacks = CaseInsensitiveDict(self.__class__.RESULT_CALLBACKS)
 
         self.commands_parser = CommandsParser(self)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def __enter__(self):
         return self
@@ -857,7 +856,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             startup_nodes=self.nodes_manager.startup_nodes,
             result_callbacks=self.result_callbacks,
             cluster_response_callbacks=self.cluster_response_callbacks,
-            cluster_error_retry_attempts=self.retry.get_retries(),
             read_from_replicas=self.read_from_replicas,
             load_balancing_strategy=self.load_balancing_strategy,
             reinitialize_steps=self.reinitialize_steps,
@@ -1474,7 +1472,7 @@ class NodesManager:
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
         if lock is None:
-            lock = threading.Lock()
+            lock = threading.RLock()
         self._lock = lock
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -1999,7 +1997,7 @@ class ClusterPubSub(PubSub):
             # register a callback that re-subscribes to any channels we
             # were listening to when we were disconnected
             self.connection.register_connect_callback(self.on_connect)
-            if self.push_handler_func is not None and not HIREDIS_AVAILABLE:
+            if self.push_handler_func is not None:
                 self.connection._parser.set_pubsub_push_handler(self.push_handler_func)
             self._event_dispatcher.dispatch(
                 AfterPubSubConnectionInstantiationEvent(
@@ -2178,7 +2176,7 @@ class ClusterPipeline(RedisCluster):
             kwargs.get("decode_responses", False),
         )
         if lock is None:
-            lock = threading.Lock()
+            lock = threading.RLock()
         self._lock = lock
         self.parent_execute_command = super().execute_command
         self._execution_strategy: ExecutionStrategy = (
@@ -3291,10 +3289,11 @@ class TransactionStrategy(AbstractStrategy):
         # watching something
         if self._transaction_connection:
             try:
-                # call this manually since our unwatch or
-                # immediate_execute_command methods can call reset()
-                self._transaction_connection.send_command("UNWATCH")
-                self._transaction_connection.read_response()
+                if self._watching:
+                    # call this manually since our unwatch or
+                    # immediate_execute_command methods can call reset()
+                    self._transaction_connection.send_command("UNWATCH")
+                    self._transaction_connection.read_response()
                 # we can safely return the connection to the pool here since we're
                 # sure we're no longer WATCHing anything
                 node = self._nodes_manager.find_connection_owner(

@@ -254,16 +254,27 @@ class Sentinel(SentinelCommands):
         once - If set to True, then execute the resulting command on a single
         node at random, rather than across the entire sentinel cluster.
         """
-        once = bool(kwargs.get("once", False))
-        if "once" in kwargs.keys():
-            kwargs.pop("once")
+        once = bool(kwargs.pop("once", False))
+
+        # Check if command is supposed to return the original
+        # responses instead of boolean value.
+        return_responses = bool(kwargs.pop("return_responses", False))
 
         if once:
-            random.choice(self.sentinels).execute_command(*args, **kwargs)
-        else:
-            for sentinel in self.sentinels:
-                sentinel.execute_command(*args, **kwargs)
-        return True
+            response = random.choice(self.sentinels).execute_command(*args, **kwargs)
+            if return_responses:
+                return [response]
+            else:
+                return True if response else False
+
+        responses = []
+        for sentinel in self.sentinels:
+            responses.append(sentinel.execute_command(*args, **kwargs))
+
+        if return_responses:
+            return responses
+
+        return all(responses)
 
     def __repr__(self):
         sentinel_addresses = []
