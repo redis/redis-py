@@ -1314,6 +1314,103 @@ class TestRedisCommands:
         assert int(binascii.hexlify(r["res3"]), 16) == 0x000000FF
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.2.0")
+    def test_bitop_diff(self, r):
+        r["a"] = b"\xf0" 
+        r["b"] = b"\xc0" 
+        r["c"] = b"\x80"
+
+        result = r.bitop("DIFF", "result", "a", "b", "c")
+        assert result == 1
+        assert r["result"] == b"\x30"
+
+        r.bitop("DIFF", "result2", "a", "nonexistent")
+        assert r["result2"] == b"\xf0"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.2.0")
+    def test_bitop_diff1(self, r):
+        r["a"] = b"\xf0" 
+        r["b"] = b"\xc0" 
+        r["c"] = b"\x80" 
+
+        result = r.bitop("DIFF1", "result", "a", "b", "c")
+        assert result == 1
+        assert r["result"] == b"\x00"
+
+        r["d"] = b"\x0f" 
+        r["e"] = b"\x03"
+        r.bitop("DIFF1", "result2", "d", "e")
+        assert r["result2"] == b"\x00"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.2.0")
+    def test_bitop_andor(self, r):
+        r["a"] = b"\xf0" 
+        r["b"] = b"\xc0" 
+        r["c"] = b"\x80" 
+
+        result = r.bitop("ANDOR", "result", "a", "b", "c")
+        assert result == 1 
+        assert r["result"] == b"\xc0" 
+
+        r["x"] = b"\xf0" 
+        r["y"] = b"\x0f" 
+        r.bitop("ANDOR", "result2", "x", "y")
+        assert r["result2"] == b"\x00"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.2.0")
+    def test_bitop_one(self, r):
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
+        r["c"] = b"\x80"
+
+        result = r.bitop("ONE", "result", "a", "b", "c")
+        assert result == 1
+        assert r["result"] == b"\x30"
+
+        r["x"] = b"\xf0"
+        r["y"] = b"\x0f" 
+        r.bitop("ONE", "result2", "x", "y")
+        assert r["result2"] == b"\xff"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.2.0")
+    def test_bitop_new_operations_with_empty_keys(self, r):
+        r["a"] = b"\xff"
+
+        r.bitop("DIFF", "empty_result", "nonexistent", "a")
+        assert r.get("empty_result") is None
+
+        r.bitop("DIFF1", "empty_result2", "a", "nonexistent")
+        assert r.get("empty_result2") is None
+
+        r.bitop("ANDOR", "empty_result3", "a", "nonexistent")
+        assert r.get("empty_result3") is None
+
+        r.bitop("ONE", "empty_result4", "nonexistent")
+        assert r.get("empty_result4") is None
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.2.0")
+    def test_bitop_new_operations_return_values(self, r):
+        r["a"] = b"\xff\x00\xff"
+        r["b"] = b"\x00\xff"
+
+        result1 = r.bitop("DIFF", "result1", "a", "b")
+        assert result1 == 3
+
+        result2 = r.bitop("DIFF1", "result2", "a", "b")
+        assert result2 == 3
+
+        result3 = r.bitop("ANDOR", "result3", "a", "b")
+        assert result3 == 3
+
+        result4 = r.bitop("ONE", "result4", "a", "b")
+        assert result4 == 3
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.7")
     def test_bitpos(self, r):
         key = "key:bitpos"
