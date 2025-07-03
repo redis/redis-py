@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Type, Union, Set, Optional
+from typing import List, Type, Union
 
 import pybreaker
 
@@ -15,7 +15,7 @@ from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
 from redis.multidb.failover import FailoverStrategy, WeightBasedFailoverStrategy
 from redis.retry import Retry
 
-DEFAULT_GRACE_PERIOD = 5
+DEFAULT_GRACE_PERIOD = 5.0
 DEFAULT_HEALTH_CHECK_INTERVAL = 5
 DEFAULT_HEALTH_CHECK_RETRIES = 3
 DEFAULT_HEALTH_CHECK_BACKOFF = ExponentialWithJitterBackoff(cap=10)
