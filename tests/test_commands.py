@@ -1314,7 +1314,7 @@ class TestRedisCommands:
         assert int(binascii.hexlify(r["res3"]), 16) == 0x000000FF
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     def test_bitop_diff(self, r):
         r["a"] = b"\xf0"
         r["b"] = b"\xc0"
@@ -1328,7 +1328,7 @@ class TestRedisCommands:
         assert r["result2"] == b"\xf0"
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     def test_bitop_diff1(self, r):
         r["a"] = b"\xf0"
         r["b"] = b"\xc0"
@@ -1344,7 +1344,7 @@ class TestRedisCommands:
         assert r["result2"] == b"\x00"
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     def test_bitop_andor(self, r):
         r["a"] = b"\xf0"
         r["b"] = b"\xc0"
@@ -1360,7 +1360,7 @@ class TestRedisCommands:
         assert r["result2"] == b"\x00"
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     def test_bitop_one(self, r):
         r["a"] = b"\xf0"
         r["b"] = b"\xc0"
@@ -1376,7 +1376,7 @@ class TestRedisCommands:
         assert r["result2"] == b"\xff"
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     def test_bitop_new_operations_with_empty_keys(self, r):
         r["a"] = b"\xff"
 
@@ -1393,7 +1393,7 @@ class TestRedisCommands:
         assert r.get("empty_result4") is None
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     def test_bitop_new_operations_return_values(self, r):
         r["a"] = b"\xff\x00\xff"
         r["b"] = b"\x00\xff"

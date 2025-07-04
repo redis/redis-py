@@ -880,7 +880,7 @@ class TestRedisCommands:
         assert int(binascii.hexlify(await r.get("res3")), 16) == 0x000000FF
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     async def test_bitop_diff(self, r: redis.Redis):
         await r.set("a", b"\xf0")
         await r.set("b", b"\xc0")
@@ -894,7 +894,7 @@ class TestRedisCommands:
         assert await r.get("result2") == b"\xf0"
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     async def test_bitop_diff1(self, r: redis.Redis):
         await r.set("a", b"\xf0")
         await r.set("b", b"\xc0")
@@ -910,7 +910,7 @@ class TestRedisCommands:
         assert await r.get("result2") == b"\x00"
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     async def test_bitop_andor(self, r: redis.Redis):
         await r.set("a", b"\xf0")
         await r.set("b", b"\xc0")
@@ -926,7 +926,7 @@ class TestRedisCommands:
         assert await r.get("result2") == b"\x00"
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     async def test_bitop_one(self, r: redis.Redis):
         await r.set("a", b"\xf0")
         await r.set("b", b"\xc0")
@@ -942,7 +942,7 @@ class TestRedisCommands:
         assert await r.get("result2") == b"\xff"
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     async def test_bitop_new_operations_with_empty_keys(self, r: redis.Redis):
         await r.set("a", b"\xff")
 
@@ -959,7 +959,7 @@ class TestRedisCommands:
         assert await r.get("empty_result4") is None
 
     @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("8.2.0")
+    @skip_if_server_version_lt("8.1.224")
     async def test_bitop_new_operations_return_values(self, r: redis.Redis):
         await r.set("a", b"\xff\x00\xff")
         await r.set("b", b"\x00\xff")
