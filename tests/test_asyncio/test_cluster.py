@@ -4,6 +4,7 @@ import datetime
 import ssl
 import warnings
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
+from unittest import mock
 from urllib.parse import urlparse
 
 import pytest
@@ -48,7 +49,7 @@ from tests.conftest import (
 )
 
 from ..ssl_utils import get_tls_certificates
-from .compat import aclosing, mock
+from .compat import aclosing
 
 pytestmark = pytest.mark.onlycluster
 

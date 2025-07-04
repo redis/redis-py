@@ -1088,12 +1088,22 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_gte("8.0.0")
     def test_lolwut(self, r):
         lolwut = r.lolwut().decode("utf-8")
         assert "Redis ver." in lolwut
 
         lolwut = r.lolwut(5, 6, 7, 8).decode("utf-8")
         assert "Redis ver." in lolwut
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.0.0")
+    def test_lolwut_v8_and_higher(self, r):
+        lolwut = r.lolwut().decode("utf-8")
+        assert lolwut
+
+        lolwut = r.lolwut(5, 6, 7, 8).decode("utf-8")
+        assert lolwut
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")

@@ -442,7 +442,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.credential_provider = UsernamePasswordCredentialProvider()
 
         proxy_connection = CacheProxyConnection(
-            mock_connection, cache, threading.Lock()
+            mock_connection, cache, threading.RLock()
         )
         proxy_connection.disconnect()
 
@@ -492,7 +492,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.can_read.return_value = False
 
         proxy_connection = CacheProxyConnection(
-            mock_connection, mock_cache, threading.Lock()
+            mock_connection, mock_cache, threading.RLock()
         )
         proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
         assert proxy_connection.read_response() == b"bar"
@@ -554,7 +554,7 @@ class TestUnitCacheProxyConnection:
         mock_connection.can_read.return_value = False
 
         proxy_connection = CacheProxyConnection(
-            mock_connection, mock_cache, threading.Lock()
+            mock_connection, mock_cache, threading.RLock()
         )
         proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
 
