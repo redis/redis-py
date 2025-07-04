@@ -1,6 +1,6 @@
 from typing import List
 
-from redis.event import EventListenerInterface, OnCommandFailEvent
+from redis.event import EventListenerInterface, OnCommandsFailEvent
 from redis.multidb.config import Databases
 from redis.multidb.failure_detector import FailureDetector
 
@@ -13,7 +13,7 @@ class RegisterCommandFailure(EventListenerInterface):
         self._failure_detectors = failure_detectors
         self._databases = databases
 
-    def listen(self, event: OnCommandFailEvent) -> None:
+    def listen(self, event: OnCommandsFailEvent) -> None:
         matching_database = None
 
         for database, _ in self._databases:

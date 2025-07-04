@@ -4,7 +4,7 @@ from unittest.mock import patch, Mock
 import pybreaker
 import pytest
 
-from redis.event import EventDispatcher, OnCommandFailEvent
+from redis.event import EventDispatcher, OnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.config import DEFAULT_HEALTH_CHECK_RETRIES, DEFAULT_HEALTH_CHECK_BACKOFF, DEFAULT_FAILOVER_RETRIES, \
     DEFAULT_FAILOVER_BACKOFF
@@ -423,8 +423,8 @@ class TestMultiDbClient:
             mock_fd = mock_multi_db_config.failure_detectors[0]
 
             # Event fired if command against mock_db1 would fail
-            command_fail_event = OnCommandFailEvent(
-                command=('SET', 'key', 'value'),
+            command_fail_event = OnCommandsFailEvent(
+                commands=('SET', 'key', 'value'),
                 exception=Exception(),
                 client=mock_db1.client
             )

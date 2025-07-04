@@ -3,7 +3,7 @@ from unittest.mock import PropertyMock
 
 import pytest
 
-from redis.event import EventDispatcher, OnCommandFailEvent
+from redis.event import EventDispatcher, OnCommandsFailEvent
 from redis.multidb.circuit import State as CBState
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.failure_detector import CommandFailureDetector
@@ -139,8 +139,8 @@ class TestDefaultCommandExecutor:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
         # Event fired if command against mock_db1 would fail
-        command_fail_event = OnCommandFailEvent(
-            command=('SET', 'key', 'value'),
+        command_fail_event = OnCommandsFailEvent(
+            commands=('SET', 'key', 'value'),
             exception=Exception(),
             client=mock_db1.client
         )
@@ -161,8 +161,8 @@ class TestDefaultCommandExecutor:
 
         assert executor.execute_command('SET', 'key', 'value') == 'OK2'
 
-        command_fail_event = OnCommandFailEvent(
-            command=('SET', 'key', 'value'),
+        command_fail_event = OnCommandsFailEvent(
+            commands=('SET', 'key', 'value'),
             exception=Exception(),
             client=mock_db2.client
         )

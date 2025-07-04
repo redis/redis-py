@@ -1,10 +1,10 @@
 import socket
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Any, Callable
 
 from redis.exceptions import ConnectionError, TimeoutError
-from redis.event import EventDispatcherInterface, OnCommandFailEvent
+from redis.event import EventDispatcherInterface, OnCommandsFailEvent
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, AbstractDatabase, Databases
 from redis.multidb.circuit import State as CBState
@@ -128,6 +128,25 @@ class DefaultCommandExecutor(CommandExecutor):
         self._auto_fallback_interval = auto_fallback_interval
 
     def execute_command(self, *args, **options):
+        def callback(database):
+            return database.client.execute_command(*args, **options)
+
+        return self._execute_with_failure_detection(callback, args)
+
+    def execute_pipeline(self, command_stack: tuple):
+        def callback(database):
+            with database.client.pipeline() as pipe:
+                for command, options in command_stack:
+                    pipe.execute_command(*command, **options)
+
+                return pipe.execute()
+
+        return self._execute_with_failure_detection(callback, command_stack)
+
+    def _execute_with_failure_detection(self, callback: Callable, cmds: tuple):
+        """
+        Execute a commands execution callback with failure detection.
+        """
         if (
                 self._active_database is None
                 or self._active_database.circuit.state != CBState.CLOSED
@@ -140,13 +159,13 @@ class DefaultCommandExecutor(CommandExecutor):
             self._schedule_next_fallback()
 
         try:
-            return self._active_database.client.execute_command(*args, **options)
+            return callback(self._active_database)
         except (ConnectionError, TimeoutError, socket.timeout) as e:
             # Register command failure
-            self._event_dispatcher.dispatch(OnCommandFailEvent(args, e, self.active_database.client))
+            self._event_dispatcher.dispatch(OnCommandsFailEvent(cmds, e, self.active_database.client))
 
             # Retry until failure detector will trigger opening of circuit
-            return self.execute_command(*args, **options)
+            return self._execute_with_failure_detection(callback, cmds)
 
     def _schedule_next_fallback(self) -> None:
         if self._auto_fallback_interval == DEFAULT_AUTO_FALLBACK_INTERVAL:
@@ -160,5 +179,5 @@ class DefaultCommandExecutor(CommandExecutor):
         """
         event_listener = RegisterCommandFailure(self._failure_detectors, self._databases)
         self._event_dispatcher.register_listeners({
-            OnCommandFailEvent: [event_listener],
+            OnCommandsFailEvent: [event_listener],
         })
