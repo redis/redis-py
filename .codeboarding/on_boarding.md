@@ -1,85 +1,181 @@
 ```mermaid
+
 graph LR
-    Redis_Client_Core["Redis Client Core"]
-    Connection_Protocol_Management["Connection & Protocol Management"]
-    Command_Module_Execution["Command & Module Execution"]
-    High_Availability_Cluster_Management["High Availability & Cluster Management"]
-    Error_Handling["Error Handling"]
-    Redis_Client_Core -- "uses" --> Connection_Protocol_Management
-    Redis_Client_Core -- "executes" --> Command_Module_Execution
-    Redis_Client_Core -- "handles" --> Error_Handling
-    Connection_Protocol_Management -- "provides to" --> Redis_Client_Core
-    Connection_Protocol_Management -- "raises" --> Error_Handling
-    Command_Module_Execution -- "is executed by" --> Redis_Client_Core
-    Command_Module_Execution -- "uses" --> Connection_Protocol_Management
-    High_Availability_Cluster_Management -- "extends" --> Redis_Client_Core
-    High_Availability_Cluster_Management -- "uses" --> Connection_Protocol_Management
-    Error_Handling -- "is raised by" --> Redis_Client_Core
-    Error_Handling -- "is raised by" --> Connection_Protocol_Management
-    click Redis_Client_Core href "https://github.com/CodeBoarding/GeneratedOnBoardings/blob/main/redis-py/Redis Client Core.md" "Details"
-    click Connection_Protocol_Management href "https://github.com/CodeBoarding/GeneratedOnBoardings/blob/main/redis-py/Connection & Protocol Management.md" "Details"
-    click Command_Module_Execution href "https://github.com/CodeBoarding/GeneratedOnBoardings/blob/main/redis-py/Command & Module Execution.md" "Details"
-    click High_Availability_Cluster_Management href "https://github.com/CodeBoarding/GeneratedOnBoardings/blob/main/redis-py/High Availability & Cluster Management.md" "Details"
-    click Error_Handling href "https://github.com/CodeBoarding/GeneratedOnBoardings/blob/main/redis-py/Error Handling.md" "Details"
+
+    Client_API["Client API"]
+
+    Connection_Management["Connection Management"]
+
+    Protocol_Command_Handling["Protocol & Command Handling"]
+
+    Utility_Cross_Cutting_Concerns["Utility & Cross-Cutting Concerns"]
+
+    Client_API -- "interacts with" --> Connection_Management
+
+    Client_API -- "uses" --> Protocol_Command_Handling
+
+    Connection_Management -- "provides connections to" --> Client_API
+
+    Connection_Management -- "leverages" --> Utility_Cross_Cutting_Concerns
+
+    Protocol_Command_Handling -- "used by" --> Client_API
+
+    Protocol_Command_Handling -- "used by" --> Connection_Management
+
+    Utility_Cross_Cutting_Concerns -- "supports" --> Client_API
+
+    Utility_Cross_Cutting_Concerns -- "supports" --> Connection_Management
+
+    click Client_API href "https://github.com/redis/redis-py/blob/master/.codeboarding//Client_API.md" "Details"
+
+    click Connection_Management href "https://github.com/redis/redis-py/blob/master/.codeboarding//Connection_Management.md" "Details"
+
+    click Protocol_Command_Handling href "https://github.com/redis/redis-py/blob/master/.codeboarding//Protocol_Command_Handling.md" "Details"
+
+    click Utility_Cross_Cutting_Concerns href "https://github.com/redis/redis-py/blob/master/.codeboarding//Utility_Cross_Cutting_Concerns.md" "Details"
+
 ```
+
+
+
 [![CodeBoarding](https://img.shields.io/badge/Generated%20by-CodeBoarding-9cf?style=flat-square)](https://github.com/CodeBoarding/GeneratedOnBoardings)[![Demo](https://img.shields.io/badge/Try%20our-Demo-blue?style=flat-square)](https://www.codeboarding.org/demo)[![Contact](https://img.shields.io/badge/Contact%20us%20-%20contact@codeboarding.org-lightgrey?style=flat-square)](mailto:contact@codeboarding.org)
 
-## Component Details
-
-The `redis-py` library provides a Python interface to the Redis key-value store. Its main flow involves establishing connections to Redis servers, executing various Redis commands, handling responses, and managing advanced features like pipelining, transactions, and publish/subscribe. It also supports specialized deployments such as Redis Cluster and Redis Sentinel for high availability and scalability. The architecture is designed to be modular, separating concerns like connection management, command execution, and error handling.
-
-### Redis Client Core
-The primary interface for interacting with Redis, encompassing basic command execution, pipelining, transactions, publish/subscribe, and distributed locking mechanisms. It orchestrates high-level operations.
 
 
-**Related Classes/Methods**:
-
-- <a href="https://github.com/redis/redis-py/blob/master/redis/client.py#L112-L670" target="_blank" rel="noopener noreferrer">`redis.client.Redis` (112:670)</a>
-- <a href="https://github.com/redis/redis-py/blob/master/redis/client.py#L1-L1000" target="_blank" rel="noopener noreferrer">`redis.client.Pipeline` (1:1000)</a>
-- <a href="https://github.com/redis/redis-py/blob/master/redis/client.py#L743-L1000" target="_blank" rel="noopener noreferrer">`redis.client.PubSub` (743:1000)</a>
-- <a href="https://github.com/redis/redis-py/blob/master/redis/lock.py#L14-L343" target="_blank" rel="noopener noreferrer">`redis.lock.Lock` (14:343)</a>
+## Details
 
 
-### Connection & Protocol Management
-Manages the lifecycle of connections to Redis servers, including pooling, health checks, and various connection types. It also handles the encoding of commands and parsing of responses, along with authentication and caching.
+
+The redis-py library is designed with a clear layered architecture, where the Client API acts as the primary facade for users. This API delegates connection management to the Connection Management layer, which in turn relies on the Protocol & Command Handling layer for data serialization and deserialization. Various Utility & Cross-Cutting Concerns provide essential supporting services across these layers, ensuring robustness, security, and efficiency.
+
+
+
+### Client API [[Expand]](./Client_API.md)
+
+The primary interface for users to interact with Redis. It provides high-level methods for executing Redis commands, managing command pipelines, and handling transactions. It supports both synchronous and asynchronous operations, abstracting the underlying network communication.
+
+
+
 
 
 **Related Classes/Methods**:
 
-- <a href="https://github.com/redis/redis-py/blob/master/redis/connection.py#L1-L1000" target="_blank" rel="noopener noreferrer">`redis.connection.ConnectionPool` (1:1000)</a>
-- <a href="https://github.com/redis/redis-py/blob/master/redis/_parsers/resp3.py#L15-L131" target="_blank" rel="noopener noreferrer">`redis._parsers.resp3._RESP3Parser` (15:131)</a>
-- <a href="https://github.com/redis/redis-py/blob/master/redis/auth/token_manager.py#L121-L340" target="_blank" rel="noopener noreferrer">`redis.auth.token_manager.TokenManager` (121:340)</a>
-- <a href="https://github.com/redis/redis-py/blob/master/redis/cache.py#L142-L224" target="_blank" rel="noopener noreferrer">`redis.cache.DefaultCache` (142:224)</a>
-- <a href="https://github.com/redis/redis-py/blob/master/redis/ocsp.py#L170-L308" target="_blank" rel="noopener noreferrer">`redis.ocsp.OCSPVerifier` (170:308)</a>
 
 
-### Command & Module Execution
-Implements and executes the full range of standard Redis commands (e.g., key-value, list, set, hash, stream operations) and provides interfaces for interacting with various Redis Modules (e.g., JSON, Search, TimeSeries).
+- <a href="https://github.com/redis/redis-py/blob/master/redis/client.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.client` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/asyncio/client.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.asyncio.client` (1:1)</a>
 
 
-**Related Classes/Methods**:
-
-- <a href="https://github.com/redis/redis-py/blob/master/redis/commands/core.py#L1-L1000" target="_blank" rel="noopener noreferrer">`redis.commands.core.BasicKeyCommands` (1:1000)</a>
-- `redis.commands.json.JSON` (1:1000)
 
 
-### High Availability & Cluster Management
-Provides specialized client functionalities for interacting with Redis Cluster and Redis Sentinel setups. It handles node discovery, slot management, command routing in clusters, and master/replica discovery with failover in Sentinel environments.
+
+### Connection Management [[Expand]](./Connection_Management.md)
+
+Responsible for establishing, maintaining, and pooling connections to various Redis deployments (standalone, Sentinel, Cluster). It handles connection lifecycle, including retries, error handling, and routing commands to appropriate nodes based on the deployment type.
+
+
+
 
 
 **Related Classes/Methods**:
 
-- <a href="https://github.com/redis/redis-py/blob/master/redis/cluster.py#L456-L1000" target="_blank" rel="noopener noreferrer">`redis.cluster.RedisCluster` (456:1000)</a>
-- <a href="https://github.com/redis/redis-py/blob/master/redis/sentinel.py#L198-L410" target="_blank" rel="noopener noreferrer">`redis.sentinel.Sentinel` (198:410)</a>
 
 
-### Error Handling
-Defines and manages custom exception classes for various Redis-related errors, providing a structured and specific way to handle different error scenarios that can occur during client-server interactions.
+- <a href="https://github.com/redis/redis-py/blob/master/redis/connection.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.connection` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/asyncio/connection.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.asyncio.connection` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/sentinel.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.sentinel` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/asyncio/sentinel.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.asyncio.sentinel` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/cluster.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.cluster` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/asyncio/cluster.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.asyncio.cluster` (1:1)</a>
+
+
+
+
+
+### Protocol & Command Handling [[Expand]](./Protocol_Command_Handling.md)
+
+Encapsulates the logic for converting Python data into the Redis Serialization Protocol (RESP) format for outgoing commands and parsing RESP responses back into Python data types. It also defines the structure and arguments for all Redis commands, including specialized module commands (e.g., RedisJSON, RediSearch).
+
+
+
 
 
 **Related Classes/Methods**:
 
-- <a href="https://github.com/redis/redis-py/blob/master/redis/exceptions.py#L4-L5" target="_blank" rel="noopener noreferrer">`redis.exceptions.RedisError` (4:5)</a>
+
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/_parsers/base.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis._parsers.base` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/_parsers/hiredis.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis._parsers.hiredis` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/_parsers/resp2.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis._parsers.resp2` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/_parsers/resp3.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis._parsers.resp3` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/_parsers/encoders.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis._parsers.encoders` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/commands/core.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.commands.core` (1:1)</a>
+
+- `redis.commands.bf` (1:1)
+
+- `redis.commands.json` (1:1)
+
+- `redis.commands.search` (1:1)
+
+- `redis.commands.timeseries` (1:1)
+
+- `redis.commands.vectorset` (1:1)
+
+
+
+
+
+### Utility & Cross-Cutting Concerns [[Expand]](./Utility_Cross_Cutting_Concerns.md)
+
+A collection of foundational services and common utilities that support the core functionality of the library. This includes authentication mechanisms, robust error handling, retry strategies, an internal event system, caching, and distributed synchronization primitives like locks.
+
+
+
+
+
+**Related Classes/Methods**:
+
+
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/credentials.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.credentials` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/auth/token.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.auth.token` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/auth/token_manager.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.auth.token_manager` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/ocsp.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.ocsp` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/exceptions.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.exceptions` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/retry.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.retry` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/backoff.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.backoff` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/event.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.event` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/cache.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.cache` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/lock.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.lock` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/asyncio/lock.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.asyncio.lock` (1:1)</a>
+
+- <a href="https://github.com/redis/redis-py/blob/master/redis/utils.py#L1-L1" target="_blank" rel="noopener noreferrer">`redis.utils` (1:1)</a>
+
+
+
+
+
 
 
 
