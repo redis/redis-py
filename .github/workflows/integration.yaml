@@ -27,8 +27,8 @@ env:
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   # this speeds up coverage with Python 3.12: https://github.com/nedbat/coveragepy/issues/1665
   COVERAGE_CORE: sysmon
-  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: 'rs-7.4.0-v2'
-  CURRENT_REDIS_VERSION: '7.4.2'
+  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: '8.0.2'
+  CURRENT_REDIS_VERSION: '8.0.2'
 
 jobs:
   dependency-audit:
@@ -74,7 +74,7 @@ jobs:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: ['8.0.1-pre', '${{ needs.redis_version.outputs.CURRENT }}', '7.2.7']
+        redis-version: ['8.2-RC1-pre', '${{ needs.redis_version.outputs.CURRENT }}', '7.4.4', '7.2.9']
         python-version: ['3.9', '3.13']
         parser-backend: ['plain']
         event-loop: ['asyncio']
