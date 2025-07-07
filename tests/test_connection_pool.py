@@ -26,22 +26,12 @@ class DummyConnection:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.pid = os.getpid()
-        self.connected = False
 
     def connect(self):
-        self.connected = True
-
-    def disconnect(self):
-        self.connected = False
-        
+        pass
+    
     def can_read(self):
         return False
-        
-    def send_command(self, *args, **kwargs):
-        pass
-        
-    def read_response(self, disable_decoding=False, **kwargs):
-        return "PONG"
 
 
 class TestConnectionPool:
