@@ -37,6 +37,7 @@ from redis.exceptions import (
     ConnectionError,
     CrossSlotTransactionError,
     DataError,
+    MaxConnectionsError,
     ExecAbortError,
     InvalidPipelineStack,
     MovedError,
@@ -1234,6 +1235,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     )
                 return response
             except AuthenticationError:
+                raise
+            except MaxConnectionsError:
+                # MaxConnectionsError indicates client-side resource exhaustion
+                # (too many connections in the pool), not a node failure.
+                # Don't treat this as a node failure - just re-raise the error
+                # without reinitializing the cluster.
                 raise
             except (ConnectionError, TimeoutError) as e:
                 # ConnectionError can also be raised if we couldn't get a
