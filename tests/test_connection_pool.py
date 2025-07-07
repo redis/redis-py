@@ -29,7 +29,7 @@ class DummyConnection:
 
     def connect(self):
         pass
-    
+
     def can_read(self):
         return False
 
