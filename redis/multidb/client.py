@@ -1,6 +1,8 @@
 import threading
+import socket
 
 from redis.background import BackgroundScheduler
+from redis.exceptions import ConnectionError, TimeoutError
 from redis.commands import RedisModuleCommands, CoreCommands, SentinelCommands
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.config import MultiDbConfig, DEFAULT_GRACE_PERIOD
@@ -186,7 +188,18 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
                     # If one of the health checks failed, it's considered unhealthy
                     break
 
-                is_healthy = health_check.check_health(database)
+                try:
+                    is_healthy = health_check.check_health(database)
+
+                    if not is_healthy and database.circuit.state != CBState.OPEN:
+                        database.circuit.state = CBState.OPEN
+                    elif is_healthy and database.circuit.state != CBState.CLOSED:
+                        database.circuit.state = CBState.CLOSED
+                except (ConnectionError, TimeoutError, socket.timeout):
+                    if database.circuit.state != CBState.OPEN:
+                        database.circuit.state = CBState.OPEN
+                    is_healthy = False
+
 
     def _check_databases_health(self):
         """
@@ -205,4 +218,3 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
 
 def _half_open_circuit(circuit: CircuitBreaker):
     circuit.state = CBState.HALF_OPEN
-
