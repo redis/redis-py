@@ -38,7 +38,7 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         'async-timeout>=4.0.3; python_full_version<"3.11.3"',
-        "PyJWT~=2.9.0",
+        "PyJWT>=2.9.0",
     ],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
