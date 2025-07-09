@@ -2865,6 +2865,7 @@ def test_vector_search_with_default_dialect(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_l2_distance_metric(client):
     client.ft().create_index(
         (
@@ -2896,6 +2897,7 @@ def test_svs_vamana_l2_distance_metric(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_cosine_distance_metric(client):
     client.ft().create_index(
         (
@@ -2926,6 +2928,7 @@ def test_svs_vamana_cosine_distance_metric(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_ip_distance_metric(client):
     client.ft().create_index(
         (
@@ -3061,6 +3064,7 @@ def _assert_search_result(client, result, expected_doc_ids):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_basic_functionality(client):
     client.ft().create_index(
         (
@@ -3100,6 +3104,7 @@ def test_svs_vamana_basic_functionality(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_float16_type(client):
     client.ft().create_index(
         (
@@ -3130,6 +3135,7 @@ def test_svs_vamana_float16_type(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_float32_type(client):
     client.ft().create_index(
         (
@@ -3160,6 +3166,7 @@ def test_svs_vamana_float32_type(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_vector_search_with_default_dialect(client):
     client.ft().create_index(
         (
@@ -3187,6 +3194,7 @@ def test_svs_vamana_vector_search_with_default_dialect(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_vector_field_basic():
     field = VectorField(
         "v", "SVS-VAMANA", {"TYPE": "FLOAT32", "DIM": 128, "DISTANCE_METRIC": "COSINE"}
@@ -3207,6 +3215,7 @@ def test_svs_vamana_vector_field_basic():
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_lvq8_compression(client):
     client.ft().create_index(
         (
@@ -3244,6 +3253,7 @@ def test_svs_vamana_lvq8_compression(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_compression_with_both_vector_types(client):
     # Test FLOAT16 with LVQ8
     client.ft("idx16").create_index(
@@ -3316,6 +3326,7 @@ def test_svs_vamana_compression_with_both_vector_types(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_construction_window_size(client):
     client.ft().create_index(
         (
@@ -3352,6 +3363,7 @@ def test_svs_vamana_construction_window_size(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_graph_max_degree(client):
     client.ft().create_index(
         (
@@ -3388,6 +3400,7 @@ def test_svs_vamana_graph_max_degree(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_search_window_size(client):
     client.ft().create_index(
         (
@@ -3424,6 +3437,7 @@ def test_svs_vamana_search_window_size(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_epsilon_parameter(client):
     client.ft().create_index(
         (
@@ -3455,6 +3469,7 @@ def test_svs_vamana_epsilon_parameter(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_all_build_parameters_combined(client):
     client.ft().create_index(
         (
@@ -3496,6 +3511,7 @@ def test_svs_vamana_all_build_parameters_combined(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_comprehensive_configuration(client):
     client.flushdb()
     client.ft().create_index(
@@ -3538,6 +3554,7 @@ def test_svs_vamana_comprehensive_configuration(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_hybrid_text_vector_search(client):
     client.flushdb()
     client.ft().create_index(
@@ -3616,6 +3633,7 @@ def test_svs_vamana_hybrid_text_vector_search(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_large_dimension_vectors(client):
     client.flushdb()
     client.ft().create_index(
@@ -3654,6 +3672,7 @@ def test_svs_vamana_large_dimension_vectors(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_training_threshold_behavior(client):
     client.ft().create_index(
         (
@@ -3690,6 +3709,7 @@ def test_svs_vamana_training_threshold_behavior(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_different_k_values(client):
     client.ft().create_index(
         (
@@ -3727,6 +3747,7 @@ def test_svs_vamana_different_k_values(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_vector_field_error(client):
     # sortable tag
     with pytest.raises(Exception):
@@ -3739,6 +3760,7 @@ def test_svs_vamana_vector_field_error(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
 def test_svs_vamana_vector_search_with_parameters(client):
     client.ft().create_index(
         (
