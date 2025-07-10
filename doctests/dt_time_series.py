@@ -38,9 +38,6 @@ assert res3["total_samples"] == 0
 # REMOVE_END
 
 # STEP_START create_retention
-# Note: the parameter name is `retention_msecs`, but you
-# can interpret the time unit however you like. Here, we
-# assume 100 days.
 res4 = r.ts().add("thermometer:2", 1, 10.8, retention_msecs=100)
 print(res4)  # >>> 1
 
@@ -83,7 +80,7 @@ assert res8 == [1, 2, 2]
 
 # STEP_START get
 # The last recorded temperature for thermometer:2
-# was 10.3 on day 2.
+# was 10.3 at time 2.
 res9 = r.ts().get("thermometer:2")
 print(res9)  # >>> (2, 10.3)
 # STEP_END
@@ -92,7 +89,7 @@ assert res9 == (2, 10.3)
 # REMOVE_END
 
 # STEP_START range
-# Add 5 data points to a rain gauge time series.
+# Add 5 data points to a time series named "rg:1".
 res10 = r.ts().create("rg:1")
 print(res10)  # >>> True
 
@@ -109,12 +106,11 @@ print(res11)  # >>> [0, 1, 2, 3, 4]
 res12 = r.ts().range("rg:1", "-", "+")
 print(res12)  # >>> [(0, 18.0), (1, 14.0), (2, 22.0), (3, 18.0), (4, 24.0)]
 
-# Retrieve data points up to day 1 (inclusive).
+# Retrieve data points up to time 1 (inclusive).
 res13 = r.ts().range("rg:1", "-", 1)
 print(res13)  # >>> [(0, 18.0), (1, 14.0)]
 
-
-# Retrieve data points from day 3 onwards.
+# Retrieve data points from time 3 onwards.
 res14 = r.ts().range("rg:1", 3, "+")
 print(res14)  # >>> [(3, 18.0), (4, 24.0)]
 
@@ -122,7 +118,7 @@ print(res14)  # >>> [(3, 18.0), (4, 24.0)]
 res15 = r.ts().revrange("rg:1", "-", "+")
 print(res15)  # >>> [(4, 24.0), (3, 18.0), (2, 22.0), (1, 14.0), (0, 18.0)]
 
-# Retrieve data points up to day 1 (inclusive), but return them
+# Retrieve data points up to time 1 (inclusive), but return them
 # in descending order.
 res16 = r.ts().revrange("rg:1", "-", 1)
 print(res16)  # >>> [(1, 14.0), (0, 18.0)]
@@ -165,8 +161,8 @@ assert res19 == [(2, 22.0)]
 # REMOVE_END
 
 # STEP_START query_multi
-# Create three new rain gauge time series, two in the US
-# and one in the UK, with different units and add some
+# Create three new "rg:" time series (two in the US
+# and one in the UK, with different units) and add some
 # data points.
 res20 = r.ts().create(
     "rg:2",
@@ -189,7 +185,7 @@ print(res22)  # >>> True
 res23 = r.ts().madd([
         ("rg:2", 0, 1.8),
         ("rg:3", 0, 0.9),
-        ("rg:4", 0, 25.4),
+        ("rg:4", 0, 25),
 ])
 print(res23)  # >>> [0, 0, 0]
 
@@ -221,7 +217,7 @@ res27 = r.ts().madd([
 ])
 print(res27)  # >>> [4, 4, 4]
 
-# Retrieve the last data point from each US rain gauge. If
+# Retrieve the last data point from each US time series. If
 # you don't specify any labels, an empty array is returned
 # for the labels.
 res28 = r.ts().mget(["location=us"])
@@ -232,8 +228,8 @@ print(res28)  # >>> [{'rg:2': [{}, 4, 1.78]}, {'rg:3': [{}, 4, 0.74]}]
 res29 = r.ts().mget(["location=us"], select_labels=["unit"])
 print(res29)  # >>> [{'unit': 'cm'}, (4, 1.78), {'unit': 'in'}, (4, 0.74)]
 
-# Retrieve data points up to day 2 (inclusive) from all
-# rain gauges that report in millimeters. Include all
+# Retrieve data points up to time 2 (inclusive) from all
+# time series that use millimeters as the unit. Include all
 # labels in the results.
 res30 = r.ts().mrange(
     "-", 2, filters=["unit=mm"], with_labels=True
@@ -241,8 +237,8 @@ res30 = r.ts().mrange(
 print(res30)
 # >>> [{'rg:4': [{'location': 'uk', 'unit': 'mm'}, [(0, 25.4),...
 
-# Retrieve data points from day 1 to day 3 (inclusive) from
-# all rain gauges that report in centimeters or millimeters,
+# Retrieve data points from time 1 to time 3 (inclusive) from
+# all time series that use centimeters or millimeters as the unit,
 # but only return the `location` label. Return the results
 # in descending order of timestamp.
 res31 = r.ts().mrevrange(
@@ -269,7 +265,7 @@ assert res30 == [
     {
         'rg:4': [
             {'location': 'uk', 'unit': 'mm'},
-            [(0, 25.4), (1, 18.0), (2, 21.0)]
+            [(0, 25), (1, 18.0), (2, 21.0)]
         ]
     }
 ]
@@ -387,7 +383,7 @@ res43 = r.ts().madd([
 ])
 print(res43)  # >>> [3, 3, 3, 3]
 
-# The result pairs contain the timestamp and the maximum wind speed
+# The result pairs contain the timestamp and the maximum sample value
 # for the country at that timestamp.
 res44 = r.ts().mrange(
     "-", "+",
@@ -396,9 +392,9 @@ res44 = r.ts().mrange(
     reduce="max"
 )
 print(res44)
-# >>> [{'country=uk': [{}, [(1, 18.0), (2, 21.0), (3, 24.0)]]}, {'country=us': [{}, [(1, 20.0), (2, 25.0), (3, 18.0)]]}]
+# >>> [{'country=uk': [{}, [(1, 18.0), (2, 21.0), (3, 24.0)]]}, ...
 
-# The result pairs contain the timestamp and the average wind speed
+# The result pairs contain the timestamp and the average sample value
 # for the country at that timestamp.
 res45 = r.ts().mrange(
     "-", "+",
@@ -407,7 +403,7 @@ res45 = r.ts().mrange(
     reduce="avg"
 )
 print(res45)
-# >>> [{'country=uk': [{}, [(1, 15.0), (2, 17.5), (3, 17.0)]]}, {'country=us': [{}, [(1, 12.5), (2, 14.5), (3, 11.5)]]}]
+# >>> [{'country=uk': [{}, [(1, 15.0), (2, 17.5), (3, 17.0)]]}, ...
 # STEP_END
 # REMOVE_START
 assert res37 is True
@@ -425,4 +421,97 @@ assert res45 == [
     {'country=uk': [{}, [(1, 15.0), (2, 17.5), (3, 17.0)]]},
     {'country=us': [{}, [(1, 12.5), (2, 14.5), (3, 13.0)]]}
 ]
+# REMOVE_END
+
+# STEP_START create_compaction
+res45 = r.ts().create("hyg:1")
+print(res45)  # >>> True
+
+res46 = r.ts().create("hyg:compacted")
+print(res46)  # >>> True
+
+res47 = r.ts().createrule("hyg:1", "hyg:compacted", "min", 3)
+print(res47)  # >>> True
+
+res48 = r.ts().info("hyg:1")
+print(res48.rules)
+# >>> [['hyg:compacted', 3, 'MIN', 0]]
+
+res49 = r.ts().info("hyg:compacted")
+print(res49.source_key)  # >>> 'hyg:1'
+# STEP_END
+# REMOVE_START
+assert res45 is True
+assert res46 is True
+assert res47 is True
+assert res48.rules == [['hyg:compacted', 3, 'MIN', 0]]
+assert res49.source_key == 'hyg:1'
+# REMOVE_END
+
+# STEP_START comp_add
+res50 = r.ts().madd([
+    ("hyg:1", 0, 75),
+    ("hyg:1", 1, 77),
+    ("hyg:1", 2, 78),
+])
+print(res50)  # >>> [0, 1, 2]
+
+res51 = r.ts().range("hyg:compacted", "-", "+")
+print(res51)  # >>> []
+
+res52 = r.ts().add("hyg:1", 3, 79)
+print(res52)  # >>> 3
+
+res53 = r.ts().range("hyg:compacted", "-", "+")
+print(res53)  # >>> [(0, 75.0)]
+# STEP_END
+# REMOVE_START
+assert res50 == [0, 1, 2]
+assert res51 == []
+assert res52 == 3
+assert res53 == [(0, 75.0)]
+# REMOVE_END
+
+# STEP_START del
+res54 = r.ts().info("thermometer:1")
+print(res54.total_samples)  # >>> 2
+print(res54.first_timestamp)  # >>> 1
+print(res54.last_timestamp)  # >>> 2
+
+res55 = r.ts().add("thermometer:1", 3, 9.7)
+print(res55)  # >>> 3
+
+res56 = r.ts().info("thermometer:1")
+print(res56.total_samples)  # >>> 3
+print(res56.first_timestamp)  # >>> 1
+print(res56.last_timestamp)  # >>> 3
+
+res57 = r.ts().delete("thermometer:1", 1, 2)
+print(res57)  # >>> 2
+
+res58 = r.ts().info("thermometer:1")
+print(res58.total_samples)  # >>> 1
+print(res58.first_timestamp)  # >>> 3
+print(res58.last_timestamp)  # >>> 3
+
+res59 = r.ts().delete("thermometer:1", 3, 3)
+print(res59)  # >>> 1
+
+res60 = r.ts().info("thermometer:1")
+print(res60.total_samples)  # >>> 0
+# STEP_END
+# REMOVE_START
+assert res54.total_samples == 2
+assert res54.first_timestamp == 1
+assert res54.last_timestamp == 2
+assert res55 == 3
+assert res56.total_samples == 3
+assert res56.first_timestamp == 1
+assert res56.last_timestamp == 3
+assert res57 == 2
+assert res58.total_samples == 1
+assert res58.first_timestamp == 3
+assert res58.last_timestamp == 3
+assert res59 == 1
+assert res60.total_samples == 0
 # REMOVE_END
