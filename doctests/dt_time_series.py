@@ -14,7 +14,7 @@ r = redis.Redis(decode_responses=True)
 r.delete(
     "thermometer:1", "thermometer:2", "thermometer:3",
     "rg:1", "rg:2", "rg:3", "rg:4",
-    "sensor:3",
+    "sensor3",
     "wind:1", "wind:2", "wind:3", "wind:4",
     "hyg:1", "hyg:compacted"
 )
@@ -276,5 +276,153 @@ assert res30 == [
 assert res31 == [
     {'rg:2': [{'location': 'us'}, [(3, 1.9), (2, 2.3), (1, 2.1)]]},
     {'rg:4': [{'location': 'uk'}, [(3, 19.0), (2, 21.0), (1, 18.0)]]}
+]
+# REMOVE_END
+
+# STEP_START agg
+res32 = r.ts().range(
+    "rg:2", "-", "+",
+    aggregation_type="avg",
+    bucket_size_msec=2
+)
+print(res32)
+# >>> [(0, 1.9500000000000002), (2, 2.0999999999999996), (4, 1.78)]
+# STEP_END
+# REMOVE_START
+assert res32 == [
+    (0, 1.9500000000000002), (2, 2.0999999999999996),
+    (4, 1.78)
+]
+# REMOVE_END
+
+# STEP_START agg_bucket
+res33 = r.ts().create("sensor3")
+print(res33)  # >>> True
+
+res34 = r.ts().madd([
+    ("sensor3", 10, 1000),
+    ("sensor3", 20, 2000),
+    ("sensor3", 30, 3000),
+    ("sensor3", 40, 4000),
+    ("sensor3", 50, 5000),
+    ("sensor3", 60, 6000),
+    ("sensor3", 70, 7000),
+])
+print(res34)  # >>> [10, 20, 30, 40, 50, 60, 70]
+
+res35 = r.ts().range(
+    "sensor3", 10, 70,
+    aggregation_type="min",
+    bucket_size_msec=25
+)
+print(res35)
+# >>> [(0, 1000.0), (25, 3000.0), (50, 5000.0)]
+# STEP_END
+# REMOVE_START
+assert res33 is True
+assert res34 == [10, 20, 30, 40, 50, 60, 70]
+assert res35 == [(0, 1000.0), (25, 3000.0), (50, 5000.0)]
+# REMOVE_END
+
+# STEP_START agg_align
+res36 = r.ts().range(
+    "sensor3", 10, 70,
+    aggregation_type="min",
+    bucket_size_msec=25,
+    align="START"
+)
+print(res36)
+# >>> [(10, 1000.0), (35, 4000.0), (60, 6000.0)]
+# STEP_END
+# REMOVE_START
+assert res36 == [(10, 1000.0), (35, 4000.0), (60, 6000.0)]
+# REMOVE_END
+
+# STEP_START agg_multi
+res37 = r.ts().create(
+    "wind:1",
+    labels={"country": "uk"}
+)
+print(res37)  # >>> True
+
+res38 = r.ts().create(
+    "wind:2",
+    labels={"country": "uk"}
+)
+print(res38)  # >>> True
+
+res39 = r.ts().create(
+    "wind:3",
+    labels={"country": "us"}
+)
+print(res39)  # >>> True
+
+res40 = r.ts().create(
+    "wind:4",
+    labels={"country": "us"}
+)
+print(res40)  # >>> True
+
+res41 = r.ts().madd([
+        ("wind:1", 1, 12),
+        ("wind:2", 1, 18),
+        ("wind:3", 1, 5),
+        ("wind:4", 1, 20),
+])
+print(res41)  # >>> [1, 1, 1, 1]
+
+res42 = r.ts().madd([
+        ("wind:1", 2, 14),
+        ("wind:2", 2, 21),
+        ("wind:3", 2, 4),
+        ("wind:4", 2, 25),
+])
+print(res42)  # >>> [2, 2, 2, 2]
+
+res43 = r.ts().madd([
+        ("wind:1", 3, 10),
+        ("wind:2", 3, 24),
+        ("wind:3", 3, 8),
+        ("wind:4", 3, 18),
+])
+print(res43)  # >>> [3, 3, 3, 3]
+
+# The result pairs contain the timestamp and the maximum wind speed
+# for the country at that timestamp.
+res44 = r.ts().mrange(
+    "-", "+",
+    filters=["country=(us,uk)"],
+    groupby="country",
+    reduce="max"
+)
+print(res44)
+# >>> [{'country=uk': [{}, [(1, 18.0), (2, 21.0), (3, 24.0)]]}, {'country=us': [{}, [(1, 20.0), (2, 25.0), (3, 18.0)]]}]
+
+# The result pairs contain the timestamp and the average wind speed
+# for the country at that timestamp.
+res45 = r.ts().mrange(
+    "-", "+",
+    filters=["country=(us,uk)"],
+    groupby="country",
+    reduce="avg"
+)
+print(res45)
+# >>> [{'country=uk': [{}, [(1, 15.0), (2, 17.5), (3, 17.0)]]}, {'country=us': [{}, [(1, 12.5), (2, 14.5), (3, 11.5)]]}]
+# STEP_END
+# REMOVE_START
+assert res37 is True
+assert res38 is True
+assert res39 is True
+assert res40 is True
+assert res41 == [1, 1, 1, 1]
+assert res42 == [2, 2, 2, 2]
+assert res43 == [3, 3, 3, 3]
+assert res44 == [
+    {'country=uk': [{}, [(1, 18.0), (2, 21.0), (3, 24.0)]]},
+    {'country=us': [{}, [(1, 20.0), (2, 25.0), (3, 18.0)]]}
+]
+assert res45 == [
+    {'country=uk': [{}, [(1, 15.0), (2, 17.5), (3, 17.0)]]},
+    {'country=us': [{}, [(1, 12.5), (2, 14.5), (3, 13.0)]]}
 ]
 # REMOVE_END
