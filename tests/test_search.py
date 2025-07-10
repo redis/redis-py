@@ -2883,7 +2883,7 @@ def test_svs_vamana_l2_distance_metric(client):
     for i, vec in enumerate(vectors):
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score")
+    query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -2914,7 +2914,7 @@ def test_svs_vamana_cosine_distance_metric(client):
     for i, vec in enumerate(vectors):
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score")
+    query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -2945,7 +2945,7 @@ def test_svs_vamana_ip_distance_metric(client):
     for i, vec in enumerate(vectors):
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score")
+    query = Query("*=>[KNN 3 @v $vec as score]").sort_by("score").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -2972,7 +2972,7 @@ def test_vector_search_with_int8_type(client):
     client.hset("b", "v", np.array(b, dtype=np.int8).tobytes())
     client.hset("c", "v", np.array(c, dtype=np.int8).tobytes())
 
-    query = Query("*=>[KNN 2 @v $vec as score]")
+    query = Query("*=>[KNN 2 @v $vec as score]").no_content()
     query_params = {"vec": np.array(a, dtype=np.int8).tobytes()}
 
     assert 2 in query.get_args()
@@ -3003,7 +3003,7 @@ def test_vector_search_with_uint8_type(client):
     client.hset("b", "v", np.array(b, dtype=np.uint8).tobytes())
     client.hset("c", "v", np.array(c, dtype=np.uint8).tobytes())
 
-    query = Query("*=>[KNN 2 @v $vec as score]")
+    query = Query("*=>[KNN 2 @v $vec as score]").no_content()
     query_params = {"vec": np.array(a, dtype=np.uint8).tobytes()}
 
     assert 2 in query.get_args()
@@ -3121,7 +3121,7 @@ def test_svs_vamana_float16_type(client):
     for i, vec in enumerate(vectors):
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float16).tobytes())
 
-    query = Query("*=>[KNN 2 @v $vec as score]")
+    query = Query("*=>[KNN 2 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float16).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -3152,7 +3152,7 @@ def test_svs_vamana_float32_type(client):
     for i, vec in enumerate(vectors):
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 2 @v $vec as score]")
+    query = Query("*=>[KNN 2 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -3239,7 +3239,7 @@ def test_svs_vamana_lvq8_compression(client):
         vectors.append(vec)
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 5 @v $vec as score]")
+    query = Query("*=>[KNN 5 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -3296,7 +3296,7 @@ def test_svs_vamana_compression_with_both_vector_types(client):
         client.hset(f"doc32_{i}", "v32", np.array(vec, dtype=np.float32).tobytes())
 
     # Test both indices
-    query = Query("*=>[KNN 3 @v16 $vec as score]")
+    query = Query("*=>[KNN 3 @v16 $vec as score]").no_content()
     res16 = client.ft("idx16").search(
         query,
         query_params={
@@ -3306,7 +3306,7 @@ def test_svs_vamana_compression_with_both_vector_types(client):
         },
     )
 
-    query = Query("*=>[KNN 3 @v32 $vec as score]")
+    query = Query("*=>[KNN 3 @v32 $vec as score]").no_content()
     res32 = client.ft("idx32").search(
         query,
         query_params={
@@ -3349,7 +3349,7 @@ def test_svs_vamana_construction_window_size(client):
         vectors.append(vec)
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 5 @v $vec as score]")
+    query = Query("*=>[KNN 5 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -3386,7 +3386,7 @@ def test_svs_vamana_graph_max_degree(client):
         vectors.append(vec)
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 6 @v $vec as score]")
+    query = Query("*=>[KNN 6 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -3423,7 +3423,7 @@ def test_svs_vamana_search_window_size(client):
         vectors.append(vec)
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 8 @v $vec as score]")
+    query = Query("*=>[KNN 8 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -3455,7 +3455,7 @@ def test_svs_vamana_epsilon_parameter(client):
         vectors.append(vec)
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 5 @v $vec as score]")
+    query = Query("*=>[KNN 5 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -3495,7 +3495,7 @@ def test_svs_vamana_all_build_parameters_combined(client):
         vectors.append(vec)
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 7 @v $vec as score]")
+    query = Query("*=>[KNN 7 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -3540,7 +3540,7 @@ def test_svs_vamana_comprehensive_configuration(client):
         vectors.append(vec)
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float16).tobytes())
 
-    query = Query("*=>[KNN 10 @v $vec as score]")
+    query = Query("*=>[KNN 10 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float16).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -3658,7 +3658,7 @@ def test_svs_vamana_large_dimension_vectors(client):
         vectors.append(vec)
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 5 @v $vec as score]")
+    query = Query("*=>[KNN 5 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)
@@ -3697,7 +3697,7 @@ def test_svs_vamana_training_threshold_behavior(client):
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
         if i >= 5:
-            query = Query("*=>[KNN 3 @v $vec as score]")
+            query = Query("*=>[KNN 3 @v $vec as score]").no_content()
             query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
             res = client.ft().search(query, query_params=query_params)
 
@@ -3733,7 +3733,7 @@ def test_svs_vamana_different_k_values(client):
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
     for k in [1, 3, 5, 10, 15]:
-        query = Query(f"*=>[KNN {k} @v $vec as score]")
+        query = Query(f"*=>[KNN {k} @v $vec as score]").no_content()
         query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
         res = client.ft().search(query, query_params=query_params)
 
@@ -3792,7 +3792,7 @@ def test_svs_vamana_vector_search_with_parameters(client):
     for i, vec in enumerate(vectors):
         client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 3 @v $vec as score]")
+    query = Query("*=>[KNN 3 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = client.ft().search(query, query_params=query_params)

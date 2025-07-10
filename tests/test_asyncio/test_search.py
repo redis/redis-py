@@ -1874,7 +1874,7 @@ async def test_async_svs_vamana_distance_metrics(decoded_r: redis.Redis):
     for i, vec in enumerate(vectors):
         await decoded_r.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 2 @v $vec as score]").sort_by("score")
+    query = Query("*=>[KNN 2 @v $vec as score]").sort_by("score").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = await decoded_r.ft().search(query, query_params=query_params)
@@ -1907,7 +1907,7 @@ async def test_async_svs_vamana_vector_types(decoded_r: redis.Redis):
             f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes()
         )
 
-    query = Query("*=>[KNN 2 @v16 $vec as score]")
+    query = Query("*=>[KNN 2 @v16 $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float16).tobytes()}
 
     res = await decoded_r.ft("idx16").search(query, query_params=query_params)
@@ -1944,7 +1944,7 @@ async def test_async_svs_vamana_compression(decoded_r: redis.Redis):
         vectors.append(vec)
         await decoded_r.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 5 @v $vec as score]")
+    query = Query("*=>[KNN 5 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = await decoded_r.ft().search(query, query_params=query_params)
@@ -1983,7 +1983,7 @@ async def test_async_svs_vamana_build_parameters(decoded_r: redis.Redis):
         vectors.append(vec)
         await decoded_r.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
 
-    query = Query("*=>[KNN 3 @v $vec as score]")
+    query = Query("*=>[KNN 3 @v $vec as score]").no_content()
     query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
 
     res = await decoded_r.ft().search(query, query_params=query_params)
