@@ -205,14 +205,17 @@ class PushNotificationsParser(Protocol):
             if msg_type in _MOVING_MESSAGE:
                 host, port = response[2].split(":")
                 ttl = response[1]
-                notification = NodeMovingEvent(host, port, ttl)
+                id = 1  # Hardcoded value for sync parser
+                notification = NodeMovingEvent(id, host, port, ttl)
                 return self.node_moving_push_handler_func(notification)
         if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
             if msg_type in _MIGRATING_MESSAGE:
                 ttl = response[1]
-                notification = NodeMigratingEvent(ttl)
+                id = 2  # Hardcoded value for sync parser
+                notification = NodeMigratingEvent(id, ttl)
             elif msg_type in _MIGRATED_MESSAGE:
-                notification = NodeMigratedEvent()
+                id = 3  # Hardcoded value for sync parser
+                notification = NodeMigratedEvent(id)
             else:
                 notification = None
             if notification is not None:
@@ -260,16 +263,16 @@ class AsyncPushNotificationsParser(Protocol):
             # push notification from enterprise cluster for node moving
             host, port = response[2].split(":")
             ttl = response[1]
-            id = 1  # TODO: get unique id from push notification
+            id = 1  # Hardcoded value for async parser
             notification = NodeMovingEvent(id, host, port, ttl)
             return await self.node_moving_push_handler_func(notification)
         if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
             if msg_type in _MIGRATING_MESSAGE:
                 ttl = response[1]
-                id = 1  # TODO: get unique id from push notification
+                id = 2  # Hardcoded value for async parser
                 notification = NodeMigratingEvent(id, ttl)
             elif msg_type in _MIGRATED_MESSAGE:
-                id = 1  # TODO: get unique id from push notification
+                id = 3  # Hardcoded value for async parser
                 notification = NodeMigratedEvent(id)
             return await self.maintenance_push_handler_func(notification)
 
