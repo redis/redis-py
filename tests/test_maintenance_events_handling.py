@@ -1,6 +1,5 @@
 import socket
 import threading
-import select
 from unittest.mock import Mock, patch
 import pytest
 
@@ -9,8 +8,6 @@ from redis.connection import ConnectionPool, BlockingConnectionPool
 from redis.maintenance_events import (
     MaintenanceEventsConfig,
     NodeMigratingEvent,
-    NodeMigratedEvent,
-    MaintenanceEventConnectionHandler,
     MaintenanceEventPoolHandler,
 )
 
