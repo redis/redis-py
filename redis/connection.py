@@ -2209,3 +2209,17 @@ class BlockingConnectionPool(ConnectionPool):
         with self._lock:
             for conn in tuple(self._connections):
                 conn.maintenance_events_config = maintenance_events_config
+
+    def _update_maintenance_events_configs_for_connections(
+        self, maintenance_events_pool_handler
+    ):
+        """Override base class method to work with BlockingConnectionPool's structure."""
+        with self._lock:
+            for conn in tuple(self._connections):
+                if conn:  # conn can be None in BlockingConnectionPool
+                    conn.set_maintenance_event_pool_handler(
+                        maintenance_events_pool_handler
+                    )
+                    conn.maintenance_events_config = (
+                        maintenance_events_pool_handler.config
+                    )
