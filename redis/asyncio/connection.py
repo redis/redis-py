@@ -295,13 +295,18 @@ class AbstractConnection:
         """Connects to the Redis server if not already connected"""
         await self.connect_check_health(check_health=True)
 
-    async def connect_check_health(self, check_health: bool = True):
+    async def connect_check_health(
+        self, check_health: bool = True, retry_socket_connect: bool = True
+    ):
         if self.is_connected:
             return
         try:
-            await self.retry.call_with_retry(
-                lambda: self._connect(), lambda error: self.disconnect()
-            )
+            if retry_socket_connect:
+                await self.retry.call_with_retry(
+                    lambda: self._connect(), lambda error: self.disconnect()
+                )
+            else:
+                await self._connect()
         except asyncio.CancelledError:
             raise  # in 3.7 and earlier, this is an Exception, not BaseException
         except (socket.timeout, asyncio.TimeoutError):
