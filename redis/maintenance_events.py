@@ -1,7 +1,8 @@
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Optional
 
 from redis.typing import Number
 
@@ -9,27 +10,30 @@ if TYPE_CHECKING:
     from redis.connection import ConnectionInterface, ConnectionPool
 
 
-class MaintenanceEvent:
+class MaintenanceEvent(ABC):
     """
     Base class for maintenance events sent through push messages by Redis server.
 
-    This class provides common TTL (Time-To-Live) functionality for all
-    maintenance events.
+    This class provides common functionality for all maintenance events including
+    unique identification and TTL (Time-To-Live) functionality.
 
     Attributes:
+        id (int): Unique identifier for this event
         ttl (int): Time-to-live in seconds for this notification
         creation_time (float): Timestamp when the notification was created/read
     """
 
-    def __init__(self, ttl: int):
+    def __init__(self, id: int, ttl: int):
         """
-        Initialize a new MaintenanceEvent with TTL functionality.
+        Initialize a new MaintenanceEvent with unique ID and TTL functionality.
 
         Args:
+            id (int): Unique identifier for this event
             ttl (int): Time-to-live in seconds for this notification
         """
+        self.id = id
         self.ttl = ttl
-        self.creation_time = int(time.time())
+        self.creation_time = time.monotonic()
         self.expire_at = self.creation_time + self.ttl
 
     def is_expired(self) -> bool:
@@ -40,7 +44,49 @@ class MaintenanceEvent:
         Returns:
             bool: True if the event has expired, False otherwise
         """
-        return int(time.time()) > (self.creation_time + self.ttl)
+        return time.monotonic() > (self.creation_time + self.ttl)
+
+    @abstractmethod
+    def __repr__(self) -> str:
+        """
+        Return a string representation of the maintenance event.
+
+        This method must be implemented by all concrete subclasses.
+
+        Returns:
+            str: String representation of the event
+        """
+        pass
+
+    @abstractmethod
+    def __eq__(self, other) -> bool:
+        """
+        Compare two maintenance events for equality.
+
+        This method must be implemented by all concrete subclasses.
+        Events are typically considered equal if they have the same id
+        and are of the same type.
+
+        Args:
+            other: The other object to compare with
+
+        Returns:
+            bool: True if the events are equal, False otherwise
+        """
+        pass
+
+    @abstractmethod
+    def __hash__(self) -> int:
+        """
+        Return a hash value for the maintenance event.
+
+        This method must be implemented by all concrete subclasses to allow
+        instances to be used in sets and as dictionary keys.
+
+        Returns:
+            int: Hash value for the event
+        """
+        pass
 
 
 class NodeMovingEvent(MaintenanceEvent):
@@ -49,25 +95,27 @@ class NodeMovingEvent(MaintenanceEvent):
     during cluster rebalancing or maintenance operations.
     """
 
-    def __init__(self, new_node_host: str, new_node_port: int, ttl: int):
+    def __init__(self, id: int, new_node_host: str, new_node_port: int, ttl: int):
         """
         Initialize a new NodeMovingEvent.
 
         Args:
+            id (int): Unique identifier for this event
             new_node_host (str): Hostname or IP address of the new replacement node
             new_node_port (int): Port number of the new replacement node
             ttl (int): Time-to-live in seconds for this notification
         """
-        super().__init__(ttl)
+        super().__init__(id, ttl)
         self.new_node_host = new_node_host
         self.new_node_port = new_node_port
 
     def __repr__(self) -> str:
         expiry_time = self.expire_at
-        remaining = max(0, expiry_time - time.time())
+        remaining = max(0, expiry_time - time.monotonic())
 
         return (
             f"{self.__class__.__name__}("
+            f"id={self.id}, "
             f"new_node_host='{self.new_node_host}', "
             f"new_node_port={self.new_node_port}, "
             f"ttl={self.ttl}, "
@@ -81,12 +129,13 @@ class NodeMovingEvent(MaintenanceEvent):
     def __eq__(self, other) -> bool:
         """
         Two NodeMovingEvent events are considered equal if they have the same
-        new_node_host and new_node_port.
+        id, new_node_host, and new_node_port.
         """
         if not isinstance(other, NodeMovingEvent):
             return False
         return (
-            self.new_node_host == other.new_node_host
+            self.id == other.id
+            and self.new_node_host == other.new_node_host
             and self.new_node_port == other.new_node_port
         )
 
@@ -96,9 +145,9 @@ class NodeMovingEvent(MaintenanceEvent):
         instances to be used in sets and as dictionary keys.
 
         Returns:
-            int: Hash value based on new_node_host and new_node_port
+            int: Hash value based on event type, id, new_node_host, and new_node_port
         """
-        return hash((self.__class__, self.new_node_host, self.new_node_port))
+        return hash((self.__class__, self.id, self.new_node_host, self.new_node_port))
 
 
 class NodeMigratingEvent(MaintenanceEvent):
@@ -109,17 +158,19 @@ class NodeMigratingEvent(MaintenanceEvent):
     during cluster rebalancing or maintenance operations.
 
     Args:
+        id (int): Unique identifier for this event
         ttl (int): Time-to-live in seconds for this notification
     """
 
-    def __init__(self, ttl: int):
-        super().__init__(ttl)
+    def __init__(self, id: int, ttl: int):
+        super().__init__(id, ttl)
 
     def __repr__(self) -> str:
         expiry_time = self.creation_time + self.ttl
-        remaining = max(0, expiry_time - time.time())
+        remaining = max(0, expiry_time - time.monotonic())
         return (
             f"{self.__class__.__name__}("
+            f"id={self.id}, "
             f"ttl={self.ttl}, "
             f"creation_time={self.creation_time}, "
             f"expires_at={expiry_time}, "
@@ -127,6 +178,25 @@ class NodeMigratingEvent(MaintenanceEvent):
             f"expired={self.is_expired()}"
             f")"
         )
+
+    def __eq__(self, other) -> bool:
+        """
+        Two NodeMigratingEvent events are considered equal if they have the same
+        id and are of the same type.
+        """
+        if not isinstance(other, NodeMigratingEvent):
+            return False
+        return self.id == other.id and type(self) is type(other)
+
+    def __hash__(self) -> int:
+        """
+        Return a hash value for the event to allow
+        instances to be used in sets and as dictionary keys.
+
+        Returns:
+            int: Hash value based on event type and id
+        """
+        return hash((self.__class__, self.id))
 
 
 class NodeMigratedEvent(MaintenanceEvent):
@@ -137,19 +207,20 @@ class NodeMigratedEvent(MaintenanceEvent):
     to other nodes during cluster rebalancing or maintenance operations.
 
     Args:
-        ttl (int): Time-to-live in seconds for this notification
+        id (int): Unique identifier for this event
     """
 
     DEFAULT_TTL = 5
 
-    def __init__(self):
-        super().__init__(NodeMigratedEvent.DEFAULT_TTL)
+    def __init__(self, id: int):
+        super().__init__(id, NodeMigratedEvent.DEFAULT_TTL)
 
     def __repr__(self) -> str:
         expiry_time = self.creation_time + self.ttl
-        remaining = max(0, expiry_time - time.time())
+        remaining = max(0, expiry_time - time.monotonic())
         return (
             f"{self.__class__.__name__}("
+            f"id={self.id}, "
             f"ttl={self.ttl}, "
             f"creation_time={self.creation_time}, "
             f"expires_at={expiry_time}, "
@@ -157,6 +228,25 @@ class NodeMigratedEvent(MaintenanceEvent):
             f"expired={self.is_expired()}"
             f")"
         )
+
+    def __eq__(self, other) -> bool:
+        """
+        Two NodeMigratedEvent events are considered equal if they have the same
+        id and are of the same type.
+        """
+        if not isinstance(other, NodeMigratedEvent):
+            return False
+        return self.id == other.id and type(self) is type(other)
+
+    def __hash__(self) -> int:
+        """
+        Return a hash value for the event to allow
+        instances to be used in sets and as dictionary keys.
+
+        Returns:
+            int: Hash value based on event type and id
+        """
+        return hash((self.__class__, self.id))
 
 
 class MaintenanceEventsConfig:
@@ -173,7 +263,7 @@ class MaintenanceEventsConfig:
         self,
         enabled: bool = False,
         proactive_reconnect: bool = True,
-        relax_timeout: Number = 20,
+        relax_timeout: Optional[Number] = 20,
     ):
         """
         Initialize a new MaintenanceEventsConfig.
