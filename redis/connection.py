@@ -24,7 +24,7 @@ from redis.typing import Number
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
-from .backoff import ExponentialWithJitterBackoff
+from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from .event import AfterConnectionReleasedEvent, EventDispatcher
 from .exceptions import (
@@ -323,15 +323,16 @@ class AbstractConnection(ConnectionInterface):
             # Add TimeoutError to the errors list to retry on
             retry_on_error.append(TimeoutError)
         self.retry_on_error = retry_on_error
-        if retry is None:
-            self.retry = Retry(
-                backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
-            )
-        else:
-            # deep-copy the Retry object as it is mutable
-            self.retry = copy.deepcopy(retry)
-        if retry_on_error:
+        if retry or retry_on_error:
+            if retry is None:
+                self.retry = Retry(NoBackoff(), 1)
+            else:
+                # deep-copy the Retry object as it is mutable
+                self.retry = copy.deepcopy(retry)
+            # Update the retry's supported errors with the specified errors
             self.retry.update_supported_errors(retry_on_error)
+        else:
+            self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
         self.next_health_check = 0
         self.redis_connect_func = redis_connect_func
