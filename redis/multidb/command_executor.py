@@ -1,8 +1,9 @@
 import socket
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import List, Union, Optional, Any, Callable
+from typing import List, Union, Optional, Callable
 
+from redis.client import Pipeline
 from redis.exceptions import ConnectionError, TimeoutError
 from redis.event import EventDispatcherInterface, OnCommandsFailEvent
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
@@ -143,7 +144,13 @@ class DefaultCommandExecutor(CommandExecutor):
 
         return self._execute_with_failure_detection(callback, command_stack)
 
-    def _execute_with_failure_detection(self, callback: Callable, cmds: tuple):
+    def execute_transaction(self, transaction: Callable[[Pipeline], None], *watches, **options):
+        def callback(database):
+            return database.client.transaction(transaction, *watches, **options)
+
+        return self._execute_with_failure_detection(callback)
+
+    def _execute_with_failure_detection(self, callback: Callable, cmds: tuple = ()):
         """
         Execute a commands execution callback with failure detection.
         """

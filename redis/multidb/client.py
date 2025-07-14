@@ -1,6 +1,6 @@
 import threading
 import socket
-from typing import List, Any
+from typing import List, Any, Callable
 
 from redis.background import BackgroundScheduler
 from redis.exceptions import ConnectionError, TimeoutError
@@ -178,7 +178,19 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         return self.command_executor.execute_command(*args, **options)
 
     def pipeline(self):
+        """
+        Enters into pipeline mode of the client.
+        """
         return Pipeline(self)
+
+    def transaction(self, func: Callable[["Pipeline"], None], *watches, **options):
+        """
+        Executes callable as transaction.
+        """
+        if not self.initialized:
+            self.initialize()
+
+        return self.command_executor.execute_transaction(func, *watches, *options)
 
     def _check_db_health(self, database: AbstractDatabase) -> None:
         """
