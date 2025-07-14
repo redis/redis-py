@@ -17,6 +17,7 @@ class MockSocket:
 
     def __init__(self):
         self.connected = False
+        self.address = None
         self.sent_data = []
         self.response_queue = []
         self.closed = False
@@ -30,6 +31,7 @@ class MockSocket:
     def connect(self, address):
         """Simulate socket connection."""
         self.connected = True
+        self.address = address
 
     def send(self, data):
         """Simulate sending data to Redis."""
@@ -187,24 +189,40 @@ class TestMaintenanceEventsHandling:
             enabled=True, proactive_reconnect=True, relax_timeout=30
         )
 
-        # Create connection pool with maintenance events (requires RESP3)
-        self.pool = ConnectionPool(
-            host="localhost",
-            port=6379,
-            max_connections=10,  # Increased for multi-threaded tests
-            protocol=3,  # Required for maintenance events
-            maintenance_events_config=self.config,
-        )
-
-        # Create Redis client
-        self.redis_client = Redis(connection_pool=self.pool)
-
     def teardown_method(self):
         """Clean up test fixtures."""
         self.socket_patcher.stop()
         self.select_patcher.stop()
-        if hasattr(self.pool, "disconnect"):
-            self.pool.disconnect()
+
+    def _get_client(
+        self, pool_class, max_connections=10, maintenance_events_config=None
+    ):
+        """Helper method to create a pool and Redis client with maintenance events configuration.
+
+        Args:
+            pool_class: The connection pool class (ConnectionPool or BlockingConnectionPool)
+            max_connections: Maximum number of connections in the pool (default: 10)
+            maintenance_events_config: Optional MaintenanceEventsConfig to use. If not provided,
+                                     uses self.config from setup_method (default: None)
+
+        Returns:
+            tuple: (test_pool, test_redis_client)
+        """
+        config = (
+            maintenance_events_config
+            if maintenance_events_config is not None
+            else self.config
+        )
+
+        test_pool = pool_class(
+            host="localhost",
+            port=6379,
+            max_connections=max_connections,
+            protocol=3,  # Required for maintenance events
+            maintenance_events_config=config,
+        )
+        test_redis_client = Redis(connection_pool=test_pool)
+        return test_pool, test_redis_client
 
     def _validate_current_timeout_for_thread(self, thread_id, expected_timeout):
         """Helper method to validate the current timeout for the calling thread."""
@@ -221,72 +239,42 @@ class TestMaintenanceEventsHandling:
             f"All thread timeouts: {[sock.thread_timeouts for sock in self.mock_sockets]}"
         )
 
-    def test_connection_pool_creation_with_maintenance_events(self):
-        """Test that connection pool is created with maintenance events configuration."""
-        assert (
-            self.pool.connection_kwargs.get("maintenance_events_config") == self.config
-        )
-        # Pool should have maintenance events enabled
-        assert self.pool.maintenance_events_pool_handler_enabled() is True
-
-        # Create and set a pool handler
-        pool_handler = MaintenanceEventPoolHandler(self.pool, self.config)
-        self.pool.set_maintenance_events_pool_handler(pool_handler)
-
-        # Validate that the handler is properly set on the pool
-        assert (
-            self.pool.connection_kwargs.get("maintenance_events_pool_handler")
-            == pool_handler
-        )
-        assert (
-            self.pool.connection_kwargs.get("maintenance_events_config")
-            == pool_handler.config
-        )
-
-        # Verify that the pool handler has the correct configuration
-        assert pool_handler.pool == self.pool
-        assert pool_handler.config == self.config
-
-    def test_blocking_connection_pool_creation_with_maintenance_events(self):
-        """Test that BlockingConnectionPool is created with maintenance events configuration."""
-        # Create blocking connection pool with maintenance events (requires RESP3)
-        blocking_pool = BlockingConnectionPool(
-            host="localhost",
-            port=6379,
-            max_connections=3,
-            protocol=3,  # Required for maintenance events
-            maintenance_events_config=self.config,
-        )
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_connection_pool_creation_with_maintenance_events(self, pool_class):
+        """Test that connection pools are created with maintenance events configuration."""
+        # Create a pool and Redis client with maintenance events
+        max_connections = 3 if pool_class == BlockingConnectionPool else 10
+        test_pool, _ = self._get_client(pool_class, max_connections=max_connections)
 
         try:
             assert (
-                blocking_pool.connection_kwargs.get("maintenance_events_config")
+                test_pool.connection_kwargs.get("maintenance_events_config")
                 == self.config
             )
             # Pool should have maintenance events enabled
-            assert blocking_pool.maintenance_events_pool_handler_enabled() is True
+            assert test_pool.maintenance_events_pool_handler_enabled() is True
 
             # Create and set a pool handler
-            pool_handler = MaintenanceEventPoolHandler(blocking_pool, self.config)
-            blocking_pool.set_maintenance_events_pool_handler(pool_handler)
+            pool_handler = MaintenanceEventPoolHandler(test_pool, self.config)
+            test_pool.set_maintenance_events_pool_handler(pool_handler)
 
-            # Validate that the handler is properly set on the blocking pool
+            # Validate that the handler is properly set on the pool
             assert (
-                blocking_pool.connection_kwargs.get("maintenance_events_pool_handler")
+                test_pool.connection_kwargs.get("maintenance_events_pool_handler")
                 == pool_handler
             )
             assert (
-                blocking_pool.connection_kwargs.get("maintenance_events_config")
+                test_pool.connection_kwargs.get("maintenance_events_config")
                 == pool_handler.config
             )
 
             # Verify that the pool handler has the correct configuration
-            assert pool_handler.pool == blocking_pool
+            assert pool_handler.pool == test_pool
             assert pool_handler.config == self.config
 
         finally:
-            if hasattr(blocking_pool, "disconnect"):
-                blocking_pool.disconnect()
+            if hasattr(test_pool, "disconnect"):
+                test_pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_redis_operations_with_mock_sockets(self, pool_class):
@@ -294,19 +282,10 @@ class TestMaintenanceEventsHandling:
         Test basic Redis operations work with mocked sockets and proper response parsing.
         Basically with test - the mocked socket is validated.
         """
-        # Create a pool of the specified type with maintenance events
-        test_pool = pool_class(
-            host="localhost",
-            port=6379,
-            max_connections=5,
-            protocol=3,  # Required for maintenance events
-            maintenance_events_config=self.config,
-        )
+        # Create a pool and Redis client with maintenance events
+        test_pool, test_redis_client = self._get_client(pool_class, max_connections=5)
 
         try:
-            # Create Redis client with the test pool
-            test_redis_client = Redis(connection_pool=test_pool)
-
             # Perform Redis operations that should work with our improved mock responses
             result_set = test_redis_client.set("hello", "world")
             result_get = test_redis_client.get("hello")
@@ -332,19 +311,10 @@ class TestMaintenanceEventsHandling:
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_multiple_connections_in_pool(self, pool_class):
         """Test that multiple connections can be created and used for Redis operations in multiple threads."""
-        # Create a pool of the specified type with maintenance events
-        test_pool = pool_class(
-            host="localhost",
-            port=6379,
-            max_connections=5,
-            protocol=3,  # Required for maintenance events
-            maintenance_events_config=self.config,
-        )
+        # Create a pool and Redis client with maintenance events
+        test_pool, test_redis_client = self._get_client(pool_class, max_connections=5)
 
         try:
-            # Create Redis client with the test pool
-            test_redis_client = Redis(connection_pool=test_pool)
-
             # Results storage for thread operations
             results = []
             errors = []
@@ -397,6 +367,44 @@ class TestMaintenanceEventsHandling:
             if hasattr(test_pool, "disconnect"):
                 test_pool.disconnect()
 
+    def test_pool_handler_with_migrating_event(self):
+        """Test that pool handler correctly handles migrating events."""
+        # Create a pool and Redis client with maintenance events
+        test_pool, _ = self._get_client(ConnectionPool)
+
+        try:
+            # Create and set a pool handler
+            pool_handler = MaintenanceEventPoolHandler(test_pool, self.config)
+
+            # Create a migrating event (not handled by pool handler)
+            migrating_event = NodeMigratingEvent(id=1, ttl=5)
+
+            # Mock the required functions
+            with (
+                patch.object(
+                    pool_handler, "remove_expired_notifications"
+                ) as mock_remove_expired,
+                patch.object(
+                    pool_handler, "handle_node_moving_event"
+                ) as mock_handle_moving,
+                patch("redis.maintenance_events.logging.error") as mock_logging_error,
+            ):
+                # Pool handler should return None for migrating events (not its responsibility)
+                pool_handler.handle_event(migrating_event)
+
+                # Validate that remove_expired_notifications has been called once
+                mock_remove_expired.assert_called_once()
+
+                # Validate that handle_node_moving_event hasn't been called
+                mock_handle_moving.assert_not_called()
+
+                # Validate that logging.error has been called once
+                mock_logging_error.assert_called_once()
+
+        finally:
+            if hasattr(test_pool, "disconnect"):
+                test_pool.disconnect()
+
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_migration_related_events_handling_integration(self, pool_class):
         """
@@ -412,19 +420,10 @@ class TestMaintenanceEventsHandling:
         7. Tests both ConnectionPool and BlockingConnectionPool implementations
         8. Uses proper RESP3 push message format for realistic protocol simulation
         """
-        # Create a pool of the specified type with maintenance events
-        test_pool = pool_class(
-            host="localhost",
-            port=6379,
-            max_connections=10,  # Increased for multi-threaded tests
-            protocol=3,  # Required for maintenance events
-            maintenance_events_config=self.config,
-        )
+        # Create a pool and Redis client with maintenance events
+        test_pool, test_redis_client = self._get_client(pool_class, max_connections=10)
 
         try:
-            # Create Redis client with the test pool
-            test_redis_client = Redis(connection_pool=test_pool)
-
             # Results storage for thread operations
             results = []
             errors = []
@@ -433,63 +432,60 @@ class TestMaintenanceEventsHandling:
                 """Perform Redis operations with maintenance events in a thread."""
                 try:
                     # Command 1: Initial command
-                    result1 = test_redis_client.set(
-                        f"key1_{thread_id}", f"value1_{thread_id}"
-                    )
+                    key1 = f"key1_{thread_id}"
+                    value1 = f"value1_{thread_id}"
+                    result1 = test_redis_client.set(key1, value1)
 
                     # Validate Command 1 result
-                    assert result1 is True, (
-                        f"Thread {thread_id}: Command 1 (SET key1) failed"
-                    )
+                    erros_msg = f"Thread {thread_id}: Command 1 (SET key1) failed"
+                    assert result1 is True, erros_msg
 
                     # Command 2: This SET command will receive MIGRATING push message before response
-                    result2 = test_redis_client.set(
-                        f"key_receive_migrating_{thread_id}", f"value2_{thread_id}"
-                    )
+                    key_migrating = f"key_receive_migrating_{thread_id}"
+                    value_migrating = f"value2_{thread_id}"
+                    result2 = test_redis_client.set(key_migrating, value_migrating)
 
                     # Validate Command 2 result
-                    assert result2 is True, (
-                        f"Thread {thread_id}: Command 2 (SET key2) failed"
-                    )
+                    erros_msg = f"Thread {thread_id}: Command 2 (SET key_receive_migrating) failed"
+                    assert result2 is True, erros_msg
 
                     # Step 4: Validate timeout was updated to relaxed value after MIGRATING
                     self._validate_current_timeout_for_thread(thread_id, 30)
 
                     # Command 3: Another command while timeout is still relaxed
-                    result3 = test_redis_client.get(f"key1_{thread_id}")
+                    result3 = test_redis_client.get(key1)
 
                     # Validate Command 3 result
-                    expected_value3 = f"value1_{thread_id}".encode()
-                    assert result3 == expected_value3, (
+                    expected_value3 = value1.encode()
+                    errors_msg = (
                         f"Thread {thread_id}: Command 3 (GET key1) failed. "
                         f"Expected {expected_value3}, got {result3}"
                     )
+                    assert result3 == expected_value3, errors_msg
 
                     # Command 4: Execute command (step 5)
-                    result4 = test_redis_client.get(
-                        f"key_receive_migrating_{thread_id}"
-                    )
+                    result4 = test_redis_client.get(key_migrating)
 
                     # Validate Command 4 result
-                    expected_value4 = f"value2_{thread_id}".encode()
-                    assert result4 == expected_value4, (
+                    expected_value4 = value_migrating.encode()
+                    errors_msg = (
                         f"Thread {thread_id}: Command 4 (GET key_receive_migrating) failed. "
                         f"Expected {expected_value4}, got {result4}"
                     )
+                    assert result4 == expected_value4, errors_msg
 
                     # Step 6: Validate socket timeout is still relaxed during commands 3-4
                     self._validate_current_timeout_for_thread(thread_id, 30)
 
                     # Command 5: This SET command will receive
                     # MIGRATED push message before actual response
-                    result5 = test_redis_client.set(
-                        f"key_receive_migrated_{thread_id}", f"value3_{thread_id}"
-                    )
+                    key_migrated = f"key_receive_migrated_{thread_id}"
+                    value_migrated = f"value3_{thread_id}"
+                    result5 = test_redis_client.set(key_migrated, value_migrated)
 
                     # Validate Command 5 result
-                    assert result5 is True, (
-                        f"Thread {thread_id}: Command 5 (SET key_receive_migrated) failed"
-                    )
+                    errors_msg = f"Thread {thread_id}: Command 5 (SET key_receive_migrated) failed"
+                    assert result5 is True, errors_msg
 
                     # Step 8: Validate socket timeout is reversed back to original after MIGRATED
                     self._validate_current_timeout_for_thread(thread_id, None)
@@ -537,157 +533,107 @@ class TestMaintenanceEventsHandling:
             if hasattr(test_pool, "disconnect"):
                 test_pool.disconnect()
 
-    def test_migrating_event_with_disabled_relax_timeout(self):
-        # TODO Not yet reviewed and validated - just vipecoded
-        """Test migrating event handling when relax timeout is disabled."""
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_migrating_event_with_disabled_relax_timeout(self, pool_class):
+        """
+        Test migrating event handling when relax timeout is disabled.
+
+        This test validates that when relax_timeout is disabled (-1):
+        1. MIGRATING events are received and processed
+        2. No timeout updates are applied to connections
+        3. Socket timeouts remain unchanged during migration events
+        4. Tests both ConnectionPool and BlockingConnectionPool implementations
+        """
         # Create config with disabled relax timeout
         disabled_config = MaintenanceEventsConfig(
             enabled=True,
-            relax_timeout=-1,  # Disabled
+            relax_timeout=-1,  # This means the relax timeout is Disabled
         )
 
-        # Create new pool with disabled config
-        disabled_pool = ConnectionPool(
-            host="localhost",
-            port=6379,
-            protocol=3,  # Required for maintenance events
-            maintenance_events_config=disabled_config,
+        # Create a pool and Redis client with disabled relax timeout config
+        test_pool, test_redis_client = self._get_client(
+            pool_class, max_connections=5, maintenance_events_config=disabled_config
         )
 
         try:
-            # Get a connection
-            connection = disabled_pool.get_connection()
+            # Results storage for thread operations
+            results = []
+            errors = []
 
-            # Mock the connection's timeout update methods
-            connection.update_current_socket_timeout = Mock()
-            connection.update_tmp_settings = Mock()
+            def redis_operations_with_disabled_relax(thread_id):
+                """Perform Redis operations with disabled relax timeout in a thread."""
+                try:
+                    # Command 1: Initial command
+                    key1 = f"key1_{thread_id}"
+                    value1 = f"value1_{thread_id}"
+                    result1 = test_redis_client.set(key1, value1)
 
-            # Create and handle migrating event
-            migrating_event = NodeMigratingEvent(id=1, ttl=10)
-            result = connection._maintenance_event_connection_handler.handle_event(
-                migrating_event
+                    # Validate Command 1 result
+                    errors_msg = f"Thread {thread_id}: Command 1 (SET key1) failed"
+                    assert result1 is True, errors_msg
+
+                    # Command 2: This SET command will receive MIGRATING push message before response
+                    key_migrating = f"key_receive_migrating_{thread_id}"
+                    value_migrating = f"value2_{thread_id}"
+                    result2 = test_redis_client.set(key_migrating, value_migrating)
+
+                    # Validate Command 2 result
+                    errors_msg = f"Thread {thread_id}: Command 2 (SET key_receive_migrating) failed"
+                    assert result2 is True, errors_msg
+
+                    # Validate timeout was NOT updated (relax is disabled)
+                    # Should remain at default timeout (None), not relaxed to 30s
+                    self._validate_current_timeout_for_thread(thread_id, None)
+
+                    # Command 3: Another command to verify timeout remains unchanged
+                    result3 = test_redis_client.get(key1)
+
+                    # Validate Command 3 result
+                    expected_value3 = value1.encode()
+                    errors_msg = (
+                        f"Thread {thread_id}: Command 3 (GET key1) failed. "
+                        f"Expected: {expected_value3}, Got: {result3}"
+                    )
+                    assert result3 == expected_value3, errors_msg
+
+                    results.append(
+                        {
+                            "thread_id": thread_id,
+                            "success": True,
+                        }
+                    )
+
+                except Exception as e:
+                    errors.append(f"Thread {thread_id}: {str(e)}")
+
+            # Run operations in multiple threads to test concurrent behavior
+            threads = []
+            for i in range(3):
+                thread = threading.Thread(
+                    target=redis_operations_with_disabled_relax, args=(i,)
+                )
+                threads.append(thread)
+                thread.start()
+
+            # Wait for all threads to complete
+            for thread in threads:
+                thread.join()
+
+            # Verify no errors occurred
+            assert len(errors) == 0, f"Errors occurred: {errors}"
+
+            # Verify all operations completed successfully
+            assert len(results) == 3, (
+                f"Expected 3 successful threads, got {len(results)}"
             )
 
-            # Verify that no timeout updates were made (relax is disabled)
-            assert result is None
-            connection.update_current_socket_timeout.assert_not_called()
-            connection.update_tmp_settings.assert_not_called()
+            # Verify maintenance events were processed correctly across all threads
+            # Note: Different pool types may create different numbers of sockets
+            # The key is that we have at least 1 socket and all threads succeeded
+            assert len(self.mock_sockets) >= 1, (
+                f"Expected at least 1 socket for operations, got {len(self.mock_sockets)}"
+            )
 
         finally:
-            if hasattr(disabled_pool, "disconnect"):
-                disabled_pool.disconnect()
-
-    def test_pool_handler_with_migrating_event(self):
-        # TODO Not yet reviewed and validated - just vipecoded
-        """Test that pool handler correctly handles migrating events."""
-        # Create and set a pool handler
-        pool_handler = MaintenanceEventPoolHandler(self.pool, self.config)
-
-        # Create a migrating event (not handled by pool handler)
-        migrating_event = NodeMigratingEvent(id=1, ttl=5)
-
-        # Pool handler should return None for migrating events (not its responsibility)
-        result = pool_handler.handle_event(migrating_event)
-        assert result is None
-
-    def test_connection_timeout_restoration_after_event(self):
-        # TODO Not yet reviewed and validated - just vipecoded
-        """Test that connection timeout is properly restored after maintenance event."""
-        # Establish connection
-        self.redis_client.set("test", "value")
-
-        connection = self.pool.get_connection()
-
-        # Mock timeout methods
-        connection.update_current_socket_timeout = Mock()
-        connection.update_tmp_settings = Mock()
-
-        # Simulate migrating event
-        migrating_event = NodeMigratingEvent(id=1, ttl=5)
-        connection._maintenance_event_connection_handler.handle_migrating_event(
-            migrating_event
-        )
-
-        # Verify relax timeout was applied
-        connection.update_current_socket_timeout.assert_called_with(30)
-        connection.update_tmp_settings.assert_called_with(tmp_relax_timeout=30)
-
-        # Reset mocks
-        connection.update_current_socket_timeout.reset_mock()
-        connection.update_tmp_settings.reset_mock()
-
-        # Simulate migration completed event
-        from redis.maintenance_events import NodeMigratedEvent
-
-        migrated_event = NodeMigratedEvent(id=1)
-        connection._maintenance_event_connection_handler.handle_migration_completed_event(
-            migrated_event
-        )
-
-        # Verify timeout was restored
-        connection.update_current_socket_timeout.assert_called_with(
-            -1
-        )  # Restore original
-        connection.update_tmp_settings.assert_called_with(tmp_relax_timeout=-1)
-
-        self.pool.release(connection)
-
-    def test_socket_error_handling_during_operations(self):
-        # TODO Not yet reviewed and validated - just vipecoded
-        """Test that socket errors are properly handled during Redis operations."""
-        # Create a connection first to ensure we have a mock socket
-        connection = self.pool.get_connection()
-
-        # Set up a socket that will fail
-        if self.mock_sockets:
-            self.mock_sockets[0].closed = True
-
-        # Attempt Redis operation that should fail due to closed socket
-        with pytest.raises(
-            (ConnectionError, OSError, Exception)
-        ):  # Should raise connection-related exception
-            # Try to use the connection with a closed socket
-            connection.send_command("PING")
-
-        # Release the connection
-        self.pool.release(connection)
-
-    def test_maintenance_events_with_concurrent_operations(self):
-        # TODO Not yet reviewed and validated - just vipecoded
-        """Test maintenance events handling with concurrent Redis operations."""
-
-        # Perform concurrent operations
-        def redis_operation(key_suffix):
-            try:
-                return self.redis_client.set(
-                    f"concurrent_key_{key_suffix}", f"value_{key_suffix}"
-                )
-            except Exception:
-                return False
-
-        # Simulate concurrent operations
-        threads = []
-        results = []
-
-        for i in range(3):
-            thread = threading.Thread(
-                target=lambda i=i: results.append(redis_operation(i))
-            )
-            threads.append(thread)
-            thread.start()
-
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
-
-        # During concurrent operations, simulate a maintenance event
-        if self.pool.connection_kwargs.get("maintenance_events_config"):
-            migrating_event = NodeMigratingEvent(id=1, ttl=5)
-            # Create a pool handler to test event handling
-            pool_handler = MaintenanceEventPoolHandler(self.pool, self.config)
-            result = pool_handler.handle_event(migrating_event)
-            assert result is None  # Pool handler doesn't handle migrating events
-
-        # Verify that some operations completed successfully
-        # (Some might fail due to mock socket limitations, but that's expected)
-        assert len(results) == 3
+            if hasattr(test_pool, "disconnect"):
+                test_pool.disconnect()
