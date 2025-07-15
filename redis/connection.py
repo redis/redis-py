@@ -807,6 +807,10 @@ class AbstractConnection(ConnectionInterface):
                 f" to timeout {timeout}; relax_timeout: {relax_timeout}"
             )
             self._sock.settimeout(timeout)
+            self.update_parser_buffer_timeout(timeout)
+
+    def update_parser_buffer_timeout(self, timeout: Optional[float] = None):
+        if self._parser and self._parser._buffer:
             self._parser._buffer.socket_timeout = timeout
 
     def update_tmp_settings(
@@ -1901,7 +1905,7 @@ class ConnectionPool:
     def update_connections_current_timeout(
         self,
         relax_timeout: Optional[float],
-        include_available_connections: bool = False,
+        include_free_connections: bool = False,
     ):
         """
         Update the timeout either for all connections in the pool or just for the ones in use.
@@ -1919,7 +1923,7 @@ class ConnectionPool:
         for conn in self._in_use_connections:
             self._update_connection_timeout(conn, relax_timeout)
 
-        if include_available_connections:
+        if include_free_connections:
             for conn in self._available_connections:
                 self._update_connection_timeout(conn, relax_timeout)
 
@@ -2164,8 +2168,6 @@ class BlockingConnectionPool(ConnectionPool):
             connections_in_queue = {conn for conn in self.pool.queue if conn}
             for conn in self._connections:
                 if conn not in connections_in_queue:
-                    if tmp_relax_timeout != -1:
-                        conn.update_socket_timeout(tmp_relax_timeout)
                     self._update_connection_for_reconnect(
                         conn, tmp_host_address, tmp_relax_timeout
                     )
@@ -2184,14 +2186,24 @@ class BlockingConnectionPool(ConnectionPool):
                         conn, tmp_host_address, tmp_relax_timeout
                     )
 
-    def update_connections_current_timeout(self, relax_timeout: Optional[float] = None):
+    def update_connections_current_timeout(
+        self,
+        relax_timeout: Optional[float] = None,
+        include_free_connections: bool = False,
+    ):
         logging.debug(
             f"***** Blocking Pool --> Updating timeouts. relax_timeout: {relax_timeout}"
         )
 
         with self._lock:
-            for conn in tuple(self._connections):
-                self._update_connection_timeout(conn, relax_timeout)
+            if include_free_connections:
+                for conn in tuple(self._connections):
+                    self._update_connection_timeout(conn, relax_timeout)
+            else:
+                connections_in_queue = {conn for conn in self.pool.queue if conn}
+                for conn in self._connections:
+                    if conn not in connections_in_queue:
+                        self._update_connection_timeout(conn, relax_timeout)
 
     def update_connections_tmp_settings(
         self,

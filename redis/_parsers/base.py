@@ -129,9 +129,10 @@ class _RESPBase(BaseParser):
     def on_connect(self, connection):
         "Called when the socket connects"
         self._sock = connection._sock
-        self._buffer = SocketBuffer(
-            self._sock, self.socket_read_size, connection.socket_timeout
-        )
+        timeout = connection.socket_timeout
+        if connection.tmp_relax_timeout != -1:
+            timeout = connection.tmp_relax_timeout
+        self._buffer = SocketBuffer(self._sock, self.socket_read_size, timeout)
         self.encoder = connection.encoder
 
     def on_disconnect(self):
@@ -203,7 +204,7 @@ class PushNotificationsParser(Protocol):
             return self.invalidation_push_handler_func(response)
         if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
             if msg_type in _MOVING_MESSAGE:
-                host, port = response[2].split(":")
+                host, port = response[2].decode().split(":")
                 ttl = response[1]
                 id = 1  # Hardcoded value for sync parser
                 notification = NodeMovingEvent(id, host, port, ttl)
