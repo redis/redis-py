@@ -47,8 +47,6 @@ class WeightBasedFailoverStrategy(FailoverStrategy):
         for database, _ in self._databases:
             if database.circuit.state == CBState.CLOSED:
                 return database
-            else:
-                continue
 
         raise NoValidDatabaseException('No valid database available for communication')
 

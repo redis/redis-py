@@ -420,6 +420,7 @@ class TestMultiDbClient:
             assert mock_db2.state == DBState.PASSIVE
 
             client.update_database_weight(mock_db2, 0.8)
+            assert mock_db2.weight == 0.8
 
             assert client.set('key', 'value') == 'OK2'
 
