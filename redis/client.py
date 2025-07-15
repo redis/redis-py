@@ -248,6 +248,133 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         Initialize a new Redis client.
 
+        PARAMETER DOCUMENTATION
+        =======================
+
+        host (str, default="localhost"):
+            Main description: Redis server hostname or IP address.
+            Recommended values:
+                - Production: Use FQDN (e.g., "redis.example.com")
+                - Development: "localhost" or "127.0.0.1"
+                - Docker: Service name (e.g., "redis-service")
+            Related parameters: port, unix_socket_path (mutually exclusive)
+            Common issues:
+                - IPv6 resolution delays: Use "127.0.0.1" instead of "localhost"
+                - Firewall blocks: Ensure Redis port is accessible
+
+        port (int, default=6379):
+            Main description: Redis server port number.
+            Recommended values:
+                - Standard: 6379 (default Redis port)
+            Related parameters: host, ssl (for secure connections)
+            Common issues:
+                - Port conflicts: Check if port is already in use
+                - Firewall rules: Ensure port is open in security groups
+
+        db (int, default=0):
+            Main description: Redis logical database number.
+            Possible values: 0 - 15
+            Recommended values:
+                - Single app: 0 (default)
+                - Namespaced keys: Different db per namespace (0-15)
+                - Testing: Separate logical db for tests (e.g., 15)
+            Trade-offs:
+                - Multiple DBs: Logical separation but shared memory/CPU and configuration
+                - Single DB: Better performance but requires key prefixing for namespacing
+            Related parameters: None (isolated per database)
+            Use cases:
+                - Logical separation: db=0 (cache), db=1 (sessions), db=2 (temp data)
+                - Testing: Ex. use db=15 for test data isolation
+            Common issues:
+                - DB limit: Redis supports 16 DBs by default (configurable)
+                - Cross-DB operations: FLUSHALL affects ALL databases (https://redis.io/docs/latest/commands/flushall/)
+                - MOVE command: Moves keys between databases (https://redis.io/docs/latest/commands/move/)
+                - Cluster mode: Only db=0 supported in Redis Cluster
+                - NOT true multi-tenancy: All DBs share CPU, memory, ACL, and configuration
+            Security considerations:
+                - Redis databases provide logical separation only, NOT security isolation
+                - All databases share the same authentication and ACL rules
+                - Memory and CPU resources are shared across all databases
+                - Use separate Redis instances for true tenant isolation
+
+        password (Optional[str], default=None):
+            Main description: Redis server authentication password.
+            Recommended values:
+                - Production: Strong password (32+ chars, mixed case, symbols)
+                - Development: Simple password or None for local dev
+            Related parameters: username (for ACL), credential_provider
+            Security considerations:
+                - Never commit passwords to version control
+                - Use Redis ACL for fine-grained access control
+                - Rotate passwords regularly
+
+        socket_timeout (Optional[float], default=None):
+            Main description: Timeout for socket read/write operations in seconds.
+            Recommended values:
+                - Same datacenter: 0.3-0.5 seconds
+                - Same region: 0.5-1.5 seconds
+                - Cross-region (same continent): 1.0-2.0 seconds
+                - Intercontinental: 1.0-3.0 seconds
+                - Slow networks/unreliable connections: 3.0-10.0 seconds
+                - Real-time systems: 0.05-0.2 seconds
+                - None: No timeout (blocks indefinitely)
+            Trade-offs:
+                - Low timeout: Fast failure detection but may cause false timeouts
+                - High timeout: More resilient but slower error detection
+                - None: Never times out but may hang indefinitely
+            Related parameters: socket_connect_timeout, retry, health_check_interval, ssl
+            Use cases:
+                - API endpoints: 0.5-2.0s to prevent request hanging
+                - Slow/unreliable networks: 3-10s for poor connectivity
+                - Real-time trading: 0.05-0.2s for predictable latency
+            Common issues:
+                - Timeout too low: Legitimate operations fail
+                - No timeout: Application hangs on network issues
+                - Inconsistent timeouts: Different behavior across environments
+            Performance implications:
+                - Affects all Redis operations (GET, SET, etc.)
+                - Should be tuned based on network latency and operation complexity
+            Distance and latency considerations:
+                - Same datacenter: ~0.1-1ms RTT, Redis responds <1ms, use 0.1-0.5s timeout
+                - Same region (e.g., us-east-1a to us-east-1b): ~1-5ms RTT, use 0.2-1.0s timeout
+                - Cross-region same continent (e.g., us-east-1 to us-west-2): ~70-100ms RTT, use 0.5-2.0s timeout
+                - Cross-continent (e.g., us-east-1 to eu-west-1): ~100-150ms RTT, use 1.0-3.0s timeout
+                - Intercontinental (e.g., us-east-1 to ap-southeast-1): ~180-250ms RTT, use 1.5-4.0s timeout
+                - Note: Redis operations typically complete in <1ms; timeout accounts for network RTT + safety margin
+            TLS/SSL impact:
+                - TLS handshake adds 1-3 additional round trips during connection establishment
+                - Ongoing operations have minimal TLS overhead (~5-10% latency increase)
+                - Consider higher socket_timeout when using SSL, especially for distant Redis instances
+
+        socket_connect_timeout (Optional[float], default=None):
+            Main description: Timeout for initial socket connection in seconds.
+            Recommended values:
+                - Local Redis (no SSL): 1.0-3.0 seconds
+                - Local Redis (with SSL): 2.0-5.0 seconds
+                - Remote Redis (no SSL): 3.0-8.0 seconds
+                - Remote Redis (with SSL): 5.0-15.0 seconds
+                - Unreliable networks: 10.0-30.0 seconds
+                - None: Uses system default (usually 60-120s)
+            Trade-offs:
+                - Short timeout: Fast failure on connection issues
+                - Long timeout: More resilient to network delays
+                - None: May wait too long for failed connections
+            Related parameters: socket_timeout, ssl, retry
+            Common issues:
+                - Too short: Fails on slow networks or high load
+                - Too long: Slow startup and poor user experience in case of network issues
+                - Network partitions: Connection hangs without timeout
+            Performance implications:
+                - Only affects initial connection establishment
+                - Important for application startup time
+                - Should account for network latency and server load
+            SSL/TLS handshake considerations:
+                - TLS handshake requires 1-3 additional round trips (2-6 RTT total)
+                - Certificate validation adds processing time
+                - Distant Redis with SSL: add 2-3x the base RTT to timeout
+                - Example: 100ms RTT + SSL = ~300-500ms handshake time
+                - Consider TLS session resumption to reduce reconnection overhead
+
         To specify a retry policy for specific errors, you have two options:
 
         1. Set the `retry_on_error` to a list of the error/s to retry on, and
