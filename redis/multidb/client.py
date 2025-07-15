@@ -65,7 +65,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
                 database.state = DBState.ACTIVE
                 self.command_executor.active_database = database
                 is_active_db_found = True
-            elif database.circuit.state == CBState.CLOSED and is_active_db:
+            elif database.circuit.state == CBState.CLOSED and is_active_db_found:
                 database.state = DBState.PASSIVE
             else:
                 database.state = DBState.DISCONNECTED

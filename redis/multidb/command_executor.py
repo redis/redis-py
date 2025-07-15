@@ -129,12 +129,16 @@ class DefaultCommandExecutor(CommandExecutor):
         self._auto_fallback_interval = auto_fallback_interval
 
     def execute_command(self, *args, **options):
+        """Executes a command and returns the result."""
         def callback(database):
             return database.client.execute_command(*args, **options)
 
         return self._execute_with_failure_detection(callback, args)
 
     def execute_pipeline(self, command_stack: tuple):
+        """
+        Executes a stack of commands in pipeline.
+        """
         def callback(database):
             with database.client.pipeline() as pipe:
                 for command, options in command_stack:
@@ -145,6 +149,9 @@ class DefaultCommandExecutor(CommandExecutor):
         return self._execute_with_failure_detection(callback, command_stack)
 
     def execute_transaction(self, transaction: Callable[[Pipeline], None], *watches, **options):
+        """
+        Executes a transaction block wrapped in callback.
+        """
         def callback(database):
             return database.client.transaction(transaction, *watches, **options)
 
