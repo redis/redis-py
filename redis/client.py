@@ -401,7 +401,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             Recommended values:
                 - Production systems: True (recommended for all connections)
                 - Connection pools: True (essential - affects all pool connections)
-                - Development/testing: False or None (for simplicity)
+                - Development/testing: False or None (for simplicity and catching network issues early)
             Trade-offs:
                 - True: Detects dead connections but uses more network resources (only during idle periods)
                 - False: Lower network overhead but may not detect connection failures
@@ -460,6 +460,118 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             Performance implications:
                 - More frequent keepalive packets increase network usage
                 - Faster dead connection detection improves reliability
+
+        connection_pool (Optional[ConnectionPool], default=None):
+            Main description: Pre-configured connection pool instance.
+            Recommended values:
+                - None: Auto-create pool with provided parameters
+                - Custom pool: For advanced configuration or sharing
+            Trade-offs:
+                - Auto-created: Simple but less control
+                - Custom pool: Full control but more complex setup
+            Related parameters: max_connections, single_connection_client
+            Performance implications:
+                - Connection reuse reduces establishment overhead
+                - Pool size affects concurrency and memory usage
+                - Proper sizing is critical for performance
+
+        unix_socket_path (Optional[str], default=None):
+            Main description: Path to Unix domain socket for local Redis connections.
+            Recommended values:
+                - Local Redis: "/var/run/redis/redis.sock"
+                - Docker: "/tmp/redis.sock" (with volume mount)
+                - None: Use TCP connection instead
+            Trade-offs:
+                - Unix socket: Lower latency, higher throughput for local connections
+                - TCP socket: Works across network but higher overhead
+            Related parameters: host, port (mutually exclusive with unix socket)
+            Use cases:
+                - Same-machine deployment: Optimal performance
+                - Container sidecar: Redis in same pod/container
+                - High-performance applications: Minimize network stack overhead
+            Common issues:
+                - File permissions: Socket file must be accessible
+                - Path doesn't exist: Redis must create socket at specified path
+                - Container volumes: Socket path must be mounted correctly
+            Performance implications:
+                - Better performance than TCP for local connections
+                - Lower CPU usage (no network stack processing)
+                - Not available for remote connections
+
+        encoding (str, default="utf-8"):
+            Main description: Character encoding for string values when encode/decode operations occur.
+            Recommended values:
+                - UTF-8: "utf-8" (recommended for most applications, universal Unicode support)
+                - ASCII: "ascii" (for ASCII-only data, fails on non-ASCII characters)
+                - Latin-1: "latin-1" (for binary data compatibility, maps bytes 0-255 directly)
+            Accepted values: Any encoding supported by Python's codecs module (120+ encodings)
+                - Common: utf-8, ascii, latin-1, iso-8859-1, cp1252, utf-16, utf-32
+                - Asian: big5, gb2312, gbk, shift_jis, euc_jp, euc_kr
+                - Cyrillic: koi8_r, koi8_u, cp1251
+                - See: https://docs.python.org/3/library/codecs.html#standard-encodings
+            Trade-offs:
+                - UTF-8: Universal Unicode support, backward compatible with ASCII
+                - ASCII: Strict 7-bit encoding, fails on characters > 127
+                - Latin-1: Handles any byte value, but not true Unicode beyond Latin characters
+            Related parameters: encoding_errors, decode_responses
+            Use cases:
+                - International apps: UTF-8 for full Unicode support
+                - Legacy systems: ASCII or Latin-1 for compatibility
+                - Binary data: Latin-1 to avoid encoding errors
+            Common issues:
+                - Encoding mismatches: Client and server using different encodings
+                - Binary data corruption: UTF-8 encoding binary values
+                - UnicodeEncodeError: ASCII/Latin-1 with non-compatible characters
+
+        encoding_errors (str, default="strict"):
+            Main description: How to handle encoding/decoding errors when they occur.
+            Recommended values:
+                - "strict": Raise exception on encoding errors (recommended for data integrity)
+                - "ignore": Skip invalid characters (data loss risk)
+                - "replace": Replace invalid chars with ? (encoding) or � (decoding)
+            Additional options:
+                - "backslashreplace": Use backslash escape sequences (\\uXXXX)
+                - "xmlcharrefreplace": Use XML character references (&#NNNN;) - encoding only
+                - "namereplace": Use Unicode names (\\N{...}) - encoding only
+            Accepted values: Any error handler supported by Python's codecs module
+                - See: https://docs.python.org/3/library/codecs.html#error-handlers
+            Trade-offs:
+                - strict: Data integrity guaranteed but may cause failures
+                - ignore: Continues processing but silently loses data
+                - replace: Preserves processing flow but corrupts data
+                - backslashreplace: Preserves information but changes data format
+            Related parameters: encoding, decode_responses
+            Use cases:
+                - Production: "strict" to catch encoding issues early
+                - Data migration: "ignore" or "replace" for dirty data
+                - Debugging: "strict" to identify encoding problems
+                - Logging: "backslashreplace" to preserve problematic characters
+            Common issues:
+                - Silent data corruption: Using "ignore" or "replace"
+                - Application crashes: "strict" with invalid data
+                - Inconsistent behavior: Different error handling across environments
+
+        decode_responses (bool, default=False):
+            Main description: Automatically decode byte responses to strings.
+            Recommended values:
+                - Web applications: True (convenient string handling)
+                - High-performance: False (avoid encoding overhead)
+                - Mixed data: False (handle encoding per operation)
+            Trade-offs:
+                - True: Convenient but adds overhead and may corrupt binary data
+                - False: More control but requires manual decoding
+            Related parameters: encoding, encoding_errors
+            Use cases:
+                - String-only data: True for convenience
+                - Binary data: False to preserve byte integrity
+                - Performance-critical: False to minimize overhead
+            Common issues:
+                - Binary data corruption: Decoding binary values as strings
+                - Type confusion: Expecting bytes but getting strings
+                - Performance degradation: Unnecessary encoding/decoding
+            Performance implications:
+                - Affects all read operations
+                - Memory usage increases for string objects
 
         To specify a retry policy for specific errors, you have two options:
 
