@@ -375,6 +375,92 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 - Example: 100ms RTT + SSL = ~300-500ms handshake time
                 - Consider TLS session resumption to reduce reconnection overhead
 
+        socket_keepalive (Optional[bool], default=None):
+            Main description: Enable TCP keepalive to detect dead connections.
+
+            What is TCP keepalive:
+                TCP keepalive is a mechanism where the operating system periodically sends
+                small probe packets on idle connections to verify the remote endpoint is
+                still reachable. If the remote side doesn't respond after several probes,
+                the connection is considered dead and closed. This happens at the TCP level,
+                below the application layer.
+
+            Why keepalive is needed:
+                Redis keeps connections open indefinitely by default (if the timeout config is set to 0), but network
+                issues, client crashes, or intermediate devices (firewalls, NAT, proxies) can
+                cause "half-open" connections where one side thinks the connection is alive
+                but the other side is unreachable. Without keepalive, these dead connections
+                can accumulate and consume resources until manually detected.
+
+            How keepalive improves reconnection:
+                When keepalive detects a dead connection, the socket is closed immediately.
+                This means reconnection attempts are much faster because redis-py won't waste
+                time retrying operations on a dead connection and waiting for timeouts.
+                Instead, it quickly establishes a new connection.
+
+            Recommended values:
+                - Production systems: True (recommended for all connections)
+                - Connection pools: True (essential - affects all pool connections)
+                - Development/testing: False or None (for simplicity)
+            Trade-offs:
+                - True: Detects dead connections but uses more network resources (only during idle periods)
+                - False: Lower network overhead but may not detect connection failures
+            Related parameters: socket_keepalive_options, health_check_interval
+            Common issues:
+                - Firewall interference: Some firewalls drop keepalive packets
+                - Resource usage: Keepalive packets consume bandwidth
+                - Timing conflicts: May conflict with application-level health checks
+                - NAT timeouts: Helps prevent NAT table entry expiration
+
+        socket_keepalive_options (Optional[Mapping[int, Union[int, bytes]]], default=None):
+            Main description: Advanced TCP keepalive socket options.
+
+            Available options reference:
+                - Python socket module: import socket; help(socket) or dir(socket)
+                - Common constants: socket.TCP_KEEPIDLE, socket.TCP_KEEPINTVL, socket.TCP_KEEPCNT
+                - Platform-specific: socket.TCP_KEEPALIVE (macOS), socket.TCP_USER_TIMEOUT (Linux)
+                - Online reference: https://docs.python.org/3/library/socket.html#socket-families
+                - System documentation: man 7 tcp (Linux), man 4 tcp (BSD/macOS)
+
+            Recommended values:
+                - Linux: {socket.TCP_KEEPIDLE: 30, socket.TCP_KEEPINTVL: 10, socket.TCP_KEEPCNT: 3}
+                - macOS: {socket.TCP_KEEPALIVE: 30, socket.TCP_KEEPINTVL: 10, socket.TCP_KEEPCNT: 3}
+                - Windows: {socket.TCP_KEEPIDLE: 30, socket.TCP_KEEPINTVL: 10, socket.TCP_KEEPCNT: 3}
+                - Default: None (use system defaults)
+                - Custom: Tune based on network characteristics
+
+            How to discover available options:
+                ```python
+                import socket
+                # List all TCP-related constants
+                tcp_options = [attr for attr in dir(socket) if attr.startswith('TCP_')]
+                print(tcp_options)
+
+                # Check if specific option exists on your platform
+                if hasattr(socket, 'TCP_KEEPIDLE'):
+                    print(f"TCP_KEEPIDLE = {socket.TCP_KEEPIDLE}")
+
+                # Example configuration for 30-second keepalive
+                keepalive_opts = {socket.TCP_KEEPIDLE: 30, socket.TCP_KEEPINTVL: 10, socket.TCP_KEEPCNT: 3}
+                ```
+
+            Trade-offs:
+                - Custom options: Fine-tuned detection but platform-specific
+                - System defaults: Portable but may not be optimal
+            Related parameters: socket_keepalive (must be True)
+            Use cases:
+                - High-availability systems: Aggressive keepalive settings
+                - Satellite/slow networks: Longer intervals
+                - Container environments: Shorter intervals for faster detection
+            Common issues:
+                - Platform differences: Options vary between OS (use hasattr() to check)
+                - Invalid options: May cause socket creation to fail
+                - Firewall interference: Aggressive settings may be blocked
+                - Constant availability: Not all TCP options available on all platforms
+            Performance implications:
+                - More frequent keepalive packets increase network usage
+                - Faster dead connection detection improves reliability
+
         To specify a retry policy for specific errors, you have two options:
 
         1. Set the `retry_on_error` to a list of the error/s to retry on, and
