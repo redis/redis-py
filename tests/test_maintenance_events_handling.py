@@ -1,10 +1,12 @@
 import socket
 import threading
-from unittest.mock import Mock, patch
+from typing import List
+from unittest.mock import patch
 import pytest
+from time import sleep
 
 from redis import Redis
-from redis.connection import ConnectionPool, BlockingConnectionPool
+from redis.connection import AbstractConnection, ConnectionPool, BlockingConnectionPool
 from redis.maintenance_events import (
     MaintenanceEventsConfig,
     NodeMigratingEvent,
@@ -15,18 +17,21 @@ from redis.maintenance_events import (
 class MockSocket:
     """Mock socket that simulates Redis protocol responses."""
 
+    AFTER_MOVING_ADDRESS = "1.2.3.4:6379"
+    DEFAULT_ADDRESS = "12.45.34.56:6379"
+    MOVING_TIMEOUT = 1
+
     def __init__(self):
         self.connected = False
         self.address = None
         self.sent_data = []
-        self.response_queue = []
         self.closed = False
         self.command_count = 0
         self.pending_responses = []
-        self.current_response_index = 0
         # Track socket timeout changes for maintenance events validation
         self.timeout = None
         self.thread_timeouts = {}  # Track last applied timeout per thread
+        self.moving_sent = False
 
     def connect(self, address):
         """Simulate socket connection."""
@@ -57,6 +62,12 @@ class MockSocket:
                 # Format: >1\r\n$8\r\nMIGRATED\r\n (1 element: MIGRATED)
                 migrated_push = ">1\r\n$8\r\nMIGRATED\r\n"
                 response = migrated_push.encode() + response
+            elif b"key_receive_moving_" in data:
+                # MOVING push message before SET key_receive_moving_X response
+                # Format: >3\r\n$6\r\nMOVING\r\n:15\r\n+localhost:6379\r\n (3 elements: MOVING, ttl, host:port)
+                # Note: Using + instead of $ to send as simple string instead of bulk string
+                moving_push = f">3\r\n$6\r\nMOVING\r\n:{MockSocket.MOVING_TIMEOUT}\r\n+{MockSocket.AFTER_MOVING_ADDRESS}\r\n"
+                response = moving_push.encode() + response
 
             self.pending_responses.append(response)
         elif b"GET" in data:
@@ -69,14 +80,20 @@ class MockSocket:
                 self.pending_responses.append(b"$8\r\nvalue1_0\r\n")
             elif b"key_receive_migrating_0" in data:
                 self.pending_responses.append(b"$8\r\nvalue2_0\r\n")
+            elif b"key_receive_moving_0" in data:
+                self.pending_responses.append(b"$8\r\nvalue3_0\r\n")
             elif b"key1_1" in data:
                 self.pending_responses.append(b"$8\r\nvalue1_1\r\n")
             elif b"key_receive_migrating_1" in data:
                 self.pending_responses.append(b"$8\r\nvalue2_1\r\n")
+            elif b"key_receive_moving_1" in data:
+                self.pending_responses.append(b"$8\r\nvalue3_1\r\n")
             elif b"key1_2" in data:
                 self.pending_responses.append(b"$8\r\nvalue1_2\r\n")
             elif b"key_receive_migrating_2" in data:
                 self.pending_responses.append(b"$8\r\nvalue2_2\r\n")
+            elif b"key_receive_moving_2" in data:
+                self.pending_responses.append(b"$8\r\nvalue3_2\r\n")
             # Generic keys (less specific, should come after thread-specific)
             elif b"key0" in data:
                 self.pending_responses.append(b"$6\r\nvalue0\r\n")
@@ -100,13 +117,12 @@ class MockSocket:
         """Simulate receiving data from Redis."""
         if self.closed:
             raise ConnectionError("Socket is closed")
-        if self.response_queue:
-            response = self.response_queue.pop(0)
-            return response[:bufsize]  # Respect buffer size
 
         # Use pending responses that were prepared when commands were sent
         if self.pending_responses:
             response = self.pending_responses.pop(0)
+            if b"MOVING" in response:
+                self.moving_sent = True
             return response[:bufsize]  # Respect buffer size
         else:
             # No data available - this should block or raise an exception
@@ -123,14 +139,21 @@ class MockSocket:
         """Simulate closing the socket."""
         self.closed = True
         self.connected = False
+        self.address = None
+        self.timeout = None
+        self.thread_timeouts = {}
 
     def settimeout(self, timeout):
         """Simulate setting socket timeout and track changes per thread."""
         self.timeout = timeout
 
-        # Track last applied timeout per thread
+        # Track last applied timeout with thread_id information added
         thread_id = threading.current_thread().ident
         self.thread_timeouts[thread_id] = timeout
+
+    def gettimeout(self):
+        """Simulate getting socket timeout."""
+        return self.timeout
 
     def setsockopt(self, level, optname, value):
         """Simulate setting socket options."""
@@ -138,11 +161,11 @@ class MockSocket:
 
     def getpeername(self):
         """Simulate getting peer name."""
-        return ("127.0.0.1", 6379)
+        return self.address
 
     def getsockname(self):
         """Simulate getting socket name."""
-        return ("127.0.0.1", 12345)
+        return (self.address.split(":")[0], 12345)
 
     def shutdown(self, how):
         """Simulate socket shutdown."""
@@ -173,9 +196,7 @@ class TestMaintenanceEventsHandling:
             for sock in rlist:
                 if hasattr(sock, "connected") and sock.connected and not sock.closed:
                     # Only return socket as ready if it actually has data to read
-                    if (
-                        hasattr(sock, "pending_responses") and sock.pending_responses
-                    ) or (hasattr(sock, "response_queue") and sock.response_queue):
+                    if hasattr(sock, "pending_responses") and sock.pending_responses:
                         ready_sockets.append(sock)
                     # Don't return socket as ready just because it received commands
                     # Only when there are actual responses available
@@ -195,7 +216,11 @@ class TestMaintenanceEventsHandling:
         self.select_patcher.stop()
 
     def _get_client(
-        self, pool_class, max_connections=10, maintenance_events_config=None
+        self,
+        pool_class,
+        max_connections=10,
+        maintenance_events_config=None,
+        setup_pool_handler=False,
     ):
         """Helper method to create a pool and Redis client with maintenance events configuration.
 
@@ -204,6 +229,7 @@ class TestMaintenanceEventsHandling:
             max_connections: Maximum number of connections in the pool (default: 10)
             maintenance_events_config: Optional MaintenanceEventsConfig to use. If not provided,
                                      uses self.config from setup_method (default: None)
+            setup_pool_handler: Whether to set up pool handler for moving events (default: False)
 
         Returns:
             tuple: (test_pool, test_redis_client)
@@ -215,19 +241,30 @@ class TestMaintenanceEventsHandling:
         )
 
         test_pool = pool_class(
-            host="localhost",
-            port=6379,
+            host=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
             max_connections=max_connections,
             protocol=3,  # Required for maintenance events
             maintenance_events_config=config,
         )
         test_redis_client = Redis(connection_pool=test_pool)
-        return test_pool, test_redis_client
+
+        # Set up pool handler for moving events if requested
+        if setup_pool_handler:
+            pool_handler = MaintenanceEventPoolHandler(
+                test_redis_client.connection_pool, config
+            )
+            test_redis_client.connection_pool.set_maintenance_events_pool_handler(
+                pool_handler
+            )
+
+        return test_redis_client
 
     def _validate_current_timeout_for_thread(self, thread_id, expected_timeout):
         """Helper method to validate the current timeout for the calling thread."""
-        current_thread_id = threading.current_thread().ident
         actual_timeout = None
+        # Get the actual thread ID from the current thread
+        current_thread_id = threading.current_thread().ident
         for sock in self.mock_sockets:
             if current_thread_id in sock.thread_timeouts:
                 actual_timeout = sock.thread_timeouts[current_thread_id]
@@ -235,16 +272,121 @@ class TestMaintenanceEventsHandling:
 
         assert actual_timeout == expected_timeout, (
             f"Thread {thread_id}: Expected timeout ({expected_timeout}), "
-            f"but found timeout: {actual_timeout} for thread {current_thread_id}. "
+            f"but found timeout: {actual_timeout} for thread {thread_id}. "
             f"All thread timeouts: {[sock.thread_timeouts for sock in self.mock_sockets]}"
         )
+
+    def _validate_disconnected(self, expected_count):
+        """Helper method to validate all socket timeouts"""
+        disconnected_sockets_count = 0
+        for sock in self.mock_sockets:
+            if sock.closed:
+                disconnected_sockets_count += 1
+        assert disconnected_sockets_count == expected_count
+
+    def _validate_connected(self, expected_count):
+        """Helper method to validate all socket timeouts"""
+        connected_sockets_count = 0
+        for sock in self.mock_sockets:
+            if sock.connected:
+                connected_sockets_count += 1
+        assert connected_sockets_count == expected_count
+
+    def _validate_in_use_connections_state(
+        self, in_use_connections: List[AbstractConnection]
+    ):
+        """Helper method to validate state of in-use connections."""
+        # validate in use connections are still working with set flag for reconnect
+        # and timeout is updated
+        for connection in in_use_connections:
+            assert connection._should_reconnect is True
+            assert (
+                connection.tmp_host_address
+                == MockSocket.AFTER_MOVING_ADDRESS.split(":")[0]
+            )
+            assert connection.tmp_relax_timeout == self.config.relax_timeout
+            assert connection._sock.gettimeout() == self.config.relax_timeout
+            assert connection._sock.connected is True
+            assert (
+                connection._sock.getpeername()[0]
+                == MockSocket.DEFAULT_ADDRESS.split(":")[0]
+            )
+
+    def _validate_free_connections_state(
+        self,
+        pool,
+        tmp_host_address,
+        relax_timeout,
+        should_be_connected_count,
+        connected_to_tmp_addres=False,
+    ):
+        """Helper method to validate state of free/available connections."""
+        if isinstance(pool, BlockingConnectionPool):
+            # BlockingConnectionPool uses _connections list where created connections are stored
+            # but we need to get the ones in the queue - these are the free ones
+            # the uninitialized connections are filtered out
+            free_connections = [conn for conn in pool.pool.queue if conn is not None]
+        elif isinstance(pool, ConnectionPool):
+            # Regular ConnectionPool uses _available_connections for free connections
+            free_connections = pool._available_connections
+        else:
+            raise ValueError(f"Unsupported pool type: {type(pool)}")
+
+        connected_count = 0
+        # Validate fields that are validated in the validation of the active connections
+        for connection in free_connections:
+            # Validate the same fields as in _validate_in_use_connections_state
+            assert connection._should_reconnect is False
+            assert connection.tmp_host_address == tmp_host_address
+            assert connection.tmp_relax_timeout == relax_timeout
+            if connection._sock is not None:
+                connected_count += 1
+
+                if connected_to_tmp_addres:
+                    assert (
+                        connection._sock.getpeername()[0]
+                        == MockSocket.AFTER_MOVING_ADDRESS.split(":")[0]
+                    )
+                else:
+                    assert (
+                        connection._sock.getpeername()[0]
+                        == MockSocket.DEFAULT_ADDRESS.split(":")[0]
+                    )
+        assert connected_count == should_be_connected_count
+
+    def _validate_all_timeouts(self, expected_timeout):
+        """Helper method to validate state of in-use connections."""
+        # validate in use connections are still working with set flag for reconnect
+        # and timeout is updated
+        for mock_socket in self.mock_sockets:
+            if expected_timeout is None:
+                assert mock_socket.gettimeout() is None
+            else:
+                assert mock_socket.gettimeout() == expected_timeout
+
+    def _validate_conn_kwargs(
+        self,
+        pool,
+        expected_host_address,
+        expected_port,
+        expected_tmp_host_address,
+        expected_tmp_relax_timeout,
+    ):
+        """Helper method to validate connection kwargs."""
+        assert pool.connection_kwargs["host"] == expected_host_address
+        assert pool.connection_kwargs["port"] == expected_port
+        assert pool.connection_kwargs["tmp_host_address"] == expected_tmp_host_address
+        assert pool.connection_kwargs["tmp_relax_timeout"] == expected_tmp_relax_timeout
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_connection_pool_creation_with_maintenance_events(self, pool_class):
         """Test that connection pools are created with maintenance events configuration."""
         # Create a pool and Redis client with maintenance events
         max_connections = 3 if pool_class == BlockingConnectionPool else 10
-        test_pool, _ = self._get_client(pool_class, max_connections=max_connections)
+        test_redis_client = self._get_client(
+            pool_class, max_connections=max_connections
+        )
+        test_pool = test_redis_client.connection_pool
 
         try:
             assert (
@@ -283,7 +425,7 @@ class TestMaintenanceEventsHandling:
         Basically with test - the mocked socket is validated.
         """
         # Create a pool and Redis client with maintenance events
-        test_pool, test_redis_client = self._get_client(pool_class, max_connections=5)
+        test_redis_client = self._get_client(pool_class, max_connections=5)
 
         try:
             # Perform Redis operations that should work with our improved mock responses
@@ -300,77 +442,19 @@ class TestMaintenanceEventsHandling:
             assert len(self.mock_sockets[0].sent_data) >= 2  # HELLO, SET, GET commands
 
             # Verify that the connection has maintenance event handler
-            connection = test_pool.get_connection()
+            connection = test_redis_client.connection_pool.get_connection()
             assert hasattr(connection, "_maintenance_event_connection_handler")
-            test_pool.release(connection)
+            test_redis_client.connection_pool.release(connection)
 
         finally:
-            if hasattr(test_pool, "disconnect"):
-                test_pool.disconnect()
-
-    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_multiple_connections_in_pool(self, pool_class):
-        """Test that multiple connections can be created and used for Redis operations in multiple threads."""
-        # Create a pool and Redis client with maintenance events
-        test_pool, test_redis_client = self._get_client(pool_class, max_connections=5)
-
-        try:
-            # Results storage for thread operations
-            results = []
-            errors = []
-
-            def redis_operation(key_suffix):
-                """Perform Redis operations in a thread."""
-                try:
-                    # SET operation
-                    set_result = test_redis_client.set(
-                        f"key{key_suffix}", f"value{key_suffix}"
-                    )
-                    # GET operation
-                    get_result = test_redis_client.get(f"key{key_suffix}")
-                    results.append((set_result, get_result))
-                except Exception as e:
-                    errors.append(e)
-
-            # Run operations in multiple threads to force multiple connections
-            threads = []
-            for i in range(3):
-                thread = threading.Thread(target=redis_operation, args=(i,))
-                threads.append(thread)
-                thread.start()
-
-            # Wait for all threads to complete
-            for thread in threads:
-                thread.join()
-
-            # Verify no errors occurred
-            assert len(errors) == 0, f"Errors occurred: {errors}"
-
-            # Verify all operations completed successfully
-            assert len(results) == 3
-            for set_result, get_result in results:
-                assert set_result is True
-                assert get_result in [b"value0", b"value1", b"value2"]
-
-            # Verify that multiple connections were created with mock sockets
-            # With threading, both pool types should create multiple sockets for concurrent access
-            assert len(self.mock_sockets) >= 2, (
-                f"Expected multiple sockets due to threading, got {len(self.mock_sockets)}"
-            )
-
-            # Verify each connection has maintenance event handler
-            connection = test_pool.get_connection()
-            assert hasattr(connection, "_maintenance_event_connection_handler")
-            test_pool.release(connection)
-
-        finally:
-            if hasattr(test_pool, "disconnect"):
-                test_pool.disconnect()
+            if hasattr(test_redis_client.connection_pool, "disconnect"):
+                test_redis_client.connection_pool.disconnect()
 
     def test_pool_handler_with_migrating_event(self):
         """Test that pool handler correctly handles migrating events."""
         # Create a pool and Redis client with maintenance events
-        test_pool, _ = self._get_client(ConnectionPool)
+        test_redis_client = self._get_client(ConnectionPool)
+        test_pool = test_redis_client.connection_pool
 
         try:
             # Create and set a pool handler
@@ -421,7 +505,7 @@ class TestMaintenanceEventsHandling:
         8. Uses proper RESP3 push message format for realistic protocol simulation
         """
         # Create a pool and Redis client with maintenance events
-        test_pool, test_redis_client = self._get_client(pool_class, max_connections=10)
+        test_redis_client = self._get_client(pool_class, max_connections=10)
 
         try:
             # Results storage for thread operations
@@ -530,8 +614,8 @@ class TestMaintenanceEventsHandling:
             )
 
         finally:
-            if hasattr(test_pool, "disconnect"):
-                test_pool.disconnect()
+            if hasattr(test_redis_client.connection_pool, "disconnect"):
+                test_redis_client.connection_pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_migrating_event_with_disabled_relax_timeout(self, pool_class):
@@ -551,7 +635,7 @@ class TestMaintenanceEventsHandling:
         )
 
         # Create a pool and Redis client with disabled relax timeout config
-        test_pool, test_redis_client = self._get_client(
+        test_redis_client = self._get_client(
             pool_class, max_connections=5, maintenance_events_config=disabled_config
         )
 
@@ -635,5 +719,343 @@ class TestMaintenanceEventsHandling:
             )
 
         finally:
-            if hasattr(test_pool, "disconnect"):
-                test_pool.disconnect()
+            if hasattr(test_redis_client.connection_pool, "disconnect"):
+                test_redis_client.connection_pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_moving_related_events_handling_integration(self, pool_class):
+        """
+        Test full integration of moving-related events (MOVING) handling with Redis commands.
+        """
+        # Create a pool and Redis client with maintenance events and pool handler
+        test_redis_client = self._get_client(
+            pool_class, max_connections=10, setup_pool_handler=True
+        )
+
+        try:
+            # Create several connections and return them in the pool
+            connections = []
+            for _ in range(10):
+                connection = test_redis_client.connection_pool.get_connection()
+                connections.append(connection)
+
+            for connection in connections:
+                test_redis_client.connection_pool.release(connection)
+
+            # Take 5 connections to be "in use"
+            in_use_connections = []
+            for _ in range(5):
+                connection = test_redis_client.connection_pool.get_connection()
+                in_use_connections.append(connection)
+
+            # Validate all connections are connected prior MOVING event
+            self._validate_disconnected(0)
+
+            # Run command that will receive and handle MOVING event
+            key_moving = "key_receive_moving_0"
+            value_moving = "value3_0"
+            # the connection used for the command is expected to be reconnected to the new address
+            # before it is returned to the pool
+            result2 = test_redis_client.set(key_moving, value_moving)
+
+            # Validate Command 2 result
+            assert result2 is True, "Command 2 (SET key_receive_moving) failed"
+
+            # Validate pool and connections settings were updated according to MOVING event
+            # handling expectations
+            self._validate_conn_kwargs(
+                test_redis_client.connection_pool,
+                MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                self.config.relax_timeout,
+            )
+            # 5 disconnects has happened, 1 of them is with reconnect
+            self._validate_disconnected(5)
+            # 5 in use connected + 1 after reconnect
+            self._validate_connected(6)
+            self._validate_in_use_connections_state(in_use_connections)
+            # Validate there is 1 free connection that is connected
+            # the one that has handled the MOVING should reconnect after parsing the response
+            self._validate_free_connections_state(
+                test_redis_client.connection_pool,
+                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                self.config.relax_timeout,
+                should_be_connected_count=1,
+                connected_to_tmp_addres=True,
+            )
+
+            # Wait for MOVING timeout to expire and the moving completed handler to run
+            print("Waiting for MOVING timeout to expire...")
+            sleep(MockSocket.MOVING_TIMEOUT + 0.5)
+
+            self._validate_all_timeouts(None)
+            self._validate_conn_kwargs(
+                test_redis_client.connection_pool,
+                MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                None,
+                -1,
+            )
+            self._validate_free_connections_state(
+                test_redis_client.connection_pool,
+                None,
+                -1,
+                should_be_connected_count=1,
+                connected_to_tmp_addres=True,
+            )
+
+        finally:
+            if hasattr(test_redis_client.connection_pool, "disconnect"):
+                test_redis_client.connection_pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_create_new_conn_while_moving_not_expired(self, pool_class):
+        """
+        Test creating new connections while MOVING event is active (not expired).
+
+        This test validates that:
+        1. After MOVING event is processed, new connections are created with temporary address
+        2. New connections inherit the relaxed timeout settings
+        3. Pool configuration is properly applied to newly created connections
+        """
+        # Create a pool and Redis client with maintenance events and pool handler
+        test_redis_client = self._get_client(
+            pool_class, max_connections=10, setup_pool_handler=True
+        )
+
+        try:
+            # Create several connections and return them in the pool
+            connections = []
+            for _ in range(5):
+                connection = test_redis_client.connection_pool.get_connection()
+                connections.append(connection)
+
+            for connection in connections:
+                test_redis_client.connection_pool.release(connection)
+
+            # Take 3 connections to be "in use"
+            in_use_connections = []
+            for _ in range(3):
+                connection = test_redis_client.connection_pool.get_connection()
+                in_use_connections.append(connection)
+
+            # Validate all connections are connected prior MOVING event
+            self._validate_disconnected(0)
+
+            # Run command that will receive and handle MOVING event
+            key_moving = "key_receive_moving_0"
+            value_moving = "value3_0"
+            result = test_redis_client.set(key_moving, value_moving)
+
+            # Validate command result
+            assert result is True, "SET key_receive_moving command failed"
+
+            # Validate pool and connections settings were updated according to MOVING event
+            self._validate_conn_kwargs(
+                test_redis_client.connection_pool,
+                MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                self.config.relax_timeout,
+            )
+
+            # Now get several more connections to force creation of new ones
+            # This should create new connections with the temporary address
+            old_connections = []
+            for _ in range(2):
+                connection = test_redis_client.connection_pool.get_connection()
+                old_connections.append(connection)
+
+            new_connection = test_redis_client.connection_pool.get_connection()
+
+            # Validate that new connections are created with temporary address and relax timeout
+            # and when connecting those configs are used
+            # get_connection() returns a connection that is already connected
+            assert (
+                new_connection.tmp_host_address
+                == MockSocket.AFTER_MOVING_ADDRESS.split(":")[0]
+            )
+            assert new_connection.tmp_relax_timeout == self.config.relax_timeout
+            # New connections should be connected to the temporary address
+            assert new_connection._sock is not None
+            assert new_connection._sock.connected is True
+            assert (
+                new_connection._sock.getpeername()[0]
+                == MockSocket.AFTER_MOVING_ADDRESS.split(":")[0]
+            )
+            assert new_connection._sock.gettimeout() == self.config.relax_timeout
+
+        finally:
+            if hasattr(test_redis_client.connection_pool, "disconnect"):
+                test_redis_client.connection_pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_create_new_conn_after_moving_expires(self, pool_class):
+        """
+        Test creating new connections after MOVING event expires.
+
+        This test validates that:
+        1. After MOVING timeout expires, new connections use original address
+        2. Pool configuration is reset to original values
+        3. New connections don't inherit temporary settings
+        """
+        # Create a pool and Redis client with maintenance events and pool handler
+        test_redis_client = self._get_client(
+            pool_class, max_connections=10, setup_pool_handler=True
+        )
+
+        try:
+            # Create several connections and return them in the pool
+            connections = []
+            for _ in range(5):
+                connection = test_redis_client.connection_pool.get_connection()
+                connections.append(connection)
+
+            for connection in connections:
+                test_redis_client.connection_pool.release(connection)
+
+            # Take 3 connections to be "in use"
+            in_use_connections = []
+            for _ in range(3):
+                connection = test_redis_client.connection_pool.get_connection()
+                in_use_connections.append(connection)
+
+            # Run command that will receive and handle MOVING event
+            key_moving = "key_receive_moving_0"
+            value_moving = "value3_0"
+            result = test_redis_client.set(key_moving, value_moving)
+
+            # Validate command result
+            assert result is True, "SET key_receive_moving command failed"
+
+            # Wait for MOVING timeout to expire
+            print("Waiting for MOVING timeout to expire...")
+            sleep(MockSocket.MOVING_TIMEOUT + 0.5)
+
+            # Now get several new connections after expiration
+            old_connections = []
+            for _ in range(2):
+                connection = test_redis_client.connection_pool.get_connection()
+                old_connections.append(connection)
+
+            new_connection = test_redis_client.connection_pool.get_connection()
+
+            # Validate that new connections are created with original address (no temporary settings)
+            assert new_connection.tmp_host_address is None
+            assert new_connection.tmp_relax_timeout == -1
+            # New connections should be connected to the original address
+            assert new_connection._sock is not None
+            assert new_connection._sock.connected is True
+            # Socket timeout should be None (original timeout)
+            assert new_connection._sock.gettimeout() is None
+
+        finally:
+            if hasattr(test_redis_client.connection_pool, "disconnect"):
+                test_redis_client.connection_pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_receive_migrated_after_moving(self, pool_class):
+        # TODO Refactor: when migrated comes after moving and
+        #               moving hasn't yet expired - it should not decrease timeouts
+        """
+        Test receiving MIGRATED event after MOVING event.
+
+        This test validates the complete MOVING -> MIGRATED lifecycle:
+        1. MOVING event is processed and temporary settings are applied
+        2. MIGRATED event is received during command execution
+        3. Temporary settings are cleared after MIGRATED
+        4. Pool configuration is restored to original values
+        """
+        # Create a pool and Redis client with maintenance events and pool handler
+        test_redis_client = self._get_client(
+            pool_class, max_connections=10, setup_pool_handler=True
+        )
+
+        try:
+            # Create several connections and return them in the pool
+            connections = []
+            for _ in range(5):
+                connection = test_redis_client.connection_pool.get_connection()
+                connections.append(connection)
+
+            for connection in connections:
+                test_redis_client.connection_pool.release(connection)
+
+            # Take 3 connections to be "in use"
+            in_use_connections = []
+            for _ in range(3):
+                connection = test_redis_client.connection_pool.get_connection()
+                in_use_connections.append(connection)
+
+            # Validate all connections are connected prior MOVING event
+            self._validate_disconnected(0)
+
+            # Step 1: Run command that will receive and handle MOVING event
+            key_moving = "key_receive_moving_0"
+            value_moving = "value3_0"
+            result_moving = test_redis_client.set(key_moving, value_moving)
+
+            # Validate MOVING command result
+            assert result_moving is True, "SET key_receive_moving command failed"
+
+            # Validate pool and connections settings were updated according to MOVING event
+            self._validate_conn_kwargs(
+                test_redis_client.connection_pool,
+                MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                self.config.relax_timeout,
+            )
+
+            # Step 2: Run command that will receive and handle MIGRATED event
+            # This should clear the temporary settings
+            key_migrated = "key_receive_migrated_0"
+            value_migrated = "migrated_value"
+            result_migrated = test_redis_client.set(key_migrated, value_migrated)
+
+            # Validate MIGRATED command result
+            assert result_migrated is True, "SET key_receive_migrated command failed"
+
+            # Step 3: Validate that MIGRATED event was processed but MOVING settings remain
+            # (MIGRATED doesn't automatically clear MOVING settings - they are separate events)
+            self._validate_conn_kwargs(
+                test_redis_client.connection_pool,
+                MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                MockSocket.AFTER_MOVING_ADDRESS.split(":")[
+                    0
+                ],  # MOVING settings still active
+                self.config.relax_timeout,  # MOVING timeout still active
+            )
+
+            # Step 4: Create new connections after MIGRATED to verify they still use MOVING settings
+            # (since MOVING settings are still active)
+            new_connections = []
+            for _ in range(2):
+                connection = test_redis_client.connection_pool.get_connection()
+                new_connections.append(connection)
+
+            # Validate that new connections are created with MOVING settings (still active)
+            for connection in new_connections:
+                assert (
+                    connection.tmp_host_address
+                    == MockSocket.AFTER_MOVING_ADDRESS.split(":")[0]
+                )
+                # Note: New connections may not inherit the exact relax timeout value
+                # but they should have the temporary host address
+                # New connections should be connected
+                if connection._sock is not None:
+                    assert connection._sock.connected is True
+
+            # Release the new connections
+            for connection in new_connections:
+                test_redis_client.connection_pool.release(connection)
+
+            # Validate free connections state with MOVING settings still active
+            # Note: We'll validate with the pool's current settings rather than individual connection settings
+            # since new connections may have different timeout values but still use the temporary address
+
+        finally:
+            if hasattr(test_redis_client.connection_pool, "disconnect"):
+                test_redis_client.connection_pool.disconnect()

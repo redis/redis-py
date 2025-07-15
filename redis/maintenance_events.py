@@ -323,25 +323,6 @@ class MaintenanceEventPoolHandler:
         else:
             logging.error(f"Unhandled notification type: {notification}")
 
-    def handle_node_moved_event(self):
-        with self._lock:
-            self.pool.update_connection_kwargs_with_tmp_settings(
-                tmp_host_address=None,
-                tmp_relax_timeout=-1,
-            )
-            with self.pool._lock:
-                if self.config.is_relax_timeouts_enabled():
-                    # reset the timeout for existing connections
-                    self.pool.update_connections_current_timeout(
-                        relax_timeout=-1, include_available_connections=True
-                    )
-                    logging.debug("***** MOVING END--> TIMEOUTS RESET")
-
-                self.pool.update_connections_tmp_settings(
-                    tmp_host_address=None, tmp_relax_timeout=-1
-                )
-                logging.debug("***** MOVING END--> TMP SETTINGS ADDRESS RESET")
-
     def handle_node_moving_event(self, event: NodeMovingEvent):
         if (
             not self.config.proactive_reconnect
@@ -402,6 +383,26 @@ class MaintenanceEventPoolHandler:
             logging.error(
                 f"###### MOVING total execution time: {execution_time_us:.0f} microseconds"
             )
+
+    def handle_node_moved_event(self):
+        logging.debug("***** MOVING END--> Starting to revert the changes.")
+        with self._lock:
+            self.pool.update_connection_kwargs_with_tmp_settings(
+                tmp_host_address=None,
+                tmp_relax_timeout=-1,
+            )
+            with self.pool._lock:
+                if self.config.is_relax_timeouts_enabled():
+                    # reset the timeout for existing connections
+                    self.pool.update_connections_current_timeout(
+                        relax_timeout=-1, include_free_connections=True
+                    )
+                    logging.debug("***** MOVING END--> TIMEOUTS RESET")
+
+                self.pool.update_connections_tmp_settings(
+                    tmp_host_address=None, tmp_relax_timeout=-1
+                )
+                logging.debug("***** MOVING END--> TMP SETTINGS ADDRESS RESET")
 
 
 class MaintenanceEventConnectionHandler:
