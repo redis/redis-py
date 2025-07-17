@@ -181,7 +181,7 @@ class VectorField(Field):
 
         ``name`` is the name of the field.
 
-        ``algorithm`` can be "FLAT" or "HNSW".
+        ``algorithm`` can be "FLAT", "HNSW", or "SVS-VAMANA".
 
         ``attributes`` each algorithm can have specific attributes. Some of them
         are mandatory and some of them are optional. See
@@ -194,10 +194,10 @@ class VectorField(Field):
         if sort or noindex:
             raise DataError("Cannot set 'sortable' or 'no_index' in Vector fields.")
 
-        if algorithm.upper() not in ["FLAT", "HNSW"]:
+        if algorithm.upper() not in ["FLAT", "HNSW", "SVS-VAMANA"]:
             raise DataError(
-                "Realtime vector indexing supporting 2 Indexing Methods:"
-                "'FLAT' and 'HNSW'."
+                "Realtime vector indexing supporting 3 Indexing Methods:"
+                "'FLAT', 'HNSW', and 'SVS-VAMANA'."
             )
 
         attr_li = []
