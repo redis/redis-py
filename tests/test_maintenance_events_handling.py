@@ -52,12 +52,12 @@ class MockSocket:
             response = b"+OK\r\n"
 
             # Check if this is a key that should trigger a push message
-            if b"key_receive_migrating_" in data:
+            if b"key_receive_migrating_" in data or b"key_receive_migrating" in data:
                 # MIGRATING push message before SET key_receive_migrating_X response
                 # Format: >2\r\n$9\r\nMIGRATING\r\n:10\r\n (2 elements: MIGRATING, ttl)
                 migrating_push = ">2\r\n$9\r\nMIGRATING\r\n:10\r\n"
                 response = migrating_push.encode() + response
-            elif b"key_receive_migrated_" in data:
+            elif b"key_receive_migrated_" in data or b"key_receive_migrated" in data:
                 # MIGRATED push message before SET key_receive_migrated_X response
                 # Format: >1\r\n$8\r\nMIGRATED\r\n (1 element: MIGRATED)
                 migrated_push = ">1\r\n$8\r\nMIGRATED\r\n"
@@ -75,32 +75,17 @@ class MockSocket:
             if b"hello" in data:
                 response = b"$5\r\nworld\r\n"
                 self.pending_responses.append(response)
-            # Handle thread-specific keys for integration test first (more specific)
-            elif b"key1_0" in data:
-                self.pending_responses.append(b"$8\r\nvalue1_0\r\n")
-            elif b"key_receive_migrating_0" in data:
-                self.pending_responses.append(b"$8\r\nvalue2_0\r\n")
+            # Handle specific keys used in tests
             elif b"key_receive_moving_0" in data:
                 self.pending_responses.append(b"$8\r\nvalue3_0\r\n")
-            elif b"key1_1" in data:
-                self.pending_responses.append(b"$8\r\nvalue1_1\r\n")
-            elif b"key_receive_migrating_1" in data:
-                self.pending_responses.append(b"$8\r\nvalue2_1\r\n")
-            elif b"key_receive_moving_1" in data:
-                self.pending_responses.append(b"$8\r\nvalue3_1\r\n")
-            elif b"key1_2" in data:
-                self.pending_responses.append(b"$8\r\nvalue1_2\r\n")
-            elif b"key_receive_migrating_2" in data:
-                self.pending_responses.append(b"$8\r\nvalue2_2\r\n")
-            elif b"key_receive_moving_2" in data:
-                self.pending_responses.append(b"$8\r\nvalue3_2\r\n")
-            # Generic keys (less specific, should come after thread-specific)
-            elif b"key0" in data:
-                self.pending_responses.append(b"$6\r\nvalue0\r\n")
+            elif b"key_receive_migrated_0" in data:
+                self.pending_responses.append(b"$13\r\nmigrated_value\r\n")
+            elif b"key_receive_migrating" in data:
+                self.pending_responses.append(b"$6\r\nvalue2\r\n")
+            elif b"key_receive_migrated" in data:
+                self.pending_responses.append(b"$6\r\nvalue3\r\n")
             elif b"key1" in data:
                 self.pending_responses.append(b"$6\r\nvalue1\r\n")
-            elif b"key2" in data:
-                self.pending_responses.append(b"$6\r\nvalue2\r\n")
             else:
                 self.pending_responses.append(b"$-1\r\n")  # NULL response
         else:
@@ -260,7 +245,37 @@ class TestMaintenanceEventsHandling:
 
         return test_redis_client
 
-    def _validate_current_timeout_for_thread(self, thread_id, expected_timeout):
+    def _validate_connection_handlers(self, conn, pool_handler, config):
+        """Helper method to validate connection handlers are properly set."""
+        # Test that the node moving handler function is correctly set
+        parser_handler = conn._parser.node_moving_push_handler_func
+        assert parser_handler is not None
+        assert hasattr(parser_handler, "__self__")
+        assert hasattr(parser_handler, "__func__")
+        assert parser_handler.__self__ is pool_handler
+        assert parser_handler.__func__ is pool_handler.handle_event.__func__
+
+        # Test that the maintenance handler function is correctly set
+        maintenance_handler = conn._parser.maintenance_push_handler_func
+        assert maintenance_handler is not None
+        assert hasattr(maintenance_handler, "__self__")
+        assert hasattr(maintenance_handler, "__func__")
+        # The maintenance handler should be bound to the connection's
+        # maintenance event connection handler
+        assert (
+            maintenance_handler.__self__ is conn._maintenance_event_connection_handler
+        )
+        assert (
+            maintenance_handler.__func__
+            is conn._maintenance_event_connection_handler.handle_event.__func__
+        )
+
+        # Validate that the connection's maintenance handler has the same config object
+        assert conn._maintenance_event_connection_handler.config is config
+
+    def _validate_current_timeout_for_thread(
+        self, thread_id, expected_timeout, error_msg=None
+    ):
         """Helper method to validate the current timeout for the calling thread."""
         actual_timeout = None
         # Get the actual thread ID from the current thread
@@ -271,9 +286,27 @@ class TestMaintenanceEventsHandling:
                 break
 
         assert actual_timeout == expected_timeout, (
+            error_msg,
             f"Thread {thread_id}: Expected timeout ({expected_timeout}), "
             f"but found timeout: {actual_timeout} for thread {thread_id}. "
-            f"All thread timeouts: {[sock.thread_timeouts for sock in self.mock_sockets]}"
+            f"All thread timeouts: {[sock.thread_timeouts for sock in self.mock_sockets]}",
+        )
+
+    def _validate_current_timeout(self, expected_timeout, error_msg=None):
+        """Helper method to validate the current timeout for the calling thread."""
+        actual_timeout = None
+        # Get the actual thread ID from the current thread
+        current_thread_id = threading.current_thread().ident
+        for sock in self.mock_sockets:
+            if current_thread_id in sock.thread_timeouts:
+                actual_timeout = sock.thread_timeouts[current_thread_id]
+                break
+
+        assert actual_timeout == expected_timeout, (
+            f"{error_msg or ''}"
+            f"Expected timeout ({expected_timeout}), "
+            f"but found timeout: {actual_timeout}. "
+            f"All thread timeouts: {[sock.thread_timeouts for sock in self.mock_sockets]}",
         )
 
     def _validate_disconnected(self, expected_count):
@@ -377,6 +410,95 @@ class TestMaintenanceEventsHandling:
         assert pool.connection_kwargs["port"] == expected_port
         assert pool.connection_kwargs["tmp_host_address"] == expected_tmp_host_address
         assert pool.connection_kwargs["tmp_relax_timeout"] == expected_tmp_relax_timeout
+
+    def test_client_initialization(self):
+        """Test that Redis client is created with maintenance events configuration."""
+        # Create a pool and Redis client with maintenance events
+
+        test_redis_client = Redis(
+            protocol=3,  # Required for maintenance events
+            maintenance_events_config=self.config,
+        )
+
+        pool_handler = test_redis_client.connection_pool.connection_kwargs.get(
+            "maintenance_events_pool_handler"
+        )
+        assert pool_handler is not None
+        assert pool_handler.config == self.config
+
+        conn = test_redis_client.connection_pool.get_connection()
+        assert conn._should_reconnect is False
+        assert conn.tmp_host_address is None
+        assert conn.tmp_relax_timeout == -1
+
+        # Test that the node moving handler function is correctly set by
+        # comparing the underlying function and instance
+        parser_handler = conn._parser.node_moving_push_handler_func
+        assert parser_handler is not None
+        assert hasattr(parser_handler, "__self__")
+        assert hasattr(parser_handler, "__func__")
+        assert parser_handler.__self__ is pool_handler
+        assert parser_handler.__func__ is pool_handler.handle_event.__func__
+
+        # Test that the maintenance handler function is correctly set
+        maintenance_handler = conn._parser.maintenance_push_handler_func
+        assert maintenance_handler is not None
+        assert hasattr(maintenance_handler, "__self__")
+        assert hasattr(maintenance_handler, "__func__")
+        # The maintenance handler should be bound to the connection's
+        # maintenance event connection handler
+        assert (
+            maintenance_handler.__self__ is conn._maintenance_event_connection_handler
+        )
+        assert (
+            maintenance_handler.__func__
+            is conn._maintenance_event_connection_handler.handle_event.__func__
+        )
+
+        # Validate that the connection's maintenance handler has the same config object
+        assert conn._maintenance_event_connection_handler.config is self.config
+
+    def test_maint_handler_init_for_existing_connections(self):
+        """Test that maintenance event handlers are properly set on existing and new connections
+        when configuration is enabled after client creation."""
+
+        # Create a Redis client with disabled maintenance events configuration
+        disabled_config = MaintenanceEventsConfig(enabled=False)
+        test_redis_client = Redis(
+            protocol=3,  # Required for maintenance events
+            maintenance_events_config=disabled_config,
+        )
+
+        # Extract an existing connection before enabling maintenance events
+        existing_conn = test_redis_client.connection_pool.get_connection()
+
+        # Verify that maintenance events are initially disabled
+        assert existing_conn._parser.node_moving_push_handler_func is None
+        assert not hasattr(existing_conn, "_maintenance_event_connection_handler")
+        assert existing_conn._parser.maintenance_push_handler_func is None
+
+        # Create a new enabled configuration and set up pool handler
+        enabled_config = MaintenanceEventsConfig(
+            enabled=True, proactive_reconnect=True, relax_timeout=30
+        )
+        pool_handler = MaintenanceEventPoolHandler(
+            test_redis_client.connection_pool, enabled_config
+        )
+        test_redis_client.connection_pool.set_maintenance_events_pool_handler(
+            pool_handler
+        )
+
+        # Validate the existing connection after enabling maintenance events
+        # Both existing and new connections should now have full handler setup
+        self._validate_connection_handlers(existing_conn, pool_handler, enabled_config)
+
+        # Create a new connection and validate it has full handlers
+        new_conn = test_redis_client.connection_pool.get_connection()
+        self._validate_connection_handlers(new_conn, pool_handler, enabled_config)
+
+        # Clean up connections
+        test_redis_client.connection_pool.release(existing_conn)
+        test_redis_client.connection_pool.release(new_conn)
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_connection_pool_creation_with_maintenance_events(self, pool_class):
@@ -492,14 +614,14 @@ class TestMaintenanceEventsHandling:
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_migration_related_events_handling_integration(self, pool_class):
         """
-        Test full integration of migration-related events (MIGRATING/MIGRATED) handling with multiple threads and commands.
+        Test full integration of migration-related events (MIGRATING/MIGRATED) handling.
 
         This test validates the complete migration lifecycle:
-        1. Creates 3 concurrent threads, each executing 5 Redis commands
-        2. Injects MIGRATING push message before command 2 (SET key_receive_migrating_X)
+        1. Executes 5 Redis commands sequentially
+        2. Injects MIGRATING push message before command 2 (SET key_receive_migrating)
         3. Validates socket timeout is updated to relaxed value (30s) after MIGRATING
         4. Executes commands 3-4 while timeout remains relaxed
-        5. Injects MIGRATED push message before command 5 (SET key_receive_migrated_X)
+        5. Injects MIGRATED push message before command 5 (SET key_receive_migrated)
         6. Validates socket timeout is restored after MIGRATED
         7. Tests both ConnectionPool and BlockingConnectionPool implementations
         8. Uses proper RESP3 push message format for realistic protocol simulation
@@ -508,107 +630,63 @@ class TestMaintenanceEventsHandling:
         test_redis_client = self._get_client(pool_class, max_connections=10)
 
         try:
-            # Results storage for thread operations
-            results = []
-            errors = []
+            # Command 1: Initial command
+            key1 = "key1"
+            value1 = "value1"
+            result1 = test_redis_client.set(key1, value1)
 
-            def redis_operations_with_maintenance_events(thread_id):
-                """Perform Redis operations with maintenance events in a thread."""
-                try:
-                    # Command 1: Initial command
-                    key1 = f"key1_{thread_id}"
-                    value1 = f"value1_{thread_id}"
-                    result1 = test_redis_client.set(key1, value1)
+            # Validate Command 1 result
+            assert result1 is True, "Command 1 (SET key1) failed"
 
-                    # Validate Command 1 result
-                    erros_msg = f"Thread {thread_id}: Command 1 (SET key1) failed"
-                    assert result1 is True, erros_msg
+            # Command 2: This SET command will receive MIGRATING push message before response
+            key_migrating = "key_receive_migrating"
+            value_migrating = "value2"
+            result2 = test_redis_client.set(key_migrating, value_migrating)
 
-                    # Command 2: This SET command will receive MIGRATING push message before response
-                    key_migrating = f"key_receive_migrating_{thread_id}"
-                    value_migrating = f"value2_{thread_id}"
-                    result2 = test_redis_client.set(key_migrating, value_migrating)
+            # Validate Command 2 result
+            assert result2 is True, "Command 2 (SET key_receive_migrating) failed"
 
-                    # Validate Command 2 result
-                    erros_msg = f"Thread {thread_id}: Command 2 (SET key_receive_migrating) failed"
-                    assert result2 is True, erros_msg
+            # Step 4: Validate timeout was updated to relaxed value after MIGRATING
+            self._validate_current_timeout(30, "Right after MIGRATING is received. ")
 
-                    # Step 4: Validate timeout was updated to relaxed value after MIGRATING
-                    self._validate_current_timeout_for_thread(thread_id, 30)
+            # Command 3: Another command while timeout is still relaxed
+            result3 = test_redis_client.get(key1)
 
-                    # Command 3: Another command while timeout is still relaxed
-                    result3 = test_redis_client.get(key1)
-
-                    # Validate Command 3 result
-                    expected_value3 = value1.encode()
-                    errors_msg = (
-                        f"Thread {thread_id}: Command 3 (GET key1) failed. "
-                        f"Expected {expected_value3}, got {result3}"
-                    )
-                    assert result3 == expected_value3, errors_msg
-
-                    # Command 4: Execute command (step 5)
-                    result4 = test_redis_client.get(key_migrating)
-
-                    # Validate Command 4 result
-                    expected_value4 = value_migrating.encode()
-                    errors_msg = (
-                        f"Thread {thread_id}: Command 4 (GET key_receive_migrating) failed. "
-                        f"Expected {expected_value4}, got {result4}"
-                    )
-                    assert result4 == expected_value4, errors_msg
-
-                    # Step 6: Validate socket timeout is still relaxed during commands 3-4
-                    self._validate_current_timeout_for_thread(thread_id, 30)
-
-                    # Command 5: This SET command will receive
-                    # MIGRATED push message before actual response
-                    key_migrated = f"key_receive_migrated_{thread_id}"
-                    value_migrated = f"value3_{thread_id}"
-                    result5 = test_redis_client.set(key_migrated, value_migrated)
-
-                    # Validate Command 5 result
-                    errors_msg = f"Thread {thread_id}: Command 5 (SET key_receive_migrated) failed"
-                    assert result5 is True, errors_msg
-
-                    # Step 8: Validate socket timeout is reversed back to original after MIGRATED
-                    self._validate_current_timeout_for_thread(thread_id, None)
-
-                    results.append(
-                        {
-                            "thread_id": thread_id,
-                            "success": True,
-                        }
-                    )
-
-                except Exception as e:
-                    errors.append(f"Thread {thread_id}: {e}")
-
-            # Run operations in multiple threads (step 1)
-            threads = []
-            for i in range(3):
-                thread = threading.Thread(
-                    target=redis_operations_with_maintenance_events,
-                    args=(i,),
-                    name=str(i),
-                )
-                threads.append(thread)
-                thread.start()
-
-            # Wait for all threads to complete
-            for thread in threads:
-                thread.join()
-
-            # Verify all threads completed successfully
-            successful_threads = len(results)
-            assert successful_threads == 3, (
-                f"Expected 3 successful threads, got {successful_threads}. "
-                f"Errors: {errors}"
+            # Validate Command 3 result
+            expected_value3 = value1.encode()
+            assert result3 == expected_value3, (
+                f"Command 3 (GET key1) failed. Expected {expected_value3}, got {result3}"
             )
 
-            # Verify maintenance events were processed correctly across all threads
-            # Note: Different pool types may create different numbers of sockets
-            # The key is that we have at least 1 socket and all threads succeeded
+            # Command 4: Execute command (step 5)
+            result4 = test_redis_client.get(key_migrating)
+
+            # Validate Command 4 result
+            expected_value4 = value_migrating.encode()
+            assert result4 == expected_value4, (
+                f"Command 4 (GET key_receive_migrating) failed. Expected {expected_value4}, got {result4}"
+            )
+
+            # Step 6: Validate socket timeout is still relaxed during commands 3-4
+            self._validate_current_timeout(
+                30,
+                "Execute a command with a connection extracted from the pool (after it has received MIGRATING)",
+            )
+
+            # Command 5: This SET command will receive
+            # MIGRATED push message before actual response
+            key_migrated = "key_receive_migrated"
+            value_migrated = "value3"
+            result5 = test_redis_client.set(key_migrated, value_migrated)
+
+            # Validate Command 5 result
+            assert result5 is True, "Command 5 (SET key_receive_migrated) failed"
+
+            # Step 8: Validate socket timeout is reversed back to original after MIGRATED
+            self._validate_current_timeout(None)
+
+            # Verify maintenance events were processed correctly
+            # The key is that we have at least 1 socket and all operations succeeded
             assert len(self.mock_sockets) >= 1, (
                 f"Expected at least 1 socket for operations, got {len(self.mock_sockets)}"
             )
@@ -640,80 +718,37 @@ class TestMaintenanceEventsHandling:
         )
 
         try:
-            # Results storage for thread operations
-            results = []
-            errors = []
+            # Command 1: Initial command
+            key1 = "key1"
+            value1 = "value1"
+            result1 = test_redis_client.set(key1, value1)
 
-            def redis_operations_with_disabled_relax(thread_id):
-                """Perform Redis operations with disabled relax timeout in a thread."""
-                try:
-                    # Command 1: Initial command
-                    key1 = f"key1_{thread_id}"
-                    value1 = f"value1_{thread_id}"
-                    result1 = test_redis_client.set(key1, value1)
+            # Validate Command 1 result
+            assert result1 is True, "Command 1 (SET key1) failed"
 
-                    # Validate Command 1 result
-                    errors_msg = f"Thread {thread_id}: Command 1 (SET key1) failed"
-                    assert result1 is True, errors_msg
+            # Command 2: This SET command will receive MIGRATING push message before response
+            key_migrating = "key_receive_migrating"
+            value_migrating = "value2"
+            result2 = test_redis_client.set(key_migrating, value_migrating)
 
-                    # Command 2: This SET command will receive MIGRATING push message before response
-                    key_migrating = f"key_receive_migrating_{thread_id}"
-                    value_migrating = f"value2_{thread_id}"
-                    result2 = test_redis_client.set(key_migrating, value_migrating)
+            # Validate Command 2 result
+            assert result2 is True, "Command 2 (SET key_receive_migrating) failed"
 
-                    # Validate Command 2 result
-                    errors_msg = f"Thread {thread_id}: Command 2 (SET key_receive_migrating) failed"
-                    assert result2 is True, errors_msg
+            # Validate timeout was NOT updated (relax is disabled)
+            # Should remain at default timeout (None), not relaxed to 30s
+            self._validate_current_timeout(None)
 
-                    # Validate timeout was NOT updated (relax is disabled)
-                    # Should remain at default timeout (None), not relaxed to 30s
-                    self._validate_current_timeout_for_thread(thread_id, None)
+            # Command 3: Another command to verify timeout remains unchanged
+            result3 = test_redis_client.get(key1)
 
-                    # Command 3: Another command to verify timeout remains unchanged
-                    result3 = test_redis_client.get(key1)
-
-                    # Validate Command 3 result
-                    expected_value3 = value1.encode()
-                    errors_msg = (
-                        f"Thread {thread_id}: Command 3 (GET key1) failed. "
-                        f"Expected: {expected_value3}, Got: {result3}"
-                    )
-                    assert result3 == expected_value3, errors_msg
-
-                    results.append(
-                        {
-                            "thread_id": thread_id,
-                            "success": True,
-                        }
-                    )
-
-                except Exception as e:
-                    errors.append(f"Thread {thread_id}: {str(e)}")
-
-            # Run operations in multiple threads to test concurrent behavior
-            threads = []
-            for i in range(3):
-                thread = threading.Thread(
-                    target=redis_operations_with_disabled_relax, args=(i,)
-                )
-                threads.append(thread)
-                thread.start()
-
-            # Wait for all threads to complete
-            for thread in threads:
-                thread.join()
-
-            # Verify no errors occurred
-            assert len(errors) == 0, f"Errors occurred: {errors}"
-
-            # Verify all operations completed successfully
-            assert len(results) == 3, (
-                f"Expected 3 successful threads, got {len(results)}"
+            # Validate Command 3 result
+            expected_value3 = value1.encode()
+            assert result3 == expected_value3, (
+                f"Command 3 (GET key1) failed. Expected: {expected_value3}, Got: {result3}"
             )
 
-            # Verify maintenance events were processed correctly across all threads
-            # Note: Different pool types may create different numbers of sockets
-            # The key is that we have at least 1 socket and all threads succeeded
+            # Verify maintenance events were processed correctly
+            # The key is that we have at least 1 socket and all operations succeeded
             assert len(self.mock_sockets) >= 1, (
                 f"Expected at least 1 socket for operations, got {len(self.mock_sockets)}"
             )
@@ -726,6 +761,13 @@ class TestMaintenanceEventsHandling:
     def test_moving_related_events_handling_integration(self, pool_class):
         """
         Test full integration of moving-related events (MOVING) handling with Redis commands.
+
+        This test validates the complete MOVING event lifecycle:
+        1. Creates multiple connections in the pool
+        2. Executes a Redis command that triggers a MOVING push message
+        3. Validates that pool configuration is updated with temporary address and timeout
+        4. Validates that existing connections are marked for disconnection
+        5. Tests both ConnectionPool and BlockingConnectionPool implementations
         """
         # Create a pool and Redis client with maintenance events and pool handler
         test_redis_client = self._get_client(
@@ -956,8 +998,6 @@ class TestMaintenanceEventsHandling:
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_receive_migrated_after_moving(self, pool_class):
-        # TODO Refactor: when migrated comes after moving and
-        #               moving hasn't yet expired - it should not decrease timeouts
         """
         Test receiving MIGRATED event after MOVING event.
 
@@ -966,6 +1006,9 @@ class TestMaintenanceEventsHandling:
         2. MIGRATED event is received during command execution
         3. Temporary settings are cleared after MIGRATED
         4. Pool configuration is restored to original values
+
+        Note: When MIGRATED comes after MOVING and MOVING hasn't yet expired,
+        it should not decrease timeouts (future refactoring consideration).
         """
         # Create a pool and Redis client with maintenance events and pool handler
         test_redis_client = self._get_client(

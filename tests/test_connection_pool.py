@@ -33,6 +33,9 @@ class DummyConnection:
     def can_read(self):
         return False
 
+    def should_reconnect(self):
+        return False
+
 
 class TestConnectionPool:
     def get_pool(
