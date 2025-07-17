@@ -824,8 +824,8 @@ class AbstractConnection(ConnectionInterface):
 
     def update_tmp_settings(
         self,
-        tmp_host_address: Optional[str | object] = SENTINEL,
-        tmp_relax_timeout: Optional[float | object] = SENTINEL,
+        tmp_host_address: Optional[Union[str, object]] = SENTINEL,
+        tmp_relax_timeout: Optional[Union[float, object]] = SENTINEL,
     ):
         """
         The value of SENTINEL is used to indicate that the property should not be updated.
