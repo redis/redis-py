@@ -1662,7 +1662,7 @@ class Pipeline(Redis):
                 lambda error: self._disconnect_raise_on_watching(conn, error),
             )
         finally:
-            # in reset() the connection is diconnected before returned to the pool if
+            # in reset() the connection is disconnected before returned to the pool if
             # it is marked for reconnect.
             self.reset()
 
