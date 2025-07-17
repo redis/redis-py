@@ -20,10 +20,12 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
     """
     def __init__(self, config: MultiDbConfig):
         self._databases = config.databases()
-        self._health_checks = config.health_checks
+        self._health_checks = config.default_health_checks() if config.health_checks is None else config.health_checks
         self._health_check_interval = config.health_check_interval
-        self._failure_detectors = config.failure_detectors
-        self._failover_strategy = config.failover_strategy
+        self._failure_detectors = config.default_failure_detectors() \
+            if config.failure_detectors is None else config.failure_detectors
+        self._failover_strategy = config.default_failover_strategy() \
+            if config.failover_strategy is None else config.failover_strategy
         self._failover_strategy.set_databases(self._databases)
         self._auto_fallback_interval = config.auto_fallback_interval
         self._event_dispatcher = config.event_dispatcher

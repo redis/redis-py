@@ -32,12 +32,12 @@ class TestMultiDbConfig:
             assert db.circuit.grace_period == DEFAULT_GRACE_PERIOD
             i+=1
 
-        assert len(config.failure_detectors) == 1
-        assert isinstance(config.failure_detectors[0], CommandFailureDetector)
-        assert len(config.health_checks) == 1
-        assert isinstance(config.health_checks[0], EchoHealthCheck)
+        assert len(config.default_failure_detectors()) == 1
+        assert isinstance(config.default_failure_detectors()[0], CommandFailureDetector)
+        assert len(config.default_health_checks()) == 1
+        assert isinstance(config.default_health_checks()[0], EchoHealthCheck)
         assert config.health_check_interval == DEFAULT_HEALTH_CHECK_INTERVAL
-        assert isinstance(config.failover_strategy, WeightBasedFailoverStrategy)
+        assert isinstance(config.default_failover_strategy(), WeightBasedFailoverStrategy)
         assert config.auto_fallback_interval == DEFAULT_AUTO_FALLBACK_INTERVAL
 
     def test_overridden_config(self):
@@ -106,7 +106,7 @@ class TestDatabaseConfig:
 
         assert config.client_kwargs == {'host': 'host1', 'port': 'port1'}
         assert config.weight == 1.0
-        assert isinstance(config.circuit, PBCircuitBreakerAdapter)
+        assert isinstance(config.default_circuit_breaker(), PBCircuitBreakerAdapter)
 
     def test_overridden_config(self):
         mock_connection_pool = Mock(spec=ConnectionPool)
