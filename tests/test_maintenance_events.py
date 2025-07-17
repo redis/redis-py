@@ -1,5 +1,6 @@
 import threading
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, MagicMock
+import pytest
 
 from redis.maintenance_events import (
     MaintenanceEvent,
@@ -17,8 +18,6 @@ class TestMaintenanceEvent:
 
     def test_abstract_class_cannot_be_instantiated(self):
         """Test that MaintenanceEvent cannot be instantiated directly."""
-        import pytest
-
         with patch("time.monotonic", return_value=1000):
             with pytest.raises(TypeError):
                 MaintenanceEvent(id=1, ttl=10)  # type: ignore
@@ -347,6 +346,9 @@ class TestMaintenanceEventPoolHandler:
     def setup_method(self):
         """Set up test fixtures."""
         self.mock_pool = Mock()
+        self.mock_pool._lock = MagicMock()
+        self.mock_pool._lock.__enter__.return_value = None
+        self.mock_pool._lock.__exit__.return_value = None
         self.config = MaintenanceEventsConfig(
             enabled=True, proactive_reconnect=True, relax_timeout=20
         )

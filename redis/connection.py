@@ -2155,7 +2155,6 @@ class BlockingConnectionPool(ConnectionPool):
                 connection.disconnect()
             # Put the connection back into the pool.
             try:
-                print("Releasing connection - in the pool")
                 self.pool.put_nowait(connection)
             except Full:
                 # perhaps the pool has been reset() after a fork? regardless,

@@ -1102,3 +1102,129 @@ class TestMaintenanceEventsHandling:
         finally:
             if hasattr(test_redis_client.connection_pool, "disconnect"):
                 test_redis_client.connection_pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_overlapping_moving_events(self, pool_class):
+        """
+        Test handling of overlapping/duplicate MOVING events (e.g., two MOVING events before the first expires).
+        Ensures that the second MOVING event updates the pool and connections as expected, and that expiry/cleanup works.
+        """
+        test_redis_client = self._get_client(
+            pool_class, max_connections=5, setup_pool_handler=True
+        )
+        try:
+            # Create and release some connections
+            for _ in range(3):
+                conn = test_redis_client.connection_pool.get_connection()
+                test_redis_client.connection_pool.release(conn)
+
+            # Take 2 connections to be in use
+            in_use_connections = []
+            for _ in range(2):
+                conn = test_redis_client.connection_pool.get_connection()
+                in_use_connections.append(conn)
+
+            # Trigger first MOVING event
+            key_moving1 = "key_receive_moving_0"
+            value_moving1 = "value3_0"
+            result1 = test_redis_client.set(key_moving1, value_moving1)
+            assert result1 is True
+            self._validate_conn_kwargs(
+                test_redis_client.connection_pool,
+                MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                self.config.relax_timeout,
+            )
+            # Validate all connections reflect the first MOVING event
+            self._validate_in_use_connections_state(in_use_connections)
+            self._validate_free_connections_state(
+                test_redis_client.connection_pool,
+                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                self.config.relax_timeout,
+                should_be_connected_count=1,
+                connected_to_tmp_addres=True,
+            )
+
+            # Before the first MOVING expires, trigger a second MOVING event (simulate new address)
+            # Patch MockSocket to use a new address for the second event
+            new_address = "5.6.7.8:6380"
+            orig_after_moving = MockSocket.AFTER_MOVING_ADDRESS
+            MockSocket.AFTER_MOVING_ADDRESS = new_address
+            try:
+                key_moving2 = "key_receive_moving_1"
+                value_moving2 = "value3_1"
+                result2 = test_redis_client.set(key_moving2, value_moving2)
+                assert result2 is True
+                self._validate_conn_kwargs(
+                    test_redis_client.connection_pool,
+                    MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                    int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                    new_address.split(":")[0],
+                    self.config.relax_timeout,
+                )
+                # Validate all connections reflect the second MOVING event
+                self._validate_in_use_connections_state(in_use_connections)
+                self._validate_free_connections_state(
+                    test_redis_client.connection_pool,
+                    new_address.split(":")[0],
+                    self.config.relax_timeout,
+                    should_be_connected_count=1,
+                    connected_to_tmp_addres=True,
+                )
+            finally:
+                MockSocket.AFTER_MOVING_ADDRESS = orig_after_moving
+
+            # Wait for both MOVING timeouts to expire
+            sleep(MockSocket.MOVING_TIMEOUT + 0.5)
+            self._validate_conn_kwargs(
+                test_redis_client.connection_pool,
+                MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                None,
+                -1,
+            )
+        finally:
+            if hasattr(test_redis_client.connection_pool, "disconnect"):
+                test_redis_client.connection_pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_thread_safety_concurrent_event_handling(self, pool_class):
+        """
+        Test thread-safety under concurrent maintenance event handling.
+        Simulates multiple threads triggering MOVING events and performing operations concurrently.
+        """
+        import threading
+
+        test_redis_client = self._get_client(
+            pool_class, max_connections=5, setup_pool_handler=True
+        )
+        results = []
+        errors = []
+
+        def worker(idx):
+            try:
+                key = f"key_receive_moving_{idx}"
+                value = f"value3_{idx}"
+                result = test_redis_client.set(key, value)
+                results.append(result)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert all(results), f"Not all threads succeeded: {results}"
+        assert not errors, f"Errors occurred in threads: {errors}"
+        # After all threads, MOVING event should have been handled safely
+        self._validate_conn_kwargs(
+            test_redis_client.connection_pool,
+            MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+            MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+            self.config.relax_timeout,
+        )
+        if hasattr(test_redis_client.connection_pool, "disconnect"):
+            test_redis_client.connection_pool.disconnect()
