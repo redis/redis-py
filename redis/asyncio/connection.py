@@ -1037,6 +1037,7 @@ class ConnectionPool:
     By default, TCP connections are created unless ``connection_class``
     is specified. Use :py:class:`~redis.UnixDomainSocketConnection` for
     unix sockets.
+    :py:class:`~redis.SSLConnection` can be used for SSL enabled connections.
 
     Any additional keyword arguments are passed to the constructor of
     ``connection_class``.
