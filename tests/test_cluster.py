@@ -111,9 +111,13 @@ class NodeProxy:
     def __init__(self, addr, redis_addr):
         self.addr = addr
         self.redis_addr = redis_addr
-        self.server = socketserver.ThreadingTCPServer(self.addr, ProxyRequestHandler)
+        self.server = socketserver.ThreadingTCPServer(
+            self.addr, ProxyRequestHandler, bind_and_activate=False
+        )
         self.server.proxy = self
-        self.server.socket_reuse_address = True
+        self.server.allow_reuse_address = True
+        self.server.server_bind()
+        self.server.server_activate()
         self.thread = None
         self.n_connections = 0
 
