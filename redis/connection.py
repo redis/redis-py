@@ -431,7 +431,20 @@ class AbstractConnection(ConnectionInterface):
     def set_maintenance_event_pool_handler(
         self, maintenance_event_pool_handler: MaintenanceEventPoolHandler
     ):
-        self._parser.set_node_moving_push_handler(maintenance_event_pool_handler)
+        self._parser.set_node_moving_push_handler(
+            maintenance_event_pool_handler.handle_event
+        )
+
+        # Initialize maintenance event connection handler if it doesn't exist
+        if not hasattr(self, "_maintenance_event_connection_handler"):
+            self._maintenance_event_connection_handler = (
+                MaintenanceEventConnectionHandler(
+                    self, maintenance_event_pool_handler.config
+                )
+            )
+            self._parser.set_maintenance_push_handler(
+                self._maintenance_event_connection_handler.handle_event
+            )
 
     def connect(self):
         "Connects to the Redis server if not already connected"
@@ -802,10 +815,6 @@ class AbstractConnection(ConnectionInterface):
     def update_current_socket_timeout(self, relax_timeout: Optional[float] = None):
         if self._sock:
             timeout = relax_timeout if relax_timeout != -1 else self.socket_timeout
-            logging.debug(
-                f"***** Connection --> Updating timeout for {self._sock.getpeername()}"
-                f" to timeout {timeout}; relax_timeout: {relax_timeout}"
-            )
             self._sock.settimeout(timeout)
             self.update_parser_buffer_timeout(timeout)
 
@@ -858,10 +867,6 @@ class Connection(AbstractConnection):
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
         err = None
-        if self.tmp_host_address is not None:
-            logging.debug(
-                f"***** Connection --> Using tmp_host_address: {self.tmp_host_address}"
-            )
         host = self.tmp_host_address or self.host
 
         for res in socket.getaddrinfo(
@@ -882,14 +887,8 @@ class Connection(AbstractConnection):
 
                 # set the socket_connect_timeout before we connect
                 if self.tmp_relax_timeout != -1:
-                    logging.debug(
-                        f"***** Connection connect --> Using relax_timeout: {self.tmp_relax_timeout}"
-                    )
                     sock.settimeout(self.tmp_relax_timeout)
                 else:
-                    logging.debug(
-                        f"***** Connection connect --> Using default socket_connect_timeout: {self.socket_connect_timeout}"
-                    )
                     sock.settimeout(self.socket_connect_timeout)
 
                 # connect
@@ -897,16 +896,9 @@ class Connection(AbstractConnection):
 
                 # set the socket_timeout now that we're connected
                 if self.tmp_relax_timeout != -1:
-                    logging.debug(
-                        f"***** Connection --> Using relax_timeout: {self.tmp_relax_timeout}"
-                    )
                     sock.settimeout(self.tmp_relax_timeout)
                 else:
-                    logging.debug(
-                        f"***** Connection --> Using default socket_timeout: {self.socket_timeout}"
-                    )
                     sock.settimeout(self.socket_timeout)
-                logging.debug(f"Connected to {sock.getpeername()}")
                 return sock
 
             except OSError as _:
@@ -1606,14 +1598,10 @@ class ConnectionPool:
     ):
         with self._lock:
             for conn in self._available_connections:
-                conn.set_maintenance_events_pool_handler(
-                    maintenance_events_pool_handler
-                )
+                conn.set_maintenance_event_pool_handler(maintenance_events_pool_handler)
                 conn.maintenance_events_config = maintenance_events_pool_handler.config
             for conn in self._in_use_connections:
-                conn.set_maintenance_events_pool_handler(
-                    maintenance_events_pool_handler
-                )
+                conn.set_maintenance_event_pool_handler(maintenance_events_pool_handler)
                 conn.maintenance_events_config = maintenance_events_pool_handler.config
 
     def reset(self) -> None:
@@ -1755,9 +1743,6 @@ class ConnectionPool:
 
             if self.owns_connection(connection):
                 if connection.should_reconnect():
-                    logging.debug(
-                        f"***** Pool--> disconnecting in release {connection._sock.getpeername()}"
-                    )
                     connection.disconnect()
                 self._available_connections.append(connection)
                 self._event_dispatcher.dispatch(
@@ -1917,20 +1902,12 @@ class ConnectionPool:
                               If -1 is provided - the relax timeout is disabled.
         :param include_available_connections: Whether to include available connections in the update.
         """
-        logging.debug(f"***** Pool --> Updating timeouts. New value: {relax_timeout}")
-        start_time = time.time()
-
         for conn in self._in_use_connections:
             self._update_connection_timeout(conn, relax_timeout)
 
         if include_free_connections:
             for conn in self._available_connections:
                 self._update_connection_timeout(conn, relax_timeout)
-
-        execution_time_us = (time.time() - start_time) * 1000000
-        logging.error(
-            f"###### TIMEOUTS execution time: {execution_time_us:.0f} microseconds"
-        )
 
     def _update_connection_for_reconnect(
         self,
@@ -2021,6 +1998,8 @@ class BlockingConnectionPool(ConnectionPool):
     ):
         self.queue_class = queue_class
         self.timeout = timeout
+        self._in_maintenance = False
+        self._locked = False
         super().__init__(
             connection_class=connection_class,
             max_connections=max_connections,
@@ -2029,7 +2008,10 @@ class BlockingConnectionPool(ConnectionPool):
 
     def reset(self):
         # Create and fill up a thread safe queue with ``None`` values.
-        with self._lock:
+        try:
+            if self._in_maintenance:
+                self._lock.acquire()
+                self._locked = True
             self.pool = self.queue_class(self.max_connections)
             while True:
                 try:
@@ -2040,6 +2022,13 @@ class BlockingConnectionPool(ConnectionPool):
             # Keep a list of actual connection instances so that we can
             # disconnect them later.
             self._connections = []
+        finally:
+            if self._locked:
+                try:
+                    self._lock.release()
+                except Exception:
+                    pass
+                self._locked = False
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
@@ -2054,7 +2043,10 @@ class BlockingConnectionPool(ConnectionPool):
 
     def make_connection(self):
         "Make a fresh connection."
-        with self._lock:
+        try:
+            if self._in_maintenance:
+                self._lock.acquire()
+                self._locked = True
             if self.cache is not None:
                 connection = CacheProxyConnection(
                     self.connection_class(**self.connection_kwargs),
@@ -2066,6 +2058,13 @@ class BlockingConnectionPool(ConnectionPool):
 
                 self._connections.append(connection)
             return connection
+        finally:
+            if self._locked:
+                try:
+                    self._lock.release()
+                except Exception:
+                    pass
+                self._locked = False
 
     @deprecated_args(
         args_to_warn=["*"],
@@ -2090,7 +2089,10 @@ class BlockingConnectionPool(ConnectionPool):
         # Try and get a connection from the pool. If one isn't available within
         # self.timeout then raise a ``ConnectionError``.
         connection = None
-        with self._lock:
+        try:
+            if self._in_maintenance:
+                self._lock.acquire()
+                self._locked = True
             try:
                 connection = self.pool.get(block=True, timeout=self.timeout)
             except Empty:
@@ -2102,6 +2104,13 @@ class BlockingConnectionPool(ConnectionPool):
             # a new connection to add to the pool.
             if connection is None:
                 connection = self.make_connection()
+        finally:
+            if self._locked:
+                try:
+                    self._lock.release()
+                except Exception:
+                    pass
+                self._locked = False
 
         try:
             # ensure this connection is connected to Redis
@@ -2130,7 +2139,10 @@ class BlockingConnectionPool(ConnectionPool):
         # Make sure we haven't changed process.
         self._checkpid()
 
-        with self._lock:
+        try:
+            if self._in_maintenance:
+                self._lock.acquire()
+                self._locked = True
             if not self.owns_connection(connection):
                 # pool doesn't own this connection. do not add it back
                 # to the pool. instead add a None value which is a placeholder
@@ -2140,24 +2152,39 @@ class BlockingConnectionPool(ConnectionPool):
                 self.pool.put_nowait(None)
                 return
             if connection.should_reconnect():
-                logging.debug(
-                    f"***** Blocking Pool--> disconnecting in release {connection._sock.getpeername()}"
-                )
                 connection.disconnect()
             # Put the connection back into the pool.
             try:
+                print("Releasing connection - in the pool")
                 self.pool.put_nowait(connection)
             except Full:
                 # perhaps the pool has been reset() after a fork? regardless,
                 # we don't want this connection
                 pass
+        finally:
+            if self._locked:
+                try:
+                    self._lock.release()
+                except Exception:
+                    pass
+                self._locked = False
 
     def disconnect(self):
         "Disconnects all connections in the pool."
         self._checkpid()
-        with self._lock:
+        try:
+            if self._in_maintenance:
+                self._lock.acquire()
+                self._locked = True
             for connection in self._connections:
                 connection.disconnect()
+        finally:
+            if self._locked:
+                try:
+                    self._lock.release()
+                except Exception:
+                    pass
+                self._locked = False
 
     def update_active_connections_for_reconnect(
         self,
@@ -2236,3 +2263,7 @@ class BlockingConnectionPool(ConnectionPool):
                     conn.maintenance_events_config = (
                         maintenance_events_pool_handler.config
                     )
+
+    def set_in_maintenance(self, in_maintenance: bool):
+        """Set the maintenance mode for the connection pool."""
+        self._in_maintenance = in_maintenance

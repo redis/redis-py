@@ -2,12 +2,16 @@ import logging
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 from redis.typing import Number
 
 if TYPE_CHECKING:
-    from redis.connection import ConnectionInterface, ConnectionPool
+    from redis.connection import (
+        BlockingConnectionPool,
+        ConnectionInterface,
+        ConnectionPool,
+    )
 
 
 class MaintenanceEvent(ABC):
@@ -303,7 +307,11 @@ class MaintenanceEventsConfig:
 
 
 class MaintenanceEventPoolHandler:
-    def __init__(self, pool: "ConnectionPool", config: MaintenanceEventsConfig) -> None:
+    def __init__(
+        self,
+        pool: Union["ConnectionPool", "BlockingConnectionPool"],
+        config: MaintenanceEventsConfig,
+    ) -> None:
         self.pool = pool
         self.config = config
         self._processed_events = set()
@@ -334,18 +342,15 @@ class MaintenanceEventPoolHandler:
                 # nothing to do in the connection pool handling
                 # the event has already been handled or is expired
                 # just return
-                logging.debug("***** MOVING --> SKIPPED DONE")
                 return
-
-            logging.info(f"***** MOVING --> {event}")
-            logging.info(f"***** MOVING --> set: {self._processed_events}")
-            start_time = time.time()
 
             with self.pool._lock:
                 if (
                     self.config.proactive_reconnect
                     or self.config.is_relax_timeouts_enabled()
                 ):
+                    if getattr(self.pool, "set_in_maintenance", False):
+                        self.pool.set_in_maintenance(True)
                     # edit the config for new connections until the notification expires
                     self.pool.update_connection_kwargs_with_tmp_settings(
                         tmp_host_address=event.new_node_host,
@@ -371,21 +376,14 @@ class MaintenanceEventPoolHandler:
                             tmp_host_address=event.new_node_host,
                             tmp_relax_timeout=self.config.relax_timeout,
                         )
-                        execution_time_us = (time.time() - start_time_2) * 1000000
-                        logging.error(
-                            f"###### MOVING disconnects execution time: {execution_time_us:.0f} microseconds"
-                        )
+                        if getattr(self.pool, "set_in_maintenance", False):
+                            self.pool.set_in_maintenance(False)
 
             threading.Timer(event.ttl, self.handle_node_moved_event).start()
 
             self._processed_events.add(event)
-            execution_time_us = (time.time() - start_time) * 1000000
-            logging.error(
-                f"###### MOVING total execution time: {execution_time_us:.0f} microseconds"
-            )
 
     def handle_node_moved_event(self):
-        logging.debug("***** MOVING END--> Starting to revert the changes.")
         with self._lock:
             self.pool.update_connection_kwargs_with_tmp_settings(
                 tmp_host_address=None,
@@ -397,12 +395,10 @@ class MaintenanceEventPoolHandler:
                     self.pool.update_connections_current_timeout(
                         relax_timeout=-1, include_free_connections=True
                     )
-                    logging.debug("***** MOVING END--> TIMEOUTS RESET")
 
                 self.pool.update_connections_tmp_settings(
                     tmp_host_address=None, tmp_relax_timeout=-1
                 )
-                logging.debug("***** MOVING END--> TMP SETTINGS ADDRESS RESET")
 
 
 class MaintenanceEventConnectionHandler:
@@ -424,7 +420,6 @@ class MaintenanceEventConnectionHandler:
         if not self.config.is_relax_timeouts_enabled():
             return
 
-        logging.info(f"***** MIGRATING --> {notification}")
         # extend the timeout for all created connections
         self.connection.update_current_socket_timeout(self.config.relax_timeout)
         self.connection.update_tmp_settings(tmp_relax_timeout=self.config.relax_timeout)
@@ -433,7 +428,6 @@ class MaintenanceEventConnectionHandler:
         if not self.config.is_relax_timeouts_enabled():
             return
 
-        logging.info(f"***** MIGRATED --> {notification}")
         # Node migration completed - reset the connection
         # timeouts by providing -1 as the relax timeout
         self.connection.update_current_socket_timeout(-1)

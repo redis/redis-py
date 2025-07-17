@@ -668,9 +668,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         finally:
             if conn and conn.should_reconnect():
-                logging.debug(
-                    f"***** Redis reconnect before exit _execute_command --> notification for {conn._sock.getpeername()}"
-                )
                 self._close_connection(conn)
                 conn.connect()
             if self._single_connection_client:
@@ -963,9 +960,6 @@ class PubSub:
             lambda _: self._reconnect(conn),
         )
         if conn.should_reconnect():
-            logging.debug(
-                f"***** PubSub --> Reconnect on notification for {conn._sock.getpeername()}"
-            )
             self._reconnect(conn)
 
         return response
