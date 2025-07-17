@@ -9,6 +9,8 @@ from redis.commands.core import HashDataPersistOptions
 from tests.conftest import skip_if_server_version_lt
 from tests.test_asyncio.test_utils import redis_server_time
 
+pytestmark = pytest.mark.asyncio
+
 
 @skip_if_server_version_lt("7.3.240")
 async def test_hexpire_basic(r):
