@@ -6,6 +6,7 @@ from redis.connection import ConnectionInterface
 
 class DummyConnection(ConnectionInterface):
     """A dummy connection class for testing that doesn't actually connect to Redis"""
+
     def __init__(self, *args, **kwargs):
         self.connected = False
 
@@ -15,22 +16,42 @@ class DummyConnection(ConnectionInterface):
     def disconnect(self):
         self.connected = False
 
-    def register_connect_callback(self, callback): pass
-    def deregister_connect_callback(self, callback): pass
-    def set_parser(self, parser_class): pass
-    def get_protocol(self): return 2
-    def on_connect(self): pass
-    def check_health(self): return True
-    def send_packed_command(self, command, check_health=True): pass
-    def send_command(self, *args, **kwargs): pass
-    def can_read(self, timeout=0): return False
-    def read_response(self, disable_decoding=False, **kwargs): return "PONG"
+    def register_connect_callback(self, callback):
+        pass
+
+    def deregister_connect_callback(self, callback):
+        pass
+
+    def set_parser(self, parser_class):
+        pass
+
+    def get_protocol(self):
+        return 2
+
+    def on_connect(self):
+        pass
+
+    def check_health(self):
+        return True
+
+    def send_packed_command(self, command, check_health=True):
+        pass
+
+    def send_command(self, *args, **kwargs):
+        pass
+
+    def can_read(self, timeout=0):
+        return False
+
+    def read_response(self, disable_decoding=False, **kwargs):
+        return "PONG"
 
 
 @pytest.mark.onlynoncluster
 def test_max_connections_error_inheritance():
     """Test that MaxConnectionsError is a subclass of ConnectionError"""
     assert issubclass(redis.MaxConnectionsError, redis.ConnectionError)
+
 
 @pytest.mark.onlynoncluster
 def test_connection_pool_raises_max_connections_error():
@@ -43,7 +64,9 @@ def test_connection_pool_raises_max_connections_error():
         pool.get_connection()
 
 
-@pytest.mark.skipif(not hasattr(redis, "RedisCluster"), reason="RedisCluster not available")
+@pytest.mark.skipif(
+    not hasattr(redis, "RedisCluster"), reason="RedisCluster not available"
+)
 def test_cluster_handles_max_connections_error():
     """
     Test that RedisCluster doesn't reinitialize when MaxConnectionsError is raised
@@ -63,9 +86,11 @@ def test_cluster_handles_max_connections_error():
     connection = mock.MagicMock()
 
     # Patch the get_connection function in the cluster module
-    with mock.patch('redis.cluster.get_connection', return_value=connection):
+    with mock.patch("redis.cluster.get_connection", return_value=connection):
         # Test MaxConnectionsError
-        connection.send_command.side_effect = redis.MaxConnectionsError("Too many connections")
+        connection.send_command.side_effect = redis.MaxConnectionsError(
+            "Too many connections"
+        )
 
         # Call the method and check that the exception is raised
         with pytest.raises(redis.MaxConnectionsError):
