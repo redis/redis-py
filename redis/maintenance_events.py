@@ -371,7 +371,6 @@ class MaintenanceEventPoolHandler:
 
                         # take care for the inactive connections in the pool
                         # delete them and create new ones
-                        start_time_2 = time.time()
                         self.pool.disconnect_and_reconfigure_free_connections(
                             tmp_host_address=event.new_node_host,
                             tmp_relax_timeout=self.config.relax_timeout,
