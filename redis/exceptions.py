@@ -225,7 +225,7 @@ class MaxConnectionsError(ConnectionError):
     Raised when a connection pool has reached its max_connections limit.
     This indicates pool exhaustion rather than an actual connection failure.
     """
-    
+
     pass
 
 
