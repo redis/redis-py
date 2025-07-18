@@ -251,327 +251,50 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         PARAMETER DOCUMENTATION
         =======================
 
-        host (str, default="localhost"):
-            Main description: Redis server hostname or IP address.
-            Recommended values:
-                - Production: Use FQDN (e.g., "redis.example.com")
-                - Development: "localhost" or "127.0.0.1"
-                - Docker: Service name (e.g., "redis-service")
-            Related parameters: port, unix_socket_path (mutually exclusive)
-            Common issues:
-                - IPv6 resolution delays: Use "127.0.0.1" instead of "localhost"
-                - Firewall blocks: Ensure Redis port is accessible
-
-        port (int, default=6379):
-            Main description: Redis server port number.
-            Recommended values:
-                - Standard: 6379 (default Redis port)
-            Related parameters: host, ssl (for secure connections)
-            Common issues:
-                - Port conflicts: Check if port is already in use
-                - Firewall rules: Ensure port is open in security groups
-
-        db (int, default=0):
-            Main description: Redis logical database number.
-            Possible values: 0 - 15
-            Recommended values:
-                - Single app: 0 (default)
-                - Namespaced keys: Different db per namespace (0-15)
-                - Testing: Separate logical db for tests (e.g., 15)
-            Trade-offs:
-                - Multiple DBs: Logical separation but shared memory/CPU and configuration
-                - Single DB: Better performance but requires key prefixing for namespacing
-            Related parameters: None (isolated per database)
-            Use cases:
-                - Logical separation: db=0 (cache), db=1 (sessions), db=2 (temp data)
-                - Testing: Ex. use db=15 for test data isolation
-            Common issues:
-                - DB limit: Redis supports 16 DBs by default (configurable)
-                - Cross-DB operations: FLUSHALL affects ALL databases (https://redis.io/docs/latest/commands/flushall/)
-                - MOVE command: Moves keys between databases (https://redis.io/docs/latest/commands/move/)
-                - Cluster mode: Only db=0 supported in Redis Cluster
-                - NOT true multi-tenancy: All DBs share CPU, memory, ACL, and configuration
-            Security considerations:
-                - Redis databases provide logical separation only, NOT security isolation
-                - All databases share the same authentication and ACL rules
-                - Memory and CPU resources are shared across all databases
-                - Use separate Redis instances for true tenant isolation
-
-        password (Optional[str], default=None):
-            Main description: Redis server authentication password.
-            Recommended values:
-                - Production: Strong password (32+ chars, mixed case, symbols)
-                - Development: Simple password or None for local dev
-            Related parameters: username (for ACL), credential_provider
-            Security considerations:
-                - Never commit passwords to version control
-                - Use Redis ACL for fine-grained access control
-                - Rotate passwords regularly
-
-        socket_timeout (Optional[float], default=None):
-            Main description: Timeout for socket read/write operations in seconds.
-            Recommended values:
-                - Same datacenter: 0.3-0.5 seconds
-                - Same region: 0.5-1.5 seconds
-                - Cross-region (same continent): 1.0-2.0 seconds
-                - Intercontinental: 1.0-3.0 seconds
-                - Slow networks/unreliable connections: 3.0-10.0 seconds
-                - Real-time systems: 0.05-0.2 seconds
-                - None: No timeout (blocks indefinitely)
-            Trade-offs:
-                - Low timeout: Fast failure detection but may cause false timeouts
-                - High timeout: More resilient but slower error detection
-                - None: Never times out but may hang indefinitely
-            Related parameters: socket_connect_timeout, retry, health_check_interval, ssl
-            Use cases:
-                - API endpoints: 0.5-2.0s to prevent request hanging
-                - Slow/unreliable networks: 3-10s for poor connectivity
-                - Real-time trading: 0.05-0.2s for predictable latency
-            Common issues:
-                - Timeout too low: Legitimate operations fail
-                - No timeout: Application hangs on network issues
-                - Inconsistent timeouts: Different behavior across environments
-            Performance implications:
-                - Affects all Redis operations (GET, SET, etc.)
-                - Should be tuned based on network latency and operation complexity
-            Distance and latency considerations:
-                - Same datacenter: ~0.1-1ms RTT, Redis responds <1ms, use 0.1-0.5s timeout
-                - Same region (e.g., us-east-1a to us-east-1b): ~1-5ms RTT, use 0.2-1.0s timeout
-                - Cross-region same continent (e.g., us-east-1 to us-west-2): ~70-100ms RTT, use 0.5-2.0s timeout
-                - Cross-continent (e.g., us-east-1 to eu-west-1): ~100-150ms RTT, use 1.0-3.0s timeout
-                - Intercontinental (e.g., us-east-1 to ap-southeast-1): ~180-250ms RTT, use 1.5-4.0s timeout
-                - Note: Redis operations typically complete in <1ms; timeout accounts for network RTT + safety margin
-            TLS/SSL impact:
-                - TLS handshake adds 1-3 additional round trips during connection establishment
-                - Ongoing operations have minimal TLS overhead (~5-10% latency increase)
-                - Consider higher socket_timeout when using SSL, especially for distant Redis instances
-
-        socket_connect_timeout (Optional[float], default=None):
-            Main description: Timeout for initial socket connection in seconds.
-            Recommended values:
-                - Local Redis (no SSL): 1.0-3.0 seconds
-                - Local Redis (with SSL): 2.0-5.0 seconds
-                - Remote Redis (no SSL): 3.0-8.0 seconds
-                - Remote Redis (with SSL): 5.0-15.0 seconds
-                - Unreliable networks: 10.0-30.0 seconds
-                - None: Uses system default (usually 60-120s)
-            Trade-offs:
-                - Short timeout: Fast failure on connection issues
-                - Long timeout: More resilient to network delays
-                - None: May wait too long for failed connections
-            Related parameters: socket_timeout, ssl, retry
-            Common issues:
-                - Too short: Fails on slow networks or high load
-                - Too long: Slow startup and poor user experience in case of network issues
-                - Network partitions: Connection hangs without timeout
-            Performance implications:
-                - Only affects initial connection establishment
-                - Important for application startup time
-                - Should account for network latency and server load
-            SSL/TLS handshake considerations:
-                - TLS handshake requires 1-3 additional round trips (2-6 RTT total)
-                - Certificate validation adds processing time
-                - Distant Redis with SSL: add 2-3x the base RTT to timeout
-                - Example: 100ms RTT + SSL = ~300-500ms handshake time
-                - Consider TLS session resumption to reduce reconnection overhead
-
-        socket_keepalive (Optional[bool], default=None):
-            Main description: Enable TCP keepalive to detect dead connections.
-
-            What is TCP keepalive:
-                TCP keepalive is a mechanism where the operating system periodically sends
-                small probe packets on idle connections to verify the remote endpoint is
-                still reachable. If the remote side doesn't respond after several probes,
-                the connection is considered dead and closed. This happens at the TCP level,
-                below the application layer.
-
-            Why keepalive is needed:
-                Redis keeps connections open indefinitely by default (if the timeout config is set to 0), but network
-                issues, client crashes, or intermediate devices (firewalls, NAT, proxies) can
-                cause "half-open" connections where one side thinks the connection is alive
-                but the other side is unreachable. Without keepalive, these dead connections
-                can accumulate and consume resources until manually detected.
-
-            How keepalive improves reconnection:
-                When keepalive detects a dead connection, the socket is closed immediately.
-                This means reconnection attempts are much faster because redis-py won't waste
-                time retrying operations on a dead connection and waiting for timeouts.
-                Instead, it quickly establishes a new connection.
-
-            Recommended values:
-                - Production systems: True (recommended for all connections)
-                - Connection pools: True (essential - affects all pool connections)
-                - Development/testing: False or None (for simplicity and catching network issues early)
-            Trade-offs:
-                - True: Detects dead connections but uses more network resources (only during idle periods)
-                - False: Lower network overhead but may not detect connection failures
-            Related parameters: socket_keepalive_options, health_check_interval
-            Common issues:
-                - Firewall interference: Some firewalls drop keepalive packets
-                - Resource usage: Keepalive packets consume bandwidth
-                - Timing conflicts: May conflict with application-level health checks
-                - NAT timeouts: Helps prevent NAT table entry expiration
-
-        socket_keepalive_options (Optional[Mapping[int, Union[int, bytes]]], default=None):
-            Main description: Advanced TCP keepalive socket options.
-
-            Available options reference:
-                - Python socket module: import socket; help(socket) or dir(socket)
-                - Common constants: socket.TCP_KEEPIDLE, socket.TCP_KEEPINTVL, socket.TCP_KEEPCNT
-                - Platform-specific: socket.TCP_KEEPALIVE (macOS), socket.TCP_USER_TIMEOUT (Linux)
-                - Online reference: https://docs.python.org/3/library/socket.html#socket-families
-                - System documentation: man 7 tcp (Linux), man 4 tcp (BSD/macOS)
-
-            Recommended values:
-                - Linux: {socket.TCP_KEEPIDLE: 30, socket.TCP_KEEPINTVL: 10, socket.TCP_KEEPCNT: 3}
-                - macOS: {socket.TCP_KEEPALIVE: 30, socket.TCP_KEEPINTVL: 10, socket.TCP_KEEPCNT: 3}
-                - Windows: {socket.TCP_KEEPIDLE: 30, socket.TCP_KEEPINTVL: 10, socket.TCP_KEEPCNT: 3}
-                - Default: None (use system defaults)
-                - Custom: Tune based on network characteristics
-
-            How to discover available options:
-                ```python
-                import socket
-                # List all TCP-related constants
-                tcp_options = [attr for attr in dir(socket) if attr.startswith('TCP_')]
-                print(tcp_options)
-
-                # Check if specific option exists on your platform
-                if hasattr(socket, 'TCP_KEEPIDLE'):
-                    print(f"TCP_KEEPIDLE = {socket.TCP_KEEPIDLE}")
-
-                # Example configuration for 30-second keepalive
-                keepalive_opts = {socket.TCP_KEEPIDLE: 30, socket.TCP_KEEPINTVL: 10, socket.TCP_KEEPCNT: 3}
-                ```
-
-            Trade-offs:
-                - Custom options: Fine-tuned detection but platform-specific
-                - System defaults: Portable but may not be optimal
-            Related parameters: socket_keepalive (must be True)
-            Use cases:
-                - High-availability systems: Aggressive keepalive settings
-                - Satellite/slow networks: Longer intervals
-                - Container environments: Shorter intervals for faster detection
-            Common issues:
-                - Platform differences: Options vary between OS (use hasattr() to check)
-                - Invalid options: May cause socket creation to fail
-                - Firewall interference: Aggressive settings may be blocked
-                - Constant availability: Not all TCP options available on all platforms
-            Performance implications:
-                - More frequent keepalive packets increase network usage
-                - Faster dead connection detection improves reliability
-
-        connection_pool (Optional[ConnectionPool], default=None):
-            Main description: Pre-configured connection pool instance.
-            Recommended values:
-                - None: Auto-create pool with provided parameters
-                - Custom pool: For advanced configuration or sharing
-            Trade-offs:
-                - Auto-created: Simple but less control
-                - Custom pool: Full control but more complex setup
-            Related parameters: max_connections, single_connection_client
-            Performance implications:
-                - Connection reuse reduces establishment overhead
-                - Pool size affects concurrency and memory usage
-                - Proper sizing is critical for performance
-
-        unix_socket_path (Optional[str], default=None):
-            Main description: Path to Unix domain socket for local Redis connections.
-            Recommended values:
-                - Local Redis: "/var/run/redis/redis.sock"
-                - Docker: "/tmp/redis.sock" (with volume mount)
-                - None: Use TCP connection instead
-            Trade-offs:
-                - Unix socket: Lower latency, higher throughput for local connections
-                - TCP socket: Works across network but higher overhead
-            Related parameters: host, port (mutually exclusive with unix socket)
-            Use cases:
-                - Same-machine deployment: Optimal performance
-                - Container sidecar: Redis in same pod/container
-                - High-performance applications: Minimize network stack overhead
-            Common issues:
-                - File permissions: Socket file must be accessible
-                - Path doesn't exist: Redis must create socket at specified path
-                - Container volumes: Socket path must be mounted correctly
-            Performance implications:
-                - Better performance than TCP for local connections
-                - Lower CPU usage (no network stack processing)
-                - Not available for remote connections
-
-        encoding (str, default="utf-8"):
-            Main description: Character encoding for string values when encode/decode operations occur.
-            Recommended values:
-                - UTF-8: "utf-8" (recommended for most applications, universal Unicode support)
-                - ASCII: "ascii" (for ASCII-only data, fails on non-ASCII characters)
-                - Latin-1: "latin-1" (for binary data compatibility, maps bytes 0-255 directly)
-            Accepted values: Any encoding supported by Python's codecs module (120+ encodings)
-                - Common: utf-8, ascii, latin-1, iso-8859-1, cp1252, utf-16, utf-32
-                - Asian: big5, gb2312, gbk, shift_jis, euc_jp, euc_kr
-                - Cyrillic: koi8_r, koi8_u, cp1251
-                - See: https://docs.python.org/3/library/codecs.html#standard-encodings
-            Trade-offs:
-                - UTF-8: Universal Unicode support, backward compatible with ASCII
-                - ASCII: Strict 7-bit encoding, fails on characters > 127
-                - Latin-1: Handles any byte value, but not true Unicode beyond Latin characters
-            Related parameters: encoding_errors, decode_responses
-            Use cases:
-                - International apps: UTF-8 for full Unicode support
-                - Legacy systems: ASCII or Latin-1 for compatibility
-                - Binary data: Latin-1 to avoid encoding errors
-            Common issues:
-                - Encoding mismatches: Client and server using different encodings
-                - Binary data corruption: UTF-8 encoding binary values
-                - UnicodeEncodeError: ASCII/Latin-1 with non-compatible characters
-
-        encoding_errors (str, default="strict"):
-            Main description: How to handle encoding/decoding errors when they occur.
-            Recommended values:
-                - "strict": Raise exception on encoding errors (recommended for data integrity)
-                - "ignore": Skip invalid characters (data loss risk)
-                - "replace": Replace invalid chars with ? (encoding) or � (decoding)
-            Additional options:
-                - "backslashreplace": Use backslash escape sequences (\\uXXXX)
-                - "xmlcharrefreplace": Use XML character references (&#NNNN;) - encoding only
-                - "namereplace": Use Unicode names (\\N{...}) - encoding only
-            Accepted values: Any error handler supported by Python's codecs module
-                - See: https://docs.python.org/3/library/codecs.html#error-handlers
-            Trade-offs:
-                - strict: Data integrity guaranteed but may cause failures
-                - ignore: Continues processing but silently loses data
-                - replace: Preserves processing flow but corrupts data
-                - backslashreplace: Preserves information but changes data format
-            Related parameters: encoding, decode_responses
-            Use cases:
-                - Production: "strict" to catch encoding issues early
-                - Data migration: "ignore" or "replace" for dirty data
-                - Debugging: "strict" to identify encoding problems
-                - Logging: "backslashreplace" to preserve problematic characters
-            Common issues:
-                - Silent data corruption: Using "ignore" or "replace"
-                - Application crashes: "strict" with invalid data
-                - Inconsistent behavior: Different error handling across environments
-
-        decode_responses (bool, default=False):
-            Main description: Automatically decode byte responses to strings.
-            Recommended values:
-                - Web applications: True (convenient string handling)
-                - High-performance: False (avoid encoding overhead)
-                - Mixed data: False (handle encoding per operation)
-            Trade-offs:
-                - True: Convenient but adds overhead and may corrupt binary data
-                - False: More control but requires manual decoding
-            Related parameters: encoding, encoding_errors
-            Use cases:
-                - String-only data: True for convenience
-                - Binary data: False to preserve byte integrity
-                - Performance-critical: False to minimize overhead
-            Common issues:
-                - Binary data corruption: Decoding binary values as strings
-                - Type confusion: Expecting bytes but getting strings
-                - Performance degradation: Unnecessary encoding/decoding
-            Performance implications:
-                - Affects all read operations
-                - Memory usage increases for string objects
+        host (str, default="localhost"): Redis server hostname or IP address
+        port (int, default=6379): Redis server port number
+        db (int, default=0): Redis logical database number (0-15, shared CPU/memory/ACL)
+        password (Optional[str], default=None): Redis server authentication password
+        socket_timeout (Optional[float], default=None): Socket read/write timeout in seconds (None=no timeout)
+        socket_connect_timeout (Optional[float], default=None): Socket connection timeout in seconds (None=system default ~60-120s)
+        socket_keepalive (Optional[bool], default=None): Enable TCP keepalive for faster dead connection detection (None=disabled)
+        socket_keepalive_options (Optional[Mapping], default=None): Advanced TCP keepalive socket options (e.g. {socket.TCP_KEEPIDLE: 30})
+        connection_pool (Optional[ConnectionPool], default=None): Pre-configured connection pool instance
+        unix_socket_path (Optional[str], default=None): Path to Unix domain socket for local connections
+        encoding (str, default="utf-8"): Character encoding for string values (utf-8, ascii, latin-1, etc.)
+        encoding_errors (str, default="strict"): How to handle encoding/decoding errors (strict, ignore, replace)
+        decode_responses (bool, default=False): Automatically decode byte responses to strings
+        retry_on_timeout (bool, default=False): Deprecated - use retry_on_error list instead
+        retry (Retry, default=Retry(...)): Retry policy configuration for failed operations (defaults: 3 retries with jitter backoff on ConnectionError, TimeoutError, BusyLoadingError)
+        retry_on_error (Optional[List], default=None): Additional error types to retry beyond defaults
+        max_connections (Optional[int], default=None): Maximum connections in pool (None=unlimited)
+        health_check_interval (int, default=0): Seconds before connection health check on acquisition (0=disabled)
+        single_connection_client (bool, default=False): Use single connection instead of pool (not thread-safe)
+        ssl (bool, default=False): Enable SSL/TLS encryption for connections
+        ssl_keyfile (Optional[str], default=None): Path to client private key file for mutual TLS
+        ssl_certfile (Optional[str], default=None): Path to client certificate file for mutual TLS
+        ssl_cert_reqs (Optional[str], default=None): Certificate verification (required/optional/none, None=none)
+        ssl_ca_certs (Optional[str], default=None): Path to CA certificate bundle (None=system default)
+        ssl_ca_data (Optional[str], default=None): CA certificate data as string (alternative to ssl_ca_certs)
+        ssl_check_hostname (Optional[bool], default=None): Verify certificate hostname matches connection (None=auto based on ssl_cert_reqs)
+        ssl_password (Optional[Union[str, Callable]], default=None): Password for encrypted private key
+        ssl_disable_dev_warnings (bool, default=False): Disable SSL development warnings
+        ssl_ciphers (Optional[str], default=None): Allowed SSL cipher suites in OpenSSL format (None=system default)
+        ssl_crlfile (Optional[str], default=None): Path to Certificate Revocation List file
+        ssl_validate_ocsp (bool, default=False): Enable OCSP certificate validation
+        ssl_validate_ocsp_stapled (bool, default=False): Validate OCSP stapled responses
+        ssl_ocsp_context (Optional[object], default=None): Custom OCSP context for validation
+        ssl_ocsp_expected_cert (Optional[object], default=None): Expected certificate for OCSP validation
+        client_name (Optional[str], default=None): Client name identifier sent to Redis server (visible in CLIENT LIST)
+        lib_name (Optional[str], default="redis-py"): Library name identifier
+        lib_version (Optional[str], default=auto): Library version identifier (auto-detected)
+        username (Optional[str], default=None): Username for Redis ACL authentication (None=use default user)
+        redis_connect_func (Optional[Callable], default=None): Custom function called after connection (replaces default setup)
+        credential_provider (Optional[CredentialProvider], default=None): Dynamic credential provider (for rotating credentials)
+        protocol (Optional[int], default=2): Redis protocol version (2=RESP2, 3=RESP3, requires Redis 6.0+ for RESP3)
+        cache (Optional[CacheInterface], default=None): Client-side caching interface (RESP3 only, requires Redis 7.4+)
+        cache_config (Optional[CacheConfig], default=None): Client-side caching configuration (RESP3 only, requires Redis 7.4+)
+        event_dispatcher (Optional[EventDispatcher], default=None): Event dispatcher for lifecycle events (None=default with re-auth support)
 
         To specify a retry policy for specific errors, you have two options:
 
