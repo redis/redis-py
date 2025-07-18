@@ -1,10 +1,8 @@
-import socket
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import List, Union, Optional, Callable
+from typing import List, Optional, Callable
 
 from redis.client import Pipeline, PubSub, PubSubWorkerThread
-from redis.exceptions import ConnectionError, TimeoutError
 from redis.event import EventDispatcherInterface, OnCommandsFailEvent
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, AbstractDatabase, Databases
@@ -12,6 +10,7 @@ from redis.multidb.circuit import State as CBState
 from redis.multidb.event import RegisterCommandFailure, ActiveDatabaseChanged, ResubscribeOnActiveDatabaseChanged
 from redis.multidb.failover import FailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
+from redis.retry import Retry
 
 
 class CommandExecutor(ABC):
@@ -80,6 +79,12 @@ class CommandExecutor(ABC):
         """Sets auto-fallback interval."""
         pass
 
+    @property
+    @abstractmethod
+    def command_retry(self) -> Retry:
+        """Returns command retry object."""
+        pass
+
     @abstractmethod
     def execute_command(self, *args, **options):
         """Executes a command and returns the result."""
@@ -92,6 +97,7 @@ class DefaultCommandExecutor(CommandExecutor):
             self,
             failure_detectors: List[FailureDetector],
             databases: Databases,
+            command_retry: Retry,
             failover_strategy: FailoverStrategy,
             event_dispatcher: EventDispatcherInterface,
             auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
@@ -104,8 +110,12 @@ class DefaultCommandExecutor(CommandExecutor):
         :param auto_fallback_interval: Interval between fallback attempts. Fallback to a new database according to
         failover_strategy.
         """
+        for fd in failure_detectors:
+            fd.set_command_executor(command_executor=self)
+
         self._failure_detectors = failure_detectors
         self._databases = databases
+        self._command_retry = command_retry
         self._failover_strategy = failover_strategy
         self._event_dispatcher = event_dispatcher
         self._auto_fallback_interval = auto_fallback_interval
@@ -126,6 +136,10 @@ class DefaultCommandExecutor(CommandExecutor):
     @property
     def databases(self) -> Databases:
         return self._databases
+
+    @property
+    def command_retry(self) -> Retry:
+        return self._command_retry
 
     @property
     def active_database(self) -> Optional[AbstractDatabase]:
@@ -163,8 +177,8 @@ class DefaultCommandExecutor(CommandExecutor):
 
     def execute_command(self, *args, **options):
         """Executes a command and returns the result."""
-        def callback(database):
-            return database.client.execute_command(*args, **options)
+        def callback():
+            return self._active_database.client.execute_command(*args, **options)
 
         return self._execute_with_failure_detection(callback, args)
 
@@ -172,8 +186,8 @@ class DefaultCommandExecutor(CommandExecutor):
         """
         Executes a stack of commands in pipeline.
         """
-        def callback(database):
-            with database.client.pipeline() as pipe:
+        def callback():
+            with self._active_database.client.pipeline() as pipe:
                 for command, options in command_stack:
                     pipe.execute_command(*command, **options)
 
@@ -185,15 +199,15 @@ class DefaultCommandExecutor(CommandExecutor):
         """
         Executes a transaction block wrapped in callback.
         """
-        def callback(database):
-            return database.client.transaction(transaction, *watches, **options)
+        def callback():
+            return self._active_database.client.transaction(transaction, *watches, **options)
 
         return self._execute_with_failure_detection(callback)
 
     def pubsub(self, **kwargs):
-        def callback(database):
+        def callback():
             if self._active_pubsub is None:
-                self._active_pubsub = database.client.pubsub(**kwargs)
+                self._active_pubsub = self._active_database.client.pubsub(**kwargs)
                 self._active_pubsub_kwargs = kwargs
             return None
 
@@ -203,7 +217,7 @@ class DefaultCommandExecutor(CommandExecutor):
         """
         Executes given method on active pub/sub.
         """
-        def callback(database):
+        def callback():
             method = getattr(self.active_pubsub, method_name)
             return method(*args, **kwargs)
 
@@ -216,7 +230,7 @@ class DefaultCommandExecutor(CommandExecutor):
         daemon: bool = False,
         exception_handler: Optional[Callable] = None,
     ) -> "PubSubWorkerThread":
-        def callback(database):
+        def callback():
             return self._active_pubsub.run_in_thread(
                 sleep_time, daemon=daemon, exception_handler=exception_handler, pubsub=pubsub
             )
@@ -226,6 +240,23 @@ class DefaultCommandExecutor(CommandExecutor):
     def _execute_with_failure_detection(self, callback: Callable, cmds: tuple = ()):
         """
         Execute a commands execution callback with failure detection.
+        """
+        def wrapper():
+            # On each retry we need to check active database as it might change.
+            self._check_active_database()
+            return callback()
+
+        return self._command_retry.call_with_retry(
+            lambda: wrapper(),
+            lambda error: self._on_command_fail(error, *cmds),
+        )
+
+    def _on_command_fail(self, error, *args):
+        self._event_dispatcher.dispatch(OnCommandsFailEvent(args, error))
+
+    def _check_active_database(self):
+        """
+        Checks if active database needs to be updated.
         """
         if (
                 self._active_database is None
@@ -238,15 +269,6 @@ class DefaultCommandExecutor(CommandExecutor):
             self.active_database = self._failover_strategy.database
             self._schedule_next_fallback()
 
-        try:
-            return callback(self._active_database)
-        except (ConnectionError, TimeoutError, socket.timeout) as e:
-            # Register command failure
-            self._event_dispatcher.dispatch(OnCommandsFailEvent(cmds, e, self.active_database.client))
-
-            # Retry until failure detector will trigger opening of circuit
-            return self._execute_with_failure_detection(callback, cmds)
-
     def _schedule_next_fallback(self) -> None:
         if self._auto_fallback_interval == DEFAULT_AUTO_FALLBACK_INTERVAL:
             return
@@ -257,7 +279,7 @@ class DefaultCommandExecutor(CommandExecutor):
         """
         Registers necessary listeners.
         """
-        failure_listener = RegisterCommandFailure(self._failure_detectors, self._databases)
+        failure_listener = RegisterCommandFailure(self._failure_detectors)
         resubscribe_listener = ResubscribeOnActiveDatabaseChanged()
         self._event_dispatcher.register_listeners({
             OnCommandsFailEvent: [failure_listener],
