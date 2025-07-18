@@ -43,10 +43,13 @@ class EchoHealthCheck(AbstractHealthCheck):
             retry=retry,
         )
     def check_health(self, database) -> bool:
-        return self._retry.call_with_retry(
-            lambda: self._returns_echoed_message(database),
-            lambda _: self._dummy_fail()
-        )
+        try:
+            return self._retry.call_with_retry(
+                lambda: self._returns_echoed_message(database),
+                lambda _: self._dummy_fail()
+            )
+        except Exception:
+            return False
 
     def _returns_echoed_message(self, database) -> bool:
         expected_message = ["healthcheck", b"healthcheck"]

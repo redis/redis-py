@@ -142,7 +142,6 @@ class TestDefaultCommandExecutor:
         command_fail_event = OnCommandFailEvent(
             command=('SET', 'key', 'value'),
             exception=Exception(),
-            client=mock_db1.client
         )
 
         executor = DefaultCommandExecutor(
@@ -152,6 +151,7 @@ class TestDefaultCommandExecutor:
             event_dispatcher=ed,
             auto_fallback_interval=0.1,
         )
+        fd.set_command_executor(command_executor=executor)
 
         assert executor.execute_command('SET', 'key', 'value') == 'OK1'
 
@@ -164,7 +164,6 @@ class TestDefaultCommandExecutor:
         command_fail_event = OnCommandFailEvent(
             command=('SET', 'key', 'value'),
             exception=Exception(),
-            client=mock_db2.client
         )
 
         for i in range(threshold):

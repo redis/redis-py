@@ -36,6 +36,10 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
             event_dispatcher=self._event_dispatcher,
             auto_fallback_interval=self._auto_fallback_interval,
         )
+
+        for fd in self._failure_detectors:
+            fd.set_command_executor(command_executor=self._command_executor)
+
         self._initialized = False
         self._hc_lock = threading.RLock()
         self._bg_scheduler = BackgroundScheduler()

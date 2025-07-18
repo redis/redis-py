@@ -1,9 +1,7 @@
-import socket
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import List, Union, Optional
 
-from redis.exceptions import ConnectionError, TimeoutError
 from redis.event import EventDispatcherInterface, OnCommandFailEvent
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, AbstractDatabase, Databases
@@ -139,14 +137,7 @@ class DefaultCommandExecutor(CommandExecutor):
             self._active_database = self._failover_strategy.database
             self._schedule_next_fallback()
 
-        try:
-            return self._active_database.client.execute_command(*args, **options)
-        except (ConnectionError, TimeoutError, socket.timeout) as e:
-            # Register command failure
-            self._event_dispatcher.dispatch(OnCommandFailEvent(args, e, self.active_database.client))
-
-            # Retry until failure detector will trigger opening of circuit
-            return self.execute_command(*args, **options)
+        return self._active_database.client.execute_command(*args, **options)
 
     def _schedule_next_fallback(self) -> None:
         if self._auto_fallback_interval == DEFAULT_AUTO_FALLBACK_INTERVAL:
@@ -158,7 +149,7 @@ class DefaultCommandExecutor(CommandExecutor):
         """
         Registers command failure event listener.
         """
-        event_listener = RegisterCommandFailure(self._failure_detectors, self._databases)
+        event_listener = RegisterCommandFailure(self._failure_detectors)
         self._event_dispatcher.register_listeners({
             OnCommandFailEvent: [event_listener],
         })

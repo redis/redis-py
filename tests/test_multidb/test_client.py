@@ -458,7 +458,6 @@ class TestMultiDbClient:
             command_fail_event = OnCommandFailEvent(
                 command=('SET', 'key', 'value'),
                 exception=Exception(),
-                client=mock_db1.client
             )
 
             for hc in mock_multi_db_config.health_checks:
