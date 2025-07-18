@@ -9,6 +9,7 @@ import pytest
 import redis
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
+from redis.maintenance_events import MaintenanceState
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
@@ -53,10 +54,15 @@ class TestConnectionPool:
         return pool
 
     def test_connection_creation(self):
-        connection_kwargs = {"foo": "bar", "biz": "baz"}
+        connection_kwargs = {
+            "foo": "bar",
+            "biz": "baz",
+            "maintenance_state": MaintenanceState.NONE,
+        }
         pool = self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=DummyConnection
         )
+
         connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
@@ -152,7 +158,9 @@ class TestBlockingConnectionPool:
             "host": master_host[0],
             "port": master_host[1],
         }
+
         pool = self.get_pool(connection_kwargs=connection_kwargs)
+        connection_kwargs["maintenance_state"] = MaintenanceState.NONE
         connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs

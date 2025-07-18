@@ -42,6 +42,7 @@ from .maintenance_events import (
     MaintenanceEventConnectionHandler,
     MaintenanceEventPoolHandler,
     MaintenanceEventsConfig,
+    MaintenanceState,
 )
 from .retry import Retry
 from .utils import (
@@ -285,6 +286,7 @@ class AbstractConnection(ConnectionInterface):
         maintenance_events_config: Optional[MaintenanceEventsConfig] = None,
         tmp_host_address: Optional[str] = None,
         tmp_relax_timeout: Optional[float] = -1,
+        maintenance_state: "MaintenanceState" = MaintenanceState.NONE,
     ):
         """
         Initialize a new Connection.
@@ -374,6 +376,7 @@ class AbstractConnection(ConnectionInterface):
         self._should_reconnect = False
         self.tmp_host_address = tmp_host_address
         self.tmp_relax_timeout = tmp_relax_timeout
+        self.maintenance_state = maintenance_state
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -834,6 +837,9 @@ class AbstractConnection(ConnectionInterface):
             self.tmp_host_address = tmp_host_address
         if tmp_relax_timeout is not SENTINEL:
             self.tmp_relax_timeout = tmp_relax_timeout
+
+    def set_maintenance_state(self, state: "MaintenanceState"):
+        self.maintenance_state = state
 
 
 class Connection(AbstractConnection):
@@ -1724,11 +1730,18 @@ class ConnectionPool:
             raise MaxConnectionsError("Too many connections")
         self._created_connections += 1
 
+        # Pass current maintenance_state to new connections
+        maintenance_state = self.connection_kwargs.get(
+            "maintenance_state", MaintenanceState.NONE
+        )
+        kwargs = dict(self.connection_kwargs)
+        kwargs["maintenance_state"] = maintenance_state
+
         if self.cache is not None:
             return CacheProxyConnection(
-                self.connection_class(**self.connection_kwargs), self.cache, self._lock
+                self.connection_class(**kwargs), self.cache, self._lock
             )
-        return self.connection_class(**self.connection_kwargs)
+        return self.connection_class(**kwargs)
 
     def release(self, connection: "Connection") -> None:
         "Releases the connection back to the pool"
@@ -1953,6 +1966,16 @@ class ConnectionPool:
         """
         pass
 
+    def set_maintenance_state_for_all(self, state: "MaintenanceState"):
+        with self._lock:
+            for conn in self._available_connections:
+                conn.set_maintenance_state(state)
+            for conn in self._in_use_connections:
+                conn.set_maintenance_state(state)
+
+    def set_maintenance_state_in_kwargs(self, state: "MaintenanceState"):
+        self.connection_kwargs["maintenance_state"] = state
+
 
 class BlockingConnectionPool(ConnectionPool):
     """
@@ -2047,15 +2070,20 @@ class BlockingConnectionPool(ConnectionPool):
             if self._in_maintenance:
                 self._lock.acquire()
                 self._locked = True
+            # Pass current maintenance_state to new connections
+            maintenance_state = self.connection_kwargs.get(
+                "maintenance_state", MaintenanceState.NONE
+            )
+            kwargs = dict(self.connection_kwargs)
+            kwargs["maintenance_state"] = maintenance_state
             if self.cache is not None:
                 connection = CacheProxyConnection(
-                    self.connection_class(**self.connection_kwargs),
+                    self.connection_class(**kwargs),
                     self.cache,
                     self._lock,
                 )
             else:
-                connection = self.connection_class(**self.connection_kwargs)
-
+                connection = self.connection_class(**kwargs)
                 self._connections.append(connection)
             return connection
         finally:
@@ -2266,3 +2294,12 @@ class BlockingConnectionPool(ConnectionPool):
     def set_in_maintenance(self, in_maintenance: bool):
         """Set the maintenance mode for the connection pool."""
         self._in_maintenance = in_maintenance
+
+    def set_maintenance_state_for_all(self, state: "MaintenanceState"):
+        with self._lock:
+            for conn in getattr(self, "_connections", []):
+                if conn:
+                    conn.set_maintenance_state(state)
+
+    def set_maintenance_state_in_kwargs(self, state: "MaintenanceState"):
+        self.connection_kwargs["maintenance_state"] = state

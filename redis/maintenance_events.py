@@ -1,3 +1,4 @@
+import enum
 import logging
 import threading
 import time
@@ -5,6 +6,13 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Optional, Union
 
 from redis.typing import Number
+
+
+class MaintenanceState(enum.Enum):
+    NONE = "none"
+    MOVING = "moving"
+    MIGRATING = "migrating"
+
 
 if TYPE_CHECKING:
     from redis.connection import (
@@ -351,6 +359,9 @@ class MaintenanceEventPoolHandler:
                 ):
                     if getattr(self.pool, "set_in_maintenance", False):
                         self.pool.set_in_maintenance(True)
+                    # Set state to MOVING for all connections and in kwargs (inside pool lock, after set_in_maintenance)
+                    self.pool.set_maintenance_state_for_all(MaintenanceState.MOVING)
+                    self.pool.set_maintenance_state_in_kwargs(MaintenanceState.MOVING)
                     # edit the config for new connections until the notification expires
                     self.pool.update_connection_kwargs_with_tmp_settings(
                         tmp_host_address=event.new_node_host,
@@ -368,7 +379,6 @@ class MaintenanceEventPoolHandler:
                             tmp_host_address=event.new_node_host,
                             tmp_relax_timeout=self.config.relax_timeout,
                         )
-
                         # take care for the inactive connections in the pool
                         # delete them and create new ones
                         self.pool.disconnect_and_reconfigure_free_connections(
@@ -388,16 +398,19 @@ class MaintenanceEventPoolHandler:
                 tmp_host_address=None,
                 tmp_relax_timeout=-1,
             )
+            # Clear state to NONE in kwargs immediately after updating tmp kwargs
+            self.pool.set_maintenance_state_in_kwargs(MaintenanceState.NONE)
             with self.pool._lock:
                 if self.config.is_relax_timeouts_enabled():
                     # reset the timeout for existing connections
                     self.pool.update_connections_current_timeout(
                         relax_timeout=-1, include_free_connections=True
                     )
-
                 self.pool.update_connections_tmp_settings(
                     tmp_host_address=None, tmp_relax_timeout=-1
                 )
+                # Clear state to NONE for all connections
+                self.pool.set_maintenance_state_for_all(MaintenanceState.NONE)
 
 
 class MaintenanceEventConnectionHandler:
@@ -416,17 +429,24 @@ class MaintenanceEventConnectionHandler:
             logging.error(f"Unhandled event type: {event}")
 
     def handle_migrating_event(self, notification: NodeMigratingEvent):
-        if not self.config.is_relax_timeouts_enabled():
+        if (
+            self.connection.maintenance_state == MaintenanceState.MOVING
+            or not self.config.is_relax_timeouts_enabled()
+        ):
             return
-
+        self.connection.set_maintenance_state(MaintenanceState.MIGRATING)
         # extend the timeout for all created connections
         self.connection.update_current_socket_timeout(self.config.relax_timeout)
         self.connection.update_tmp_settings(tmp_relax_timeout=self.config.relax_timeout)
 
     def handle_migration_completed_event(self, notification: "NodeMigratedEvent"):
-        if not self.config.is_relax_timeouts_enabled():
+        # Only reset timeouts if state is not MOVING and relax timeouts are enabled
+        if (
+            self.connection.maintenance_state == MaintenanceState.MOVING
+            or not self.config.is_relax_timeouts_enabled()
+        ):
             return
-
+        self.connection.set_maintenance_state(MaintenanceState.NONE)
         # Node migration completed - reset the connection
         # timeouts by providing -1 as the relax timeout
         self.connection.update_current_socket_timeout(-1)
