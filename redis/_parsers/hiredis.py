@@ -152,6 +152,7 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
                     disable_decoding=disable_decoding,
                     push_request=push_request,
                 )
+            return response
 
         if disable_decoding:
             response = self._reader.gets(False)

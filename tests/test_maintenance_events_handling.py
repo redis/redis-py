@@ -6,11 +6,18 @@ import pytest
 from time import sleep
 
 from redis import Redis
-from redis.connection import AbstractConnection, ConnectionPool, BlockingConnectionPool
+from redis.connection import (
+    AbstractConnection,
+    ConnectionPool,
+    BlockingConnectionPool,
+    MaintenanceState,
+)
 from redis.maintenance_events import (
     MaintenanceEventsConfig,
     NodeMigratingEvent,
     MaintenanceEventPoolHandler,
+    NodeMovingEvent,
+    NodeMigratedEvent,
 )
 
 
@@ -326,24 +333,25 @@ class TestMaintenanceEventsHandling:
         assert connected_sockets_count == expected_count
 
     def _validate_in_use_connections_state(
-        self, in_use_connections: List[AbstractConnection]
+        self,
+        in_use_connections: List[AbstractConnection],
+        expected_state=MaintenanceState.NONE,
+        expected_tmp_host_address=None,
+        expected_tmp_relax_timeout=-1,
+        expected_current_socket_timeout=None,
+        expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
     ):
         """Helper method to validate state of in-use connections."""
         # validate in use connections are still working with set flag for reconnect
         # and timeout is updated
         for connection in in_use_connections:
             assert connection._should_reconnect is True
-            assert (
-                connection.tmp_host_address
-                == MockSocket.AFTER_MOVING_ADDRESS.split(":")[0]
-            )
-            assert connection.tmp_relax_timeout == self.config.relax_timeout
-            assert connection._sock.gettimeout() == self.config.relax_timeout
+            assert connection.tmp_host_address == expected_tmp_host_address
+            assert connection.tmp_relax_timeout == expected_tmp_relax_timeout
+            assert connection._sock.gettimeout() == expected_current_socket_timeout
             assert connection._sock.connected is True
-            assert (
-                connection._sock.getpeername()[0]
-                == MockSocket.DEFAULT_ADDRESS.split(":")[0]
-            )
+            assert connection.maintenance_state == expected_state
+            assert connection._sock.getpeername()[0] == expected_current_peername
 
     def _validate_free_connections_state(
         self,
@@ -352,39 +360,30 @@ class TestMaintenanceEventsHandling:
         relax_timeout,
         should_be_connected_count,
         connected_to_tmp_addres=False,
+        expected_state=MaintenanceState.MOVING,
     ):
         """Helper method to validate state of free/available connections."""
         if isinstance(pool, BlockingConnectionPool):
-            # BlockingConnectionPool uses _connections list where created connections are stored
-            # but we need to get the ones in the queue - these are the free ones
-            # the uninitialized connections are filtered out
             free_connections = [conn for conn in pool.pool.queue if conn is not None]
         elif isinstance(pool, ConnectionPool):
-            # Regular ConnectionPool uses _available_connections for free connections
             free_connections = pool._available_connections
         else:
             raise ValueError(f"Unsupported pool type: {type(pool)}")
 
         connected_count = 0
-        # Validate fields that are validated in the validation of the active connections
         for connection in free_connections:
-            # Validate the same fields as in _validate_in_use_connections_state
             assert connection._should_reconnect is False
             assert connection.tmp_host_address == tmp_host_address
             assert connection.tmp_relax_timeout == relax_timeout
+            assert connection.maintenance_state == expected_state
             if connection._sock is not None:
-                connected_count += 1
-
+                assert connection._sock.connected is True
                 if connected_to_tmp_addres:
                     assert (
                         connection._sock.getpeername()[0]
                         == MockSocket.AFTER_MOVING_ADDRESS.split(":")[0]
                     )
-                else:
-                    assert (
-                        connection._sock.getpeername()[0]
-                        == MockSocket.DEFAULT_ADDRESS.split(":")[0]
-                    )
+                connected_count += 1
         assert connected_count == should_be_connected_count
 
     def _validate_all_timeouts(self, expected_timeout):
@@ -804,7 +803,6 @@ class TestMaintenanceEventsHandling:
             assert result2 is True, "Command 2 (SET key_receive_moving) failed"
 
             # Validate pool and connections settings were updated according to MOVING event
-            # handling expectations
             self._validate_conn_kwargs(
                 test_redis_client.connection_pool,
                 MockSocket.DEFAULT_ADDRESS.split(":")[0],
@@ -812,25 +810,28 @@ class TestMaintenanceEventsHandling:
                 MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
                 self.config.relax_timeout,
             )
-            # 5 disconnects has happened, 1 of them is with reconnect
             self._validate_disconnected(5)
-            # 5 in use connected + 1 after reconnect
             self._validate_connected(6)
-            self._validate_in_use_connections_state(in_use_connections)
-            # Validate there is 1 free connection that is connected
-            # the one that has handled the MOVING should reconnect after parsing the response
+            self._validate_in_use_connections_state(
+                in_use_connections,
+                expected_state=MaintenanceState.MOVING,
+                expected_tmp_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_tmp_relax_timeout=self.config.relax_timeout,
+                expected_current_socket_timeout=self.config.relax_timeout,
+                expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[
+                    0
+                ],  # the in use connections reconnect when they complete their current task
+            )
             self._validate_free_connections_state(
                 test_redis_client.connection_pool,
                 MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
                 self.config.relax_timeout,
                 should_be_connected_count=1,
                 connected_to_tmp_addres=True,
+                expected_state=MaintenanceState.MOVING,
             )
-
             # Wait for MOVING timeout to expire and the moving completed handler to run
-            print("Waiting for MOVING timeout to expire...")
             sleep(MockSocket.MOVING_TIMEOUT + 0.5)
-
             self._validate_all_timeouts(None)
             self._validate_conn_kwargs(
                 test_redis_client.connection_pool,
@@ -845,8 +846,8 @@ class TestMaintenanceEventsHandling:
                 -1,
                 should_be_connected_count=1,
                 connected_to_tmp_addres=True,
+                expected_state=MaintenanceState.NONE,
             )
-
         finally:
             if hasattr(test_redis_client.connection_pool, "disconnect"):
                 test_redis_client.connection_pool.disconnect()
@@ -972,7 +973,6 @@ class TestMaintenanceEventsHandling:
             assert result is True, "SET key_receive_moving command failed"
 
             # Wait for MOVING timeout to expire
-            print("Waiting for MOVING timeout to expire...")
             sleep(MockSocket.MOVING_TIMEOUT + 0.5)
 
             # Now get several new connections after expiration
@@ -1137,7 +1137,14 @@ class TestMaintenanceEventsHandling:
                 self.config.relax_timeout,
             )
             # Validate all connections reflect the first MOVING event
-            self._validate_in_use_connections_state(in_use_connections)
+            self._validate_in_use_connections_state(
+                in_use_connections,
+                expected_state=MaintenanceState.MOVING,
+                expected_tmp_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_tmp_relax_timeout=self.config.relax_timeout,
+                expected_current_socket_timeout=self.config.relax_timeout,
+                expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            )
             self._validate_free_connections_state(
                 test_redis_client.connection_pool,
                 MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
@@ -1164,7 +1171,14 @@ class TestMaintenanceEventsHandling:
                     self.config.relax_timeout,
                 )
                 # Validate all connections reflect the second MOVING event
-                self._validate_in_use_connections_state(in_use_connections)
+                self._validate_in_use_connections_state(
+                    in_use_connections,
+                    expected_state=MaintenanceState.MOVING,
+                    expected_tmp_host_address=new_address.split(":")[0],
+                    expected_tmp_relax_timeout=self.config.relax_timeout,
+                    expected_current_socket_timeout=self.config.relax_timeout,
+                    expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                )
                 self._validate_free_connections_state(
                     test_redis_client.connection_pool,
                     new_address.split(":")[0],
@@ -1228,3 +1242,110 @@ class TestMaintenanceEventsHandling:
         )
         if hasattr(test_redis_client.connection_pool, "disconnect"):
             test_redis_client.connection_pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_moving_migrating_migrated_moved_state_transitions(self, pool_class):
+        """
+        Test moving configs are not lost if the per connection events get picked up after moving is handled.
+        MOVING → MIGRATING → MIGRATED → MOVED
+        Checks the state after each event for all connections and for new connections created during each state.
+        """
+        # Setup
+        test_redis_client = self._get_client(
+            pool_class, max_connections=5, setup_pool_handler=True
+        )
+        pool = test_redis_client.connection_pool
+        pool_handler = pool.connection_kwargs["maintenance_events_pool_handler"]
+
+        # Create and release some connections
+        in_use_connections = []
+        for _ in range(3):
+            in_use_connections.append(pool.get_connection())
+        while len(in_use_connections) > 0:
+            pool.release(in_use_connections.pop())
+
+        # Take 2 connections to be in use
+        in_use_connections = []
+        for _ in range(2):
+            conn = pool.get_connection()
+            in_use_connections.append(conn)
+
+        # 1. MOVING event
+        tmp_address = "22.23.24.25"
+        moving_event = NodeMovingEvent(
+            id=1, new_node_host=tmp_address, new_node_port=6379, ttl=1
+        )
+        pool_handler.handle_event(moving_event)
+        self._validate_in_use_connections_state(
+            in_use_connections,
+            expected_state=MaintenanceState.MOVING,
+            expected_tmp_host_address=tmp_address,
+            expected_tmp_relax_timeout=self.config.relax_timeout,
+            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+        )
+        self._validate_free_connections_state(
+            pool,
+            tmp_address,
+            self.config.relax_timeout,
+            should_be_connected_count=0,
+            connected_to_tmp_addres=False,
+            expected_state=MaintenanceState.MOVING,
+        )
+
+        # 2. MIGRATING event (simulate direct connection handler call)
+        for conn in in_use_connections:
+            conn._maintenance_event_connection_handler.handle_event(
+                NodeMigratingEvent(id=2, ttl=1)
+            )
+        self._validate_in_use_connections_state(
+            in_use_connections,
+            expected_state=MaintenanceState.MOVING,
+            expected_tmp_host_address=tmp_address,
+            expected_tmp_relax_timeout=self.config.relax_timeout,
+            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+        )
+
+        # 3. MIGRATED event (simulate direct connection handler call)
+        for conn in in_use_connections:
+            conn._maintenance_event_connection_handler.handle_event(
+                NodeMigratedEvent(id=2)
+            )
+        # State should not change for connections that are in MOVING state
+        self._validate_in_use_connections_state(
+            in_use_connections,
+            expected_state=MaintenanceState.MOVING,
+            expected_tmp_host_address=tmp_address,
+            expected_tmp_relax_timeout=self.config.relax_timeout,
+            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+        )
+
+        # 4. MOVED event (simulate timer expiry)
+        pool_handler.handle_node_moved_event()
+        self._validate_in_use_connections_state(
+            in_use_connections,
+            expected_state=MaintenanceState.NONE,
+            expected_tmp_host_address=None,
+            expected_tmp_relax_timeout=-1,
+            expected_current_socket_timeout=None,
+            expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+        )
+        self._validate_free_connections_state(
+            pool,
+            None,
+            -1,
+            should_be_connected_count=0,
+            connected_to_tmp_addres=False,
+            expected_state=MaintenanceState.NONE,
+        )
+        # New connection after MOVED
+        new_conn_none = pool.get_connection()
+        assert new_conn_none.maintenance_state == MaintenanceState.NONE
+        pool.release(new_conn_none)
+        # Cleanup
+        for conn in in_use_connections:
+            pool.release(conn)
+        if hasattr(pool, "disconnect"):
+            pool.disconnect()
