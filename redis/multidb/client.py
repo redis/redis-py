@@ -1,5 +1,6 @@
 import threading
 import socket
+from typing import List, Any, Callable
 
 from redis.background import BackgroundScheduler
 from redis.exceptions import ConnectionError, TimeoutError
@@ -29,7 +30,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         self._failover_strategy.set_databases(self._databases)
         self._auto_fallback_interval = config.auto_fallback_interval
         self._event_dispatcher = config.event_dispatcher
-        self._command_executor = DefaultCommandExecutor(
+        self.command_executor = DefaultCommandExecutor(
             failure_detectors=self._failure_detectors,
             databases=self._databases,
             command_retry=config.command_retry,
@@ -37,15 +38,12 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
             event_dispatcher=self._event_dispatcher,
             auto_fallback_interval=self._auto_fallback_interval,
         )
-
-        for fd in self._failure_detectors:
-            fd.set_command_executor(command_executor=self._command_executor)
-
-        self._initialized = False
+        self.initialized = False
         self._hc_lock = threading.RLock()
         self._bg_scheduler = BackgroundScheduler()
+        self._config = config
 
-    def _initialize(self):
+    def initialize(self):
         """
         Perform initialization of databases to define their initial state.
         """
@@ -68,7 +66,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
             # Set states according to a weights and circuit state
             if database.circuit.state == CBState.CLOSED and not is_active_db_found:
                 database.state = DBState.ACTIVE
-                self._command_executor.active_database = database
+                self.command_executor.active_database = database
                 is_active_db_found = True
             elif database.circuit.state == CBState.CLOSED and is_active_db_found:
                 database.state = DBState.PASSIVE
@@ -78,7 +76,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         if not is_active_db_found:
             raise NoValidDatabaseException('Initial connection failed - no active database found')
 
-        self._initialized = True
+        self.initialized = True
 
     def get_databases(self) -> Databases:
         """
@@ -106,7 +104,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
             highest_weighted_db, _ = self._databases.get_top_n(1)[0]
             highest_weighted_db.state = DBState.PASSIVE
             database.state = DBState.ACTIVE
-            self._command_executor.active_database = database
+            self.command_executor.active_database = database
             return
 
         raise NoValidDatabaseException('Cannot set active database, database is unhealthy')
@@ -128,7 +126,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
     def _change_active_database(self, new_database: AbstractDatabase, highest_weight_database: AbstractDatabase):
         if new_database.weight > highest_weight_database.weight and new_database.circuit.state == CBState.CLOSED:
             new_database.state = DBState.ACTIVE
-            self._command_executor.active_database = new_database
+            self.command_executor.active_database = new_database
             highest_weight_database.state = DBState.PASSIVE
 
     def remove_database(self, database: Database):
@@ -140,7 +138,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         if highest_weight <= weight and highest_weighted_db.circuit.state == CBState.CLOSED:
             highest_weighted_db.state = DBState.ACTIVE
-            self._command_executor.active_database = highest_weighted_db
+            self.command_executor.active_database = highest_weighted_db
 
     def update_database_weight(self, database: AbstractDatabase, weight: float):
         """
@@ -178,10 +176,25 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         """
         Executes a single command and return its result.
         """
-        if not self._initialized:
-            self._initialize()
+        if not self.initialized:
+            self.initialize()
 
-        return self._command_executor.execute_command(*args, **options)
+        return self.command_executor.execute_command(*args, **options)
+
+    def pipeline(self):
+        """
+        Enters into pipeline mode of the client.
+        """
+        return Pipeline(self)
+
+    def transaction(self, func: Callable[["Pipeline"], None], *watches, **options):
+        """
+        Executes callable as transaction.
+        """
+        if not self.initialized:
+            self.initialize()
+
+        return self.command_executor.execute_transaction(func, *watches, *options)
 
     def _check_db_health(self, database: AbstractDatabase) -> None:
         """
@@ -211,8 +224,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     def _check_databases_health(self):
         """
-        Runs health checks as recurring task.
+        Runs health checks against all databases.
         """
+
         for database, _ in self._databases:
             self._check_db_health(database)
 
@@ -226,3 +240,62 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
 
 def _half_open_circuit(circuit: CircuitBreaker):
     circuit.state = CBState.HALF_OPEN
+
+
+class Pipeline(RedisModuleCommands, CoreCommands, SentinelCommands):
+    """
+    Pipeline implementation for multiple logical Redis databases.
+    """
+    def __init__(self, client: MultiDBClient):
+        self._command_stack = []
+        self._client = client
+
+    def __enter__(self) -> "Pipeline":
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.reset()
+
+    def __del__(self):
+        try:
+            self.reset()
+        except Exception:
+            pass
+
+    def __len__(self) -> int:
+        return len(self._command_stack)
+
+    def __bool__(self) -> bool:
+        """Pipeline instances should always evaluate to True"""
+        return True
+
+    def reset(self) -> None:
+        self._command_stack = []
+
+    def close(self) -> None:
+        """Close the pipeline"""
+        self.reset()
+
+    def pipeline_execute_command(self, *args, **options) -> "Pipeline":
+        """
+        Stage a command to be executed when execute() is next called
+
+        Returns the current Pipeline object back so commands can be
+        chained together, such as:
+
+        pipe = pipe.set('foo', 'bar').incr('baz').decr('bang')
+
+        At some other point, you can then run: pipe.execute(),
+        which will execute all commands queued in the pipe.
+        """
+        self._command_stack.append((args, options))
+        return self
+
+    def execute_command(self, *args, **kwargs):
+        return self.pipeline_execute_command(*args, **kwargs)
+
+    def execute(self) -> List[Any]:
+        if not self._client.initialized:
+            self._client.initialize()
+
+        return self._client.command_executor.execute_pipeline(tuple(self._command_stack))
