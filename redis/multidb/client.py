@@ -32,6 +32,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         self._command_executor = DefaultCommandExecutor(
             failure_detectors=self._failure_detectors,
             databases=self._databases,
+            command_retry=config.command_retry,
             failover_strategy=self._failover_strategy,
             event_dispatcher=self._event_dispatcher,
             auto_fallback_interval=self._auto_fallback_interval,

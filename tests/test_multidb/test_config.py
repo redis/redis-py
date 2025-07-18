@@ -7,6 +7,7 @@ from redis.multidb.database import Database
 from redis.multidb.failure_detector import CommandFailureDetector, FailureDetector
 from redis.multidb.healthcheck import EchoHealthCheck, HealthCheck
 from redis.multidb.failover import WeightBasedFailoverStrategy, FailoverStrategy
+from redis.retry import Retry
 
 
 class TestMultiDbConfig:
@@ -30,6 +31,7 @@ class TestMultiDbConfig:
             assert isinstance(db, Database)
             assert weight == db_configs[i].weight
             assert db.circuit.grace_period == DEFAULT_GRACE_PERIOD
+            assert db.client.get_retry() is not config.command_retry
             i+=1
 
         assert len(config.default_failure_detectors()) == 1
@@ -39,6 +41,7 @@ class TestMultiDbConfig:
         assert config.health_check_interval == DEFAULT_HEALTH_CHECK_INTERVAL
         assert isinstance(config.default_failover_strategy(), WeightBasedFailoverStrategy)
         assert config.auto_fallback_interval == DEFAULT_AUTO_FALLBACK_INTERVAL
+        assert isinstance(config.command_retry, Retry)
 
     def test_overridden_config(self):
         grace_period = 2

@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import List, Union, Optional
 
+from redis.backoff import NoBackoff
 from redis.event import EventDispatcherInterface, OnCommandFailEvent
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, AbstractDatabase, Databases
@@ -9,6 +10,7 @@ from redis.multidb.circuit import State as CBState
 from redis.multidb.event import RegisterCommandFailure
 from redis.multidb.failover import FailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
+from redis.retry import Retry
 
 
 class CommandExecutor(ABC):
@@ -60,6 +62,12 @@ class CommandExecutor(ABC):
         """Sets auto-fallback interval."""
         pass
 
+    @property
+    @abstractmethod
+    def command_retry(self) -> Retry:
+        """Returns command retry object."""
+        pass
+
     @abstractmethod
     def execute_command(self, *args, **options):
         """Executes a command and returns the result."""
@@ -72,6 +80,7 @@ class DefaultCommandExecutor(CommandExecutor):
             self,
             failure_detectors: List[FailureDetector],
             databases: Databases,
+            command_retry: Retry,
             failover_strategy: FailoverStrategy,
             event_dispatcher: EventDispatcherInterface,
             auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
@@ -86,6 +95,7 @@ class DefaultCommandExecutor(CommandExecutor):
         """
         self._failure_detectors = failure_detectors
         self._databases = databases
+        self._command_retry = command_retry
         self._failover_strategy = failover_strategy
         self._event_dispatcher = event_dispatcher
         self._auto_fallback_interval = auto_fallback_interval
@@ -104,6 +114,10 @@ class DefaultCommandExecutor(CommandExecutor):
     @property
     def databases(self) -> Databases:
         return self._databases
+
+    @property
+    def command_retry(self) -> Retry:
+        return self._command_retry
 
     @property
     def active_database(self) -> Optional[AbstractDatabase]:
@@ -126,6 +140,24 @@ class DefaultCommandExecutor(CommandExecutor):
         self._auto_fallback_interval = auto_fallback_interval
 
     def execute_command(self, *args, **options):
+        self._check_active_database()
+
+        return self._command_retry.call_with_retry(
+            lambda: self._execute_command(*args, **options),
+            lambda error: self._on_command_fail(error, *args),
+        )
+
+    def _execute_command(self, *args, **options):
+        self._check_active_database()
+        return self._active_database.client.execute_command(*args, **options)
+
+    def _on_command_fail(self, error, *args):
+        self._event_dispatcher.dispatch(OnCommandFailEvent(args, error))
+
+    def _check_active_database(self):
+        """
+        Checks if active database need to be updated.
+        """
         if (
                 self._active_database is None
                 or self._active_database.circuit.state != CBState.CLOSED
@@ -136,8 +168,6 @@ class DefaultCommandExecutor(CommandExecutor):
         ):
             self._active_database = self._failover_strategy.database
             self._schedule_next_fallback()
-
-        return self._active_database.client.execute_command(*args, **options)
 
     def _schedule_next_fallback(self) -> None:
         if self._auto_fallback_interval == DEFAULT_AUTO_FALLBACK_INTERVAL:

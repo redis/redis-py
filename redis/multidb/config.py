@@ -6,7 +6,7 @@ from typing_extensions import Optional
 
 from redis import Redis, Sentinel
 from redis.asyncio import RedisCluster
-from redis.backoff import ExponentialWithJitterBackoff, AbstractBackoff
+from redis.backoff import ExponentialWithJitterBackoff, AbstractBackoff, NoBackoff
 from redis.data_structure import WeightedList
 from redis.event import EventDispatcher, EventDispatcherInterface
 from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter
@@ -44,6 +44,9 @@ class DatabaseConfig:
 class MultiDbConfig:
     databases_config: List[DatabaseConfig]
     client_class: Type[Union[Redis, RedisCluster, Sentinel]] = Redis
+    command_retry: Retry = Retry(
+        backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+    )
     failure_detectors: Optional[List[FailureDetector]] = None
     failure_threshold: int = DEFAULT_FAILURES_THRESHOLD
     failures_interval: float = DEFAULT_FAILURES_DURATION
@@ -61,6 +64,11 @@ class MultiDbConfig:
         databases = WeightedList()
 
         for database_config in self.databases_config:
+            if database_config.client_kwargs.get("retry", None) is not None:
+                # The retry object is not used in the lower level clients, so we can safely remove it.
+                # We rely on command_retry in terms of global retries.
+                database_config.client_kwargs.update({"retry": Retry(retries=0, backoff=NoBackoff())})
+
             client = self.client_class(**database_config.client_kwargs)
             circuit = database_config.default_circuit_breaker() \
                 if database_config.circuit is None else database_config.circuit
