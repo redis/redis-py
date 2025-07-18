@@ -3,10 +3,13 @@ from unittest.mock import PropertyMock
 
 import pytest
 
-from redis.event import EventDispatcher, OnCommandsFailEvent
+from redis.exceptions import ConnectionError
+from redis.backoff import NoBackoff
+from redis.event import EventDispatcher
 from redis.multidb.circuit import State as CBState
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.failure_detector import CommandFailureDetector
+from redis.retry import Retry
 from tests.test_multidb.conftest import create_weighted_list
 
 
@@ -31,7 +34,8 @@ class TestDefaultCommandExecutor:
             failure_detectors=[mock_fd],
             databases=databases,
             failover_strategy=mock_fs,
-            event_dispatcher=mock_ed
+            event_dispatcher=mock_ed,
+            command_retry=Retry(NoBackoff(), 0)
         )
 
         executor.active_database = mock_db1
@@ -65,7 +69,8 @@ class TestDefaultCommandExecutor:
             failure_detectors=[mock_fd],
             databases=databases,
             failover_strategy=mock_fs,
-            event_dispatcher=mock_ed
+            event_dispatcher=mock_ed,
+            command_retry=Retry(NoBackoff(), 0)
         )
 
         assert executor.execute_command('SET', 'key', 'value') == 'OK1'
@@ -101,6 +106,7 @@ class TestDefaultCommandExecutor:
             failover_strategy=mock_fs,
             event_dispatcher=mock_ed,
             auto_fallback_interval=0.1,
+            command_retry=Retry(NoBackoff(), 0)
         )
 
         assert executor.execute_command('SET', 'key', 'value') == 'OK1'
@@ -129,21 +135,14 @@ class TestDefaultCommandExecutor:
     def test_execute_command_fallback_to_another_db_after_failure_detection(
             self, mock_db, mock_db1, mock_db2, mock_fs
     ):
-        mock_db1.client.execute_command.return_value = 'OK1'
-        mock_db2.client.execute_command.return_value = 'OK2'
+        mock_db1.client.execute_command.side_effect = ['OK1', ConnectionError, ConnectionError, ConnectionError, 'OK1']
+        mock_db2.client.execute_command.side_effect = ['OK2', ConnectionError, ConnectionError, ConnectionError]
         mock_selector = PropertyMock(side_effect=[mock_db1, mock_db2, mock_db1])
         type(mock_fs).database = mock_selector
-        threshold = 5
+        threshold = 3
         fd = CommandFailureDetector(threshold, 1)
         ed = EventDispatcher()
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-
-        # Event fired if command against mock_db1 would fail
-        command_fail_event = OnCommandsFailEvent(
-            commands=('SET', 'key', 'value'),
-            exception=Exception(),
-            client=mock_db1.client
-        )
 
         executor = DefaultCommandExecutor(
             failure_detectors=[fd],
@@ -151,24 +150,10 @@ class TestDefaultCommandExecutor:
             failover_strategy=mock_fs,
             event_dispatcher=ed,
             auto_fallback_interval=0.1,
+            command_retry=Retry(NoBackoff(), threshold),
         )
 
         assert executor.execute_command('SET', 'key', 'value') == 'OK1'
-
-        # Simulate failing command events that lead to a failure detection
-        for i in range(threshold):
-            ed.dispatch(command_fail_event)
-
         assert executor.execute_command('SET', 'key', 'value') == 'OK2'
-
-        command_fail_event = OnCommandsFailEvent(
-            commands=('SET', 'key', 'value'),
-            exception=Exception(),
-            client=mock_db2.client
-        )
-
-        for i in range(threshold):
-            ed.dispatch(command_fail_event)
-
         assert executor.execute_command('SET', 'key', 'value') == 'OK1'
         assert mock_selector.call_count == 3

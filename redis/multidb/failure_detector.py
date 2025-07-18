@@ -7,11 +7,17 @@ from typing_extensions import Optional
 
 from redis.multidb.circuit import State as CBState
 
+
 class FailureDetector(ABC):
 
     @abstractmethod
-    def register_failure(self, database, exception: Exception, cmd: tuple) -> None:
+    def register_failure(self, exception: Exception, cmd: tuple) -> None:
         """Register a failure that occurred during command execution."""
+        pass
+
+    @abstractmethod
+    def set_command_executor(self, command_executor) -> None:
+        """Set the command executor for this failure."""
         pass
 
 class CommandFailureDetector(FailureDetector):
@@ -30,6 +36,7 @@ class CommandFailureDetector(FailureDetector):
         :param duration: Interval in seconds after which database will be marked as failed if threshold was exceeded.
         :param error_types: List of exception that has to be registered. By default, all exceptions are registered.
         """
+        self._command_executor = None
         self._threshold = threshold
         self._duration = duration
         self._error_types = error_types
@@ -38,7 +45,7 @@ class CommandFailureDetector(FailureDetector):
         self._failures_within_duration: List[tuple[datetime, tuple]] = []
         self._lock = threading.RLock()
 
-    def register_failure(self, database, exception: Exception, cmd: tuple) -> None:
+    def register_failure(self, exception: Exception, cmd: tuple) -> None:
         failure_time = datetime.now()
 
         if not self._start_time < failure_time < self._end_time:
@@ -51,12 +58,16 @@ class CommandFailureDetector(FailureDetector):
             else:
                 self._failures_within_duration.append((datetime.now(), cmd))
 
-        self._check_threshold(database)
+        self._check_threshold()
 
-    def _check_threshold(self, database):
+    def set_command_executor(self, command_executor) -> None:
+        self._command_executor = command_executor
+
+    def _check_threshold(self):
         with self._lock:
             if len(self._failures_within_duration) >= self._threshold:
-                database.circuit.state = CBState.OPEN
+                if self._command_executor and self._command_executor.active_database:
+                    self._command_executor.active_database.circuit.state = CBState.OPEN
                 self._reset()
 
     def _reset(self) -> None:
