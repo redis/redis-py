@@ -267,24 +267,24 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         retry_on_timeout (bool, default=False): Deprecated - use retry_on_error list instead
         retry (Retry, default=Retry(...)): Retry policy configuration for failed operations (defaults: 3 retries with jitter backoff on ConnectionError, TimeoutError, BusyLoadingError)
         retry_on_error (Optional[List], default=None): Additional error types to retry beyond defaults
-        max_connections (Optional[int], default=None): Maximum connections in pool (None=unlimited)
-        health_check_interval (int, default=0): Seconds before connection health check on acquisition (0=disabled)
-        single_connection_client (bool, default=False): Use single connection instead of pool (not thread-safe)
         ssl (bool, default=False): Enable SSL/TLS encryption for connections
         ssl_keyfile (Optional[str], default=None): Path to client private key file for mutual TLS
         ssl_certfile (Optional[str], default=None): Path to client certificate file for mutual TLS
-        ssl_cert_reqs (Optional[str], default=None): Certificate verification (required/optional/none, None=none)
+        ssl_cert_reqs (Union[str, ssl.VerifyMode], default="required"): Certificate verification (required/optional/none)
         ssl_ca_certs (Optional[str], default=None): Path to CA certificate bundle (None=system default)
+        ssl_ca_path (Optional[str], default=None): Path to directory containing CA certificates
         ssl_ca_data (Optional[str], default=None): CA certificate data as string (alternative to ssl_ca_certs)
-        ssl_check_hostname (Optional[bool], default=None): Verify certificate hostname matches connection (None=auto based on ssl_cert_reqs)
-        ssl_password (Optional[Union[str, Callable]], default=None): Password for encrypted private key
-        ssl_disable_dev_warnings (bool, default=False): Disable SSL development warnings
-        ssl_ciphers (Optional[str], default=None): Allowed SSL cipher suites in OpenSSL format (None=system default)
-        ssl_crlfile (Optional[str], default=None): Path to Certificate Revocation List file
+        ssl_check_hostname (bool, default=True): Verify certificate hostname matches connection
+        ssl_password (Optional[str], default=None): Password for encrypted private key
         ssl_validate_ocsp (bool, default=False): Enable OCSP certificate validation
         ssl_validate_ocsp_stapled (bool, default=False): Validate OCSP stapled responses
-        ssl_ocsp_context (Optional[object], default=None): Custom OCSP context for validation
-        ssl_ocsp_expected_cert (Optional[object], default=None): Expected certificate for OCSP validation
+        ssl_ocsp_context (Optional[OpenSSL.SSL.Context], default=None): Custom OCSP context for validation
+        ssl_ocsp_expected_cert (Optional[str], default=None): Expected certificate for OCSP validation
+        ssl_min_version (Optional[ssl.TLSVersion], default=None): Minimum TLS version (None=system default)
+        ssl_ciphers (Optional[str], default=None): Allowed SSL cipher suites in OpenSSL format (None=system default)
+        max_connections (Optional[int], default=None): Maximum connections in pool (None=unlimited)
+        single_connection_client (bool, default=False): Use single connection instead of pool (not thread-safe)
+        health_check_interval (int, default=0): Seconds before connection health check on acquisition (0=disabled)
         client_name (Optional[str], default=None): Client name identifier sent to Redis server (visible in CLIENT LIST)
         lib_name (Optional[str], default="redis-py"): Library name identifier
         lib_version (Optional[str], default=auto): Library version identifier (auto-detected)
