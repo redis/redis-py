@@ -280,25 +280,6 @@ class TestMaintenanceEventsHandling:
         # Validate that the connection's maintenance handler has the same config object
         assert conn._maintenance_event_connection_handler.config is config
 
-    def _validate_current_timeout_for_thread(
-        self, thread_id, expected_timeout, error_msg=None
-    ):
-        """Helper method to validate the current timeout for the calling thread."""
-        actual_timeout = None
-        # Get the actual thread ID from the current thread
-        current_thread_id = threading.current_thread().ident
-        for sock in self.mock_sockets:
-            if current_thread_id in sock.thread_timeouts:
-                actual_timeout = sock.thread_timeouts[current_thread_id]
-                break
-
-        assert actual_timeout == expected_timeout, (
-            error_msg,
-            f"Thread {thread_id}: Expected timeout ({expected_timeout}), "
-            f"but found timeout: {actual_timeout} for thread {thread_id}. "
-            f"All thread timeouts: {[sock.thread_timeouts for sock in self.mock_sockets]}",
-        )
-
     def _validate_current_timeout(self, expected_timeout, error_msg=None):
         """Helper method to validate the current timeout for the calling thread."""
         actual_timeout = None
@@ -336,8 +317,12 @@ class TestMaintenanceEventsHandling:
         self,
         in_use_connections: List[AbstractConnection],
         expected_state=MaintenanceState.NONE,
-        expected_tmp_host_address=None,
-        expected_tmp_relax_timeout=-1,
+        expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+        expected_socket_timeout=None,
+        expected_socket_connect_timeout=None,
+        expected_orig_host_address=None,
+        expected_orig_socket_timeout=None,
+        expected_orig_socket_connect_timeout=None,
         expected_current_socket_timeout=None,
         expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
     ):
@@ -346,21 +331,33 @@ class TestMaintenanceEventsHandling:
         # and timeout is updated
         for connection in in_use_connections:
             assert connection._should_reconnect is True
-            assert connection.tmp_host_address == expected_tmp_host_address
-            assert connection.tmp_relax_timeout == expected_tmp_relax_timeout
-            assert connection._sock.gettimeout() == expected_current_socket_timeout
-            assert connection._sock.connected is True
+            assert connection.host == expected_host_address
+            assert connection.socket_timeout == expected_socket_timeout
+            assert connection.socket_connect_timeout == expected_socket_connect_timeout
+            assert connection.orig_host_address == expected_orig_host_address
+            assert connection.orig_socket_timeout == expected_orig_socket_timeout
+            assert (
+                connection.orig_socket_connect_timeout
+                == expected_orig_socket_connect_timeout
+            )
+            if connection._sock is not None:
+                assert connection._sock.gettimeout() == expected_current_socket_timeout
+                assert connection._sock.connected is True
+                assert connection._sock.getpeername()[0] == expected_current_peername
             assert connection.maintenance_state == expected_state
-            assert connection._sock.getpeername()[0] == expected_current_peername
 
     def _validate_free_connections_state(
         self,
         pool,
-        tmp_host_address,
-        relax_timeout,
         should_be_connected_count,
         connected_to_tmp_addres=False,
         expected_state=MaintenanceState.MOVING,
+        expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+        expected_socket_timeout=None,
+        expected_socket_connect_timeout=None,
+        expected_orig_host_address=None,
+        expected_orig_socket_timeout=None,
+        expected_orig_socket_connect_timeout=None,
     ):
         """Helper method to validate state of free/available connections."""
         if isinstance(pool, BlockingConnectionPool):
@@ -373,8 +370,15 @@ class TestMaintenanceEventsHandling:
         connected_count = 0
         for connection in free_connections:
             assert connection._should_reconnect is False
-            assert connection.tmp_host_address == tmp_host_address
-            assert connection.tmp_relax_timeout == relax_timeout
+            assert connection.host == expected_host_address
+            assert connection.socket_timeout == expected_socket_timeout
+            assert connection.socket_connect_timeout == expected_socket_connect_timeout
+            assert connection.orig_host_address == expected_orig_host_address
+            assert connection.orig_socket_timeout == expected_orig_socket_timeout
+            assert (
+                connection.orig_socket_connect_timeout
+                == expected_orig_socket_connect_timeout
+            )
             assert connection.maintenance_state == expected_state
             if connection._sock is not None:
                 assert connection._sock.connected is True
@@ -401,14 +405,29 @@ class TestMaintenanceEventsHandling:
         pool,
         expected_host_address,
         expected_port,
-        expected_tmp_host_address,
-        expected_tmp_relax_timeout,
+        expected_socket_timeout,
+        expected_socket_connect_timeout,
+        expected_orig_host_address,
+        expected_orig_socket_timeout,
+        expected_orig_socket_connect_timeout,
     ):
         """Helper method to validate connection kwargs."""
         assert pool.connection_kwargs["host"] == expected_host_address
         assert pool.connection_kwargs["port"] == expected_port
-        assert pool.connection_kwargs["tmp_host_address"] == expected_tmp_host_address
-        assert pool.connection_kwargs["tmp_relax_timeout"] == expected_tmp_relax_timeout
+        assert pool.connection_kwargs["socket_timeout"] == expected_socket_timeout
+        assert (
+            pool.connection_kwargs["socket_connect_timeout"]
+            == expected_socket_connect_timeout
+        )
+        assert pool.connection_kwargs["orig_host_address"] == expected_orig_host_address
+        assert (
+            pool.connection_kwargs["orig_socket_timeout"]
+            == expected_orig_socket_timeout
+        )
+        assert (
+            pool.connection_kwargs["orig_socket_connect_timeout"]
+            == expected_orig_socket_connect_timeout
+        )
 
     def test_client_initialization(self):
         """Test that Redis client is created with maintenance events configuration."""
@@ -427,8 +446,8 @@ class TestMaintenanceEventsHandling:
 
         conn = test_redis_client.connection_pool.get_connection()
         assert conn._should_reconnect is False
-        assert conn.tmp_host_address is None
-        assert conn.tmp_relax_timeout == -1
+        assert conn.orig_host_address is None
+        assert conn.orig_socket_timeout is None
 
         # Test that the node moving handler function is correctly set by
         # comparing the underlying function and instance
@@ -764,7 +783,8 @@ class TestMaintenanceEventsHandling:
         This test validates the complete MOVING event lifecycle:
         1. Creates multiple connections in the pool
         2. Executes a Redis command that triggers a MOVING push message
-        3. Validates that pool configuration is updated with temporary address and timeout
+        3. Validates that pool configuration is updated with temporary
+           address and timeout - for new connections creation
         4. Validates that existing connections are marked for disconnection
         5. Tests both ConnectionPool and BlockingConnectionPool implementations
         """
@@ -804,46 +824,64 @@ class TestMaintenanceEventsHandling:
 
             # Validate pool and connections settings were updated according to MOVING event
             self._validate_conn_kwargs(
-                test_redis_client.connection_pool,
-                MockSocket.DEFAULT_ADDRESS.split(":")[0],
-                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
-                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
-                self.config.relax_timeout,
+                pool=test_redis_client.connection_pool,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
+                expected_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
             )
             self._validate_disconnected(5)
             self._validate_connected(6)
             self._validate_in_use_connections_state(
                 in_use_connections,
                 expected_state=MaintenanceState.MOVING,
-                expected_tmp_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
-                expected_tmp_relax_timeout=self.config.relax_timeout,
+                expected_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
                 expected_current_socket_timeout=self.config.relax_timeout,
                 expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[
                     0
                 ],  # the in use connections reconnect when they complete their current task
             )
             self._validate_free_connections_state(
-                test_redis_client.connection_pool,
-                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
-                self.config.relax_timeout,
+                pool=test_redis_client.connection_pool,
+                expected_state=MaintenanceState.MOVING,
+                expected_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
                 should_be_connected_count=1,
                 connected_to_tmp_addres=True,
-                expected_state=MaintenanceState.MOVING,
             )
             # Wait for MOVING timeout to expire and the moving completed handler to run
             sleep(MockSocket.MOVING_TIMEOUT + 0.5)
             self._validate_all_timeouts(None)
             self._validate_conn_kwargs(
-                test_redis_client.connection_pool,
-                MockSocket.DEFAULT_ADDRESS.split(":")[0],
-                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
-                None,
-                -1,
+                pool=test_redis_client.connection_pool,
+                expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                expected_socket_timeout=None,
+                expected_socket_connect_timeout=None,
+                expected_orig_host_address=None,
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
             )
             self._validate_free_connections_state(
-                test_redis_client.connection_pool,
-                None,
-                -1,
+                pool=test_redis_client.connection_pool,
+                expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_socket_timeout=None,
+                expected_socket_connect_timeout=None,
+                expected_orig_host_address=None,
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
                 should_be_connected_count=1,
                 connected_to_tmp_addres=True,
                 expected_state=MaintenanceState.NONE,
@@ -896,11 +934,14 @@ class TestMaintenanceEventsHandling:
 
             # Validate pool and connections settings were updated according to MOVING event
             self._validate_conn_kwargs(
-                test_redis_client.connection_pool,
-                MockSocket.DEFAULT_ADDRESS.split(":")[0],
-                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
-                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
-                self.config.relax_timeout,
+                pool=test_redis_client.connection_pool,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
+                expected_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
             )
 
             # Now get several more connections to force creation of new ones
@@ -915,11 +956,8 @@ class TestMaintenanceEventsHandling:
             # Validate that new connections are created with temporary address and relax timeout
             # and when connecting those configs are used
             # get_connection() returns a connection that is already connected
-            assert (
-                new_connection.tmp_host_address
-                == MockSocket.AFTER_MOVING_ADDRESS.split(":")[0]
-            )
-            assert new_connection.tmp_relax_timeout == self.config.relax_timeout
+            assert new_connection.host == MockSocket.AFTER_MOVING_ADDRESS.split(":")[0]
+            assert new_connection.socket_timeout is self.config.relax_timeout
             # New connections should be connected to the temporary address
             assert new_connection._sock is not None
             assert new_connection._sock.connected is True
@@ -984,8 +1022,8 @@ class TestMaintenanceEventsHandling:
             new_connection = test_redis_client.connection_pool.get_connection()
 
             # Validate that new connections are created with original address (no temporary settings)
-            assert new_connection.tmp_host_address is None
-            assert new_connection.tmp_relax_timeout == -1
+            assert new_connection.orig_host_address is None
+            assert new_connection.orig_socket_timeout is None
             # New connections should be connected to the original address
             assert new_connection._sock is not None
             assert new_connection._sock.connected is True
@@ -1044,12 +1082,17 @@ class TestMaintenanceEventsHandling:
 
             # Validate pool and connections settings were updated according to MOVING event
             self._validate_conn_kwargs(
-                test_redis_client.connection_pool,
-                MockSocket.DEFAULT_ADDRESS.split(":")[0],
-                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
-                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
-                self.config.relax_timeout,
+                pool=test_redis_client.connection_pool,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
+                expected_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
             )
+
+            # TODO validate current socket timeout
 
             # Step 2: Run command that will receive and handle MIGRATED event
             # This should clear the temporary settings
@@ -1062,14 +1105,17 @@ class TestMaintenanceEventsHandling:
 
             # Step 3: Validate that MIGRATED event was processed but MOVING settings remain
             # (MIGRATED doesn't automatically clear MOVING settings - they are separate events)
+            # MOVING settings should still be active
+            # MOVING timeout should still be active
             self._validate_conn_kwargs(
-                test_redis_client.connection_pool,
-                MockSocket.DEFAULT_ADDRESS.split(":")[0],
-                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
-                MockSocket.AFTER_MOVING_ADDRESS.split(":")[
-                    0
-                ],  # MOVING settings still active
-                self.config.relax_timeout,  # MOVING timeout still active
+                pool=test_redis_client.connection_pool,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
+                expected_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
             )
 
             # Step 4: Create new connections after MIGRATED to verify they still use MOVING settings
@@ -1081,10 +1127,7 @@ class TestMaintenanceEventsHandling:
 
             # Validate that new connections are created with MOVING settings (still active)
             for connection in new_connections:
-                assert (
-                    connection.tmp_host_address
-                    == MockSocket.AFTER_MOVING_ADDRESS.split(":")[0]
-                )
+                assert connection.host == MockSocket.AFTER_MOVING_ADDRESS.split(":")[0]
                 # Note: New connections may not inherit the exact relax timeout value
                 # but they should have the temporary host address
                 # New connections should be connected
@@ -1130,61 +1173,85 @@ class TestMaintenanceEventsHandling:
             result1 = test_redis_client.set(key_moving1, value_moving1)
             assert result1 is True
             self._validate_conn_kwargs(
-                test_redis_client.connection_pool,
-                MockSocket.DEFAULT_ADDRESS.split(":")[0],
-                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
-                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
-                self.config.relax_timeout,
+                pool=test_redis_client.connection_pool,
+                expected_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
             )
             # Validate all connections reflect the first MOVING event
             self._validate_in_use_connections_state(
                 in_use_connections,
                 expected_state=MaintenanceState.MOVING,
-                expected_tmp_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
-                expected_tmp_relax_timeout=self.config.relax_timeout,
+                expected_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
                 expected_current_socket_timeout=self.config.relax_timeout,
                 expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
             )
             self._validate_free_connections_state(
-                test_redis_client.connection_pool,
-                MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
-                self.config.relax_timeout,
+                pool=test_redis_client.connection_pool,
                 should_be_connected_count=1,
                 connected_to_tmp_addres=True,
+                expected_state=MaintenanceState.MOVING,
+                expected_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
             )
 
             # Before the first MOVING expires, trigger a second MOVING event (simulate new address)
-            # Patch MockSocket to use a new address for the second event
-            new_address = "5.6.7.8:6380"
+            # Validate the orig properties are not changed!
+            second_moving_address = "5.6.7.8:6380"
             orig_after_moving = MockSocket.AFTER_MOVING_ADDRESS
-            MockSocket.AFTER_MOVING_ADDRESS = new_address
+            MockSocket.AFTER_MOVING_ADDRESS = second_moving_address
             try:
                 key_moving2 = "key_receive_moving_1"
                 value_moving2 = "value3_1"
                 result2 = test_redis_client.set(key_moving2, value_moving2)
                 assert result2 is True
                 self._validate_conn_kwargs(
-                    test_redis_client.connection_pool,
-                    MockSocket.DEFAULT_ADDRESS.split(":")[0],
-                    int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
-                    new_address.split(":")[0],
-                    self.config.relax_timeout,
+                    pool=test_redis_client.connection_pool,
+                    expected_host_address=second_moving_address.split(":")[0],
+                    expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                    expected_socket_timeout=self.config.relax_timeout,
+                    expected_socket_connect_timeout=self.config.relax_timeout,
+                    expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                    expected_orig_socket_timeout=None,
+                    expected_orig_socket_connect_timeout=None,
                 )
                 # Validate all connections reflect the second MOVING event
                 self._validate_in_use_connections_state(
                     in_use_connections,
                     expected_state=MaintenanceState.MOVING,
-                    expected_tmp_host_address=new_address.split(":")[0],
-                    expected_tmp_relax_timeout=self.config.relax_timeout,
+                    expected_host_address=second_moving_address.split(":")[0],
+                    expected_socket_timeout=self.config.relax_timeout,
+                    expected_socket_connect_timeout=self.config.relax_timeout,
+                    expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                    expected_orig_socket_timeout=None,
+                    expected_orig_socket_connect_timeout=None,
                     expected_current_socket_timeout=self.config.relax_timeout,
                     expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
                 )
                 self._validate_free_connections_state(
                     test_redis_client.connection_pool,
-                    new_address.split(":")[0],
-                    self.config.relax_timeout,
                     should_be_connected_count=1,
                     connected_to_tmp_addres=True,
+                    expected_state=MaintenanceState.MOVING,
+                    expected_host_address=second_moving_address.split(":")[0],
+                    expected_socket_timeout=self.config.relax_timeout,
+                    expected_socket_connect_timeout=self.config.relax_timeout,
+                    expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                    expected_orig_socket_timeout=None,
+                    expected_orig_socket_connect_timeout=None,
                 )
             finally:
                 MockSocket.AFTER_MOVING_ADDRESS = orig_after_moving
@@ -1192,11 +1259,14 @@ class TestMaintenanceEventsHandling:
             # Wait for both MOVING timeouts to expire
             sleep(MockSocket.MOVING_TIMEOUT + 0.5)
             self._validate_conn_kwargs(
-                test_redis_client.connection_pool,
-                MockSocket.DEFAULT_ADDRESS.split(":")[0],
-                int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
-                None,
-                -1,
+                pool=test_redis_client.connection_pool,
+                expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+                expected_socket_timeout=None,
+                expected_socket_connect_timeout=None,
+                expected_orig_host_address=None,
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
             )
         finally:
             if hasattr(test_redis_client.connection_pool, "disconnect"):
@@ -1234,12 +1304,16 @@ class TestMaintenanceEventsHandling:
         assert not errors, f"Errors occurred in threads: {errors}"
         # After all threads, MOVING event should have been handled safely
         self._validate_conn_kwargs(
-            test_redis_client.connection_pool,
-            MockSocket.DEFAULT_ADDRESS.split(":")[0],
-            int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
-            MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
-            self.config.relax_timeout,
+            pool=test_redis_client.connection_pool,
+            expected_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+            expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
+            expected_socket_timeout=self.config.relax_timeout,
+            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_orig_socket_timeout=None,
+            expected_orig_socket_connect_timeout=None,
         )
+
         if hasattr(test_redis_client.connection_pool, "disconnect"):
             test_redis_client.connection_pool.disconnect()
 
@@ -1279,18 +1353,26 @@ class TestMaintenanceEventsHandling:
         self._validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.MOVING,
-            expected_tmp_host_address=tmp_address,
-            expected_tmp_relax_timeout=self.config.relax_timeout,
+            expected_host_address=tmp_address,
+            expected_socket_timeout=self.config.relax_timeout,
+            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_orig_socket_timeout=None,
+            expected_orig_socket_connect_timeout=None,
             expected_current_socket_timeout=self.config.relax_timeout,
             expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
         )
         self._validate_free_connections_state(
-            pool,
-            tmp_address,
-            self.config.relax_timeout,
+            pool=pool,
             should_be_connected_count=0,
             connected_to_tmp_addres=False,
             expected_state=MaintenanceState.MOVING,
+            expected_host_address=tmp_address,
+            expected_socket_timeout=self.config.relax_timeout,
+            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_orig_socket_timeout=None,
+            expected_orig_socket_connect_timeout=None,
         )
 
         # 2. MIGRATING event (simulate direct connection handler call)
@@ -1301,8 +1383,12 @@ class TestMaintenanceEventsHandling:
         self._validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.MOVING,
-            expected_tmp_host_address=tmp_address,
-            expected_tmp_relax_timeout=self.config.relax_timeout,
+            expected_host_address=tmp_address,
+            expected_socket_timeout=self.config.relax_timeout,
+            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_orig_socket_timeout=None,
+            expected_orig_socket_connect_timeout=None,
             expected_current_socket_timeout=self.config.relax_timeout,
             expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
         )
@@ -1316,29 +1402,41 @@ class TestMaintenanceEventsHandling:
         self._validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.MOVING,
-            expected_tmp_host_address=tmp_address,
-            expected_tmp_relax_timeout=self.config.relax_timeout,
+            expected_host_address=tmp_address,
+            expected_socket_timeout=self.config.relax_timeout,
+            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_orig_socket_timeout=None,
+            expected_orig_socket_connect_timeout=None,
             expected_current_socket_timeout=self.config.relax_timeout,
             expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
         )
 
         # 4. MOVED event (simulate timer expiry)
-        pool_handler.handle_node_moved_event()
+        pool_handler.handle_node_moved_event(moving_event)
         self._validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.NONE,
-            expected_tmp_host_address=None,
-            expected_tmp_relax_timeout=-1,
+            expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_socket_timeout=None,
+            expected_socket_connect_timeout=None,
+            expected_orig_host_address=None,
+            expected_orig_socket_timeout=None,
+            expected_orig_socket_connect_timeout=None,
             expected_current_socket_timeout=None,
             expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
         )
         self._validate_free_connections_state(
-            pool,
-            None,
-            -1,
+            pool=pool,
             should_be_connected_count=0,
             connected_to_tmp_addres=False,
             expected_state=MaintenanceState.NONE,
+            expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_socket_timeout=None,
+            expected_socket_connect_timeout=None,
+            expected_orig_host_address=None,
+            expected_orig_socket_timeout=None,
+            expected_orig_socket_connect_timeout=None,
         )
         # New connection after MOVED
         new_conn_none = pool.get_connection()

@@ -130,8 +130,6 @@ class _RESPBase(BaseParser):
         "Called when the socket connects"
         self._sock = connection._sock
         timeout = connection.socket_timeout
-        if connection.tmp_relax_timeout != -1:
-            timeout = connection.tmp_relax_timeout
         self._buffer = SocketBuffer(self._sock, self.socket_read_size, timeout)
         self.encoder = connection.encoder
 
