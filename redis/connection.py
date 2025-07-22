@@ -31,6 +31,7 @@ from .exceptions import (
     ChildDeadlockedError,
     ConnectionError,
     DataError,
+    MaxConnectionsError,
     RedisError,
     ResponseError,
     TimeoutError,
@@ -1557,7 +1558,7 @@ class ConnectionPool:
     def make_connection(self) -> "ConnectionInterface":
         "Create a new connection"
         if self._created_connections >= self.max_connections:
-            raise ConnectionError("Too many connections")
+            raise MaxConnectionsError("Too many connections")
         self._created_connections += 1
 
         if self.cache is not None:
