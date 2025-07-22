@@ -1,18 +1,30 @@
 from asyncio import sleep
-from typing import Any, Awaitable, Callable, Tuple, Type, TypeVar
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Tuple, Type, TypeVar
 
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
 from redis.retry import AbstractRetry
 
 T = TypeVar("T")
 
+if TYPE_CHECKING:
+    from redis.backoff import AbstractBackoff
 
-class Retry(AbstractRetry):
-    _supported_errors: Tuple[Type[RedisError], ...] = (
-        ConnectionError,
-        TimeoutError,
-    )
+
+class Retry(AbstractRetry[RedisError]):
     __hash__ = AbstractRetry.__hash__
+
+    def __init__(
+        self,
+        backoff: "AbstractBackoff",
+        retries: int,
+        supported_errors: Tuple[Type[RedisError], ...] = (
+            ConnectionError,
+            TimeoutError,
+        ),
+    ):
+        super().__init__(backoff, retries, supported_errors)
+
+    __init__.__doc__ = AbstractRetry.__init__.__doc__
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, Retry):
@@ -25,7 +37,7 @@ class Retry(AbstractRetry):
         )
 
     async def call_with_retry(
-        self, do: Callable[[], Awaitable[T]], fail: Callable[[Exception], Any]
+        self, do: Callable[[], Awaitable[T]], fail: Callable[[RedisError], Any]
     ) -> T:
         """
         Execute an operation that might fail and returns its result, or
