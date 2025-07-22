@@ -24,8 +24,6 @@ class Retry(AbstractRetry[RedisError]):
     ):
         super().__init__(backoff, retries, supported_errors)
 
-    __init__.__doc__ = AbstractRetry.__init__.__doc__
-
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, Retry):
             return NotImplemented
