@@ -1,5 +1,4 @@
 import copy
-import logging
 import os
 import socket
 import sys
@@ -236,22 +235,62 @@ class ConnectionInterface:
 
     @abstractmethod
     def mark_for_reconnect(self):
+        """
+        Mark the connection to be reconnected on the next command.
+        This is useful when a connection is moved to a different node.
+        """
         pass
 
     @abstractmethod
     def should_reconnect(self):
+        """
+        Returns True if the connection should be reconnected.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def maintenance_state(self) -> MaintenanceState:
+        """
+        Returns the current maintenance state of the connection.
+        """
+        pass
+
+    @maintenance_state.setter
+    @abstractmethod
+    def maintenance_state(self, state: "MaintenanceState"):
+        """
+        Sets the current maintenance state of the connection.
+        """
         pass
 
     @abstractmethod
     def update_current_socket_timeout(self, relax_timeout: Optional[float] = None):
+        """
+        Update the timeout for the current socket.
+        """
         pass
 
     @abstractmethod
-    def update_tmp_settings(
+    def set_tmp_settings(
         self,
         tmp_host_address: Optional[str] = None,
         tmp_relax_timeout: Optional[float] = None,
     ):
+        """
+        Updates temporary host address and timeout settings for the connection.
+        """
+        pass
+
+    @abstractmethod
+    def reset_tmp_settings(
+        self,
+        reset_host_address: bool = False,
+        reset_relax_timeout: bool = False,
+    ):
+        """
+        Resets temporary host address and timeout settings for the connection.
+        """
         pass
 
 
@@ -284,8 +323,9 @@ class AbstractConnection(ConnectionInterface):
         event_dispatcher: Optional[EventDispatcher] = None,
         maintenance_events_pool_handler: Optional[MaintenanceEventPoolHandler] = None,
         maintenance_events_config: Optional[MaintenanceEventsConfig] = None,
-        tmp_host_address: Optional[str] = None,
-        tmp_relax_timeout: Optional[float] = -1,
+        orig_host_address: Optional[str] = None,
+        orig_socket_timeout: Optional[float] = None,
+        orig_socket_connect_timeout: Optional[float] = None,
         maintenance_state: "MaintenanceState" = MaintenanceState.NONE,
     ):
         """
@@ -374,8 +414,9 @@ class AbstractConnection(ConnectionInterface):
 
         self._command_packer = self._construct_command_packer(command_packer)
         self._should_reconnect = False
-        self.tmp_host_address = tmp_host_address
-        self.tmp_relax_timeout = tmp_relax_timeout
+        self.orig_host_address = orig_host_address
+        self.orig_socket_timeout = orig_socket_timeout
+        self.orig_socket_connect_timeout = orig_socket_connect_timeout
         self.maintenance_state = maintenance_state
 
     def __repr__(self):
@@ -809,6 +850,14 @@ class AbstractConnection(ConnectionInterface):
             self.read_response()
             self._re_auth_token = None
 
+    @property
+    def maintenance_state(self) -> MaintenanceState:
+        return self._maintenance_state
+
+    @maintenance_state.setter
+    def maintenance_state(self, state: "MaintenanceState"):
+        self._maintenance_state = state
+
     def mark_for_reconnect(self):
         self._should_reconnect = True
 
@@ -825,21 +874,40 @@ class AbstractConnection(ConnectionInterface):
         if self._parser and self._parser._buffer:
             self._parser._buffer.socket_timeout = timeout
 
-    def update_tmp_settings(
+    def set_tmp_settings(
         self,
         tmp_host_address: Optional[Union[str, object]] = SENTINEL,
-        tmp_relax_timeout: Optional[Union[float, object]] = SENTINEL,
+        tmp_relax_timeout: Optional[float] = None,
+        skip_original_data_update: bool = False,
     ):
         """
         The value of SENTINEL is used to indicate that the property should not be updated.
         """
         if tmp_host_address is not SENTINEL:
-            self.tmp_host_address = tmp_host_address
-        if tmp_relax_timeout is not SENTINEL:
-            self.tmp_relax_timeout = tmp_relax_timeout
+            if not skip_original_data_update:
+                self.orig_host_address = self.host
+            self.host = tmp_host_address
+        if tmp_relax_timeout != -1:
+            if not skip_original_data_update:
+                self.orig_socket_timeout = self.socket_timeout
+                self.orig_socket_connect_timeout = self.socket_connect_timeout
 
-    def set_maintenance_state(self, state: "MaintenanceState"):
-        self.maintenance_state = state
+            self.socket_timeout = tmp_relax_timeout
+            self.socket_connect_timeout = tmp_relax_timeout
+
+    def reset_tmp_settings(
+        self,
+        reset_host_address: bool = False,
+        reset_relax_timeout: bool = False,
+    ):
+        if reset_host_address:
+            self.host = self.orig_host_address
+            self.orig_host_address = None
+        if reset_relax_timeout:
+            self.socket_timeout = self.orig_socket_timeout
+            self.socket_connect_timeout = self.orig_socket_connect_timeout
+            self.orig_socket_timeout = None
+            self.orig_socket_connect_timeout = None
 
 
 class Connection(AbstractConnection):
@@ -873,10 +941,9 @@ class Connection(AbstractConnection):
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
         err = None
-        host = self.tmp_host_address or self.host
 
         for res in socket.getaddrinfo(
-            host, self.port, self.socket_type, socket.SOCK_STREAM
+            self.host, self.port, self.socket_type, socket.SOCK_STREAM
         ):
             family, socktype, proto, canonname, socket_address = res
             sock = None
@@ -892,19 +959,13 @@ class Connection(AbstractConnection):
                         sock.setsockopt(socket.IPPROTO_TCP, k, v)
 
                 # set the socket_connect_timeout before we connect
-                if self.tmp_relax_timeout != -1:
-                    sock.settimeout(self.tmp_relax_timeout)
-                else:
-                    sock.settimeout(self.socket_connect_timeout)
+                sock.settimeout(self.socket_connect_timeout)
 
                 # connect
                 sock.connect(socket_address)
 
                 # set the socket_timeout now that we're connected
-                if self.tmp_relax_timeout != -1:
-                    sock.settimeout(self.tmp_relax_timeout)
-                else:
-                    sock.settimeout(self.socket_timeout)
+                sock.settimeout(self.socket_timeout)
                 return sock
 
             except OSError as _:
@@ -1818,54 +1879,128 @@ class ConnectionPool:
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
 
-    def update_connection_kwargs_with_tmp_settings(
+    def set_maintenance_state_for_all_connections(self, state: "MaintenanceState"):
+        for conn in self._available_connections:
+            conn.maintenance_state = state
+        for conn in self._in_use_connections:
+            conn.maintenance_state = state
+
+    def set_maintenance_state_in_connection_kwargs(self, state: "MaintenanceState"):
+        self.connection_kwargs["maintenance_state"] = state
+
+    def add_tmp_config_to_connection_kwargs(
         self,
-        tmp_host_address: Optional[str] = None,
+        tmp_host_address: str,
         tmp_relax_timeout: Optional[float] = None,
+        skip_original_data_update: bool = False,
     ):
         """
-        Update the connection kwargs with the temporary host address and the
-        relax timeout(if enabled).
-        This is used when a cluster node is rebind to a different address.
+        Store original connection configuration and apply temporary settings.
+
+        This method saves the current host, socket_timeout, and socket_connect_timeout values
+        in temporary storage fields (orig_*), then applies the provided temporary values
+        as the active connection configuration.
+
+        This is used when a cluster node is rebound to a different address during
+        maintenance operations. New connections created after this call will use the
+        temporary configuration until remove_tmp_config_from_connection_kwargs() is called.
+
+        When this method is called the pool will already be locked, so getting the pool
+        lock inside is not needed.
+
+        :param tmp_host_address: The temporary host address to use for new connections.
+                               This parameter is required and will replace the current host.
+        :param tmp_relax_timeout: The temporary timeout value to use for both socket_timeout
+                                and socket_connect_timeout. If -1 is provided, the timeout
+                                settings are not modified (relax timeout is disabled).
+        :param skip_original_data_update: Whether to skip updating the original data.
+                                        This is used when we are already in MOVING state
+                                        and the original data is already stored in the connection kwargs.
+        """
+        if not skip_original_data_update:
+            # Store original values in temporary storage
+            original_host = self.connection_kwargs.get("host")
+            original_socket_timeout = self.connection_kwargs.get("socket_timeout")
+            original_connect_timeout = self.connection_kwargs.get(
+                "socket_connect_timeout"
+            )
+
+            self.connection_kwargs.update(
+                {
+                    "orig_host_address": original_host,
+                    "orig_socket_timeout": original_socket_timeout,
+                    "orig_socket_connect_timeout": original_connect_timeout,
+                }
+            )
+
+        # Apply temporary values as active configuration
+        self.connection_kwargs.update({"host": tmp_host_address})
+
+        if tmp_relax_timeout != -1:
+            self.connection_kwargs.update(
+                {
+                    "socket_timeout": tmp_relax_timeout,
+                    "socket_connect_timeout": tmp_relax_timeout,
+                }
+            )
+
+    def remove_tmp_config_from_connection_kwargs(self):
+        """
+        Remove temporary configuration from connection kwargs and restore original values.
+
+        This method restores the original host address, socket timeout, and connect timeout
+        from their temporary storage back to the main connection kwargs, then clears the
+        temporary storage fields.
+
+        This is typically called when a cluster node maintenance operation is complete
+        and the connection should revert to its original configuration.
+
+        When this method is called the pool will already be locked, so getting the pool
+        lock inside is not needed.
+        """
+        orig_host = self.connection_kwargs.get("orig_host_address")
+        orig_socket_timeout = self.connection_kwargs.get("orig_socket_timeout")
+        orig_connect_timeout = self.connection_kwargs.get("orig_socket_connect_timeout")
+
+        self.connection_kwargs.update(
+            {
+                "orig_host_address": None,
+                "orig_socket_timeout": None,
+                "orig_socket_connect_timeout": None,
+                "host": orig_host,
+                "socket_timeout": orig_socket_timeout,
+                "socket_connect_timeout": orig_connect_timeout,
+            }
+        )
+
+    def reset_connections_tmp_settings(self):
+        """
+        Restore original settings from temporary configuration for all connections in the pool.
+
+        This method restores each connection's original host, socket_timeout, and socket_connect_timeout
+        values from their orig_* attributes back to the active connection configuration, then clears
+        the temporary storage attributes.
+
+        This is used to restore connections to their original configuration after maintenance operations
+        that required temporary address/timeout changes are complete.
 
         When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
-        This new address will be used to create new connections until the old node is decomissioned.
-
-        :param tmp_host_address: The temporary host address to use for the connection.
-        :param tmp_relax_timeout: The relax timeout to use for the connection.
-                              If -1 is provided - the relax timeout is disabled, so the tmp property is not set
-        """
-        self.connection_kwargs.update({"tmp_host_address": tmp_host_address})
-        self.connection_kwargs.update({"tmp_relax_timeout": tmp_relax_timeout})
-
-    def update_connections_tmp_settings(
-        self,
-        tmp_host_address: Optional[str] = None,
-        tmp_relax_timeout: Optional[float] = None,
-    ):
-        """
-        Update the tmp settings for all connections in the pool.
-        This is used when a cluster node is rebind to a different address.
-
-        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
-
-        :param tmp_host_address: The temporary host address to use for the connection.
-        :param tmp_relax_timeout: The relax timeout to use for the connection.
         """
         with self._lock:
             for conn in self._available_connections:
-                self._update_connection_tmp_settings(
-                    conn, tmp_host_address, tmp_relax_timeout
+                conn.reset_tmp_settings(
+                    reset_host_address=True, reset_relax_timeout=True
                 )
             for conn in self._in_use_connections:
-                self._update_connection_tmp_settings(
-                    conn, tmp_host_address, tmp_relax_timeout
+                conn.reset_tmp_settings(
+                    reset_host_address=True, reset_relax_timeout=True
                 )
 
     def update_active_connections_for_reconnect(
         self,
-        tmp_host_address: Optional[str] = None,
+        tmp_host_address: str,
         tmp_relax_timeout: Optional[float] = None,
+        skip_original_data_update: bool = False,
     ):
         """
         Mark all active connections for reconnect.
@@ -1873,17 +2008,18 @@ class ConnectionPool:
 
         When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
 
-        :param tmp_host_address: The temporary host address to use for the connection.
+        :param orig_host_address: The temporary host address to use for the connection.
         """
         for conn in self._in_use_connections:
             self._update_connection_for_reconnect(
-                conn, tmp_host_address, tmp_relax_timeout
+                conn, tmp_host_address, tmp_relax_timeout, skip_original_data_update
             )
 
     def disconnect_and_reconfigure_free_connections(
         self,
-        tmp_host_address: Optional[str] = None,
+        tmp_host_address: str,
         tmp_relax_timeout: Optional[float] = None,
+        skip_original_data_update: bool = False,
     ):
         """
         Disconnect all free/available connections.
@@ -1891,13 +2027,13 @@ class ConnectionPool:
 
         When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
 
-        :param tmp_host_address: The temporary host address to use for the connection.
-        :param tmp_relax_timeout: The relax timeout to use for the connection.
+        :param orig_host_address: The temporary host address to use for the connection.
+        :param orig_relax_timeout: The relax timeout to use for the connection.
         """
 
         for conn in self._available_connections:
             self._disconnect_and_update_connection_for_reconnect(
-                conn, tmp_host_address, tmp_relax_timeout
+                conn, tmp_host_address, tmp_relax_timeout, skip_original_data_update
             )
 
     def update_connections_current_timeout(
@@ -1916,47 +2052,39 @@ class ConnectionPool:
         :param include_available_connections: Whether to include available connections in the update.
         """
         for conn in self._in_use_connections:
-            self._update_connection_timeout(conn, relax_timeout)
+            conn.update_current_socket_timeout(relax_timeout)
 
         if include_free_connections:
             for conn in self._available_connections:
-                self._update_connection_timeout(conn, relax_timeout)
+                conn.update_current_socket_timeout(relax_timeout)
 
     def _update_connection_for_reconnect(
         self,
         connection: "Connection",
-        tmp_host_address: Optional[str] = None,
+        tmp_host_address: str,
         tmp_relax_timeout: Optional[float] = None,
+        skip_original_data_update: bool = False,
     ):
         connection.mark_for_reconnect()
-        self._update_connection_tmp_settings(
-            connection, tmp_host_address, tmp_relax_timeout
+        connection.set_tmp_settings(
+            tmp_host_address=tmp_host_address,
+            tmp_relax_timeout=tmp_relax_timeout,
+            skip_original_data_update=skip_original_data_update,
         )
 
     def _disconnect_and_update_connection_for_reconnect(
         self,
         connection: "Connection",
-        tmp_host_address: Optional[str] = None,
+        tmp_host_address: str,
         tmp_relax_timeout: Optional[float] = None,
+        skip_original_data_update: bool = False,
     ):
         connection.disconnect()
-        self._update_connection_tmp_settings(
-            connection, tmp_host_address, tmp_relax_timeout
+        connection.set_tmp_settings(
+            tmp_host_address=tmp_host_address,
+            tmp_relax_timeout=tmp_relax_timeout,
+            skip_original_data_update=skip_original_data_update,
         )
-
-    def _update_connection_tmp_settings(
-        self,
-        connection: "Connection",
-        tmp_host_address: Optional[str] = None,
-        tmp_relax_timeout: Optional[float] = None,
-    ):
-        connection.tmp_host_address = tmp_host_address
-        connection.tmp_relax_timeout = tmp_relax_timeout
-
-    def _update_connection_timeout(
-        self, connection: "Connection", relax_timeout: Optional[Number]
-    ):
-        connection.update_current_socket_timeout(relax_timeout)
 
     async def _mock(self, error: RedisError):
         """
@@ -1965,16 +2093,6 @@ class ConnectionPool:
         :return:
         """
         pass
-
-    def set_maintenance_state_for_all(self, state: "MaintenanceState"):
-        with self._lock:
-            for conn in self._available_connections:
-                conn.set_maintenance_state(state)
-            for conn in self._in_use_connections:
-                conn.set_maintenance_state(state)
-
-    def set_maintenance_state_in_kwargs(self, state: "MaintenanceState"):
-        self.connection_kwargs["maintenance_state"] = state
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -2215,67 +2333,54 @@ class BlockingConnectionPool(ConnectionPool):
 
     def update_active_connections_for_reconnect(
         self,
-        tmp_host_address: Optional[str] = None,
+        tmp_host_address: str,
         tmp_relax_timeout: Optional[float] = None,
+        skip_original_data_update: bool = False,
     ):
         with self._lock:
             connections_in_queue = {conn for conn in self.pool.queue if conn}
             for conn in self._connections:
                 if conn not in connections_in_queue:
                     self._update_connection_for_reconnect(
-                        conn, tmp_host_address, tmp_relax_timeout
+                        conn,
+                        tmp_host_address,
+                        tmp_relax_timeout,
+                        skip_original_data_update,
                     )
 
     def disconnect_and_reconfigure_free_connections(
         self,
-        tmp_host_address: Optional[str] = None,
+        tmp_host_address: str,
         tmp_relax_timeout: Optional[Number] = None,
+        skip_original_data_update: bool = False,
     ):
-        with self._lock:
-            existing_connections = self.pool.queue
+        existing_connections = self.pool.queue
 
-            for conn in existing_connections:
-                if conn:
-                    self._disconnect_and_update_connection_for_reconnect(
-                        conn, tmp_host_address, tmp_relax_timeout
-                    )
+        for conn in existing_connections:
+            if conn:
+                self._disconnect_and_update_connection_for_reconnect(
+                    conn, tmp_host_address, tmp_relax_timeout, skip_original_data_update
+                )
 
     def update_connections_current_timeout(
         self,
         relax_timeout: Optional[float] = None,
         include_free_connections: bool = False,
     ):
-        logging.debug(
-            f"***** Blocking Pool --> Updating timeouts. relax_timeout: {relax_timeout}"
-        )
-
-        with self._lock:
-            if include_free_connections:
-                for conn in tuple(self._connections):
-                    self._update_connection_timeout(conn, relax_timeout)
-            else:
-                connections_in_queue = {conn for conn in self.pool.queue if conn}
-                for conn in self._connections:
-                    if conn not in connections_in_queue:
-                        self._update_connection_timeout(conn, relax_timeout)
-
-    def update_connections_tmp_settings(
-        self,
-        tmp_host_address: Optional[str] = None,
-        tmp_relax_timeout: Optional[float] = None,
-    ):
-        with self._lock:
+        if include_free_connections:
             for conn in tuple(self._connections):
-                self._update_connection_tmp_settings(
-                    conn, tmp_host_address, tmp_relax_timeout
-                )
+                conn.update_current_socket_timeout(relax_timeout)
+        else:
+            connections_in_queue = {conn for conn in self.pool.queue if conn}
+            for conn in self._connections:
+                if conn not in connections_in_queue:
+                    conn.update_current_socket_timeout(relax_timeout)
 
     def _update_maintenance_events_config_for_connections(
         self, maintenance_events_config
     ):
-        with self._lock:
-            for conn in tuple(self._connections):
-                conn.maintenance_events_config = maintenance_events_config
+        for conn in tuple(self._connections):
+            conn.maintenance_events_config = maintenance_events_config
 
     def _update_maintenance_events_configs_for_connections(
         self, maintenance_events_pool_handler
@@ -2283,23 +2388,25 @@ class BlockingConnectionPool(ConnectionPool):
         """Override base class method to work with BlockingConnectionPool's structure."""
         with self._lock:
             for conn in tuple(self._connections):
-                if conn:  # conn can be None in BlockingConnectionPool
-                    conn.set_maintenance_event_pool_handler(
-                        maintenance_events_pool_handler
-                    )
-                    conn.maintenance_events_config = (
-                        maintenance_events_pool_handler.config
-                    )
+                conn.set_maintenance_event_pool_handler(maintenance_events_pool_handler)
+                conn.maintenance_events_config = maintenance_events_pool_handler.config
+
+    def reset_connections_tmp_settings(self):
+        """
+        Override base class method to work with BlockingConnectionPool's structure.
+
+        Restore original settings from temporary configuration for all connections in the pool.
+        """
+        for conn in tuple(self._connections):
+            conn.reset_tmp_settings(reset_host_address=True, reset_relax_timeout=True)
 
     def set_in_maintenance(self, in_maintenance: bool):
         """Set the maintenance mode for the connection pool."""
         self._in_maintenance = in_maintenance
 
-    def set_maintenance_state_for_all(self, state: "MaintenanceState"):
-        with self._lock:
-            for conn in getattr(self, "_connections", []):
-                if conn:
-                    conn.set_maintenance_state(state)
+    def set_maintenance_state_for_all_connections(self, state: "MaintenanceState"):
+        for conn in self._connections:
+            conn.maintenance_state = state
 
-    def set_maintenance_state_in_kwargs(self, state: "MaintenanceState"):
+    def set_maintenance_state_in_connection_kwargs(self, state: "MaintenanceState"):
         self.connection_kwargs["maintenance_state"] = state

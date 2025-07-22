@@ -438,7 +438,7 @@ class TestMaintenanceEventPoolHandler:
 
             # Verify timer was started
             mock_timer.assert_called_once_with(
-                event.ttl, self.handler.handle_node_moved_event
+                event.ttl, self.handler.handle_node_moved_event, args=(event,)
             )
             mock_timer.return_value.start.assert_called_once()
 
@@ -446,17 +446,18 @@ class TestMaintenanceEventPoolHandler:
             assert event in self.handler._processed_events
 
             # Verify pool methods were called
-            self.mock_pool.update_connection_kwargs_with_tmp_settings.assert_called_once()
+            self.mock_pool.add_tmp_config_to_connection_kwargs.assert_called_once()
 
     def test_handle_node_moved_event(self):
         """Test handling of node moved event (cleanup)."""
-        self.handler.handle_node_moved_event()
+        event = NodeMovingEvent(
+            id=1, new_node_host="localhost", new_node_port=6379, ttl=10
+        )
+        self.mock_pool.connection_kwargs = {"host": "localhost"}
+        self.handler.handle_node_moved_event(event)
 
         # Verify cleanup methods were called
-        self.mock_pool.update_connection_kwargs_with_tmp_settings.assert_called_once_with(
-            tmp_host_address=None,
-            tmp_relax_timeout=-1,
-        )
+        self.mock_pool.remove_tmp_config_from_connection_kwargs.assert_called_once()
 
 
 class TestMaintenanceEventConnectionHandler:
@@ -519,7 +520,7 @@ class TestMaintenanceEventConnectionHandler:
         self.handler.handle_migrating_event(event)
 
         self.mock_connection.update_current_socket_timeout.assert_called_once_with(20)
-        self.mock_connection.update_tmp_settings.assert_called_once_with(
+        self.mock_connection.set_tmp_settings.assert_called_once_with(
             tmp_relax_timeout=20
         )
 
@@ -540,6 +541,6 @@ class TestMaintenanceEventConnectionHandler:
         self.handler.handle_migration_completed_event(event)
 
         self.mock_connection.update_current_socket_timeout.assert_called_once_with(-1)
-        self.mock_connection.update_tmp_settings.assert_called_once_with(
-            tmp_relax_timeout=-1
+        self.mock_connection.reset_tmp_settings.assert_called_once_with(
+            reset_relax_timeout=True
         )
