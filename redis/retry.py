@@ -1,27 +1,27 @@
+import abc
 import socket
 from time import sleep
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Tuple, Type, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Generic, Iterable, Tuple, Type, TypeVar
 
 from redis.exceptions import ConnectionError, TimeoutError
 
 T = TypeVar("T")
+E = TypeVar("E", bound=Exception, covariant=True)
 
 if TYPE_CHECKING:
     from redis.backoff import AbstractBackoff
 
 
-class Retry:
+class AbstractRetry(Generic[E], abc.ABC):
     """Retry a specific number of times after a failure"""
+
+    _supported_errors: Tuple[Type[E], ...]
 
     def __init__(
         self,
         backoff: "AbstractBackoff",
         retries: int,
-        supported_errors: Tuple[Type[Exception], ...] = (
-            ConnectionError,
-            TimeoutError,
-            socket.timeout,
-        ),
+        supported_errors: Tuple[Type[E], ...],
     ):
         """
         Initialize a `Retry` object with a `Backoff` object
@@ -34,22 +34,14 @@ class Retry:
         self._retries = retries
         self._supported_errors = supported_errors
 
+    @abc.abstractmethod
     def __eq__(self, other: Any) -> bool:
-        if not isinstance(other, Retry):
-            return NotImplemented
-
-        return (
-            self._backoff == other._backoff
-            and self._retries == other._retries
-            and set(self._supported_errors) == set(other._supported_errors)
-        )
+        return NotImplemented
 
     def __hash__(self) -> int:
         return hash((self._backoff, self._retries, frozenset(self._supported_errors)))
 
-    def update_supported_errors(
-        self, specified_errors: Iterable[Type[Exception]]
-    ) -> None:
+    def update_supported_errors(self, specified_errors: Iterable[Type[E]]) -> None:
         """
         Updates the supported errors with the specified error types
         """
@@ -68,6 +60,32 @@ class Retry:
         Set the number of retries.
         """
         self._retries = value
+
+
+class Retry(AbstractRetry[Exception]):
+    __hash__ = AbstractRetry.__hash__
+
+    def __init__(
+        self,
+        backoff: "AbstractBackoff",
+        retries: int,
+        supported_errors: Tuple[Type[Exception], ...] = (
+            ConnectionError,
+            TimeoutError,
+            socket.timeout,
+        ),
+    ):
+        super().__init__(backoff, retries, supported_errors)
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Retry):
+            return NotImplemented
+
+        return (
+            self._backoff == other._backoff
+            and self._retries == other._retries
+            and set(self._supported_errors) == set(other._supported_errors)
+        )
 
     def call_with_retry(
         self,
