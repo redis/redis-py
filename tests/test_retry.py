@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+from redis.asyncio.retry import Retry as AsyncRetry
 from redis.backoff import (
     AbstractBackoff,
     ConstantBackoff,
@@ -89,6 +90,7 @@ class TestConnectionConstructorWithRetry:
         assert c.retry._retries == retries
 
 
+@pytest.mark.parametrize("retry_class", [Retry, AsyncRetry])
 @pytest.mark.parametrize(
     "args",
     [
@@ -108,8 +110,8 @@ class TestConnectionConstructorWithRetry:
         for backoff in ((Backoff(), 2), (Backoff(25), 5), (Backoff(25, 5), 5))
     ],
 )
-def test_retry_eq_and_hashable(args):
-    assert Retry(*args) == Retry(*args)
+def test_retry_eq_and_hashable(retry_class, args):
+    assert retry_class(*args) == retry_class(*args)
 
     # create another retry object with different parameters
     copy = list(args)
@@ -118,9 +120,19 @@ def test_retry_eq_and_hashable(args):
     else:
         copy[0] = ConstantBackoff(9000)
 
-    assert Retry(*args) != Retry(*copy)
-    assert Retry(*copy) != Retry(*args)
-    assert len({Retry(*args), Retry(*args), Retry(*copy), Retry(*copy)}) == 2
+    assert retry_class(*args) != retry_class(*copy)
+    assert retry_class(*copy) != retry_class(*args)
+    assert (
+        len(
+            {
+                retry_class(*args),
+                retry_class(*args),
+                retry_class(*copy),
+                retry_class(*copy),
+            }
+        )
+        == 2
+    )
 
 
 class TestRetry:
