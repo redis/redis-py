@@ -814,7 +814,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     moved = False
 
                 return await target_node.execute_command(*args, **kwargs)
-            except (BusyLoadingError, MaxConnectionsError):
+            except BusyLoadingError:
+                raise
+            except MaxConnectionsError:
+                # MaxConnectionsError indicates client-side resource exhaustion
+                # (too many connections in the pool), not a node failure.
+                # Don't treat this as a node failure - just re-raise the error
+                # without reinitializing the cluster.
                 raise
             except (ConnectionError, TimeoutError):
                 # Connection retries are being handled in the node's
