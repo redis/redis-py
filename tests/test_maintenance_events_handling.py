@@ -15,9 +15,11 @@ from redis.connection import (
 from redis.maintenance_events import (
     MaintenanceEventsConfig,
     NodeMigratingEvent,
+    NodeMigratedEvent,
+    NodeFailingOverEvent,
+    NodeFailedOverEvent,
     MaintenanceEventPoolHandler,
     NodeMovingEvent,
-    NodeMigratedEvent,
 )
 
 
@@ -69,6 +71,22 @@ class MockSocket:
                 # Format: >1\r\n$8\r\nMIGRATED\r\n (1 element: MIGRATED)
                 migrated_push = ">1\r\n$8\r\nMIGRATED\r\n"
                 response = migrated_push.encode() + response
+            elif (
+                b"key_receive_failing_over_" in data
+                or b"key_receive_failing_over" in data
+            ):
+                # FAILING_OVER push message before SET key_receive_failing_over_X response
+                # Format: >2\r\n$12\r\nFAILING_OVER\r\n:10\r\n (2 elements: FAILING_OVER, ttl)
+                failing_over_push = ">2\r\n$12\r\nFAILING_OVER\r\n:10\r\n"
+                response = failing_over_push.encode() + response
+            elif (
+                b"key_receive_failed_over_" in data
+                or b"key_receive_failed_over" in data
+            ):
+                # FAILED_OVER push message before SET key_receive_failed_over_X response
+                # Format: >1\r\n$11\r\nFAILED_OVER\r\n (1 element: FAILED_OVER)
+                failed_over_push = ">1\r\n$11\r\nFAILED_OVER\r\n"
+                response = failed_over_push.encode() + response
             elif b"key_receive_moving_" in data:
                 # MOVING push message before SET key_receive_moving_X response
                 # Format: >3\r\n$6\r\nMOVING\r\n:15\r\n+localhost:6379\r\n (3 elements: MOVING, ttl, host:port)
@@ -91,6 +109,10 @@ class MockSocket:
                 self.pending_responses.append(b"$6\r\nvalue2\r\n")
             elif b"key_receive_migrated" in data:
                 self.pending_responses.append(b"$6\r\nvalue3\r\n")
+            elif b"key_receive_failing_over" in data:
+                self.pending_responses.append(b"$6\r\nvalue4\r\n")
+            elif b"key_receive_failed_over" in data:
+                self.pending_responses.append(b"$6\r\nvalue5\r\n")
             elif b"key1" in data:
                 self.pending_responses.append(b"$6\r\nvalue1\r\n")
             else:
@@ -719,13 +741,14 @@ class TestMaintenanceEventsHandling:
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_migrating_event_with_disabled_relax_timeout(self, pool_class):
         """
-        Test migrating event handling when relax timeout is disabled.
+        Test maintenance events handling when relax timeout is disabled.
 
         This test validates that when relax_timeout is disabled (-1):
-        1. MIGRATING events are received and processed
+        1. MIGRATING, MIGRATED, FAILING_OVER, and FAILED_OVER events are received and processed
         2. No timeout updates are applied to connections
-        3. Socket timeouts remain unchanged during migration events
+        3. Socket timeouts remain unchanged during all maintenance events
         4. Tests both ConnectionPool and BlockingConnectionPool implementations
+        5. Tests the complete lifecycle: MIGRATING -> MIGRATED -> FAILING_OVER -> FAILED_OVER
         """
         # Create config with disabled relax timeout
         disabled_config = MaintenanceEventsConfig(
@@ -766,6 +789,57 @@ class TestMaintenanceEventsHandling:
             expected_value3 = value1.encode()
             assert result3 == expected_value3, (
                 f"Command 3 (GET key1) failed. Expected: {expected_value3}, Got: {result3}"
+            )
+
+            # Command 4: This SET command will receive MIGRATED push message before response
+            key_migrated = "key_receive_migrated"
+            value_migrated = "value3"
+            result4 = test_redis_client.set(key_migrated, value_migrated)
+
+            # Validate Command 4 result
+            assert result4 is True, "Command 4 (SET key_receive_migrated) failed"
+
+            # Validate timeout is still NOT updated after MIGRATED (relax is disabled)
+            self._validate_current_timeout(None)
+
+            # Command 5: This SET command will receive FAILING_OVER push message before response
+            key_failing_over = "key_receive_failing_over"
+            value_failing_over = "value4"
+            result5 = test_redis_client.set(key_failing_over, value_failing_over)
+
+            # Validate Command 5 result
+            assert result5 is True, "Command 5 (SET key_receive_failing_over) failed"
+
+            # Validate timeout is still NOT updated after FAILING_OVER (relax is disabled)
+            self._validate_current_timeout(None)
+
+            # Command 6: Another command to verify timeout remains unchanged during failover
+            result6 = test_redis_client.get(key_failing_over)
+
+            # Validate Command 6 result
+            expected_value6 = value_failing_over.encode()
+            assert result6 == expected_value6, (
+                f"Command 6 (GET key_receive_failing_over) failed. Expected: {expected_value6}, Got: {result6}"
+            )
+
+            # Command 7: This SET command will receive FAILED_OVER push message before response
+            key_failed_over = "key_receive_failed_over"
+            value_failed_over = "value5"
+            result7 = test_redis_client.set(key_failed_over, value_failed_over)
+
+            # Validate Command 7 result
+            assert result7 is True, "Command 7 (SET key_receive_failed_over) failed"
+
+            # Validate timeout is still NOT updated after FAILED_OVER (relax is disabled)
+            self._validate_current_timeout(None)
+
+            # Command 8: Final command to verify timeout remains unchanged after all events
+            result8 = test_redis_client.get(key_failed_over)
+
+            # Validate Command 8 result
+            expected_value8 = value_failed_over.encode()
+            assert result8 == expected_value8, (
+                f"Command 8 (GET key_receive_failed_over) failed. Expected: {expected_value8}, Got: {result8}"
             )
 
             # Verify maintenance events were processed correctly
@@ -1327,7 +1401,7 @@ class TestMaintenanceEventsHandling:
     def test_moving_migrating_migrated_moved_state_transitions(self, pool_class):
         """
         Test moving configs are not lost if the per connection events get picked up after moving is handled.
-        MOVING → MIGRATING → MIGRATED → MOVED
+        MOVING → MIGRATING → MIGRATED → FAILING_OVER → FAILED_OVER → MOVED
         Checks the state after each event for all connections and for new connections created during each state.
         """
         # Setup
@@ -1418,7 +1492,45 @@ class TestMaintenanceEventsHandling:
             expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
         )
 
-        # 4. MOVED event (simulate timer expiry)
+        # 4. FAILING_OVER event (simulate direct connection handler call)
+        for conn in in_use_connections:
+            conn._maintenance_event_connection_handler.handle_event(
+                NodeFailingOverEvent(id=3, ttl=1)
+            )
+        # State should not change for connections that are in MOVING state
+        self._validate_in_use_connections_state(
+            in_use_connections,
+            expected_state=MaintenanceState.MOVING,
+            expected_host_address=tmp_address,
+            expected_socket_timeout=self.config.relax_timeout,
+            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_orig_socket_timeout=None,
+            expected_orig_socket_connect_timeout=None,
+            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+        )
+
+        # 5. FAILED_OVER event (simulate direct connection handler call)
+        for conn in in_use_connections:
+            conn._maintenance_event_connection_handler.handle_event(
+                NodeFailedOverEvent(id=3)
+            )
+        # State should not change for connections that are in MOVING state
+        self._validate_in_use_connections_state(
+            in_use_connections,
+            expected_state=MaintenanceState.MOVING,
+            expected_host_address=tmp_address,
+            expected_socket_timeout=self.config.relax_timeout,
+            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_orig_socket_timeout=None,
+            expected_orig_socket_connect_timeout=None,
+            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+        )
+
+        # 6. MOVED event (simulate timer expiry)
         pool_handler.handle_node_moved_event(moving_event)
         self._validate_in_use_connections_state(
             in_use_connections,
