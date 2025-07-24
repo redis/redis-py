@@ -30,10 +30,12 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         self._failover_strategy.set_databases(self._databases)
         self._auto_fallback_interval = config.auto_fallback_interval
         self._event_dispatcher = config.event_dispatcher
+        self._command_retry = config.command_retry
+        self._command_retry.update_supported_errors((ConnectionRefusedError,))
         self.command_executor = DefaultCommandExecutor(
             failure_detectors=self._failure_detectors,
             databases=self._databases,
-            command_retry=config.command_retry,
+            command_retry=self._command_retry,
             failover_strategy=self._failover_strategy,
             event_dispatcher=self._event_dispatcher,
             auto_fallback_interval=self._auto_fallback_interval,
@@ -219,7 +221,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
                         database.circuit.state = CBState.OPEN
                     elif is_healthy and database.circuit.state != CBState.CLOSED:
                         database.circuit.state = CBState.CLOSED
-                except (ConnectionError, TimeoutError, socket.timeout) as e:
+                except (ConnectionError, TimeoutError, socket.timeout, ConnectionRefusedError) as e:
                     if database.circuit.state != CBState.OPEN:
                         database.circuit.state = CBState.OPEN
                     is_healthy = False

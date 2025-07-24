@@ -66,6 +66,9 @@ class TestActiveActiveStandalone:
             assert r_multi_db.get('key') == 'value'
             sleep(0.1)
 
+        # Timeout so cluster could recover from network failure.
+        sleep(2)
+
     @pytest.mark.parametrize(
         "r_multi_db",
         [
@@ -91,6 +94,9 @@ class TestActiveActiveStandalone:
             while not event.is_set():
                 assert r_multi_db.get('key') == 'value'
                 sleep(0.1)
+
+        # Timeout so cluster could recover from network failure.
+        sleep(2)
 
 class TestActiveActiveStandalonePipeline:
     @pytest.mark.parametrize(
@@ -138,6 +144,9 @@ class TestActiveActiveStandalonePipeline:
                 assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
             sleep(0.1)
 
+        # Timeout so cluster could recover from network failure.
+        sleep(2)
+
     @pytest.mark.parametrize(
         "r_multi_db",
         [
@@ -183,6 +192,9 @@ class TestActiveActiveStandalonePipeline:
             assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
             sleep(0.1)
 
+        # Timeout so cluster could recover from network failure.
+        sleep(2)
+
     @pytest.mark.parametrize(
         "r_multi_db",
         [
@@ -215,6 +227,9 @@ class TestActiveActiveStandalonePipeline:
                     pipe.get('{hash}key3')
                     assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
                 sleep(0.1)
+
+        # Timeout so cluster could recover from network failure.
+        sleep(2)
 
 class TestActiveActiveStandaloneTransaction:
     @pytest.mark.parametrize(
@@ -255,6 +270,9 @@ class TestActiveActiveStandaloneTransaction:
         for _ in range(3):
             r_multi_db.transaction(callback)
             sleep(0.1)
+
+        # Timeout so cluster could recover from network failure.
+        sleep(2)
 
     @pytest.mark.parametrize(
         "r_multi_db",
