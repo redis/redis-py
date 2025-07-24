@@ -7,9 +7,12 @@ from redis.maintenance_events import (
     NodeMovingEvent,
     NodeMigratingEvent,
     NodeMigratedEvent,
+    NodeFailingOverEvent,
+    NodeFailedOverEvent,
     MaintenanceEventsConfig,
     MaintenanceEventPoolHandler,
     MaintenanceEventConnectionHandler,
+    MaintenanceState,
 )
 
 
@@ -281,6 +284,84 @@ class TestNodeMigratedEvent:
         assert hash(event1) != hash(event3)
 
 
+class TestNodeFailingOverEvent:
+    """Test the NodeFailingOverEvent class."""
+
+    def test_init(self):
+        """Test NodeFailingOverEvent initialization."""
+        with patch("time.monotonic", return_value=1000):
+            event = NodeFailingOverEvent(id=1, ttl=5)
+            assert event.id == 1
+            assert event.ttl == 5
+            assert event.creation_time == 1000
+
+    def test_repr(self):
+        """Test NodeFailingOverEvent string representation."""
+        with patch("time.monotonic", return_value=1000):
+            event = NodeFailingOverEvent(id=1, ttl=5)
+
+        with patch("time.monotonic", return_value=1002):  # 2 seconds later
+            repr_str = repr(event)
+            assert "NodeFailingOverEvent" in repr_str
+            assert "id=1" in repr_str
+            assert "ttl=5" in repr_str
+            assert "remaining=3.0s" in repr_str
+            assert "expired=False" in repr_str
+
+    def test_equality_and_hash(self):
+        """Test equality and hash for NodeFailingOverEvent."""
+        event1 = NodeFailingOverEvent(id=1, ttl=5)
+        event2 = NodeFailingOverEvent(id=1, ttl=10)  # Same id, different ttl
+        event3 = NodeFailingOverEvent(id=2, ttl=5)  # Different id
+
+        assert event1 == event2
+        assert event1 != event3
+        assert hash(event1) == hash(event2)
+        assert hash(event1) != hash(event3)
+
+
+class TestNodeFailedOverEvent:
+    """Test the NodeFailedOverEvent class."""
+
+    def test_init(self):
+        """Test NodeFailedOverEvent initialization."""
+        with patch("time.monotonic", return_value=1000):
+            event = NodeFailedOverEvent(id=1)
+            assert event.id == 1
+            assert event.ttl == NodeFailedOverEvent.DEFAULT_TTL
+            assert event.creation_time == 1000
+
+    def test_default_ttl(self):
+        """Test that DEFAULT_TTL is used correctly."""
+        assert NodeFailedOverEvent.DEFAULT_TTL == 5
+        event = NodeFailedOverEvent(id=1)
+        assert event.ttl == 5
+
+    def test_repr(self):
+        """Test NodeFailedOverEvent string representation."""
+        with patch("time.monotonic", return_value=1000):
+            event = NodeFailedOverEvent(id=1)
+
+        with patch("time.monotonic", return_value=1001):  # 1 second later
+            repr_str = repr(event)
+            assert "NodeFailedOverEvent" in repr_str
+            assert "id=1" in repr_str
+            assert "ttl=5" in repr_str
+            assert "remaining=4.0s" in repr_str
+            assert "expired=False" in repr_str
+
+    def test_equality_and_hash(self):
+        """Test equality and hash for NodeFailedOverEvent."""
+        event1 = NodeFailedOverEvent(id=1)
+        event2 = NodeFailedOverEvent(id=1)  # Same id
+        event3 = NodeFailedOverEvent(id=2)  # Different id
+
+        assert event1 == event2
+        assert event1 != event3
+        assert hash(event1) == hash(event2)
+        assert hash(event1) != hash(event3)
+
+
 class TestMaintenanceEventsConfig:
     """Test the MaintenanceEventsConfig class."""
 
@@ -477,19 +558,41 @@ class TestMaintenanceEventConnectionHandler:
         """Test handling of NodeMigratingEvent."""
         event = NodeMigratingEvent(id=1, ttl=5)
 
-        with patch.object(self.handler, "handle_migrating_event") as mock_handle:
+        with patch.object(
+            self.handler, "handle_maintenance_start_event"
+        ) as mock_handle:
             self.handler.handle_event(event)
-            mock_handle.assert_called_once_with(event)
+            mock_handle.assert_called_once_with(MaintenanceState.MIGRATING)
 
     def test_handle_event_migrated(self):
         """Test handling of NodeMigratedEvent."""
         event = NodeMigratedEvent(id=1)
 
         with patch.object(
-            self.handler, "handle_migration_completed_event"
+            self.handler, "handle_maintenance_completed_event"
         ) as mock_handle:
             self.handler.handle_event(event)
-            mock_handle.assert_called_once_with(event)
+            mock_handle.assert_called_once_with()
+
+    def test_handle_event_failing_over(self):
+        """Test handling of NodeFailingOverEvent."""
+        event = NodeFailingOverEvent(id=1, ttl=5)
+
+        with patch.object(
+            self.handler, "handle_maintenance_start_event"
+        ) as mock_handle:
+            self.handler.handle_event(event)
+            mock_handle.assert_called_once_with(MaintenanceState.FAILING_OVER)
+
+    def test_handle_event_failed_over(self):
+        """Test handling of NodeFailedOverEvent."""
+        event = NodeFailedOverEvent(id=1)
+
+        with patch.object(
+            self.handler, "handle_maintenance_completed_event"
+        ) as mock_handle:
+            self.handler.handle_event(event)
+            mock_handle.assert_called_once_with()
 
     def test_handle_event_unknown_type(self):
         """Test handling of unknown event type."""
@@ -500,43 +603,71 @@ class TestMaintenanceEventConnectionHandler:
         result = self.handler.handle_event(event)
         assert result is None
 
-    def test_handle_migrating_event_disabled(self):
-        """Test migrating event handling when relax timeouts are disabled."""
+    def test_handle_maintenance_start_event_disabled(self):
+        """Test maintenance start event handling when relax timeouts are disabled."""
         config = MaintenanceEventsConfig(relax_timeout=-1)
         handler = MaintenanceEventConnectionHandler(self.mock_connection, config)
-        event = NodeMigratingEvent(id=1, ttl=5)
 
-        result = handler.handle_migrating_event(event)
+        result = handler.handle_maintenance_start_event(MaintenanceState.MIGRATING)
         assert result is None
         self.mock_connection.update_current_socket_timeout.assert_not_called()
 
-    def test_handle_migrating_event_success(self):
-        """Test successful migrating event handling."""
-        event = NodeMigratingEvent(id=1, ttl=5)
+    def test_handle_maintenance_start_event_moving_state(self):
+        """Test maintenance start event handling when connection is in MOVING state."""
+        self.mock_connection.maintenance_state = MaintenanceState.MOVING
 
-        self.handler.handle_migrating_event(event)
+        result = self.handler.handle_maintenance_start_event(MaintenanceState.MIGRATING)
+        assert result is None
+        self.mock_connection.update_current_socket_timeout.assert_not_called()
 
+    def test_handle_maintenance_start_event_migrating_success(self):
+        """Test successful maintenance start event handling for migrating."""
+        self.mock_connection.maintenance_state = MaintenanceState.NONE
+
+        self.handler.handle_maintenance_start_event(MaintenanceState.MIGRATING)
+
+        assert self.mock_connection.maintenance_state == MaintenanceState.MIGRATING
         self.mock_connection.update_current_socket_timeout.assert_called_once_with(20)
         self.mock_connection.set_tmp_settings.assert_called_once_with(
             tmp_relax_timeout=20
         )
 
-    def test_handle_migration_completed_event_disabled(self):
-        """Test migration completed event handling when relax timeouts are disabled."""
+    def test_handle_maintenance_start_event_failing_over_success(self):
+        """Test successful maintenance start event handling for failing over."""
+        self.mock_connection.maintenance_state = MaintenanceState.NONE
+
+        self.handler.handle_maintenance_start_event(MaintenanceState.FAILING_OVER)
+
+        assert self.mock_connection.maintenance_state == MaintenanceState.FAILING_OVER
+        self.mock_connection.update_current_socket_timeout.assert_called_once_with(20)
+        self.mock_connection.set_tmp_settings.assert_called_once_with(
+            tmp_relax_timeout=20
+        )
+
+    def test_handle_maintenance_completed_event_disabled(self):
+        """Test maintenance completed event handling when relax timeouts are disabled."""
         config = MaintenanceEventsConfig(relax_timeout=-1)
         handler = MaintenanceEventConnectionHandler(self.mock_connection, config)
-        event = NodeMigratedEvent(id=1)
 
-        result = handler.handle_migration_completed_event(event)
+        result = handler.handle_maintenance_completed_event()
         assert result is None
         self.mock_connection.update_current_socket_timeout.assert_not_called()
 
-    def test_handle_migration_completed_event_success(self):
-        """Test successful migration completed event handling."""
-        event = NodeMigratedEvent(id=1)
+    def test_handle_maintenance_completed_event_moving_state(self):
+        """Test maintenance completed event handling when connection is in MOVING state."""
+        self.mock_connection.maintenance_state = MaintenanceState.MOVING
 
-        self.handler.handle_migration_completed_event(event)
+        result = self.handler.handle_maintenance_completed_event()
+        assert result is None
+        self.mock_connection.update_current_socket_timeout.assert_not_called()
 
+    def test_handle_maintenance_completed_event_success(self):
+        """Test successful maintenance completed event handling."""
+        self.mock_connection.maintenance_state = MaintenanceState.MIGRATING
+
+        self.handler.handle_maintenance_completed_event()
+
+        assert self.mock_connection.maintenance_state == MaintenanceState.NONE
         self.mock_connection.update_current_socket_timeout.assert_called_once_with(-1)
         self.mock_connection.reset_tmp_settings.assert_called_once_with(
             reset_relax_timeout=True
