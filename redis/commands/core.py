@@ -3484,6 +3484,28 @@ class StreamCommands(CommandsProtocol):
         """
         return self.execute_command("XACK", name, groupname, *ids)
 
+    def xackdel(
+        self,
+        name: KeyT,
+        groupname: GroupT,
+        *ids: StreamIdT,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
+    ) -> ResponseT:
+        """
+        Combines the functionality of XACK and XDEL. Acknowledges the specified
+        message IDs in the given consumer group and simultaneously attempts to
+        delete the corresponding entries from the stream.
+        """
+        if not ids:
+            raise DataError("XACKDEL requires at least one message ID")
+
+        if ref_policy not in {"KEEPREF", "DELREF", "ACKED"}:
+            raise DataError("XACKDEL ref_policy must be one of: KEEPREF, DELREF, ACKED")
+
+        pieces = [name, groupname, ref_policy, "IDS", len(ids)]
+        pieces.extend(ids)
+        return self.execute_command("XACKDEL", *pieces)
+
     def xadd(
         self,
         name: KeyT,
@@ -3494,6 +3516,7 @@ class StreamCommands(CommandsProtocol):
         nomkstream: bool = False,
         minid: Union[StreamIdT, None] = None,
         limit: Optional[int] = None,
+        ref_policy: Optional[Literal["KEEPREF", "DELREF", "ACKED"]] = None,
     ) -> ResponseT:
         """
         Add to a stream.
@@ -3507,12 +3530,19 @@ class StreamCommands(CommandsProtocol):
         minid: the minimum id in the stream to query.
         Can't be specified with maxlen.
         limit: specifies the maximum number of entries to retrieve
+        ref_policy: optional reference policy for consumer groups when trimming:
+            - KEEPREF (default): When trimming, preserves references in consumer groups' PEL
+            - DELREF: When trimming, removes all references from consumer groups' PEL
+            - ACKED: When trimming, only removes entries acknowledged by all consumer groups
 
         For more information see https://redis.io/commands/xadd
         """
         pieces: list[EncodableT] = []
         if maxlen is not None and minid is not None:
             raise DataError("Only one of ```maxlen``` or ```minid``` may be specified")
+
+        if ref_policy is not None and ref_policy not in {"KEEPREF", "DELREF", "ACKED"}:
+            raise DataError("XADD ref_policy must be one of: KEEPREF, DELREF, ACKED")
 
         if maxlen is not None:
             if not isinstance(maxlen, int) or maxlen < 0:
@@ -3530,6 +3560,8 @@ class StreamCommands(CommandsProtocol):
             pieces.extend([b"LIMIT", limit])
         if nomkstream:
             pieces.append(b"NOMKSTREAM")
+        if ref_policy is not None:
+            pieces.append(ref_policy)
         pieces.append(id)
         if not isinstance(fields, dict) or len(fields) == 0:
             raise DataError("XADD fields must be a non-empty dict")
@@ -3682,6 +3714,26 @@ class StreamCommands(CommandsProtocol):
         For more information see https://redis.io/commands/xdel
         """
         return self.execute_command("XDEL", name, *ids)
+
+    def xdelex(
+        self,
+        name: KeyT,
+        *ids: StreamIdT,
+        ref_policy: Literal["KEEPREF", "DELREF", "ACKED"] = "KEEPREF",
+    ) -> ResponseT:
+        """
+        Extended version of XDEL that provides more control over how message entries
+        are deleted concerning consumer groups.
+        """
+        if not ids:
+            raise DataError("XDELEX requires at least one message ID")
+
+        if ref_policy not in {"KEEPREF", "DELREF", "ACKED"}:
+            raise DataError("XDELEX ref_policy must be one of: KEEPREF, DELREF, ACKED")
+
+        pieces = [name, ref_policy, "IDS", len(ids)]
+        pieces.extend(ids)
+        return self.execute_command("XDELEX", *pieces)
 
     def xgroup_create(
         self,
@@ -4034,6 +4086,7 @@ class StreamCommands(CommandsProtocol):
         approximate: bool = True,
         minid: Union[StreamIdT, None] = None,
         limit: Optional[int] = None,
+        ref_policy: Optional[Literal["KEEPREF", "DELREF", "ACKED"]] = None,
     ) -> ResponseT:
         """
         Trims old messages from a stream.
@@ -4044,6 +4097,10 @@ class StreamCommands(CommandsProtocol):
         minid: the minimum id in the stream to query
         Can't be specified with maxlen.
         limit: specifies the maximum number of entries to retrieve
+        ref_policy: optional reference policy for consumer groups:
+            - KEEPREF (default): Trims entries but preserves references in consumer groups' PEL
+            - DELREF: Trims entries and removes all references from consumer groups' PEL
+            - ACKED: Only trims entries that were read and acknowledged by all consumer groups
 
         For more information see https://redis.io/commands/xtrim
         """
@@ -4053,6 +4110,9 @@ class StreamCommands(CommandsProtocol):
 
         if maxlen is None and minid is None:
             raise DataError("One of ``maxlen`` or ``minid`` must be specified")
+
+        if ref_policy is not None and ref_policy not in {"KEEPREF", "DELREF", "ACKED"}:
+            raise DataError("XTRIM ref_policy must be one of: KEEPREF, DELREF, ACKED")
 
         if maxlen is not None:
             pieces.append(b"MAXLEN")
@@ -4067,6 +4127,8 @@ class StreamCommands(CommandsProtocol):
         if limit is not None:
             pieces.append(b"LIMIT")
             pieces.append(limit)
+        if ref_policy is not None:
+            pieces.append(ref_policy)
 
         return self.execute_command("XTRIM", name, *pieces)
 
