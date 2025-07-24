@@ -129,8 +129,9 @@ class _RESPBase(BaseParser):
     def on_connect(self, connection):
         "Called when the socket connects"
         self._sock = connection._sock
-        timeout = connection.socket_timeout
-        self._buffer = SocketBuffer(self._sock, self.socket_read_size, timeout)
+        self._buffer = SocketBuffer(
+            self._sock, self.socket_read_size, connection.socket_timeout
+        )
         self.encoder = connection.encoder
 
     def on_disconnect(self):
@@ -201,19 +202,18 @@ class PushNotificationsParser(Protocol):
         if msg_type in _INVALIDATION_MESSAGE and self.invalidation_push_handler_func:
             return self.invalidation_push_handler_func(response)
         if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
-            if msg_type in _MOVING_MESSAGE:
-                host, port = response[2].decode().split(":")
-                ttl = response[1]
-                id = 1  # Hardcoded value for sync parser
-                notification = NodeMovingEvent(id, host, port, ttl)
-                return self.node_moving_push_handler_func(notification)
+            host, port = response[2].decode().split(":")
+            ttl = response[1]
+            id = 1  # Hardcoded value until the notification starts including the id
+            notification = NodeMovingEvent(id, host, port, ttl)
+            return self.node_moving_push_handler_func(notification)
         if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
             if msg_type in _MIGRATING_MESSAGE:
                 ttl = response[1]
-                id = 2  # Hardcoded value for sync parser
+                id = 2  # Hardcoded value until the notification starts including the id
                 notification = NodeMigratingEvent(id, ttl)
             elif msg_type in _MIGRATED_MESSAGE:
-                id = 3  # Hardcoded value for sync parser
+                id = 3  # Hardcoded value until the notification starts including the id
                 notification = NodeMigratedEvent(id)
             else:
                 notification = None

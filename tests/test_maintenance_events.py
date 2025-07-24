@@ -33,25 +33,22 @@ class TestMaintenanceEvent:
             assert event.creation_time == 1000
             assert event.expire_at == 1010
 
-    def test_is_expired_false(self):
+    @pytest.mark.parametrize(
+        ("current_time", "expected_expired_state"),
+        [
+            (1005, False),
+            (1015, True),
+        ],
+    )
+    def test_is_expired(self, current_time, expected_expired_state):
         """Test is_expired returns False for non-expired event."""
         with patch("time.monotonic", return_value=1000):
             event = NodeMovingEvent(
                 id=1, new_node_host="localhost", new_node_port=6379, ttl=10
             )
 
-        with patch("time.monotonic", return_value=1005):  # 5 seconds later
-            assert not event.is_expired()
-
-    def test_is_expired_true(self):
-        """Test is_expired returns True for expired event."""
-        with patch("time.monotonic", return_value=1000):
-            event = NodeMovingEvent(
-                id=1, new_node_host="localhost", new_node_port=6379, ttl=10
-            )
-
-        with patch("time.monotonic", return_value=1015):  # 15 seconds later
-            assert event.is_expired()
+        with patch("time.monotonic", return_value=current_time):
+            assert event.is_expired() == expected_expired_state
 
     def test_is_expired_exact_boundary(self):
         """Test is_expired at exact expiration boundary."""

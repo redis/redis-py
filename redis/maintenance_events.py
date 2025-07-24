@@ -382,7 +382,6 @@ class MaintenanceEventPoolHandler:
                     self.pool.add_tmp_config_to_connection_kwargs(
                         tmp_host_address=event.new_node_host,
                         tmp_relax_timeout=self.config.relax_timeout,
-                        skip_original_data_update=prev_moving_in_progress,
                     )
                     if (
                         self.config.is_relax_timeouts_enabled()
@@ -395,21 +394,15 @@ class MaintenanceEventPoolHandler:
                     if self.config.proactive_reconnect:
                         # take care for the active connections in the pool
                         # mark them for reconnect after they complete the current command
-                        # skip original data update if we are already in MOVING state
-                        # as the original data is already stored in the connection
                         self.pool.update_active_connections_for_reconnect(
                             tmp_host_address=event.new_node_host,
                             tmp_relax_timeout=self.config.relax_timeout,
-                            skip_original_data_update=prev_moving_in_progress,
                         )
                         # take care for the inactive connections in the pool
                         # delete them and create new ones
-                        # skip original data update if we are already in MOVING state
-                        # as the original data is already stored in the connection
                         self.pool.disconnect_and_reconfigure_free_connections(
                             tmp_host_address=event.new_node_host,
                             tmp_relax_timeout=self.config.relax_timeout,
-                            skip_original_data_update=prev_moving_in_progress,
                         )
                         if getattr(self.pool, "set_in_maintenance", False):
                             self.pool.set_in_maintenance(False)
