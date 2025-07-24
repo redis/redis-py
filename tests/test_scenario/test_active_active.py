@@ -7,8 +7,8 @@ import pytest
 from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError
 from redis.retry import Retry
-from tests.scenario.conftest import get_endpoint_config
-from tests.scenario.fault_injector_client import ActionRequest, ActionType
+from tests.test_scenario.conftest import get_endpoint_config
+from tests.test_scenario.fault_injector_client import ActionRequest, ActionType
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ from redis.multidb.client import MultiDBClient
 from redis.multidb.config import DatabaseConfig, MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
     DEFAULT_FAILURES_THRESHOLD
 from redis.retry import Retry
-from tests.scenario.fault_injector_client import FaultInjectorClient
+from tests.test_scenario.fault_injector_client import FaultInjectorClient
 
 
 def get_endpoint_config(endpoint_name: str):
