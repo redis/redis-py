@@ -5,6 +5,7 @@ from time import sleep
 import pytest
 
 from redis.backoff import NoBackoff
+from redis.client import Pipeline
 from redis.exceptions import ConnectionError
 from redis.retry import Retry
 from tests.test_scenario.conftest import get_endpoint_config
@@ -50,7 +51,7 @@ class TestActiveActiveStandalone:
         thread.start()
 
         r_multi_db.set('key', 'value')
-        current_active_db = r_multi_db._command_executor.active_database
+        current_active_db = r_multi_db.command_executor.active_database
 
         # Execute commands before network failure
         while not event.is_set():
@@ -58,7 +59,7 @@ class TestActiveActiveStandalone:
             sleep(0.1)
 
         # Active db has been changed.
-        assert current_active_db != r_multi_db._command_executor.active_database
+        assert current_active_db != r_multi_db.command_executor.active_database
 
         # Execute commands after network failure
         for _ in range(3):
@@ -86,7 +87,205 @@ class TestActiveActiveStandalone:
         thread.start()
 
         with pytest.raises(ConnectionError):
-            # Retries count > failure threshold, so a client gives up earlier.
+            # Retries count < failure threshold, so a client gives up earlier.
             while not event.is_set():
                 assert r_multi_db.get('key') == 'value'
+                sleep(0.1)
+
+class TestActiveActiveStandalonePipeline:
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [
+            {"failure_threshold": 2}
+        ],
+        indirect=True
+    )
+    def test_context_manager_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        event = threading.Event()
+        thread = threading.Thread(
+            target=trigger_network_failure_action,
+            daemon=True,
+            args=(fault_injector_client,event)
+        )
+        thread.start()
+
+        current_active_db = r_multi_db.command_executor.active_database
+
+        # Execute pipeline before network failure
+        while not event.is_set():
+            with r_multi_db.pipeline() as pipe:
+                pipe.set('{hash}key1', 'value1')
+                pipe.set('{hash}key2', 'value2')
+                pipe.set('{hash}key3', 'value3')
+                pipe.get('{hash}key1')
+                pipe.get('{hash}key2')
+                pipe.get('{hash}key3')
+                assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+            sleep(0.1)
+
+        # Active db has been changed.
+        assert current_active_db != r_multi_db.command_executor.active_database
+
+        # Execute pipeline after network failure
+        for _ in range(3):
+            with r_multi_db.pipeline() as pipe:
+                pipe.set('{hash}key1', 'value1')
+                pipe.set('{hash}key2', 'value2')
+                pipe.set('{hash}key3', 'value3')
+                pipe.get('{hash}key1')
+                pipe.get('{hash}key2')
+                pipe.get('{hash}key3')
+                assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+            sleep(0.1)
+
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [
+            {"failure_threshold": 2}
+        ],
+        indirect=True
+    )
+    def test_chaining_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        event = threading.Event()
+        thread = threading.Thread(
+            target=trigger_network_failure_action,
+            daemon=True,
+            args=(fault_injector_client,event)
+        )
+        thread.start()
+
+        current_active_db = r_multi_db.command_executor.active_database
+
+        pipe = r_multi_db.pipeline()
+
+        # Execute pipeline before network failure
+        while not event.is_set():
+            pipe.set('{hash}key1', 'value1')
+            pipe.set('{hash}key2', 'value2')
+            pipe.set('{hash}key3', 'value3')
+            pipe.get('{hash}key1')
+            pipe.get('{hash}key2')
+            pipe.get('{hash}key3')
+            assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+            sleep(0.1)
+
+        # Active db has been changed.
+        assert current_active_db != r_multi_db.command_executor.active_database
+
+        # Execute pipeline after network failure
+        for _ in range(3):
+            pipe.set('{hash}key1', 'value1')
+            pipe.set('{hash}key2', 'value2')
+            pipe.set('{hash}key3', 'value3')
+            pipe.get('{hash}key1')
+            pipe.get('{hash}key2')
+            pipe.get('{hash}key3')
+            assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+            sleep(0.1)
+
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [
+            {
+                "failure_threshold": 15,
+                "command_retry": Retry(NoBackoff(), retries=5),
+                "health_check_interval": 100,
+            }
+        ],
+        indirect=True
+    )
+    def test_pipeline_client_throws_error_on_retry_exceed(self, r_multi_db, fault_injector_client):
+        event = threading.Event()
+        thread = threading.Thread(
+            target=trigger_network_failure_action,
+            daemon=True,
+            args=(fault_injector_client,event)
+        )
+        thread.start()
+
+        with pytest.raises(ConnectionError):
+            # Retries count < failure threshold, so a client gives up earlier.
+            while not event.is_set():
+                with r_multi_db.pipeline() as pipe:
+                    pipe.set('{hash}key1', 'value1')
+                    pipe.set('{hash}key2', 'value2')
+                    pipe.set('{hash}key3', 'value3')
+                    pipe.get('{hash}key1')
+                    pipe.get('{hash}key2')
+                    pipe.get('{hash}key3')
+                    assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+                sleep(0.1)
+
+class TestActiveActiveStandaloneTransaction:
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [
+            {"failure_threshold": 2}
+        ],
+        indirect=True
+    )
+    def test_transaction_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        event = threading.Event()
+        thread = threading.Thread(
+            target=trigger_network_failure_action,
+            daemon=True,
+            args=(fault_injector_client,event)
+        )
+        thread.start()
+
+        current_active_db = r_multi_db.command_executor.active_database
+
+        def callback(pipe: Pipeline):
+            pipe.set('{hash}key1', 'value1')
+            pipe.set('{hash}key2', 'value2')
+            pipe.set('{hash}key3', 'value3')
+            pipe.get('{hash}key1')
+            pipe.get('{hash}key2')
+            pipe.get('{hash}key3')
+
+        # Execute pipeline before network failure
+        while not event.is_set():
+            r_multi_db.transaction(callback)
+            sleep(0.1)
+
+        # Active db has been changed.
+        assert current_active_db != r_multi_db.command_executor.active_database
+
+        # Execute pipeline after network failure
+        for _ in range(3):
+            r_multi_db.transaction(callback)
+            sleep(0.1)
+
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [
+            {
+                "failure_threshold": 15,
+                "command_retry": Retry(NoBackoff(), retries=5),
+                "health_check_interval": 100,
+            }
+        ],
+        indirect=True
+    )
+    def test_transaction_client_throws_error_on_retry_exceed(self, r_multi_db, fault_injector_client):
+        event = threading.Event()
+        thread = threading.Thread(
+            target=trigger_network_failure_action,
+            daemon=True,
+            args=(fault_injector_client,event)
+        )
+        thread.start()
+
+        def callback(pipe: Pipeline):
+            pipe.set('{hash}key1', 'value1')
+            pipe.set('{hash}key2', 'value2')
+            pipe.set('{hash}key3', 'value3')
+            pipe.get('{hash}key1')
+            pipe.get('{hash}key2')
+            pipe.get('{hash}key3')
+
+        with pytest.raises(ConnectionError):
+            # Retries count < failure threshold, so a client gives up earlier.
+            while not event.is_set():
+                r_multi_db.transaction(callback)
                 sleep(0.1)

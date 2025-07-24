@@ -305,4 +305,7 @@ class Pipeline(RedisModuleCommands, CoreCommands, SentinelCommands):
         if not self._client.initialized:
             self._client.initialize()
 
-        return self._client.command_executor.execute_pipeline(tuple(self._command_stack))
+        try:
+            return self._client.command_executor.execute_pipeline(tuple(self._command_stack))
+        finally:
+            self.reset()
