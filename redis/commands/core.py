@@ -3499,7 +3499,7 @@ class StreamCommands(CommandsProtocol):
         if not ids:
             raise DataError("XACKDEL requires at least one message ID")
 
-        if ref_policy not in ("KEEPREF", "DELREF", "ACKED"):
+        if ref_policy not in {"KEEPREF", "DELREF", "ACKED"}:
             raise DataError("XACKDEL ref_policy must be one of: KEEPREF, DELREF, ACKED")
 
         pieces = [name, groupname, ref_policy, "IDS", len(ids)]
@@ -3541,11 +3541,9 @@ class StreamCommands(CommandsProtocol):
         if maxlen is not None and minid is not None:
             raise DataError("Only one of ```maxlen``` or ```minid``` may be specified")
 
-        if ref_policy is not None and ref_policy not in ("KEEPREF", "DELREF", "ACKED"):
+        if ref_policy is not None and ref_policy not in {"KEEPREF", "DELREF", "ACKED"}:
             raise DataError("XADD ref_policy must be one of: KEEPREF, DELREF, ACKED")
 
-        if nomkstream:
-            pieces.append(b"NOMKSTREAM")
         if maxlen is not None:
             if not isinstance(maxlen, int) or maxlen < 0:
                 raise DataError("XADD maxlen must be non-negative integer")
@@ -3560,6 +3558,8 @@ class StreamCommands(CommandsProtocol):
             pieces.append(minid)
         if limit is not None:
             pieces.extend([b"LIMIT", limit])
+        if nomkstream:
+            pieces.append(b"NOMKSTREAM")
         if ref_policy is not None:
             pieces.append(ref_policy)
         pieces.append(id)
@@ -3728,7 +3728,7 @@ class StreamCommands(CommandsProtocol):
         if not ids:
             raise DataError("XDELEX requires at least one message ID")
 
-        if ref_policy not in ("KEEPREF", "DELREF", "ACKED"):
+        if ref_policy not in {"KEEPREF", "DELREF", "ACKED"}:
             raise DataError("XDELEX ref_policy must be one of: KEEPREF, DELREF, ACKED")
 
         pieces = [name, ref_policy, "IDS", len(ids)]
@@ -4111,7 +4111,7 @@ class StreamCommands(CommandsProtocol):
         if maxlen is None and minid is None:
             raise DataError("One of ``maxlen`` or ``minid`` must be specified")
 
-        if ref_policy is not None and ref_policy not in ("KEEPREF", "DELREF", "ACKED"):
+        if ref_policy is not None and ref_policy not in {"KEEPREF", "DELREF", "ACKED"}:
             raise DataError("XTRIM ref_policy must be one of: KEEPREF, DELREF, ACKED")
 
         if maxlen is not None:
