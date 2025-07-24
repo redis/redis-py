@@ -1672,7 +1672,8 @@ class PubSub:
             args = list_or_args(args[0], args[1:])
         new_s_channels = dict.fromkeys(args)
         new_s_channels.update(kwargs)
-        ret_val = self.execute_command("SSUBSCRIBE", *new_s_channels.keys())
+        for channel in new_s_channels:  # We should send ssubscribe one by one on redis cluster to prevent CROSSSLOT error
+            self.execute_command("SSUBSCRIBE", channel)
         # update the s_channels dict AFTER we send the command. we don't want to
         # subscribe twice to these channels, once for the command and again
         # for the reconnection.
@@ -1684,7 +1685,6 @@ class PubSub:
             # Clear the health check counter
             self.health_check_response_counter = 0
         self.pending_unsubscribe_shard_channels.difference_update(new_s_channels)
-        return ret_val
 
     def sunsubscribe(self, *args, target_node=None):
         """
