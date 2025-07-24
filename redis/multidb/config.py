@@ -4,7 +4,7 @@ from typing import List, Type, Union
 import pybreaker
 from typing_extensions import Optional
 
-from redis import Redis, Sentinel
+from redis import Redis, Sentinel, ConnectionPool
 from redis.asyncio import RedisCluster
 from redis.backoff import ExponentialWithJitterBackoff, AbstractBackoff, NoBackoff
 from redis.data_structure import WeightedList
@@ -20,7 +20,7 @@ DEFAULT_GRACE_PERIOD = 5.0
 DEFAULT_HEALTH_CHECK_INTERVAL = 5
 DEFAULT_HEALTH_CHECK_RETRIES = 3
 DEFAULT_HEALTH_CHECK_BACKOFF = ExponentialWithJitterBackoff(cap=10)
-DEFAULT_FAILURES_THRESHOLD = 100
+DEFAULT_FAILURES_THRESHOLD = 3
 DEFAULT_FAILURES_DURATION = 2
 DEFAULT_FAILOVER_RETRIES = 3
 DEFAULT_FAILOVER_BACKOFF = ExponentialWithJitterBackoff(cap=3)
@@ -31,8 +31,10 @@ def default_event_dispatcher() -> EventDispatcherInterface:
 
 @dataclass
 class DatabaseConfig:
-    weight: float
+    weight: float = 1.0
     client_kwargs: dict = field(default_factory=dict)
+    from_url: Optional[str] = None
+    from_pool: Optional[ConnectionPool] = None
     circuit: Optional[CircuitBreaker] = None
     grace_period: float = DEFAULT_GRACE_PERIOD
 
@@ -42,6 +44,43 @@ class DatabaseConfig:
 
 @dataclass
 class MultiDbConfig:
+    """
+    Configuration class for managing multiple database connections in a resilient and fail-safe manner.
+
+    Attributes:
+        databases_config: A list of database configurations.
+        client_class: The client class used to manage database connections.
+        command_retry: Retry strategy for executing database commands.
+        failure_detectors: Optional list of failure detectors for monitoring database failures.
+        failure_threshold: Threshold for determining database failure.
+        failures_interval: Time interval for tracking database failures.
+        health_checks: Optional list of health checks performed on databases.
+        health_check_interval: Time interval for executing health checks.
+        health_check_retries: Number of retry attempts for performing health checks.
+        health_check_backoff: Backoff strategy for health check retries.
+        failover_strategy: Optional strategy for handling database failover scenarios.
+        failover_retries: Number of retries allowed for failover operations.
+        failover_backoff: Backoff strategy for failover retries.
+        auto_fallback_interval: Time interval to trigger automatic fallback.
+        event_dispatcher: Interface for dispatching events related to database operations.
+
+    Methods:
+        databases:
+            Retrieves a collection of database clients managed by weighted configurations.
+            Initializes database clients based on the provided configuration and removes
+            redundant retry objects for lower-level clients to rely on global retry logic.
+
+        default_failure_detectors:
+            Returns the default list of failure detectors used to monitor database failures.
+
+        default_health_checks:
+            Returns the default list of health checks used to monitor database health
+            with specific retry and backoff strategies.
+
+        default_failover_strategy:
+            Provides the default failover strategy used for handling failover scenarios
+            with defined retry and backoff configurations.
+    """
     databases_config: List[DatabaseConfig]
     client_class: Type[Union[Redis, RedisCluster, Sentinel]] = Redis
     command_retry: Retry = Retry(
@@ -69,7 +108,13 @@ class MultiDbConfig:
                 # We rely on command_retry in terms of global retries.
                 database_config.client_kwargs.update({"retry": Retry(retries=0, backoff=NoBackoff())})
 
-            client = self.client_class(**database_config.client_kwargs)
+            if database_config.from_url:
+                client = self.client_class.from_url(database_config.from_url, **database_config.client_kwargs)
+            elif database_config.from_pool:
+                client = self.client_class.from_pool(connection_pool=database_config.from_pool)
+            else:
+                client = self.client_class(**database_config.client_kwargs)
+
             circuit = database_config.default_circuit_breaker() \
                 if database_config.circuit is None else database_config.circuit
             databases.add(

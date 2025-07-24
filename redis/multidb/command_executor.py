@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import List, Union, Optional
 
-from redis.backoff import NoBackoff
 from redis.event import EventDispatcherInterface, OnCommandFailEvent
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, AbstractDatabase, Databases
@@ -156,7 +155,7 @@ class DefaultCommandExecutor(CommandExecutor):
 
     def _check_active_database(self):
         """
-        Checks if active database need to be updated.
+        Checks if active a database needs to be updated.
         """
         if (
                 self._active_database is None
