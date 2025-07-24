@@ -320,7 +320,7 @@ class TestMaintenanceEventsHandling:
         expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
         expected_socket_timeout=None,
         expected_socket_connect_timeout=None,
-        expected_orig_host_address=None,
+        expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
         expected_orig_socket_timeout=None,
         expected_orig_socket_connect_timeout=None,
         expected_current_socket_timeout=None,
@@ -355,7 +355,7 @@ class TestMaintenanceEventsHandling:
         expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
         expected_socket_timeout=None,
         expected_socket_connect_timeout=None,
-        expected_orig_host_address=None,
+        expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
         expected_orig_socket_timeout=None,
         expected_orig_socket_connect_timeout=None,
     ):
@@ -419,13 +419,16 @@ class TestMaintenanceEventsHandling:
             pool.connection_kwargs["socket_connect_timeout"]
             == expected_socket_connect_timeout
         )
-        assert pool.connection_kwargs["orig_host_address"] == expected_orig_host_address
         assert (
-            pool.connection_kwargs["orig_socket_timeout"]
+            pool.connection_kwargs.get("orig_host_address", None)
+            == expected_orig_host_address
+        )
+        assert (
+            pool.connection_kwargs.get("orig_socket_timeout", None)
             == expected_orig_socket_timeout
         )
         assert (
-            pool.connection_kwargs["orig_socket_connect_timeout"]
+            pool.connection_kwargs.get("orig_socket_connect_timeout", None)
             == expected_orig_socket_connect_timeout
         )
 
@@ -446,7 +449,7 @@ class TestMaintenanceEventsHandling:
 
         conn = test_redis_client.connection_pool.get_connection()
         assert conn._should_reconnect is False
-        assert conn.orig_host_address is None
+        assert conn.orig_host_address == "localhost"
         assert conn.orig_socket_timeout is None
 
         # Test that the node moving handler function is correctly set by
@@ -825,13 +828,13 @@ class TestMaintenanceEventsHandling:
             # Validate pool and connections settings were updated according to MOVING event
             self._validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
-                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
-                expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
-                expected_orig_socket_timeout=None,
-                expected_orig_socket_connect_timeout=None,
                 expected_host_address=MockSocket.AFTER_MOVING_ADDRESS.split(":")[0],
+                expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
                 expected_socket_timeout=self.config.relax_timeout,
                 expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
             )
             self._validate_disconnected(5)
             self._validate_connected(6)
@@ -870,7 +873,7 @@ class TestMaintenanceEventsHandling:
                 expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
                 expected_socket_timeout=None,
                 expected_socket_connect_timeout=None,
-                expected_orig_host_address=None,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
             )
@@ -879,7 +882,7 @@ class TestMaintenanceEventsHandling:
                 expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
                 expected_socket_timeout=None,
                 expected_socket_connect_timeout=None,
-                expected_orig_host_address=None,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
                 should_be_connected_count=1,
@@ -1022,7 +1025,10 @@ class TestMaintenanceEventsHandling:
             new_connection = test_redis_client.connection_pool.get_connection()
 
             # Validate that new connections are created with original address (no temporary settings)
-            assert new_connection.orig_host_address is None
+            assert (
+                new_connection.orig_host_address
+                == MockSocket.DEFAULT_ADDRESS.split(":")[0]
+            )
             assert new_connection.orig_socket_timeout is None
             # New connections should be connected to the original address
             assert new_connection._sock is not None
@@ -1264,7 +1270,7 @@ class TestMaintenanceEventsHandling:
                 expected_port=int(MockSocket.DEFAULT_ADDRESS.split(":")[1]),
                 expected_socket_timeout=None,
                 expected_socket_connect_timeout=None,
-                expected_orig_host_address=None,
+                expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
             )
@@ -1420,7 +1426,7 @@ class TestMaintenanceEventsHandling:
             expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
             expected_socket_timeout=None,
             expected_socket_connect_timeout=None,
-            expected_orig_host_address=None,
+            expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
             expected_current_socket_timeout=None,
@@ -1434,7 +1440,7 @@ class TestMaintenanceEventsHandling:
             expected_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
             expected_socket_timeout=None,
             expected_socket_connect_timeout=None,
-            expected_orig_host_address=None,
+            expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
         )

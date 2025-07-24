@@ -57,7 +57,6 @@ class TestConnectionPool:
         connection_kwargs = {
             "foo": "bar",
             "biz": "baz",
-            "maintenance_state": MaintenanceState.NONE,
         }
         pool = self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=DummyConnection
@@ -160,7 +159,6 @@ class TestBlockingConnectionPool:
         }
 
         pool = self.get_pool(connection_kwargs=connection_kwargs)
-        connection_kwargs["maintenance_state"] = MaintenanceState.NONE
         connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
