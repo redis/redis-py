@@ -58,16 +58,16 @@ class TestActiveActiveStandalone:
             assert r_multi_db.get('key') == 'value'
             sleep(0.1)
 
-        # Active db has been changed.
-        assert current_active_db != r_multi_db.command_executor.active_database
-
         # Execute commands after network failure
         for _ in range(3):
             assert r_multi_db.get('key') == 'value'
             sleep(0.1)
 
+        # Active db has been changed.
+        assert current_active_db != r_multi_db.command_executor.active_database
+
         # Timeout so cluster could recover from network failure.
-        sleep(2)
+        sleep(3)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -96,7 +96,7 @@ class TestActiveActiveStandalone:
                 sleep(0.1)
 
         # Timeout so cluster could recover from network failure.
-        sleep(2)
+        sleep(3)
 
 class TestActiveActiveStandalonePipeline:
     @pytest.mark.parametrize(
@@ -129,9 +129,6 @@ class TestActiveActiveStandalonePipeline:
                 assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
             sleep(0.1)
 
-        # Active db has been changed.
-        assert current_active_db != r_multi_db.command_executor.active_database
-
         # Execute pipeline after network failure
         for _ in range(3):
             with r_multi_db.pipeline() as pipe:
@@ -144,8 +141,11 @@ class TestActiveActiveStandalonePipeline:
                 assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
             sleep(0.1)
 
+        # Active db has been changed.
+        assert current_active_db != r_multi_db.command_executor.active_database
+
         # Timeout so cluster could recover from network failure.
-        sleep(2)
+        sleep(3)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -178,9 +178,6 @@ class TestActiveActiveStandalonePipeline:
             assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
             sleep(0.1)
 
-        # Active db has been changed.
-        assert current_active_db != r_multi_db.command_executor.active_database
-
         # Execute pipeline after network failure
         for _ in range(3):
             pipe.set('{hash}key1', 'value1')
@@ -192,8 +189,11 @@ class TestActiveActiveStandalonePipeline:
             assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
             sleep(0.1)
 
+        # Active db has been changed.
+        assert current_active_db != r_multi_db.command_executor.active_database
+
         # Timeout so cluster could recover from network failure.
-        sleep(2)
+        sleep(3)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -229,7 +229,7 @@ class TestActiveActiveStandalonePipeline:
                 sleep(0.1)
 
         # Timeout so cluster could recover from network failure.
-        sleep(2)
+        sleep(3)
 
 class TestActiveActiveStandaloneTransaction:
     @pytest.mark.parametrize(
@@ -263,16 +263,16 @@ class TestActiveActiveStandaloneTransaction:
             r_multi_db.transaction(callback)
             sleep(0.1)
 
-        # Active db has been changed.
-        assert current_active_db != r_multi_db.command_executor.active_database
-
         # Execute pipeline after network failure
         for _ in range(3):
             r_multi_db.transaction(callback)
             sleep(0.1)
 
+        # Active db has been changed.
+        assert current_active_db != r_multi_db.command_executor.active_database
+
         # Timeout so cluster could recover from network failure.
-        sleep(2)
+        sleep(3)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -307,3 +307,6 @@ class TestActiveActiveStandaloneTransaction:
             while not event.is_set():
                 r_multi_db.transaction(callback)
                 sleep(0.1)
+
+        # Timeout so cluster could recover from network failure.
+        sleep(3)
