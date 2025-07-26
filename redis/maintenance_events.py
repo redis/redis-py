@@ -324,6 +324,10 @@ class MaintenanceEventPoolHandler:
         self.config = config
         self._processed_events = set()
         self._lock = threading.RLock()
+        self.connection = None
+
+    def set_connection(self, connection: "ConnectionInterface"):
+        self.connection = connection
 
     def remove_expired_notifications(self):
         with self._lock:
@@ -357,25 +361,20 @@ class MaintenanceEventPoolHandler:
                     self.config.proactive_reconnect
                     or self.config.is_relax_timeouts_enabled()
                 ):
+                    moving_address_src = (
+                        self.connection.getpeername() if self.connection else None
+                    )
+
                     if getattr(self.pool, "set_in_maintenance", False):
                         self.pool.set_in_maintenance(True)
 
-                    prev_moving_in_progress = False
-                    if (
-                        self.pool.connection_kwargs.get("maintenance_state")
-                        == MaintenanceState.MOVING
-                    ):
-                        # The pool is already in MOVING state, update just the new host information
-                        prev_moving_in_progress = True
-
-                    if not prev_moving_in_progress:
-                        # Set state to MOVING for all connections and in kwargs (inside pool lock, after set_in_maintenance)
-                        self.pool.set_maintenance_state_for_all_connections(
-                            MaintenanceState.MOVING
-                        )
-                        self.pool.set_maintenance_state_in_connection_kwargs(
-                            MaintenanceState.MOVING
-                        )
+                    # Set state to MOVING for all connections and in kwargs (inside pool lock, after set_in_maintenance)
+                    self.pool.set_maintenance_state_for_connections(
+                        MaintenanceState.MOVING, moving_address_src
+                    )
+                    self.pool.set_maintenance_state_in_connection_kwargs(
+                        MaintenanceState.MOVING
+                    )
                     # edit the config for new connections until the notification expires
                     # skip original data update if we are already in MOVING state
                     # as the original data is already stored in the connection kwargs
@@ -383,13 +382,12 @@ class MaintenanceEventPoolHandler:
                         tmp_host_address=event.new_node_host,
                         tmp_relax_timeout=self.config.relax_timeout,
                     )
-                    if (
-                        self.config.is_relax_timeouts_enabled()
-                        and not prev_moving_in_progress
-                    ):
+                    if self.config.is_relax_timeouts_enabled():
                         # extend the timeout for all connections that are currently in use
                         self.pool.update_connections_current_timeout(
-                            self.config.relax_timeout
+                            relax_timeout=self.config.relax_timeout,
+                            matching_address=moving_address_src,
+                            address_type_to_match="connected",
                         )
                     if self.config.proactive_reconnect:
                         # take care for the active connections in the pool
@@ -397,16 +395,18 @@ class MaintenanceEventPoolHandler:
                         self.pool.update_active_connections_for_reconnect(
                             tmp_host_address=event.new_node_host,
                             tmp_relax_timeout=self.config.relax_timeout,
+                            moving_address_src=moving_address_src,
                         )
                         # take care for the inactive connections in the pool
                         # delete them and create new ones
                         self.pool.disconnect_and_reconfigure_free_connections(
                             tmp_host_address=event.new_node_host,
                             tmp_relax_timeout=self.config.relax_timeout,
+                            moving_address_src=moving_address_src,
                         )
                         if getattr(self.pool, "set_in_maintenance", False):
                             self.pool.set_in_maintenance(False)
-
+            print(f"Starting timer for {event} for {event.ttl} seconds")
             threading.Timer(
                 event.ttl, self.handle_node_moved_event, args=(event,)
             ).start()
@@ -415,25 +415,39 @@ class MaintenanceEventPoolHandler:
 
     def handle_node_moved_event(self, event: NodeMovingEvent):
         with self._lock:
-            if self.pool.connection_kwargs.get("host") != event.new_node_host:
-                # if the current host is not matching the event
-                # it means there has been a new moving event after this one
-                # so we don't need to handle this one anymore
-                # the settings will be reverted by the moved handler of the next event
-                return
-            self.pool.remove_tmp_config_from_connection_kwargs()
-            # Clear state to NONE in kwargs immediately after updating tmp kwargs
-            self.pool.set_maintenance_state_in_connection_kwargs(MaintenanceState.NONE)
+            # if the current host in kwargs is not matching the event
+            # it means there has been a new moving event after this one
+            # and we don't need to revert the kwargs
+            if self.pool.connection_kwargs.get("host") == event.new_node_host:
+                self.pool.remove_tmp_config_from_connection_kwargs()
+                # Clear state to NONE in kwargs immediately after updating tmp kwargs
+                self.pool.set_maintenance_state_in_connection_kwargs(
+                    MaintenanceState.NONE
+                )
             with self.pool._lock:
-                self.pool.reset_connections_tmp_settings()
+                moving_address = event.new_node_host
                 if self.config.is_relax_timeouts_enabled():
+                    self.pool.reset_connections_tmp_settings(
+                        moving_address, reset_relax_timeout=True
+                    )
                     # reset the timeout for existing connections
                     self.pool.update_connections_current_timeout(
-                        relax_timeout=-1, include_free_connections=True
+                        relax_timeout=-1,
+                        matching_address=moving_address,
+                        address_type_to_match="configured",
+                        include_free_connections=True,
                     )
-                # Clear state to NONE for all connections
-                self.pool.set_maintenance_state_for_all_connections(
-                    MaintenanceState.NONE
+
+                # Clear maintenance state to NONE for all matching connections
+                self.pool.set_maintenance_state_for_connections(
+                    state=MaintenanceState.NONE,
+                    matching_address=moving_address,
+                    address_type_to_match="configured",
+                )
+                # reset the host address after all other operations that
+                # compare against tmp host are completed
+                self.pool.reset_connections_tmp_settings(
+                    moving_address, reset_host_address=True
                 )
 
 

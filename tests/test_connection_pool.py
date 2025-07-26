@@ -9,7 +9,6 @@ import pytest
 import redis
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
-from redis.maintenance_events import MaintenanceState
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (

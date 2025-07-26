@@ -8,7 +8,7 @@ import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Type, TypeVar, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
@@ -250,6 +250,13 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
+    def getpeername(self):
+        """
+        Returns the peer name of the connection.
+        """
+        pass
+
+    @abstractmethod
     def mark_for_reconnect(self):
         """
         Mark the connection to be reconnected on the next command.
@@ -402,6 +409,7 @@ class AbstractConnection(ConnectionInterface):
 
         if maintenance_events_config and maintenance_events_config.enabled:
             if maintenance_events_pool_handler:
+                maintenance_events_pool_handler.set_connection(self)
                 self._parser.set_node_moving_push_handler(
                     maintenance_events_pool_handler.handle_event
                 )
@@ -484,6 +492,7 @@ class AbstractConnection(ConnectionInterface):
     def set_maintenance_event_pool_handler(
         self, maintenance_event_pool_handler: MaintenanceEventPoolHandler
     ):
+        maintenance_event_pool_handler.set_connection(self)
         self._parser.set_node_moving_push_handler(
             maintenance_event_pool_handler.handle_event
         )
@@ -866,6 +875,11 @@ class AbstractConnection(ConnectionInterface):
     @maintenance_state.setter
     def maintenance_state(self, state: "MaintenanceState"):
         self._maintenance_state = state
+
+    def getpeername(self):
+        if not self._sock:
+            return None
+        return self._sock.getpeername()[0]
 
     def mark_for_reconnect(self):
         self._should_reconnect = True
@@ -1892,10 +1906,27 @@ class ConnectionPool:
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
 
-    def set_maintenance_state_for_all_connections(self, state: "MaintenanceState"):
+    def set_maintenance_state_for_connections(
+        self,
+        state: "MaintenanceState",
+        matching_address: Optional[str] = None,
+        address_type_to_match: Literal["connected", "configured"] = "connected",
+    ):
         for conn in self._available_connections:
+            if address_type_to_match == "connected":
+                if matching_address and conn.getpeername() != matching_address:
+                    continue
+            else:
+                if matching_address and conn.host != matching_address:
+                    continue
             conn.maintenance_state = state
         for conn in self._in_use_connections:
+            if address_type_to_match == "connected":
+                if matching_address and conn.getpeername() != matching_address:
+                    continue
+            else:
+                if matching_address and conn.host != matching_address:
+                    continue
             conn.maintenance_state = state
 
     def set_maintenance_state_in_connection_kwargs(self, state: "MaintenanceState"):
@@ -1963,7 +1994,12 @@ class ConnectionPool:
             }
         )
 
-    def reset_connections_tmp_settings(self):
+    def reset_connections_tmp_settings(
+        self,
+        moving_address: Optional[str] = None,
+        reset_host_address: bool = False,
+        reset_relax_timeout: bool = False,
+    ):
         """
         Restore original settings from temporary configuration for all connections in the pool.
 
@@ -1978,16 +2014,25 @@ class ConnectionPool:
         """
         with self._lock:
             for conn in self._available_connections:
+                if moving_address and conn.host != moving_address:
+                    continue
                 conn.reset_tmp_settings(
-                    reset_host_address=True, reset_relax_timeout=True
+                    reset_host_address=reset_host_address,
+                    reset_relax_timeout=reset_relax_timeout,
                 )
             for conn in self._in_use_connections:
+                if moving_address and conn.host != moving_address:
+                    continue
                 conn.reset_tmp_settings(
-                    reset_host_address=True, reset_relax_timeout=True
+                    reset_host_address=reset_host_address,
+                    reset_relax_timeout=reset_relax_timeout,
                 )
 
     def update_active_connections_for_reconnect(
-        self, tmp_host_address: str, tmp_relax_timeout: Optional[float] = None
+        self,
+        tmp_host_address: str,
+        tmp_relax_timeout: Optional[float] = None,
+        moving_address_src: Optional[str] = None,
     ):
         """
         Mark all active connections for reconnect.
@@ -1999,6 +2044,8 @@ class ConnectionPool:
         :param tmp_relax_timeout: The relax timeout to use for the connection.
         """
         for conn in self._in_use_connections:
+            if moving_address_src and conn.getpeername() != moving_address_src:
+                continue
             self._update_connection_for_reconnect(
                 conn, tmp_host_address, tmp_relax_timeout
             )
@@ -2007,6 +2054,7 @@ class ConnectionPool:
         self,
         tmp_host_address: str,
         tmp_relax_timeout: Optional[float] = None,
+        moving_address_src: Optional[str] = None,
     ):
         """
         Disconnect all free/available connections.
@@ -2019,6 +2067,8 @@ class ConnectionPool:
         """
 
         for conn in self._available_connections:
+            if moving_address_src and conn.getpeername() != moving_address_src:
+                continue
             self._disconnect_and_update_connection_for_reconnect(
                 conn, tmp_host_address, tmp_relax_timeout
             )
@@ -2026,6 +2076,8 @@ class ConnectionPool:
     def update_connections_current_timeout(
         self,
         relax_timeout: Optional[float],
+        matching_address: Optional[str] = None,
+        address_type_to_match: Literal["connected", "configured"] = "connected",
         include_free_connections: bool = False,
     ):
         """
@@ -2039,10 +2091,22 @@ class ConnectionPool:
         :param include_available_connections: Whether to include available connections in the update.
         """
         for conn in self._in_use_connections:
+            if address_type_to_match == "connected":
+                if matching_address and conn.getpeername() != matching_address:
+                    continue
+            else:
+                if matching_address and conn.host != matching_address:
+                    continue
             conn.update_current_socket_timeout(relax_timeout)
 
         if include_free_connections:
             for conn in self._available_connections:
+                if address_type_to_match == "connected":
+                    if matching_address and conn.getpeername() != matching_address:
+                        continue
+                else:
+                    if matching_address and conn.host != matching_address:
+                        continue
                 conn.update_current_socket_timeout(relax_timeout)
 
     def _update_connection_for_reconnect(
@@ -2308,7 +2372,10 @@ class BlockingConnectionPool(ConnectionPool):
                 self._locked = False
 
     def update_active_connections_for_reconnect(
-        self, tmp_host_address: str, tmp_relax_timeout: Optional[float] = None
+        self,
+        tmp_host_address: str,
+        tmp_relax_timeout: Optional[float] = None,
+        moving_address_src: Optional[str] = None,
     ):
         """
         Mark all active connections for reconnect.
@@ -2323,6 +2390,8 @@ class BlockingConnectionPool(ConnectionPool):
             connections_in_queue = {conn for conn in self.pool.queue if conn}
             for conn in self._connections:
                 if conn not in connections_in_queue:
+                    if moving_address_src and conn.getpeername() != moving_address_src:
+                        continue
                     self._update_connection_for_reconnect(
                         conn, tmp_host_address, tmp_relax_timeout
                     )
@@ -2331,6 +2400,7 @@ class BlockingConnectionPool(ConnectionPool):
         self,
         tmp_host_address: str,
         tmp_relax_timeout: Optional[Number] = None,
+        moving_address_src: Optional[str] = None,
     ):
         """
         Disconnect all free/available connections.
@@ -2345,6 +2415,8 @@ class BlockingConnectionPool(ConnectionPool):
 
         for conn in existing_connections:
             if conn:
+                if moving_address_src and conn.getpeername() != moving_address_src:
+                    continue
                 self._disconnect_and_update_connection_for_reconnect(
                     conn, tmp_host_address, tmp_relax_timeout
                 )
@@ -2352,6 +2424,8 @@ class BlockingConnectionPool(ConnectionPool):
     def update_connections_current_timeout(
         self,
         relax_timeout: Optional[float] = None,
+        matching_address: Optional[str] = None,
+        address_type_to_match: Literal["connected", "configured"] = "connected",
         include_free_connections: bool = False,
     ):
         """
@@ -2365,11 +2439,23 @@ class BlockingConnectionPool(ConnectionPool):
         """
         if include_free_connections:
             for conn in tuple(self._connections):
+                if address_type_to_match == "connected":
+                    if matching_address and conn.getpeername() != matching_address:
+                        continue
+                else:
+                    if matching_address and conn.host != matching_address:
+                        continue
                 conn.update_current_socket_timeout(relax_timeout)
         else:
             connections_in_queue = {conn for conn in self.pool.queue if conn}
             for conn in self._connections:
                 if conn not in connections_in_queue:
+                    if address_type_to_match == "connected":
+                        if matching_address and conn.getpeername() != matching_address:
+                            continue
+                    else:
+                        if matching_address and conn.host != matching_address:
+                            continue
                     conn.update_current_socket_timeout(relax_timeout)
 
     def _update_maintenance_events_config_for_connections(
@@ -2387,14 +2473,24 @@ class BlockingConnectionPool(ConnectionPool):
                 conn.set_maintenance_event_pool_handler(maintenance_events_pool_handler)
                 conn.maintenance_events_config = maintenance_events_pool_handler.config
 
-    def reset_connections_tmp_settings(self):
+    def reset_connections_tmp_settings(
+        self,
+        moving_address: Optional[str] = None,
+        reset_host_address: bool = False,
+        reset_relax_timeout: bool = False,
+    ):
         """
         Override base class method to work with BlockingConnectionPool's structure.
 
         Restore original settings from temporary configuration for all connections in the pool.
         """
         for conn in tuple(self._connections):
-            conn.reset_tmp_settings(reset_host_address=True, reset_relax_timeout=True)
+            if moving_address and conn.host != moving_address:
+                continue
+            conn.reset_tmp_settings(
+                reset_host_address=reset_host_address,
+                reset_relax_timeout=reset_relax_timeout,
+            )
 
     def set_in_maintenance(self, in_maintenance: bool):
         """
@@ -2405,6 +2501,18 @@ class BlockingConnectionPool(ConnectionPool):
         """
         self._in_maintenance = in_maintenance
 
-    def set_maintenance_state_for_all_connections(self, state: "MaintenanceState"):
+    def set_maintenance_state_for_connections(
+        self,
+        state: "MaintenanceState",
+        matching_address: Optional[str] = None,
+        address_type_to_match: Literal["connected", "configured"] = "connected",
+    ):
         for conn in self._connections:
+            if address_type_to_match == "connected":
+                if matching_address and conn.getpeername() != matching_address:
+                    continue
+            else:
+                if matching_address and conn.host != matching_address:
+                    continue
+
             conn.maintenance_state = state
