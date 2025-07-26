@@ -33,6 +33,9 @@ class DummyConnection:
     def can_read(self):
         return False
 
+    def should_reconnect(self):
+        return False
+
 
 class TestConnectionPool:
     def get_pool(
@@ -50,10 +53,14 @@ class TestConnectionPool:
         return pool
 
     def test_connection_creation(self):
-        connection_kwargs = {"foo": "bar", "biz": "baz"}
+        connection_kwargs = {
+            "foo": "bar",
+            "biz": "baz",
+        }
         pool = self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=DummyConnection
         )
+
         connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
@@ -149,6 +156,7 @@ class TestBlockingConnectionPool:
             "host": master_host[0],
             "port": master_host[1],
         }
+
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
