@@ -605,16 +605,23 @@ class Redis(
         connection pool is only closed (via aclose()) when no context is using
         the client.
         """
-        async with self._usage_lock:
-            self._usage_counter += 1
+        await self._increment_usage()
         try:
             # Initialize the client (i.e. establish connection, etc.)
             return await self.initialize()
         except Exception:
             # If initialization fails, decrement the counter to keep it in sync
-            async with self._usage_lock:
-                self._usage_counter -= 1
+            await self._decrement_usage()
             raise
+
+    async def _increment_usage(self) -> int:
+        """
+        Helper coroutine to increment the usage counter while holding the lock.
+        Returns the new value of the usage counter.
+        """
+        async with self._usage_lock:
+            self._usage_counter += 1
+            return self._usage_counter
 
     async def _decrement_usage(self) -> int:
         """
