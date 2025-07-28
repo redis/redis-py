@@ -9,6 +9,8 @@ from .conftest import (
     _get_client,
     assert_resp_response,
     is_resp2_connection,
+    skip_if_server_version_gte,
+    skip_if_server_version_lt,
     skip_ifmodversion_lt,
 )
 
@@ -84,11 +86,28 @@ def test_alter(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
-def test_alter_duplicate_policy(client):
+@skip_if_server_version_gte("7.9.0")
+def test_alter_duplicate_policy_prior_redis_8(client):
     assert client.ts().create(1)
     info = client.ts().info(1)
     assert_resp_response(
         client, None, info.get("duplicate_policy"), info.get("duplicatePolicy")
+    )
+    assert client.ts().alter(1, duplicate_policy="min")
+    info = client.ts().info(1)
+    assert_resp_response(
+        client, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
+    )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.4.0", "timeseries")
+@skip_if_server_version_lt("7.9.0")
+def test_alter_duplicate_policy(client):
+    assert client.ts().create(1)
+    info = client.ts().info(1)
+    assert_resp_response(
+        client, "block", info.get("duplicate_policy"), info.get("duplicatePolicy")
     )
     assert client.ts().alter(1, duplicate_policy="min")
     info = client.ts().info(1)
@@ -967,7 +986,25 @@ def test_info(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("1.4.0", "timeseries")
+@skip_if_server_version_lt("7.9.0")
 def test_info_duplicate_policy(client):
+    client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
+    info = client.ts().info(1)
+    assert_resp_response(
+        client, "block", info.get("duplicate_policy"), info.get("duplicatePolicy")
+    )
+
+    client.ts().create("time-serie-2", duplicate_policy="min")
+    info = client.ts().info("time-serie-2")
+    assert_resp_response(
+        client, "min", info.get("duplicate_policy"), info.get("duplicatePolicy")
+    )
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("1.4.0", "timeseries")
+@skip_if_server_version_gte("7.9.0")
+def test_info_duplicate_policy_prior_redis_8(client):
     client.ts().create(1, retention_msecs=5, labels={"currentLabel": "currentData"})
     info = client.ts().info(1)
     assert_resp_response(

@@ -5,8 +5,12 @@ from typing import Optional
 from redis.client import Redis
 from redis.commands import SentinelCommands
 from redis.connection import Connection, ConnectionPool, SSLConnection
-from redis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
-from redis.utils import str_if_bytes
+from redis.exceptions import (
+    ConnectionError,
+    ReadOnlyError,
+    ResponseError,
+    TimeoutError,
+)
 
 
 class MasterNotFoundError(ConnectionError):
@@ -35,11 +39,11 @@ class SentinelManagedConnection(Connection):
 
     def connect_to(self, address):
         self.host, self.port = address
-        super().connect()
-        if self.connection_pool.check_connection:
-            self.send_command("PING")
-            if str_if_bytes(self.read_response()) != "PONG":
-                raise ConnectionError("PING failed")
+
+        self.connect_check_health(
+            check_health=self.connection_pool.check_connection,
+            retry_socket_connect=False,
+        )
 
     def _connect_retry(self):
         if self._sock:
@@ -254,16 +258,27 @@ class Sentinel(SentinelCommands):
         once - If set to True, then execute the resulting command on a single
         node at random, rather than across the entire sentinel cluster.
         """
-        once = bool(kwargs.get("once", False))
-        if "once" in kwargs.keys():
-            kwargs.pop("once")
+        once = bool(kwargs.pop("once", False))
+
+        # Check if command is supposed to return the original
+        # responses instead of boolean value.
+        return_responses = bool(kwargs.pop("return_responses", False))
 
         if once:
-            random.choice(self.sentinels).execute_command(*args, **kwargs)
-        else:
-            for sentinel in self.sentinels:
-                sentinel.execute_command(*args, **kwargs)
-        return True
+            response = random.choice(self.sentinels).execute_command(*args, **kwargs)
+            if return_responses:
+                return [response]
+            else:
+                return True if response else False
+
+        responses = []
+        for sentinel in self.sentinels:
+            responses.append(sentinel.execute_command(*args, **kwargs))
+
+        if return_responses:
+            return responses
+
+        return all(responses)
 
     def __repr__(self):
         sentinel_addresses = []
@@ -273,7 +288,7 @@ class Sentinel(SentinelCommands):
             )
         return (
             f"<{type(self).__module__}.{type(self).__name__}"
-            f'(sentinels=[{",".join(sentinel_addresses)}])>'
+            f"(sentinels=[{','.join(sentinel_addresses)}])>"
         )
 
     def check_master_state(self, state, service_name):
@@ -349,6 +364,8 @@ class Sentinel(SentinelCommands):
     ):
         """
         Returns a redis client instance for the ``service_name`` master.
+        Sentinel client will detect failover and reconnect Redis clients
+        automatically.
 
         A :py:class:`~redis.sentinel.SentinelConnectionPool` class is
         used to retrieve the master's address before establishing a new

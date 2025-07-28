@@ -1,15 +1,24 @@
+import datetime
 import logging
+import textwrap
+from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Dict, Mapping, Union
+from typing import Any, Dict, List, Mapping, Optional, TypeVar, Union
+
+from redis.exceptions import DataError
+from redis.typing import AbsExpiryT, EncodableT, ExpiryT
 
 try:
     import hiredis  # noqa
 
     # Only support Hiredis >= 3.0:
-    HIREDIS_AVAILABLE = int(hiredis.__version__.split(".")[0]) >= 3
+    hiredis_version = hiredis.__version__.split(".")
+    HIREDIS_AVAILABLE = int(hiredis_version[0]) > 3 or (
+        int(hiredis_version[0]) == 3 and int(hiredis_version[1]) >= 2
+    )
     if not HIREDIS_AVAILABLE:
-        raise ImportError("hiredis package should be >= 3.0.0")
+        raise ImportError("hiredis package should be >= 3.2.0")
 except ImportError:
     HIREDIS_AVAILABLE = False
 
@@ -142,18 +151,21 @@ def warn_deprecated_arg_usage(
     warnings.warn(msg, category=DeprecationWarning, stacklevel=stacklevel)
 
 
+C = TypeVar("C", bound=Callable)
+
+
 def deprecated_args(
     args_to_warn: list = ["*"],
     allowed_args: list = [],
     reason: str = "",
     version: str = "",
-):
+) -> Callable[[C], C]:
     """
     Decorator to mark specified args of a function as deprecated.
     If '*' is in args_to_warn, all arguments will be marked as deprecated.
     """
 
-    def decorator(func):
+    def decorator(func: C) -> C:
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Get function argument names
@@ -257,3 +269,46 @@ def ensure_string(key):
         return key
     else:
         raise TypeError("Key must be either a string or bytes")
+
+
+def extract_expire_flags(
+    ex: Optional[ExpiryT] = None,
+    px: Optional[ExpiryT] = None,
+    exat: Optional[AbsExpiryT] = None,
+    pxat: Optional[AbsExpiryT] = None,
+) -> List[EncodableT]:
+    exp_options: list[EncodableT] = []
+    if ex is not None:
+        exp_options.append("EX")
+        if isinstance(ex, datetime.timedelta):
+            exp_options.append(int(ex.total_seconds()))
+        elif isinstance(ex, int):
+            exp_options.append(ex)
+        elif isinstance(ex, str) and ex.isdigit():
+            exp_options.append(int(ex))
+        else:
+            raise DataError("ex must be datetime.timedelta or int")
+    elif px is not None:
+        exp_options.append("PX")
+        if isinstance(px, datetime.timedelta):
+            exp_options.append(int(px.total_seconds() * 1000))
+        elif isinstance(px, int):
+            exp_options.append(px)
+        else:
+            raise DataError("px must be datetime.timedelta or int")
+    elif exat is not None:
+        if isinstance(exat, datetime.datetime):
+            exat = int(exat.timestamp())
+        exp_options.extend(["EXAT", exat])
+    elif pxat is not None:
+        if isinstance(pxat, datetime.datetime):
+            pxat = int(pxat.timestamp() * 1000)
+        exp_options.extend(["PXAT", pxat])
+
+    return exp_options
+
+
+def truncate_text(txt, max_length=100):
+    return textwrap.shorten(
+        text=txt, width=max_length, placeholder="...", break_long_words=True
+    )

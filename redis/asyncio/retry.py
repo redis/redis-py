@@ -2,18 +2,16 @@ from asyncio import sleep
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Tuple, Type, TypeVar
 
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
+from redis.retry import AbstractRetry
+
+T = TypeVar("T")
 
 if TYPE_CHECKING:
     from redis.backoff import AbstractBackoff
 
 
-T = TypeVar("T")
-
-
-class Retry:
-    """Retry a specific number of times after a failure"""
-
-    __slots__ = "_backoff", "_retries", "_supported_errors"
+class Retry(AbstractRetry[RedisError]):
+    __hash__ = AbstractRetry.__hash__
 
     def __init__(
         self,
@@ -24,23 +22,16 @@ class Retry:
             TimeoutError,
         ),
     ):
-        """
-        Initialize a `Retry` object with a `Backoff` object
-        that retries a maximum of `retries` times.
-        `retries` can be negative to retry forever.
-        You can specify the types of supported errors which trigger
-        a retry with the `supported_errors` parameter.
-        """
-        self._backoff = backoff
-        self._retries = retries
-        self._supported_errors = supported_errors
+        super().__init__(backoff, retries, supported_errors)
 
-    def update_supported_errors(self, specified_errors: list):
-        """
-        Updates the supported errors with the specified error types
-        """
-        self._supported_errors = tuple(
-            set(self._supported_errors + tuple(specified_errors))
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Retry):
+            return NotImplemented
+
+        return (
+            self._backoff == other._backoff
+            and self._retries == other._retries
+            and set(self._supported_errors) == set(other._supported_errors)
         )
 
     async def call_with_retry(

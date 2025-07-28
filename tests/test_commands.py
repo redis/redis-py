@@ -21,6 +21,7 @@ from redis.client import EMPTY_RESPONSE, NEVER_DECODE
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
+from tests.test_utils import redis_server_time
 
 from .conftest import (
     _get_client,
@@ -48,12 +49,6 @@ def slowlog(request, r):
 
     r.config_set("slowlog-log-slower-than", 0)
     r.config_set("slowlog-max-len", 128)
-
-
-def redis_server_time(client):
-    seconds, milliseconds = client.time()
-    timestamp = float(f"{seconds}.{milliseconds}")
-    return datetime.datetime.fromtimestamp(timestamp)
 
 
 def get_stream_message(client, stream, message_id):
@@ -667,11 +662,15 @@ class TestRedisCommands:
         assert "addr" in clients[0]
 
         # testing multiple client ids
-        _get_client(redis.Redis, request, flushdb=False)
-        _get_client(redis.Redis, request, flushdb=False)
-        _get_client(redis.Redis, request, flushdb=False)
-        clients_listed = r.client_list(client_id=clients[:-1])
-        assert len(clients_listed) > 1
+        client_list = list()
+        client_count = 3
+        for i in range(client_count):
+            client = _get_client(redis.Redis, request, flushdb=False)
+            client_list.append(client)
+
+        multiple_client_ids = [str(client.client_id()) for client in client_list]
+        clients_listed = r.client_list(client_id=multiple_client_ids)
+        assert len(clients_listed) == len(multiple_client_ids)
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("5.0.0")
@@ -1021,8 +1020,9 @@ class TestRedisCommands:
             assert r.config_set("search-default-dialect", default_dialect_new)
             assert r.config_get("*")["search-default-dialect"] == default_dialect_new
             assert (
-                r.ft().config_get("*")[b"DEFAULT_DIALECT"]
-            ).decode() == default_dialect_new
+                (r.ft().config_get("*")[b"DEFAULT_DIALECT"]).decode()
+                == default_dialect_new
+            )
         except AssertionError as ex:
             raise ex
         finally:
@@ -1088,12 +1088,22 @@ class TestRedisCommands:
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("5.0.0")
+    @skip_if_server_version_gte("8.0.0")
     def test_lolwut(self, r):
         lolwut = r.lolwut().decode("utf-8")
         assert "Redis ver." in lolwut
 
         lolwut = r.lolwut(5, 6, 7, 8).decode("utf-8")
         assert "Redis ver." in lolwut
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.0.0")
+    def test_lolwut_v8_and_higher(self, r):
+        lolwut = r.lolwut().decode("utf-8")
+        assert lolwut
+
+        lolwut = r.lolwut(5, 6, 7, 8).decode("utf-8")
+        assert lolwut
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("6.2.0")
@@ -1264,7 +1274,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_not(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["a"] = test_str
         r.bitop("not", "r", "a")
@@ -1273,7 +1283,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_not_in_place(self, r):
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         r["a"] = test_str
         r.bitop("not", "a", "a")
@@ -1282,7 +1292,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_single_string(self, r):
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         r["a"] = test_str
         r.bitop("and", "res1", "a")
         r.bitop("or", "res2", "a")
@@ -1294,14 +1304,111 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.0")
     def test_bitop_string_operands(self, r):
-        r["a"] = b"\x01\x02\xFF\xFF"
-        r["b"] = b"\x01\x02\xFF"
+        r["a"] = b"\x01\x02\xff\xff"
+        r["b"] = b"\x01\x02\xff"
         r.bitop("and", "res1", "a", "b")
         r.bitop("or", "res2", "a", "b")
         r.bitop("xor", "res3", "a", "b")
         assert int(binascii.hexlify(r["res1"]), 16) == 0x0102FF00
         assert int(binascii.hexlify(r["res2"]), 16) == 0x0102FFFF
         assert int(binascii.hexlify(r["res3"]), 16) == 0x000000FF
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_diff(self, r):
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
+        r["c"] = b"\x80"
+
+        result = r.bitop("DIFF", "result", "a", "b", "c")
+        assert result == 1
+        assert r["result"] == b"\x30"
+
+        r.bitop("DIFF", "result2", "a", "nonexistent")
+        assert r["result2"] == b"\xf0"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_diff1(self, r):
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
+        r["c"] = b"\x80"
+
+        result = r.bitop("DIFF1", "result", "a", "b", "c")
+        assert result == 1
+        assert r["result"] == b"\x00"
+
+        r["d"] = b"\x0f"
+        r["e"] = b"\x03"
+        r.bitop("DIFF1", "result2", "d", "e")
+        assert r["result2"] == b"\x00"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_andor(self, r):
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
+        r["c"] = b"\x80"
+
+        result = r.bitop("ANDOR", "result", "a", "b", "c")
+        assert result == 1
+        assert r["result"] == b"\xc0"
+
+        r["x"] = b"\xf0"
+        r["y"] = b"\x0f"
+        r.bitop("ANDOR", "result2", "x", "y")
+        assert r["result2"] == b"\x00"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_one(self, r):
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
+        r["c"] = b"\x80"
+
+        result = r.bitop("ONE", "result", "a", "b", "c")
+        assert result == 1
+        assert r["result"] == b"\x30"
+
+        r["x"] = b"\xf0"
+        r["y"] = b"\x0f"
+        r.bitop("ONE", "result2", "x", "y")
+        assert r["result2"] == b"\xff"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_new_operations_with_empty_keys(self, r):
+        r["a"] = b"\xff"
+
+        r.bitop("DIFF", "empty_result", "nonexistent", "a")
+        assert r.get("empty_result") == b"\x00"
+
+        r.bitop("DIFF1", "empty_result2", "a", "nonexistent")
+        assert r.get("empty_result2") == b"\x00"
+
+        r.bitop("ANDOR", "empty_result3", "a", "nonexistent")
+        assert r.get("empty_result3") == b"\x00"
+
+        r.bitop("ONE", "empty_result4", "nonexistent")
+        assert r.get("empty_result4") is None
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_new_operations_return_values(self, r):
+        r["a"] = b"\xff\x00\xff"
+        r["b"] = b"\x00\xff"
+
+        result1 = r.bitop("DIFF", "result1", "a", "b")
+        assert result1 == 3
+
+        result2 = r.bitop("DIFF1", "result2", "a", "b")
+        assert result2 == 3
+
+        result3 = r.bitop("ANDOR", "result3", "a", "b")
+        assert result3 == 3
+
+        result4 = r.bitop("ONE", "result4", "a", "b")
+        assert result4 == 3
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.7")
@@ -2044,57 +2151,6 @@ class TestRedisCommands:
                 r.tfunction_delete(lib_name)
             except Exception:
                 pass
-
-    @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("7.1.140")
-    @skip_if_server_version_gte("7.9.0")
-    def test_tfunction_load_delete(self, stack_r):
-        self.try_delete_libs(stack_r, "lib1")
-        lib_code = self.generate_lib_code("lib1")
-        assert stack_r.tfunction_load(lib_code)
-        assert stack_r.tfunction_delete("lib1")
-
-    @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("7.1.140")
-    @skip_if_server_version_gte("7.9.0")
-    def test_tfunction_list(self, stack_r):
-        self.try_delete_libs(stack_r, "lib1", "lib2", "lib3")
-        assert stack_r.tfunction_load(self.generate_lib_code("lib1"))
-        assert stack_r.tfunction_load(self.generate_lib_code("lib2"))
-        assert stack_r.tfunction_load(self.generate_lib_code("lib3"))
-
-        # test error thrown when verbose > 4
-        with pytest.raises(redis.exceptions.DataError):
-            assert stack_r.tfunction_list(verbose=8)
-
-        functions = stack_r.tfunction_list(verbose=1)
-        assert len(functions) == 3
-
-        expected_names = [b"lib1", b"lib2", b"lib3"]
-        if is_resp2_connection(stack_r):
-            actual_names = [functions[0][13], functions[1][13], functions[2][13]]
-        else:
-            actual_names = [
-                functions[0][b"name"],
-                functions[1][b"name"],
-                functions[2][b"name"],
-            ]
-
-        assert sorted(expected_names) == sorted(actual_names)
-        assert stack_r.tfunction_delete("lib1")
-        assert stack_r.tfunction_delete("lib2")
-        assert stack_r.tfunction_delete("lib3")
-
-    @pytest.mark.onlynoncluster
-    @skip_if_server_version_lt("7.1.140")
-    @skip_if_server_version_gte("7.9.0")
-    def test_tfcall(self, stack_r):
-        self.try_delete_libs(stack_r, "lib1")
-        assert stack_r.tfunction_load(self.generate_lib_code("lib1"))
-        assert stack_r.tfcall("lib1", "foo") == b"bar"
-        assert stack_r.tfcall_async("lib1", "foo") == b"bar"
-
-        assert stack_r.tfunction_delete("lib1")
 
     def test_ttl(self, r):
         r["a"] = "1"
@@ -3439,13 +3495,8 @@ class TestRedisCommands:
         assert r.hmget("a", "a", "b", "c") == [b"1", b"2", b"3"]
 
     def test_hmset(self, r):
-        redis_class = type(r).__name__
-        warning_message = (
-            r"^{0}\.hmset\(\) is deprecated\. "
-            r"Use {0}\.hset\(\) instead\.$".format(redis_class)
-        )
         h = {b"a": b"1", b"b": b"2", b"c": b"3"}
-        with pytest.warns(DeprecationWarning, match=warning_message):
+        with pytest.warns(DeprecationWarning):
             assert r.hmset("a", h)
         assert r.hgetall("a") == h
 
@@ -5044,6 +5095,145 @@ class TestRedisCommands:
         m3 = r.xadd(stream, {"foo": "bar"})
         r.xadd(stream, {"foo": "bar"})
         assert r.xtrim(stream, None, approximate=True, minid=m3) == 0
+
+    @skip_if_server_version_lt("8.1.224")
+    def test_xdelex(self, r):
+        stream = "stream"
+
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        m3 = r.xadd(stream, {"foo": "bar"})
+        m4 = r.xadd(stream, {"foo": "bar"})
+
+        # Test XDELEX with default ref_policy (KEEPREF)
+        result = r.xdelex(stream, m1)
+        assert result == [1]
+
+        # Test XDELEX with explicit KEEPREF
+        result = r.xdelex(stream, m2, ref_policy="KEEPREF")
+        assert result == [1]
+
+        # Test XDELEX with DELREF
+        result = r.xdelex(stream, m3, ref_policy="DELREF")
+        assert result == [1]
+
+        # Test XDELEX with ACKED
+        result = r.xdelex(stream, m4, ref_policy="ACKED")
+        assert result == [1]
+
+        # Test with non-existent ID
+        result = r.xdelex(stream, "999999-0", ref_policy="KEEPREF")
+        assert result == [-1]
+
+        # Test with multiple IDs
+        m5 = r.xadd(stream, {"foo": "bar"})
+        m6 = r.xadd(stream, {"foo": "bar"})
+        result = r.xdelex(stream, m5, m6, ref_policy="KEEPREF")
+        assert result == [1, 1]  # Both entries deleted
+
+        # Test error cases
+        with pytest.raises(redis.DataError):
+            r.xdelex(stream, "123-0", ref_policy="INVALID")
+
+        with pytest.raises(redis.DataError):
+            r.xdelex(stream)  # No IDs provided
+
+    @skip_if_server_version_lt("8.1.224")
+    def test_xackdel(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        m3 = r.xadd(stream, {"foo": "bar"})
+        m4 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+
+        # Test XACKDEL with default ref_policy (KEEPREF)
+        result = r.xackdel(stream, group, m1)
+        assert result == [1]
+
+        # Test XACKDEL with explicit KEEPREF
+        result = r.xackdel(stream, group, m2, ref_policy="KEEPREF")
+        assert result == [1]
+
+        # Test XACKDEL with DELREF
+        result = r.xackdel(stream, group, m3, ref_policy="DELREF")
+        assert result == [1]
+
+        # Test XACKDEL with ACKED
+        result = r.xackdel(stream, group, m4, ref_policy="ACKED")
+        assert result == [1]
+
+        # Test with non-existent ID
+        result = r.xackdel(stream, group, "999999-0", ref_policy="KEEPREF")
+        assert result == [-1]
+
+        # Test error cases
+        with pytest.raises(redis.DataError):
+            r.xackdel(stream, group, m1, ref_policy="INVALID")
+
+        with pytest.raises(redis.DataError):
+            r.xackdel(stream, group)  # No IDs provided
+
+    @skip_if_server_version_lt("8.1.224")
+    def test_xtrim_with_options(self, r):
+        stream = "stream"
+
+        r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XTRIM with KEEPREF ref_policy
+        assert r.xtrim(stream, maxlen=2, approximate=False, ref_policy="KEEPREF") == 2
+
+        r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XTRIM with DELREF ref_policy
+        assert r.xtrim(stream, maxlen=2, approximate=False, ref_policy="DELREF") == 2
+
+        r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XTRIM with ACKED ref_policy
+        assert r.xtrim(stream, maxlen=2, approximate=False, ref_policy="ACKED") == 2
+
+        # Test error case
+        with pytest.raises(redis.DataError):
+            r.xtrim(stream, maxlen=2, ref_policy="INVALID")
+
+    @skip_if_server_version_lt("8.1.224")
+    def test_xadd_with_options(self, r):
+        stream = "stream"
+
+        # Test XADD with KEEPREF ref_policy
+        r.xadd(
+            stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="KEEPREF"
+        )
+        r.xadd(
+            stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="KEEPREF"
+        )
+        r.xadd(
+            stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="KEEPREF"
+        )
+        assert r.xlen(stream) == 2
+
+        # Test XADD with DELREF ref_policy
+        r.xadd(stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="DELREF")
+        assert r.xlen(stream) == 2
+
+        # Test XADD with ACKED ref_policy
+        r.xadd(stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="ACKED")
+        assert r.xlen(stream) == 2
+
+        # Test error case
+        with pytest.raises(redis.DataError):
+            r.xadd(stream, {"foo": "bar"}, ref_policy="INVALID")
 
     def test_bitfield_operations(self, r):
         # comments show affected bits

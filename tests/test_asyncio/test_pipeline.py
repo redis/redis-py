@@ -1,8 +1,10 @@
+from unittest import mock
+
 import pytest
 import redis
 from tests.conftest import skip_if_server_version_lt
 
-from .compat import aclosing, mock
+from .compat import aclosing
 from .conftest import wait_for_command
 
 
@@ -367,6 +369,22 @@ class TestPipeline:
             assert str(ex.value).startswith(expected)
 
         assert await r.get(key) == b"1"
+
+    async def test_exec_error_in_pipeline_truncated(self, r):
+        key = "a" * 50
+        a_value = "a" * 20
+        b_value = "b" * 20
+
+        await r.set(key, 1)
+        async with r.pipeline(transaction=False) as pipe:
+            pipe.hset(key, mapping={"field_a": a_value, "field_b": b_value})
+            pipe.expire(key, 100)
+
+            with pytest.raises(redis.ResponseError) as ex:
+                await pipe.execute()
+
+            expected = f"Command # 1 (HSET {key} field_a {a_value} field_b...) of pipeline caused error: "
+            assert str(ex.value).startswith(expected)
 
     async def test_pipeline_with_bitfield(self, r):
         async with r.pipeline() as pipe:

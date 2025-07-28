@@ -1,9 +1,10 @@
 ---
+# image tag 8.0-RC2-pre is the one matching the 8.0 GA release
 x-client-libs-stack-image: &client-libs-stack-image
-  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_STACK_IMAGE_TAG:-rs-7.4.0-v2}"
+  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_STACK_IMAGE_TAG:-8.0.2}"
 
 x-client-libs-image: &client-libs-image
-  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-7.4.2}"
+  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-8.0.2}"
 
 services:
 
@@ -105,11 +106,3 @@ services:
       - standalone
       - all-stack
       - all
-
-  redis-stack-graph:
-    image: redis/redis-stack-server:6.2.6-v15
-    container_name: redis-stack-graph
-    ports:
-      - 6480:6379
-    profiles:
-      - graph

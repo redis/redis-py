@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 
-import jwt
 from redis.auth.err import InvalidTokenSchemaErr
 
 
@@ -77,10 +76,15 @@ class SimpleToken(TokenInterface):
 
 
 class JWToken(TokenInterface):
-
     REQUIRED_FIELDS = {"exp"}
 
     def __init__(self, token: str):
+        try:
+            import jwt
+        except ImportError as ie:
+            raise ImportError(
+                f"The PyJWT library is required for {self.__class__.__name__}.",
+            ) from ie
         self._value = token
         self._decoded = jwt.decode(
             self._value,

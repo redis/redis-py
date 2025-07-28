@@ -1,3 +1,4 @@
+from datetime import datetime
 import pytest
 from redis.utils import compare_versions
 
@@ -25,3 +26,9 @@ from redis.utils import compare_versions
 )
 def test_compare_versions(version1, version2, expected_res):
     assert compare_versions(version1, version2) == expected_res
+
+
+def redis_server_time(client):
+    seconds, milliseconds = client.time()
+    timestamp = float(f"{seconds}.{milliseconds}")
+    return datetime.fromtimestamp(timestamp)

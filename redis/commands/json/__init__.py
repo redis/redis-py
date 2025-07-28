@@ -120,7 +120,7 @@ class JSON(JSONCommands):
                 startup_nodes=self.client.nodes_manager.startup_nodes,
                 result_callbacks=self.client.result_callbacks,
                 cluster_response_callbacks=self.client.cluster_response_callbacks,
-                cluster_error_retry_attempts=self.client.cluster_error_retry_attempts,
+                cluster_error_retry_attempts=self.client.retry.get_retries(),
                 read_from_replicas=self.client.read_from_replicas,
                 reinitialize_steps=self.client.reinitialize_steps,
                 lock=self.client._lock,

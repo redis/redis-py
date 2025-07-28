@@ -2,6 +2,7 @@ import time
 
 import pytest
 import redis
+
 from redis.cache import (
     CacheConfig,
     CacheEntry,
@@ -12,7 +13,6 @@ from redis.cache import (
     EvictionPolicyType,
     LRUPolicy,
 )
-from redis.utils import HIREDIS_AVAILABLE
 from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
 
 
@@ -39,7 +39,6 @@ def r(request):
         yield client
 
 
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
@@ -123,6 +122,10 @@ class TestCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
+
+        # Add a small delay to allow invalidation to be processed
+        time.sleep(0.1)
+
         # Retrieves a new value from server and cache it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
@@ -324,7 +327,6 @@ class TestCache:
         assert cache.size == 0
 
 
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlycluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
@@ -567,7 +569,6 @@ class TestClusterCache:
         assert cache.size == 0
 
 
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")
@@ -636,6 +637,7 @@ class TestSentinelCache:
         ]
         # change key in redis (cause invalidation)
         r2.set("foo", "barbar")
+        time.sleep(0.1)
         # Retrieves a new value from server and cache_data it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
@@ -672,7 +674,6 @@ class TestSentinelCache:
         assert cache.size == 0
 
 
-@pytest.mark.skipif(HIREDIS_AVAILABLE, reason="PythonParser only")
 @pytest.mark.onlynoncluster
 @skip_if_resp_version(2)
 @skip_if_server_version_lt("7.4.0")

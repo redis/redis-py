@@ -23,7 +23,6 @@ ALTER_CMD = "FT.ALTER"
 SEARCH_CMD = "FT.SEARCH"
 ADD_CMD = "FT.ADD"
 ADDHASH_CMD = "FT.ADDHASH"
-DROP_CMD = "FT.DROP"
 DROPINDEX_CMD = "FT.DROPINDEX"
 EXPLAIN_CMD = "FT.EXPLAIN"
 EXPLAINCLI_CMD = "FT.EXPLAINCLI"
@@ -35,7 +34,6 @@ SPELLCHECK_CMD = "FT.SPELLCHECK"
 DICT_ADD_CMD = "FT.DICTADD"
 DICT_DEL_CMD = "FT.DICTDEL"
 DICT_DUMP_CMD = "FT.DICTDUMP"
-GET_CMD = "FT.GET"
 MGET_CMD = "FT.MGET"
 CONFIG_CMD = "FT.CONFIG"
 TAGVALS_CMD = "FT.TAGVALS"
@@ -255,8 +253,18 @@ class SearchCommands:
 
         For more information see `FT.DROPINDEX <https://redis.io/commands/ft.dropindex>`_.
         """  # noqa
-        delete_str = "DD" if delete_documents else ""
-        return self.execute_command(DROPINDEX_CMD, self.index_name, delete_str)
+        args = [DROPINDEX_CMD, self.index_name]
+
+        delete_str = (
+            "DD"
+            if isinstance(delete_documents, bool) and delete_documents is True
+            else ""
+        )
+
+        if delete_str:
+            args.append(delete_str)
+
+        return self.execute_command(*args)
 
     def _add_document(
         self,
@@ -396,6 +404,7 @@ class SearchCommands:
             doc_id, conn=None, score=score, language=language, replace=replace
         )
 
+    @deprecated_function(version="2.0.0", reason="deprecated since redisearch 2.0")
     def delete_document(self, doc_id, conn=None, delete_actual_document=False):
         """
         Delete a document from index
@@ -430,6 +439,7 @@ class SearchCommands:
 
         return Document(id=id, **fields)
 
+    @deprecated_function(version="2.0.0", reason="deprecated since redisearch 2.0")
     def get(self, *ids):
         """
         Returns the full contents of multiple documents.
@@ -500,7 +510,7 @@ class SearchCommands:
         For more information see `FT.SEARCH <https://redis.io/commands/ft.search>`_.
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
-        st = time.time()
+        st = time.monotonic()
 
         options = {}
         if get_protocol_version(self.client) not in ["3", 3]:
@@ -512,7 +522,7 @@ class SearchCommands:
             return res
 
         return self._parse_results(
-            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+            SEARCH_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
     def explain(
@@ -532,7 +542,7 @@ class SearchCommands:
 
     def aggregate(
         self,
-        query: Union[str, Query],
+        query: Union[AggregateRequest, Cursor],
         query_params: Dict[str, Union[str, int, float]] = None,
     ):
         """
@@ -563,7 +573,7 @@ class SearchCommands:
         )
 
     def _get_aggregate_result(
-        self, raw: List, query: Union[str, Query, AggregateRequest], has_cursor: bool
+        self, raw: List, query: Union[AggregateRequest, Cursor], has_cursor: bool
     ):
         if has_cursor:
             if isinstance(query, Cursor):
@@ -586,7 +596,7 @@ class SearchCommands:
 
     def profile(
         self,
-        query: Union[str, Query, AggregateRequest],
+        query: Union[Query, AggregateRequest],
         limited: bool = False,
         query_params: Optional[Dict[str, Union[str, int, float]]] = None,
     ):
@@ -596,13 +606,13 @@ class SearchCommands:
 
         ### Parameters
 
-        **query**: This can be either an `AggregateRequest`, `Query` or string.
+        **query**: This can be either an `AggregateRequest` or `Query`.
         **limited**: If set to True, removes details of reader iterator.
         **query_params**: Define one or more value parameters.
         Each parameter has a name and a value.
 
         """
-        st = time.time()
+        st = time.monotonic()
         cmd = [PROFILE_CMD, self.index_name, ""]
         if limited:
             cmd.append("LIMITED")
@@ -621,7 +631,7 @@ class SearchCommands:
         res = self.execute_command(*cmd)
 
         return self._parse_results(
-            PROFILE_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+            PROFILE_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
     def spellcheck(self, query, distance=None, include=None, exclude=None):
@@ -940,7 +950,7 @@ class AsyncSearchCommands(SearchCommands):
         For more information see `FT.SEARCH <https://redis.io/commands/ft.search>`_.
         """  # noqa
         args, query = self._mk_query_args(query, query_params=query_params)
-        st = time.time()
+        st = time.monotonic()
 
         options = {}
         if get_protocol_version(self.client) not in ["3", 3]:
@@ -952,12 +962,12 @@ class AsyncSearchCommands(SearchCommands):
             return res
 
         return self._parse_results(
-            SEARCH_CMD, res, query=query, duration=(time.time() - st) * 1000.0
+            SEARCH_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
 
     async def aggregate(
         self,
-        query: Union[str, Query],
+        query: Union[AggregateResult, Cursor],
         query_params: Dict[str, Union[str, int, float]] = None,
     ):
         """

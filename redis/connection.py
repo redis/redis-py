@@ -1,14 +1,13 @@
 import copy
 import os
 import socket
-import ssl
 import sys
 import threading
+import time
 import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from time import time
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -32,6 +31,7 @@ from .exceptions import (
     ChildDeadlockedError,
     ConnectionError,
     DataError,
+    MaxConnectionsError,
     RedisError,
     ResponseError,
     TimeoutError,
@@ -48,6 +48,11 @@ from .utils import (
     get_lib_version,
     str_if_bytes,
 )
+
+if SSL_AVAILABLE:
+    import ssl
+else:
+    ssl = None
 
 if HIREDIS_AVAILABLE:
     import hiredis
@@ -372,12 +377,20 @@ class AbstractConnection(ConnectionInterface):
 
     def connect(self):
         "Connects to the Redis server if not already connected"
+        self.connect_check_health(check_health=True)
+
+    def connect_check_health(
+        self, check_health: bool = True, retry_socket_connect: bool = True
+    ):
         if self._sock:
             return
         try:
-            sock = self.retry.call_with_retry(
-                lambda: self._connect(), lambda error: self.disconnect(error)
-            )
+            if retry_socket_connect:
+                sock = self.retry.call_with_retry(
+                    lambda: self._connect(), lambda error: self.disconnect(error)
+                )
+            else:
+                sock = self._connect()
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
         except OSError as e:
@@ -387,7 +400,7 @@ class AbstractConnection(ConnectionInterface):
         try:
             if self.redis_connect_func is None:
                 # Use the default on_connect function
-                self.on_connect()
+                self.on_connect_check_health(check_health=check_health)
             else:
                 # Use the passed function redis_connect_func
                 self.redis_connect_func(self)
@@ -417,6 +430,9 @@ class AbstractConnection(ConnectionInterface):
         return format_error_message(self._host_error(), exception)
 
     def on_connect(self):
+        self.on_connect_check_health(check_health=True)
+
+    def on_connect_check_health(self, check_health: bool = True):
         "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
         parser = self._parser
@@ -440,7 +456,11 @@ class AbstractConnection(ConnectionInterface):
                 self._parser.on_connect(self)
             if len(auth_args) == 1:
                 auth_args = ["default", auth_args[0]]
-            self.send_command("HELLO", self.protocol, "AUTH", *auth_args)
+            # avoid checking health here -- PING will fail if we try
+            # to check the health prior to the AUTH
+            self.send_command(
+                "HELLO", self.protocol, "AUTH", *auth_args, check_health=False
+            )
             self.handshake_metadata = self.read_response()
             # if response.get(b"proto") != self.protocol and response.get(
             #     "proto"
@@ -471,7 +491,7 @@ class AbstractConnection(ConnectionInterface):
                 # update cluster exception classes
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
-            self.send_command("HELLO", self.protocol)
+            self.send_command("HELLO", self.protocol, check_health=check_health)
             self.handshake_metadata = self.read_response()
             if (
                 self.handshake_metadata.get(b"proto") != self.protocol
@@ -481,28 +501,45 @@ class AbstractConnection(ConnectionInterface):
 
         # if a client_name is given, set it
         if self.client_name:
-            self.send_command("CLIENT", "SETNAME", self.client_name)
+            self.send_command(
+                "CLIENT",
+                "SETNAME",
+                self.client_name,
+                check_health=check_health,
+            )
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
         try:
             # set the library name and version
             if self.lib_name:
-                self.send_command("CLIENT", "SETINFO", "LIB-NAME", self.lib_name)
+                self.send_command(
+                    "CLIENT",
+                    "SETINFO",
+                    "LIB-NAME",
+                    self.lib_name,
+                    check_health=check_health,
+                )
                 self.read_response()
         except ResponseError:
             pass
 
         try:
             if self.lib_version:
-                self.send_command("CLIENT", "SETINFO", "LIB-VER", self.lib_version)
+                self.send_command(
+                    "CLIENT",
+                    "SETINFO",
+                    "LIB-VER",
+                    self.lib_version,
+                    check_health=check_health,
+                )
                 self.read_response()
         except ResponseError:
             pass
 
         # if a database is specified, switch to it
         if self.db:
-            self.send_command("SELECT", self.db)
+            self.send_command("SELECT", self.db, check_health=check_health)
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
@@ -538,13 +575,13 @@ class AbstractConnection(ConnectionInterface):
 
     def check_health(self):
         """Check the health of the connection with a PING/PONG"""
-        if self.health_check_interval and time() > self.next_health_check:
+        if self.health_check_interval and time.monotonic() > self.next_health_check:
             self.retry.call_with_retry(self._send_ping, self._ping_failed)
 
     def send_packed_command(self, command, check_health=True):
         """Send an already packed command to the Redis server"""
         if not self._sock:
-            self.connect()
+            self.connect_check_health(check_health=False)
         # guard against health check recursion
         if check_health:
             self.check_health()
@@ -605,7 +642,7 @@ class AbstractConnection(ConnectionInterface):
         host_error = self._host_error()
 
         try:
-            if self.protocol in ["3", 3] and not HIREDIS_AVAILABLE:
+            if self.protocol in ["3", 3]:
                 response = self._parser.read_response(
                     disable_decoding=disable_decoding, push_request=push_request
                 )
@@ -618,9 +655,7 @@ class AbstractConnection(ConnectionInterface):
         except OSError as e:
             if disconnect_on_error:
                 self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {host_error}" f" : {e.args}"
-            )
+            raise ConnectionError(f"Error while reading from {host_error} : {e.args}")
         except BaseException:
             # Also by default close in case of BaseException.  A lot of code
             # relies on this behaviour when doing Command/Response pairs.
@@ -630,7 +665,7 @@ class AbstractConnection(ConnectionInterface):
             raise
 
         if self.health_check_interval:
-            self.next_health_check = time() + self.health_check_interval
+            self.next_health_check = time.monotonic() + self.health_check_interval
 
         if isinstance(response, ResponseError):
             try:
@@ -758,6 +793,10 @@ class Connection(AbstractConnection):
             except OSError as _:
                 err = _
                 if sock is not None:
+                    try:
+                        sock.shutdown(socket.SHUT_RDWR)  # ensure a clean close
+                    except OSError:
+                        pass
                     sock.close()
 
         if err is not None:
@@ -777,7 +816,7 @@ class CacheProxyConnection(ConnectionInterface):
         self,
         conn: ConnectionInterface,
         cache: CacheInterface,
-        pool_lock: threading.Lock,
+        pool_lock: threading.RLock,
     ):
         self.pid = os.getpid()
         self._conn = conn
@@ -787,7 +826,7 @@ class CacheProxyConnection(ConnectionInterface):
         self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
         self._cache = cache
-        self._cache_lock = threading.Lock()
+        self._cache_lock = threading.RLock()
         self._current_command_cache_key = None
         self._current_options = None
         self.register_connect_callback(self._enable_tracking_callback)
@@ -995,7 +1034,7 @@ class SSLConnection(Connection):
         ssl_cert_reqs="required",
         ssl_ca_certs=None,
         ssl_ca_data=None,
-        ssl_check_hostname=False,
+        ssl_check_hostname=True,
         ssl_ca_path=None,
         ssl_password=None,
         ssl_validate_ocsp=False,
@@ -1011,7 +1050,7 @@ class SSLConnection(Connection):
         Args:
             ssl_keyfile: Path to an ssl private key. Defaults to None.
             ssl_certfile: Path to an ssl certificate. Defaults to None.
-            ssl_cert_reqs: The string value for the SSLContext.verify_mode (none, optional, required). Defaults to "required".
+            ssl_cert_reqs: The string value for the SSLContext.verify_mode (none, optional, required), or an ssl.VerifyMode. Defaults to "required".
             ssl_ca_certs: The path to a file of concatenated CA certificates in PEM format. Defaults to None.
             ssl_ca_data: Either an ASCII string of one or more PEM-encoded certificates or a bytes-like object of DER-encoded certificates.
             ssl_check_hostname: If set, match the hostname during the SSL handshake. Defaults to False.
@@ -1036,7 +1075,7 @@ class SSLConnection(Connection):
         if ssl_cert_reqs is None:
             ssl_cert_reqs = ssl.CERT_NONE
         elif isinstance(ssl_cert_reqs, str):
-            CERT_REQS = {
+            CERT_REQS = {  # noqa: N806
                 "none": ssl.CERT_NONE,
                 "optional": ssl.CERT_OPTIONAL,
                 "required": ssl.CERT_REQUIRED,
@@ -1050,7 +1089,9 @@ class SSLConnection(Connection):
         self.ca_certs = ssl_ca_certs
         self.ca_data = ssl_ca_data
         self.ca_path = ssl_ca_path
-        self.check_hostname = ssl_check_hostname
+        self.check_hostname = (
+            ssl_check_hostname if self.cert_reqs != ssl.CERT_NONE else False
+        )
         self.certificate_password = ssl_password
         self.ssl_validate_ocsp = ssl_validate_ocsp
         self.ssl_validate_ocsp_stapled = ssl_validate_ocsp_stapled
@@ -1173,6 +1214,10 @@ class UnixDomainSocketConnection(AbstractConnection):
             sock.connect(self.path)
         except OSError:
             # Prevent ResourceWarnings for unclosed sockets.
+            try:
+                sock.shutdown(socket.SHUT_RDWR)  # ensure a clean close
+            except OSError:
+                pass
             sock.close()
             raise
         sock.settimeout(self.socket_timeout)
@@ -1276,6 +1321,7 @@ class ConnectionPool:
     By default, TCP connections are created unless ``connection_class``
     is specified. Use class:`.UnixDomainSocketConnection` for
     unix sockets.
+    :py:class:`~redis.SSLConnection` can be used for SSL enabled connections.
 
     Any additional keyword arguments are passed to the constructor of
     ``connection_class``.
@@ -1381,14 +1427,18 @@ class ConnectionPool:
         # object of this pool. subsequent threads acquiring this lock
         # will notice the first thread already did the work and simply
         # release the lock.
-        self._fork_lock = threading.Lock()
-        self._lock = threading.Lock()
+
+        self._fork_lock = threading.RLock()
+        self._lock = threading.RLock()
+
         self.reset()
 
-    def __repr__(self) -> (str, str):
+    def __repr__(self) -> str:
+        conn_kwargs = ",".join([f"{k}={v}" for k, v in self.connection_kwargs.items()])
         return (
-            f"<{type(self).__module__}.{type(self).__name__}"
-            f"({repr(self.connection_class(**self.connection_kwargs))})>"
+            f"<{self.__class__.__module__}.{self.__class__.__name__}"
+            f"(<{self.connection_class.__module__}.{self.connection_class.__name__}"
+            f"({conn_kwargs})>)>"
         )
 
     def get_protocol(self):
@@ -1465,7 +1515,7 @@ class ConnectionPool:
     @deprecated_args(
         args_to_warn=["*"],
         reason="Use get_connection() without args instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def get_connection(self, command_name=None, *keys, **options) -> "Connection":
         "Get a connection from the pool"
@@ -1488,7 +1538,7 @@ class ConnectionPool:
             try:
                 if connection.can_read() and self.cache is None:
                     raise ConnectionError("Connection has data")
-            except (ConnectionError, OSError):
+            except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
                 connection.connect()
                 if connection.can_read():
@@ -1513,7 +1563,7 @@ class ConnectionPool:
     def make_connection(self) -> "ConnectionInterface":
         "Create a new connection"
         if self._created_connections >= self.max_connections:
-            raise ConnectionError("Too many connections")
+            raise MaxConnectionsError("Too many connections")
         self._created_connections += 1
 
         if self.cache is not None:
@@ -1532,7 +1582,7 @@ class ConnectionPool:
             except KeyError:
                 # Gracefully fail when a connection is returned to this pool
                 # that the pool doesn't actually own
-                pass
+                return
 
             if self.owns_connection(connection):
                 self._available_connections.append(connection)
@@ -1540,10 +1590,10 @@ class ConnectionPool:
                     AfterConnectionReleasedEvent(connection)
                 )
             else:
-                # pool doesn't own this connection. do not add it back
-                # to the pool and decrement the count so that another
-                # connection can take its place if needed
-                self._created_connections -= 1
+                # Pool doesn't own this connection, do not add it back
+                # to the pool.
+                # The created connections count should not be changed,
+                # because the connection was not created by the pool.
                 connection.disconnect()
                 return
 
@@ -1574,7 +1624,7 @@ class ConnectionPool:
         """Close the pool, disconnecting all connections"""
         self.disconnect()
 
-    def set_retry(self, retry: "Retry") -> None:
+    def set_retry(self, retry: Retry) -> None:
         self.connection_kwargs.update({"retry": retry})
         for conn in self._available_connections:
             conn.retry = retry
@@ -1693,7 +1743,7 @@ class BlockingConnectionPool(ConnectionPool):
     @deprecated_args(
         args_to_warn=["*"],
         reason="Use get_connection() without args instead",
-        version="5.0.3",
+        version="5.3.0",
     )
     def get_connection(self, command_name=None, *keys, **options):
         """
@@ -1735,7 +1785,7 @@ class BlockingConnectionPool(ConnectionPool):
             try:
                 if connection.can_read():
                     raise ConnectionError("Connection has data")
-            except (ConnectionError, OSError):
+            except (ConnectionError, TimeoutError, OSError):
                 connection.disconnect()
                 connection.connect()
                 if connection.can_read():

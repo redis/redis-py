@@ -1,5 +1,3 @@
-from importlib import metadata
-
 from redis import asyncio  # noqa
 from redis.backoff import default_backoff
 from redis.client import Redis, StrictRedis
@@ -18,11 +16,15 @@ from redis.exceptions import (
     BusyLoadingError,
     ChildDeadlockedError,
     ConnectionError,
+    CrossSlotTransactionError,
     DataError,
+    InvalidPipelineStack,
     InvalidResponse,
+    MaxConnectionsError,
     OutOfMemoryError,
     PubSubError,
     ReadOnlyError,
+    RedisClusterException,
     RedisError,
     ResponseError,
     TimeoutError,
@@ -44,16 +46,9 @@ def int_or_str(value):
         return value
 
 
-try:
-    __version__ = metadata.version("redis")
-except metadata.PackageNotFoundError:
-    __version__ = "99.99.99"
+__version__ = "6.2.0"
+VERSION = tuple(map(int_or_str, __version__.split(".")))
 
-
-try:
-    VERSION = tuple(map(int_or_str, __version__.split(".")))
-except AttributeError:
-    VERSION = tuple([99, 99, 99])
 
 __all__ = [
     "AuthenticationError",
@@ -65,15 +60,19 @@ __all__ = [
     "ConnectionError",
     "ConnectionPool",
     "CredentialProvider",
+    "CrossSlotTransactionError",
     "DataError",
     "from_url",
     "default_backoff",
+    "InvalidPipelineStack",
     "InvalidResponse",
+    "MaxConnectionsError",
     "OutOfMemoryError",
     "PubSubError",
     "ReadOnlyError",
     "Redis",
     "RedisCluster",
+    "RedisClusterException",
     "RedisError",
     "ResponseError",
     "Sentinel",

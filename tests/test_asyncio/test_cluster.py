@@ -4,6 +4,7 @@ import datetime
 import ssl
 import warnings
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, Union
+from unittest import mock
 from urllib.parse import urlparse
 
 import pytest
@@ -13,8 +14,18 @@ from redis._parsers import AsyncCommandsParser
 from redis.asyncio.cluster import ClusterNode, NodesManager, RedisCluster
 from redis.asyncio.connection import Connection, SSLConnection, async_timeout
 from redis.asyncio.retry import Retry
-from redis.backoff import ExponentialBackoff, NoBackoff, default_backoff
-from redis.cluster import PIPELINE_BLOCKED_COMMANDS, PRIMARY, REPLICA, get_node_name
+from redis.backoff import (
+    ExponentialBackoff,
+    ExponentialWithJitterBackoff,
+    NoBackoff,
+)
+from redis.cluster import (
+    PIPELINE_BLOCKED_COMMANDS,
+    PRIMARY,
+    REPLICA,
+    LoadBalancingStrategy,
+    get_node_name,
+)
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
@@ -38,7 +49,7 @@ from tests.conftest import (
 )
 
 from ..ssl_utils import get_tls_certificates
-from .compat import aclosing, mock
+from .compat import aclosing
 
 pytestmark = pytest.mark.onlycluster
 
@@ -146,7 +157,6 @@ async def get_mocked_redis_client(
     with mock.patch.object(ClusterNode, "execute_command") as execute_command_mock:
 
         async def execute_command(*_args, **_kwargs):
-
             if _args[0] == "CLUSTER SLOTS":
                 if cluster_slots_raise_error:
                     raise ResponseError()
@@ -182,7 +192,18 @@ async def get_mocked_redis_client(
 
             cmd_parser_initialize.side_effect = cmd_init_mock
 
-            return await RedisCluster(*args, **kwargs)
+            # Create a subclass of RedisCluster that overrides __del__
+            class MockedRedisCluster(RedisCluster):
+                def __del__(self):
+                    # Override to prevent connection cleanup attempts
+                    pass
+
+                @property
+                def connection_pool(self):
+                    # Required abstract property implementation
+                    return self.nodes_manager.get_default_node().redis_connection.connection_pool
+
+            return await MockedRedisCluster(*args, **kwargs)
 
 
 def mock_node_resp(node: ClusterNode, response: Any) -> ClusterNode:
@@ -351,71 +372,79 @@ class TestRedisClusterObj:
         retry = Retry(NoBackoff(), 2)
         url = request.config.getoption("--redis-url")
         async with RedisCluster.from_url(url, retry=retry) as r:
-            assert r.get_retry()._retries == retry._retries
-            assert isinstance(r.get_retry()._backoff, NoBackoff)
+            assert r.retry.get_retries() == retry.get_retries()
+            assert isinstance(r.retry._backoff, NoBackoff)
             for node in r.get_nodes():
-                n_retry = node.connection_kwargs.get("retry")
+                # validate nodes lower level connections default
+                # retry policy is applied
+                n_retry = node.acquire_connection().retry
                 assert n_retry is not None
-                assert n_retry._retries == retry._retries
+                assert n_retry._retries == 0
                 assert isinstance(n_retry._backoff, NoBackoff)
             rand_cluster_node = r.get_random_node()
             existing_conn = rand_cluster_node.acquire_connection()
             # Change retry policy
             new_retry = Retry(ExponentialBackoff(), 3)
             r.set_retry(new_retry)
-            assert r.get_retry()._retries == new_retry._retries
-            assert isinstance(r.get_retry()._backoff, ExponentialBackoff)
+            assert r.retry.get_retries() == new_retry.get_retries()
+            assert isinstance(r.retry._backoff, ExponentialBackoff)
             for node in r.get_nodes():
-                n_retry = node.connection_kwargs.get("retry")
+                # validate nodes lower level connections are not affected
+                n_retry = node.acquire_connection().retry
                 assert n_retry is not None
-                assert n_retry._retries == new_retry._retries
-                assert isinstance(n_retry._backoff, ExponentialBackoff)
-            assert existing_conn.retry._retries == new_retry._retries
+                assert n_retry._retries == 0
+                assert isinstance(n_retry._backoff, NoBackoff)
+            assert existing_conn.retry.get_retries() == 0
             new_conn = rand_cluster_node.acquire_connection()
-            assert new_conn.retry._retries == new_retry._retries
+            assert new_conn.retry._retries == 0
 
     async def test_cluster_retry_object(self, request: FixtureRequest) -> None:
         url = request.config.getoption("--redis-url")
         async with RedisCluster.from_url(url) as rc_default:
             # Test default retry
-            retry = rc_default.connection_kwargs.get("retry")
+            retry = rc_default.retry
 
             # FIXME: Workaround for https://github.com/redis/redis-py/issues/3030
             host = rc_default.get_default_node().host
 
             assert isinstance(retry, Retry)
             assert retry._retries == 3
-            assert isinstance(retry._backoff, type(default_backoff()))
-            assert rc_default.get_node(host, 16379).connection_kwargs.get(
-                "retry"
-            ) == rc_default.get_node(host, 16380).connection_kwargs.get("retry")
+            assert isinstance(retry._backoff, type(ExponentialWithJitterBackoff()))
+
+            # validate nodes connections are using the default retry for
+            # lower level connections when client is created through 'from_url' method
+            # without specified retry object
+            node1_retry = rc_default.get_node(host, 16379).acquire_connection().retry
+            node2_retry = rc_default.get_node(host, 16380).acquire_connection().retry
+            for node_retry in (node1_retry, node2_retry):
+                assert node_retry.get_retries() == 0
+                assert isinstance(node_retry._backoff, NoBackoff)
+                assert node_retry._supported_errors == (ConnectionError,)
 
         retry = Retry(ExponentialBackoff(10, 5), 5)
         async with RedisCluster.from_url(url, retry=retry) as rc_custom_retry:
             # Test custom retry
-            assert (
-                rc_custom_retry.get_node(host, 16379).connection_kwargs.get("retry")
-                == retry
-            )
+            assert rc_custom_retry.retry == retry
+            # validate nodes connections are using the default retry for
+            # lower level connections when client is created through 'from_url' method
+            # with specified retry object
+            node1_retry = rc_default.get_node(host, 16379).acquire_connection().retry
+            node2_retry = rc_default.get_node(host, 16380).acquire_connection().retry
+            for node_retry in (node1_retry, node2_retry):
+                assert node_retry.get_retries() == 0
+                assert isinstance(node_retry._backoff, NoBackoff)
+                assert node_retry._supported_errors == (ConnectionError,)
 
         async with RedisCluster.from_url(
-            url, connection_error_retry_attempts=0
+            url, cluster_error_retry_attempts=0
         ) as rc_no_retries:
-            # Test no connection retries
-            assert (
-                rc_no_retries.get_node(host, 16379).connection_kwargs.get("retry")
-                is None
-            )
+            # Test no cluster retries
+            assert rc_no_retries.retry.get_retries() == 0
 
         async with RedisCluster.from_url(
             url, retry=Retry(NoBackoff(), 0)
         ) as rc_no_retries:
-            assert (
-                rc_no_retries.get_node(host, 16379)
-                .connection_kwargs.get("retry")
-                ._retries
-                == 0
-            )
+            assert rc_no_retries.retry.get_retries() == 0
 
     async def test_empty_startup_nodes(self) -> None:
         """
@@ -678,7 +707,24 @@ class TestRedisClusterObj:
                         assert execute_command.failed_calls == 1
                         assert execute_command.successful_calls == 1
 
-    async def test_reading_from_replicas_in_round_robin(self) -> None:
+    @pytest.mark.parametrize(
+        "read_from_replicas,load_balancing_strategy,mocks_srv_ports",
+        [
+            (True, None, [7001, 7002, 7001]),
+            (True, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
+            (True, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (True, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.ROUND_ROBIN, [7001, 7002, 7001]),
+            (False, LoadBalancingStrategy.ROUND_ROBIN_REPLICAS, [7002, 7002, 7002]),
+            (False, LoadBalancingStrategy.RANDOM_REPLICA, [7002, 7002, 7002]),
+        ],
+    )
+    async def test_reading_with_load_balancing_strategies(
+        self,
+        read_from_replicas: bool,
+        load_balancing_strategy: LoadBalancingStrategy,
+        mocks_srv_ports: List[int],
+    ) -> None:
         with mock.patch.multiple(
             Connection,
             send_command=mock.DEFAULT,
@@ -694,19 +740,19 @@ class TestRedisClusterObj:
                 async def execute_command_mock_first(self, *args, **options):
                     await self.connection_class(**self.connection_kwargs).connect()
                     # Primary
-                    assert self.port == 7001
+                    assert self.port == mocks_srv_ports[0]
                     execute_command.side_effect = execute_command_mock_second
                     return "MOCK_OK"
 
                 def execute_command_mock_second(self, *args, **options):
                     # Replica
-                    assert self.port == 7002
+                    assert self.port == mocks_srv_ports[1]
                     execute_command.side_effect = execute_command_mock_third
                     return "MOCK_OK"
 
                 def execute_command_mock_third(self, *args, **options):
                     # Primary
-                    assert self.port == 7001
+                    assert self.port == mocks_srv_ports[2]
                     return "MOCK_OK"
 
                 # We don't need to create a real cluster connection but we
@@ -721,9 +767,13 @@ class TestRedisClusterObj:
 
                 # Create a cluster with reading from replications
                 read_cluster = await get_mocked_redis_client(
-                    host=default_host, port=default_port, read_from_replicas=True
+                    host=default_host,
+                    port=default_port,
+                    read_from_replicas=read_from_replicas,
+                    load_balancing_strategy=load_balancing_strategy,
                 )
-                assert read_cluster.read_from_replicas is True
+                assert read_cluster.read_from_replicas is read_from_replicas
+                assert read_cluster.load_balancing_strategy is load_balancing_strategy
                 # Check that we read from the slot's nodes in a round robin
                 # matter.
                 # 'foo' belongs to slot 12182 and the slot's nodes are:
@@ -970,6 +1020,34 @@ class TestClusterRedisCommands:
         assert await r.get("byte_string") == byte_string
         assert await r.get("integer") == str(integer).encode()
         assert (await r.get("unicode_string")).decode("utf-8") == unicode_string
+
+    @pytest.mark.parametrize(
+        "load_balancing_strategy",
+        [
+            LoadBalancingStrategy.ROUND_ROBIN,
+            LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM_REPLICA,
+        ],
+    )
+    async def test_get_and_set_with_load_balanced_client(
+        self, create_redis, load_balancing_strategy: LoadBalancingStrategy
+    ) -> None:
+        r = await create_redis(
+            cls=RedisCluster,
+            load_balancing_strategy=load_balancing_strategy,
+        )
+
+        # get and set can't be tested independently of each other
+        assert await r.get("a") is None
+
+        byte_string = b"value"
+        assert await r.set("byte_string", byte_string)
+
+        # run the get command for the same key several times
+        # to iterate over the read nodes
+        assert await r.get("byte_string") == byte_string
+        assert await r.get("byte_string") == byte_string
+        assert await r.get("byte_string") == byte_string
 
     async def test_mget_nonatomic(self, r: RedisCluster) -> None:
         assert await r.mget_nonatomic([]) == []
@@ -1577,7 +1655,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_not(self, r: RedisCluster) -> None:
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         await r.set("{foo}a", test_str)
         await r.bitop("not", "{foo}r", "{foo}a")
@@ -1585,7 +1663,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_not_in_place(self, r: RedisCluster) -> None:
-        test_str = b"\xAA\x00\xFF\x55"
+        test_str = b"\xaa\x00\xff\x55"
         correct = ~0xAA00FF55 & 0xFFFFFFFF
         await r.set("{foo}a", test_str)
         await r.bitop("not", "{foo}a", "{foo}a")
@@ -1593,7 +1671,7 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_single_string(self, r: RedisCluster) -> None:
-        test_str = b"\x01\x02\xFF"
+        test_str = b"\x01\x02\xff"
         await r.set("{foo}a", test_str)
         await r.bitop("and", "{foo}res1", "{foo}a")
         await r.bitop("or", "{foo}res2", "{foo}a")
@@ -1604,8 +1682,8 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("2.6.0")
     async def test_cluster_bitop_string_operands(self, r: RedisCluster) -> None:
-        await r.set("{foo}a", b"\x01\x02\xFF\xFF")
-        await r.set("{foo}b", b"\x01\x02\xFF")
+        await r.set("{foo}a", b"\x01\x02\xff\xff")
+        await r.set("{foo}b", b"\x01\x02\xff")
         await r.bitop("and", "{foo}res1", "{foo}a", "{foo}b")
         await r.bitop("or", "{foo}res2", "{foo}a", "{foo}b")
         await r.bitop("xor", "{foo}res3", "{foo}a", "{foo}b")
@@ -2371,11 +2449,14 @@ class TestNodesManager:
         primary2_name = n_manager.slots_cache[slot_2][0].name
         list1_size = len(n_manager.slots_cache[slot_1])
         list2_size = len(n_manager.slots_cache[slot_2])
+
+        # default load balancer strategy: LoadBalancerStrategy.ROUND_ROBIN
         # slot 1
         assert lb.get_server_index(primary1_name, list1_size) == 0
         assert lb.get_server_index(primary1_name, list1_size) == 1
         assert lb.get_server_index(primary1_name, list1_size) == 2
         assert lb.get_server_index(primary1_name, list1_size) == 0
+
         # slot 2
         assert lb.get_server_index(primary2_name, list2_size) == 0
         assert lb.get_server_index(primary2_name, list2_size) == 1
@@ -2384,6 +2465,29 @@ class TestNodesManager:
         lb.reset()
         assert lb.get_server_index(primary1_name, list1_size) == 0
         assert lb.get_server_index(primary2_name, list2_size) == 0
+
+        # reset the indexes before load balancing strategy test
+        lb.reset()
+        # load balancer strategy: LoadBalancerStrategy.ROUND_ROBIN_REPLICAS
+        for i in [1, 2, 1]:
+            srv_index = lb.get_server_index(
+                primary1_name,
+                list1_size,
+                load_balancing_strategy=LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            )
+            assert srv_index == i
+
+        # reset the indexes before load balancing strategy test
+        lb.reset()
+        # load balancer strategy: LoadBalancerStrategy.RANDOM_REPLICA
+        for i in range(5):
+            srv_index = lb.get_server_index(
+                primary1_name,
+                list1_size,
+                load_balancing_strategy=LoadBalancingStrategy.RANDOM_REPLICA,
+            )
+
+            assert srv_index > 0 and srv_index <= 2
 
     async def test_init_slots_cache_not_all_slots_covered(self) -> None:
         """
@@ -2620,16 +2724,33 @@ class TestNodesManager:
                     assert rc.get_node(host=default_host, port=7001) is not None
                     assert rc.get_node(host=default_host, port=7002) is not None
 
+    @pytest.mark.parametrize("dynamic_startup_nodes", [True, False])
+    async def test_init_slots_dynamic_startup_nodes(self, dynamic_startup_nodes):
+        rc = await get_mocked_redis_client(
+            host="my@DNS.com",
+            port=7000,
+            cluster_slots=default_cluster_slots,
+            dynamic_startup_nodes=dynamic_startup_nodes,
+        )
+        # Nodes are taken from default_cluster_slots
+        discovered_nodes = [
+            "127.0.0.1:7000",
+            "127.0.0.1:7001",
+            "127.0.0.1:7002",
+            "127.0.0.1:7003",
+        ]
+        startup_nodes = list(rc.nodes_manager.startup_nodes.keys())
+        if dynamic_startup_nodes is True:
+            assert sorted(startup_nodes) == sorted(discovered_nodes)
+        else:
+            assert startup_nodes == ["my@DNS.com:7000"]
+
 
 class TestClusterPipeline:
     """Tests for the ClusterPipeline class."""
 
     async def test_blocked_arguments(self, r: RedisCluster) -> None:
         """Test handling for blocked pipeline arguments."""
-        with pytest.raises(RedisClusterException) as ex:
-            r.pipeline(transaction=True)
-
-        assert str(ex.value) == "transaction is deprecated in cluster mode"
 
         with pytest.raises(RedisClusterException) as ex:
             r.pipeline(shard_hint=True)
@@ -2674,6 +2795,17 @@ class TestClusterPipeline:
         )
         assert result == [True, b"1", 1, {b"F": b"V"}, True, True, b"2", b"3", 1, 1, 1]
 
+    async def test_cluster_pipeline_execution_zero_cluster_err_retries(
+        self, r: RedisCluster
+    ) -> None:
+        """
+        Test that we can run successfully cluster pipeline execute at least once when
+        cluster_error_retry_attempts is set to 0
+        """
+        r.cluster_error_retry_attempts = 0
+        result = await r.pipeline().set("A", 1).get("A").delete("A").execute()
+        assert result == [True, b"1", 1]
+
     async def test_multi_key_operation_with_a_single_slot(
         self, r: RedisCluster
     ) -> None:
@@ -2707,7 +2839,7 @@ class TestClusterPipeline:
 
     async def test_cluster_down_error(self, r: RedisCluster) -> None:
         """
-        Test that the pipeline retries cluster_error_retry_attempts times before raising
+        Test that the pipeline retries the specified in retry object times before raising
         an error.
         """
         key = "foo"
@@ -2732,10 +2864,7 @@ class TestClusterPipeline:
             async with r.pipeline() as pipe:
                 with pytest.raises(ClusterDownError):
                     await pipe.get(key).execute()
-                assert (
-                    node.parse_response.await_count
-                    == 3 * r.cluster_error_retry_attempts - 2
-                )
+                assert node.parse_response.await_count == 3 * r.retry.get_retries() + 1
 
     async def test_connection_error_not_raised(self, r: RedisCluster) -> None:
         """Test ConnectionError handling with raise_on_error=False."""
@@ -2803,6 +2932,25 @@ class TestClusterPipeline:
             assert ask_node._free.pop().read_response.await_count
             assert res == ["MOCK_OK"]
 
+    async def test_error_is_truncated(self, r) -> None:
+        """
+        Test that an error from the pipeline is truncated correctly.
+        """
+        key = "a" * 50
+        a_value = "a" * 20
+        b_value = "b" * 20
+
+        async with r.pipeline() as pipe:
+            pipe.set(key, 1)
+            pipe.hset(key, mapping={"field_a": a_value, "field_b": b_value})
+            pipe.expire(key, 100)
+
+            with pytest.raises(Exception) as ex:
+                await pipe.execute()
+
+            expected = f"Command # 2 (HSET {key} field_a {a_value} field_b...) of pipeline caused error: "
+            assert str(ex.value).startswith(expected)
+
     async def test_moved_redirection_on_slave_with_default(
         self, r: RedisCluster
     ) -> None:
@@ -2855,6 +3003,37 @@ class TestClusterPipeline:
                         executed_on_replica = True
                         break
             assert executed_on_replica
+
+    @pytest.mark.parametrize(
+        "load_balancing_strategy",
+        [
+            LoadBalancingStrategy.ROUND_ROBIN_REPLICAS,
+            LoadBalancingStrategy.RANDOM_REPLICA,
+        ],
+    )
+    async def test_readonly_pipeline_with_reading_from_replicas_strategies(
+        self, r: RedisCluster, load_balancing_strategy: LoadBalancingStrategy
+    ) -> None:
+        """
+        Test that the pipeline uses replicas for different replica-based
+        load balancing strategies.
+        """
+        # Set the load balancing strategy
+        r.load_balancing_strategy = load_balancing_strategy
+        key = "bar"
+        await r.set(key, "foo")
+
+        async with r.pipeline() as pipe:
+            mock_all_nodes_resp(r, "MOCK_OK")
+            assert await pipe.get(key).get(key).execute() == ["MOCK_OK", "MOCK_OK"]
+            slot_nodes = r.nodes_manager.slots_cache[r.keyslot(key)]
+            executed_on_replicas_only = True
+            for node in slot_nodes:
+                if node.server_type == PRIMARY:
+                    if node._free.pop().read_response.await_count > 0:
+                        executed_on_replicas_only = False
+                        break
+            assert executed_on_replicas_only
 
     async def test_can_run_concurrent_pipelines(self, r: RedisCluster) -> None:
         """Test that the pipeline can be used concurrently."""
@@ -3016,12 +3195,20 @@ class TestSSL:
     async def test_validating_self_signed_certificate(
         self, create_client: Callable[..., Awaitable[RedisCluster]]
     ) -> None:
+        # ssl_check_hostname=False is used to avoid hostname verification
+        # in the test environment, where the server certificate is self-signed
+        # and does not match the hostname that is extracted for the cluster.
+        # Cert hostname is 'localhost' in the cluster initialization when using
+        # 'localhost' it gets transformed into 127.0.0.1
+        # In production code, ssl_check_hostname should be set to True
+        # to ensure proper hostname verification.
         async with await create_client(
             ssl=True,
             ssl_ca_certs=self.ca_cert,
             ssl_cert_reqs="required",
             ssl_certfile=self.client_cert,
             ssl_keyfile=self.client_key,
+            ssl_check_hostname=False,
         ) as rc:
             assert await rc.ping()
 
@@ -3031,10 +3218,18 @@ class TestSSL:
         with open(self.ca_cert) as f:
             cert_data = f.read()
 
+        # ssl_check_hostname=False is used to avoid hostname verification
+        # in the test environment, where the server certificate is self-signed
+        # and does not match the hostname that is extracted for the cluster.
+        # Cert hostname is 'localhost' in the cluster initialization when using
+        # 'localhost' it gets transformed into 127.0.0.1
+        # In production code, ssl_check_hostname should be set to True
+        # to ensure proper hostname verification.
         async with await create_client(
             ssl=True,
             ssl_ca_data=cert_data,
             ssl_cert_reqs="required",
+            ssl_check_hostname=False,
             ssl_certfile=self.client_cert,
             ssl_keyfile=self.client_key,
         ) as rc:
