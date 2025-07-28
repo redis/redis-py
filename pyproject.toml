@@ -42,6 +42,9 @@ ocsp = [
 jwt = [
     "PyJWT>=2.9.0",
 ]
+circuit_breaker = [
+    "pybreaker>=1.4.0"
+]
 
 [project.urls]
 Changes = "https://github.com/redis/redis-py/releases"
