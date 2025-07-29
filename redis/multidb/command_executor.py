@@ -256,7 +256,7 @@ class DefaultCommandExecutor(CommandExecutor):
 
     def _check_active_database(self):
         """
-        Checks if active database needs to be updated.
+        Checks if active a database needs to be updated.
         """
         if (
                 self._active_database is None

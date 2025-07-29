@@ -31,10 +31,12 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         self._failover_strategy.set_databases(self._databases)
         self._auto_fallback_interval = config.auto_fallback_interval
         self._event_dispatcher = config.event_dispatcher
+        self._command_retry = config.command_retry
+        self._command_retry.update_supported_errors((ConnectionRefusedError,))
         self.command_executor = DefaultCommandExecutor(
             failure_detectors=self._failure_detectors,
             databases=self._databases,
-            command_retry=config.command_retry,
+            command_retry=self._command_retry,
             failover_strategy=self._failover_strategy,
             event_dispatcher=self._event_dispatcher,
             auto_fallback_interval=self._auto_fallback_interval,
@@ -49,8 +51,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
         Perform initialization of databases to define their initial state.
         """
 
+        def raise_exception_on_failed_hc(error):
+            raise error
+
         # Initial databases check to define initial state
-        self._check_databases_health()
+        self._check_databases_health(on_error=raise_exception_on_failed_hc)
 
         # Starts recurring health checks on the background.
         self._bg_scheduler.run_recurring(
@@ -208,7 +213,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         return PubSub(self, **kwargs)
 
-    def _check_db_health(self, database: AbstractDatabase) -> None:
+    def _check_db_health(self, database: AbstractDatabase, on_error: Callable[[Exception], None] = None) -> None:
         """
         Runs health checks on the given database until first failure.
         """
@@ -228,19 +233,23 @@ class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
                         database.circuit.state = CBState.OPEN
                     elif is_healthy and database.circuit.state != CBState.CLOSED:
                         database.circuit.state = CBState.CLOSED
-                except (ConnectionError, TimeoutError, socket.timeout):
+                except (ConnectionError, TimeoutError, socket.timeout, ConnectionRefusedError) as e:
                     if database.circuit.state != CBState.OPEN:
                         database.circuit.state = CBState.OPEN
                     is_healthy = False
 
+                    if on_error:
+                        on_error(e)
 
-    def _check_databases_health(self):
+
+    def _check_databases_health(self, on_error: Callable[[Exception], None] = None):
         """
+        Runs health checks as a recurring task.
         Runs health checks against all databases.
         """
 
         for database, _ in self._databases:
-            self._check_db_health(database)
+            self._check_db_health(database, on_error)
 
     def _on_circuit_state_change_callback(self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState):
         if new_state == CBState.HALF_OPEN:
@@ -310,7 +319,10 @@ class Pipeline(RedisModuleCommands, CoreCommands, SentinelCommands):
         if not self._client.initialized:
             self._client.initialize()
 
-        return self._client.command_executor.execute_pipeline(tuple(self._command_stack))
+        try:
+            return self._client.command_executor.execute_pipeline(tuple(self._command_stack))
+        finally:
+            self.reset()
 
 class PubSub:
     """
