@@ -21,6 +21,7 @@ class AbstractHealthCheck(HealthCheck):
             retry: Retry,
     ) -> None:
         self._retry = retry
+        self._retry.update_supported_errors([ConnectionRefusedError])
 
     @property
     def retry(self) -> Retry:
