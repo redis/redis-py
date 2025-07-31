@@ -9,6 +9,7 @@ from redis.multidb.client import MultiDBClient
 from redis.multidb.config import DatabaseConfig, MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
     DEFAULT_FAILURES_THRESHOLD
 from redis.multidb.event import ActiveDatabaseChanged
+from redis.multidb.healthcheck import EchoHealthCheck
 from redis.retry import Retry
 from tests.test_scenario.fault_injector_client import FaultInjectorClient
 
@@ -47,6 +48,7 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
      password = endpoint_config.get('password', None)
      failure_threshold = request.param.get('failure_threshold', DEFAULT_FAILURES_THRESHOLD)
      command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=0.5, base=0.05), retries=3))
+     health_checks = [EchoHealthCheck(command_retry)]
      health_check_interval = request.param.get('health_check_interval', DEFAULT_HEALTH_CHECK_INTERVAL)
      event_dispatcher = EventDispatcher()
      listener = CheckActiveDatabaseChangedListener()
@@ -79,6 +81,7 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
 
      config = MultiDbConfig(
          databases_config=db_configs,
+         health_checks=health_checks,
          command_retry=command_retry,
          failure_threshold=failure_threshold,
          health_check_interval=health_check_interval,
