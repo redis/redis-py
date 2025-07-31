@@ -251,21 +251,21 @@ class AfterAsyncClusterInstantiationEvent:
     def credential_provider(self) -> Union[CredentialProvider, None]:
         return self._credential_provider
 
-class OnCommandFailEvent:
+class OnCommandsFailEvent:
     """
     Event fired whenever a command fails during the execution.
     """
     def __init__(
             self,
-            command: tuple,
+            commands: tuple,
             exception: Exception,
     ):
-        self._command = command
+        self._commands = commands
         self._exception = exception
 
     @property
-    def command(self) -> tuple:
-        return self._command
+    def commands(self) -> tuple:
+        return self._commands
 
     @property
     def exception(self) -> Exception:
