@@ -783,6 +783,17 @@ class TestRedisClusterObj:
         _get_client(RedisCluster, request, redis_connect_func=mock)
         assert mock.called is True
 
+    def test_user_connection_pool_timeout(self, request):
+        """
+        Test support in passing timeout value by the user when setting
+        up a RedisCluster with a BlockingConnectionPool
+        """
+
+        timeout = 3
+        client = _get_client(RedisCluster, request, timeout=timeout, connection_pool_class=redis.BlockingConnectionPool)
+        for _, node_config in client.nodes_manager.startup_nodes.items():
+            assert node_config.redis_connection.connection_pool.timeout == timeout
+
     def test_set_default_node_success(self, r):
         """
         test successful replacement of the default cluster node
