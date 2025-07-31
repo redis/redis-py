@@ -264,7 +264,7 @@ class OnCommandsFailEvent:
         self._exception = exception
 
     @property
-    def command(self) -> tuple:
+    def commands(self) -> tuple:
         return self._commands
 
     @property

@@ -13,4 +13,4 @@ class RegisterCommandFailure(EventListenerInterface):
 
     def listen(self, event: OnCommandsFailEvent) -> None:
         for failure_detector in self._failure_detectors:
-            failure_detector.register_failure(event.exception, event.command)
+            failure_detector.register_failure(event.exception, event.commands)
