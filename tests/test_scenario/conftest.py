@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from redis.backoff import NoBackoff
+from redis.backoff import NoBackoff, ExponentialBackoff
 from redis.event import EventDispatcher, EventListenerInterface
 from redis.multidb.client import MultiDBClient
 from redis.multidb.config import DatabaseConfig, MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
@@ -46,7 +46,7 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
      username = endpoint_config.get('username', None)
      password = endpoint_config.get('password', None)
      failure_threshold = request.param.get('failure_threshold', DEFAULT_FAILURES_THRESHOLD)
-     command_retry = request.param.get('command_retry', Retry(NoBackoff(), retries=3))
+     command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=0.5, base=0.05), retries=3))
      health_check_interval = request.param.get('health_check_interval', DEFAULT_HEALTH_CHECK_INTERVAL)
      event_dispatcher = EventDispatcher()
      listener = CheckActiveDatabaseChangedListener()

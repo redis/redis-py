@@ -34,7 +34,7 @@ def trigger_network_failure_action(fault_injector_client, event: threading.Event
 class TestActiveActiveStandalone:
     def teardown_method(self, method):
         # Timeout so the cluster could recover from network failure.
-        sleep(5)
+        sleep(3)
 
     @pytest.mark.parametrize(
         "r_multi_db",
