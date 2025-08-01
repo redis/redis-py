@@ -424,17 +424,17 @@ async def test_vsim_truth_no_thread_enabled(d_client):
 
 
 @skip_if_server_version_lt("8.2.0")
-def test_vsim_epsilon(d_client):
-    d_client.vset().vadd("myset", [2, 1, 1], "a")
-    d_client.vset().vadd("myset", [2, 0, 1], "b")
-    d_client.vset().vadd("myset", [2, 0, 0], "c")
-    d_client.vset().vadd("myset", [2, 0, -1], "d")
-    d_client.vset().vadd("myset", [2, -1, -1], "e")
+async def test_vsim_epsilon(d_client):
+    await d_client.vset().vadd("myset", [2, 1, 1], "a")
+    await d_client.vset().vadd("myset", [2, 0, 1], "b")
+    await d_client.vset().vadd("myset", [2, 0, 0], "c")
+    await d_client.vset().vadd("myset", [2, 0, -1], "d")
+    await d_client.vset().vadd("myset", [2, -1, -1], "e")
 
-    res1 = d_client.vset().vsim("myset", [2, 1, 1])
+    res1 = await d_client.vset().vsim("myset", [2, 1, 1])
     assert 5 == len(res1)
 
-    res2 = d_client.vset().vsim("myset", [2, 1, 1], epsilon=0.5)
+    res2 = await d_client.vset().vsim("myset", [2, 1, 1], epsilon=0.5)
     assert 3 == len(res2)
 
 
