@@ -3803,6 +3803,7 @@ def test_svs_vamana_vector_search_with_parameters(client):
         assert res["total_results"] == 3
         assert "doc0" == res["results"][0]["id"]
 
+
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.4.3", "search")
 @skip_if_server_version_lt("8.1.224")
