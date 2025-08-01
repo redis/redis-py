@@ -3802,3 +3802,52 @@ def test_svs_vamana_vector_search_with_parameters(client):
     else:
         assert res["total_results"] == 3
         assert "doc0" == res["results"][0]["id"]
+
+
+@pytest.mark.redismod
+@skip_ifmodversion_lt("2.4.3", "search")
+@skip_if_server_version_lt("8.1.224")
+def test_svs_vamana_vector_search_with_parameters_leanvec(client):
+    client.ft().create_index(
+        (
+            VectorField(
+                "v",
+                "SVS-VAMANA",
+                {
+                    "TYPE": "FLOAT32",
+                    "DIM": 8,
+                    "DISTANCE_METRIC": "L2",
+                    "COMPRESSION": "LeanVec8x8",  # LeanVec compression required for REDUCE
+                    "CONSTRUCTION_WINDOW_SIZE": 200,
+                    "GRAPH_MAX_DEGREE": 32,
+                    "SEARCH_WINDOW_SIZE": 15,
+                    "EPSILON": 0.01,
+                    "TRAINING_THRESHOLD": 1024,
+                    "REDUCE": 4,  # Half of DIM (8/2 = 4)
+                },
+            ),
+        )
+    )
+
+    # Create test vectors (8-dimensional to match DIM)
+    vectors = [
+        [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        [2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        [3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+        [4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0],
+        [5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+    ]
+
+    for i, vec in enumerate(vectors):
+        client.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+
+    query = Query("*=>[KNN 3 @v $vec as score]").no_content()
+    query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
+
+    res = client.ft().search(query, query_params=query_params)
+    if is_resp2_connection(client):
+        assert res.total == 3
+        assert "doc0" == res.docs[0].id
+    else:
+        assert res["total_results"] == 3
+        assert "doc0" == res["results"][0]["id"]
