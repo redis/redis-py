@@ -3817,7 +3817,7 @@ def test_svs_vamana_vector_search_with_parameters_leanvec(client):
                     "TYPE": "FLOAT32",
                     "DIM": 8,
                     "DISTANCE_METRIC": "L2",
-                    "COMPRESSION": "LVQ8",  # LeanVec compression required for REDUCE
+                    "COMPRESSION": "LeanVec8x8",  # LeanVec compression required for REDUCE
                     "CONSTRUCTION_WINDOW_SIZE": 200,
                     "GRAPH_MAX_DEGREE": 32,
                     "SEARCH_WINDOW_SIZE": 15,
