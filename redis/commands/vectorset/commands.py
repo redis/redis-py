@@ -129,6 +129,7 @@ class VectorSetCommands(CommandsProtocol):
         filter_ef: Optional[str] = None,
         truth: Optional[bool] = False,
         no_thread: Optional[bool] = False,
+        epsilon: Optional[Number] = None,
     ) -> Union[
         Awaitable[Optional[List[Union[List[EncodableT], Dict[EncodableT, Number]]]]],
         Optional[List[Union[List[EncodableT], Dict[EncodableT, Number]]]],
@@ -151,6 +152,9 @@ class VectorSetCommands(CommandsProtocol):
 
         ``no_thread`` when enabled forces the command to execute the search
                 on the data structure in the main thread.
+
+        ``epsilon`` floating point between 0 and 1, if specified will return
+                only elements with distance no further than the specified one.
 
         For more information see https://redis.io/commands/vsim
         """
@@ -175,6 +179,9 @@ class VectorSetCommands(CommandsProtocol):
 
         if count:
             pieces.extend(["COUNT", count])
+
+        if epsilon:
+            pieces.extend(["EPSILON", epsilon])
 
         if ef:
             pieces.extend(["EF", ef])
