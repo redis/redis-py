@@ -219,7 +219,7 @@ class Lock:
         if blocking is None:
             blocking = self.blocking
         if blocking_timeout is None:
-            blocking_timeout = self.blocking_timeout
+            blocking_timeout = self.blocking_timeout or self.timeout
         stop_trying_at = None
         if blocking_timeout is not None:
             stop_trying_at = mod_time.monotonic() + blocking_timeout
