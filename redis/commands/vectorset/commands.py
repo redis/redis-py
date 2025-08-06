@@ -238,7 +238,7 @@ class VectorSetCommands(CommandsProtocol):
                 internal representation used by the vector.
 
 
-        For more information, see https://redis.io/commands/vembe.d.
+        For more information, see https://redis.io/commands/vemb.
         """
         options = {}
         pieces = []
