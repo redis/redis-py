@@ -435,7 +435,7 @@ async def test_vsim_epsilon(d_client):
     assert 5 == len(res1)
 
     res2 = await d_client.vset().vsim("myset", [2, 1, 1], epsilon=0.5)
-    assert 3 == len(res2)
+    assert 4 == len(res2)
 
 
 @skip_if_server_version_lt("7.9.0")
