@@ -790,7 +790,12 @@ class TestRedisClusterObj:
         """
 
         timeout = 3
-        client = _get_client(RedisCluster, request, timeout=timeout, connection_pool_class=redis.BlockingConnectionPool)
+        client = _get_client(
+            RedisCluster,
+            request,
+            timeout=timeout,
+            connection_pool_class=redis.BlockingConnectionPool,
+        )
         for _, node_config in client.nodes_manager.startup_nodes.items():
             assert node_config.redis_connection.connection_pool.timeout == timeout
 
