@@ -2,6 +2,7 @@ import sys
 from abc import ABC
 from asyncio import IncompleteReadError, StreamReader, TimeoutError
 from typing import Callable, List, Optional, Protocol, Union
+import logging
 
 from redis.maintenance_events import (
     NodeMigratedEvent,
@@ -56,6 +57,7 @@ NO_AUTH_SET_ERROR = {
     "Client sent AUTH, but no password is set": AuthenticationError,
 }
 
+logger = logging.getLogger(__name__)
 
 class BaseParser(ABC):
     EXCEPTION_CLASSES = {
@@ -192,6 +194,7 @@ class PushNotificationsParser(Protocol):
         raise NotImplementedError()
 
     def handle_push_response(self, response, **kwargs):
+
         msg_type = response[0]
         if msg_type not in (
             *_INVALIDATION_MESSAGE,
@@ -199,28 +202,36 @@ class PushNotificationsParser(Protocol):
             *_MOVING_MESSAGE,
         ):
             return self.pubsub_push_handler_func(response)
-        if msg_type in _INVALIDATION_MESSAGE and self.invalidation_push_handler_func:
-            return self.invalidation_push_handler_func(response)
-        if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
-            host, port = response[2].decode().split(":")
-            ttl = response[1]
-            id = 1  # Hardcoded value until the notification starts including the id
-            notification = NodeMovingEvent(id, host, port, ttl)
-            return self.node_moving_push_handler_func(notification)
-        if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
-            if msg_type in _MIGRATING_MESSAGE:
-                ttl = response[1]
-                id = 2  # Hardcoded value until the notification starts including the id
-                notification = NodeMigratingEvent(id, ttl)
-            elif msg_type in _MIGRATED_MESSAGE:
-                id = 3  # Hardcoded value until the notification starts including the id
-                notification = NodeMigratedEvent(id)
-            else:
+
+        try:
+            if msg_type in _INVALIDATION_MESSAGE and self.invalidation_push_handler_func:
+                return self.invalidation_push_handler_func(response)
+            if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
+                # Expected message format is: MOVING <seq_number> <time> <endpoint>
+                id = response[1]
+                ttl = response[2]
+                host, port = response[3].decode().split(":")
+                notification = NodeMovingEvent(id, host, port, ttl)
+                return self.node_moving_push_handler_func(notification)
+
+            if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
                 notification = None
-            if notification is not None:
-                return self.maintenance_push_handler_func(notification)
-            else:
-                return None
+
+                if msg_type in _MIGRATING_MESSAGE:
+                    # Expected message format is: MIGRATING <seq_number> <time> <shard_id-s>
+                    id = response[1]
+                    ttl = response[2]
+                    notification = NodeMigratingEvent(id, ttl)
+                elif msg_type in _MIGRATED_MESSAGE:
+                    id = response[1]
+                    notification = NodeMigratedEvent(id)
+
+                if notification is not None:
+                    return self.maintenance_push_handler_func(notification)
+        except Exception as e:
+            logger.error("Error handling {} message ({}): {}".format(msg_type, response, e))
+
+        return None
 
     def set_pubsub_push_handler(self, pubsub_push_handler_func):
         self.pubsub_push_handler_func = pubsub_push_handler_func
@@ -249,6 +260,7 @@ class AsyncPushNotificationsParser(Protocol):
 
     async def handle_push_response(self, response, **kwargs):
         """Handle push responses asynchronously"""
+
         msg_type = response[0]
         if msg_type not in (
             *_INVALIDATION_MESSAGE,
@@ -256,24 +268,35 @@ class AsyncPushNotificationsParser(Protocol):
             *_MOVING_MESSAGE,
         ):
             return await self.pubsub_push_handler_func(response)
-        if msg_type in _INVALIDATION_MESSAGE and self.invalidation_push_handler_func:
-            return await self.invalidation_push_handler_func(response)
-        if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
-            # push notification from enterprise cluster for node moving
-            host, port = response[2].split(":")
-            ttl = response[1]
-            id = 1  # Hardcoded value for async parser
-            notification = NodeMovingEvent(id, host, port, ttl)
-            return await self.node_moving_push_handler_func(notification)
-        if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
-            if msg_type in _MIGRATING_MESSAGE:
-                ttl = response[1]
-                id = 2  # Hardcoded value for async parser
-                notification = NodeMigratingEvent(id, ttl)
-            elif msg_type in _MIGRATED_MESSAGE:
-                id = 3  # Hardcoded value for async parser
-                notification = NodeMigratedEvent(id)
-            return await self.maintenance_push_handler_func(notification)
+
+        try:
+            if msg_type in _INVALIDATION_MESSAGE and self.invalidation_push_handler_func:
+                return await self.invalidation_push_handler_func(response)
+            if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
+                # push notification from enterprise cluster for node moving
+                id = response[1]
+                ttl = response[2]
+                host, port = response[3].split(":")
+                notification = NodeMovingEvent(id, host, port, ttl)
+                return await self.node_moving_push_handler_func(notification)
+
+            if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
+                notification = None
+
+                if msg_type in _MIGRATING_MESSAGE:
+                    id = response[1]
+                    ttl = response[2]
+                    notification = NodeMigratingEvent(id, ttl)
+                elif msg_type in _MIGRATED_MESSAGE:
+                    id = response[1]
+                    notification = NodeMigratedEvent(id)
+
+                if notification is not None:
+                    return self.maintenance_push_handler_func(notification)
+        except Exception as e:
+            logger.error("Error handling {} message ({}): {}".format(msg_type, response, e))
+
+        return None
 
     def set_pubsub_push_handler(self, pubsub_push_handler_func):
         """Set the pubsub push handler function"""

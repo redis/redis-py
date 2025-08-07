@@ -400,28 +400,15 @@ class AbstractConnection(ConnectionInterface):
             parser_class = _RESP3Parser
         self.set_parser(parser_class)
 
-        if maintenance_events_config and maintenance_events_config.enabled:
-            if maintenance_events_pool_handler:
-                self._parser.set_node_moving_push_handler(
-                    maintenance_events_pool_handler.handle_event
-                )
-            self._maintenance_event_connection_handler = (
-                MaintenanceEventConnectionHandler(self, maintenance_events_config)
-            )
-            self._parser.set_maintenance_push_handler(
-                self._maintenance_event_connection_handler.handle_event
-            )
+        self.maintenance_events_config = maintenance_events_config
 
-            self.orig_host_address = (
-                orig_host_address if orig_host_address else self.host
-            )
-            self.orig_socket_timeout = (
-                orig_socket_timeout if orig_socket_timeout else self.socket_timeout
-            )
-            self.orig_socket_connect_timeout = (
+        # Set up maintenance events if enabled
+        if maintenance_events_config and maintenance_events_config.enabled:
+            self._enable_maintenance_events(
+                maintenance_events_pool_handler,
+                orig_host_address,
+                orig_socket_timeout,
                 orig_socket_connect_timeout
-                if orig_socket_connect_timeout
-                else self.socket_connect_timeout
             )
         self._should_reconnect = False
         self.maintenance_state = maintenance_state
@@ -480,6 +467,46 @@ class AbstractConnection(ConnectionInterface):
         :param parser_class: The required parser class
         """
         self._parser = parser_class(socket_read_size=self._socket_read_size)
+
+    def _enable_maintenance_events(
+        self,
+        maintenance_events_pool_handler=None,
+        orig_host_address=None,
+        orig_socket_timeout=None,
+        orig_socket_connect_timeout=None
+    ):
+        """Enable maintenance events by setting up handlers and storing original connection parameters."""
+        if not self.maintenance_events_config:
+            return
+
+        # Set up pool handler if available
+        if maintenance_events_pool_handler:
+            self._parser.set_node_moving_push_handler(
+                maintenance_events_pool_handler.handle_event
+            )
+
+        # Set up connection handler
+        self._maintenance_event_connection_handler = (
+            MaintenanceEventConnectionHandler(self, self.maintenance_events_config)
+        )
+        self._parser.set_maintenance_push_handler(
+            self._maintenance_event_connection_handler.handle_event
+        )
+
+        # Store original connection parameters
+        self.orig_host_address = (
+            orig_host_address if orig_host_address else self.host
+        )
+        self.orig_socket_timeout = (
+            orig_socket_timeout if orig_socket_timeout else self.socket_timeout
+        )
+        self.orig_socket_connect_timeout = (
+            orig_socket_connect_timeout
+            if orig_socket_connect_timeout
+            else self.socket_connect_timeout
+        )
+
+
 
     def set_maintenance_event_pool_handler(
         self, maintenance_event_pool_handler: MaintenanceEventPoolHandler
@@ -622,6 +649,32 @@ class AbstractConnection(ConnectionInterface):
                 and self.handshake_metadata.get("proto") != self.protocol
             ):
                 raise ConnectionError("Invalid RESP version")
+
+        # Send maintenance notifications handshake if RESP3 is active and maintenance events are enabled
+        if (
+            self.protocol not in [2, "2"]
+            and self.maintenance_events_config
+            and self.maintenance_events_config.enabled
+            and hasattr(self, "_maintenance_event_connection_handler")
+        ):
+            try:
+                endpoint_type = self.maintenance_events_config.get_endpoint_type(self.host, self)
+                self.send_command(
+                    "CLIENT",
+                    "MAINT_NOTIFICATIONS",
+                    "ON",
+                    "moving-endpoint-type",
+                    endpoint_type,
+                    check_health=check_health
+                )
+                response = self.read_response()
+                if str_if_bytes(response) != "OK":
+                    raise ConnectionError("The server doesn't support maintenance notifications")
+            except Exception as e:
+                # Log warning but don't fail the connection
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to enable maintenance notifications: {e}")
 
         # if a client_name is given, set it
         if self.client_name:

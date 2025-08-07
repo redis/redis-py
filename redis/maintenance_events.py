@@ -534,13 +534,13 @@ class MaintenanceEventsConfig:
         """
         return self.relax_timeout != -1
 
-    def get_endpoint_type(self, host: str, connection: "ConnectionInterface") -> str:
+    def get_endpoint_type(self,  host: str, connection: "ConnectionInterface") -> str:
         """
         Determine the appropriate endpoint type for CLIENT MAINT_NOTIFICATIONS command.
 
         Logic:
         1. If endpoint_type is explicitly set, use it
-        3. Otherwise, check the original host from host:
+        3. Otherwise, check the original host from connection.host:
            - If host is an IP address, use it directly to determine internal-ip vs external-ip
            - If host is an FQDN, get the resolved IP to determine internal-fqdn vs external-fqdn
 
@@ -608,13 +608,11 @@ class MaintenanceEventPoolHandler:
             logging.error(f"Unhandled notification type: {notification}")
 
     def handle_node_moving_event(self, event: NodeMovingEvent):
-        print("Received MOVING event: {event}")
         if (
             not self.config.proactive_reconnect
             and not self.config.is_relax_timeouts_enabled()
         ):
             return
-        print("Handling MOVING event: {event}")
         with self._lock:
             if event in self._processed_events:
                 # nothing to do in the connection pool handling
