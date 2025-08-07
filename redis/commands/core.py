@@ -4172,17 +4172,17 @@ class SortedSetCommands(CommandsProtocol):
         the existing score will be incremented by. When using this mode the
         return value of ZADD will be the new score of the element.
 
-        ``LT`` Only update existing elements if the new score is less than
+        ``lt`` only updates existing elements if the new score is less than
         the current score. This flag doesn't prevent adding new elements.
 
-        ``GT`` Only update existing elements if the new score is greater than
+        ``gt`` only updates existing elements if the new score is greater than
         the current score. This flag doesn't prevent adding new elements.
 
         The return value of ZADD varies based on the mode specified. With no
         options, ZADD returns the number of new elements added to the sorted
         set.
 
-        ``NX``, ``LT``, and ``GT`` are mutually exclusive options.
+        ``nx``, ``lt``, and ``gt`` are mutually exclusive options.
 
         See: https://redis.io/commands/ZADD
         """
