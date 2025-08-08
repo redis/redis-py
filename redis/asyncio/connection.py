@@ -1308,8 +1308,6 @@ class BlockingConnectionPool(ConnectionPool):
         )
         self._condition = asyncio.Condition()
         self.timeout = timeout
-        self._in_maintenance = False
-        self._locked = False
 
     @deprecated_args(
         args_to_warn=["*"],

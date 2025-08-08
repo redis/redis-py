@@ -406,7 +406,7 @@ class MaintenanceEventPoolHandler:
                         )
                         if getattr(self.pool, "set_in_maintenance", False):
                             self.pool.set_in_maintenance(False)
-            print(f"Starting timer for {event} for {event.ttl} seconds")
+
             threading.Timer(
                 event.ttl, self.handle_node_moved_event, args=(event,)
             ).start()
