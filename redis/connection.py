@@ -1906,6 +1906,20 @@ class ConnectionPool:
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
 
+    def should_update_connection(
+        self,
+        conn: "Connection",
+        address_type_to_match: Literal["connected", "configured"] = "connected",
+        matching_address: Optional[str] = None,
+    ) -> bool:
+        if address_type_to_match == "connected":
+            if matching_address and conn.getpeername() != matching_address:
+                return False
+        else:
+            if matching_address and conn.host != matching_address:
+                return False
+        return True
+
     def set_maintenance_state_for_connections(
         self,
         state: "MaintenanceState",
@@ -1913,21 +1927,15 @@ class ConnectionPool:
         address_type_to_match: Literal["connected", "configured"] = "connected",
     ):
         for conn in self._available_connections:
-            if address_type_to_match == "connected":
-                if matching_address and conn.getpeername() != matching_address:
-                    continue
-            else:
-                if matching_address and conn.host != matching_address:
-                    continue
-            conn.maintenance_state = state
+            if self.should_update_connection(
+                conn, address_type_to_match, matching_address
+            ):
+                conn.maintenance_state = state
         for conn in self._in_use_connections:
-            if address_type_to_match == "connected":
-                if matching_address and conn.getpeername() != matching_address:
-                    continue
-            else:
-                if matching_address and conn.host != matching_address:
-                    continue
-            conn.maintenance_state = state
+            if self.should_update_connection(
+                conn, address_type_to_match, matching_address
+            ):
+                conn.maintenance_state = state
 
     def set_maintenance_state_in_connection_kwargs(self, state: "MaintenanceState"):
         self.connection_kwargs["maintenance_state"] = state
@@ -2091,23 +2099,17 @@ class ConnectionPool:
         :param include_available_connections: Whether to include available connections in the update.
         """
         for conn in self._in_use_connections:
-            if address_type_to_match == "connected":
-                if matching_address and conn.getpeername() != matching_address:
-                    continue
-            else:
-                if matching_address and conn.host != matching_address:
-                    continue
-            conn.update_current_socket_timeout(relax_timeout)
+            if self.should_update_connection(
+                conn, address_type_to_match, matching_address
+            ):
+                conn.update_current_socket_timeout(relax_timeout)
 
         if include_free_connections:
             for conn in self._available_connections:
-                if address_type_to_match == "connected":
-                    if matching_address and conn.getpeername() != matching_address:
-                        continue
-                else:
-                    if matching_address and conn.host != matching_address:
-                        continue
-                conn.update_current_socket_timeout(relax_timeout)
+                if self.should_update_connection(
+                    conn, address_type_to_match, matching_address
+                ):
+                    conn.update_current_socket_timeout(relax_timeout)
 
     def _update_connection_for_reconnect(
         self,
@@ -2439,24 +2441,18 @@ class BlockingConnectionPool(ConnectionPool):
         """
         if include_free_connections:
             for conn in tuple(self._connections):
-                if address_type_to_match == "connected":
-                    if matching_address and conn.getpeername() != matching_address:
-                        continue
-                else:
-                    if matching_address and conn.host != matching_address:
-                        continue
-                conn.update_current_socket_timeout(relax_timeout)
+                if self.should_update_connection(
+                    conn, address_type_to_match, matching_address
+                ):
+                    conn.update_current_socket_timeout(relax_timeout)
         else:
             connections_in_queue = {conn for conn in self.pool.queue if conn}
             for conn in self._connections:
                 if conn not in connections_in_queue:
-                    if address_type_to_match == "connected":
-                        if matching_address and conn.getpeername() != matching_address:
-                            continue
-                    else:
-                        if matching_address and conn.host != matching_address:
-                            continue
-                    conn.update_current_socket_timeout(relax_timeout)
+                    if self.should_update_connection(
+                        conn, address_type_to_match, matching_address
+                    ):
+                        conn.update_current_socket_timeout(relax_timeout)
 
     def _update_maintenance_events_config_for_connections(
         self, maintenance_events_config
@@ -2508,11 +2504,7 @@ class BlockingConnectionPool(ConnectionPool):
         address_type_to_match: Literal["connected", "configured"] = "connected",
     ):
         for conn in self._connections:
-            if address_type_to_match == "connected":
-                if matching_address and conn.getpeername() != matching_address:
-                    continue
-            else:
-                if matching_address and conn.host != matching_address:
-                    continue
-
-            conn.maintenance_state = state
+            if self.should_update_connection(
+                conn, address_type_to_match, matching_address
+            ):
+                conn.maintenance_state = state

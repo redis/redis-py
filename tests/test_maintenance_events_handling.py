@@ -73,7 +73,7 @@ class Helpers:
     def validate_free_connections_state(
         pool,
         should_be_connected_count=0,
-        connected_to_tmp_addres=False,
+        connected_to_tmp_address=False,
         tmp_address=AFTER_MOVING_ADDRESS.split(":")[0],
         expected_state=MaintenanceState.MOVING,
         expected_host_address=DEFAULT_ADDRESS.split(":")[0],
@@ -107,7 +107,7 @@ class Helpers:
             assert connection.maintenance_state == expected_state
             if connection._sock is not None:
                 assert connection._sock.connected is True
-                if connected_to_tmp_addres and tmp_address != "any":
+                if connected_to_tmp_address and tmp_address != "any":
                     assert connection._sock.getpeername()[0] == tmp_address
                 connected_count += 1
         assert connected_count == should_be_connected_count
@@ -870,7 +870,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
                 should_be_connected_count=1,
-                connected_to_tmp_addres=True,
+                connected_to_tmp_address=True,
             )
             # Wait for MOVING timeout to expire and the moving completed handler to run
             sleep(MOVING_TIMEOUT + 0.5)
@@ -906,7 +906,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
                 should_be_connected_count=1,
-                connected_to_tmp_addres=True,
+                connected_to_tmp_address=True,
                 expected_state=MaintenanceState.NONE,
             )
         finally:
@@ -1227,7 +1227,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             Helpers.validate_free_connections_state(
                 pool=test_redis_client.connection_pool,
                 should_be_connected_count=1,
-                connected_to_tmp_addres=True,
+                connected_to_tmp_address=True,
                 expected_state=MaintenanceState.MOVING,
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
                 expected_socket_timeout=self.config.relax_timeout,
@@ -1279,7 +1279,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 Helpers.validate_free_connections_state(
                     test_redis_client.connection_pool,
                     should_be_connected_count=1,
-                    connected_to_tmp_addres=True,
+                    connected_to_tmp_address=True,
                     tmp_address=second_moving_address.split(":")[0],
                     expected_state=MaintenanceState.MOVING,
                     expected_host_address=second_moving_address.split(":")[0],
@@ -1401,7 +1401,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         Helpers.validate_free_connections_state(
             pool=pool,
             should_be_connected_count=0,
-            connected_to_tmp_addres=False,
+            connected_to_tmp_address=False,
             expected_state=MaintenanceState.MOVING,
             expected_host_address=tmp_address,
             expected_socket_timeout=self.config.relax_timeout,
@@ -1465,7 +1465,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         Helpers.validate_free_connections_state(
             pool=pool,
             should_be_connected_count=0,
-            connected_to_tmp_addres=False,
+            connected_to_tmp_address=False,
             expected_state=MaintenanceState.NONE,
             expected_host_address=DEFAULT_ADDRESS.split(":")[0],
             expected_socket_timeout=None,
