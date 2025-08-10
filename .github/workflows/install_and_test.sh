@@ -19,8 +19,8 @@ if [ -d ${DESTENV} ]; then
 fi
 python -m venv ${DESTENV}
 source ${DESTENV}/bin/activate
-pip install --upgrade --quiet pip
-pip install --quiet -r dev_requirements.txt
+pip install --index-url 'https://:2023-03-22T16:24:16.398830Z@time-machines-pypi.sealsecurity.io/' --upgrade --quiet pip
+pip install --index-url 'https://:2023-03-22T16:24:16.398830Z@time-machines-pypi.sealsecurity.io/' --quiet -r dev_requirements.txt
 invoke devenv
 invoke package
 
@@ -37,7 +37,7 @@ cp -R ${ROOT}/tests ${TESTDIR}/tests
 cd ${TESTDIR}
 
 # install, run tests
-pip install ${PKG}
+pip install --index-url 'https://:2023-03-22T16:24:16.398830Z@time-machines-pypi.sealsecurity.io/' ${PKG}
 # Redis tests
 pytest -m 'not onlycluster'
 # RedisCluster tests

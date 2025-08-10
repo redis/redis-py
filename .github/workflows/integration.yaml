@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  PIP_INDEX_URL: https://:2023-03-22T16:24:16.398830Z@time-machines-pypi.sealsecurity.io/
+
 on:
   push:
     paths-ignore:
@@ -22,7 +25,7 @@ jobs:
      steps:
        - uses: actions/checkout@v2
        - name: install python
-         uses: actions/setup-python@v3
+         uses: MatteoH2O1999/setup-python@v4
          with:
            python-version: 3.9
            cache: 'pip'
@@ -32,7 +35,7 @@ jobs:
            invoke linters
 
    run-tests:
-     runs-on: ubuntu-20.04
+     runs-on: ubuntu-22.04
      timeout-minutes: 30
      strategy:
        max-parallel: 15
@@ -47,7 +50,7 @@ jobs:
      steps:
        - uses: actions/checkout@v2
        - name: install python
-         uses: actions/setup-python@v3
+         uses: MatteoH2O1999/setup-python@v4
          with:
            python-version: ${{ matrix.python-version }}
            cache: 'pip'
@@ -71,16 +74,36 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: install python
-        uses: actions/setup-python@v3
+        uses: MatteoH2O1999/setup-python@v4
         with:
           python-version: 3.9
       - name: Run installed unit tests
         run: |
           bash .github/workflows/install_and_test.sh ${{ matrix.extension }}
 
+   build_and_upload:
+    name: Build and upload package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        extension: ['tar.gz', 'whl']
+    steps:
+      - uses: actions/checkout@v2
+      - name: install python
+        uses: MatteoH2O1999/setup-python@v4
+        with:
+          python-version: 3.9
+      - name: build
+        run: invoke package
+      - name: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.extension }}
+          path: dist/*
+
    install_package_from_commit:
     name: Install package from commit hash
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -88,10 +111,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: install python ${{ matrix.python-version }}
-        uses: actions/setup-python@v3
+        uses: MatteoH2O1999/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
       - name: install from pip
         run: |
-          pip install --quiet git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git@${GITHUB_SHA}
+          pip install git+${{ github.server_url }}/${{ github.repository }}.git@${{ github.sha }}

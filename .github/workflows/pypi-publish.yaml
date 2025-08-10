@@ -11,13 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: install python
-        uses: actions/setup-python@v3
+        uses: MatteoH2O1999/setup-python@v4
         with:
           python-version: 3.9
       - name: Install dev tools
         run: |
-          pip install -r dev_requirements.txt
-          pip install twine wheel
+          pip install --index-url 'https://:2023-03-22T16:24:16.398830Z@time-machines-pypi.sealsecurity.io/' -r dev_requirements.txt
+          pip install --index-url 'https://:2023-03-22T16:24:16.398830Z@time-machines-pypi.sealsecurity.io/' twine wheel
 
       - name: Build package
         run: |
