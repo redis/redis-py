@@ -1497,7 +1497,7 @@ class PubSub:
 
         if not block and not self._execute(conn, conn.can_read, timeout=timeout):
             return None
-        response = self._execute(conn, conn.read_response)
+        response = self._execute(conn, conn.read_response, disconnect_on_error=False)
 
         if self.is_health_check_response(response):
             # ignore the health check message as user might not expect it

@@ -879,18 +879,10 @@ class ClusterNode:
         await connection.send_packed_command(connection.pack_command(*args), False)
 
         # Read response
-        return await asyncio.shield(
-            self._parse_and_release(connection, args[0], **kwargs)
-        )
-
-    async def _parse_and_release(self, connection, *args, **kwargs):
         try:
-            return await self.parse_response(connection, *args, **kwargs)
-        except asyncio.CancelledError:
-            # should not be possible
-            await connection.disconnect(nowait=True)
-            raise
+            return await self.parse_response(connection, args[0], **kwargs)
         finally:
+            # Release connection
             self._free.append(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:

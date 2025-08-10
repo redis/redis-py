@@ -756,7 +756,7 @@ class PubSub:
 
         if not block and not await self._execute(conn, conn.can_read, timeout=timeout):
             return None
-        response = await self._execute(conn, conn.read_response)
+        response = await self._execute(conn, conn.read_response, disconnect_on_error=False)
 
         if conn.health_check_interval and response == self.health_check_response:
             # ignore the health check message as user might not expect it
@@ -1349,16 +1349,10 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         conn = cast(Connection, conn)
 
         try:
-            return await asyncio.shield(
-                conn.retry.call_with_retry(
-                    lambda: execute(conn, stack, raise_on_error),
-                    lambda error: self._disconnect_raise_reset(conn, error),
-                )
+            return await conn.retry.call_with_retry(
+                lambda: execute(conn, stack, raise_on_error),
+                lambda error: self._disconnect_raise_reset(conn, error),
             )
-        except asyncio.CancelledError:
-            # not supposed to be possible, yet here we are
-            await conn.disconnect(nowait=True)
-            raise
         finally:
             await self.reset()
 
