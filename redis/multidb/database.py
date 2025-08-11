@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Union
 
-from redis import RedisCluster, Sentinel
+from redis import RedisCluster
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import CircuitBreaker
 from redis.typing import Number
@@ -17,7 +17,7 @@ class State(Enum):
 class AbstractDatabase(ABC):
     @property
     @abstractmethod
-    def client(self) -> Union[redis.Redis, RedisCluster, Sentinel]:
+    def client(self) -> Union[redis.Redis, RedisCluster]:
         """The underlying redis client."""
         pass
 
@@ -68,7 +68,7 @@ Databases = WeightedList[tuple[AbstractDatabase, Number]]
 class Database(AbstractDatabase):
     def __init__(
             self,
-            client: Union[redis.Redis, RedisCluster, Sentinel],
+            client: Union[redis.Redis, RedisCluster],
             circuit: CircuitBreaker,
             weight: float,
             state: State = State.DISCONNECTED,
@@ -86,11 +86,11 @@ class Database(AbstractDatabase):
         self._state = state
 
     @property
-    def client(self) -> Union[redis.Redis, RedisCluster, Sentinel]:
+    def client(self) -> Union[redis.Redis, RedisCluster]:
         return self._client
 
     @client.setter
-    def client(self, client: Union[redis.Redis, RedisCluster, Sentinel]):
+    def client(self, client: Union[redis.Redis, RedisCluster]):
         self._client = client
 
     @property

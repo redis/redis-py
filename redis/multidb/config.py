@@ -4,7 +4,7 @@ from typing import List, Type, Union
 import pybreaker
 from typing_extensions import Optional
 
-from redis import Redis, Sentinel, ConnectionPool
+from redis import Redis, ConnectionPool
 from redis.asyncio import RedisCluster
 from redis.backoff import ExponentialWithJitterBackoff, AbstractBackoff, NoBackoff
 from redis.data_structure import WeightedList
@@ -82,7 +82,7 @@ class MultiDbConfig:
             with defined retry and backoff configurations.
     """
     databases_config: List[DatabaseConfig]
-    client_class: Type[Union[Redis, RedisCluster, Sentinel]] = Redis
+    client_class: Type[Union[Redis, RedisCluster]] = Redis
     command_retry: Retry = Retry(
         backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
     )
