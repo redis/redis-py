@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Callable
 
-from redis.event import EventDispatcherInterface, OnCommandFailEvent
+from redis.client import Pipeline
+from redis.event import EventDispatcherInterface, OnCommandsFailEvent
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, AbstractDatabase, Databases
 from redis.multidb.circuit import State as CBState
@@ -92,6 +93,9 @@ class DefaultCommandExecutor(CommandExecutor):
         :param auto_fallback_interval: Interval between fallback attempts. Fallback to a new database according to
         failover_strategy.
         """
+        for fd in failure_detectors:
+            fd.set_command_executor(command_executor=self)
+
         self._failure_detectors = failure_detectors
         self._databases = databases
         self._command_retry = command_retry
@@ -139,19 +143,49 @@ class DefaultCommandExecutor(CommandExecutor):
         self._auto_fallback_interval = auto_fallback_interval
 
     def execute_command(self, *args, **options):
-        self._check_active_database()
+        def callback():
+            return self._active_database.client.execute_command(*args, **options)
+
+        return self._execute_with_failure_detection(callback, args)
+
+    def execute_pipeline(self, command_stack: tuple):
+        """
+        Executes a stack of commands in pipeline.
+        """
+        def callback():
+            with self._active_database.client.pipeline() as pipe:
+                for command, options in command_stack:
+                    pipe.execute_command(*command, **options)
+
+                return pipe.execute()
+
+        return self._execute_with_failure_detection(callback, command_stack)
+
+    def execute_transaction(self, transaction: Callable[[Pipeline], None], *watches, **options):
+        """
+        Executes a transaction block wrapped in callback.
+        """
+        def callback():
+            return self._active_database.client.transaction(transaction, *watches, **options)
+
+        return self._execute_with_failure_detection(callback)
+
+    def _execute_with_failure_detection(self, callback: Callable, cmds: tuple = ()):
+        """
+        Execute a commands execution callback with failure detection.
+        """
+        def wrapper():
+            # On each retry we need to check active database as it might change.
+            self._check_active_database()
+            return callback()
 
         return self._command_retry.call_with_retry(
-            lambda: self._execute_command(*args, **options),
-            lambda error: self._on_command_fail(error, *args),
+            lambda: wrapper(),
+            lambda error: self._on_command_fail(error, *cmds),
         )
 
-    def _execute_command(self, *args, **options):
-        self._check_active_database()
-        return self._active_database.client.execute_command(*args, **options)
-
     def _on_command_fail(self, error, *args):
-        self._event_dispatcher.dispatch(OnCommandFailEvent(args, error))
+        self._event_dispatcher.dispatch(OnCommandsFailEvent(args, error))
 
     def _check_active_database(self):
         """
@@ -180,5 +214,5 @@ class DefaultCommandExecutor(CommandExecutor):
         """
         event_listener = RegisterCommandFailure(self._failure_detectors)
         self._event_dispatcher.register_listeners({
-            OnCommandFailEvent: [event_listener],
+            OnCommandsFailEvent: [event_listener],
         })
