@@ -17,7 +17,7 @@ def trigger_network_failure_action(fault_injector_client, event: threading.Event
     endpoint_config = get_endpoint_config('re-active-active')
     action_request = ActionRequest(
         action_type=ActionType.NETWORK_FAILURE,
-        parameters={"bdb_id": endpoint_config['bdb_id'], "delay": 1, "cluster_index": 0}
+        parameters={"bdb_id": endpoint_config['bdb_id'], "delay": 3, "cluster_index": 0}
     )
 
     result = fault_injector_client.trigger_action(action_request)

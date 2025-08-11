@@ -184,10 +184,6 @@ class DefaultCommandExecutor(CommandExecutor):
             lambda error: self._on_command_fail(error, *cmds),
         )
 
-    def _execute_command(self, *args, **options):
-        self._check_active_database()
-        return self._active_database.client.execute_command(*args, **options)
-
     def _on_command_fail(self, error, *args):
         self._event_dispatcher.dispatch(OnCommandsFailEvent(args, error))
 
