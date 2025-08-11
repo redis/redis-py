@@ -378,20 +378,20 @@ class MaintenanceEventPoolHandler:
                     )
 
                     if self.config.proactive_reconnect:
-                            # take care for the active connections in the pool
-                            # mark them for reconnect after they complete the current command
-                            self.pool.update_active_connections_for_reconnect(
-                                tmp_host_address=event.new_node_host,
-                                tmp_relax_timeout=self.config.relax_timeout,
-                                moving_address_src=moving_address_src,
-                            )
-                            # take care for the inactive connections in the pool
-                            # delete them and create new ones
-                            self.pool.disconnect_and_reconfigure_free_connections(
-                                tmp_host_address=event.new_node_host,
-                                tmp_relax_timeout=self.config.relax_timeout,
-                                moving_address_src=moving_address_src,
-                            )
+                        # take care for the active connections in the pool
+                        # mark them for reconnect after they complete the current command
+                        self.pool.update_active_connections_for_reconnect(
+                            tmp_host_address=event.new_node_host,
+                            tmp_relax_timeout=self.config.relax_timeout,
+                            moving_address_src=moving_address_src,
+                        )
+                        # take care for the inactive connections in the pool
+                        # delete them and create new ones
+                        self.pool.disconnect_and_reconfigure_free_connections(
+                            tmp_host_address=event.new_node_host,
+                            tmp_relax_timeout=self.config.relax_timeout,
+                            moving_address_src=moving_address_src,
+                        )
 
                     # Update config for new connections:
                     # Set state to MOVING
@@ -426,8 +426,12 @@ class MaintenanceEventPoolHandler:
             # and we don't need to revert the kwargs
             if self.pool.connection_kwargs.get("host") == event.new_node_host:
                 orig_host = self.pool.connection_kwargs.get("orig_host_address")
-                orig_socket_timeout = self.pool.connection_kwargs.get("orig_socket_timeout")
-                orig_connect_timeout = self.pool.connection_kwargs.get("orig_socket_connect_timeout")
+                orig_socket_timeout = self.pool.connection_kwargs.get(
+                    "orig_socket_timeout"
+                )
+                orig_connect_timeout = self.pool.connection_kwargs.get(
+                    "orig_socket_connect_timeout"
+                )
                 kwargs: dict = {
                     "maintenance_state": MaintenanceState.NONE,
                     "host": orig_host,
