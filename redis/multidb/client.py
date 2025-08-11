@@ -4,7 +4,7 @@ from typing import List, Any, Callable
 
 from redis.background import BackgroundScheduler
 from redis.exceptions import ConnectionError, TimeoutError
-from redis.commands import RedisModuleCommands, CoreCommands, SentinelCommands
+from redis.commands import RedisModuleCommands, CoreCommands
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.config import MultiDbConfig, DEFAULT_GRACE_PERIOD
 from redis.multidb.circuit import State as CBState, CircuitBreaker
@@ -14,7 +14,7 @@ from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck
 
 
-class MultiDBClient(RedisModuleCommands, CoreCommands, SentinelCommands):
+class MultiDBClient(RedisModuleCommands, CoreCommands):
     """
     Client that operates on multiple logical Redis databases.
     Should be used in Active-Active database setups.
@@ -251,7 +251,7 @@ def _half_open_circuit(circuit: CircuitBreaker):
     circuit.state = CBState.HALF_OPEN
 
 
-class Pipeline(RedisModuleCommands, CoreCommands, SentinelCommands):
+class Pipeline(RedisModuleCommands, CoreCommands):
     """
     Pipeline implementation for multiple logical Redis databases.
     """
