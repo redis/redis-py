@@ -2,7 +2,7 @@ import asyncio
 import threading
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict, Type
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
@@ -42,6 +42,11 @@ class EventDispatcherInterface(ABC):
     async def dispatch_async(self, event: object):
         pass
 
+    @abstractmethod
+    def register_listeners(self, mappings: Dict[Type[object], List[EventListenerInterface]]):
+        """Register additional listeners."""
+        pass
+
 
 class EventException(Exception):
     """
@@ -56,11 +61,14 @@ class EventException(Exception):
 
 class EventDispatcher(EventDispatcherInterface):
     # TODO: Make dispatcher to accept external mappings.
-    def __init__(self):
+    def __init__(
+            self,
+            event_listeners: Optional[Dict[Type[object], List[EventListenerInterface]]] = None,
+    ):
         """
-        Mapping should be extended for any new events or listeners to be added.
+        Dispatcher that dispatches events to listeners associated with given event.
         """
-        self._event_listeners_mapping = {
+        self._event_listeners_mapping: Dict[Type[object], List[EventListenerInterface]]= {
             AfterConnectionReleasedEvent: [
                 ReAuthConnectionListener(),
             ],
@@ -77,17 +85,35 @@ class EventDispatcher(EventDispatcherInterface):
             ],
         }
 
-    def dispatch(self, event: object):
-        listeners = self._event_listeners_mapping.get(type(event))
+        self._lock = threading.Lock()
+        self._async_lock = asyncio.Lock()
 
-        for listener in listeners:
-            listener.listen(event)
+        if event_listeners:
+            self.register_listeners(event_listeners)
+
+    def dispatch(self, event: object):
+        with self._lock:
+            listeners = self._event_listeners_mapping.get(type(event), [])
+
+            for listener in listeners:
+                listener.listen(event)
 
     async def dispatch_async(self, event: object):
-        listeners = self._event_listeners_mapping.get(type(event))
+        with self._async_lock:
+            listeners = self._event_listeners_mapping.get(type(event), [])
 
-        for listener in listeners:
-            await listener.listen(event)
+            for listener in listeners:
+                await listener.listen(event)
+
+    def register_listeners(self, event_listeners: Dict[Type[object], List[EventListenerInterface]]):
+        with self._lock:
+            for event_type in event_listeners:
+                if event_type in self._event_listeners_mapping:
+                    self._event_listeners_mapping[event_type] = list(
+                        set(self._event_listeners_mapping[event_type] + event_listeners[event_type])
+                    )
+                else:
+                    self._event_listeners_mapping[event_type] = event_listeners[event_type]
 
 
 class AfterConnectionReleasedEvent:
@@ -225,6 +251,25 @@ class AfterAsyncClusterInstantiationEvent:
     def credential_provider(self) -> Union[CredentialProvider, None]:
         return self._credential_provider
 
+class OnCommandFailEvent:
+    """
+    Event fired whenever a command fails during the execution.
+    """
+    def __init__(
+            self,
+            command: tuple,
+            exception: Exception,
+    ):
+        self._command = command
+        self._exception = exception
+
+    @property
+    def command(self) -> tuple:
+        return self._command
+
+    @property
+    def exception(self) -> Exception:
+        return self._exception
 
 class ReAuthConnectionListener(EventListenerInterface):
     """
