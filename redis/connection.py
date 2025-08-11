@@ -2018,9 +2018,7 @@ class ConnectionPool:
         :param tmp_relax_timeout: The relax timeout to use for the connection.
         """
         for conn in self._in_use_connections:
-            if self.should_update_connection(
-                conn, "connected", moving_address_src
-            ):
+            if self.should_update_connection(conn, "connected", moving_address_src):
                 self._update_connection_for_reconnect(
                     conn, tmp_host_address, tmp_relax_timeout
                 )
@@ -2042,9 +2040,7 @@ class ConnectionPool:
         """
 
         for conn in self._available_connections:
-            if self.should_update_connection(
-                conn, "connected", moving_address_src
-            ):
+            if self.should_update_connection(conn, "connected", moving_address_src):
                 self._disconnect_and_update_connection_for_reconnect(
                     conn, tmp_host_address, tmp_relax_timeout
                 )
@@ -2312,15 +2308,15 @@ class BlockingConnectionPool(ConnectionPool):
                 self._locked = False
 
     def update_connections_settings(
-            self,
-            state: Optional["MaintenanceState"] = None,
-            relax_timeout: Optional[float] = None,
-            matching_address: Optional[str] = None,
-            address_type_to_match: Literal["connected", "configured"] = "connected",
-            reset_host_address: bool = False,
-            reset_relax_timeout: bool = False,
-            include_free_connections: bool = True,
-        ):
+        self,
+        state: Optional["MaintenanceState"] = None,
+        relax_timeout: Optional[float] = None,
+        matching_address: Optional[str] = None,
+        address_type_to_match: Literal["connected", "configured"] = "connected",
+        reset_host_address: bool = False,
+        reset_relax_timeout: bool = False,
+        include_free_connections: bool = True,
+    ):
         """
         Override base class method to work with BlockingConnectionPool's structure.
         """
@@ -2424,4 +2420,3 @@ class BlockingConnectionPool(ConnectionPool):
         The pool will be in maintenance mode only when we are processing a MOVING event.
         """
         self._in_maintenance = in_maintenance
-
