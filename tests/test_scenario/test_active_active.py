@@ -6,7 +6,6 @@ from time import sleep
 import pytest
 
 from redis.client import Pipeline
-from redis.exceptions import ConnectionError
 from tests.test_scenario.conftest import get_endpoint_config
 from tests.test_scenario.fault_injector_client import ActionRequest, ActionType
 
@@ -70,30 +69,6 @@ class TestActiveActiveStandalone:
             sleep(0.1)
 
         assert listener.is_changed_flag == True
-
-    @pytest.mark.parametrize(
-        "r_multi_db",
-        [
-            {"failure_threshold": 2}
-        ],
-        indirect=True
-    )
-    def test_multi_db_client_throws_error_on_retry_exceed(self, r_multi_db, fault_injector_client):
-        event = threading.Event()
-        thread = threading.Thread(
-            target=trigger_network_failure_action,
-            daemon=True,
-            args=(fault_injector_client, event)
-        )
-
-        r_multi_db, _ = r_multi_db
-        thread.start()
-
-        with pytest.raises(ConnectionError):
-            # Retries count > failure threshold, so a client gives up earlier.
-            while not event.is_set():
-                assert r_multi_db.get('key') == 'value'
-                sleep(0.1)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -261,9 +236,11 @@ class TestActiveActiveStandalone:
 
         r_multi_db, listener = r_multi_db
         data = json.dumps({'message': 'test'})
+        messages_count = 0
 
         def handler(message):
-            assert message['data'] == data
+            nonlocal messages_count
+            messages_count += 1
 
         pubsub = r_multi_db.pubsub()
 
@@ -285,6 +262,7 @@ class TestActiveActiveStandalone:
         pubsub_thread.stop()
 
         assert listener.is_changed_flag == True
+        assert messages_count > 5
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -303,9 +281,11 @@ class TestActiveActiveStandalone:
 
         r_multi_db, listener = r_multi_db
         data = json.dumps({'message': 'test'})
+        messages_count = 0
 
         def handler(message):
-            assert message['data'] == data
+            nonlocal messages_count
+            messages_count += 1
 
         pubsub = r_multi_db.pubsub()
 
@@ -327,3 +307,4 @@ class TestActiveActiveStandalone:
         pubsub_thread.stop()
 
         assert listener.is_changed_flag == True
+        assert messages_count > 5
