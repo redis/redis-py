@@ -4,7 +4,7 @@ from typing import List, Type, Union
 import pybreaker
 from typing_extensions import Optional
 
-from redis import Redis, Sentinel, ConnectionPool
+from redis import Redis, ConnectionPool
 from redis.asyncio import RedisCluster
 from redis.backoff import ExponentialWithJitterBackoff, AbstractBackoff, NoBackoff
 from redis.data_structure import WeightedList
@@ -82,7 +82,7 @@ class MultiDbConfig:
             with defined retry and backoff configurations.
     """
     databases_config: List[DatabaseConfig]
-    client_class: Type[Union[Redis, RedisCluster, Sentinel]] = Redis
+    client_class: Type[Union[Redis, RedisCluster]] = Redis
     command_retry: Retry = Retry(
         backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
     )
@@ -103,14 +103,14 @@ class MultiDbConfig:
         databases = WeightedList()
 
         for database_config in self.databases_config:
-            if database_config.client_kwargs.get("retry", None) is not None:
-                # The retry object is not used in the lower level clients, so we can safely remove it.
-                # We rely on command_retry in terms of global retries.
-                database_config.client_kwargs.update({"retry": Retry(retries=0, backoff=NoBackoff())})
+            # The retry object is not used in the lower level clients, so we can safely remove it.
+            # We rely on command_retry in terms of global retries.
+            database_config.client_kwargs.update({"retry": Retry(retries=0, backoff=NoBackoff())})
 
             if database_config.from_url:
                 client = self.client_class.from_url(database_config.from_url, **database_config.client_kwargs)
             elif database_config.from_pool:
+                database_config.from_pool.set_retry(Retry(retries=0, backoff=NoBackoff()))
                 client = self.client_class.from_pool(connection_pool=database_config.from_pool)
             else:
                 client = self.client_class(**database_config.client_kwargs)

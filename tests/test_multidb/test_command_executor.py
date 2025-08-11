@@ -152,6 +152,7 @@ class TestDefaultCommandExecutor:
             auto_fallback_interval=0.1,
             command_retry=Retry(NoBackoff(), threshold),
         )
+        fd.set_command_executor(command_executor=executor)
 
         assert executor.execute_command('SET', 'key', 'value') == 'OK1'
         assert executor.execute_command('SET', 'key', 'value') == 'OK2'

@@ -56,6 +56,7 @@ class TestActiveActiveStandalone:
 
         # Client initialized on the first command.
         r_multi_db.set('key', 'value')
+        current_active_db = r_multi_db.command_executor.active_database
         thread.start()
 
         # Execute commands before network failure
@@ -63,10 +64,35 @@ class TestActiveActiveStandalone:
             assert r_multi_db.get('key') == 'value'
             sleep(0.1)
 
+        # Active db has been changed.
+        assert current_active_db != r_multi_db.command_executor.active_database
+
         # Execute commands after network failure
         for _ in range(3):
             assert r_multi_db.get('key') == 'value'
             sleep(0.1)
+
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [
+            {"failure_threshold": 2}
+        ],
+        indirect=True
+    )
+    def test_multi_db_client_throws_error_on_retry_exceed(self, r_multi_db, fault_injector_client):
+        event = threading.Event()
+        thread = threading.Thread(
+            target=trigger_network_failure_action,
+            daemon=True,
+            args=(fault_injector_client, event)
+        )
+        thread.start()
+
+        with pytest.raises(ConnectionError):
+            # Retries count > failure threshold, so a client gives up earlier.
+            while not event.is_set():
+                assert r_multi_db.get('key') == 'value'
+                sleep(0.1)
 
     @pytest.mark.parametrize(
         "r_multi_db",
