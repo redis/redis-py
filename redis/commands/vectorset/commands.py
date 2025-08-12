@@ -77,7 +77,7 @@ class VectorSetCommands(CommandsProtocol):
         ``numlinks`` sets the number of links to create for the vector.
                 If not provided, the default number of links is used.
 
-        For more information see https://redis.io/commands/vadd
+        For more information, see https://redis.io/commands/vadd.
         """
         if not vector or not element:
             raise DataError("Both vector and element must be provided")
@@ -144,11 +144,11 @@ class VectorSetCommands(CommandsProtocol):
 
         ``ef`` sets the exploration factor.
 
-        ``filter`` sets filter that should be applied for the search.
+        ``filter`` sets the filter that should be applied for the search.
 
         ``filter_ef`` sets the max filtering effort.
 
-        ``truth`` when enabled forces the command to perform linear scan.
+        ``truth`` when enabled, forces the command to perform a linear scan.
 
         ``no_thread`` when enabled forces the command to execute the search
                 on the data structure in the main thread.
@@ -156,7 +156,7 @@ class VectorSetCommands(CommandsProtocol):
         ``epsilon`` floating point between 0 and 1, if specified will return
                 only elements with distance no further than the specified one.
 
-        For more information see https://redis.io/commands/vsim
+        For more information, see https://redis.io/commands/vsim.
         """
 
         if not input:
@@ -210,7 +210,7 @@ class VectorSetCommands(CommandsProtocol):
 
         Raises `redis.exceptions.ResponseError` if the vector set doesn't exist.
 
-        For more information see https://redis.io/commands/vdim
+        For more information, see https://redis.io/commands/vdim.
         """
         return self.execute_command(VDIM_CMD, key)
 
@@ -220,7 +220,7 @@ class VectorSetCommands(CommandsProtocol):
 
         Raises `redis.exceptions.ResponseError` if the vector set doesn't exist.
 
-        For more information see https://redis.io/commands/vcard
+        For more information, see https://redis.io/commands/vcard.
         """
         return self.execute_command(VCARD_CMD, key)
 
@@ -228,7 +228,7 @@ class VectorSetCommands(CommandsProtocol):
         """
         Remove an element from a vector set.
 
-        For more information see https://redis.io/commands/vrem
+        For more information, see https://redis.io/commands/vrem.
         """
         return self.execute_command(VREM_CMD, key, element)
 
@@ -242,10 +242,10 @@ class VectorSetCommands(CommandsProtocol):
         Get the approximated vector of an element ``element`` from vector set ``key``.
 
         ``raw`` is a boolean flag that indicates whether to return the
-                interal representation used by the vector.
+                internal representation used by the vector.
 
 
-        For more information see https://redis.io/commands/vembed
+        For more information, see https://redis.io/commands/vemb.
         """
         options = {}
         pieces = []
@@ -293,7 +293,7 @@ class VectorSetCommands(CommandsProtocol):
         If the ``WITHSCORES`` option is provided, the result is a list of dicts,
         where each dict contains the neighbors for one level, with the scores as values.
 
-        For more information see https://redis.io/commands/vlinks
+        For more information, see https://redis.io/commands/vlinks
         """
         options = {}
         pieces = []
@@ -309,7 +309,7 @@ class VectorSetCommands(CommandsProtocol):
         """
         Get information about a vector set.
 
-        For more information see https://redis.io/commands/vinfo
+        For more information, see https://redis.io/commands/vinfo.
         """
         return self.execute_command(VINFO_CMD, key)
 
@@ -320,7 +320,7 @@ class VectorSetCommands(CommandsProtocol):
         Associate or remove JSON attributes ``attributes`` of element ``element``
         for vector set ``key``.
 
-        For more information see https://redis.io/commands/vsetattr
+        For more information, see https://redis.io/commands/vsetattr
         """
         if attributes is None:
             attributes_json = "{}"
@@ -336,12 +336,12 @@ class VectorSetCommands(CommandsProtocol):
         self, key: KeyT, element: str
     ) -> Union[Optional[Awaitable[dict]], Optional[dict]]:
         """
-        Retrieve the JSON attributes of an element ``elemet`` for vector set ``key``.
+        Retrieve the JSON attributes of an element ``element `` for vector set ``key``.
 
         If the element does not exist, or if the vector set does not exist, None is
         returned.
 
-        For more information see https://redis.io/commands/vgetattr
+        For more information, see https://redis.io/commands/vgetattr.
         """
         return self.execute_command(VGETATTR_CMD, key, element)
 
@@ -365,7 +365,7 @@ class VectorSetCommands(CommandsProtocol):
 
         If the vector set does not exist, ``None`` is returned.
 
-        For more information see https://redis.io/commands/vrandmember
+        For more information, see https://redis.io/commands/vrandmember.
         """
         pieces = []
         pieces.append(key)
