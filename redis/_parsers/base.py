@@ -1,8 +1,8 @@
+import logging
 import sys
 from abc import ABC
 from asyncio import IncompleteReadError, StreamReader, TimeoutError
 from typing import Callable, List, Optional, Protocol, Union
-import logging
 
 from redis.maintenance_events import (
     NodeMigratedEvent,
@@ -58,6 +58,7 @@ NO_AUTH_SET_ERROR = {
 }
 
 logger = logging.getLogger(__name__)
+
 
 class BaseParser(ABC):
     EXCEPTION_CLASSES = {
@@ -194,7 +195,6 @@ class PushNotificationsParser(Protocol):
         raise NotImplementedError()
 
     def handle_push_response(self, response, **kwargs):
-
         msg_type = response[0]
         if msg_type not in (
             *_INVALIDATION_MESSAGE,
@@ -204,7 +204,10 @@ class PushNotificationsParser(Protocol):
             return self.pubsub_push_handler_func(response)
 
         try:
-            if msg_type in _INVALIDATION_MESSAGE and self.invalidation_push_handler_func:
+            if (
+                msg_type in _INVALIDATION_MESSAGE
+                and self.invalidation_push_handler_func
+            ):
                 return self.invalidation_push_handler_func(response)
             if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
                 # Expected message format is: MOVING <seq_number> <time> <endpoint>
@@ -229,7 +232,9 @@ class PushNotificationsParser(Protocol):
                 if notification is not None:
                     return self.maintenance_push_handler_func(notification)
         except Exception as e:
-            logger.error("Error handling {} message ({}): {}".format(msg_type, response, e))
+            logger.error(
+                "Error handling {} message ({}): {}".format(msg_type, response, e)
+            )
 
         return None
 
@@ -270,7 +275,10 @@ class AsyncPushNotificationsParser(Protocol):
             return await self.pubsub_push_handler_func(response)
 
         try:
-            if msg_type in _INVALIDATION_MESSAGE and self.invalidation_push_handler_func:
+            if (
+                msg_type in _INVALIDATION_MESSAGE
+                and self.invalidation_push_handler_func
+            ):
                 return await self.invalidation_push_handler_func(response)
             if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
                 # push notification from enterprise cluster for node moving
@@ -294,7 +302,9 @@ class AsyncPushNotificationsParser(Protocol):
                 if notification is not None:
                     return self.maintenance_push_handler_func(notification)
         except Exception as e:
-            logger.error("Error handling {} message ({}): {}".format(msg_type, response, e))
+            logger.error(
+                "Error handling {} message ({}): {}".format(msg_type, response, e)
+            )
 
         return None
 

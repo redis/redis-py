@@ -19,6 +19,7 @@ class MaintenanceState(enum.Enum):
 
 class EndpointType:
     """Constants for valid endpoint types used in CLIENT MAINT_NOTIFICATIONS command."""
+
     INTERNAL_IP = "internal-ip"
     INTERNAL_FQDN = "internal-fqdn"
     EXTERNAL_IP = "external-ip"
@@ -28,7 +29,13 @@ class EndpointType:
     @classmethod
     def get_valid_types(cls):
         """Return a set of all valid endpoint types."""
-        return {cls.INTERNAL_IP, cls.INTERNAL_FQDN, cls.EXTERNAL_IP, cls.EXTERNAL_FQDN, cls.NONE}
+        return {
+            cls.INTERNAL_IP,
+            cls.INTERNAL_FQDN,
+            cls.EXTERNAL_IP,
+            cls.EXTERNAL_FQDN,
+            cls.NONE,
+        }
 
 
 if TYPE_CHECKING:
@@ -393,20 +400,20 @@ def _is_private_fqdn(host: str) -> bool:
     Returns:
         bool: True if the FQDN appears to be internal/private
     """
-    host_lower = host.lower().rstrip('.')
+    host_lower = host.lower().rstrip(".")
 
     # Single-label hostnames (no dots) are typically internal
-    if '.' not in host_lower:
+    if "." not in host_lower:
         return True
 
     # Common internal/private domain patterns
     internal_patterns = [
-        r'\.local$',           # mDNS/Bonjour domains
-        r'\.internal$',        # Common internal convention
-        r'\.corp$',            # Corporate domains
-        r'\.lan$',             # Local area network
-        r'\.intranet$',        # Intranet domains
-        r'\.private$',         # Private domains
+        r"\.local$",  # mDNS/Bonjour domains
+        r"\.internal$",  # Common internal convention
+        r"\.corp$",  # Corporate domains
+        r"\.lan$",  # Local area network
+        r"\.intranet$",  # Intranet domains
+        r"\.private$",  # Private domains
     ]
 
     for pattern in internal_patterns:
@@ -417,7 +424,9 @@ def _is_private_fqdn(host: str) -> bool:
     return False
 
 
-def _get_resolved_ip_from_connection(connection: "ConnectionInterface") -> Optional[str]:
+def _get_resolved_ip_from_connection(
+    connection: "ConnectionInterface",
+) -> Optional[str]:
     """
     Extract the resolved IP address from an established connection.
 
@@ -435,7 +444,7 @@ def _get_resolved_ip_from_connection(connection: "ConnectionInterface") -> Optio
     # Method 1: Try to get the actual IP from the established socket connection
     # This is most accurate as it shows the exact IP being used
     try:
-        sock = getattr(connection, '_sock', None)
+        sock = getattr(connection, "_sock", None)
         if sock is not None:
             peer_addr = sock.getpeername()
             if peer_addr and len(peer_addr) >= 1:
@@ -449,12 +458,14 @@ def _get_resolved_ip_from_connection(connection: "ConnectionInterface") -> Optio
     # Method 2: Fallback to DNS resolution of the host
     # This is less accurate but works when socket is not available
     try:
-        host = getattr(connection, 'host', None)
-        port = getattr(connection, 'port', 6379)
+        host = getattr(connection, "host", None)
+        port = getattr(connection, "port", 6379)
         if host:
             # Use getaddrinfo to resolve the hostname to IP
             # This mimics what the connection would do during _connect()
-            addr_info = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            addr_info = socket.getaddrinfo(
+                host, port, socket.AF_UNSPEC, socket.SOCK_STREAM
+            )
             if addr_info:
                 # Return the IP from the first result
                 # addr_info[0] is (family, socktype, proto, canonname, sockaddr)
@@ -507,9 +518,16 @@ class MaintenanceEventsConfig:
         self.proactive_reconnect = proactive_reconnect
 
         # Validate endpoint_type if provided
-        if endpoint_type is not None and endpoint_type not in EndpointType.get_valid_types():
-            valid_types = ', '.join(f"'{t}'" for t in sorted(EndpointType.get_valid_types()))
-            raise ValueError(f"Invalid endpoint_type '{endpoint_type}'. Must be one of: {valid_types}")
+        if (
+            endpoint_type is not None
+            and endpoint_type not in EndpointType.get_valid_types()
+        ):
+            valid_types = ", ".join(
+                f"'{t}'" for t in sorted(EndpointType.get_valid_types())
+            )
+            raise ValueError(
+                f"Invalid endpoint_type '{endpoint_type}'. Must be one of: {valid_types}"
+            )
 
         self.endpoint_type = endpoint_type
 
@@ -534,7 +552,7 @@ class MaintenanceEventsConfig:
         """
         return self.relax_timeout != -1
 
-    def get_endpoint_type(self,  host: str, connection: "ConnectionInterface") -> str:
+    def get_endpoint_type(self, host: str, connection: "ConnectionInterface") -> str:
         """
         Determine the appropriate endpoint type for CLIENT MAINT_NOTIFICATIONS command.
 
@@ -573,7 +591,11 @@ class MaintenanceEventsConfig:
                 ip_addr = ipaddress.ip_address(resolved_ip)
                 is_private = ip_addr.is_private
                 # Use FQDN types since the original host was an FQDN
-                return EndpointType.INTERNAL_FQDN if is_private else EndpointType.EXTERNAL_FQDN
+                return (
+                    EndpointType.INTERNAL_FQDN
+                    if is_private
+                    else EndpointType.EXTERNAL_FQDN
+                )
             except ValueError:
                 # This shouldn't happen since we got the IP from the socket, but fallback
                 pass
@@ -581,6 +603,7 @@ class MaintenanceEventsConfig:
         # Final fallback: use heuristics on the FQDN itself
         is_private = _is_private_fqdn(host)
         return EndpointType.INTERNAL_FQDN if is_private else EndpointType.EXTERNAL_FQDN
+
 
 class MaintenanceEventPoolHandler:
     def __init__(

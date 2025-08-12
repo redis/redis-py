@@ -408,7 +408,7 @@ class AbstractConnection(ConnectionInterface):
                 maintenance_events_pool_handler,
                 orig_host_address,
                 orig_socket_timeout,
-                orig_socket_connect_timeout
+                orig_socket_connect_timeout,
             )
         self._should_reconnect = False
         self.maintenance_state = maintenance_state
@@ -473,7 +473,7 @@ class AbstractConnection(ConnectionInterface):
         maintenance_events_pool_handler=None,
         orig_host_address=None,
         orig_socket_timeout=None,
-        orig_socket_connect_timeout=None
+        orig_socket_connect_timeout=None,
     ):
         """Enable maintenance events by setting up handlers and storing original connection parameters."""
         if not self.maintenance_events_config:
@@ -486,17 +486,15 @@ class AbstractConnection(ConnectionInterface):
             )
 
         # Set up connection handler
-        self._maintenance_event_connection_handler = (
-            MaintenanceEventConnectionHandler(self, self.maintenance_events_config)
+        self._maintenance_event_connection_handler = MaintenanceEventConnectionHandler(
+            self, self.maintenance_events_config
         )
         self._parser.set_maintenance_push_handler(
             self._maintenance_event_connection_handler.handle_event
         )
 
         # Store original connection parameters
-        self.orig_host_address = (
-            orig_host_address if orig_host_address else self.host
-        )
+        self.orig_host_address = orig_host_address if orig_host_address else self.host
         self.orig_socket_timeout = (
             orig_socket_timeout if orig_socket_timeout else self.socket_timeout
         )
@@ -505,8 +503,6 @@ class AbstractConnection(ConnectionInterface):
             if orig_socket_connect_timeout
             else self.socket_connect_timeout
         )
-
-
 
     def set_maintenance_event_pool_handler(
         self, maintenance_event_pool_handler: MaintenanceEventPoolHandler
@@ -658,21 +654,26 @@ class AbstractConnection(ConnectionInterface):
             and hasattr(self, "_maintenance_event_connection_handler")
         ):
             try:
-                endpoint_type = self.maintenance_events_config.get_endpoint_type(self.host, self)
+                endpoint_type = self.maintenance_events_config.get_endpoint_type(
+                    self.host, self
+                )
                 self.send_command(
                     "CLIENT",
                     "MAINT_NOTIFICATIONS",
                     "ON",
                     "moving-endpoint-type",
                     endpoint_type,
-                    check_health=check_health
+                    check_health=check_health,
                 )
                 response = self.read_response()
                 if str_if_bytes(response) != "OK":
-                    raise ConnectionError("The server doesn't support maintenance notifications")
+                    raise ConnectionError(
+                        "The server doesn't support maintenance notifications"
+                    )
             except Exception as e:
                 # Log warning but don't fail the connection
                 import logging
+
                 logger = logging.getLogger(__name__)
                 logger.warning(f"Failed to enable maintenance notifications: {e}")
 
