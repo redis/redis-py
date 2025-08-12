@@ -64,6 +64,44 @@ WITHPAYLOADS = "WITHPAYLOADS"
 class SearchCommands:
     """Search commands."""
 
+    @property
+    def index_name(self) -> str:
+        """The name of the search index. Must be implemented by inheriting classes."""
+        if not hasattr(self, "_index_name"):
+            raise AttributeError("index_name must be set by the inheriting class")
+        return self._index_name
+
+    @index_name.setter
+    def index_name(self, value: str) -> None:
+        """Set the name of the search index."""
+        self._index_name = value
+
+    @property
+    def client(self):
+        """The Redis client. Must be provided by inheriting classes."""
+        if not hasattr(self, "_client"):
+            raise AttributeError("client must be set by the inheriting class")
+        return self._client
+
+    @client.setter
+    def client(self, value) -> None:
+        """Set the Redis client."""
+        self._client = value
+
+    @property
+    def _RESP2_MODULE_CALLBACKS(self):
+        """Response callbacks for RESP2. Must be provided by inheriting classes."""
+        if not hasattr(self, "_resp2_module_callbacks"):
+            raise AttributeError(
+                "_RESP2_MODULE_CALLBACKS must be set by the inheriting class"
+            )
+        return self._resp2_module_callbacks
+
+    @_RESP2_MODULE_CALLBACKS.setter
+    def _RESP2_MODULE_CALLBACKS(self, value) -> None:
+        """Set the RESP2 module callbacks."""
+        self._resp2_module_callbacks = value
+
     def _parse_results(self, cmd, res, **kwargs):
         if get_protocol_version(self.client) in ["3", 3]:
             return ProfileInformation(res) if cmd == "FT.PROFILE" else res
@@ -221,7 +259,7 @@ class SearchCommands:
 
         return self.execute_command(*args)
 
-    def alter_schema_add(self, fields: List[str]):
+    def alter_schema_add(self, fields: Union[Field, List[Field]]):
         """
         Alter the existing search index by adding new fields. The index
         must already exist.
@@ -336,11 +374,11 @@ class SearchCommands:
         doc_id: str,
         nosave: bool = False,
         score: float = 1.0,
-        payload: bool = None,
+        payload: Optional[bool] = None,
         replace: bool = False,
         partial: bool = False,
         language: Optional[str] = None,
-        no_create: str = False,
+        no_create: bool = False,
         **fields: List[str],
     ):
         """
@@ -478,7 +516,7 @@ class SearchCommands:
         return args
 
     def _mk_query_args(
-        self, query, query_params: Union[Dict[str, Union[str, int, float, bytes]], None]
+        self, query, query_params: Optional[Dict[str, Union[str, int, float, bytes]]]
     ):
         args = [self.index_name]
 
@@ -528,7 +566,7 @@ class SearchCommands:
     def explain(
         self,
         query: Union[str, Query],
-        query_params: Dict[str, Union[str, int, float]] = None,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
     ):
         """Returns the execution plan for a complex query.
 
@@ -543,7 +581,7 @@ class SearchCommands:
     def aggregate(
         self,
         query: Union[AggregateRequest, Cursor],
-        query_params: Optional[Dict[str, Union[str, int, float]]] = None,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
     ):
         """
         Issue an aggregation query.
@@ -598,7 +636,7 @@ class SearchCommands:
         self,
         query: Union[Query, AggregateRequest],
         limited: bool = False,
-        query_params: Optional[Dict[str, Union[str, int, float]]] = None,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
     ):
         """
         Performs a search or aggregate command and collects performance
@@ -936,7 +974,7 @@ class AsyncSearchCommands(SearchCommands):
     async def search(
         self,
         query: Union[str, Query],
-        query_params: Dict[str, Union[str, int, float]] = None,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
     ):
         """
         Search the index for a given query, and return a result of documents
@@ -968,7 +1006,7 @@ class AsyncSearchCommands(SearchCommands):
     async def aggregate(
         self,
         query: Union[AggregateResult, Cursor],
-        query_params: Dict[str, Union[str, int, float]] = None,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
     ):
         """
         Issue an aggregation query.
