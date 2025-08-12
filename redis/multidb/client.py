@@ -9,7 +9,7 @@ from redis.commands import RedisModuleCommands, CoreCommands
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.config import MultiDbConfig, DEFAULT_GRACE_PERIOD
 from redis.multidb.circuit import State as CBState, CircuitBreaker
-from redis.multidb.database import State as DBState, Database, AbstractDatabase, Databases
+from redis.multidb.database import Database, AbstractDatabase, Databases
 from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck
@@ -71,13 +71,8 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
             # Set states according to a weights and circuit state
             if database.circuit.state == CBState.CLOSED and not is_active_db_found:
-                database.state = DBState.ACTIVE
                 self.command_executor.active_database = database
                 is_active_db_found = True
-            elif database.circuit.state == CBState.CLOSED and is_active_db_found:
-                database.state = DBState.PASSIVE
-            else:
-                database.state = DBState.DISCONNECTED
 
         if not is_active_db_found:
             raise NoValidDatabaseException('Initial connection failed - no active database found')
@@ -108,8 +103,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         if database.circuit.state == CBState.CLOSED:
             highest_weighted_db, _ = self._databases.get_top_n(1)[0]
-            highest_weighted_db.state = DBState.PASSIVE
-            database.state = DBState.ACTIVE
             self.command_executor.active_database = database
             return
 
@@ -131,9 +124,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
     def _change_active_database(self, new_database: AbstractDatabase, highest_weight_database: AbstractDatabase):
         if new_database.weight > highest_weight_database.weight and new_database.circuit.state == CBState.CLOSED:
-            new_database.state = DBState.ACTIVE
             self.command_executor.active_database = new_database
-            highest_weight_database.state = DBState.PASSIVE
 
     def remove_database(self, database: Database):
         """
@@ -143,7 +134,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
 
         if highest_weight <= weight and highest_weighted_db.circuit.state == CBState.CLOSED:
-            highest_weighted_db.state = DBState.ACTIVE
             self.command_executor.active_database = highest_weighted_db
 
     def update_database_weight(self, database: AbstractDatabase, weight: float):
