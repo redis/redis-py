@@ -490,7 +490,7 @@ class MaintenanceEventsConfig:
 
     def __init__(
         self,
-        enabled: bool = False,
+        enabled: bool = True,
         proactive_reconnect: bool = True,
         relax_timeout: Optional[Number] = 20,
         endpoint_type: Optional[str] = None,
