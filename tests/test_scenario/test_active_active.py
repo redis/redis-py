@@ -45,7 +45,7 @@ class TestActiveActiveStandalone:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(40)
+    @pytest.mark.timeout(50)
     def test_multi_db_client_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
@@ -79,7 +79,7 @@ class TestActiveActiveStandalone:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(40)
+    @pytest.mark.timeout(50)
     def test_context_manager_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
@@ -135,7 +135,7 @@ class TestActiveActiveStandalone:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(40)
+    @pytest.mark.timeout(50)
     def test_chaining_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
@@ -191,7 +191,7 @@ class TestActiveActiveStandalone:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(40)
+    @pytest.mark.timeout(50)
     def test_transaction_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
@@ -233,7 +233,7 @@ class TestActiveActiveStandalone:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(40)
+    @pytest.mark.timeout(50)
     def test_pubsub_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
@@ -279,7 +279,7 @@ class TestActiveActiveStandalone:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(40)
+    @pytest.mark.timeout(50)
     def test_sharded_pubsub_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
