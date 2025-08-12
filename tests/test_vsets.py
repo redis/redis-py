@@ -425,6 +425,21 @@ def test_vsim_truth_no_thread_enabled(d_client):
     assert isinstance(sim_no_thread, dict)
 
 
+@skip_if_server_version_lt("8.2.0")
+def test_vsim_epsilon(d_client):
+    d_client.vset().vadd("myset", [2, 1, 1], "a")
+    d_client.vset().vadd("myset", [2, 0, 1], "b")
+    d_client.vset().vadd("myset", [2, 0, 0], "c")
+    d_client.vset().vadd("myset", [2, 0, -1], "d")
+    d_client.vset().vadd("myset", [2, -1, -1], "e")
+
+    res1 = d_client.vset().vsim("myset", [2, 1, 1])
+    assert 5 == len(res1)
+
+    res2 = d_client.vset().vsim("myset", [2, 1, 1], epsilon=0.5)
+    assert 4 == len(res2)
+
+
 @skip_if_server_version_lt("7.9.0")
 def test_vdim(d_client):
     float_array = [1, 4.32, 0.11, 0.5, 0.9, 0.1, 0.2]
