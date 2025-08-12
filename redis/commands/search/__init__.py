@@ -1,4 +1,4 @@
-import redis
+from redis.client import Pipeline as RedisPipeline
 
 from ...asyncio.client import Pipeline as AsyncioPipeline
 from .commands import (
@@ -181,9 +181,17 @@ class AsyncSearch(Search, AsyncSearchCommands):
         return p
 
 
-class Pipeline(SearchCommands, redis.client.Pipeline):
+class Pipeline(SearchCommands, RedisPipeline):
     """Pipeline for the module."""
 
+    def __init__(self, connection_pool, response_callbacks, transaction, shard_hint):
+        super().__init__(connection_pool, response_callbacks, transaction, shard_hint)
+        self.index_name: str = ""
 
-class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline, Pipeline):
+
+class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline):
     """AsyncPipeline for the module."""
+
+    def __init__(self, connection_pool, response_callbacks, transaction, shard_hint):
+        super().__init__(connection_pool, response_callbacks, transaction, shard_hint)
+        self.index_name: str = ""
