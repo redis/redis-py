@@ -3,6 +3,7 @@ import os
 
 import pytest
 
+from redis import Redis
 from redis.backoff import NoBackoff, ExponentialBackoff
 from redis.event import EventDispatcher, EventListenerInterface
 from redis.multidb.client import MultiDBClient
@@ -42,8 +43,14 @@ def fault_injector_client():
      return FaultInjectorClient(url)
 
 @pytest.fixture()
-def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListener]:
-     endpoint_config = get_endpoint_config('re-active-active')
+def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListener, dict]:
+     client_class = request.param.get('client_class', Redis)
+
+     if client_class == Redis:
+        endpoint_config = get_endpoint_config('re-active-active')
+     else:
+        endpoint_config = get_endpoint_config('re-active-active-oss-cluster')
+
      username = endpoint_config.get('username', None)
      password = endpoint_config.get('password', None)
      failure_threshold = request.param.get('failure_threshold', DEFAULT_FAILURES_THRESHOLD)
@@ -83,6 +90,7 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
      db_configs.append(db_config1)
 
      config = MultiDbConfig(
+         client_class=client_class,
          databases_config=db_configs,
          health_checks=health_checks,
          command_retry=command_retry,
@@ -91,4 +99,4 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
          event_dispatcher=event_dispatcher,
      )
 
-     return MultiDBClient(config), listener
+     return MultiDBClient(config), listener, endpoint_config

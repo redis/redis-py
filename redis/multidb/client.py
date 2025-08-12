@@ -233,7 +233,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                         database.circuit.state = CBState.OPEN
                     elif is_healthy and database.circuit.state != CBState.CLOSED:
                         database.circuit.state = CBState.CLOSED
-                except (ConnectionError, TimeoutError, socket.timeout, ConnectionRefusedError) as e:
+                except (ConnectionError, TimeoutError, socket.timeout, ConnectionRefusedError, ValueError) as e:
                     if database.circuit.state != CBState.OPEN:
                         database.circuit.state = CBState.OPEN
                     is_healthy = False
@@ -423,18 +423,33 @@ class PubSub:
             ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
         )
 
-    get_sharded_message = get_message
+    def get_sharded_message(
+        self, ignore_subscribe_messages: bool = False, timeout: float = 0.0
+    ):
+        """
+        Get the next message if one is available in a sharded channel, otherwise None.
+
+        If timeout is specified, the system will wait for `timeout` seconds
+        before returning. Timeout should be specified as a floating point
+        number, or None, to wait indefinitely.
+        """
+        return self._client.command_executor.execute_pubsub_method(
+            'get_sharded_message',
+            ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+        )
 
     def run_in_thread(
         self,
         sleep_time: float = 0.0,
         daemon: bool = False,
         exception_handler: Optional[Callable] = None,
+        sharded_pubsub: bool = False,
     ) -> "PubSubWorkerThread":
         return self._client.command_executor.execute_pubsub_run_in_thread(
             sleep_time=sleep_time,
             daemon=daemon,
             exception_handler=exception_handler,
-            pubsub=self
+            pubsub=self,
+            sharded_pubsub=sharded_pubsub,
         )
 

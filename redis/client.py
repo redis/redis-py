@@ -1217,7 +1217,8 @@ class PubSub:
         sleep_time: float = 0.0,
         daemon: bool = False,
         exception_handler: Optional[Callable] = None,
-        pubsub = None
+        pubsub = None,
+        sharded_pubsub: bool = False,
     ) -> "PubSubWorkerThread":
         for channel, handler in self.channels.items():
             if handler is None:
@@ -1233,7 +1234,7 @@ class PubSub:
 
         pubsub = self if pubsub is None else pubsub
         thread = PubSubWorkerThread(
-            pubsub, sleep_time, daemon=daemon, exception_handler=exception_handler
+            pubsub, sleep_time, daemon=daemon, exception_handler=exception_handler, sharded_pubsub=sharded_pubsub
         )
         thread.start()
         return thread
@@ -1248,12 +1249,14 @@ class PubSubWorkerThread(threading.Thread):
         exception_handler: Union[
             Callable[[Exception, "PubSub", "PubSubWorkerThread"], None], None
         ] = None,
+        sharded_pubsub: bool = False,
     ):
         super().__init__()
         self.daemon = daemon
         self.pubsub = pubsub
         self.sleep_time = sleep_time
         self.exception_handler = exception_handler
+        self.sharded_pubsub = sharded_pubsub
         self._running = threading.Event()
 
     def run(self) -> None:
@@ -1264,7 +1267,10 @@ class PubSubWorkerThread(threading.Thread):
         sleep_time = self.sleep_time
         while self._running.is_set():
             try:
-                pubsub.get_message(ignore_subscribe_messages=True, timeout=sleep_time)
+                if not self.sharded_pubsub:
+                    pubsub.get_message(ignore_subscribe_messages=True, timeout=sleep_time)
+                else:
+                    pubsub.get_sharded_message(ignore_subscribe_messages=True, timeout=sleep_time)
             except BaseException as e:
                 if self.exception_handler is None:
                     raise
