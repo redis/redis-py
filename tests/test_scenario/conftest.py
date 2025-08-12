@@ -3,6 +3,7 @@ import os
 
 import pytest
 
+from redis import Redis
 from redis.backoff import NoBackoff, ExponentialBackoff
 from redis.event import EventDispatcher, EventListenerInterface
 from redis.multidb.client import MultiDBClient
@@ -42,12 +43,18 @@ def fault_injector_client():
      return FaultInjectorClient(url)
 
 @pytest.fixture()
-def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListener]:
-     endpoint_config = get_endpoint_config('re-active-active')
+def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListener, dict]:
+     client_class = request.param.get('client_class', Redis)
+
+     if client_class == Redis:
+        endpoint_config = get_endpoint_config('re-active-active')
+     else:
+        endpoint_config = get_endpoint_config('re-active-active-oss-cluster')
+
      username = endpoint_config.get('username', None)
      password = endpoint_config.get('password', None)
      failure_threshold = request.param.get('failure_threshold', DEFAULT_FAILURES_THRESHOLD)
-     command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=0.5, base=0.05), retries=3))
+     command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=2, base=0.05), retries=10))
 
      # Retry configuration different for health checks as initial health check require more time in case
      # if infrastructure wasn't restored from the previous test.
@@ -83,6 +90,7 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
      db_configs.append(db_config1)
 
      config = MultiDbConfig(
+         client_class=client_class,
          databases_config=db_configs,
          health_checks=health_checks,
          command_retry=command_retry,
@@ -91,4 +99,4 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
          event_dispatcher=event_dispatcher,
      )
 
-     return MultiDBClient(config), listener
+     return MultiDBClient(config), listener, endpoint_config

@@ -229,10 +229,15 @@ class DefaultCommandExecutor(CommandExecutor):
         sleep_time: float = 0.0,
         daemon: bool = False,
         exception_handler: Optional[Callable] = None,
+        sharded_pubsub: bool = False,
     ) -> "PubSubWorkerThread":
         def callback():
             return self._active_pubsub.run_in_thread(
-                sleep_time, daemon=daemon, exception_handler=exception_handler, pubsub=pubsub
+                sleep_time,
+                daemon=daemon,
+                exception_handler=exception_handler,
+                pubsub=pubsub,
+                sharded_pubsub=sharded_pubsub
             )
 
         return self._execute_with_failure_detection(callback)
