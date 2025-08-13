@@ -6,14 +6,15 @@ import pytest
 
 from redis.event import EventDispatcher, OnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
-from redis.multidb.config import DEFAULT_HEALTH_CHECK_RETRIES, DEFAULT_HEALTH_CHECK_BACKOFF, DEFAULT_FAILOVER_RETRIES, \
+from redis.multidb.config import DEFAULT_FAILOVER_RETRIES, \
     DEFAULT_FAILOVER_BACKOFF
 from redis.multidb.database import State as DBState, AbstractDatabase
 from redis.multidb.client import MultiDBClient
 from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failover import WeightBasedFailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
-from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
+from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_RETRIES, \
+    DEFAULT_HEALTH_CHECK_BACKOFF
 from redis.retry import Retry
 from tests.test_multidb.conftest import create_weighted_list
 

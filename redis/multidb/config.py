@@ -12,14 +12,13 @@ from redis.event import EventDispatcher, EventDispatcherInterface
 from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter
 from redis.multidb.database import Database, Databases
 from redis.multidb.failure_detector import FailureDetector, CommandFailureDetector
-from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
+from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_RETRIES, \
+    DEFAULT_HEALTH_CHECK_BACKOFF
 from redis.multidb.failover import FailoverStrategy, WeightBasedFailoverStrategy
 from redis.retry import Retry
 
 DEFAULT_GRACE_PERIOD = 5.0
 DEFAULT_HEALTH_CHECK_INTERVAL = 5
-DEFAULT_HEALTH_CHECK_RETRIES = 3
-DEFAULT_HEALTH_CHECK_BACKOFF = ExponentialWithJitterBackoff(cap=10)
 DEFAULT_FAILURES_THRESHOLD = 3
 DEFAULT_FAILURES_DURATION = 2
 DEFAULT_FAILOVER_RETRIES = 3
