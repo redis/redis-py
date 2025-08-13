@@ -810,7 +810,7 @@ class PubSub:
     """
 
     PUBLISH_MESSAGE_TYPES = ("message", "pmessage")
-    UNSUBSCRIBE_MESSAGE_TYPES = ("unsubscribe", "punsubscribe")
+    UNSUBSCRIBE_MESSAGE_TYPES = ("unsubscribe", "punsubscribe", "sunsubscribe")
     HEALTH_CHECK_MESSAGE = "redis-py-health-check"
 
     def __init__(
@@ -852,6 +852,8 @@ class PubSub:
         self.pending_unsubscribe_channels = set()
         self.patterns = {}
         self.pending_unsubscribe_patterns = set()
+        self.shard_channels = {}
+        self.pending_unsubscribe_shard_channels = set()
         self._lock = asyncio.Lock()
 
     async def __aenter__(self):
@@ -880,6 +882,8 @@ class PubSub:
             self.pending_unsubscribe_channels = set()
             self.patterns = {}
             self.pending_unsubscribe_patterns = set()
+            self.shard_channels = {}
+            self.pending_unsubscribe_shard_channels = set()
 
     @deprecated_function(version="5.0.1", reason="Use aclose() instead", name="close")
     async def close(self) -> None:
@@ -898,6 +902,7 @@ class PubSub:
         # before passing them to [p]subscribe.
         self.pending_unsubscribe_channels.clear()
         self.pending_unsubscribe_patterns.clear()
+        self.pending_unsubscribe_shard_channels.clear()
         if self.channels:
             channels = {}
             for k, v in self.channels.items():
@@ -908,11 +913,17 @@ class PubSub:
             for k, v in self.patterns.items():
                 patterns[self.encoder.decode(k, force=True)] = v
             await self.psubscribe(**patterns)
+        if self.shard_channels:
+            shard_channels = {
+                self.encoder.decode(k, force=True): v
+                for k, v in self.shard_channels.items()
+            }
+            await self.ssubscribe(**shard_channels)
 
     @property
     def subscribed(self):
         """Indicates if there are subscriptions to any channels or patterns"""
-        return bool(self.channels or self.patterns)
+        return bool(self.channels or self.patterns or self.shard_channels)
 
     async def execute_command(self, *args: EncodableT):
         """Execute a publish/subscribe command"""
@@ -1091,6 +1102,40 @@ class PubSub:
         self.pending_unsubscribe_channels.update(channels)
         return self.execute_command("UNSUBSCRIBE", *parsed_args)
 
+    def ssubscribe(self, *args, target_node=None, **kwargs) -> Awaitable:
+        """
+        Subscribes the client to the specified shard channels.
+        Channels supplied as keyword arguments expect a channel name as the key
+        and a callable as the value. A channel's callable will be invoked automatically
+        when a message is received on that channel rather than producing a message via
+        ``listen()`` or ``get_sharded_message()``.
+        """
+        if args:
+            args = list_or_args(args[0], args[1:])
+        new_s_channels = dict.fromkeys(args)
+        new_s_channels.update(kwargs)
+        ret_val = self.execute_command("SSUBSCRIBE", *new_s_channels.keys())
+        # update the s_channels dict AFTER we send the command. we don't want to
+        # subscribe twice to these channels, once for the command and again
+        # for the reconnection.
+        new_s_channels = self._normalize_keys(new_s_channels)
+        self.shard_channels.update(new_s_channels)
+        self.pending_unsubscribe_shard_channels.difference_update(new_s_channels)
+        return ret_val
+
+    def sunsubscribe(self, *args, target_node=None) -> Awaitable:
+        """
+        Unsubscribe from the supplied shard_channels. If empty, unsubscribe from
+        all shard_channels
+        """
+        if args:
+            args = list_or_args(args[0], args[1:])
+            s_channels = self._normalize_keys(dict.fromkeys(args))
+        else:
+            s_channels = self.shard_channels
+        self.pending_unsubscribe_shard_channels.update(s_channels)
+        return self.execute_command("SUNSUBSCRIBE", *args)
+
     async def listen(self) -> AsyncIterator:
         """Listen for messages on channels this client has been subscribed to"""
         while self.subscribed:
@@ -1160,6 +1205,11 @@ class PubSub:
                 if pattern in self.pending_unsubscribe_patterns:
                     self.pending_unsubscribe_patterns.remove(pattern)
                     self.patterns.pop(pattern, None)
+            elif message_type == "sunsubscribe":
+                s_channel = response[1]
+                if s_channel in self.pending_unsubscribe_shard_channels:
+                    self.pending_unsubscribe_shard_channels.remove(s_channel)
+                    self.shard_channels.pop(s_channel, None)
             else:
                 channel = response[1]
                 if channel in self.pending_unsubscribe_channels:
@@ -1172,6 +1222,8 @@ class PubSub:
                 handler = self.patterns.get(message["pattern"], None)
             else:
                 handler = self.channels.get(message["channel"], None)
+                if handler is None:
+                    handler = self.shard_channels.get(message["channel"], None)
             if handler:
                 if inspect.iscoroutinefunction(handler):
                     await handler(message)
