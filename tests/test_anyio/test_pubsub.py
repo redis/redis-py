@@ -1041,7 +1041,7 @@ class TestBaseException:
         with (
             patch("redis.anyio._parsers._AnyIORESP2Parser.read_response") as mock1,
             patch("redis.anyio._parsers._AnyIOHiredisParser.read_response") as mock2,
-            patch("redis.anyio._parsers._AnyIORESP3Parser.read_response") as mock3
+            patch("redis.anyio._parsers._AnyIORESP3Parser.read_response") as mock3,
         ):
             mock1.side_effect = BaseException("boom")
             mock2.side_effect = BaseException("boom")
