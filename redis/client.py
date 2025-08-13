@@ -1217,6 +1217,7 @@ class PubSub:
         sleep_time: float = 0.0,
         daemon: bool = False,
         exception_handler: Optional[Callable] = None,
+        pubsub = None
     ) -> "PubSubWorkerThread":
         for channel, handler in self.channels.items():
             if handler is None:
@@ -1230,8 +1231,9 @@ class PubSub:
                     f"Shard Channel: '{s_channel}' has no handler registered"
                 )
 
+        pubsub = self if pubsub is None else pubsub
         thread = PubSubWorkerThread(
-            self, sleep_time, daemon=daemon, exception_handler=exception_handler
+            pubsub, sleep_time, daemon=daemon, exception_handler=exception_handler
         )
         thread.start()
         return thread

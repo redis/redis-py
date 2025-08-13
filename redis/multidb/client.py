@@ -1,8 +1,9 @@
 import threading
 import socket
-from typing import List, Any, Callable
+from typing import List, Any, Callable, Optional
 
 from redis.background import BackgroundScheduler
+from redis.client import PubSubWorkerThread
 from redis.exceptions import ConnectionError, TimeoutError
 from redis.commands import RedisModuleCommands, CoreCommands
 from redis.multidb.command_executor import DefaultCommandExecutor
@@ -201,6 +202,17 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         return self.command_executor.execute_transaction(func, *watches, *options)
 
+    def pubsub(self, **kwargs):
+        """
+        Return a Publish/Subscribe object. With this object, you can
+        subscribe to channels and listen for messages that get published to
+        them.
+        """
+        if not self.initialized:
+            self.initialize()
+
+        return PubSub(self, **kwargs)
+
     def _check_db_health(self, database: AbstractDatabase, on_error: Callable[[Exception], None] = None) -> None:
         """
         Runs health checks on the given database until first failure.
@@ -311,3 +323,118 @@ class Pipeline(RedisModuleCommands, CoreCommands):
             return self._client.command_executor.execute_pipeline(tuple(self._command_stack))
         finally:
             self.reset()
+
+class PubSub:
+    """
+    PubSub object for multi database client.
+    """
+    def __init__(self, client: MultiDBClient, **kwargs):
+        self._client = client
+        self._client.command_executor.pubsub(**kwargs)
+
+    def __enter__(self) -> "PubSub":
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.reset()
+
+    def __del__(self) -> None:
+        try:
+            # if this object went out of scope prior to shutting down
+            # subscriptions, close the connection manually before
+            # returning it to the connection pool
+            self.reset()
+        except Exception:
+            pass
+
+    def reset(self) -> None:
+        pass
+
+    def close(self) -> None:
+        self.reset()
+
+    @property
+    def subscribed(self) -> bool:
+        return self._client.command_executor.active_pubsub.subscribed
+
+    def psubscribe(self, *args, **kwargs):
+        """
+        Subscribe to channel patterns. Patterns supplied as keyword arguments
+        expect a pattern name as the key and a callable as the value. A
+        pattern's callable will be invoked automatically when a message is
+        received on that pattern rather than producing a message via
+        ``listen()``.
+        """
+        return self._client.command_executor.execute_pubsub_method('psubscribe', *args, **kwargs)
+
+    def punsubscribe(self, *args):
+        """
+        Unsubscribe from the supplied patterns. If empty, unsubscribe from
+        all patterns.
+        """
+        return self._client.command_executor.execute_pubsub_method('punsubscribe', *args)
+
+    def subscribe(self, *args, **kwargs):
+        """
+        Subscribe to channels. Channels supplied as keyword arguments expect
+        a channel name as the key and a callable as the value. A channel's
+        callable will be invoked automatically when a message is received on
+        that channel rather than producing a message via ``listen()`` or
+        ``get_message()``.
+        """
+        return self._client.command_executor.execute_pubsub_method('subscribe', *args, **kwargs)
+
+    def unsubscribe(self, *args):
+        """
+        Unsubscribe from the supplied channels. If empty, unsubscribe from
+        all channels
+        """
+        return self._client.command_executor.execute_pubsub_method('unsubscribe', *args)
+
+    def ssubscribe(self, *args, **kwargs):
+        """
+        Subscribes the client to the specified shard channels.
+        Channels supplied as keyword arguments expect a channel name as the key
+        and a callable as the value. A channel's callable will be invoked automatically
+        when a message is received on that channel rather than producing a message via
+        ``listen()`` or ``get_sharded_message()``.
+        """
+        return self._client.command_executor.execute_pubsub_method('ssubscribe', *args, **kwargs)
+
+    def sunsubscribe(self, *args):
+        """
+        Unsubscribe from the supplied shard_channels. If empty, unsubscribe from
+        all shard_channels
+        """
+        return self._client.command_executor.execute_pubsub_method('sunsubscribe', *args)
+
+    def get_message(
+        self, ignore_subscribe_messages: bool = False, timeout: float = 0.0
+    ):
+        """
+        Get the next message if one is available, otherwise None.
+
+        If timeout is specified, the system will wait for `timeout` seconds
+        before returning. Timeout should be specified as a floating point
+        number, or None, to wait indefinitely.
+        """
+        return self._client.command_executor.execute_pubsub_method(
+            'get_message',
+            ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+        )
+
+    get_sharded_message = get_message
+
+    def run_in_thread(
+        self,
+        sleep_time: float = 0.0,
+        daemon: bool = False,
+        exception_handler: Optional[Callable] = None,
+    ) -> "PubSubWorkerThread":
+        return self._client.command_executor.execute_pubsub_run_in_thread(
+            sleep_time=sleep_time,
+            daemon=daemon,
+            exception_handler=exception_handler,
+            pubsub=self
+        )
+
