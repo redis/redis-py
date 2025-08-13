@@ -31,6 +31,7 @@ from .exceptions import (
     ChildDeadlockedError,
     ConnectionError,
     DataError,
+    MaxConnectionsError,
     RedisError,
     ResponseError,
     TimeoutError,
@@ -378,13 +379,18 @@ class AbstractConnection(ConnectionInterface):
         "Connects to the Redis server if not already connected"
         self.connect_check_health(check_health=True)
 
-    def connect_check_health(self, check_health: bool = True):
+    def connect_check_health(
+        self, check_health: bool = True, retry_socket_connect: bool = True
+    ):
         if self._sock:
             return
         try:
-            sock = self.retry.call_with_retry(
-                lambda: self._connect(), lambda error: self.disconnect(error)
-            )
+            if retry_socket_connect:
+                sock = self.retry.call_with_retry(
+                    lambda: self._connect(), lambda error: self.disconnect(error)
+                )
+            else:
+                sock = self._connect()
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
         except OSError as e:
@@ -1315,6 +1321,7 @@ class ConnectionPool:
     By default, TCP connections are created unless ``connection_class``
     is specified. Use class:`.UnixDomainSocketConnection` for
     unix sockets.
+    :py:class:`~redis.SSLConnection` can be used for SSL enabled connections.
 
     Any additional keyword arguments are passed to the constructor of
     ``connection_class``.
@@ -1556,7 +1563,7 @@ class ConnectionPool:
     def make_connection(self) -> "ConnectionInterface":
         "Create a new connection"
         if self._created_connections >= self.max_connections:
-            raise ConnectionError("Too many connections")
+            raise MaxConnectionsError("Too many connections")
         self._created_connections += 1
 
         if self.cache is not None:

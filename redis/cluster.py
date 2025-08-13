@@ -39,6 +39,7 @@ from redis.exceptions import (
     DataError,
     ExecAbortError,
     InvalidPipelineStack,
+    MaxConnectionsError,
     MovedError,
     RedisClusterException,
     RedisError,
@@ -169,6 +170,7 @@ REDIS_ALLOWED_KEYS = (
     "redis_connect_func",
     "password",
     "port",
+    "timeout",
     "queue_class",
     "retry",
     "retry_on_timeout",
@@ -1234,6 +1236,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     )
                 return response
             except AuthenticationError:
+                raise
+            except MaxConnectionsError:
+                # MaxConnectionsError indicates client-side resource exhaustion
+                # (too many connections in the pool), not a node failure.
+                # Don't treat this as a node failure - just re-raise the error
+                # without reinitializing the cluster.
                 raise
             except (ConnectionError, TimeoutError) as e:
                 # ConnectionError can also be raised if we couldn't get a
@@ -2709,8 +2717,8 @@ class PipelineStrategy(AbstractStrategy):
 
         If one of the retryable exceptions has been thrown we assume that:
          - connection_pool was disconnected
-         - connection_pool was reseted
-         - refereh_table_asap set to True
+         - connection_pool was reset
+         - refresh_table_asap set to True
 
         It will try the number of times specified by
         the retries in config option "self.retry"

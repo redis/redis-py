@@ -11,8 +11,12 @@ from redis.asyncio.connection import (
     SSLConnection,
 )
 from redis.commands import AsyncSentinelCommands
-from redis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
-from redis.utils import str_if_bytes
+from redis.exceptions import (
+    ConnectionError,
+    ReadOnlyError,
+    ResponseError,
+    TimeoutError,
+)
 
 
 class MasterNotFoundError(ConnectionError):
@@ -37,11 +41,10 @@ class SentinelManagedConnection(Connection):
 
     async def connect_to(self, address):
         self.host, self.port = address
-        await super().connect()
-        if self.connection_pool.check_connection:
-            await self.send_command("PING")
-            if str_if_bytes(await self.read_response()) != "PONG":
-                raise ConnectionError("PING failed")
+        await self.connect_check_health(
+            check_health=self.connection_pool.check_connection,
+            retry_socket_connect=False,
+        )
 
     async def _connect_retry(self):
         if self._reader:

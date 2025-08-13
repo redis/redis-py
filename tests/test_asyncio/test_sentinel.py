@@ -15,7 +15,7 @@ from redis.asyncio.sentinel import (
 pytestmark = pytest.mark.asyncio
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 def master_ip(master_host):
     yield socket.gethostbyname(master_host[0])
 
