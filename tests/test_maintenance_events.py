@@ -369,7 +369,7 @@ class TestMaintenanceEventsConfig:
     def test_init_defaults(self):
         """Test MaintenanceEventsConfig initialization with defaults."""
         config = MaintenanceEventsConfig()
-        assert config.enabled is False
+        assert config.enabled is True
         assert config.proactive_reconnect is True
         assert config.relax_timeout == 20
 
