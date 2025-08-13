@@ -265,6 +265,13 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
+    def get_resolved_ip(self):
+        """
+        Get resolved ip address for the connection.
+        """
+        pass
+
+    @abstractmethod
     def update_current_socket_timeout(self, relax_timeout: Optional[float] = None):
         """
         Update the timeout for the current socket.
@@ -476,7 +483,10 @@ class AbstractConnection(ConnectionInterface):
         orig_socket_connect_timeout=None,
     ):
         """Enable maintenance events by setting up handlers and storing original connection parameters."""
-        if not self.maintenance_events_config:
+        if (
+            not self.maintenance_events_config
+            or not self.maintenance_events_config.enabled
+        ):
             return
 
         # Set up pool handler if available
@@ -912,6 +922,56 @@ class AbstractConnection(ConnectionInterface):
             )
             self.read_response()
             self._re_auth_token = None
+
+    def get_resolved_ip(self) -> Optional[str]:
+        """
+        Extract the resolved IP address from an
+        established connection or resolve it from the host.
+
+        First tries to get the actual IP from the socket (most accurate),
+        then falls back to DNS resolution if needed.
+
+        Args:
+            connection: The connection object to extract the IP from
+
+        Returns:
+            str: The resolved IP address, or None if it cannot be determined
+        """
+
+        # Method 1: Try to get the actual IP from the established socket connection
+        # This is most accurate as it shows the exact IP being used
+        try:
+            if self._sock is not None:
+                peer_addr = self._sock.getpeername()
+                if peer_addr and len(peer_addr) >= 1:
+                    # For TCP sockets, peer_addr is typically (host, port) tuple
+                    # Return just the host part
+                    return peer_addr[0]
+        except (AttributeError, OSError):
+            # Socket might not be connected or getpeername() might fail
+            pass
+
+        # Method 2: Fallback to DNS resolution of the host
+        # This is less accurate but works when socket is not available
+        try:
+            host = getattr(self, "host", "localhost")
+            port = getattr(self, "port", 6379)
+            if host:
+                # Use getaddrinfo to resolve the hostname to IP
+                # This mimics what the connection would do during _connect()
+                addr_info = socket.getaddrinfo(
+                    host, port, socket.AF_UNSPEC, socket.SOCK_STREAM
+                )
+                if addr_info:
+                    # Return the IP from the first result
+                    # addr_info[0] is (family, socktype, proto, canonname, sockaddr)
+                    # sockaddr[0] is the IP address
+                    return addr_info[0][4][0]
+        except (AttributeError, OSError, socket.gaierror):
+            # DNS resolution might fail
+            pass
+
+        return None
 
     @property
     def maintenance_state(self) -> MaintenanceState:

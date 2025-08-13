@@ -558,7 +558,7 @@ class MaintenanceEventsConfig:
 
         Logic:
         1. If endpoint_type is explicitly set, use it
-        3. Otherwise, check the original host from connection.host:
+        2. Otherwise, check the original host from connection.host:
            - If host is an IP address, use it directly to determine internal-ip vs external-ip
            - If host is an FQDN, get the resolved IP to determine internal-fqdn vs external-fqdn
 
@@ -584,7 +584,7 @@ class MaintenanceEventsConfig:
             pass
 
         # Host is an FQDN, get the resolved IP to determine if it's internal or external
-        resolved_ip = _get_resolved_ip_from_connection(connection)
+        resolved_ip = connection.get_resolved_ip()
 
         if resolved_ip:
             try:

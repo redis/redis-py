@@ -300,7 +300,7 @@ class AsyncPushNotificationsParser(Protocol):
                     notification = NodeMigratedEvent(id)
 
                 if notification is not None:
-                    return self.maintenance_push_handler_func(notification)
+                    return await self.maintenance_push_handler_func(notification)
         except Exception as e:
             logger.error(
                 "Error handling {} message ({}): {}".format(msg_type, response, e)
