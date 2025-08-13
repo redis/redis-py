@@ -73,6 +73,15 @@ def make_subscribe_test_data(pubsub, type):
             "unsub_func": pubsub.unsubscribe,
             "keys": ["foo", "bar", "uni" + chr(4456) + "code"],
         }
+    elif type == "shard_channel":
+        return {
+            "p": pubsub,
+            "sub_type": "ssubscribe",
+            "unsub_type": "sunsubscribe",
+            "sub_func": pubsub.ssubscribe,
+            "unsub_func": pubsub.sunsubscribe,
+            "keys": ["foo", "bar", "uni" + chr(4456) + "code"],
+        }
     elif type == "pattern":
         return {
             "p": pubsub,
@@ -118,6 +127,12 @@ class TestPubSubSubscribeUnsubscribe:
 
     async def test_pattern_subscribe_unsubscribe(self, pubsub):
         kwargs = make_subscribe_test_data(pubsub, "pattern")
+        await self._test_subscribe_unsubscribe(**kwargs)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_subscribe_unsubscribe(self, pubsub):
+        kwargs = make_subscribe_test_data(pubsub, "shard_channel")
         await self._test_subscribe_unsubscribe(**kwargs)
 
     @pytest.mark.onlynoncluster
@@ -263,6 +278,12 @@ class TestPubSubSubscribeUnsubscribe:
     @pytest.mark.onlynoncluster
     async def test_subscribe_property_with_patterns(self, pubsub):
         kwargs = make_subscribe_test_data(pubsub, "pattern")
+        await self._test_subscribed_property(**kwargs)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("7.0.0")
+    async def test_subscribe_property_with_shard_channels(self, pubsub):
+        kwargs = make_subscribe_test_data(pubsub, "shard_channel")
         await self._test_subscribed_property(**kwargs)
 
     async def test_aclosing(self, r: redis.Redis):
