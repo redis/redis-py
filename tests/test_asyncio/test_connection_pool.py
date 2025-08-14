@@ -13,6 +13,8 @@ from .compat import aclosing
 from .conftest import asynccontextmanager
 from .test_pubsub import wait_for_message
 
+pytestmark = pytest.mark.asyncio
+
 
 @pytest.mark.onlynoncluster
 class TestRedisAutoReleaseConnectionPool:
@@ -40,7 +42,6 @@ class TestRedisAutoReleaseConnectionPool:
             for x in pool._available_connections + list(pool._in_use_connections)
         )
 
-    @pytest.mark.asyncio
     async def test_auto_disconnect_redis_created_pool(self, r: redis.Redis):
         new_conn = await self.create_two_conn(r)
         assert new_conn != r.connection
@@ -48,7 +49,6 @@ class TestRedisAutoReleaseConnectionPool:
         await r.aclose()
         assert self.has_no_connected_connections(r.connection_pool)
 
-    @pytest.mark.asyncio
     async def test_do_not_auto_disconnect_redis_created_pool(self, r2: redis.Redis):
         assert r2.auto_close_connection_pool is False, (
             "The connection pool should not be disconnected as a manually created "
@@ -62,7 +62,6 @@ class TestRedisAutoReleaseConnectionPool:
         assert len(r2.connection_pool._available_connections) == 1
         assert r2.connection_pool._available_connections[0].is_connected
 
-    @pytest.mark.asyncio
     async def test_auto_release_override_true_manual_created_pool(self, r: redis.Redis):
         assert r.auto_close_connection_pool is True, "This is from the class fixture"
         await self.create_two_conn(r)
@@ -74,7 +73,6 @@ class TestRedisAutoReleaseConnectionPool:
         assert self.has_no_connected_connections(r.connection_pool)
 
     @pytest.mark.parametrize("auto_close_conn_pool", [True, False])
-    @pytest.mark.asyncio
     async def test_close_override(self, r: redis.Redis, auto_close_conn_pool):
         r.auto_close_connection_pool = auto_close_conn_pool
         await self.create_two_conn(r)
@@ -82,7 +80,6 @@ class TestRedisAutoReleaseConnectionPool:
         assert self.has_no_connected_connections(r.connection_pool)
 
     @pytest.mark.parametrize("auto_close_conn_pool", [True, False])
-    @pytest.mark.asyncio
     async def test_negate_auto_close_client_pool(
         self, r: redis.Redis, auto_close_conn_pool
     ):
@@ -139,7 +136,6 @@ class TestConnectionPool:
         finally:
             await pool.disconnect(inuse_connections=True)
 
-    @pytest.mark.asyncio
     async def test_connection_creation(self):
         connection_kwargs = {"foo": "bar", "biz": "baz"}
         async with self.get_pool(
@@ -149,7 +145,6 @@ class TestConnectionPool:
             assert isinstance(connection, DummyConnection)
             assert connection.kwargs == connection_kwargs
 
-    @pytest.mark.asyncio
     async def test_aclosing(self):
         connection_kwargs = {"foo": "bar", "biz": "baz"}
         pool = redis.ConnectionPool(
@@ -160,7 +155,6 @@ class TestConnectionPool:
         async with aclosing(pool):
             pass
 
-    @pytest.mark.asyncio
     async def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
@@ -168,7 +162,6 @@ class TestConnectionPool:
             c2 = await pool.get_connection()
             assert c1 != c2
 
-    @pytest.mark.asyncio
     async def test_max_connections(self, master_host):
         connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(
@@ -179,7 +172,6 @@ class TestConnectionPool:
             with pytest.raises(redis.ConnectionError):
                 await pool.get_connection()
 
-    @pytest.mark.asyncio
     async def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
@@ -188,7 +180,6 @@ class TestConnectionPool:
             c2 = await pool.get_connection()
             assert c1 == c2
 
-    @pytest.mark.asyncio
     async def test_repr_contains_db_info_tcp(self):
         connection_kwargs = {
             "host": "localhost",
@@ -202,7 +193,6 @@ class TestConnectionPool:
             expected = "host=localhost,port=6379,db=1,client_name=test-client"
             assert expected in repr(pool)
 
-    @pytest.mark.asyncio
     async def test_repr_contains_db_info_unix(self):
         connection_kwargs = {"path": "/abc", "db": 1, "client_name": "test-client"}
         async with self.get_pool(
@@ -228,7 +218,6 @@ class TestBlockingConnectionPool:
         finally:
             await pool.disconnect(inuse_connections=True)
 
-    @pytest.mark.asyncio
     async def test_connection_creation(self, master_host):
         connection_kwargs = {
             "foo": "bar",
@@ -241,7 +230,6 @@ class TestBlockingConnectionPool:
             assert isinstance(connection, DummyConnection)
             assert connection.kwargs == connection_kwargs
 
-    @pytest.mark.asyncio
     async def test_disconnect(self, master_host):
         """A regression test for #1047"""
         connection_kwargs = {
@@ -254,7 +242,6 @@ class TestBlockingConnectionPool:
             await pool.get_connection()
             await pool.disconnect()
 
-    @pytest.mark.asyncio
     async def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
@@ -262,7 +249,6 @@ class TestBlockingConnectionPool:
             c2 = await pool.get_connection()
             assert c1 != c2
 
-    @pytest.mark.asyncio
     async def test_connection_pool_blocks_until_timeout(self, master_host):
         """When out of connections, block for timeout seconds, then raise"""
         connection_kwargs = {"host": master_host[0]}
@@ -279,7 +265,6 @@ class TestBlockingConnectionPool:
             assert asyncio.get_running_loop().time() - start >= 0.05
             await c1.disconnect()
 
-    @pytest.mark.asyncio
     async def test_connection_pool_blocks_until_conn_available(self, master_host):
         """
         When out of connections, block until another connection is released
@@ -300,7 +285,6 @@ class TestBlockingConnectionPool:
             stop = asyncio.get_running_loop().time()
             assert (stop - start) <= 0.2
 
-    @pytest.mark.asyncio
     async def test_reuse_previously_released_connection(self, master_host):
         connection_kwargs = {"host": master_host[0]}
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
@@ -592,7 +576,6 @@ class TestSSLConnectionURLParsing:
 
 
 class TestConnection:
-    @pytest.mark.asyncio
     async def test_on_connect_error(self):
         """
         An error in Connection.on_connect should disconnect from the server
@@ -611,7 +594,6 @@ class TestConnection:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
-    @pytest.mark.asyncio
     async def test_busy_loading_disconnects_socket(self, r):
         """
         If Redis raises a LOADING error, the connection should be
@@ -625,7 +607,6 @@ class TestConnection:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
-    @pytest.mark.asyncio
     async def test_busy_loading_from_pipeline_immediate_command(self, r):
         """
         BusyLoadingErrors should raise from Pipelines that execute a
@@ -644,7 +625,6 @@ class TestConnection:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
-    @pytest.mark.asyncio
     async def test_busy_loading_from_pipeline(self, r):
         """
         BusyLoadingErrors should be raised from a pipeline execution
@@ -661,14 +641,12 @@ class TestConnection:
 
     @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
-    @pytest.mark.asyncio
     async def test_read_only_error(self, r):
         """READONLY errors get turned into ReadOnlyError exceptions"""
         with pytest.raises(redis.ReadOnlyError):
             await r.execute_command("DEBUG", "ERROR", "READONLY blah blah")
 
     @skip_if_redis_enterprise()
-    @pytest.mark.asyncio
     async def test_oom_error(self, r):
         """OOM errors get turned into OutOfMemoryError exceptions"""
         with pytest.raises(redis.OutOfMemoryError):
@@ -701,7 +679,6 @@ class TestConnection:
         )
 
     @skip_if_redis_enterprise()
-    @pytest.mark.asyncio
     async def test_connect_no_auth_supplied_when_required(self, r):
         """
         AuthenticationError should be raised when the server requires a
@@ -713,7 +690,6 @@ class TestConnection:
             )
 
     @skip_if_redis_enterprise()
-    @pytest.mark.asyncio
     async def test_connect_invalid_password_supplied(self, r):
         """AuthenticationError should be raised when sending the wrong password"""
         with pytest.raises(redis.AuthenticationError):
@@ -744,14 +720,12 @@ class TestHealthCheck:
         diff = connection.next_health_check - asyncio.get_running_loop().time()
         assert self.interval >= diff > (self.interval - 1)
 
-    @pytest.mark.asyncio
     async def test_health_check_runs(self, r):
         if r.connection:
             r.connection.next_health_check = asyncio.get_running_loop().time() - 1
             await r.connection.check_health()
             self.assert_interval_advanced(r.connection)
 
-    @pytest.mark.asyncio
     async def test_arbitrary_command_invokes_health_check(self, r):
         # invoke a command to make sure the connection is entirely setup
         if r.connection:
@@ -765,7 +739,6 @@ class TestHealthCheck:
 
             self.assert_interval_advanced(r.connection)
 
-    @pytest.mark.asyncio
     async def test_arbitrary_command_advances_next_health_check(self, r):
         if r.connection:
             await r.get("foo")
@@ -775,7 +748,6 @@ class TestHealthCheck:
             await r.get("foo")
             assert next_health_check < r.connection.next_health_check
 
-    @pytest.mark.asyncio
     async def test_health_check_not_invoked_within_interval(self, r):
         if r.connection:
             await r.get("foo")
@@ -786,7 +758,6 @@ class TestHealthCheck:
                 ping_call_spec = (("PING",), {"check_health": False})
                 assert ping_call_spec not in m.call_args_list
 
-    @pytest.mark.asyncio
     async def test_health_check_in_pipeline(self, r):
         async with r.pipeline(transaction=False) as pipe:
             pipe.connection = await pipe.connection_pool.get_connection()
@@ -798,7 +769,6 @@ class TestHealthCheck:
                 m.assert_any_call("PING", check_health=False)
                 assert responses == [True, b"bar"]
 
-    @pytest.mark.asyncio
     async def test_health_check_in_transaction(self, r):
         async with r.pipeline(transaction=True) as pipe:
             pipe.connection = await pipe.connection_pool.get_connection()
@@ -810,7 +780,6 @@ class TestHealthCheck:
                 m.assert_any_call("PING", check_health=False)
                 assert responses == [True, b"bar"]
 
-    @pytest.mark.asyncio
     async def test_health_check_in_watched_pipeline(self, r):
         await r.set("foo", "bar")
         async with r.pipeline(transaction=False) as pipe:
@@ -835,7 +804,6 @@ class TestHealthCheck:
                 assert responses == [True, b"not-bar"]
                 m.assert_any_call("PING", check_health=False)
 
-    @pytest.mark.asyncio
     async def test_health_check_in_pubsub_before_subscribe(self, r):
         """A health check happens before the first [p]subscribe"""
         p = r.pubsub()
@@ -855,7 +823,6 @@ class TestHealthCheck:
             subscribe_message = await wait_for_message(p)
             assert subscribe_message["type"] == "subscribe"
 
-    @pytest.mark.asyncio
     async def test_health_check_in_pubsub_after_subscribed(self, r):
         """
         Pubsub can handle a new subscribe when it's time to check the
@@ -896,7 +863,6 @@ class TestHealthCheck:
             m.assert_any_call("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)
 
-    @pytest.mark.asyncio
     async def test_health_check_in_pubsub_poll(self, r):
         """
         Polling a pubsub connection that's subscribed will regularly
