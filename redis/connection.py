@@ -8,7 +8,18 @@ import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from typing import Any, Callable, Dict, List, Literal, Optional, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+)
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
@@ -311,7 +322,7 @@ class AbstractConnection(ConnectionInterface):
         socket_timeout: Optional[float] = None,
         socket_connect_timeout: Optional[float] = None,
         retry_on_timeout: bool = False,
-        retry_on_error=SENTINEL,
+        retry_on_error: Union[Iterable[Type[Exception]], object] = SENTINEL,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
@@ -367,19 +378,22 @@ class AbstractConnection(ConnectionInterface):
         self.socket_connect_timeout = socket_connect_timeout
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
-            retry_on_error = []
+            retry_on_errors_list = []
+        else:
+            retry_on_errors_list = list(retry_on_error)
         if retry_on_timeout:
             # Add TimeoutError to the errors list to retry on
-            retry_on_error.append(TimeoutError)
-        self.retry_on_error = retry_on_error
-        if retry or retry_on_error:
+            retry_on_errors_list.append(TimeoutError)
+        self.retry_on_error = retry_on_errors_list
+        if retry or self.retry_on_error:
             if retry is None:
                 self.retry = Retry(NoBackoff(), 1)
             else:
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
-            # Update the retry's supported errors with the specified errors
-            self.retry.update_supported_errors(retry_on_error)
+            if self.retry_on_error:
+                # Update the retry's supported errors with the specified errors
+                self.retry.update_supported_errors(self.retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
@@ -1912,6 +1926,9 @@ class ConnectionPool:
         address_type_to_match: Literal["connected", "configured"] = "connected",
         matching_address: Optional[str] = None,
     ) -> bool:
+        """
+        Check if the connection should be updated based on the matching address.
+        """
         if address_type_to_match == "connected":
             if matching_address and conn.getpeername() != matching_address:
                 return False
@@ -1964,6 +1981,7 @@ class ConnectionPool:
         :param address_type_to_match: The type of address to match.
         :param reset_host_address: Whether to reset the host address to the original address.
         :param reset_relax_timeout: Whether to reset the relax timeout to the original timeout.
+        :param include_free_connections: Whether to include free/available connections.
         """
         for conn in self._in_use_connections:
             if self.should_update_connection(
@@ -2016,6 +2034,7 @@ class ConnectionPool:
 
         :param tmp_host_address: The temporary host address to use for the connection.
         :param tmp_relax_timeout: The relax timeout to use for the connection.
+        :param moving_address_src: The address of the node that is being moved.
         """
         for conn in self._in_use_connections:
             if self.should_update_connection(conn, "connected", moving_address_src):
@@ -2035,8 +2054,9 @@ class ConnectionPool:
 
         When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
 
-        :param orig_host_address: The temporary host address to use for the connection.
-        :param orig_relax_timeout: The relax timeout to use for the connection.
+        :param tmp_host_address: The temporary host address to use for the connection.
+        :param tmp_relax_timeout: The relax timeout to use for the connection.
+        :param moving_address_src: The address of the node that is being moved.
         """
 
         for conn in self._available_connections:
@@ -2361,6 +2381,7 @@ class BlockingConnectionPool(ConnectionPool):
 
         :param tmp_host_address: The temporary host address to use for the connection.
         :param tmp_relax_timeout: The relax timeout to use for the connection.
+        :param moving_address_src: The address of the node that is being moved.
         """
         with self._lock:
             connections_in_queue = {conn for conn in self.pool.queue if conn}
@@ -2386,6 +2407,7 @@ class BlockingConnectionPool(ConnectionPool):
 
         :param tmp_host_address: The temporary host address to use for the connection.
         :param tmp_relax_timeout: The relax timeout to use for the connection.
+        :param moving_address_src: The address of the node that is being moved.
         """
         existing_connections = self.pool.queue
 
