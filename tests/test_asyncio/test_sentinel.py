@@ -86,7 +86,7 @@ def sentinel(request, cluster):
     return Sentinel([("foo", 26379), ("bar", 26379)])
 
 
-@pytest.fixture()
+@pytest_asyncio.fixture()
 async def deployed_sentinel(request):
     sentinel_ips = request.config.getoption("--sentinels")
     sentinel_endpoints = [
