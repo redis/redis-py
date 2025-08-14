@@ -140,18 +140,22 @@ class TokenManager:
     ) -> Callable[[], None]:
         self._listener = listener
 
+        # Event to block for initial execution.
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             # Run loop in a separate thread to unblock main thread.
             loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            init_event = asyncio.Event()
+            asyncio.set_event_loop(None)
             thread = threading.Thread(
                 target=_start_event_loop_in_thread, args=(loop,), daemon=True
             )
             thread.start()
+        else:
+            init_event = asyncio.Event()
 
-        # Event to block for initial execution.
-        init_event = asyncio.Event(loop=loop)
         self._init_timer = loop.call_later(
             0, self._renew_token, skip_initial, init_event
         )
