@@ -6,6 +6,7 @@ from redis.multidb.database import AbstractDatabase
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import NoValidDatabaseException
 from redis.retry import Retry
+from redis.utils import dummy_fail
 
 
 class FailoverStrategy(ABC):
@@ -37,7 +38,7 @@ class WeightBasedFailoverStrategy(FailoverStrategy):
     def database(self) -> AbstractDatabase:
         return self._retry.call_with_retry(
             lambda: self._get_active_database(),
-            lambda _: self._dummy_fail()
+            lambda _: dummy_fail()
         )
 
     def set_databases(self, databases: Databases) -> None:
@@ -49,6 +50,3 @@ class WeightBasedFailoverStrategy(FailoverStrategy):
                 return database
 
         raise NoValidDatabaseException('No valid database available for communication')
-
-    def _dummy_fail(self):
-        pass

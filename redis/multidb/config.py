@@ -12,14 +12,13 @@ from redis.event import EventDispatcher, EventDispatcherInterface
 from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter
 from redis.multidb.database import Database, Databases
 from redis.multidb.failure_detector import FailureDetector, CommandFailureDetector
-from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
+from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_RETRIES, \
+    DEFAULT_HEALTH_CHECK_BACKOFF
 from redis.multidb.failover import FailoverStrategy, WeightBasedFailoverStrategy
 from redis.retry import Retry
 
 DEFAULT_GRACE_PERIOD = 5.0
 DEFAULT_HEALTH_CHECK_INTERVAL = 5
-DEFAULT_HEALTH_CHECK_RETRIES = 3
-DEFAULT_HEALTH_CHECK_BACKOFF = ExponentialWithJitterBackoff(cap=10)
 DEFAULT_FAILURES_THRESHOLD = 3
 DEFAULT_FAILURES_DURATION = 2
 DEFAULT_FAILOVER_RETRIES = 3
@@ -54,7 +53,7 @@ class MultiDbConfig:
         failure_detectors: Optional list of failure detectors for monitoring database failures.
         failure_threshold: Threshold for determining database failure.
         failures_interval: Time interval for tracking database failures.
-        health_checks: Optional list of health checks performed on databases.
+        additional_health_checks: Optional list of health checks performed on databases.
         health_check_interval: Time interval for executing health checks.
         health_check_retries: Number of retry attempts for performing health checks.
         health_check_backoff: Backoff strategy for health check retries.
@@ -89,7 +88,7 @@ class MultiDbConfig:
     failure_detectors: Optional[List[FailureDetector]] = None
     failure_threshold: int = DEFAULT_FAILURES_THRESHOLD
     failures_interval: float = DEFAULT_FAILURES_DURATION
-    health_checks: Optional[List[HealthCheck]] = None
+    additional_health_checks: Optional[List[HealthCheck]] = None
     health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL
     health_check_retries: int = DEFAULT_HEALTH_CHECK_RETRIES
     health_check_backoff: AbstractBackoff = DEFAULT_HEALTH_CHECK_BACKOFF
