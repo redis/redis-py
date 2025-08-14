@@ -84,7 +84,7 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
 
      config = MultiDbConfig(
          databases_config=db_configs,
-         health_checks=health_checks,
+         additional_health_checks=health_checks,
          command_retry=command_retry,
          failure_threshold=failure_threshold,
          health_check_interval=health_check_interval,

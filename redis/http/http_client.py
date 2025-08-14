@@ -74,7 +74,15 @@ class HttpClient:
         retry: Retry = Retry(
             backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
         ),
-        verify_tls: bool = False,
+        verify_tls: bool = True,
+        # TLS verification (server) options
+        ca_file: Optional[str] = None,
+        ca_path: Optional[str] = None,
+        ca_data: Optional[Union[str, bytes]] = None,
+        # Mutual TLS (client cert) options
+        client_cert_file: Optional[str] = None,
+        client_key_file: Optional[str] = None,
+        client_key_password: Optional[str] = None,
         auth_basic: Optional[Tuple[str, str]] = None,  # (username, password)
         user_agent: str = DEFAULT_USER_AGENT,
     ) -> None:
@@ -84,6 +92,15 @@ class HttpClient:
         self.retry = retry
         self.retry.update_supported_errors((HTTPError, URLError, ssl.SSLError))
         self.verify_tls = verify_tls
+
+        # TLS settings
+        self.ca_file = ca_file
+        self.ca_path = ca_path
+        self.ca_data = ca_data
+        self.client_cert_file = client_cert_file
+        self.client_key_file = client_key_file
+        self.client_key_password = client_key_password
+
         self.auth_basic = auth_basic
         self.user_agent = user_agent
 
@@ -206,10 +223,25 @@ class HttpClient:
 
         req = Request(url=url, method=method.upper(), data=data, headers=all_headers)
 
-        context = None
+        context: Optional[ssl.SSLContext] = None
         if url.lower().startswith("https"):
-            context = ssl.create_default_context()
-            if not self.verify_tls:
+            if self.verify_tls:
+                # Use provided CA material if any; fall back to system defaults
+                context = ssl.create_default_context(
+                    cafile=self.ca_file,
+                    capath=self.ca_path,
+                    cadata=self.ca_data,
+                )
+                # Load client certificate for mTLS if configured
+                if self.client_cert_file:
+                    context.load_cert_chain(
+                        certfile=self.client_cert_file,
+                        keyfile=self.client_key_file,
+                        password=self.client_key_password,
+                    )
+            else:
+                # Verification disabled
+                context = ssl.create_default_context()
                 context.check_hostname = False
                 context.verify_mode = ssl.CERT_NONE
 
@@ -355,14 +387,3 @@ class HttpClient:
             # If decompression fails, return original bytes
             return content
         return content
-
-
-# Example usage:
-# client = HttpClient(
-#     base_url="https://api.example.com/",
-#     auth_basic=("username", "password"),
-# )
-# data = client.get("v1/items", params={"limit": 10})
-# created = client.post("v1/items", json_body={"name": "sample"})
-# resp = client.get("v1/raw", expect_json=False)  # returns HttpResponse
-# print(resp.text())

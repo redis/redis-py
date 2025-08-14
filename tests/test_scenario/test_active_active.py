@@ -1,11 +1,13 @@
 import json
 import logging
+import os
 import threading
 from time import sleep
 
 import pytest
 
 from redis.client import Pipeline
+from redis.multidb.healthcheck import LagAwareHealthCheck
 from tests.test_scenario.conftest import get_endpoint_config
 from tests.test_scenario.fault_injector_client import ActionRequest, ActionType
 
@@ -53,6 +55,47 @@ class TestActiveActiveStandalone:
         )
 
         r_multi_db, listener = r_multi_db
+
+        # Client initialized on the first command.
+        r_multi_db.set('key', 'value')
+        thread.start()
+
+        # Execute commands before network failure
+        while not event.is_set():
+            assert r_multi_db.get('key') == 'value'
+            sleep(0.1)
+
+        # Execute commands after network failure
+        for _ in range(3):
+            assert r_multi_db.get('key') == 'value'
+            sleep(0.1)
+
+        assert listener.is_changed_flag == True
+
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [
+            {"failure_threshold": 2}
+        ],
+        indirect=True
+    )
+    def test_multi_db_client_uses_lag_aware_health_check(self, r_multi_db, fault_injector_client):
+        event = threading.Event()
+        thread = threading.Thread(
+            target=trigger_network_failure_action,
+            daemon=True,
+            args=(fault_injector_client,event)
+        )
+
+        r_multi_db, listener = r_multi_db
+
+        env0_username = os.getenv('ENV0_USERNAME')
+        env0_password = os.getenv('ENV0_PASSWORD')
+
+        # Adding additional health check to the client.
+        r_multi_db.add_health_check(
+            LagAwareHealthCheck(verify_tls=False, auth_basic=(env0_username,env0_password))
+        )
 
         # Client initialized on the first command.
         r_multi_db.set('key', 'value')

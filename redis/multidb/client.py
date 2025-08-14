@@ -22,7 +22,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
     """
     def __init__(self, config: MultiDbConfig):
         self._databases = config.databases()
-        self._health_checks = config.default_health_checks() if config.health_checks is None else config.health_checks
+        self._health_checks = config.default_health_checks()
+
+        if config.additional_health_checks is not None:
+            self._health_checks.extend(config.additional_health_checks)
+
         self._health_check_interval = config.health_check_interval
         self._failure_detectors = config.default_failure_detectors() \
             if config.failure_detectors is None else config.failure_detectors
@@ -233,7 +237,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                         database.circuit.state = CBState.OPEN
                     elif is_healthy and database.circuit.state != CBState.CLOSED:
                         database.circuit.state = CBState.CLOSED
-                except (ConnectionError, TimeoutError, socket.timeout, ConnectionRefusedError) as e:
+                except Exception as e:
                     if database.circuit.state != CBState.OPEN:
                         database.circuit.state = CBState.OPEN
                     is_healthy = False

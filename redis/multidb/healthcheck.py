@@ -1,6 +1,6 @@
 import logging
 from abc import abstractmethod, ABC
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.http.http_client import DEFAULT_TIMEOUT, HttpClient
@@ -75,6 +75,15 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         rest_api_port: int = 9443,
         timeout: float = DEFAULT_TIMEOUT,
         auth_basic: Optional[Tuple[str, str]] = None,
+        verify_tls: bool = True,
+        # TLS verification (server) options
+        ca_file: Optional[str] = None,
+        ca_path: Optional[str] = None,
+        ca_data: Optional[Union[str, bytes]] = None,
+        # Mutual TLS (client cert) options
+        client_cert_file: Optional[str] = None,
+        client_key_file: Optional[str] = None,
+        client_key_password: Optional[str] = None,
     ):
         super().__init__(
             retry=retry,
@@ -83,6 +92,13 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             timeout=timeout,
             auth_basic=auth_basic,
             retry=self.retry,
+            verify_tls=verify_tls,
+            ca_file=ca_file,
+            ca_path=ca_path,
+            ca_data=ca_data,
+            client_cert_file=client_cert_file,
+            client_key_file=client_key_file,
+            client_key_password=client_key_password
         )
         self._rest_api_port = rest_api_port
 
@@ -92,13 +108,19 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         base_url = f"https://{db_host}:{self._rest_api_port}"
         self._http_client.base_url = base_url
 
-        # Find bdb matching to current database host.
+        # Find bdb matching to the current database host
         matching_bdb = None
         for bdb in self._http_client.get("/v1/bdbs"):
             for endpoint in bdb["endpoints"]:
                 if endpoint['dns_name'] == db_host:
                     matching_bdb = bdb
                     break
+
+                # In case if the host was set as public IP
+                for addr in endpoint['addr']:
+                    if addr == db_host:
+                        matching_bdb = bdb
+                        break
 
         if matching_bdb is None:
             logger.warning("LagAwareHealthCheck failed: Couldn't find a matching bdb")
@@ -107,5 +129,5 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         url = f"/v1/bdbs/{matching_bdb['uid']}/availability"
         self._http_client.get(url, expect_json=False)
 
-        # Status checked in http client, otherwise HttpError will be raised
+        # Status checked in an http client, otherwise HttpError will be raised
         return True
