@@ -151,7 +151,7 @@ class TokenManager:
             thread.start()
 
         # Event to block for initial execution.
-        init_event = asyncio.Event()
+        init_event = asyncio.Event(loop=loop)
         self._init_timer = loop.call_later(
             0, self._renew_token, skip_initial, init_event
         )
