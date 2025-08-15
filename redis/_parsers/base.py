@@ -316,7 +316,7 @@ class AsyncPushNotificationsParser(Protocol):
         """Set the invalidation push handler function"""
         self.invalidation_push_handler_func = invalidation_push_handler_func
 
-    def set_node_moving_push_handler_func(self, node_moving_push_handler_func):
+    def set_node_moving_push_handler(self, node_moving_push_handler_func):
         self.node_moving_push_handler_func = node_moving_push_handler_func
 
     def set_maintenance_push_handler(self, maintenance_push_handler_func):
