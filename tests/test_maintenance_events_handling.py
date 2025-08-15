@@ -1583,14 +1583,14 @@ class TestMaintenanceEventsHandlingSingleProxy:
         pool_handler.handle_node_moved_event(moving_event)
         Helpers.validate_in_use_connections_state(
             in_use_connections,
-            expected_state=MaintenanceState.MOVING,
-            expected_host_address=tmp_address,
-            expected_socket_timeout=self.config.relax_timeout,
-            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_state=MaintenanceState.NONE,
+            expected_host_address=DEFAULT_ADDRESS.split(":")[0],
+            expected_socket_timeout=None,
+            expected_socket_connect_timeout=None,
             expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
-            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_socket_timeout=None,
             expected_current_peername=DEFAULT_ADDRESS.split(":")[0],
         )
 
