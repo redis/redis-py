@@ -5,6 +5,8 @@ from asyncio import IncompleteReadError, StreamReader, TimeoutError
 from typing import Callable, List, Optional, Protocol, Union
 
 from redis.maintenance_events import (
+    NodeFailedOverEvent,
+    NodeFailingOverEvent,
     NodeMigratedEvent,
     NodeMigratingEvent,
     NodeMovingEvent,
@@ -228,6 +230,13 @@ class PushNotificationsParser(Protocol):
                 elif msg_type in _MIGRATED_MESSAGE:
                     id = response[1]
                     notification = NodeMigratedEvent(id)
+                elif msg_type in _FAILING_OVER_MESSAGE:
+                    id = response[1]
+                    ttl = response[2]
+                    notification = NodeFailingOverEvent(id, ttl)
+                elif msg_type in _FAILED_OVER_MESSAGE:
+                    id = response[1]
+                    notification = NodeFailedOverEvent(id)
 
                 if notification is not None:
                     return self.maintenance_push_handler_func(notification)
@@ -284,7 +293,10 @@ class AsyncPushNotificationsParser(Protocol):
                 # push notification from enterprise cluster for node moving
                 id = response[1]
                 ttl = response[2]
-                host, port = response[3].split(":")
+                if response[3] != "null":
+                    host, port = response[3].split(":")
+                else:
+                    host, port = None, None
                 notification = NodeMovingEvent(id, host, port, ttl)
                 return await self.node_moving_push_handler_func(notification)
 
@@ -298,6 +310,13 @@ class AsyncPushNotificationsParser(Protocol):
                 elif msg_type in _MIGRATED_MESSAGE:
                     id = response[1]
                     notification = NodeMigratedEvent(id)
+                elif msg_type in _FAILING_OVER_MESSAGE:
+                    id = response[1]
+                    ttl = response[2]
+                    notification = NodeFailingOverEvent(id, ttl)
+                elif msg_type in _FAILED_OVER_MESSAGE:
+                    id = response[1]
+                    notification = NodeFailedOverEvent(id)
 
                 if notification is not None:
                     return await self.maintenance_push_handler_func(notification)
