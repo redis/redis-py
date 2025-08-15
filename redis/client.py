@@ -954,12 +954,13 @@ class PubSub:
         patterns we were previously listening to
         """
 
+        if conn.should_reconnect():
+            self._reconnect(conn)
+
         response = conn.retry.call_with_retry(
             lambda: command(*args, **kwargs),
             lambda _: self._reconnect(conn),
         )
-        if conn.should_reconnect():
-            self._reconnect(conn)
 
         return response
 
@@ -1172,6 +1173,7 @@ class PubSub:
                 return None
 
         response = self.parse_response(block=(timeout is None), timeout=timeout)
+
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None

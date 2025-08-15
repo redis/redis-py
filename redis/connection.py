@@ -445,6 +445,8 @@ class AbstractConnection(ConnectionInterface):
                 if orig_socket_connect_timeout
                 else self.socket_connect_timeout
             )
+        else:
+            self._maintenance_event_connection_handler = None
         self._should_reconnect = False
         self.maintenance_state = maintenance_state
 
@@ -511,8 +513,8 @@ class AbstractConnection(ConnectionInterface):
             maintenance_event_pool_handler.handle_event
         )
 
-        # Initialize maintenance event connection handler if it doesn't exist
-        if not hasattr(self, "_maintenance_event_connection_handler"):
+        # Update maintenance event connection handler if it doesn't exist
+        if not self._maintenance_event_connection_handler:
             self._maintenance_event_connection_handler = (
                 MaintenanceEventConnectionHandler(
                     self, maintenance_event_pool_handler.config
@@ -520,6 +522,10 @@ class AbstractConnection(ConnectionInterface):
             )
             self._parser.set_maintenance_push_handler(
                 self._maintenance_event_connection_handler.handle_event
+            )
+        else:
+            self._maintenance_event_connection_handler.config = (
+                maintenance_event_pool_handler.config
             )
 
     def connect(self):
@@ -1983,20 +1989,8 @@ class ConnectionPool:
         :param reset_relax_timeout: Whether to reset the relax timeout to the original timeout.
         :param include_free_connections: Whether to include free/available connections.
         """
-        for conn in self._in_use_connections:
-            if self.should_update_connection(
-                conn, address_type_to_match, matching_address
-            ):
-                self.update_connection_settings(
-                    conn,
-                    state=state,
-                    relax_timeout=relax_timeout,
-                    reset_host_address=reset_host_address,
-                    reset_relax_timeout=reset_relax_timeout,
-                )
-
-        if include_free_connections:
-            for conn in self._available_connections:
+        with self._lock:
+            for conn in self._in_use_connections:
                 if self.should_update_connection(
                     conn, address_type_to_match, matching_address
                 ):
@@ -2007,6 +2001,19 @@ class ConnectionPool:
                         reset_host_address=reset_host_address,
                         reset_relax_timeout=reset_relax_timeout,
                     )
+
+            if include_free_connections:
+                for conn in self._available_connections:
+                    if self.should_update_connection(
+                        conn, address_type_to_match, matching_address
+                    ):
+                        self.update_connection_settings(
+                            conn,
+                            state=state,
+                            relax_timeout=relax_timeout,
+                            reset_host_address=reset_host_address,
+                            reset_relax_timeout=reset_relax_timeout,
+                        )
 
     def update_connection_kwargs(
         self,
@@ -2036,11 +2043,12 @@ class ConnectionPool:
         :param tmp_relax_timeout: The relax timeout to use for the connection.
         :param moving_address_src: The address of the node that is being moved.
         """
-        for conn in self._in_use_connections:
-            if self.should_update_connection(conn, "connected", moving_address_src):
-                self._update_connection_for_reconnect(
-                    conn, tmp_host_address, tmp_relax_timeout
-                )
+        with self._lock:
+            for conn in self._in_use_connections:
+                if self.should_update_connection(conn, "connected", moving_address_src):
+                    self._update_connection_for_reconnect(
+                        conn, tmp_host_address, tmp_relax_timeout
+                    )
 
     def disconnect_and_reconfigure_free_connections(
         self,
@@ -2058,12 +2066,12 @@ class ConnectionPool:
         :param tmp_relax_timeout: The relax timeout to use for the connection.
         :param moving_address_src: The address of the node that is being moved.
         """
-
-        for conn in self._available_connections:
-            if self.should_update_connection(conn, "connected", moving_address_src):
-                self._disconnect_and_update_connection_for_reconnect(
-                    conn, tmp_host_address, tmp_relax_timeout
-                )
+        with self._lock:
+            for conn in self._available_connections:
+                if self.should_update_connection(conn, "connected", moving_address_src):
+                    self._disconnect_and_update_connection_for_reconnect(
+                        conn, tmp_host_address, tmp_relax_timeout
+                    )
 
     def _update_connection_for_reconnect(
         self,
@@ -2340,22 +2348,9 @@ class BlockingConnectionPool(ConnectionPool):
         """
         Override base class method to work with BlockingConnectionPool's structure.
         """
-        if include_free_connections:
-            for conn in tuple(self._connections):
-                if self.should_update_connection(
-                    conn, address_type_to_match, matching_address
-                ):
-                    self.update_connection_settings(
-                        conn,
-                        state=state,
-                        relax_timeout=relax_timeout,
-                        reset_host_address=reset_host_address,
-                        reset_relax_timeout=reset_relax_timeout,
-                    )
-        else:
-            connections_in_queue = {conn for conn in self.pool.queue if conn}
-            for conn in self._connections:
-                if conn not in connections_in_queue:
+        with self._lock:
+            if include_free_connections:
+                for conn in tuple(self._connections):
                     if self.should_update_connection(
                         conn, address_type_to_match, matching_address
                     ):
@@ -2366,6 +2361,20 @@ class BlockingConnectionPool(ConnectionPool):
                             reset_host_address=reset_host_address,
                             reset_relax_timeout=reset_relax_timeout,
                         )
+            else:
+                connections_in_queue = {conn for conn in self.pool.queue if conn}
+                for conn in self._connections:
+                    if conn not in connections_in_queue:
+                        if self.should_update_connection(
+                            conn, address_type_to_match, matching_address
+                        ):
+                            self.update_connection_settings(
+                                conn,
+                                state=state,
+                                relax_timeout=relax_timeout,
+                                reset_host_address=reset_host_address,
+                                reset_relax_timeout=reset_relax_timeout,
+                            )
 
     def update_active_connections_for_reconnect(
         self,
@@ -2409,15 +2418,16 @@ class BlockingConnectionPool(ConnectionPool):
         :param tmp_relax_timeout: The relax timeout to use for the connection.
         :param moving_address_src: The address of the node that is being moved.
         """
-        existing_connections = self.pool.queue
+        with self._lock:
+            existing_connections = self.pool.queue
 
-        for conn in existing_connections:
-            if conn:
-                if moving_address_src and conn.getpeername() != moving_address_src:
-                    continue
-                self._disconnect_and_update_connection_for_reconnect(
-                    conn, tmp_host_address, tmp_relax_timeout
-                )
+            for conn in existing_connections:
+                if conn:
+                    if moving_address_src and conn.getpeername() != moving_address_src:
+                        continue
+                    self._disconnect_and_update_connection_for_reconnect(
+                        conn, tmp_host_address, tmp_relax_timeout
+                    )
 
     def _update_maintenance_events_config_for_connections(
         self, maintenance_events_config

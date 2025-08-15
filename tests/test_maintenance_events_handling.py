@@ -503,7 +503,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
         # Verify that maintenance events are initially disabled
         assert existing_conn._parser.node_moving_push_handler_func is None
-        assert not hasattr(existing_conn, "_maintenance_event_connection_handler")
+        assert existing_conn._maintenance_event_connection_handler is None
         assert existing_conn._parser.maintenance_push_handler_func is None
 
         # Create a new enabled configuration and set up pool handler
