@@ -2,7 +2,7 @@ import logging
 import sys
 from abc import ABC
 from asyncio import IncompleteReadError, StreamReader, TimeoutError
-from typing import Callable, List, Optional, Protocol, Union
+from typing import Awaitable, Callable, List, Optional, Protocol, Union
 
 from redis.maintenance_events import (
     NodeMigratedEvent,
@@ -256,8 +256,8 @@ class AsyncPushNotificationsParser(Protocol):
 
     pubsub_push_handler_func: Callable
     invalidation_push_handler_func: Optional[Callable] = None
-    node_moving_push_handler_func: Optional[Callable] = None
-    maintenance_push_handler_func: Optional[Callable] = None
+    node_moving_push_handler_func: Optional[Callable[..., Awaitable[None]]] = None
+    maintenance_push_handler_func: Optional[Callable[..., Awaitable[None]]] = None
 
     async def handle_pubsub_push_response(self, response):
         """Handle pubsub push responses asynchronously"""
