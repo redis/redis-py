@@ -123,7 +123,13 @@ class NodeMovingEvent(MaintenanceEvent):
     during cluster rebalancing or maintenance operations.
     """
 
-    def __init__(self, id: int, new_node_host: str, new_node_port: int, ttl: int):
+    def __init__(
+        self,
+        id: int,
+        new_node_host: Optional[str],
+        new_node_port: Optional[int],
+        ttl: int,
+    ):
         """
         Initialize a new NodeMovingEvent.
 
@@ -578,37 +584,39 @@ class MaintenanceEventPoolHandler:
                     self.config.proactive_reconnect
                     or self.config.is_relax_timeouts_enabled()
                 ):
+                    # Get the current connected address - if any
+                    # This is the address that is being moved
+                    # and we need to handle only connections
+                    # connected to the same address
                     moving_address_src = (
                         self.connection.getpeername() if self.connection else None
                     )
 
                     if getattr(self.pool, "set_in_maintenance", False):
+                        # Set pool in maintenance mode - executed only if
+                        # BlockingConnectionPool is used
                         self.pool.set_in_maintenance(True)
 
-                    # Update connection settings for all connections
+                    # Update maintenance state, timeout and optionally host address
+                    # connection settings for matching connections
                     self.pool.update_connections_settings(
                         state=MaintenanceState.MOVING,
                         relax_timeout=self.config.relax_timeout,
+                        host_address=event.new_node_host,
                         matching_address=moving_address_src,
                         address_type_to_match="connected",
                         include_free_connections=True,
                     )
 
                     if self.config.proactive_reconnect:
-                        # take care for the active connections in the pool
-                        # mark them for reconnect after they complete the current command
-                        self.pool.update_active_connections_for_reconnect(
-                            tmp_host_address=event.new_node_host,
-                            tmp_relax_timeout=self.config.relax_timeout,
-                            moving_address_src=moving_address_src,
-                        )
-                        # take care for the inactive connections in the pool
-                        # delete them and create new ones
-                        self.pool.disconnect_and_reconfigure_free_connections(
-                            tmp_host_address=event.new_node_host,
-                            tmp_relax_timeout=self.config.relax_timeout,
-                            moving_address_src=moving_address_src,
-                        )
+                        if event.new_node_host is not None:
+                            self.run_proactive_reconnect(moving_address_src)
+                        else:
+                            threading.Timer(
+                                event.ttl / 2,
+                                self.run_proactive_reconnect,
+                                args=(moving_address_src,),
+                            ).start()
 
                     # Update config for new connections:
                     # Set state to MOVING
@@ -616,8 +624,16 @@ class MaintenanceEventPoolHandler:
                     # if relax timeouts are enabled - update timeouts
                     kwargs: dict = {
                         "maintenance_state": MaintenanceState.MOVING,
-                        "host": event.new_node_host,
                     }
+                    if event.new_node_host is not None:
+                        # the host is not updated if the new node host is None
+                        # this happens when the MOVING push notification does not contain
+                        # the new node host - in this case we only update the timeouts
+                        kwargs.update(
+                            {
+                                "host": event.new_node_host,
+                            }
+                        )
                     if self.config.is_relax_timeouts_enabled():
                         kwargs.update(
                             {
@@ -635,6 +651,24 @@ class MaintenanceEventPoolHandler:
             ).start()
 
             self._processed_events.add(event)
+
+    def run_proactive_reconnect(self, moving_address_src: Optional[str] = None):
+        """
+        Run proactive reconnect for the pool.
+        Active connections are marked for reconnect after they complete the current command.
+        Inactive connections are disconnected and will be connected on next use.
+        """
+        with self._lock and self.pool._lock:
+            # take care for the active connections in the pool
+            # mark them for reconnect after they complete the current command
+            self.pool.update_active_connections_for_reconnect(
+                moving_address_src=moving_address_src,
+            )
+            # take care for the inactive connections in the pool
+            # delete them and create new ones
+            self.pool.disconnect_free_connections(
+                moving_address_src=moving_address_src,
+            )
 
     def handle_node_moved_event(self, event: NodeMovingEvent):
         with self._lock:
