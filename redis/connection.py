@@ -8,7 +8,18 @@ import weakref
 from abc import abstractmethod
 from itertools import chain
 from queue import Empty, Full, LifoQueue
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+)
 from urllib.parse import parse_qs, unquote, urlparse
 
 from redis.cache import (
@@ -250,6 +261,13 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
+    def getpeername(self):
+        """
+        Returns the peer name of the connection.
+        """
+        pass
+
+    @abstractmethod
     def mark_for_reconnect(self):
         """
         Mark the connection to be reconnected on the next command.
@@ -304,7 +322,7 @@ class AbstractConnection(ConnectionInterface):
         socket_timeout: Optional[float] = None,
         socket_connect_timeout: Optional[float] = None,
         retry_on_timeout: bool = False,
-        retry_on_error=SENTINEL,
+        retry_on_error: Union[Iterable[Type[Exception]], object] = SENTINEL,
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
@@ -360,19 +378,22 @@ class AbstractConnection(ConnectionInterface):
         self.socket_connect_timeout = socket_connect_timeout
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
-            retry_on_error = []
+            retry_on_errors_list = []
+        else:
+            retry_on_errors_list = list(retry_on_error)
         if retry_on_timeout:
             # Add TimeoutError to the errors list to retry on
-            retry_on_error.append(TimeoutError)
-        self.retry_on_error = retry_on_error
-        if retry or retry_on_error:
+            retry_on_errors_list.append(TimeoutError)
+        self.retry_on_error = retry_on_errors_list
+        if retry or self.retry_on_error:
             if retry is None:
                 self.retry = Retry(NoBackoff(), 1)
             else:
                 # deep-copy the Retry object as it is mutable
                 self.retry = copy.deepcopy(retry)
-            # Update the retry's supported errors with the specified errors
-            self.retry.update_supported_errors(retry_on_error)
+            if self.retry_on_error:
+                # Update the retry's supported errors with the specified errors
+                self.retry.update_supported_errors(self.retry_on_error)
         else:
             self.retry = Retry(NoBackoff(), 0)
         self.health_check_interval = health_check_interval
@@ -402,6 +423,7 @@ class AbstractConnection(ConnectionInterface):
 
         if maintenance_events_config and maintenance_events_config.enabled:
             if maintenance_events_pool_handler:
+                maintenance_events_pool_handler.set_connection(self)
                 self._parser.set_node_moving_push_handler(
                     maintenance_events_pool_handler.handle_event
                 )
@@ -484,6 +506,7 @@ class AbstractConnection(ConnectionInterface):
     def set_maintenance_event_pool_handler(
         self, maintenance_event_pool_handler: MaintenanceEventPoolHandler
     ):
+        maintenance_event_pool_handler.set_connection(self)
         self._parser.set_node_moving_push_handler(
             maintenance_event_pool_handler.handle_event
         )
@@ -866,6 +889,11 @@ class AbstractConnection(ConnectionInterface):
     @maintenance_state.setter
     def maintenance_state(self, state: "MaintenanceState"):
         self._maintenance_state = state
+
+    def getpeername(self):
+        if not self._sock:
+            return None
+        return self._sock.getpeername()[0]
 
     def mark_for_reconnect(self):
         self._should_reconnect = True
@@ -1892,102 +1920,111 @@ class ConnectionPool:
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
 
-    def set_maintenance_state_for_all_connections(self, state: "MaintenanceState"):
-        for conn in self._available_connections:
+    def should_update_connection(
+        self,
+        conn: "Connection",
+        address_type_to_match: Literal["connected", "configured"] = "connected",
+        matching_address: Optional[str] = None,
+    ) -> bool:
+        """
+        Check if the connection should be updated based on the matching address.
+        """
+        if address_type_to_match == "connected":
+            if matching_address and conn.getpeername() != matching_address:
+                return False
+        else:
+            if matching_address and conn.host != matching_address:
+                return False
+        return True
+
+    def update_connection_settings(
+        self,
+        conn: "Connection",
+        state: Optional["MaintenanceState"] = None,
+        relax_timeout: Optional[float] = None,
+        reset_host_address: bool = False,
+        reset_relax_timeout: bool = False,
+    ):
+        """
+        Update the settings for a single connection.
+        """
+        if state:
             conn.maintenance_state = state
+
+        if reset_relax_timeout or reset_host_address:
+            conn.reset_tmp_settings(
+                reset_host_address=reset_host_address,
+                reset_relax_timeout=reset_relax_timeout,
+            )
+
+        conn.update_current_socket_timeout(relax_timeout)
+
+    def update_connections_settings(
+        self,
+        state: Optional["MaintenanceState"] = None,
+        relax_timeout: Optional[float] = None,
+        matching_address: Optional[str] = None,
+        address_type_to_match: Literal["connected", "configured"] = "connected",
+        reset_host_address: bool = False,
+        reset_relax_timeout: bool = False,
+        include_free_connections: bool = True,
+    ):
+        """
+        Update the settings for all matching connections in the pool.
+
+        This method does not create new connections.
+        This method does not affect the connection kwargs.
+
+        :param state: The maintenance state to set for the connection.
+        :param relax_timeout: The relax timeout to set for the connection.
+        :param matching_address: The address to match for the connection.
+        :param address_type_to_match: The type of address to match.
+        :param reset_host_address: Whether to reset the host address to the original address.
+        :param reset_relax_timeout: Whether to reset the relax timeout to the original timeout.
+        :param include_free_connections: Whether to include free/available connections.
+        """
         for conn in self._in_use_connections:
-            conn.maintenance_state = state
+            if self.should_update_connection(
+                conn, address_type_to_match, matching_address
+            ):
+                self.update_connection_settings(
+                    conn,
+                    state=state,
+                    relax_timeout=relax_timeout,
+                    reset_host_address=reset_host_address,
+                    reset_relax_timeout=reset_relax_timeout,
+                )
 
-    def set_maintenance_state_in_connection_kwargs(self, state: "MaintenanceState"):
-        self.connection_kwargs["maintenance_state"] = state
+        if include_free_connections:
+            for conn in self._available_connections:
+                if self.should_update_connection(
+                    conn, address_type_to_match, matching_address
+                ):
+                    self.update_connection_settings(
+                        conn,
+                        state=state,
+                        relax_timeout=relax_timeout,
+                        reset_host_address=reset_host_address,
+                        reset_relax_timeout=reset_relax_timeout,
+                    )
 
-    def add_tmp_config_to_connection_kwargs(
+    def update_connection_kwargs(
+        self,
+        **kwargs,
+    ):
+        """
+        Update the connection kwargs for all future connections.
+
+        This method updates the connection kwargs for all future connections created by the pool.
+        Existing connections are not affected.
+        """
+        self.connection_kwargs.update(kwargs)
+
+    def update_active_connections_for_reconnect(
         self,
         tmp_host_address: str,
         tmp_relax_timeout: Optional[float] = None,
-    ):
-        """
-        Store original connection configuration and apply temporary settings.
-
-        This method saves the current host, socket_timeout, and socket_connect_timeout values
-        in temporary storage fields (orig_*), then applies the provided temporary values
-        as the active connection configuration.
-
-        This is used when a cluster node is rebound to a different address during
-        maintenance operations. New connections created after this call will use the
-        temporary configuration until remove_tmp_config_from_connection_kwargs() is called.
-
-        When this method is called the pool will already be locked, so getting the pool
-        lock inside is not needed.
-
-        :param tmp_host_address: The temporary host address to use for new connections.
-                               This parameter is required and will replace the current host.
-        :param tmp_relax_timeout: The temporary timeout value to use for both socket_timeout
-                                and socket_connect_timeout. If -1 is provided, the timeout
-                                settings are not modified (relax timeout is disabled).
-        """
-        # Apply temporary values as active configuration
-        self.connection_kwargs.update({"host": tmp_host_address})
-
-        if tmp_relax_timeout != -1:
-            self.connection_kwargs.update(
-                {
-                    "socket_timeout": tmp_relax_timeout,
-                    "socket_connect_timeout": tmp_relax_timeout,
-                }
-            )
-
-    def remove_tmp_config_from_connection_kwargs(self):
-        """
-        Remove temporary configuration from connection kwargs and restore original values.
-
-        This method restores the original host address, socket timeout, and connect timeout
-        from their temporary storage back to the main connection kwargs, then clears the
-        temporary storage fields.
-
-        This is typically called when a cluster node maintenance operation is complete
-        and the connection should revert to its original configuration.
-
-        When this method is called the pool will already be locked, so getting the pool
-        lock inside is not needed.
-        """
-        orig_host = self.connection_kwargs.get("orig_host_address")
-        orig_socket_timeout = self.connection_kwargs.get("orig_socket_timeout")
-        orig_connect_timeout = self.connection_kwargs.get("orig_socket_connect_timeout")
-
-        self.connection_kwargs.update(
-            {
-                "host": orig_host,
-                "socket_timeout": orig_socket_timeout,
-                "socket_connect_timeout": orig_connect_timeout,
-            }
-        )
-
-    def reset_connections_tmp_settings(self):
-        """
-        Restore original settings from temporary configuration for all connections in the pool.
-
-        This method restores each connection's original host, socket_timeout, and socket_connect_timeout
-        values from their orig_* attributes back to the active connection configuration, then clears
-        the temporary storage attributes.
-
-        This is used to restore connections to their original configuration after maintenance operations
-        that required temporary address/timeout changes are complete.
-
-        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
-        """
-        with self._lock:
-            for conn in self._available_connections:
-                conn.reset_tmp_settings(
-                    reset_host_address=True, reset_relax_timeout=True
-                )
-            for conn in self._in_use_connections:
-                conn.reset_tmp_settings(
-                    reset_host_address=True, reset_relax_timeout=True
-                )
-
-    def update_active_connections_for_reconnect(
-        self, tmp_host_address: str, tmp_relax_timeout: Optional[float] = None
+        moving_address_src: Optional[str] = None,
     ):
         """
         Mark all active connections for reconnect.
@@ -1997,16 +2034,19 @@ class ConnectionPool:
 
         :param tmp_host_address: The temporary host address to use for the connection.
         :param tmp_relax_timeout: The relax timeout to use for the connection.
+        :param moving_address_src: The address of the node that is being moved.
         """
         for conn in self._in_use_connections:
-            self._update_connection_for_reconnect(
-                conn, tmp_host_address, tmp_relax_timeout
-            )
+            if self.should_update_connection(conn, "connected", moving_address_src):
+                self._update_connection_for_reconnect(
+                    conn, tmp_host_address, tmp_relax_timeout
+                )
 
     def disconnect_and_reconfigure_free_connections(
         self,
         tmp_host_address: str,
         tmp_relax_timeout: Optional[float] = None,
+        moving_address_src: Optional[str] = None,
     ):
         """
         Disconnect all free/available connections.
@@ -2014,36 +2054,16 @@ class ConnectionPool:
 
         When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
 
-        :param orig_host_address: The temporary host address to use for the connection.
-        :param orig_relax_timeout: The relax timeout to use for the connection.
+        :param tmp_host_address: The temporary host address to use for the connection.
+        :param tmp_relax_timeout: The relax timeout to use for the connection.
+        :param moving_address_src: The address of the node that is being moved.
         """
 
         for conn in self._available_connections:
-            self._disconnect_and_update_connection_for_reconnect(
-                conn, tmp_host_address, tmp_relax_timeout
-            )
-
-    def update_connections_current_timeout(
-        self,
-        relax_timeout: Optional[float],
-        include_free_connections: bool = False,
-    ):
-        """
-        Update the timeout either for all connections in the pool or just for the ones in use.
-        This is used when a cluster node is migrated to a different address.
-
-        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
-
-        :param relax_timeout: The relax timeout to use for the connection.
-                              If -1 is provided - the relax timeout is disabled.
-        :param include_available_connections: Whether to include available connections in the update.
-        """
-        for conn in self._in_use_connections:
-            conn.update_current_socket_timeout(relax_timeout)
-
-        if include_free_connections:
-            for conn in self._available_connections:
-                conn.update_current_socket_timeout(relax_timeout)
+            if self.should_update_connection(conn, "connected", moving_address_src):
+                self._disconnect_and_update_connection_for_reconnect(
+                    conn, tmp_host_address, tmp_relax_timeout
+                )
 
     def _update_connection_for_reconnect(
         self,
@@ -2307,8 +2327,51 @@ class BlockingConnectionPool(ConnectionPool):
                     pass
                 self._locked = False
 
+    def update_connections_settings(
+        self,
+        state: Optional["MaintenanceState"] = None,
+        relax_timeout: Optional[float] = None,
+        matching_address: Optional[str] = None,
+        address_type_to_match: Literal["connected", "configured"] = "connected",
+        reset_host_address: bool = False,
+        reset_relax_timeout: bool = False,
+        include_free_connections: bool = True,
+    ):
+        """
+        Override base class method to work with BlockingConnectionPool's structure.
+        """
+        if include_free_connections:
+            for conn in tuple(self._connections):
+                if self.should_update_connection(
+                    conn, address_type_to_match, matching_address
+                ):
+                    self.update_connection_settings(
+                        conn,
+                        state=state,
+                        relax_timeout=relax_timeout,
+                        reset_host_address=reset_host_address,
+                        reset_relax_timeout=reset_relax_timeout,
+                    )
+        else:
+            connections_in_queue = {conn for conn in self.pool.queue if conn}
+            for conn in self._connections:
+                if conn not in connections_in_queue:
+                    if self.should_update_connection(
+                        conn, address_type_to_match, matching_address
+                    ):
+                        self.update_connection_settings(
+                            conn,
+                            state=state,
+                            relax_timeout=relax_timeout,
+                            reset_host_address=reset_host_address,
+                            reset_relax_timeout=reset_relax_timeout,
+                        )
+
     def update_active_connections_for_reconnect(
-        self, tmp_host_address: str, tmp_relax_timeout: Optional[float] = None
+        self,
+        tmp_host_address: str,
+        tmp_relax_timeout: Optional[float] = None,
+        moving_address_src: Optional[str] = None,
     ):
         """
         Mark all active connections for reconnect.
@@ -2318,11 +2381,14 @@ class BlockingConnectionPool(ConnectionPool):
 
         :param tmp_host_address: The temporary host address to use for the connection.
         :param tmp_relax_timeout: The relax timeout to use for the connection.
+        :param moving_address_src: The address of the node that is being moved.
         """
         with self._lock:
             connections_in_queue = {conn for conn in self.pool.queue if conn}
             for conn in self._connections:
                 if conn not in connections_in_queue:
+                    if moving_address_src and conn.getpeername() != moving_address_src:
+                        continue
                     self._update_connection_for_reconnect(
                         conn, tmp_host_address, tmp_relax_timeout
                     )
@@ -2331,6 +2397,7 @@ class BlockingConnectionPool(ConnectionPool):
         self,
         tmp_host_address: str,
         tmp_relax_timeout: Optional[Number] = None,
+        moving_address_src: Optional[str] = None,
     ):
         """
         Disconnect all free/available connections.
@@ -2340,37 +2407,17 @@ class BlockingConnectionPool(ConnectionPool):
 
         :param tmp_host_address: The temporary host address to use for the connection.
         :param tmp_relax_timeout: The relax timeout to use for the connection.
+        :param moving_address_src: The address of the node that is being moved.
         """
         existing_connections = self.pool.queue
 
         for conn in existing_connections:
             if conn:
+                if moving_address_src and conn.getpeername() != moving_address_src:
+                    continue
                 self._disconnect_and_update_connection_for_reconnect(
                     conn, tmp_host_address, tmp_relax_timeout
                 )
-
-    def update_connections_current_timeout(
-        self,
-        relax_timeout: Optional[float] = None,
-        include_free_connections: bool = False,
-    ):
-        """
-        Update the timeout for the current socket.
-        This is used when a cluster node is migrated to a different address.
-
-        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
-
-        :param relax_timeout: The relax timeout to use for the connection.
-        :param include_free_connections: Whether to include available connections in the update.
-        """
-        if include_free_connections:
-            for conn in tuple(self._connections):
-                conn.update_current_socket_timeout(relax_timeout)
-        else:
-            connections_in_queue = {conn for conn in self.pool.queue if conn}
-            for conn in self._connections:
-                if conn not in connections_in_queue:
-                    conn.update_current_socket_timeout(relax_timeout)
 
     def _update_maintenance_events_config_for_connections(
         self, maintenance_events_config
@@ -2387,15 +2434,6 @@ class BlockingConnectionPool(ConnectionPool):
                 conn.set_maintenance_event_pool_handler(maintenance_events_pool_handler)
                 conn.maintenance_events_config = maintenance_events_pool_handler.config
 
-    def reset_connections_tmp_settings(self):
-        """
-        Override base class method to work with BlockingConnectionPool's structure.
-
-        Restore original settings from temporary configuration for all connections in the pool.
-        """
-        for conn in tuple(self._connections):
-            conn.reset_tmp_settings(reset_host_address=True, reset_relax_timeout=True)
-
     def set_in_maintenance(self, in_maintenance: bool):
         """
         Sets a flag that this Blocking ConnectionPool is in maintenance mode.
@@ -2404,7 +2442,3 @@ class BlockingConnectionPool(ConnectionPool):
         The pool will be in maintenance mode only when we are processing a MOVING event.
         """
         self._in_maintenance = in_maintenance
-
-    def set_maintenance_state_for_all_connections(self, state: "MaintenanceState"):
-        for conn in self._connections:
-            conn.maintenance_state = state

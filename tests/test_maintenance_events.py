@@ -524,7 +524,7 @@ class TestMaintenanceEventPoolHandler:
             assert event in self.handler._processed_events
 
             # Verify pool methods were called
-            self.mock_pool.add_tmp_config_to_connection_kwargs.assert_called_once()
+            self.mock_pool.update_connections_settings.assert_called_once()
 
     def test_handle_node_moved_event(self):
         """Test handling of node moved event (cleanup)."""
@@ -535,7 +535,7 @@ class TestMaintenanceEventPoolHandler:
         self.handler.handle_node_moved_event(event)
 
         # Verify cleanup methods were called
-        self.mock_pool.remove_tmp_config_from_connection_kwargs.assert_called_once()
+        self.mock_pool.update_connections_settings.assert_called_once()
 
 
 class TestMaintenanceEventConnectionHandler:
