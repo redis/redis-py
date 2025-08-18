@@ -12,7 +12,6 @@ class MaintenanceState(enum.Enum):
     NONE = "none"
     MOVING = "moving"
     MAINTENANCE = "maintenance"
-    FAILING_OVER = "failing_over"
 
 
 if TYPE_CHECKING:
@@ -573,7 +572,7 @@ class MaintenanceEventConnectionHandler:
 
     def handle_event(self, event: MaintenanceEvent):
         # get the event type by checking its class in the _EVENT_TYPES dict
-        event_type = self._EVENT_TYPES.get(event.__class__)
+        event_type = self._EVENT_TYPES.get(event.__class__, None)
 
         if event_type is None:
             logging.error(f"Unhandled event type: {event}")
