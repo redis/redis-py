@@ -247,7 +247,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         Runs health checks as a recurring task.
         Runs health checks against all databases.
         """
-
         for database, _ in self._databases:
             self._check_db_health(database, on_error)
 
@@ -313,9 +312,11 @@ class Pipeline(RedisModuleCommands, CoreCommands):
         return self
 
     def execute_command(self, *args, **kwargs):
+        """Adds a command to the stack"""
         return self.pipeline_execute_command(*args, **kwargs)
 
     def execute(self) -> List[Any]:
+        """Execute all the commands in the current pipeline"""
         if not self._client.initialized:
             self._client.initialize()
 
@@ -326,9 +327,16 @@ class Pipeline(RedisModuleCommands, CoreCommands):
 
 class PubSub:
     """
-    PubSub object for multi database client.
+    PubSub object for multi-database client.
     """
     def __init__(self, client: MultiDBClient, **kwargs):
+        """Initialize the PubSub object for a multi-database client.
+
+        Args:
+            client: MultiDBClient instance to use for pub/sub operations
+            **kwargs: Additional keyword arguments to pass to the underlying pubsub implementation
+        """
+
         self._client = client
         self._client.command_executor.pubsub(**kwargs)
 

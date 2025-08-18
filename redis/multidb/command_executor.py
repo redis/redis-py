@@ -103,12 +103,15 @@ class DefaultCommandExecutor(CommandExecutor):
             auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
     ):
         """
-        :param failure_detectors: List of failure detectors.
-        :param databases: List of databases.
-        :param failover_strategy: Strategy that defines the failover logic.
-        :param event_dispatcher: Event dispatcher.
-        :param auto_fallback_interval: Interval between fallback attempts. Fallback to a new database according to
-        failover_strategy.
+        Initialize the DefaultCommandExecutor instance.
+
+        Args:
+            failure_detectors: List of failure detector instances to monitor database health
+            databases: Collection of available databases to execute commands on
+            command_retry: Retry policy for failed command execution
+            failover_strategy: Strategy for handling database failover
+            event_dispatcher: Interface for dispatching events
+            auto_fallback_interval: Time interval in seconds between attempts to fall back to a primary database
         """
         for fd in failure_detectors:
             fd.set_command_executor(command_executor=self)
@@ -205,6 +208,9 @@ class DefaultCommandExecutor(CommandExecutor):
         return self._execute_with_failure_detection(callback)
 
     def pubsub(self, **kwargs):
+        """
+        Initializes a PubSub object on a currently active database.
+        """
         def callback():
             if self._active_pubsub is None:
                 self._active_pubsub = self._active_database.client.pubsub(**kwargs)
