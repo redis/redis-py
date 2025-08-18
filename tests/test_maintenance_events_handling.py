@@ -1528,17 +1528,17 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 NodeFailingOverEvent(id=3, ttl=1)
             )
         # State should not change for connections that are in MOVING state
-        self._validate_in_use_connections_state(
+        Helpers.validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.MOVING,
             expected_host_address=tmp_address,
             expected_socket_timeout=self.config.relax_timeout,
             expected_socket_connect_timeout=self.config.relax_timeout,
-            expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
             expected_current_socket_timeout=self.config.relax_timeout,
-            expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_current_peername=DEFAULT_ADDRESS.split(":")[0],
         )
 
         # 5. FAILED_OVER event (simulate direct connection handler call)
@@ -1547,17 +1547,17 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 NodeFailedOverEvent(id=3)
             )
         # State should not change for connections that are in MOVING state
-        self._validate_in_use_connections_state(
+        Helpers.validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.MOVING,
             expected_host_address=tmp_address,
             expected_socket_timeout=self.config.relax_timeout,
             expected_socket_connect_timeout=self.config.relax_timeout,
-            expected_orig_host_address=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
             expected_current_socket_timeout=self.config.relax_timeout,
-            expected_current_peername=MockSocket.DEFAULT_ADDRESS.split(":")[0],
+            expected_current_peername=DEFAULT_ADDRESS.split(":")[0],
         )
 
         # 6. MOVED event (simulate timer expiry)
