@@ -283,6 +283,7 @@ class TestNodeMigratedEvent:
         assert hash(event1) == hash(event2)
         assert hash(event1) != hash(event3)
 
+
 class TestNodeFailingOverEvent:
     """Test the NodeFailingOverEvent class."""
 
@@ -359,6 +360,7 @@ class TestNodeFailedOverEvent:
         assert event1 != event3
         assert hash(event1) == hash(event2)
         assert hash(event1) != hash(event3)
+
 
 class TestMaintenanceEventsConfig:
     """Test the MaintenanceEventsConfig class."""
@@ -561,7 +563,6 @@ class TestMaintenanceEventConnectionHandler:
         ) as mock_handle:
             self.handler.handle_event(event)
             mock_handle.assert_called_once_with(MaintenanceState.MIGRATING)
-
 
     def test_handle_event_migrated(self):
         """Test handling of NodeMigratedEvent."""
