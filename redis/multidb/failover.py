@@ -24,7 +24,7 @@ class FailoverStrategy(ABC):
 
 class WeightBasedFailoverStrategy(FailoverStrategy):
     """
-    Choose the active database with the highest weight.
+    Failover strategy based on database weights.
     """
     def __init__(
             self,
