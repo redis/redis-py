@@ -17,7 +17,7 @@ def trigger_network_failure_action(fault_injector_client, event: threading.Event
     endpoint_config = get_endpoint_config('re-active-active')
     action_request = ActionRequest(
         action_type=ActionType.NETWORK_FAILURE,
-        parameters={"bdb_id": endpoint_config['bdb_id'], "delay": 2, "cluster_index": 0}
+        parameters={"bdb_id": endpoint_config['bdb_id'], "delay": 3, "cluster_index": 0}
     )
 
     result = fault_injector_client.trigger_action(action_request)
@@ -37,7 +37,7 @@ class TestActiveActiveStandalone:
 
     def teardown_method(self, method):
         # Timeout so the cluster could recover from network failure.
-        sleep(4)
+        sleep(5)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -63,12 +63,12 @@ class TestActiveActiveStandalone:
         # Execute commands before network failure
         while not event.is_set():
             assert r_multi_db.get('key') == 'value'
-            sleep(0.1)
+            sleep(0.5)
 
         # Execute commands after network failure
         for _ in range(3):
             assert r_multi_db.get('key') == 'value'
-            sleep(0.1)
+            sleep(0.5)
 
         assert listener.is_changed_flag == True
 
@@ -104,12 +104,12 @@ class TestActiveActiveStandalone:
         # Execute commands before network failure
         while not event.is_set():
             assert r_multi_db.get('key') == 'value'
-            sleep(0.1)
+            sleep(0.5)
 
         # Execute commands after network failure
         for _ in range(3):
             assert r_multi_db.get('key') == 'value'
-            sleep(0.1)
+            sleep(0.5)
 
         assert listener.is_changed_flag == True
 
@@ -152,7 +152,7 @@ class TestActiveActiveStandalone:
                 pipe.get('{hash}key2')
                 pipe.get('{hash}key3')
                 assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
-            sleep(0.1)
+            sleep(0.5)
 
         # Execute pipeline after network failure
         for _ in range(3):
@@ -164,7 +164,7 @@ class TestActiveActiveStandalone:
                 pipe.get('{hash}key2')
                 pipe.get('{hash}key3')
                 assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
-            sleep(0.1)
+            sleep(0.5)
 
         assert listener.is_changed_flag == True
 
@@ -206,7 +206,7 @@ class TestActiveActiveStandalone:
             pipe.get('{hash}key2')
             pipe.get('{hash}key3')
             assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
-        sleep(0.1)
+        sleep(0.5)
 
         # Execute pipeline after network failure
         for _ in range(3):
@@ -217,7 +217,7 @@ class TestActiveActiveStandalone:
             pipe.get('{hash}key2')
             pipe.get('{hash}key3')
             assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
-        sleep(0.1)
+        sleep(0.5)
 
         assert listener.is_changed_flag == True
 
@@ -253,12 +253,12 @@ class TestActiveActiveStandalone:
         # Execute pipeline before network failure
         while not event.is_set():
             r_multi_db.transaction(callback)
-            sleep(0.1)
+            sleep(0.5)
 
         # Execute pipeline after network failure
         for _ in range(3):
             r_multi_db.transaction(callback)
-            sleep(0.1)
+            sleep(0.5)
 
         assert listener.is_changed_flag == True
 
@@ -295,12 +295,12 @@ class TestActiveActiveStandalone:
         # Execute pipeline before network failure
         while not event.is_set():
             r_multi_db.publish('test-channel', data)
-            sleep(0.1)
+            sleep(0.5)
 
         # Execute pipeline after network failure
         for _ in range(3):
             r_multi_db.publish('test-channel', data)
-            sleep(0.1)
+            sleep(0.5)
 
         pubsub_thread.stop()
 
@@ -340,12 +340,12 @@ class TestActiveActiveStandalone:
         # Execute pipeline before network failure
         while not event.is_set():
             r_multi_db.spublish('test-channel', data)
-            sleep(0.1)
+            sleep(0.5)
 
         # Execute pipeline after network failure
         for _ in range(3):
             r_multi_db.spublish('test-channel', data)
-            sleep(0.1)
+            sleep(0.5)
 
         pubsub_thread.stop()
 
