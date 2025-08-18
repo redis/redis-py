@@ -51,12 +51,20 @@ class CircuitBreaker(ABC):
         pass
 
 class PBListener(pybreaker.CircuitBreakerListener):
+    """Wrapper for callback to be compatible with pybreaker implementation."""
     def __init__(
             self,
             cb: Callable[[CircuitBreaker, State, State], None],
             database,
     ):
-        """Wrapper for callback to be compatible with pybreaker implementation."""
+        """
+        Initialize a PBListener instance.
+
+        Args:
+            cb: Callback function that will be called when the circuit breaker state changes.
+            database: Database instance associated with this circuit breaker.
+        """
+
         self._cb = cb
         self._database = database
 
@@ -70,7 +78,15 @@ class PBListener(pybreaker.CircuitBreakerListener):
 
 class PBCircuitBreakerAdapter(CircuitBreaker):
     def __init__(self, cb: pybreaker.CircuitBreaker):
-        """Adapter for pybreaker CircuitBreaker."""
+        """
+        Initialize a PBCircuitBreakerAdapter instance.
+
+        This adapter wraps pybreaker's CircuitBreaker implementation to make it compatible
+        with our CircuitBreaker interface.
+
+        Args:
+            cb: A pybreaker CircuitBreaker instance to be adapted.
+        """
         self._cb = cb
         self._state_pb_mapper = {
             State.CLOSED: self._cb.close,
