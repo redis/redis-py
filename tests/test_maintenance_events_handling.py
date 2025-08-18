@@ -1431,7 +1431,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
     def test_moving_migrating_migrated_moved_state_transitions(self, pool_class):
         """
         Test moving configs are not lost if the per connection events get picked up after moving is handled.
-        MOVING → MIGRATING → MIGRATED → FAILING_OVER → FAILED_OVER → MOVED
+        Sequence of events: MOVING, MIGRATING, MIGRATED, FAILING_OVER, FAILED_OVER, MOVED.
+        Note: FAILING_OVER and FAILED_OVER events do not change the connection state when already in MOVING state.
         Checks the state after each event for all connections and for new connections created during each state.
         """
         # Setup
