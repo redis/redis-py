@@ -562,7 +562,7 @@ class TestMaintenanceEventConnectionHandler:
             self.handler, "handle_maintenance_start_event"
         ) as mock_handle:
             self.handler.handle_event(event)
-            mock_handle.assert_called_once_with(MaintenanceState.MIGRATING)
+            mock_handle.assert_called_once_with(MaintenanceState.MAINTENANCE)
 
     def test_handle_event_migrated(self):
         """Test handling of NodeMigratedEvent."""
@@ -582,7 +582,7 @@ class TestMaintenanceEventConnectionHandler:
             self.handler, "handle_maintenance_start_event"
         ) as mock_handle:
             self.handler.handle_event(event)
-            mock_handle.assert_called_once_with(MaintenanceState.FAILING_OVER)
+            mock_handle.assert_called_once_with(MaintenanceState.MAINTENANCE)
 
     def test_handle_event_failed_over(self):
         """Test handling of NodeFailedOverEvent."""
@@ -608,7 +608,7 @@ class TestMaintenanceEventConnectionHandler:
         config = MaintenanceEventsConfig(relax_timeout=-1)
         handler = MaintenanceEventConnectionHandler(self.mock_connection, config)
 
-        result = handler.handle_maintenance_start_event(MaintenanceState.MIGRATING)
+        result = handler.handle_maintenance_start_event(MaintenanceState.MAINTENANCE)
         assert result is None
         self.mock_connection.update_current_socket_timeout.assert_not_called()
 
@@ -616,29 +616,19 @@ class TestMaintenanceEventConnectionHandler:
         """Test maintenance start event handling when connection is in MOVING state."""
         self.mock_connection.maintenance_state = MaintenanceState.MOVING
 
-        result = self.handler.handle_maintenance_start_event(MaintenanceState.MIGRATING)
+        result = self.handler.handle_maintenance_start_event(
+            MaintenanceState.MAINTENANCE
+        )
         assert result is None
         self.mock_connection.update_current_socket_timeout.assert_not_called()
 
-    def test_handle_maintenance_start_event_migrating_success(self):
+    def test_handle_maintenance_start_event_success(self):
         """Test successful maintenance start event handling for migrating."""
         self.mock_connection.maintenance_state = MaintenanceState.NONE
 
-        self.handler.handle_maintenance_start_event(MaintenanceState.MIGRATING)
+        self.handler.handle_maintenance_start_event(MaintenanceState.MAINTENANCE)
 
-        assert self.mock_connection.maintenance_state == MaintenanceState.MIGRATING
-        self.mock_connection.update_current_socket_timeout.assert_called_once_with(20)
-        self.mock_connection.set_tmp_settings.assert_called_once_with(
-            tmp_relax_timeout=20
-        )
-
-    def test_handle_maintenance_start_event_failing_over_success(self):
-        """Test successful maintenance start event handling for failing over."""
-        self.mock_connection.maintenance_state = MaintenanceState.NONE
-
-        self.handler.handle_maintenance_start_event(MaintenanceState.FAILING_OVER)
-
-        assert self.mock_connection.maintenance_state == MaintenanceState.FAILING_OVER
+        assert self.mock_connection.maintenance_state == MaintenanceState.MAINTENANCE
         self.mock_connection.update_current_socket_timeout.assert_called_once_with(20)
         self.mock_connection.set_tmp_settings.assert_called_once_with(
             tmp_relax_timeout=20
@@ -663,7 +653,7 @@ class TestMaintenanceEventConnectionHandler:
 
     def test_handle_maintenance_completed_event_success(self):
         """Test successful maintenance completed event handling."""
-        self.mock_connection.maintenance_state = MaintenanceState.MIGRATING
+        self.mock_connection.maintenance_state = MaintenanceState.MAINTENANCE
 
         self.handler.handle_maintenance_completed_event()
 

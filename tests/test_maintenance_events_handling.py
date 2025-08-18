@@ -1808,7 +1808,7 @@ class TestMaintenanceEventsHandlingMultipleProxies:
         conn_event_handler = conn._maintenance_event_connection_handler
         conn_event_handler.handle_event(NodeMigratingEvent(id=3, ttl=1))
         # validate connection is in MIGRATING state
-        assert conn.maintenance_state == MaintenanceState.MIGRATING
+        assert conn.maintenance_state == MaintenanceState.MAINTENANCE
         assert conn.socket_timeout == self.config.relax_timeout
 
         # Send MIGRATED event to con with ip = key3
