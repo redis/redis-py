@@ -86,6 +86,29 @@ class HttpClient:
         auth_basic: Optional[Tuple[str, str]] = None,  # (username, password)
         user_agent: str = DEFAULT_USER_AGENT,
     ) -> None:
+        """
+        Initialize a new HTTP client instance.
+
+        Args:
+            base_url: Base URL for all requests. Will be prefixed to all paths.
+            headers: Default headers to include in all requests.
+            timeout: Default timeout in seconds for requests.
+            retry: Retry configuration for failed requests.
+            verify_tls: Whether to verify TLS certificates.
+            ca_file: Path to CA certificate file for TLS verification.
+            ca_path: Path to a directory containing CA certificates.
+            ca_data: CA certificate data as string or bytes.
+            client_cert_file: Path to client certificate for mutual TLS.
+            client_key_file: Path to a client private key for mutual TLS.
+            client_key_password: Password for an encrypted client private key.
+            auth_basic: Tuple of (username, password) for HTTP basic auth.
+            user_agent: User-Agent header value for requests.
+
+        The client supports both regular HTTPS with server verification and mutual TLS
+        authentication. For server verification, provide CA certificate information via
+        ca_file, ca_path or ca_data. For mutual TLS, additionally provide a client
+        certificate and key via client_cert_file and client_key_file.
+        """
         self.base_url = base_url.rstrip("/") + "/" if base_url and not base_url.endswith("/") else base_url
         self._default_headers = {k.lower(): v for k, v in (headers or {}).items()}
         self.timeout = timeout

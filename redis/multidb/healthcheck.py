@@ -103,7 +103,6 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             client_key_file: Path to client private key file for mutual TLS
             client_key_password: Password for encrypted client private key
         """
-
         super().__init__(
             retry=retry,
         )
