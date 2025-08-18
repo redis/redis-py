@@ -13,10 +13,9 @@ from redis.typing import Number
 class MaintenanceState(enum.Enum):
     NONE = "none"
     MOVING = "moving"
-    MIGRATING = "migrating"
-    FAILING_OVER = "failing_over"
+    MAINTENANCE = "maintenance"
 
-
+    
 class EndpointType:
     """Constants for valid endpoint types used in CLIENT MAINT_NOTIFICATIONS command."""
 
@@ -26,6 +25,7 @@ class EndpointType:
     EXTERNAL_FQDN = "external-fqdn"
     NONE = "none"
 
+    
     @classmethod
     def get_valid_types(cls):
         """Return a set of all valid endpoint types."""
@@ -37,7 +37,7 @@ class EndpointType:
             cls.NONE,
         }
 
-
+      
 if TYPE_CHECKING:
     from redis.connection import (
         BlockingConnectionPool,
@@ -531,6 +531,7 @@ class MaintenanceEventsConfig:
 
         self.endpoint_type = endpoint_type
 
+
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("
@@ -748,6 +749,14 @@ class MaintenanceEventPoolHandler:
 
 
 class MaintenanceEventConnectionHandler:
+    # 1 = "starting maintenance" events, 0 = "completed maintenance" events
+    _EVENT_TYPES: dict[type["MaintenanceEvent"], int] = {
+        NodeMigratingEvent: 1,
+        NodeFailingOverEvent: 1,
+        NodeMigratedEvent: 0,
+        NodeFailedOverEvent: 0,
+    }
+
     def __init__(
         self, connection: "ConnectionInterface", config: MaintenanceEventsConfig
     ) -> None:
@@ -755,16 +764,17 @@ class MaintenanceEventConnectionHandler:
         self.config = config
 
     def handle_event(self, event: MaintenanceEvent):
-        if isinstance(event, NodeMigratingEvent):
-            return self.handle_maintenance_start_event(MaintenanceState.MIGRATING)
-        elif isinstance(event, NodeMigratedEvent):
-            return self.handle_maintenance_completed_event()
-        elif isinstance(event, NodeFailingOverEvent):
-            return self.handle_maintenance_start_event(MaintenanceState.FAILING_OVER)
-        elif isinstance(event, NodeFailedOverEvent):
-            return self.handle_maintenance_completed_event()
-        else:
+        # get the event type by checking its class in the _EVENT_TYPES dict
+        event_type = self._EVENT_TYPES.get(event.__class__, None)
+
+        if event_type is None:
             logging.error(f"Unhandled event type: {event}")
+            return
+
+        if event_type:
+            self.handle_maintenance_start_event(MaintenanceState.MAINTENANCE)
+        else:
+            self.handle_maintenance_completed_event()
 
     def handle_maintenance_start_event(self, maintenance_state: MaintenanceState):
         if (
@@ -772,6 +782,7 @@ class MaintenanceEventConnectionHandler:
             or not self.config.is_relax_timeouts_enabled()
         ):
             return
+
         self.connection.maintenance_state = maintenance_state
         self.connection.set_tmp_settings(tmp_relax_timeout=self.config.relax_timeout)
         # extend the timeout for all created connections
