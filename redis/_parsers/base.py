@@ -1,7 +1,13 @@
 import sys
 from abc import ABC
 from asyncio import IncompleteReadError, StreamReader, TimeoutError
-from typing import Callable, List, Optional, Protocol, Union
+from typing import Awaitable, Callable, List, Optional, Protocol, Union
+
+from redis.maintenance_events import (
+    NodeMigratedEvent,
+    NodeMigratingEvent,
+    NodeMovingEvent,
+)
 
 if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
     from asyncio import timeout as async_timeout
@@ -158,7 +164,19 @@ class AsyncBaseParser(BaseParser):
         raise NotImplementedError()
 
 
-_INVALIDATION_MESSAGE = [b"invalidate", "invalidate"]
+_INVALIDATION_MESSAGE = (b"invalidate", "invalidate")
+_MOVING_MESSAGE = (b"MOVING", "MOVING")
+_MIGRATING_MESSAGE = (b"MIGRATING", "MIGRATING")
+_MIGRATED_MESSAGE = (b"MIGRATED", "MIGRATED")
+_FAILING_OVER_MESSAGE = (b"FAILING_OVER", "FAILING_OVER")
+_FAILED_OVER_MESSAGE = (b"FAILED_OVER", "FAILED_OVER")
+
+_MAINTENANCE_MESSAGES = (
+    *_MIGRATING_MESSAGE,
+    *_MIGRATED_MESSAGE,
+    *_FAILING_OVER_MESSAGE,
+    *_FAILED_OVER_MESSAGE,
+)
 
 
 class PushNotificationsParser(Protocol):
@@ -166,16 +184,46 @@ class PushNotificationsParser(Protocol):
 
     pubsub_push_handler_func: Callable
     invalidation_push_handler_func: Optional[Callable] = None
+    node_moving_push_handler_func: Optional[Callable] = None
+    maintenance_push_handler_func: Optional[Callable] = None
 
     def handle_pubsub_push_response(self, response):
         """Handle pubsub push responses"""
         raise NotImplementedError()
 
     def handle_push_response(self, response, **kwargs):
-        if response[0] not in _INVALIDATION_MESSAGE:
+        msg_type = response[0]
+        if msg_type not in (
+            *_INVALIDATION_MESSAGE,
+            *_MAINTENANCE_MESSAGES,
+            *_MOVING_MESSAGE,
+        ):
             return self.pubsub_push_handler_func(response)
-        if self.invalidation_push_handler_func:
+        if msg_type in _INVALIDATION_MESSAGE and self.invalidation_push_handler_func:
             return self.invalidation_push_handler_func(response)
+        if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
+            # TODO: PARSE latest format when available
+            host, port = response[2].decode().split(":")
+            ttl = response[1]
+            id = 1  # Hardcoded value until the notification starts including the id
+            notification = NodeMovingEvent(id, host, port, ttl)
+            return self.node_moving_push_handler_func(notification)
+        if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
+            if msg_type in _MIGRATING_MESSAGE:
+                # TODO: PARSE latest format when available
+                ttl = response[1]
+                id = 2  # Hardcoded value until the notification starts including the id
+                notification = NodeMigratingEvent(id, ttl)
+            elif msg_type in _MIGRATED_MESSAGE:
+                # TODO: PARSE latest format when available
+                id = 3  # Hardcoded value until the notification starts including the id
+                notification = NodeMigratedEvent(id)
+            else:
+                notification = None
+            if notification is not None:
+                return self.maintenance_push_handler_func(notification)
+            else:
+                return None
 
     def set_pubsub_push_handler(self, pubsub_push_handler_func):
         self.pubsub_push_handler_func = pubsub_push_handler_func
@@ -183,12 +231,20 @@ class PushNotificationsParser(Protocol):
     def set_invalidation_push_handler(self, invalidation_push_handler_func):
         self.invalidation_push_handler_func = invalidation_push_handler_func
 
+    def set_node_moving_push_handler(self, node_moving_push_handler_func):
+        self.node_moving_push_handler_func = node_moving_push_handler_func
+
+    def set_maintenance_push_handler(self, maintenance_push_handler_func):
+        self.maintenance_push_handler_func = maintenance_push_handler_func
+
 
 class AsyncPushNotificationsParser(Protocol):
     """Protocol defining async RESP3-specific parsing functionality"""
 
     pubsub_push_handler_func: Callable
     invalidation_push_handler_func: Optional[Callable] = None
+    node_moving_push_handler_func: Optional[Callable[..., Awaitable[None]]] = None
+    maintenance_push_handler_func: Optional[Callable[..., Awaitable[None]]] = None
 
     async def handle_pubsub_push_response(self, response):
         """Handle pubsub push responses asynchronously"""
@@ -196,10 +252,34 @@ class AsyncPushNotificationsParser(Protocol):
 
     async def handle_push_response(self, response, **kwargs):
         """Handle push responses asynchronously"""
-        if response[0] not in _INVALIDATION_MESSAGE:
+        msg_type = response[0]
+        if msg_type not in (
+            *_INVALIDATION_MESSAGE,
+            *_MAINTENANCE_MESSAGES,
+            *_MOVING_MESSAGE,
+        ):
             return await self.pubsub_push_handler_func(response)
-        if self.invalidation_push_handler_func:
+        if msg_type in _INVALIDATION_MESSAGE and self.invalidation_push_handler_func:
             return await self.invalidation_push_handler_func(response)
+        if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
+            # push notification from enterprise cluster for node moving
+            # TODO: PARSE latest format when available
+            host, port = response[2].split(":")
+            ttl = response[1]
+            id = 1  # Hardcoded value for async parser
+            notification = NodeMovingEvent(id, host, port, ttl)
+            return await self.node_moving_push_handler_func(notification)
+        if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
+            if msg_type in _MIGRATING_MESSAGE:
+                # TODO: PARSE latest format when available
+                ttl = response[1]
+                id = 2  # Hardcoded value for async parser
+                notification = NodeMigratingEvent(id, ttl)
+            elif msg_type in _MIGRATED_MESSAGE:
+                # TODO: PARSE latest format when available
+                id = 3  # Hardcoded value for async parser
+                notification = NodeMigratedEvent(id)
+            return await self.maintenance_push_handler_func(notification)
 
     def set_pubsub_push_handler(self, pubsub_push_handler_func):
         """Set the pubsub push handler function"""
@@ -208,6 +288,12 @@ class AsyncPushNotificationsParser(Protocol):
     def set_invalidation_push_handler(self, invalidation_push_handler_func):
         """Set the invalidation push handler function"""
         self.invalidation_push_handler_func = invalidation_push_handler_func
+
+    def set_node_moving_push_handler(self, node_moving_push_handler_func):
+        self.node_moving_push_handler_func = node_moving_push_handler_func
+
+    def set_maintenance_push_handler(self, maintenance_push_handler_func):
+        self.maintenance_push_handler_func = maintenance_push_handler_func
 
 
 class _AsyncRESPBase(AsyncBaseParser):
