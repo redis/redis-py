@@ -15,6 +15,7 @@ class MaintenanceState(enum.Enum):
     FAILING_OVER = "failing_over"
 
 
+
 if TYPE_CHECKING:
     from redis.connection import (
         BlockingConnectionPool,
@@ -581,10 +582,12 @@ class MaintenanceEventConnectionHandler:
             or not self.config.is_relax_timeouts_enabled()
         ):
             return
+
         self.connection.maintenance_state = maintenance_state
         self.connection.set_tmp_settings(tmp_relax_timeout=self.config.relax_timeout)
         # extend the timeout for all created connections
         self.connection.update_current_socket_timeout(self.config.relax_timeout)
+
 
     def handle_maintenance_completed_event(self):
         # Only reset timeouts if state is not MOVING and relax timeouts are enabled
