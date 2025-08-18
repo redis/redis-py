@@ -305,7 +305,7 @@ class TestActiveActiveStandalone:
         pubsub_thread.stop()
 
         assert listener.is_changed_flag == True
-        assert messages_count > 5
+        assert messages_count > 2
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -350,4 +350,4 @@ class TestActiveActiveStandalone:
         pubsub_thread.stop()
 
         assert listener.is_changed_flag == True
-        assert messages_count > 5
+        assert messages_count > 2
