@@ -109,7 +109,7 @@ class HttpClient:
         ca_file, ca_path or ca_data. For mutual TLS, additionally provide a client
         certificate and key via client_cert_file and client_key_file.
         """
-        self.base_url = base_url.rstrip("/") + "/" if base_url and not base_url.endswith("/") else base_url
+        self.base_url = base_url.rstrip() + "/" if base_url and not base_url.endswith("/") else base_url
         self._default_headers = {k.lower(): v for k, v in (headers or {}).items()}
         self.timeout = timeout
         self.retry = retry
@@ -170,7 +170,7 @@ class HttpClient:
         self,
         path: str,
         *,
-        json_body: Any = None,
+        json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
         params: Optional[Mapping[str, Union[str, int, float, bool, None, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
@@ -191,7 +191,7 @@ class HttpClient:
         self,
         path: str,
         *,
-        json_body: Any = None,
+        json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
         params: Optional[Mapping[str, Union[str, int, float, bool, None, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
@@ -212,7 +212,7 @@ class HttpClient:
         self,
         path: str,
         *,
-        json_body: Any = None,
+        json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
         params: Optional[Mapping[str, Union[str, int, float, bool, None, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
@@ -340,7 +340,7 @@ class HttpClient:
             return resp.json()
         return resp
 
-    def _prepare_body(self, *, json_body: Any = None, data: Optional[Union[bytes, str]] = None) -> Optional[Union[bytes, str]]:
+    def _prepare_body(self, *, json_body: Optional[Any] = None, data: Optional[Union[bytes, str]] = None) -> Optional[Union[bytes, str]]:
         if json_body is not None and data is not None:
             raise ValueError("Provide either json_body or data, not both.")
         if json_body is not None:

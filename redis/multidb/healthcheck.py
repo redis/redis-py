@@ -28,7 +28,7 @@ class HealthCheck(ABC):
 class AbstractHealthCheck(HealthCheck):
     def __init__(
             self,
-            retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
+            retry: Retry = Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
     ) -> None:
         self._retry = retry
         self._retry.update_supported_errors([ConnectionRefusedError])
@@ -45,7 +45,7 @@ class AbstractHealthCheck(HealthCheck):
 class EchoHealthCheck(AbstractHealthCheck):
     def __init__(
         self,
-        retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF),
+        retry: Retry = Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
     ) -> None:
         """
         Check database healthiness by sending an echo request.
@@ -71,7 +71,7 @@ class LagAwareHealthCheck(AbstractHealthCheck):
     """
     def __init__(
         self,
-        retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF),
+        retry: Retry = Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF),
         rest_api_port: int = 9443,
         availability_lag_tolerance: int = 100,
         timeout: float = DEFAULT_TIMEOUT,
