@@ -157,11 +157,10 @@ class VectorSetCommands(CommandsProtocol):
         """
         Compare a vector or element ``input``  with the other vectors in a vector set ``key``.
 
-        ``with_scores`` sets if returns, for each element, the JSON attribute associated
-        with the element or None when no attributes are present.
+        ``with_scores`` sets if similarity scores should be returned for each element in the result.
 
-        ``with_attribs`` sets if the results should be returned with the
-                attributes of the elements in the result.
+        ``with_attribs`` ``with_attribs`` sets if the results should be returned with the
+                attributes of the elements in the result, or None when no attributes are present.
 
         ``count`` sets the number of results to return.
 
@@ -196,13 +195,17 @@ class VectorSetCommands(CommandsProtocol):
         else:
             pieces.extend(["ELE", input])
 
-        if with_scores:
-            pieces.append("WITHSCORES")
-            options[CallbacksOptions.WITHSCORES.value] = True
+        if with_scores or with_attribs:
+            if get_protocol_version(self.client) in ["3", 3]:
+                options[CallbacksOptions.RESP3.value] = True
 
-        if with_attribs:
-            pieces.append("WITHATTRIBS")
-            options[CallbacksOptions.WITHATTRIBS.value] = True
+            if with_scores:
+                pieces.append("WITHSCORES")
+                options[CallbacksOptions.WITHSCORES.value] = True
+
+            if with_attribs:
+                pieces.append("WITHATTRIBS")
+                options[CallbacksOptions.WITHATTRIBS.value] = True
 
         if count:
             pieces.extend(["COUNT", count])
