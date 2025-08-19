@@ -16,8 +16,8 @@ class MaintenanceState(enum.Enum):
     MAINTENANCE = "maintenance"
 
 
-class EndpointType:
-    """Constants for valid endpoint types used in CLIENT MAINT_NOTIFICATIONS command."""
+class EndpointType(enum.Enum):
+    """Valid endpoint types used in CLIENT MAINT_NOTIFICATIONS command."""
 
     INTERNAL_IP = "internal-ip"
     INTERNAL_FQDN = "internal-fqdn"
@@ -25,16 +25,9 @@ class EndpointType:
     EXTERNAL_FQDN = "external-fqdn"
     NONE = "none"
 
-    @classmethod
-    def get_valid_types(cls):
-        """Return a set of all valid endpoint types."""
-        return {
-            cls.INTERNAL_IP,
-            cls.INTERNAL_FQDN,
-            cls.EXTERNAL_IP,
-            cls.EXTERNAL_FQDN,
-            cls.NONE,
-        }
+    def __str__(self):
+        """Return the string value of the enum."""
+        return self.value
 
 
 if TYPE_CHECKING:
@@ -438,7 +431,7 @@ class MaintenanceEventsConfig:
         enabled: bool = True,
         proactive_reconnect: bool = True,
         relax_timeout: Optional[Number] = 20,
-        endpoint_type: Optional[str] = None,
+        endpoint_type: Optional[EndpointType] = None,
     ):
         """
         Initialize a new MaintenanceEventsConfig.
@@ -450,8 +443,7 @@ class MaintenanceEventsConfig:
                 Defaults to True.
             relax_timeout (Number): The relax timeout to use for the connection during maintenance.
                 If -1 is provided - the relax timeout is disabled. Defaults to 20.
-            endpoint_type (Optional[str]): Override for the endpoint type to use in CLIENT MAINT_NOTIFICATIONS.
-                Must be one of: 'internal-ip', 'internal-fqdn', 'external-ip', 'external-fqdn', 'none'.
+            endpoint_type (Optional[EndpointType]): Override for the endpoint type to use in CLIENT MAINT_NOTIFICATIONS.
                 If None, the endpoint type will be automatically determined based on the host and TLS configuration.
                 Defaults to None.
 
@@ -461,19 +453,6 @@ class MaintenanceEventsConfig:
         self.enabled = enabled
         self.relax_timeout = relax_timeout
         self.proactive_reconnect = proactive_reconnect
-
-        # Validate endpoint_type if provided
-        if (
-            endpoint_type is not None
-            and endpoint_type not in EndpointType.get_valid_types()
-        ):
-            valid_types = ", ".join(
-                f"'{t}'" for t in sorted(EndpointType.get_valid_types())
-            )
-            raise ValueError(
-                f"Invalid endpoint_type '{endpoint_type}'. Must be one of: {valid_types}"
-            )
-
         self.endpoint_type = endpoint_type
 
     def __repr__(self) -> str:
@@ -497,7 +476,9 @@ class MaintenanceEventsConfig:
         """
         return self.relax_timeout != -1
 
-    def get_endpoint_type(self, host: str, connection: "ConnectionInterface") -> str:
+    def get_endpoint_type(
+        self, host: str, connection: "ConnectionInterface"
+    ) -> EndpointType:
         """
         Determine the appropriate endpoint type for CLIENT MAINT_NOTIFICATIONS command.
 

@@ -431,15 +431,13 @@ class AbstractConnection(ConnectionInterface):
         self.maintenance_events_config = maintenance_events_config
 
         # Set up maintenance events if enabled
-        if maintenance_events_config and maintenance_events_config.enabled:
-            self._enable_maintenance_events(
-                maintenance_events_pool_handler,
-                orig_host_address,
-                orig_socket_timeout,
-                orig_socket_connect_timeout,
-            )
-        else:
-            self._maintenance_event_connection_handler = None
+        self._configure_maintenance_events(
+            maintenance_events_pool_handler,
+            orig_host_address,
+            orig_socket_timeout,
+            orig_socket_connect_timeout,
+        )
+
         self._should_reconnect = False
         self.maintenance_state = maintenance_state
 
@@ -498,7 +496,7 @@ class AbstractConnection(ConnectionInterface):
         """
         self._parser = parser_class(socket_read_size=self._socket_read_size)
 
-    def _enable_maintenance_events(
+    def _configure_maintenance_events(
         self,
         maintenance_events_pool_handler=None,
         orig_host_address=None,
@@ -510,6 +508,7 @@ class AbstractConnection(ConnectionInterface):
             not self.maintenance_events_config
             or not self.maintenance_events_config.enabled
         ):
+            self._maintenance_event_connection_handler = None
             return
 
         # Set up pool handler if available
@@ -702,7 +701,7 @@ class AbstractConnection(ConnectionInterface):
                     "MAINT_NOTIFICATIONS",
                     "ON",
                     "moving-endpoint-type",
-                    endpoint_type,
+                    endpoint_type.value,
                     check_health=check_health,
                 )
                 response = self.read_response()

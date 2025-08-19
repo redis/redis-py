@@ -209,6 +209,7 @@ class PushNotificationsParser(Protocol):
                 and self.invalidation_push_handler_func
             ):
                 return self.invalidation_push_handler_func(response)
+
             if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
                 # Expected message format is: MOVING <seq_number> <time> <endpoint>
                 id = response[1]
@@ -280,6 +281,7 @@ class AsyncPushNotificationsParser(Protocol):
                 and self.invalidation_push_handler_func
             ):
                 return await self.invalidation_push_handler_func(response)
+
             if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
                 # push notification from enterprise cluster for node moving
                 id = response[1]

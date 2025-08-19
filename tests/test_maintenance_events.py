@@ -674,23 +674,11 @@ class TestEndpointType:
 
     def test_endpoint_type_constants(self):
         """Test that the EndpointType constants are correct."""
-        assert EndpointType.INTERNAL_IP == "internal-ip"
-        assert EndpointType.INTERNAL_FQDN == "internal-fqdn"
-        assert EndpointType.EXTERNAL_IP == "external-ip"
-        assert EndpointType.EXTERNAL_FQDN == "external-fqdn"
-        assert EndpointType.NONE == "none"
-
-    def test_get_valid_types(self):
-        """Test that get_valid_types returns the expected set."""
-        valid_types = EndpointType.get_valid_types()
-        expected_types = {
-            "internal-ip",
-            "internal-fqdn",
-            "external-ip",
-            "external-fqdn",
-            "none",
-        }
-        assert valid_types == expected_types
+        assert EndpointType.INTERNAL_IP.value == "internal-ip"
+        assert EndpointType.INTERNAL_FQDN.value == "internal-fqdn"
+        assert EndpointType.EXTERNAL_IP.value == "external-ip"
+        assert EndpointType.EXTERNAL_FQDN.value == "external-fqdn"
+        assert EndpointType.NONE.value == "none"
 
 
 class TestMaintenanceEventsConfigEndpointType:
@@ -724,14 +712,9 @@ class TestMaintenanceEventsConfigEndpointType:
 
     def test_config_validation_valid_endpoint_types(self):
         """Test that MaintenanceEventsConfig accepts valid endpoint types."""
-        for endpoint_type in EndpointType.get_valid_types():
+        for endpoint_type in EndpointType:
             config = MaintenanceEventsConfig(endpoint_type=endpoint_type)
             assert config.endpoint_type == endpoint_type
-
-    def test_config_validation_invalid_endpoint_type(self):
-        """Test that MaintenanceEventsConfig raises ValueError for invalid endpoint type."""
-        with pytest.raises(ValueError, match="Invalid endpoint_type"):
-            MaintenanceEventsConfig(endpoint_type="invalid-type")
 
     def test_config_validation_none_endpoint_type(self):
         """Test that MaintenanceEventsConfig accepts None as endpoint type."""
