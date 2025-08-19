@@ -15,7 +15,7 @@ class MaintenanceState(enum.Enum):
     MOVING = "moving"
     MAINTENANCE = "maintenance"
 
-    
+
 class EndpointType:
     """Constants for valid endpoint types used in CLIENT MAINT_NOTIFICATIONS command."""
 
@@ -25,7 +25,6 @@ class EndpointType:
     EXTERNAL_FQDN = "external-fqdn"
     NONE = "none"
 
-    
     @classmethod
     def get_valid_types(cls):
         """Return a set of all valid endpoint types."""
@@ -37,7 +36,7 @@ class EndpointType:
             cls.NONE,
         }
 
-      
+
 if TYPE_CHECKING:
     from redis.connection import (
         BlockingConnectionPool,
@@ -424,60 +423,6 @@ def _is_private_fqdn(host: str) -> bool:
     return False
 
 
-def _get_resolved_ip_from_connection(
-    connection: "ConnectionInterface",
-) -> Optional[str]:
-    """
-    Extract the resolved IP address from an established connection.
-
-    First tries to get the actual IP from the socket (most accurate),
-    then falls back to DNS resolution if needed.
-
-    Args:
-        connection: The connection object to extract the IP from
-
-    Returns:
-        str: The resolved IP address, or None if it cannot be determined
-    """
-    import socket
-
-    # Method 1: Try to get the actual IP from the established socket connection
-    # This is most accurate as it shows the exact IP being used
-    try:
-        sock = getattr(connection, "_sock", None)
-        if sock is not None:
-            peer_addr = sock.getpeername()
-            if peer_addr and len(peer_addr) >= 1:
-                # For TCP sockets, peer_addr is typically (host, port) tuple
-                # Return just the host part
-                return peer_addr[0]
-    except (AttributeError, OSError):
-        # Socket might not be connected or getpeername() might fail
-        pass
-
-    # Method 2: Fallback to DNS resolution of the host
-    # This is less accurate but works when socket is not available
-    try:
-        host = getattr(connection, "host", None)
-        port = getattr(connection, "port", 6379)
-        if host:
-            # Use getaddrinfo to resolve the hostname to IP
-            # This mimics what the connection would do during _connect()
-            addr_info = socket.getaddrinfo(
-                host, port, socket.AF_UNSPEC, socket.SOCK_STREAM
-            )
-            if addr_info:
-                # Return the IP from the first result
-                # addr_info[0] is (family, socktype, proto, canonname, sockaddr)
-                # sockaddr[0] is the IP address
-                return addr_info[0][4][0]
-    except (AttributeError, OSError, socket.gaierror):
-        # DNS resolution might fail
-        pass
-
-    return None
-
-
 class MaintenanceEventsConfig:
     """
     Configuration class for maintenance events handling behaviour. Events are received through
@@ -530,7 +475,6 @@ class MaintenanceEventsConfig:
             )
 
         self.endpoint_type = endpoint_type
-
 
     def __repr__(self) -> str:
         return (

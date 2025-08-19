@@ -685,11 +685,13 @@ class AbstractConnection(ConnectionInterface):
                 raise ConnectionError("Invalid RESP version")
 
         # Send maintenance notifications handshake if RESP3 is active and maintenance events are enabled
+        # and we have a host to determine the endpoint type from
         if (
             self.protocol not in [2, "2"]
             and self.maintenance_events_config
             and self.maintenance_events_config.enabled
-            and hasattr(self, "_maintenance_event_connection_handler")
+            and self._maintenance_event_connection_handler
+            and hasattr(self, "host")
         ):
             try:
                 endpoint_type = self.maintenance_events_config.get_endpoint_type(
