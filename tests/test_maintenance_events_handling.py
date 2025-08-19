@@ -198,6 +198,7 @@ class MockSocket:
                 # FAILING_OVER push message before SET key_receive_failing_over_X response
                 # Format: >3\r\n$12\r\nFAILING_OVER\r\n:1\r\n:10\r\n (3 elements: FAILING_OVER, id, ttl)
                 failing_over_push = ">3\r\n$12\r\nFAILING_OVER\r\n:1\r\n:10\r\n"
+
                 response = failing_over_push.encode() + response
             elif (
                 b"key_receive_failed_over_" in data
@@ -1809,7 +1810,7 @@ class TestMaintenanceEventsHandlingMultipleProxies:
         conn_event_handler.handle_event(NodeMigratingEvent(id=3, ttl=1))
         # validate connection is in MIGRATING state
         assert conn.maintenance_state == MaintenanceState.MAINTENANCE
-
+        
         assert conn.socket_timeout == self.config.relax_timeout
 
         # Send MIGRATED event to con with ip = key3

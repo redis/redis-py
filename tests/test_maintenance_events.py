@@ -587,7 +587,6 @@ class TestMaintenanceEventConnectionHandler:
             self.handler.handle_event(event)
             mock_handle.assert_called_once_with(MaintenanceState.MAINTENANCE)
 
-
     def test_handle_event_failed_over(self):
         """Test handling of NodeFailedOverEvent."""
         event = NodeFailedOverEvent(id=1)
