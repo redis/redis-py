@@ -1,6 +1,6 @@
 import json
 from enum import Enum
-from typing import Awaitable, Dict, List, Optional, Union
+from typing import Any, Awaitable, Dict, List, Optional, Union
 
 from redis.client import NEVER_DECODE
 from redis.commands.helpers import get_protocol_version
@@ -33,6 +33,7 @@ class CallbacksOptions(Enum):
 
     RAW = "RAW"
     WITHSCORES = "WITHSCORES"
+    WITHATTRIBS = "WITHATTRIBS"
     ALLOW_DECODING = "ALLOW_DECODING"
     RESP3 = "RESP3"
 
@@ -123,6 +124,7 @@ class VectorSetCommands(CommandsProtocol):
         key: KeyT,
         input: Union[List[float], bytes, str],
         with_scores: Optional[bool] = False,
+        with_attribs: Optional[bool] = False,
         count: Optional[int] = None,
         ef: Optional[Number] = None,
         filter: Optional[str] = None,
@@ -131,14 +133,35 @@ class VectorSetCommands(CommandsProtocol):
         no_thread: Optional[bool] = False,
         epsilon: Optional[Number] = None,
     ) -> Union[
-        Awaitable[Optional[List[Union[List[EncodableT], Dict[EncodableT, Number]]]]],
-        Optional[List[Union[List[EncodableT], Dict[EncodableT, Number]]]],
+        Awaitable[
+            Optional[
+                List[
+                    Union[
+                        List[EncodableT],
+                        Dict[EncodableT, Number],
+                        Dict[EncodableT, Dict[str, Any]],
+                    ]
+                ]
+            ]
+        ],
+        Optional[
+            List[
+                Union[
+                    List[EncodableT],
+                    Dict[EncodableT, Number],
+                    Dict[EncodableT, Dict[str, Any]],
+                ]
+            ]
+        ],
     ]:
         """
         Compare a vector or element ``input``  with the other vectors in a vector set ``key``.
 
-        ``with_scores`` sets if the results should be returned with the
-                similarity scores of the elements in the result.
+        ``with_scores`` sets if returns, for each element, the JSON attribute associated
+        with the element or None when no attributes are present.
+
+        ``with_attribs`` sets if the results should be returned with the
+                attributes of the elements in the result.
 
         ``count`` sets the number of results to return.
 
@@ -176,6 +199,10 @@ class VectorSetCommands(CommandsProtocol):
         if with_scores:
             pieces.append("WITHSCORES")
             options[CallbacksOptions.WITHSCORES.value] = True
+
+        if with_attribs:
+            pieces.append("WITHATTRIBS")
+            options[CallbacksOptions.WITHATTRIBS.value] = True
 
         if count:
             pieces.extend(["COUNT", count])

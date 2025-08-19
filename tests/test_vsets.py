@@ -265,6 +265,80 @@ def test_vsim_with_scores(d_client):
 
 
 @skip_if_server_version_lt("7.9.0")
+def test_vsim_with_attribs_attribs_set(d_client):
+    elements_count = 5
+    vector_dim = 10
+    attrs_dict = {"key1": "value1", "key2": "value2"}
+    for i in range(elements_count):
+        float_array = [random.uniform(0, 5) for x in range(vector_dim)]
+        d_client.vset().vadd(
+            "myset",
+            float_array,
+            f"elem{i}",
+            numlinks=64,
+            attributes=attrs_dict if i % 2 == 0 else None,
+        )
+
+    vsim = d_client.vset().vsim("myset", input="elem1", with_attribs=True)
+    assert len(vsim) == 5
+    assert isinstance(vsim, dict)
+    assert vsim["elem1"] is None
+    assert vsim["elem2"] == attrs_dict
+
+
+@skip_if_server_version_lt("7.9.0")
+def test_vsim_with_scores_and_attribs_attribs_set(d_client):
+    elements_count = 5
+    vector_dim = 10
+    attrs_dict = {"key1": "value1", "key2": "value2"}
+    for i in range(elements_count):
+        float_array = [random.uniform(0, 5) for x in range(vector_dim)]
+        d_client.vset().vadd(
+            "myset",
+            float_array,
+            f"elem{i}",
+            numlinks=64,
+            attributes=attrs_dict if i % 2 == 0 else None,
+        )
+
+    vsim = d_client.vset().vsim(
+        "myset", input="elem1", with_scores=True, with_attribs=True
+    )
+    assert len(vsim) == 5
+    assert isinstance(vsim, dict)
+    assert isinstance(vsim["elem1"], dict)
+    assert "score" in vsim["elem1"]
+    assert "attributes" in vsim["elem1"]
+    assert isinstance(vsim["elem1"]["score"], float)
+    assert vsim["elem1"]["attributes"] is None
+
+    assert isinstance(vsim["elem2"], dict)
+    assert "score" in vsim["elem2"]
+    assert "attributes" in vsim["elem2"]
+    assert isinstance(vsim["elem2"]["score"], float)
+    assert vsim["elem2"]["attributes"] == attrs_dict
+
+
+@skip_if_server_version_lt("7.9.0")
+def test_vsim_with_attribs_attribs_not_set(d_client):
+    elements_count = 20
+    vector_dim = 50
+    for i in range(elements_count):
+        float_array = [random.uniform(0, 10) for x in range(vector_dim)]
+        d_client.vset().vadd(
+            "myset",
+            float_array,
+            f"elem{i}",
+            numlinks=64,
+        )
+
+    vsim = d_client.vset().vsim("myset", input="elem1", with_attribs=True)
+    assert len(vsim) == 10
+    assert isinstance(vsim, dict)
+    assert vsim["elem1"] is None
+
+
+@skip_if_server_version_lt("7.9.0")
 def test_vsim_with_different_vector_input_types(d_client):
     elements_count = 10
     vector_dim = 5
@@ -789,9 +863,12 @@ def test_vrandmember(d_client):
 def test_vset_commands_without_decoding_responces(client):
     # test vadd
     elements = ["elem1", "elem2", "elem3"]
+    attrs_dict = {"key1": "value1", "key2": "value2"}
     for elem in elements:
         float_array = [random.uniform(0.5, 10) for x in range(0, 8)]
-        resp = client.vset().vadd("myset", float_array, element=elem)
+        resp = client.vset().vadd(
+            "myset", float_array, element=elem, attributes=attrs_dict
+        )
         assert resp == 1
 
     # test vemb
@@ -817,6 +894,26 @@ def test_vset_commands_without_decoding_responces(client):
     assert len(vsim_with_scores) == 3
     assert isinstance(vsim_with_scores, dict)
     assert isinstance(vsim_with_scores[b"elem1"], float)
+
+    # test vsim with attributes
+    vsim_with_attribs = client.vset().vsim("myset", input="elem1", with_attribs=True)
+    assert len(vsim_with_attribs) == 3
+    assert isinstance(vsim_with_attribs, dict)
+    assert isinstance(vsim_with_attribs[b"elem1"], dict)
+    assert vsim_with_attribs[b"elem1"] == attrs_dict
+
+    # test vsim with score and attributes
+    vsim_with_scores_and_attribs = client.vset().vsim(
+        "myset", input="elem1", with_scores=True, with_attribs=True
+    )
+    assert len(vsim_with_scores_and_attribs) == 3
+    assert isinstance(vsim_with_scores_and_attribs, dict)
+    assert isinstance(vsim_with_scores_and_attribs[b"elem1"], dict)
+    assert "score" in vsim_with_scores_and_attribs[b"elem1"]
+    assert "attributes" in vsim_with_scores_and_attribs[b"elem1"]
+    assert isinstance(vsim_with_scores_and_attribs[b"elem1"]["score"], float)
+    assert isinstance(vsim_with_scores_and_attribs[b"elem1"]["attributes"], dict)
+    assert vsim_with_scores_and_attribs[b"elem1"]["attributes"] == attrs_dict
 
     # test vlinks - no scores
     element_links_all_layers = client.vset().vlinks("myset", "elem1")

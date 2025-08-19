@@ -1,3 +1,5 @@
+import json
+
 from redis._parsers.helpers import pairs_to_dict
 from redis.commands.vectorset.commands import CallbacksOptions
 
@@ -75,18 +77,39 @@ def parse_vsim_result(response, **options):
     structures depending on input options.
     Parsing VSIM result into:
     - List[List[str]]
-    - List[Dict[str, Number]]
+    - List[Dict[str, Number]] - when with_scores is used (without attributes)
+    - List[Dict[str, Mapping[str, Any]]] - when with_attribs is used (without scores)
+    - List[Dict[str, Union[Number, Mapping[str, Any]]]] - when with_scores and with_attribs are used
+
     """
     if response is None:
         return response
 
-    if options.get(CallbacksOptions.WITHSCORES.value):
+    withscores = bool(options.get(CallbacksOptions.WITHSCORES.value))
+    withattribs = bool(options.get(CallbacksOptions.WITHATTRIBS.value))
+
+    if withscores ^ withattribs:
         # Redis will return a list of list of pairs.
         # This list have to be transformed to dict
         result_dict = {}
         for key, value in pairs_to_dict(response).items():
-            value = float(value)
+            if withscores:
+                value = float(value)
+            else:
+                value = json.loads(value) if value else None
+
             result_dict[key] = value
+        return result_dict
+    elif withscores and withattribs:
+        it = iter(response)
+        result_dict = {}
+        for elem, score, attribs in zip(it, it, it):
+            if attribs is not None:
+                attribs_dict = json.loads(attribs)
+            else:
+                attribs_dict = None
+
+            result_dict[elem] = {"score": float(score), "attributes": attribs_dict}
         return result_dict
     else:
         # return the list of elements for each level
