@@ -11,7 +11,7 @@ from redis.typing import Number
 class MaintenanceState(enum.Enum):
     NONE = "none"
     MOVING = "moving"
-    MIGRATING = "migrating"
+    MAINTENANCE = "maintenance"
 
 
 if TYPE_CHECKING:
@@ -261,6 +261,105 @@ class NodeMigratedEvent(MaintenanceEvent):
         return hash((self.__class__, self.id))
 
 
+class NodeFailingOverEvent(MaintenanceEvent):
+    """
+    Event for when a Redis cluster node is in the process of failing over.
+
+    This event is received when a node starts a failover process during
+    cluster maintenance operations or when handling node failures.
+
+    Args:
+        id (int): Unique identifier for this event
+        ttl (int): Time-to-live in seconds for this notification
+    """
+
+    def __init__(self, id: int, ttl: int):
+        super().__init__(id, ttl)
+
+    def __repr__(self) -> str:
+        expiry_time = self.creation_time + self.ttl
+        remaining = max(0, expiry_time - time.monotonic())
+        return (
+            f"{self.__class__.__name__}("
+            f"id={self.id}, "
+            f"ttl={self.ttl}, "
+            f"creation_time={self.creation_time}, "
+            f"expires_at={expiry_time}, "
+            f"remaining={remaining:.1f}s, "
+            f"expired={self.is_expired()}"
+            f")"
+        )
+
+    def __eq__(self, other) -> bool:
+        """
+        Two NodeFailingOverEvent events are considered equal if they have the same
+        id and are of the same type.
+        """
+        if not isinstance(other, NodeFailingOverEvent):
+            return False
+        return self.id == other.id and type(self) is type(other)
+
+    def __hash__(self) -> int:
+        """
+        Return a hash value for the event to allow
+        instances to be used in sets and as dictionary keys.
+
+        Returns:
+            int: Hash value based on event type and id
+        """
+        return hash((self.__class__, self.id))
+
+
+class NodeFailedOverEvent(MaintenanceEvent):
+    """
+    Event for when a Redis cluster node has completed a failover.
+
+    This event is received when a node has finished the failover process
+    during cluster maintenance operations or after handling node failures.
+
+    Args:
+        id (int): Unique identifier for this event
+    """
+
+    DEFAULT_TTL = 5
+
+    def __init__(self, id: int):
+        super().__init__(id, NodeFailedOverEvent.DEFAULT_TTL)
+
+    def __repr__(self) -> str:
+        expiry_time = self.creation_time + self.ttl
+        remaining = max(0, expiry_time - time.monotonic())
+        return (
+            f"{self.__class__.__name__}("
+            f"id={self.id}, "
+            f"ttl={self.ttl}, "
+            f"creation_time={self.creation_time}, "
+            f"expires_at={expiry_time}, "
+            f"remaining={remaining:.1f}s, "
+            f"expired={self.is_expired()}"
+            f")"
+        )
+
+    def __eq__(self, other) -> bool:
+        """
+        Two NodeFailedOverEvent events are considered equal if they have the same
+        id and are of the same type.
+        """
+        if not isinstance(other, NodeFailedOverEvent):
+            return False
+        return self.id == other.id and type(self) is type(other)
+
+    def __hash__(self) -> int:
+        """
+        Return a hash value for the event to allow
+        instances to be used in sets and as dictionary keys.
+
+        Returns:
+            int: Hash value based on event type and id
+        """
+        return hash((self.__class__, self.id))
+
+
 class MaintenanceEventsConfig:
     """
     Configuration class for maintenance events handling behaviour. Events are received through
@@ -457,6 +556,14 @@ class MaintenanceEventPoolHandler:
 
 
 class MaintenanceEventConnectionHandler:
+    # 1 = "starting maintenance" events, 0 = "completed maintenance" events
+    _EVENT_TYPES: dict[type["MaintenanceEvent"], int] = {
+        NodeMigratingEvent: 1,
+        NodeFailingOverEvent: 1,
+        NodeMigratedEvent: 0,
+        NodeFailedOverEvent: 0,
+    }
+
     def __init__(
         self, connection: "ConnectionInterface", config: MaintenanceEventsConfig
     ) -> None:
@@ -464,25 +571,31 @@ class MaintenanceEventConnectionHandler:
         self.config = config
 
     def handle_event(self, event: MaintenanceEvent):
-        if isinstance(event, NodeMigratingEvent):
-            return self.handle_migrating_event(event)
-        elif isinstance(event, NodeMigratedEvent):
-            return self.handle_migration_completed_event(event)
-        else:
-            logging.error(f"Unhandled event type: {event}")
+        # get the event type by checking its class in the _EVENT_TYPES dict
+        event_type = self._EVENT_TYPES.get(event.__class__, None)
 
-    def handle_migrating_event(self, notification: NodeMigratingEvent):
+        if event_type is None:
+            logging.error(f"Unhandled event type: {event}")
+            return
+
+        if event_type:
+            self.handle_maintenance_start_event(MaintenanceState.MAINTENANCE)
+        else:
+            self.handle_maintenance_completed_event()
+
+    def handle_maintenance_start_event(self, maintenance_state: MaintenanceState):
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING
             or not self.config.is_relax_timeouts_enabled()
         ):
             return
-        self.connection.maintenance_state = MaintenanceState.MIGRATING
+
+        self.connection.maintenance_state = maintenance_state
         self.connection.set_tmp_settings(tmp_relax_timeout=self.config.relax_timeout)
         # extend the timeout for all created connections
         self.connection.update_current_socket_timeout(self.config.relax_timeout)
 
-    def handle_migration_completed_event(self, notification: "NodeMigratedEvent"):
+    def handle_maintenance_completed_event(self):
         # Only reset timeouts if state is not MOVING and relax timeouts are enabled
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING
@@ -490,7 +603,7 @@ class MaintenanceEventConnectionHandler:
         ):
             return
         self.connection.reset_tmp_settings(reset_relax_timeout=True)
-        # Node migration completed - reset the connection
+        # Maintenance completed - reset the connection
         # timeouts by providing -1 as the relax timeout
         self.connection.update_current_socket_timeout(-1)
         self.connection.maintenance_state = MaintenanceState.NONE
