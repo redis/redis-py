@@ -145,7 +145,7 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             logger.warning("LagAwareHealthCheck failed: Couldn't find a matching bdb")
             raise ValueError("Could not find a matching bdb")
 
-        url = f"/v1/bdbs/{matching_bdb['uid']}/availability?availability_lag_tolerance_ms={self._availability_lag_tolerance}"
+        url = f"/v1/local/bdbs/{matching_bdb['uid']}/endpoint/availability?extend_check=lag&availability_lag_tolerance_ms={self._availability_lag_tolerance}"
         self._http_client.get(url, expect_json=False)
 
         # Status checked in an http client, otherwise HttpError will be raised
