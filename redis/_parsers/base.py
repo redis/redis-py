@@ -2,7 +2,13 @@ import logging
 import sys
 from abc import ABC
 from asyncio import IncompleteReadError, StreamReader, TimeoutError
-from typing import Callable, List, Optional, Protocol, Union
+from typing import Awaitable, Callable, List, Optional, Protocol, Union
+
+from redis.maintenance_events import (
+    NodeMigratedEvent,
+    NodeMigratingEvent,
+    NodeMovingEvent,
+)
 
 from redis.maintenance_events import (
     NodeFailedOverEvent,
@@ -211,6 +217,7 @@ class PushNotificationsParser(Protocol):
                 and self.invalidation_push_handler_func
             ):
                 return self.invalidation_push_handler_func(response)
+              
             if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
                 # Expected message format is: MOVING <seq_number> <time> <endpoint>
                 id = response[1]
@@ -265,8 +272,8 @@ class AsyncPushNotificationsParser(Protocol):
 
     pubsub_push_handler_func: Callable
     invalidation_push_handler_func: Optional[Callable] = None
-    node_moving_push_handler_func: Optional[Callable] = None
-    maintenance_push_handler_func: Optional[Callable] = None
+    node_moving_push_handler_func: Optional[Callable[..., Awaitable[None]]] = None
+    maintenance_push_handler_func: Optional[Callable[..., Awaitable[None]]] = None
 
     async def handle_pubsub_push_response(self, response):
         """Handle pubsub push responses asynchronously"""
@@ -289,6 +296,7 @@ class AsyncPushNotificationsParser(Protocol):
                 and self.invalidation_push_handler_func
             ):
                 return await self.invalidation_push_handler_func(response)
+
             if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
                 # push notification from enterprise cluster for node moving
                 id = response[1]
@@ -297,6 +305,7 @@ class AsyncPushNotificationsParser(Protocol):
                     host, port = response[3].split(":")
                 else:
                     host, port = None, None
+
                 notification = NodeMovingEvent(id, host, port, ttl)
                 return await self.node_moving_push_handler_func(notification)
 

@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch, MagicMock
 import pytest
 
 from redis.connection import ConnectionInterface
+
 from redis.maintenance_events import (
     MaintenanceEvent,
     NodeMovingEvent,
@@ -564,7 +565,7 @@ class TestMaintenanceEventConnectionHandler:
             self.handler, "handle_maintenance_start_event"
         ) as mock_handle:
             self.handler.handle_event(event)
-            mock_handle.assert_called_once_with(MaintenanceState.MIGRATING)
+            mock_handle.assert_called_once_with(MaintenanceState.MAINTENANCE)
 
     def test_handle_event_migrated(self):
         """Test handling of NodeMigratedEvent."""
@@ -584,7 +585,7 @@ class TestMaintenanceEventConnectionHandler:
             self.handler, "handle_maintenance_start_event"
         ) as mock_handle:
             self.handler.handle_event(event)
-            mock_handle.assert_called_once_with(MaintenanceState.FAILING_OVER)
+            mock_handle.assert_called_once_with(MaintenanceState.MAINTENANCE)
 
     def test_handle_event_failed_over(self):
         """Test handling of NodeFailedOverEvent."""
@@ -610,7 +611,8 @@ class TestMaintenanceEventConnectionHandler:
         config = MaintenanceEventsConfig(relax_timeout=-1)
         handler = MaintenanceEventConnectionHandler(self.mock_connection, config)
 
-        result = handler.handle_maintenance_start_event(MaintenanceState.MIGRATING)
+        result = handler.handle_maintenance_start_event(MaintenanceState.MAINTENANCE)
+
         assert result is None
         self.mock_connection.update_current_socket_timeout.assert_not_called()
 
@@ -618,29 +620,20 @@ class TestMaintenanceEventConnectionHandler:
         """Test maintenance start event handling when connection is in MOVING state."""
         self.mock_connection.maintenance_state = MaintenanceState.MOVING
 
-        result = self.handler.handle_maintenance_start_event(MaintenanceState.MIGRATING)
+        result = self.handler.handle_maintenance_start_event(
+            MaintenanceState.MAINTENANCE
+        )
         assert result is None
         self.mock_connection.update_current_socket_timeout.assert_not_called()
 
-    def test_handle_maintenance_start_event_migrating_success(self):
+    def test_handle_maintenance_start_event_success(self):
         """Test successful maintenance start event handling for migrating."""
         self.mock_connection.maintenance_state = MaintenanceState.NONE
 
-        self.handler.handle_maintenance_start_event(MaintenanceState.MIGRATING)
+        self.handler.handle_maintenance_start_event(MaintenanceState.MAINTENANCE)
 
-        assert self.mock_connection.maintenance_state == MaintenanceState.MIGRATING
-        self.mock_connection.update_current_socket_timeout.assert_called_once_with(20)
-        self.mock_connection.set_tmp_settings.assert_called_once_with(
-            tmp_relax_timeout=20
-        )
+        assert self.mock_connection.maintenance_state == MaintenanceState.MAINTENANCE
 
-    def test_handle_maintenance_start_event_failing_over_success(self):
-        """Test successful maintenance start event handling for failing over."""
-        self.mock_connection.maintenance_state = MaintenanceState.NONE
-
-        self.handler.handle_maintenance_start_event(MaintenanceState.FAILING_OVER)
-
-        assert self.mock_connection.maintenance_state == MaintenanceState.FAILING_OVER
         self.mock_connection.update_current_socket_timeout.assert_called_once_with(20)
         self.mock_connection.set_tmp_settings.assert_called_once_with(
             tmp_relax_timeout=20
@@ -665,11 +658,12 @@ class TestMaintenanceEventConnectionHandler:
 
     def test_handle_maintenance_completed_event_success(self):
         """Test successful maintenance completed event handling."""
-        self.mock_connection.maintenance_state = MaintenanceState.MIGRATING
+        self.mock_connection.maintenance_state = MaintenanceState.MAINTENANCE
 
         self.handler.handle_maintenance_completed_event()
 
         assert self.mock_connection.maintenance_state == MaintenanceState.NONE
+
         self.mock_connection.update_current_socket_timeout.assert_called_once_with(-1)
         self.mock_connection.reset_tmp_settings.assert_called_once_with(
             reset_relax_timeout=True
@@ -681,23 +675,11 @@ class TestEndpointType:
 
     def test_endpoint_type_constants(self):
         """Test that the EndpointType constants are correct."""
-        assert EndpointType.INTERNAL_IP == "internal-ip"
-        assert EndpointType.INTERNAL_FQDN == "internal-fqdn"
-        assert EndpointType.EXTERNAL_IP == "external-ip"
-        assert EndpointType.EXTERNAL_FQDN == "external-fqdn"
-        assert EndpointType.NONE == "none"
-
-    def test_get_valid_types(self):
-        """Test that get_valid_types returns the expected set."""
-        valid_types = EndpointType.get_valid_types()
-        expected_types = {
-            "internal-ip",
-            "internal-fqdn",
-            "external-ip",
-            "external-fqdn",
-            "none",
-        }
-        assert valid_types == expected_types
+        assert EndpointType.INTERNAL_IP.value == "internal-ip"
+        assert EndpointType.INTERNAL_FQDN.value == "internal-fqdn"
+        assert EndpointType.EXTERNAL_IP.value == "external-ip"
+        assert EndpointType.EXTERNAL_FQDN.value == "external-fqdn"
+        assert EndpointType.NONE.value == "none"
 
 
 class TestMaintenanceEventsConfigEndpointType:
@@ -731,14 +713,9 @@ class TestMaintenanceEventsConfigEndpointType:
 
     def test_config_validation_valid_endpoint_types(self):
         """Test that MaintenanceEventsConfig accepts valid endpoint types."""
-        for endpoint_type in EndpointType.get_valid_types():
+        for endpoint_type in EndpointType:
             config = MaintenanceEventsConfig(endpoint_type=endpoint_type)
             assert config.endpoint_type == endpoint_type
-
-    def test_config_validation_invalid_endpoint_type(self):
-        """Test that MaintenanceEventsConfig raises ValueError for invalid endpoint type."""
-        with pytest.raises(ValueError, match="Invalid endpoint_type"):
-            MaintenanceEventsConfig(endpoint_type="invalid-type")
 
     def test_config_validation_none_endpoint_type(self):
         """Test that MaintenanceEventsConfig accepts None as endpoint type."""

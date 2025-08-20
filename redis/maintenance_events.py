@@ -13,12 +13,11 @@ from redis.typing import Number
 class MaintenanceState(enum.Enum):
     NONE = "none"
     MOVING = "moving"
-    MIGRATING = "migrating"
-    FAILING_OVER = "failing_over"
+    MAINTENANCE = "maintenance"
 
 
-class EndpointType:
-    """Constants for valid endpoint types used in CLIENT MAINT_NOTIFICATIONS command."""
+class EndpointType(enum.Enum):
+    """Valid endpoint types used in CLIENT MAINT_NOTIFICATIONS command."""
 
     INTERNAL_IP = "internal-ip"
     INTERNAL_FQDN = "internal-fqdn"
@@ -26,16 +25,9 @@ class EndpointType:
     EXTERNAL_FQDN = "external-fqdn"
     NONE = "none"
 
-    @classmethod
-    def get_valid_types(cls):
-        """Return a set of all valid endpoint types."""
-        return {
-            cls.INTERNAL_IP,
-            cls.INTERNAL_FQDN,
-            cls.EXTERNAL_IP,
-            cls.EXTERNAL_FQDN,
-            cls.NONE,
-        }
+    def __str__(self):
+        """Return the string value of the enum."""
+        return self.value
 
 
 if TYPE_CHECKING:
@@ -131,13 +123,7 @@ class NodeMovingEvent(MaintenanceEvent):
     during cluster rebalancing or maintenance operations.
     """
 
-    def __init__(
-        self,
-        id: int,
-        new_node_host: Optional[str],
-        new_node_port: Optional[int],
-        ttl: int,
-    ):
+    def __init__(self, id: int, new_node_host: str, new_node_port: int, ttl: int):
         """
         Initialize a new NodeMovingEvent.
 
@@ -430,60 +416,6 @@ def _is_private_fqdn(host: str) -> bool:
     return False
 
 
-def _get_resolved_ip_from_connection(
-    connection: "ConnectionInterface",
-) -> Optional[str]:
-    """
-    Extract the resolved IP address from an established connection.
-
-    First tries to get the actual IP from the socket (most accurate),
-    then falls back to DNS resolution if needed.
-
-    Args:
-        connection: The connection object to extract the IP from
-
-    Returns:
-        str: The resolved IP address, or None if it cannot be determined
-    """
-    import socket
-
-    # Method 1: Try to get the actual IP from the established socket connection
-    # This is most accurate as it shows the exact IP being used
-    try:
-        sock = getattr(connection, "_sock", None)
-        if sock is not None:
-            peer_addr = sock.getpeername()
-            if peer_addr and len(peer_addr) >= 1:
-                # For TCP sockets, peer_addr is typically (host, port) tuple
-                # Return just the host part
-                return peer_addr[0]
-    except (AttributeError, OSError):
-        # Socket might not be connected or getpeername() might fail
-        pass
-
-    # Method 2: Fallback to DNS resolution of the host
-    # This is less accurate but works when socket is not available
-    try:
-        host = getattr(connection, "host", None)
-        port = getattr(connection, "port", 6379)
-        if host:
-            # Use getaddrinfo to resolve the hostname to IP
-            # This mimics what the connection would do during _connect()
-            addr_info = socket.getaddrinfo(
-                host, port, socket.AF_UNSPEC, socket.SOCK_STREAM
-            )
-            if addr_info:
-                # Return the IP from the first result
-                # addr_info[0] is (family, socktype, proto, canonname, sockaddr)
-                # sockaddr[0] is the IP address
-                return addr_info[0][4][0]
-    except (AttributeError, OSError, socket.gaierror):
-        # DNS resolution might fail
-        pass
-
-    return None
-
-
 class MaintenanceEventsConfig:
     """
     Configuration class for maintenance events handling behaviour. Events are received through
@@ -499,7 +431,7 @@ class MaintenanceEventsConfig:
         enabled: bool = True,
         proactive_reconnect: bool = True,
         relax_timeout: Optional[Number] = 20,
-        endpoint_type: Optional[str] = None,
+        endpoint_type: Optional[EndpointType] = None,
     ):
         """
         Initialize a new MaintenanceEventsConfig.
@@ -511,8 +443,7 @@ class MaintenanceEventsConfig:
                 Defaults to True.
             relax_timeout (Number): The relax timeout to use for the connection during maintenance.
                 If -1 is provided - the relax timeout is disabled. Defaults to 20.
-            endpoint_type (Optional[str]): Override for the endpoint type to use in CLIENT MAINT_NOTIFICATIONS.
-                Must be one of: 'internal-ip', 'internal-fqdn', 'external-ip', 'external-fqdn', 'none'.
+            endpoint_type (Optional[EndpointType]): Override for the endpoint type to use in CLIENT MAINT_NOTIFICATIONS.
                 If None, the endpoint type will be automatically determined based on the host and TLS configuration.
                 Defaults to None.
 
@@ -522,19 +453,6 @@ class MaintenanceEventsConfig:
         self.enabled = enabled
         self.relax_timeout = relax_timeout
         self.proactive_reconnect = proactive_reconnect
-
-        # Validate endpoint_type if provided
-        if (
-            endpoint_type is not None
-            and endpoint_type not in EndpointType.get_valid_types()
-        ):
-            valid_types = ", ".join(
-                f"'{t}'" for t in sorted(EndpointType.get_valid_types())
-            )
-            raise ValueError(
-                f"Invalid endpoint_type '{endpoint_type}'. Must be one of: {valid_types}"
-            )
-
         self.endpoint_type = endpoint_type
 
     def __repr__(self) -> str:
@@ -558,7 +476,9 @@ class MaintenanceEventsConfig:
         """
         return self.relax_timeout != -1
 
-    def get_endpoint_type(self, host: str, connection: "ConnectionInterface") -> str:
+    def get_endpoint_type(
+        self, host: str, connection: "ConnectionInterface"
+    ) -> EndpointType:
         """
         Determine the appropriate endpoint type for CLIENT MAINT_NOTIFICATIONS command.
 
@@ -708,6 +628,7 @@ class MaintenanceEventPoolHandler:
                                 "host": event.new_node_host,
                             }
                         )
+
                     if self.config.is_relax_timeouts_enabled():
                         kwargs.update(
                             {
@@ -782,6 +703,14 @@ class MaintenanceEventPoolHandler:
 
 
 class MaintenanceEventConnectionHandler:
+    # 1 = "starting maintenance" events, 0 = "completed maintenance" events
+    _EVENT_TYPES: dict[type["MaintenanceEvent"], int] = {
+        NodeMigratingEvent: 1,
+        NodeFailingOverEvent: 1,
+        NodeMigratedEvent: 0,
+        NodeFailedOverEvent: 0,
+    }
+
     def __init__(
         self, connection: "ConnectionInterface", config: MaintenanceEventsConfig
     ) -> None:
@@ -789,16 +718,17 @@ class MaintenanceEventConnectionHandler:
         self.config = config
 
     def handle_event(self, event: MaintenanceEvent):
-        if isinstance(event, NodeMigratingEvent):
-            return self.handle_maintenance_start_event(MaintenanceState.MIGRATING)
-        elif isinstance(event, NodeMigratedEvent):
-            return self.handle_maintenance_completed_event()
-        elif isinstance(event, NodeFailingOverEvent):
-            return self.handle_maintenance_start_event(MaintenanceState.FAILING_OVER)
-        elif isinstance(event, NodeFailedOverEvent):
-            return self.handle_maintenance_completed_event()
-        else:
+        # get the event type by checking its class in the _EVENT_TYPES dict
+        event_type = self._EVENT_TYPES.get(event.__class__, None)
+
+        if event_type is None:
             logging.error(f"Unhandled event type: {event}")
+            return
+
+        if event_type:
+            self.handle_maintenance_start_event(MaintenanceState.MAINTENANCE)
+        else:
+            self.handle_maintenance_completed_event()
 
     def handle_maintenance_start_event(self, maintenance_state: MaintenanceState):
         if (
@@ -806,6 +736,7 @@ class MaintenanceEventConnectionHandler:
             or not self.config.is_relax_timeouts_enabled()
         ):
             return
+
         self.connection.maintenance_state = maintenance_state
         self.connection.set_tmp_settings(tmp_relax_timeout=self.config.relax_timeout)
         # extend the timeout for all created connections

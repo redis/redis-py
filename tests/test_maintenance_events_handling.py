@@ -198,6 +198,7 @@ class MockSocket:
                 # FAILING_OVER push message before SET key_receive_failing_over_X response
                 # Format: >3\r\n$12\r\nFAILING_OVER\r\n:1\r\n:10\r\n (3 elements: FAILING_OVER, id, ttl)
                 failing_over_push = ">3\r\n$12\r\nFAILING_OVER\r\n:1\r\n:10\r\n"
+
                 response = failing_over_push.encode() + response
             elif (
                 b"key_receive_failed_over_" in data
@@ -525,7 +526,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
         # Verify that maintenance events are initially disabled
         assert existing_conn._parser.node_moving_push_handler_func is None
-        assert not hasattr(existing_conn, "_maintenance_event_connection_handler")
+        assert existing_conn._maintenance_event_connection_handler is None
         assert existing_conn._parser.maintenance_push_handler_func is None
 
         # Create a new enabled configuration and set up pool handler
@@ -1431,7 +1432,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
     def test_moving_migrating_migrated_moved_state_transitions(self, pool_class):
         """
         Test moving configs are not lost if the per connection events get picked up after moving is handled.
-        MOVING → MIGRATING → MIGRATED → FAILING_OVER → FAILED_OVER → MOVED
+        Sequence of events: MOVING, MIGRATING, MIGRATED, FAILING_OVER, FAILED_OVER, MOVED.
+        Note: FAILING_OVER and FAILED_OVER events do not change the connection state when already in MOVING state.
         Checks the state after each event for all connections and for new connections created during each state.
         """
         # Setup
@@ -1807,7 +1809,8 @@ class TestMaintenanceEventsHandlingMultipleProxies:
         conn_event_handler = conn._maintenance_event_connection_handler
         conn_event_handler.handle_event(NodeMigratingEvent(id=3, ttl=1))
         # validate connection is in MIGRATING state
-        assert conn.maintenance_state == MaintenanceState.MIGRATING
+        assert conn.maintenance_state == MaintenanceState.MAINTENANCE
+
         assert conn.socket_timeout == self.config.relax_timeout
 
         # Send MIGRATED event to con with ip = key3
