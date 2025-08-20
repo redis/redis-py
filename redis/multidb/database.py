@@ -55,10 +55,13 @@ class Database(AbstractDatabase):
             weight: float
     ):
         """
-        param: client: Client instance for communication with the database.
-        param: circuit: Circuit breaker for the current database.
-        param: weight: Weight of current database. Database with the highest weight becomes Active.
-        param: state: State of the current database.
+        Initialize a new Database instance.
+
+        Args:
+            client: Underlying Redis client instance for database operations
+            circuit: Circuit breaker for handling database failures
+            weight: Weight value used for database failover prioritization
+            state: Initial database state, defaults to DISCONNECTED
         """
         self._client = client
         self._cb = circuit

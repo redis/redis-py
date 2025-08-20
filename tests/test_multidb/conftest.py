@@ -91,7 +91,6 @@ def mock_multi_db_config(
      config = MultiDbConfig(
           databases_config=[Mock(spec=DatabaseConfig)],
           failure_detectors=[mock_fd],
-          health_checks=[mock_hc],
           health_check_interval=hc_interval,
           failover_strategy=mock_fs,
           auto_fallback_interval=auto_fallback_interval,

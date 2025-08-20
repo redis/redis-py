@@ -22,10 +22,17 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
     """
     def __init__(self, config: MultiDbConfig):
         self._databases = config.databases()
-        self._health_checks = config.default_health_checks() if config.health_checks is None else config.health_checks
+        self._health_checks = config.default_health_checks()
+
+        if config.health_checks is not None:
+            self._health_checks.extend(config.health_checks)
+
         self._health_check_interval = config.health_check_interval
-        self._failure_detectors = config.default_failure_detectors() \
-            if config.failure_detectors is None else config.failure_detectors
+        self._failure_detectors = config.default_failure_detectors()
+
+        if config.failure_detectors is not None:
+            self._failure_detectors.extend(config.failure_detectors)
+
         self._failover_strategy = config.default_failover_strategy() \
             if config.failover_strategy is None else config.failover_strategy
         self._failover_strategy.set_databases(self._databases)
@@ -237,7 +244,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         Runs health checks as a recurring task.
         Runs health checks against all databases.
         """
-
         for database, _ in self._databases:
             self._check_db_health(database, on_error)
 
@@ -303,9 +309,11 @@ class Pipeline(RedisModuleCommands, CoreCommands):
         return self
 
     def execute_command(self, *args, **kwargs):
+        """Adds a command to the stack"""
         return self.pipeline_execute_command(*args, **kwargs)
 
     def execute(self) -> List[Any]:
+        """Execute all the commands in the current pipeline"""
         if not self._client.initialized:
             self._client.initialize()
 

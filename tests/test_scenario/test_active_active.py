@@ -7,6 +7,7 @@ import pytest
 
 from redis import Redis, RedisCluster
 from redis.client import Pipeline
+from tests.test_scenario.conftest import get_endpoint_config
 from tests.test_scenario.fault_injector_client import ActionRequest, ActionType
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,8 @@ class TestActiveActiveStandalone:
                 assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
             sleep(0.1)
 
+        assert listener.is_changed_flag == True
+
     @pytest.mark.parametrize(
         "r_multi_db",
         [
@@ -182,6 +185,8 @@ class TestActiveActiveStandalone:
             assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
         sleep(0.1)
 
+        assert listener.is_changed_flag == True
+
     @pytest.mark.parametrize(
         "r_multi_db",
         [
@@ -223,6 +228,8 @@ class TestActiveActiveStandalone:
         while not listener.is_changed_flag:
             r_multi_db.transaction(callback)
             sleep(0.1)
+
+        assert listener.is_changed_flag == True
 
     @pytest.mark.parametrize(
         "r_multi_db",

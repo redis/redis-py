@@ -32,9 +32,15 @@ class CommandFailureDetector(FailureDetector):
             error_types: Optional[List[Type[Exception]]] = None,
     ) -> None:
         """
-        :param threshold: Threshold of failed commands over the duration after which database will be marked as failed.
-        :param duration: Interval in seconds after which database will be marked as failed if threshold was exceeded.
-        :param error_types: List of exception that has to be registered. By default, all exceptions are registered.
+        Initialize a new CommandFailureDetector instance.
+
+        Args:
+            threshold: The number of failures that must occur within the duration to trigger failure detection.
+            duration: The time window in seconds during which failures are counted.
+            error_types: Optional list of exception types to trigger failover. If None, all exceptions are counted.
+
+        The detector tracks command failures within a sliding time window. When the number of failures
+        exceeds the threshold within the specified duration, it triggers failure detection.
         """
         self._command_executor = None
         self._threshold = threshold
