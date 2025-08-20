@@ -51,7 +51,6 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
 
      # Retry configuration different for health checks as initial health check require more time in case
      # if infrastructure wasn't restored from the previous test.
-     health_checks = [EchoHealthCheck(Retry(ExponentialBackoff(cap=5, base=0.5), retries=3))]
      health_check_interval = request.param.get('health_check_interval', DEFAULT_HEALTH_CHECK_INTERVAL)
      event_dispatcher = EventDispatcher()
      listener = CheckActiveDatabaseChangedListener()
@@ -84,10 +83,11 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
 
      config = MultiDbConfig(
          databases_config=db_configs,
-         health_checks=health_checks,
          command_retry=command_retry,
          failure_threshold=failure_threshold,
          health_check_interval=health_check_interval,
+         health_check_backoff=ExponentialBackoff(cap=0.5, base=0.05),
+         health_check_retries=3,
          event_dispatcher=event_dispatcher,
      )
 

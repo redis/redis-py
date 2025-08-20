@@ -36,21 +36,17 @@ class TestPipeline:
         indirect=True,
     )
     def test_executes_pipeline_against_correct_db(
-            self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+            self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with patch.object(
-                mock_multi_db_config,
-                'databases',
-                return_value=databases
-        ):
+        with patch.object(mock_multi_db_config,'databases',return_value=databases), \
+             patch.object(mock_multi_db_config,'default_health_checks', return_value=[mock_hc]):
             pipe = mock_pipe()
             pipe.execute.return_value = ['OK1', 'value1']
             mock_db1.client.pipeline.return_value = pipe
 
-            for hc in mock_multi_db_config.health_checks:
-                hc.check_health.return_value = True
+            mock_hc.check_health.return_value = True
 
             client = MultiDBClient(mock_multi_db_config)
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
@@ -60,9 +56,7 @@ class TestPipeline:
             pipe.get('key1')
 
             assert pipe.execute() == ['OK1', 'value1']
-
-            for hc in mock_multi_db_config.health_checks:
-                assert hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 3
 
     @pytest.mark.parametrize(
         'mock_multi_db_config,mock_db, mock_db1, mock_db2',
@@ -77,21 +71,17 @@ class TestPipeline:
         indirect=True,
     )
     def test_execute_pipeline_against_correct_db_and_closed_circuit(
-            self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+            self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with patch.object(
-                mock_multi_db_config,
-                'databases',
-                return_value=databases
-        ):
+        with patch.object(mock_multi_db_config,'databases',return_value=databases), \
+             patch.object(mock_multi_db_config,'default_health_checks', return_value=[mock_hc]):
             pipe = mock_pipe()
             pipe.execute.return_value = ['OK1', 'value1']
             mock_db1.client.pipeline.return_value = pipe
 
-            for hc in mock_multi_db_config.health_checks:
-                hc.check_health.side_effect = [False, True, True]
+            mock_hc.check_health.side_effect = [False, True, True]
 
             client = MultiDBClient(mock_multi_db_config)
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
@@ -101,9 +91,7 @@ class TestPipeline:
                 pipe.get('key1')
 
             assert pipe.execute() == ['OK1', 'value1']
-
-            for hc in mock_multi_db_config.health_checks:
-                assert hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 3
 
             assert mock_db.circuit.state == CBState.CLOSED
             assert mock_db1.circuit.state == CBState.CLOSED
@@ -122,7 +110,7 @@ class TestPipeline:
         indirect=True,
     )
     def test_execute_pipeline_against_correct_db_on_background_health_check_determine_active_db_unhealthy(
-            self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+            self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         cb = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5))
         cb.database = mock_db
@@ -138,11 +126,10 @@ class TestPipeline:
 
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with patch.object(
-                mock_multi_db_config,
-                'databases',
-                return_value=databases
-        ):
+        with patch.object(mock_multi_db_config,'databases',return_value=databases), \
+             patch.object(mock_multi_db_config,'default_health_checks', return_value=[EchoHealthCheck(
+                    retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
+                )]):
             mock_db.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'healthcheck', 'error']
             mock_db1.client.execute_command.side_effect = ['healthcheck', 'error', 'error', 'healthcheck']
             mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'error', 'error']
@@ -160,11 +147,6 @@ class TestPipeline:
             mock_db2.client.pipeline.return_value = pipe2
 
             mock_multi_db_config.health_check_interval = 0.1
-            mock_multi_db_config.health_checks = [
-                EchoHealthCheck(
-                    retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
-                )
-            ]
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
                 retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
             )
@@ -216,19 +198,15 @@ class TestTransaction:
         indirect=True,
     )
     def test_executes_transaction_against_correct_db(
-            self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+            self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with patch.object(
-                mock_multi_db_config,
-                'databases',
-                return_value=databases
-        ):
+        with patch.object(mock_multi_db_config,'databases',return_value=databases), \
+             patch.object(mock_multi_db_config,'default_health_checks', return_value=[mock_hc]):
             mock_db1.client.transaction.return_value = ['OK1', 'value1']
 
-            for hc in mock_multi_db_config.health_checks:
-                hc.check_health.return_value = True
+            mock_hc.check_health.return_value = True
 
             client = MultiDBClient(mock_multi_db_config)
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
@@ -238,9 +216,7 @@ class TestTransaction:
                 pipe.get('key1')
 
             assert client.transaction(callback) == ['OK1', 'value1']
-
-            for hc in mock_multi_db_config.health_checks:
-                assert hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 3
 
     @pytest.mark.parametrize(
         'mock_multi_db_config,mock_db, mock_db1, mock_db2',
@@ -255,19 +231,15 @@ class TestTransaction:
         indirect=True,
     )
     def test_execute_transaction_against_correct_db_and_closed_circuit(
-            self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+            self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with patch.object(
-                mock_multi_db_config,
-                'databases',
-                return_value=databases
-        ):
+        with patch.object(mock_multi_db_config,'databases',return_value=databases), \
+             patch.object(mock_multi_db_config,'default_health_checks', return_value=[mock_hc]):
             mock_db1.client.transaction.return_value = ['OK1', 'value1']
 
-            for hc in mock_multi_db_config.health_checks:
-                hc.check_health.side_effect = [False, True, True]
+            mock_hc.check_health.side_effect = [False, True, True]
 
             client = MultiDBClient(mock_multi_db_config)
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
@@ -277,9 +249,7 @@ class TestTransaction:
                 pipe.get('key1')
 
             assert client.transaction(callback) == ['OK1', 'value1']
-
-            for hc in mock_multi_db_config.health_checks:
-                assert hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 3
 
             assert mock_db.circuit.state == CBState.CLOSED
             assert mock_db1.circuit.state == CBState.CLOSED
@@ -314,11 +284,10 @@ class TestTransaction:
 
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-        with patch.object(
-                mock_multi_db_config,
-                'databases',
-                return_value=databases
-        ):
+        with patch.object(mock_multi_db_config,'databases',return_value=databases), \
+             patch.object(mock_multi_db_config,'default_health_checks', return_value=[EchoHealthCheck(
+                    retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
+                )]):
             mock_db.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'healthcheck', 'error']
             mock_db1.client.execute_command.side_effect = ['healthcheck', 'error', 'error', 'healthcheck']
             mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'error', 'error']
@@ -328,11 +297,6 @@ class TestTransaction:
             mock_db2.client.transaction.return_value = ['OK2', 'value']
 
             mock_multi_db_config.health_check_interval = 0.1
-            mock_multi_db_config.health_checks = [
-                EchoHealthCheck(
-                    retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
-                )
-            ]
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
                 retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
             )
