@@ -214,12 +214,12 @@ class TestActiveActive:
         r_multi_db.transaction(callback)
         thread.start()
 
-        # Execute pipeline before network failure
+        # Execute transaction before network failure
         while not event.is_set():
             r_multi_db.transaction(callback)
             sleep(0.5)
 
-        # Execute pipeline until database failover
+        # Execute transaction until database failover
         while not listener.is_changed_flag:
             r_multi_db.transaction(callback)
             sleep(0.5)
@@ -257,12 +257,12 @@ class TestActiveActive:
         pubsub_thread = pubsub.run_in_thread(sleep_time=0.1, daemon=True)
         thread.start()
 
-        # Execute pipeline before network failure
+        # Execute publish before network failure
         while not event.is_set():
             r_multi_db.publish('test-channel', data)
             sleep(0.5)
 
-        # Execute pipeline until database failover
+        # Execute publish until database failover
         while not listener.is_changed_flag:
             r_multi_db.publish('test-channel', data)
             sleep(0.5)
@@ -307,12 +307,12 @@ class TestActiveActive:
         )
         thread.start()
 
-        # Execute pipeline before network failure
+        # Execute publish before network failure
         while not event.is_set():
             r_multi_db.spublish('test-channel', data)
             sleep(0.5)
 
-        # Execute pipeline until database failover
+        # Execute publish until database failover
         while not listener.is_changed_flag:
             r_multi_db.spublish('test-channel', data)
             sleep(0.5)

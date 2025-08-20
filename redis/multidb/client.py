@@ -327,6 +327,13 @@ class PubSub:
     PubSub object for multi database client.
     """
     def __init__(self, client: MultiDBClient, **kwargs):
+        """Initialize the PubSub object for a multi-database client.
+
+        Args:
+            client: MultiDBClient instance to use for pub/sub operations
+            **kwargs: Additional keyword arguments to pass to the underlying pubsub implementation
+        """
+
         self._client = client
         self._client.command_executor.pubsub(**kwargs)
 

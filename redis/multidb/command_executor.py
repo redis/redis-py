@@ -208,6 +208,9 @@ class DefaultCommandExecutor(CommandExecutor):
         return self._execute_with_failure_detection(callback)
 
     def pubsub(self, **kwargs):
+        """
+        Initializes a PubSub object on a currently active database.
+        """
         def callback():
             if self._active_pubsub is None:
                 self._active_pubsub = self._active_database.client.pubsub(**kwargs)
