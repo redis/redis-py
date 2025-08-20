@@ -8,12 +8,6 @@ from redis.data_structure import WeightedList
 from redis.multidb.circuit import CircuitBreaker
 from redis.typing import Number
 
-
-class State(Enum):
-    ACTIVE = 0
-    PASSIVE = 1
-    DISCONNECTED = 2
-
 class AbstractDatabase(ABC):
     @property
     @abstractmethod
@@ -41,18 +35,6 @@ class AbstractDatabase(ABC):
 
     @property
     @abstractmethod
-    def state(self) -> State:
-        """The state of the current database."""
-        pass
-
-    @state.setter
-    @abstractmethod
-    def state(self, state: State):
-        """Set the state of the current database."""
-        pass
-
-    @property
-    @abstractmethod
     def circuit(self) -> CircuitBreaker:
         """Circuit breaker for the current database."""
         pass
@@ -70,8 +52,7 @@ class Database(AbstractDatabase):
             self,
             client: Union[redis.Redis, RedisCluster],
             circuit: CircuitBreaker,
-            weight: float,
-            state: State = State.DISCONNECTED,
+            weight: float
     ):
         """
         Initialize a new Database instance.
@@ -86,7 +67,6 @@ class Database(AbstractDatabase):
         self._cb = circuit
         self._cb.database = self
         self._weight = weight
-        self._state = state
 
     @property
     def client(self) -> Union[redis.Redis, RedisCluster]:
@@ -103,14 +83,6 @@ class Database(AbstractDatabase):
     @weight.setter
     def weight(self, weight: float):
         self._weight = weight
-
-    @property
-    def state(self) -> State:
-        return self._state
-
-    @state.setter
-    def state(self, state: State):
-        self._state = state
 
     @property
     def circuit(self) -> CircuitBreaker:

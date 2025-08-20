@@ -1,5 +1,5 @@
 from redis.backoff import ExponentialBackoff
-from redis.multidb.database import Database, State
+from redis.multidb.database import Database
 from redis.multidb.healthcheck import EchoHealthCheck
 from redis.multidb.circuit import State as CBState
 from redis.exceptions import ConnectionError
@@ -14,7 +14,7 @@ class TestEchoHealthCheck:
         """
         mock_client.execute_command.side_effect = [ConnectionError, ConnectionError, 'healthcheck']
         hc = EchoHealthCheck(Retry(backoff=ExponentialBackoff(cap=1.0), retries=3))
-        db = Database(mock_client, mock_cb, 0.9, State.ACTIVE)
+        db = Database(mock_client, mock_cb, 0.9)
 
         assert hc.check_health(db) == True
         assert mock_client.execute_command.call_count == 3
@@ -26,7 +26,7 @@ class TestEchoHealthCheck:
         """
         mock_client.execute_command.side_effect = [ConnectionError, ConnectionError, 'wrong']
         hc = EchoHealthCheck(Retry(backoff=ExponentialBackoff(cap=1.0), retries=3))
-        db = Database(mock_client, mock_cb, 0.9, State.ACTIVE)
+        db = Database(mock_client, mock_cb, 0.9)
 
         assert hc.check_health(db) == False
         assert mock_client.execute_command.call_count == 3
@@ -35,7 +35,7 @@ class TestEchoHealthCheck:
         mock_client.execute_command.side_effect = [ConnectionError, ConnectionError, 'healthcheck']
         mock_cb.state = CBState.HALF_OPEN
         hc = EchoHealthCheck(Retry(backoff=ExponentialBackoff(cap=1.0), retries=3))
-        db = Database(mock_client, mock_cb, 0.9, State.ACTIVE)
+        db = Database(mock_client, mock_cb, 0.9)
 
         assert hc.check_health(db) == True
         assert mock_client.execute_command.call_count == 3

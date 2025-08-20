@@ -8,7 +8,7 @@ from redis.event import EventDispatcher, OnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.config import DEFAULT_HEALTH_CHECK_RETRIES, DEFAULT_HEALTH_CHECK_BACKOFF, DEFAULT_FAILOVER_RETRIES, \
     DEFAULT_FAILOVER_BACKOFF
-from redis.multidb.database import State as DBState, AbstractDatabase
+from redis.multidb.database import AbstractDatabase
 from redis.multidb.client import MultiDBClient
 from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failover import WeightBasedFailoverStrategy
@@ -166,25 +166,13 @@ class TestMultiDbClient:
             client = MultiDBClient(mock_multi_db_config)
             assert client.set('key', 'value') == 'OK1'
 
-            assert mock_db.state == DBState.PASSIVE
-            assert mock_db1.state == DBState.ACTIVE
-            assert mock_db2.state == DBState.PASSIVE
-
             sleep(0.15)
 
             assert client.set('key', 'value') == 'OK2'
 
-            assert mock_db.state == DBState.PASSIVE
-            assert mock_db1.state == DBState.ACTIVE
-            assert mock_db2.state == DBState.PASSIVE
-
             sleep(0.22)
 
             assert client.set('key', 'value') == 'OK1'
-
-            assert mock_db.state == DBState.PASSIVE
-            assert mock_db1.state == DBState.ACTIVE
-            assert mock_db2.state == DBState.PASSIVE
 
     @pytest.mark.parametrize(
         'mock_multi_db_config,mock_db, mock_db1, mock_db2',
@@ -214,10 +202,6 @@ class TestMultiDbClient:
                 client.set('key', 'value')
 
                 assert mock_hc.check_health.call_count == 3
-
-                assert mock_db.state == DBState.DISCONNECTED
-                assert mock_db1.state == DBState.DISCONNECTED
-                assert mock_db2.state == DBState.DISCONNECTED
 
     @pytest.mark.parametrize(
         'mock_multi_db_config,mock_db, mock_db1, mock_db2',
@@ -277,17 +261,10 @@ class TestMultiDbClient:
             assert client.set('key', 'value') == 'OK2'
             assert mock_hc.check_health.call_count == 2
 
-            assert mock_db.state == DBState.PASSIVE
-            assert mock_db2.state == DBState.ACTIVE
-
             client.add_database(mock_db1)
             assert mock_hc.check_health.call_count == 3
 
             assert client.set('key', 'value') == 'OK1'
-
-            assert mock_db.state == DBState.PASSIVE
-            assert mock_db1.state == DBState.ACTIVE
-            assert mock_db2.state == DBState.PASSIVE
 
     @pytest.mark.parametrize(
         'mock_multi_db_config,mock_db, mock_db1, mock_db2',
@@ -319,16 +296,9 @@ class TestMultiDbClient:
             assert client.set('key', 'value') == 'OK1'
             assert mock_hc.check_health.call_count == 3
 
-            assert mock_db.state == DBState.PASSIVE
-            assert mock_db1.state == DBState.ACTIVE
-            assert mock_db2.state == DBState.PASSIVE
-
             client.remove_database(mock_db1)
 
             assert client.set('key', 'value') == 'OK2'
-
-            assert mock_db.state == DBState.PASSIVE
-            assert mock_db2.state == DBState.ACTIVE
 
     @pytest.mark.parametrize(
         'mock_multi_db_config,mock_db, mock_db1, mock_db2',
@@ -360,18 +330,10 @@ class TestMultiDbClient:
             assert client.set('key', 'value') == 'OK1'
             assert mock_hc.check_health.call_count == 3
 
-            assert mock_db.state == DBState.PASSIVE
-            assert mock_db1.state == DBState.ACTIVE
-            assert mock_db2.state == DBState.PASSIVE
-
             client.update_database_weight(mock_db2, 0.8)
             assert mock_db2.weight == 0.8
 
             assert client.set('key', 'value') == 'OK2'
-
-            assert mock_db.state == DBState.PASSIVE
-            assert mock_db1.state == DBState.PASSIVE
-            assert mock_db2.state == DBState.ACTIVE
 
     @pytest.mark.parametrize(
         'mock_multi_db_config,mock_db, mock_db1, mock_db2',
@@ -491,16 +453,8 @@ class TestMultiDbClient:
             assert client.set('key', 'value') == 'OK1'
             assert mock_hc.check_health.call_count == 3
 
-            assert mock_db.state == DBState.PASSIVE
-            assert mock_db1.state == DBState.ACTIVE
-            assert mock_db2.state == DBState.PASSIVE
-
             client.set_active_database(mock_db)
             assert client.set('key', 'value') == 'OK'
-
-            assert mock_db.state == DBState.ACTIVE
-            assert mock_db1.state == DBState.PASSIVE
-            assert mock_db2.state == DBState.PASSIVE
 
             with pytest.raises(ValueError, match='Given database is not a member of database list'):
                 client.set_active_database(Mock(spec=AbstractDatabase))
