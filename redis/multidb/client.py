@@ -9,7 +9,7 @@ from redis.commands import RedisModuleCommands, CoreCommands
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.config import MultiDbConfig, DEFAULT_GRACE_PERIOD
 from redis.multidb.circuit import State as CBState, CircuitBreaker
-from redis.multidb.database import State as DBState, Database, AbstractDatabase, Databases
+from redis.multidb.database import Database, AbstractDatabase, Databases
 from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck
@@ -22,10 +22,17 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
     """
     def __init__(self, config: MultiDbConfig):
         self._databases = config.databases()
-        self._health_checks = config.default_health_checks() if config.health_checks is None else config.health_checks
+        self._health_checks = config.default_health_checks()
+
+        if config.health_checks is not None:
+            self._health_checks.extend(config.health_checks)
+
         self._health_check_interval = config.health_check_interval
-        self._failure_detectors = config.default_failure_detectors() \
-            if config.failure_detectors is None else config.failure_detectors
+        self._failure_detectors = config.default_failure_detectors()
+
+        if config.failure_detectors is not None:
+            self._failure_detectors.extend(config.failure_detectors)
+
         self._failover_strategy = config.default_failover_strategy() \
             if config.failover_strategy is None else config.failover_strategy
         self._failover_strategy.set_databases(self._databases)
@@ -71,13 +78,8 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
             # Set states according to a weights and circuit state
             if database.circuit.state == CBState.CLOSED and not is_active_db_found:
-                database.state = DBState.ACTIVE
                 self.command_executor.active_database = database
                 is_active_db_found = True
-            elif database.circuit.state == CBState.CLOSED and is_active_db_found:
-                database.state = DBState.PASSIVE
-            else:
-                database.state = DBState.DISCONNECTED
 
         if not is_active_db_found:
             raise NoValidDatabaseException('Initial connection failed - no active database found')
@@ -108,8 +110,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         if database.circuit.state == CBState.CLOSED:
             highest_weighted_db, _ = self._databases.get_top_n(1)[0]
-            highest_weighted_db.state = DBState.PASSIVE
-            database.state = DBState.ACTIVE
             self.command_executor.active_database = database
             return
 
@@ -131,9 +131,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
     def _change_active_database(self, new_database: AbstractDatabase, highest_weight_database: AbstractDatabase):
         if new_database.weight > highest_weight_database.weight and new_database.circuit.state == CBState.CLOSED:
-            new_database.state = DBState.ACTIVE
             self.command_executor.active_database = new_database
-            highest_weight_database.state = DBState.PASSIVE
 
     def remove_database(self, database: Database):
         """
@@ -143,7 +141,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
 
         if highest_weight <= weight and highest_weighted_db.circuit.state == CBState.CLOSED:
-            highest_weighted_db.state = DBState.ACTIVE
             self.command_executor.active_database = highest_weighted_db
 
     def update_database_weight(self, database: AbstractDatabase, weight: float):
@@ -233,7 +230,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                         database.circuit.state = CBState.OPEN
                     elif is_healthy and database.circuit.state != CBState.CLOSED:
                         database.circuit.state = CBState.CLOSED
-                except (ConnectionError, TimeoutError, socket.timeout, ConnectionRefusedError) as e:
+                except (ConnectionError, TimeoutError, socket.timeout, ConnectionRefusedError, ValueError) as e:
                     if database.circuit.state != CBState.OPEN:
                         database.circuit.state = CBState.OPEN
                     is_healthy = False
@@ -327,7 +324,7 @@ class Pipeline(RedisModuleCommands, CoreCommands):
 
 class PubSub:
     """
-    PubSub object for multi-database client.
+    PubSub object for multi database client.
     """
     def __init__(self, client: MultiDBClient, **kwargs):
         """Initialize the PubSub object for a multi-database client.
@@ -431,18 +428,33 @@ class PubSub:
             ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
         )
 
-    get_sharded_message = get_message
+    def get_sharded_message(
+        self, ignore_subscribe_messages: bool = False, timeout: float = 0.0
+    ):
+        """
+        Get the next message if one is available in a sharded channel, otherwise None.
+
+        If timeout is specified, the system will wait for `timeout` seconds
+        before returning. Timeout should be specified as a floating point
+        number, or None, to wait indefinitely.
+        """
+        return self._client.command_executor.execute_pubsub_method(
+            'get_sharded_message',
+            ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+        )
 
     def run_in_thread(
         self,
         sleep_time: float = 0.0,
         daemon: bool = False,
         exception_handler: Optional[Callable] = None,
+        sharded_pubsub: bool = False,
     ) -> "PubSubWorkerThread":
         return self._client.command_executor.execute_pubsub_run_in_thread(
             sleep_time=sleep_time,
             daemon=daemon,
             exception_handler=exception_handler,
-            pubsub=self
+            pubsub=self,
+            sharded_pubsub=sharded_pubsub,
         )
 

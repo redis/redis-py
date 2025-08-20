@@ -7,7 +7,7 @@ from redis.data_structure import WeightedList
 from redis.multidb.circuit import CircuitBreaker, State as CBState
 from redis.multidb.config import MultiDbConfig, DatabaseConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
      DEFAULT_AUTO_FALLBACK_INTERVAL
-from redis.multidb.database import Database, State, Databases
+from redis.multidb.database import Database, Databases
 from redis.multidb.failover import FailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck
@@ -38,7 +38,6 @@ def mock_hc() -> HealthCheck:
 def mock_db(request) -> Database:
      db = Mock(spec=Database)
      db.weight = request.param.get("weight", 1.0)
-     db.state = request.param.get("state", State.ACTIVE)
      db.client = Mock(spec=Redis)
 
      cb = request.param.get("circuit", {})
@@ -53,7 +52,6 @@ def mock_db(request) -> Database:
 def mock_db1(request) -> Database:
      db = Mock(spec=Database)
      db.weight = request.param.get("weight", 1.0)
-     db.state = request.param.get("state", State.ACTIVE)
      db.client = Mock(spec=Redis)
 
      cb = request.param.get("circuit", {})
@@ -68,7 +66,6 @@ def mock_db1(request) -> Database:
 def mock_db2(request) -> Database:
      db = Mock(spec=Database)
      db.weight = request.param.get("weight", 1.0)
-     db.state = request.param.get("state", State.ACTIVE)
      db.client = Mock(spec=Redis)
 
      cb = request.param.get("circuit", {})
@@ -94,7 +91,6 @@ def mock_multi_db_config(
      config = MultiDbConfig(
           databases_config=[Mock(spec=DatabaseConfig)],
           failure_detectors=[mock_fd],
-          health_checks=[mock_hc],
           health_check_interval=hc_interval,
           failover_strategy=mock_fs,
           auto_fallback_interval=auto_fallback_interval,
