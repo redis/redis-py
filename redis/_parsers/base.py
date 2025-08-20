@@ -216,7 +216,11 @@ class PushNotificationsParser(Protocol):
                 # Expected message format is: MOVING <seq_number> <time> <endpoint>
                 id = response[1]
                 ttl = response[2]
-                host, port = response[3].decode().split(":")
+                if response[3] in [b"null", "null"]:
+                    host, port = None, None
+                else:
+                    host, port = response[3].decode().split(":")
+
                 notification = NodeMovingEvent(id, host, port, ttl)
                 return self.node_moving_push_handler_func(notification)
 

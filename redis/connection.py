@@ -348,6 +348,7 @@ class AbstractConnection(ConnectionInterface):
         maintenance_events_pool_handler: Optional[MaintenanceEventPoolHandler] = None,
         maintenance_events_config: Optional[MaintenanceEventsConfig] = None,
         maintenance_state: "MaintenanceState" = MaintenanceState.NONE,
+        maintenance_event_hash: Optional[int] = None,
         orig_host_address: Optional[str] = None,
         orig_socket_timeout: Optional[float] = None,
         orig_socket_connect_timeout: Optional[float] = None,
@@ -439,6 +440,7 @@ class AbstractConnection(ConnectionInterface):
 
         self._should_reconnect = False
         self.maintenance_state = maintenance_state
+        self.maintenance_event_hash = maintenance_event_hash
 
         self._command_packer = self._construct_command_packer(command_packer)
 
@@ -2042,17 +2044,26 @@ class ConnectionPool:
     def should_update_connection(
         self,
         conn: "Connection",
-        address_type_to_match: Literal["connected", "configured"] = "connected",
+        matching_pattern: Literal[
+            "connected_address", "configured_address", "event_hash"
+        ] = "connected_address",
         matching_address: Optional[str] = None,
+        matching_event_hash: Optional[int] = None,
     ) -> bool:
         """
         Check if the connection should be updated based on the matching address.
         """
-        if address_type_to_match == "connected":
+        if matching_pattern == "connected_address":
             if matching_address and conn.getpeername() != matching_address:
                 return False
-        else:
+        elif matching_pattern == "configured_address":
             if matching_address and conn.host != matching_address:
+                return False
+        elif matching_pattern == "event_hash":
+            if (
+                matching_event_hash
+                and conn.maintenance_event_hash != matching_event_hash
+            ):
                 return False
         return True
 
@@ -2060,8 +2071,10 @@ class ConnectionPool:
         self,
         conn: "Connection",
         state: Optional["MaintenanceState"] = None,
+        maintenance_event_hash: Optional[int] = None,
         host_address: Optional[str] = None,
         relax_timeout: Optional[float] = None,
+        update_event_hash: bool = False,
         reset_host_address: bool = False,
         reset_relax_timeout: bool = False,
     ):
@@ -2070,6 +2083,10 @@ class ConnectionPool:
         """
         if state:
             conn.maintenance_state = state
+
+        if update_event_hash:
+            # update the event hash only if requested
+            conn.maintenance_event_hash = maintenance_event_hash
 
         if host_address is not None:
             conn.set_tmp_settings(tmp_host_address=host_address)
@@ -2088,10 +2105,15 @@ class ConnectionPool:
     def update_connections_settings(
         self,
         state: Optional["MaintenanceState"] = None,
+        maintenance_event_hash: Optional[int] = None,
         host_address: Optional[str] = None,
         relax_timeout: Optional[float] = None,
         matching_address: Optional[str] = None,
-        address_type_to_match: Literal["connected", "configured"] = "connected",
+        matching_event_hash: Optional[int] = None,
+        matching_pattern: Literal[
+            "connected_address", "configured_address", "event_hash"
+        ] = "connected_address",
+        update_event_hash: bool = False,
         reset_host_address: bool = False,
         reset_relax_timeout: bool = False,
         include_free_connections: bool = True,
@@ -2103,9 +2125,14 @@ class ConnectionPool:
         This method does not affect the connection kwargs.
 
         :param state: The maintenance state to set for the connection.
+        :param maintenance_event_hash: The hash of the maintenance event
+                                        to set for the connection.
+        :param host_address: The host address to set for the connection.
         :param relax_timeout: The relax timeout to set for the connection.
         :param matching_address: The address to match for the connection.
-        :param address_type_to_match: The type of address to match.
+        :param matching_event_hash: The event hash to match for the connection.
+        :param matching_pattern: The pattern to match for the connection.
+        :param update_event_hash: Whether to update the event hash for the connection.
         :param reset_host_address: Whether to reset the host address to the original address.
         :param reset_relax_timeout: Whether to reset the relax timeout to the original timeout.
         :param include_free_connections: Whether to include free/available connections.
@@ -2113,13 +2140,18 @@ class ConnectionPool:
         with self._lock:
             for conn in self._in_use_connections:
                 if self.should_update_connection(
-                    conn, address_type_to_match, matching_address
+                    conn,
+                    matching_pattern,
+                    matching_address,
+                    matching_event_hash,
                 ):
                     self.update_connection_settings(
                         conn,
                         state=state,
+                        maintenance_event_hash=maintenance_event_hash,
                         host_address=host_address,
                         relax_timeout=relax_timeout,
+                        update_event_hash=update_event_hash,
                         reset_host_address=reset_host_address,
                         reset_relax_timeout=reset_relax_timeout,
                     )
@@ -2127,13 +2159,18 @@ class ConnectionPool:
             if include_free_connections:
                 for conn in self._available_connections:
                     if self.should_update_connection(
-                        conn, address_type_to_match, matching_address
+                        conn,
+                        matching_pattern,
+                        matching_address,
+                        matching_event_hash,
                     ):
                         self.update_connection_settings(
                             conn,
                             state=state,
+                            maintenance_event_hash=maintenance_event_hash,
                             host_address=host_address,
                             relax_timeout=relax_timeout,
+                            update_event_hash=update_event_hash,
                             reset_host_address=reset_host_address,
                             reset_relax_timeout=reset_relax_timeout,
                         )
@@ -2162,7 +2199,9 @@ class ConnectionPool:
         """
         with self._lock:
             for conn in self._in_use_connections:
-                if self.should_update_connection(conn, "connected", moving_address_src):
+                if self.should_update_connection(
+                    conn, "connected_address", moving_address_src
+                ):
                     conn.mark_for_reconnect()
 
     def disconnect_free_connections(
@@ -2178,7 +2217,9 @@ class ConnectionPool:
 
         with self._lock:
             for conn in self._available_connections:
-                if self.should_update_connection(conn, "connected", moving_address_src):
+                if self.should_update_connection(
+                    conn, "connected_address", moving_address_src
+                ):
                     conn.disconnect()
 
     async def _mock(self, error: RedisError):
@@ -2424,10 +2465,15 @@ class BlockingConnectionPool(ConnectionPool):
     def update_connections_settings(
         self,
         state: Optional["MaintenanceState"] = None,
+        maintenance_event_hash: Optional[int] = None,
         relax_timeout: Optional[float] = None,
         host_address: Optional[str] = None,
         matching_address: Optional[str] = None,
-        address_type_to_match: Literal["connected", "configured"] = "connected",
+        matching_event_hash: Optional[int] = None,
+        matching_pattern: Literal[
+            "connected_address", "configured_address", "event_hash"
+        ] = "connected_address",
+        update_event_hash: bool = False,
         reset_host_address: bool = False,
         reset_relax_timeout: bool = False,
         include_free_connections: bool = True,
@@ -2439,13 +2485,18 @@ class BlockingConnectionPool(ConnectionPool):
             if include_free_connections:
                 for conn in tuple(self._connections):
                     if self.should_update_connection(
-                        conn, address_type_to_match, matching_address
+                        conn,
+                        matching_pattern,
+                        matching_address,
+                        matching_event_hash,
                     ):
                         self.update_connection_settings(
                             conn,
                             state=state,
+                            maintenance_event_hash=maintenance_event_hash,
                             host_address=host_address,
                             relax_timeout=relax_timeout,
+                            update_event_hash=update_event_hash,
                             reset_host_address=reset_host_address,
                             reset_relax_timeout=reset_relax_timeout,
                         )
@@ -2454,13 +2505,18 @@ class BlockingConnectionPool(ConnectionPool):
                 for conn in self._connections:
                     if conn not in connections_in_queue:
                         if self.should_update_connection(
-                            conn, address_type_to_match, matching_address
+                            conn,
+                            matching_pattern,
+                            matching_address,
+                            matching_event_hash,
                         ):
                             self.update_connection_settings(
                                 conn,
                                 state=state,
+                                maintenance_event_hash=maintenance_event_hash,
                                 host_address=host_address,
                                 relax_timeout=relax_timeout,
+                                update_event_hash=update_event_hash,
                                 reset_host_address=reset_host_address,
                                 reset_relax_timeout=reset_relax_timeout,
                             )
@@ -2479,9 +2535,12 @@ class BlockingConnectionPool(ConnectionPool):
             connections_in_queue = {conn for conn in self.pool.queue if conn}
             for conn in self._connections:
                 if conn not in connections_in_queue:
-                    if moving_address_src and conn.getpeername() != moving_address_src:
-                        continue
-                    conn.mark_for_reconnect()
+                    if self.should_update_connection(
+                        conn,
+                        matching_pattern="connected_address",
+                        matching_address=moving_address_src,
+                    ):
+                        conn.mark_for_reconnect()
 
     def disconnect_free_connections(
         self,
@@ -2498,9 +2557,10 @@ class BlockingConnectionPool(ConnectionPool):
 
             for conn in existing_connections:
                 if conn:
-                    if moving_address_src and conn.getpeername() != moving_address_src:
-                        continue
-                    conn.disconnect()
+                    if self.should_update_connection(
+                        conn, "connected_address", moving_address_src
+                    ):
+                        conn.disconnect()
 
     def _update_maintenance_events_config_for_connections(
         self, maintenance_events_config

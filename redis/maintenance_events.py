@@ -123,7 +123,13 @@ class NodeMovingEvent(MaintenanceEvent):
     during cluster rebalancing or maintenance operations.
     """
 
-    def __init__(self, id: int, new_node_host: str, new_node_port: int, ttl: int):
+    def __init__(
+        self,
+        id: int,
+        new_node_host: Optional[str],
+        new_node_port: Optional[int],
+        ttl: int,
+    ):
         """
         Initialize a new NodeMovingEvent.
 
@@ -173,9 +179,17 @@ class NodeMovingEvent(MaintenanceEvent):
         instances to be used in sets and as dictionary keys.
 
         Returns:
-            int: Hash value based on event type, id, new_node_host, and new_node_port
+            int: Hash value based on event type class name, id,
+            new_node_host and new_node_port
         """
-        return hash((self.__class__, self.id, self.new_node_host, self.new_node_port))
+        return hash(
+            (
+                self.__class__.__name__,
+                int(self.id),
+                str(self.new_node_host),
+                int(self.new_node_port) if self.new_node_port else None,
+            )
+        )
 
 
 class NodeMigratingEvent(MaintenanceEvent):
@@ -224,7 +238,7 @@ class NodeMigratingEvent(MaintenanceEvent):
         Returns:
             int: Hash value based on event type and id
         """
-        return hash((self.__class__, self.id))
+        return hash((self.__class__.__name__, int(self.id)))
 
 
 class NodeMigratedEvent(MaintenanceEvent):
@@ -274,7 +288,7 @@ class NodeMigratedEvent(MaintenanceEvent):
         Returns:
             int: Hash value based on event type and id
         """
-        return hash((self.__class__, self.id))
+        return hash((self.__class__.__name__, int(self.id)))
 
 
 class NodeFailingOverEvent(MaintenanceEvent):
@@ -323,7 +337,7 @@ class NodeFailingOverEvent(MaintenanceEvent):
         Returns:
             int: Hash value based on event type and id
         """
-        return hash((self.__class__, self.id))
+        return hash((self.__class__.__name__, int(self.id)))
 
 
 class NodeFailedOverEvent(MaintenanceEvent):
@@ -373,7 +387,7 @@ class NodeFailedOverEvent(MaintenanceEvent):
         Returns:
             int: Hash value based on event type and id
         """
-        return hash((self.__class__, self.id))
+        return hash((self.__class__.__name__, int(self.id)))
 
 
 def _is_private_fqdn(host: str) -> bool:
@@ -595,10 +609,12 @@ class MaintenanceEventPoolHandler:
                     # connection settings for matching connections
                     self.pool.update_connections_settings(
                         state=MaintenanceState.MOVING,
+                        maintenance_event_hash=hash(event),
                         relax_timeout=self.config.relax_timeout,
                         host_address=event.new_node_host,
                         matching_address=moving_address_src,
-                        address_type_to_match="connected",
+                        matching_pattern="connected_address",
+                        update_event_hash=True,
                         include_free_connections=True,
                     )
 
@@ -618,6 +634,7 @@ class MaintenanceEventPoolHandler:
                     # if relax timeouts are enabled - update timeouts
                     kwargs: dict = {
                         "maintenance_state": MaintenanceState.MOVING,
+                        "maintenance_event_hash": hash(event),
                     }
                     if event.new_node_host is not None:
                         # the host is not updated if the new node host is None
@@ -666,11 +683,16 @@ class MaintenanceEventPoolHandler:
             )
 
     def handle_node_moved_event(self, event: NodeMovingEvent):
+        """
+        Handle the cleanup after a node moving event expires.
+        """
+        event_hash = hash(event)
+
         with self._lock:
-            # if the current host in kwargs is not matching the event
+            # if the current maintenance_event_hash in kwargs is not matching the event
             # it means there has been a new moving event after this one
-            # and we don't need to revert the kwargs
-            if self.pool.connection_kwargs.get("host") == event.new_node_host:
+            # and we don't need to revert the kwargs yet
+            if self.pool.connection_kwargs.get("maintenance_event_hash") == event_hash:
                 orig_host = self.pool.connection_kwargs.get("orig_host_address")
                 orig_socket_timeout = self.pool.connection_kwargs.get(
                     "orig_socket_timeout"
@@ -680,6 +702,7 @@ class MaintenanceEventPoolHandler:
                 )
                 kwargs: dict = {
                     "maintenance_state": MaintenanceState.NONE,
+                    "maintenance_event_hash": None,
                     "host": orig_host,
                     "socket_timeout": orig_socket_timeout,
                     "socket_connect_timeout": orig_connect_timeout,
@@ -687,15 +710,16 @@ class MaintenanceEventPoolHandler:
                 self.pool.update_connection_kwargs(**kwargs)
 
             with self.pool._lock:
-                moving_address = event.new_node_host
                 reset_relax_timeout = self.config.is_relax_timeouts_enabled()
                 reset_host_address = self.config.proactive_reconnect
 
                 self.pool.update_connections_settings(
                     relax_timeout=-1,
                     state=MaintenanceState.NONE,
-                    matching_address=moving_address,
-                    address_type_to_match="configured",
+                    maintenance_event_hash=None,
+                    matching_event_hash=event_hash,
+                    matching_pattern="event_hash",
+                    update_event_hash=True,
                     reset_relax_timeout=reset_relax_timeout,
                     reset_host_address=reset_host_address,
                     include_free_connections=True,

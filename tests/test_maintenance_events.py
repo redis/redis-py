@@ -1,5 +1,5 @@
 import threading
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, call, patch, MagicMock
 import pytest
 
 from redis.connection import ConnectionInterface
@@ -101,6 +101,14 @@ class TestNodeMovingEvent:
             assert "ttl=10" in repr_str
             assert "remaining=5.0s" in repr_str
             assert "expired=False" in repr_str
+
+    def test_equality_none_id_none_port(self):
+        """Test equality for events with same id and host and port - None."""
+        event1 = NodeMovingEvent(id=1, new_node_host=None, new_node_port=None, ttl=10)
+        event2 = NodeMovingEvent(
+            id=1, new_node_host=None, new_node_port=None, ttl=20
+        )  # Different TTL
+        assert event1 == event2
 
     def test_equality_same_id_host_port(self):
         """Test equality for events with same id, host, and port."""
@@ -522,6 +530,38 @@ class TestMaintenanceEventPoolHandler:
                 event.ttl, self.handler.handle_node_moved_event, args=(event,)
             )
             mock_timer.return_value.start.assert_called_once()
+
+            # Verify event was added to processed set
+            assert event in self.handler._processed_events
+
+            # Verify pool methods were called
+            self.mock_pool.update_connections_settings.assert_called_once()
+
+    def test_handle_node_moving_event_with_no_host_and_port(self):
+        """Test successful node moving event handling."""
+        event = NodeMovingEvent(id=1, new_node_host=None, new_node_port=None, ttl=2)
+
+        with (
+            patch("threading.Timer") as mock_timer,
+            patch("time.monotonic", return_value=1000),
+        ):
+            self.handler.handle_node_moving_event(event)
+
+            # Verify timer was started
+            mock_timer.assert_has_calls(
+                [
+                    call(
+                        event.ttl / 2,
+                        self.handler.run_proactive_reconnect,
+                        args=(None,),
+                    ),
+                    call().start(),
+                    call(
+                        event.ttl, self.handler.handle_node_moved_event, args=(event,)
+                    ),
+                    call().start(),
+                ]
+            )
 
             # Verify event was added to processed set
             assert event in self.handler._processed_events
