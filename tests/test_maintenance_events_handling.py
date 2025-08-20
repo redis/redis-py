@@ -183,35 +183,36 @@ class MockSocket:
             # Check if this is a key that should trigger a push message
             if b"key_receive_migrating_" in data or b"key_receive_migrating" in data:
                 # MIGRATING push message before SET key_receive_migrating_X response
-                # Format: >2\r\n$9\r\nMIGRATING\r\n:10\r\n (2 elements: MIGRATING, ttl)
-                migrating_push = ">2\r\n$9\r\nMIGRATING\r\n:10\r\n"
+                # Format: >3\r\n$9\r\nMIGRATING\r\n:1\r\n:10\r\n (3 elements: MIGRATING, id, ttl)
+                migrating_push = ">3\r\n$9\r\nMIGRATING\r\n:1\r\n:10\r\n"
                 response = migrating_push.encode() + response
             elif b"key_receive_migrated_" in data or b"key_receive_migrated" in data:
                 # MIGRATED push message before SET key_receive_migrated_X response
-                # Format: >1\r\n$8\r\nMIGRATED\r\n (1 element: MIGRATED)
-                migrated_push = ">1\r\n$8\r\nMIGRATED\r\n"
+                # Format: >2\r\n$8\r\nMIGRATED\r\n:1\r\n (2 elements: MIGRATED, id)
+                migrated_push = ">2\r\n$8\r\nMIGRATED\r\n:1\r\n"
                 response = migrated_push.encode() + response
             elif (
                 b"key_receive_failing_over_" in data
                 or b"key_receive_failing_over" in data
             ):
                 # FAILING_OVER push message before SET key_receive_failing_over_X response
-                # Format: >2\r\n$12\r\nFAILING_OVER\r\n:10\r\n (2 elements: FAILING_OVER, ttl)
-                failing_over_push = ">2\r\n$12\r\nFAILING_OVER\r\n:10\r\n"
+                # Format: >3\r\n$12\r\nFAILING_OVER\r\n:1\r\n:10\r\n (3 elements: FAILING_OVER, id, ttl)
+                failing_over_push = ">3\r\n$12\r\nFAILING_OVER\r\n:1\r\n:10\r\n"
+
                 response = failing_over_push.encode() + response
             elif (
                 b"key_receive_failed_over_" in data
                 or b"key_receive_failed_over" in data
             ):
                 # FAILED_OVER push message before SET key_receive_failed_over_X response
-                # Format: >1\r\n$11\r\nFAILED_OVER\r\n (1 element: FAILED_OVER)
-                failed_over_push = ">1\r\n$11\r\nFAILED_OVER\r\n"
+                # Format: >2\r\n$11\r\nFAILED_OVER\r\n:1\r\n (2 elements: FAILED_OVER, id)
+                failed_over_push = ">2\r\n$11\r\nFAILED_OVER\r\n:1\r\n"
                 response = failed_over_push.encode() + response
             elif b"key_receive_moving_" in data:
                 # MOVING push message before SET key_receive_moving_X response
-                # Format: >3\r\n$6\r\nMOVING\r\n:15\r\n+localhost:6379\r\n (3 elements: MOVING, ttl, host:port)
+                # Format: >4\r\n$6\r\nMOVING\r\n:1\r\n:1\r\n+1.2.3.4:6379\r\n (4 elements: MOVING, id, ttl, host:port)
                 # Note: Using + instead of $ to send as simple string instead of bulk string
-                moving_push = f">3\r\n$6\r\nMOVING\r\n:{MOVING_TIMEOUT}\r\n+{AFTER_MOVING_ADDRESS}\r\n"
+                moving_push = f">4\r\n$6\r\nMOVING\r\n:1\r\n:{MOVING_TIMEOUT}\r\n+{AFTER_MOVING_ADDRESS}\r\n"
                 response = moving_push.encode() + response
 
             self.pending_responses.append(response)
@@ -1809,6 +1810,7 @@ class TestMaintenanceEventsHandlingMultipleProxies:
         conn_event_handler.handle_event(NodeMigratingEvent(id=3, ttl=1))
         # validate connection is in MIGRATING state
         assert conn.maintenance_state == MaintenanceState.MAINTENANCE
+
         assert conn.socket_timeout == self.config.relax_timeout
 
         # Send MIGRATED event to con with ip = key3
