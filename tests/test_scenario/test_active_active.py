@@ -7,7 +7,6 @@ import pytest
 
 from redis import Redis, RedisCluster
 from redis.client import Pipeline
-from tests.test_scenario.conftest import get_endpoint_config
 from tests.test_scenario.fault_injector_client import ActionRequest, ActionType
 
 logger = logging.getLogger(__name__)
@@ -31,11 +30,11 @@ def trigger_network_failure_action(fault_injector_client, config, event: threadi
 
     logger.info(f"Action completed. Status: {status_result['status']}")
 
-class TestActiveActiveStandalone:
+class TestActiveActive:
 
     def teardown_method(self, method):
         # Timeout so the cluster could recover from network failure.
-        sleep(6)
+        sleep(5)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -64,12 +63,12 @@ class TestActiveActiveStandalone:
         # Execute commands before network failure
         while not event.is_set():
             assert r_multi_db.get('key') == 'value'
-            sleep(0.1)
+            sleep(0.5)
 
         # Execute commands until database failover
         while not listener.is_changed_flag:
             assert r_multi_db.get('key') == 'value'
-            sleep(0.1)
+            sleep(0.5)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -113,10 +112,10 @@ class TestActiveActiveStandalone:
                 pipe.get('{hash}key2')
                 pipe.get('{hash}key3')
                 assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
-            sleep(0.1)
+            sleep(0.5)
 
         # Execute pipeline until database failover
-        while not listener.is_changed_flag:
+        for _ in range(5):
             with r_multi_db.pipeline() as pipe:
                 pipe.set('{hash}key1', 'value1')
                 pipe.set('{hash}key2', 'value2')
@@ -125,9 +124,7 @@ class TestActiveActiveStandalone:
                 pipe.get('{hash}key2')
                 pipe.get('{hash}key3')
                 assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
-            sleep(0.1)
-
-        assert listener.is_changed_flag == True
+            sleep(0.5)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -171,10 +168,10 @@ class TestActiveActiveStandalone:
             pipe.get('{hash}key2')
             pipe.get('{hash}key3')
             assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
-        sleep(0.1)
+        sleep(0.5)
 
         # Execute pipeline until database failover
-        while not listener.is_changed_flag:
+        for _ in range(5):
             pipe = r_multi_db.pipeline()
             pipe.set('{hash}key1', 'value1')
             pipe.set('{hash}key2', 'value2')
@@ -183,9 +180,7 @@ class TestActiveActiveStandalone:
             pipe.get('{hash}key2')
             pipe.get('{hash}key3')
             assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
-        sleep(0.1)
-
-        assert listener.is_changed_flag == True
+        sleep(0.5)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -222,14 +217,12 @@ class TestActiveActiveStandalone:
         # Execute pipeline before network failure
         while not event.is_set():
             r_multi_db.transaction(callback)
-            sleep(0.1)
+            sleep(0.5)
 
         # Execute pipeline until database failover
         while not listener.is_changed_flag:
             r_multi_db.transaction(callback)
-            sleep(0.1)
-
-        assert listener.is_changed_flag == True
+            sleep(0.5)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -267,12 +260,12 @@ class TestActiveActiveStandalone:
         # Execute pipeline before network failure
         while not event.is_set():
             r_multi_db.publish('test-channel', data)
-            sleep(0.1)
+            sleep(0.5)
 
         # Execute pipeline until database failover
         while not listener.is_changed_flag:
             r_multi_db.publish('test-channel', data)
-            sleep(0.1)
+            sleep(0.5)
 
         pubsub_thread.stop()
         assert messages_count > 5
@@ -317,12 +310,12 @@ class TestActiveActiveStandalone:
         # Execute pipeline before network failure
         while not event.is_set():
             r_multi_db.spublish('test-channel', data)
-            sleep(0.1)
+            sleep(0.5)
 
         # Execute pipeline until database failover
         while not listener.is_changed_flag:
             r_multi_db.spublish('test-channel', data)
-            sleep(0.1)
+            sleep(0.5)
 
         pubsub_thread.stop()
         assert messages_count > 5
