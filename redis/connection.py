@@ -283,6 +283,13 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
+    def get_resolved_ip(self):
+        """
+        Get resolved ip address for the connection.
+        """
+        pass
+
+    @abstractmethod
     def update_current_socket_timeout(self, relax_timeout: Optional[float] = None):
         """
         Update the timeout for the current socket.
@@ -421,32 +428,16 @@ class AbstractConnection(ConnectionInterface):
             parser_class = _RESP3Parser
         self.set_parser(parser_class)
 
-        if maintenance_events_config and maintenance_events_config.enabled:
-            if maintenance_events_pool_handler:
-                maintenance_events_pool_handler.set_connection(self)
-                self._parser.set_node_moving_push_handler(
-                    maintenance_events_pool_handler.handle_event
-                )
-            self._maintenance_event_connection_handler = (
-                MaintenanceEventConnectionHandler(self, maintenance_events_config)
-            )
-            self._parser.set_maintenance_push_handler(
-                self._maintenance_event_connection_handler.handle_event
-            )
+        self.maintenance_events_config = maintenance_events_config
 
-            self.orig_host_address = (
-                orig_host_address if orig_host_address else self.host
-            )
-            self.orig_socket_timeout = (
-                orig_socket_timeout if orig_socket_timeout else self.socket_timeout
-            )
-            self.orig_socket_connect_timeout = (
-                orig_socket_connect_timeout
-                if orig_socket_connect_timeout
-                else self.socket_connect_timeout
-            )
-        else:
-            self._maintenance_event_connection_handler = None
+        # Set up maintenance events if enabled
+        self._configure_maintenance_events(
+            maintenance_events_pool_handler,
+            orig_host_address,
+            orig_socket_timeout,
+            orig_socket_connect_timeout,
+        )
+
         self._should_reconnect = False
         self.maintenance_state = maintenance_state
 
@@ -504,6 +495,46 @@ class AbstractConnection(ConnectionInterface):
         :param parser_class: The required parser class
         """
         self._parser = parser_class(socket_read_size=self._socket_read_size)
+
+    def _configure_maintenance_events(
+        self,
+        maintenance_events_pool_handler=None,
+        orig_host_address=None,
+        orig_socket_timeout=None,
+        orig_socket_connect_timeout=None,
+    ):
+        """Enable maintenance events by setting up handlers and storing original connection parameters."""
+        if (
+            not self.maintenance_events_config
+            or not self.maintenance_events_config.enabled
+        ):
+            self._maintenance_event_connection_handler = None
+            return
+
+        # Set up pool handler if available
+        if maintenance_events_pool_handler:
+            self._parser.set_node_moving_push_handler(
+                maintenance_events_pool_handler.handle_event
+            )
+
+        # Set up connection handler
+        self._maintenance_event_connection_handler = MaintenanceEventConnectionHandler(
+            self, self.maintenance_events_config
+        )
+        self._parser.set_maintenance_push_handler(
+            self._maintenance_event_connection_handler.handle_event
+        )
+
+        # Store original connection parameters
+        self.orig_host_address = orig_host_address if orig_host_address else self.host
+        self.orig_socket_timeout = (
+            orig_socket_timeout if orig_socket_timeout else self.socket_timeout
+        )
+        self.orig_socket_connect_timeout = (
+            orig_socket_connect_timeout
+            if orig_socket_connect_timeout
+            else self.socket_connect_timeout
+        )
 
     def set_maintenance_event_pool_handler(
         self, maintenance_event_pool_handler: MaintenanceEventPoolHandler
@@ -651,6 +682,39 @@ class AbstractConnection(ConnectionInterface):
                 and self.handshake_metadata.get("proto") != self.protocol
             ):
                 raise ConnectionError("Invalid RESP version")
+
+        # Send maintenance notifications handshake if RESP3 is active and maintenance events are enabled
+        # and we have a host to determine the endpoint type from
+        if (
+            self.protocol not in [2, "2"]
+            and self.maintenance_events_config
+            and self.maintenance_events_config.enabled
+            and self._maintenance_event_connection_handler
+            and hasattr(self, "host")
+        ):
+            try:
+                endpoint_type = self.maintenance_events_config.get_endpoint_type(
+                    self.host, self
+                )
+                self.send_command(
+                    "CLIENT",
+                    "MAINT_NOTIFICATIONS",
+                    "ON",
+                    "moving-endpoint-type",
+                    endpoint_type.value,
+                    check_health=check_health,
+                )
+                response = self.read_response()
+                if str_if_bytes(response) != "OK":
+                    raise ConnectionError(
+                        "The server doesn't support maintenance notifications"
+                    )
+            except Exception as e:
+                # Log warning but don't fail the connection
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to enable maintenance notifications: {e}")
 
         # if a client_name is given, set it
         if self.client_name:
@@ -887,6 +951,56 @@ class AbstractConnection(ConnectionInterface):
             )
             self.read_response()
             self._re_auth_token = None
+
+    def get_resolved_ip(self) -> Optional[str]:
+        """
+        Extract the resolved IP address from an
+        established connection or resolve it from the host.
+
+        First tries to get the actual IP from the socket (most accurate),
+        then falls back to DNS resolution if needed.
+
+        Args:
+            connection: The connection object to extract the IP from
+
+        Returns:
+            str: The resolved IP address, or None if it cannot be determined
+        """
+
+        # Method 1: Try to get the actual IP from the established socket connection
+        # This is most accurate as it shows the exact IP being used
+        try:
+            if self._sock is not None:
+                peer_addr = self._sock.getpeername()
+                if peer_addr and len(peer_addr) >= 1:
+                    # For TCP sockets, peer_addr is typically (host, port) tuple
+                    # Return just the host part
+                    return peer_addr[0]
+        except (AttributeError, OSError):
+            # Socket might not be connected or getpeername() might fail
+            pass
+
+        # Method 2: Fallback to DNS resolution of the host
+        # This is less accurate but works when socket is not available
+        try:
+            host = getattr(self, "host", "localhost")
+            port = getattr(self, "port", 6379)
+            if host:
+                # Use getaddrinfo to resolve the hostname to IP
+                # This mimics what the connection would do during _connect()
+                addr_info = socket.getaddrinfo(
+                    host, port, socket.AF_UNSPEC, socket.SOCK_STREAM
+                )
+                if addr_info:
+                    # Return the IP from the first result
+                    # addr_info[0] is (family, socktype, proto, canonname, sockaddr)
+                    # sockaddr[0] is the IP address
+                    return addr_info[0][4][0]
+        except (AttributeError, OSError, socket.gaierror):
+            # DNS resolution might fail
+            pass
+
+        return None
 
     @property
     def maintenance_state(self) -> MaintenanceState:

@@ -2,6 +2,8 @@ import threading
 from unittest.mock import Mock, patch, MagicMock
 import pytest
 
+from redis.connection import ConnectionInterface
+
 from redis.maintenance_events import (
     MaintenanceEvent,
     NodeMovingEvent,
@@ -13,6 +15,7 @@ from redis.maintenance_events import (
     MaintenanceEventPoolHandler,
     MaintenanceEventConnectionHandler,
     MaintenanceState,
+    EndpointType,
 )
 
 
@@ -368,7 +371,7 @@ class TestMaintenanceEventsConfig:
     def test_init_defaults(self):
         """Test MaintenanceEventsConfig initialization with defaults."""
         config = MaintenanceEventsConfig()
-        assert config.enabled is False
+        assert config.enabled is True
         assert config.proactive_reconnect is True
         assert config.relax_timeout == 20
 
@@ -609,6 +612,7 @@ class TestMaintenanceEventConnectionHandler:
         handler = MaintenanceEventConnectionHandler(self.mock_connection, config)
 
         result = handler.handle_maintenance_start_event(MaintenanceState.MAINTENANCE)
+
         assert result is None
         self.mock_connection.update_current_socket_timeout.assert_not_called()
 
@@ -663,3 +667,163 @@ class TestMaintenanceEventConnectionHandler:
         self.mock_connection.reset_tmp_settings.assert_called_once_with(
             reset_relax_timeout=True
         )
+
+
+class TestEndpointType:
+    """Test the EndpointType class functionality."""
+
+    def test_endpoint_type_constants(self):
+        """Test that the EndpointType constants are correct."""
+        assert EndpointType.INTERNAL_IP.value == "internal-ip"
+        assert EndpointType.INTERNAL_FQDN.value == "internal-fqdn"
+        assert EndpointType.EXTERNAL_IP.value == "external-ip"
+        assert EndpointType.EXTERNAL_FQDN.value == "external-fqdn"
+        assert EndpointType.NONE.value == "none"
+
+
+class TestMaintenanceEventsConfigEndpointType:
+    """Test MaintenanceEventsConfig endpoint type functionality."""
+
+    def setup_method(self):
+        """Set up common mock classes for all tests."""
+
+        class MockSocket:
+            def __init__(self, resolved_ip):
+                self.resolved_ip = resolved_ip
+
+            def getpeername(self):
+                return (self.resolved_ip, 6379)
+
+        class MockConnection(ConnectionInterface):
+            def __init__(self, host, resolved_ip=None, is_ssl=False):
+                self.host = host
+                self.port = 6379
+                self._sock = MockSocket(resolved_ip) if resolved_ip else None
+                self.__class__.__name__ = "SSLConnection" if is_ssl else "Connection"
+
+            def get_resolved_ip(self):
+                # Call the actual method from AbstractConnection
+                from redis.connection import AbstractConnection
+
+                return AbstractConnection.get_resolved_ip(self)  # type: ignore
+
+        self.MockSocket = MockSocket
+        self.MockConnection = MockConnection
+
+    def test_config_validation_valid_endpoint_types(self):
+        """Test that MaintenanceEventsConfig accepts valid endpoint types."""
+        for endpoint_type in EndpointType:
+            config = MaintenanceEventsConfig(endpoint_type=endpoint_type)
+            assert config.endpoint_type == endpoint_type
+
+    def test_config_validation_none_endpoint_type(self):
+        """Test that MaintenanceEventsConfig accepts None as endpoint type."""
+        config = MaintenanceEventsConfig(endpoint_type=None)
+        assert config.endpoint_type is None
+
+    def test_endpoint_type_detection_ip_addresses(self):
+        """Test endpoint type detection for IP addresses."""
+        config = MaintenanceEventsConfig()
+
+        # Test private IPv4 addresses
+        conn1 = self.MockConnection("192.168.1.1", resolved_ip="192.168.1.1")
+        assert (
+            config.get_endpoint_type("192.168.1.1", conn1) == EndpointType.INTERNAL_IP
+        )
+
+        # Test public IPv4 addresses
+        conn2 = self.MockConnection("8.8.8.8", resolved_ip="8.8.8.8")
+        assert config.get_endpoint_type("8.8.8.8", conn2) == EndpointType.EXTERNAL_IP
+
+        # Test IPv6 loopback
+        conn3 = self.MockConnection("::1")
+        assert config.get_endpoint_type("::1", conn3) == EndpointType.INTERNAL_IP
+
+        # Test IPv6 public address
+        conn4 = self.MockConnection("2001:4860:4860::8888")
+        assert (
+            config.get_endpoint_type("2001:4860:4860::8888", conn4)
+            == EndpointType.EXTERNAL_IP
+        )
+
+    def test_endpoint_type_detection_fqdn_with_resolved_ip(self):
+        """Test endpoint type detection for FQDNs with resolved IP addresses."""
+        config = MaintenanceEventsConfig()
+
+        # Test FQDN resolving to private IP
+        conn1 = self.MockConnection(
+            "redis.internal.company.com", resolved_ip="192.168.1.1"
+        )
+        assert (
+            config.get_endpoint_type("redis.internal.company.com", conn1)
+            == EndpointType.INTERNAL_FQDN
+        )
+
+        # Test FQDN resolving to public IP
+        conn2 = self.MockConnection("db123.redis.com", resolved_ip="8.8.8.8")
+        assert (
+            config.get_endpoint_type("db123.redis.com", conn2)
+            == EndpointType.EXTERNAL_FQDN
+        )
+
+        # Test internal FQDN resolving to public IP (should use resolved IP)
+        conn3 = self.MockConnection(
+            "redis.internal.company.com", resolved_ip="10.8.8.8"
+        )
+        assert (
+            config.get_endpoint_type("redis.internal.company.com", conn3)
+            == EndpointType.INTERNAL_FQDN
+        )
+
+        # Test FQDN with TLS
+        conn4 = self.MockConnection(
+            "redis.internal.company.com", resolved_ip="192.168.1.1", is_ssl=True
+        )
+        assert (
+            config.get_endpoint_type("redis.internal.company.com", conn4)
+            == EndpointType.INTERNAL_FQDN
+        )
+
+        conn5 = self.MockConnection(
+            "db123.redis.com", resolved_ip="8.8.8.8", is_ssl=True
+        )
+        assert (
+            config.get_endpoint_type("db123.redis.com", conn5)
+            == EndpointType.EXTERNAL_FQDN
+        )
+
+    def test_endpoint_type_detection_fqdn_heuristics(self):
+        """Test endpoint type detection using FQDN heuristics when no resolved IP is available."""
+        config = MaintenanceEventsConfig()
+
+        # Test localhost (should be internal)
+        conn1 = self.MockConnection("localhost")
+        assert (
+            config.get_endpoint_type("localhost", conn1) == EndpointType.INTERNAL_FQDN
+        )
+
+        # Test .local domain (should be internal)
+        conn2 = self.MockConnection("server.local")
+        assert (
+            config.get_endpoint_type("server.local", conn2)
+            == EndpointType.INTERNAL_FQDN
+        )
+
+        # Test public domain (should be external)
+        conn3 = self.MockConnection("example.com")
+        assert (
+            config.get_endpoint_type("example.com", conn3) == EndpointType.EXTERNAL_FQDN
+        )
+
+    def test_endpoint_type_override(self):
+        """Test that configured endpoint_type overrides detection."""
+
+        # Test with endpoint_type set to NONE
+        config = MaintenanceEventsConfig(endpoint_type=EndpointType.NONE)
+        conn = self.MockConnection("localhost")
+
+        assert config.get_endpoint_type("localhost", conn) == EndpointType.NONE
+
+        # Test with endpoint_type set to EXTERNAL_IP
+        config = MaintenanceEventsConfig(endpoint_type=EndpointType.EXTERNAL_IP)
+        assert config.get_endpoint_type("localhost", conn) == EndpointType.EXTERNAL_IP

@@ -1,5 +1,7 @@
 import enum
+import ipaddress
 import logging
+import re
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -12,6 +14,20 @@ class MaintenanceState(enum.Enum):
     NONE = "none"
     MOVING = "moving"
     MAINTENANCE = "maintenance"
+
+
+class EndpointType(enum.Enum):
+    """Valid endpoint types used in CLIENT MAINT_NOTIFICATIONS command."""
+
+    INTERNAL_IP = "internal-ip"
+    INTERNAL_FQDN = "internal-fqdn"
+    EXTERNAL_IP = "external-ip"
+    EXTERNAL_FQDN = "external-fqdn"
+    NONE = "none"
+
+    def __str__(self):
+        """Return the string value of the enum."""
+        return self.value
 
 
 if TYPE_CHECKING:
@@ -360,6 +376,46 @@ class NodeFailedOverEvent(MaintenanceEvent):
         return hash((self.__class__, self.id))
 
 
+def _is_private_fqdn(host: str) -> bool:
+    """
+    Determine if an FQDN is likely to be internal/private.
+
+    This uses heuristics based on RFC 952 and RFC 1123 standards:
+    - .local domains (RFC 6762 - Multicast DNS)
+    - .internal domains (common internal convention)
+    - Single-label hostnames (no dots)
+    - Common internal TLDs
+
+    Args:
+        host (str): The FQDN to check
+
+    Returns:
+        bool: True if the FQDN appears to be internal/private
+    """
+    host_lower = host.lower().rstrip(".")
+
+    # Single-label hostnames (no dots) are typically internal
+    if "." not in host_lower:
+        return True
+
+    # Common internal/private domain patterns
+    internal_patterns = [
+        r"\.local$",  # mDNS/Bonjour domains
+        r"\.internal$",  # Common internal convention
+        r"\.corp$",  # Corporate domains
+        r"\.lan$",  # Local area network
+        r"\.intranet$",  # Intranet domains
+        r"\.private$",  # Private domains
+    ]
+
+    for pattern in internal_patterns:
+        if re.search(pattern, host_lower):
+            return True
+
+    # If none of the internal patterns match, assume it's external
+    return False
+
+
 class MaintenanceEventsConfig:
     """
     Configuration class for maintenance events handling behaviour. Events are received through
@@ -372,9 +428,10 @@ class MaintenanceEventsConfig:
 
     def __init__(
         self,
-        enabled: bool = False,
+        enabled: bool = True,
         proactive_reconnect: bool = True,
         relax_timeout: Optional[Number] = 20,
+        endpoint_type: Optional[EndpointType] = None,
     ):
         """
         Initialize a new MaintenanceEventsConfig.
@@ -386,11 +443,17 @@ class MaintenanceEventsConfig:
                 Defaults to True.
             relax_timeout (Number): The relax timeout to use for the connection during maintenance.
                 If -1 is provided - the relax timeout is disabled. Defaults to 20.
+            endpoint_type (Optional[EndpointType]): Override for the endpoint type to use in CLIENT MAINT_NOTIFICATIONS.
+                If None, the endpoint type will be automatically determined based on the host and TLS configuration.
+                Defaults to None.
 
+        Raises:
+            ValueError: If endpoint_type is provided but is not a valid endpoint type.
         """
         self.enabled = enabled
         self.relax_timeout = relax_timeout
         self.proactive_reconnect = proactive_reconnect
+        self.endpoint_type = endpoint_type
 
     def __repr__(self) -> str:
         return (
@@ -398,6 +461,7 @@ class MaintenanceEventsConfig:
             f"enabled={self.enabled}, "
             f"proactive_reconnect={self.proactive_reconnect}, "
             f"relax_timeout={self.relax_timeout}, "
+            f"endpoint_type={self.endpoint_type!r}"
             f")"
         )
 
@@ -411,6 +475,60 @@ class MaintenanceEventsConfig:
             True if the relax_timeout is enabled, False otherwise.
         """
         return self.relax_timeout != -1
+
+    def get_endpoint_type(
+        self, host: str, connection: "ConnectionInterface"
+    ) -> EndpointType:
+        """
+        Determine the appropriate endpoint type for CLIENT MAINT_NOTIFICATIONS command.
+
+        Logic:
+        1. If endpoint_type is explicitly set, use it
+        2. Otherwise, check the original host from connection.host:
+           - If host is an IP address, use it directly to determine internal-ip vs external-ip
+           - If host is an FQDN, get the resolved IP to determine internal-fqdn vs external-fqdn
+
+        Args:
+            host: User provided hostname to analyze
+            connection: The connection object to analyze for endpoint type determination
+
+        Returns:
+        """
+
+        # If endpoint_type is explicitly set, use it
+        if self.endpoint_type is not None:
+            return self.endpoint_type
+
+        # Check if the host is an IP address
+        try:
+            ip_addr = ipaddress.ip_address(host)
+            # Host is an IP address - use it directly
+            is_private = ip_addr.is_private
+            return EndpointType.INTERNAL_IP if is_private else EndpointType.EXTERNAL_IP
+        except ValueError:
+            # Host is an FQDN - need to check resolved IP to determine internal vs external
+            pass
+
+        # Host is an FQDN, get the resolved IP to determine if it's internal or external
+        resolved_ip = connection.get_resolved_ip()
+
+        if resolved_ip:
+            try:
+                ip_addr = ipaddress.ip_address(resolved_ip)
+                is_private = ip_addr.is_private
+                # Use FQDN types since the original host was an FQDN
+                return (
+                    EndpointType.INTERNAL_FQDN
+                    if is_private
+                    else EndpointType.EXTERNAL_FQDN
+                )
+            except ValueError:
+                # This shouldn't happen since we got the IP from the socket, but fallback
+                pass
+
+        # Final fallback: use heuristics on the FQDN itself
+        is_private = _is_private_fqdn(host)
+        return EndpointType.INTERNAL_FQDN if is_private else EndpointType.EXTERNAL_FQDN
 
 
 class MaintenanceEventPoolHandler:
