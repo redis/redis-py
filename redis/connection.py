@@ -30,7 +30,6 @@ from redis.cache import (
     CacheInterface,
     CacheKey,
 )
-from redis.typing import Number
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
@@ -497,7 +496,6 @@ class AbstractConnection(ConnectionInterface):
         self._parser = parser_class(socket_read_size=self._socket_read_size)
 
     def _configure_maintenance_events(
-
         self,
         maintenance_events_pool_handler=None,
         orig_host_address=None,
@@ -2114,7 +2112,6 @@ class ConnectionPool:
         """
         with self._lock:
             for conn in self._in_use_connections:
-
                 if self.should_update_connection(
                     conn, address_type_to_match, matching_address
                 ):
@@ -2158,26 +2155,23 @@ class ConnectionPool:
         moving_address_src: Optional[str] = None,
     ):
         """
-        Mark all active connections for reconnect.
+        Mark all matching active connections for reconnect.
         This is used when a cluster node is migrated to a different address.
-
-        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
 
         :param moving_address_src: The address of the node that is being moved.
         """
-        for conn in self._in_use_connections:
-            if self.should_update_connection(conn, "connected", moving_address_src):
-                self._update_connection_for_reconnect(conn)
+        with self._lock:
+            for conn in self._in_use_connections:
+                if self.should_update_connection(conn, "connected", moving_address_src):
+                    conn.mark_for_reconnect()
 
     def disconnect_free_connections(
         self,
         moving_address_src: Optional[str] = None,
     ):
         """
-        Disconnect all free/available connections.
+        Disconnect all matching free/available connections.
         This is used when a cluster node is migrated to a different address.
-
-        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
 
         :param moving_address_src: The address of the node that is being moved.
         """
@@ -2186,12 +2180,6 @@ class ConnectionPool:
             for conn in self._available_connections:
                 if self.should_update_connection(conn, "connected", moving_address_src):
                     conn.disconnect()
-
-    def _update_connection_for_reconnect(
-        self,
-        connection: "Connection",
-    ):
-        connection.mark_for_reconnect()
 
     async def _mock(self, error: RedisError):
         """
@@ -2493,7 +2481,7 @@ class BlockingConnectionPool(ConnectionPool):
                 if conn not in connections_in_queue:
                     if moving_address_src and conn.getpeername() != moving_address_src:
                         continue
-                    self._update_connection_for_reconnect(conn)
+                    conn.mark_for_reconnect()
 
     def disconnect_free_connections(
         self,

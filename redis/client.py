@@ -964,8 +964,6 @@ class PubSub:
 
         return response
 
-        return response
-
     def parse_response(self, block=True, timeout=0):
         """Parse the response from a publish/subscribe command"""
         conn = self.connection

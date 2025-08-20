@@ -5,12 +5,6 @@ from asyncio import IncompleteReadError, StreamReader, TimeoutError
 from typing import Awaitable, Callable, List, Optional, Protocol, Union
 
 from redis.maintenance_events import (
-    NodeMigratedEvent,
-    NodeMigratingEvent,
-    NodeMovingEvent,
-)
-
-from redis.maintenance_events import (
     NodeFailedOverEvent,
     NodeFailingOverEvent,
     NodeMigratedEvent,
@@ -217,7 +211,7 @@ class PushNotificationsParser(Protocol):
                 and self.invalidation_push_handler_func
             ):
                 return self.invalidation_push_handler_func(response)
-              
+
             if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
                 # Expected message format is: MOVING <seq_number> <time> <endpoint>
                 id = response[1]
