@@ -137,10 +137,9 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         if isinstance(client, Redis):
             db_host = client.get_connection_kwargs()['host']
         else:
-            db_host = client.startup_nodes[0].host
+            db_host = client.get_primaries()[0].host
 
         base_url = f"https://{db_host}:{self._rest_api_port}"
-        print(base_url)
         self._http_client.base_url = base_url
 
         # Find bdb matching to the current database host
