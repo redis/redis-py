@@ -9,7 +9,6 @@ import pytest
 from redis import Redis, RedisCluster
 from redis.client import Pipeline
 from redis.multidb.healthcheck import LagAwareHealthCheck
-from tests.test_scenario.conftest import get_endpoint_config
 from tests.test_scenario.fault_injector_client import ActionRequest, ActionType
 
 logger = logging.getLogger(__name__)
@@ -76,19 +75,22 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"failure_threshold": 2}
+            {"client_class": Redis, "failure_threshold": 2},
+            {"client_class": RedisCluster, "failure_threshold": 2},
         ],
+        ids=["standalone", "cluster"],
         indirect=True
     )
+    @pytest.mark.timeout(50)
     def test_multi_db_client_uses_lag_aware_health_check(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
         event = threading.Event()
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client,event)
+            args=(fault_injector_client,config,event)
         )
-
-        r_multi_db, listener = r_multi_db
 
         env0_username = os.getenv('ENV0_USERNAME')
         env0_password = os.getenv('ENV0_PASSWORD')
@@ -108,11 +110,9 @@ class TestActiveActive:
             sleep(0.5)
 
         # Execute commands after network failure
-        for _ in range(3):
+        while not listener.is_changed_flag:
             assert r_multi_db.get('key') == 'value'
             sleep(0.5)
-
-        assert listener.is_changed_flag == True
 
     @pytest.mark.parametrize(
         "r_multi_db",

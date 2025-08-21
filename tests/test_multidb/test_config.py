@@ -75,7 +75,7 @@ class TestMultiDbConfig:
         config = MultiDbConfig(
             databases_config=db_configs,
             failure_detectors=mock_failure_detectors,
-            additional_health_checks=mock_health_checks,
+            health_checks=mock_health_checks,
             health_check_interval=health_check_interval,
             failover_strategy=mock_failover_strategy,
             auto_fallback_interval=auto_fallback_interval,
@@ -96,9 +96,9 @@ class TestMultiDbConfig:
         assert len(config.failure_detectors) == 2
         assert config.failure_detectors[0] == mock_failure_detectors[0]
         assert config.failure_detectors[1] == mock_failure_detectors[1]
-        assert len(config.additional_health_checks) == 2
-        assert config.additional_health_checks[0] == mock_health_checks[0]
-        assert config.additional_health_checks[1] == mock_health_checks[1]
+        assert len(config.health_checks) == 2
+        assert config.health_checks[0] == mock_health_checks[0]
+        assert config.health_checks[1] == mock_health_checks[1]
         assert config.health_check_interval == health_check_interval
         assert config.failover_strategy == mock_failover_strategy
         assert config.auto_fallback_interval == auto_fallback_interval

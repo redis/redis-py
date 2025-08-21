@@ -93,12 +93,10 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
          databases_config=db_configs,
          command_retry=command_retry,
          failure_threshold=failure_threshold,
-         health_check_backoff=ExponentialBackoff(cap=0.5, base=0.05),
          health_check_retries=3,
          health_check_interval=health_check_interval,
          event_dispatcher=event_dispatcher,
          health_check_backoff=ExponentialBackoff(cap=5, base=0.5),
-         health_check_retries=3,
      )
 
      return MultiDBClient(config), listener, endpoint_config

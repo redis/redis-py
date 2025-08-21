@@ -691,6 +691,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             self._event_dispatcher = EventDispatcher()
         else:
             self._event_dispatcher = event_dispatcher
+        self.startup_nodes = startup_nodes
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
             from_url=from_url,

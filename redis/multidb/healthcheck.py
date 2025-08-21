@@ -86,7 +86,6 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         self,
         retry: Retry = Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF),
         rest_api_port: int = 9443,
-        availability_lag_tolerance: int = 100,
         timeout: float = DEFAULT_TIMEOUT,
         auth_basic: Optional[Tuple[str, str]] = None,
         verify_tls: bool = True,
@@ -105,7 +104,6 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         Args:
             retry: Retry configuration for health checks
             rest_api_port: Port number for Redis Enterprise REST API (default: 9443)
-            availability_lag_tolerance: Maximum acceptable lag in milliseconds (default: 100)
             timeout: Request timeout in seconds (default: DEFAULT_TIMEOUT)
             auth_basic: Tuple of (username, password) for basic authentication
             verify_tls: Whether to verify TLS certificates (default: True)
@@ -132,12 +130,17 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             client_key_password=client_key_password
         )
         self._rest_api_port = rest_api_port
-        self._availability_lag_tolerance = availability_lag_tolerance
 
     def check_health(self, database) -> bool:
         client = database.client
-        db_host = client.get_connection_kwargs()['host']
+
+        if isinstance(client, Redis):
+            db_host = client.get_connection_kwargs()['host']
+        else:
+            db_host = client.startup_nodes[0].host
+
         base_url = f"https://{db_host}:{self._rest_api_port}"
+        print(base_url)
         self._http_client.base_url = base_url
 
         # Find bdb matching to the current database host
@@ -158,7 +161,7 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             logger.warning("LagAwareHealthCheck failed: Couldn't find a matching bdb")
             raise ValueError("Could not find a matching bdb")
 
-        url = f"/v1/local/bdbs/{matching_bdb['uid']}/endpoint/availability?extend_check=lag&availability_lag_tolerance_ms={self._availability_lag_tolerance}"
+        url = f"/v1/local/bdbs/{matching_bdb['uid']}/endpoint/availability"
         self._http_client.get(url, expect_json=False)
 
         # Status checked in an http client, otherwise HttpError will be raised

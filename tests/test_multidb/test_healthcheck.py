@@ -89,7 +89,7 @@ class TestLagAwareHealthCheck:
         first_call = mock_http.get.call_args_list[0]
         second_call = mock_http.get.call_args_list[1]
         assert first_call.args[0] == "/v1/bdbs"
-        assert second_call.args[0] == "/v1/bdbs/bdb-1/availability"
+        assert second_call.args[0] == "/v1/local/bdbs/bdb-1/endpoint/availability"
         assert second_call.kwargs.get("expect_json") is False
 
     def test_database_is_healthy_when_bdb_matches_by_addr(self, mock_client, mock_cb):
@@ -121,7 +121,7 @@ class TestLagAwareHealthCheck:
 
         assert hc.check_health(db) is True
         assert mock_http.get.call_count == 2
-        assert mock_http.get.call_args_list[1].args[0] == "/v1/bdbs/bdb-42/availability"
+        assert mock_http.get.call_args_list[1].args[0] == "/v1/local/bdbs/bdb-42/endpoint/availability"
 
     def test_raises_value_error_when_no_matching_bdb(self, mock_client, mock_cb):
         """
