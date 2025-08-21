@@ -132,7 +132,7 @@ class HttpClient:
         self,
         path: str,
         *,
-        params: Optional[Mapping[str, Union[str, int, float, bool, None, list, tuple]]] = None,
+        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
         expect_json: bool = True
@@ -151,7 +151,7 @@ class HttpClient:
         self,
         path: str,
         *,
-        params: Optional[Mapping[str, Union[str, int, float, bool, None, list, tuple]]] = None,
+        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
         expect_json: bool = True
@@ -172,7 +172,7 @@ class HttpClient:
         *,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[str, int, float, bool, None, list, tuple]]] = None,
+        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
         expect_json: bool = True
@@ -193,7 +193,7 @@ class HttpClient:
         *,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[str, int, float, bool, None, list, tuple]]] = None,
+        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
         expect_json: bool = True
@@ -214,7 +214,7 @@ class HttpClient:
         *,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[str, int, float, bool, None, list, tuple]]] = None,
+        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
         expect_json: bool = True
@@ -235,7 +235,7 @@ class HttpClient:
         method: str,
         path: str,
         *,
-        params: Optional[Mapping[str, Union[str, int, float, bool, None, list, tuple]]] = None,
+        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
         body: Optional[Union[bytes, str]] = None,
         timeout: Optional[float] = None,
@@ -320,7 +320,7 @@ class HttpClient:
         method: str,
         path: str,
         *,
-        params: Optional[Mapping[str, Union[str, int, float, bool, None, list, tuple]]] = None,
+        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
         body: Optional[Union[bytes, str]] = None,
@@ -350,7 +350,7 @@ class HttpClient:
     def _build_url(
         self,
         path: str,
-        params: Optional[Mapping[str, Union[str, int, float, bool, None, list, tuple]]] = None,
+        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
     ) -> str:
         url = urljoin(self.base_url or "", path)
         if params:
