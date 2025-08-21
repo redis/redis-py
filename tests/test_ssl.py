@@ -328,3 +328,88 @@ class TestSSL:
             assert conn.check_hostname is False
         finally:
             r.close()
+
+    def test_ssl_verify_flags_config_applied_to_context(self, request):
+        """Test that ssl_verify_flags_config is properly applied to the SSL context"""
+        ssl_url = request.config.option.redis_ssl_url
+        parsed_url = urlparse(ssl_url)
+
+        # Test with specific SSL verify flags
+        ssl_verify_flags_config = [
+            (ssl.VerifyFlags.VERIFY_X509_STRICT, False),  # Disable strict verification
+            (ssl.VerifyFlags.VERIFY_X509_PARTIAL_CHAIN, True),  # Enable partial chain
+        ]
+
+        r = redis.Redis(
+            host=parsed_url.hostname,
+            port=parsed_url.port,
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_verify_flags_config=ssl_verify_flags_config,
+        )
+
+        try:
+            # Get the connection to trigger SSL context creation
+            conn = r.connection_pool.get_connection()
+            assert isinstance(conn, redis.SSLConnection)
+
+            # Verify the flags were processed by checking they're stored in connection
+            assert conn.ssl_verify_flags_config is not None
+            assert len(conn.ssl_verify_flags_config) == 2
+
+            # Check each flag individually
+            for flag, expected_enabled in ssl_verify_flags_config:
+                found = False
+                for stored_flag, stored_enabled in conn.ssl_verify_flags_config:
+                    if stored_flag == flag:
+                        assert stored_enabled == expected_enabled
+                        found = True
+                        break
+                assert found, f"Flag {flag} not found in stored ssl_verify_flags_config"
+
+            # Test the actual SSL context created by the connection
+            # We need to create a mock socket and call _wrap_socket_with_ssl to get the context
+            import socket
+            import unittest.mock
+
+            mock_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+            try:
+                # Mock the wrap_socket method to capture the context
+                captured_context = None
+
+                def capture_context_wrap_socket(context_self, sock, **_kwargs):
+                    nonlocal captured_context
+                    captured_context = context_self
+                    # Don't actually wrap the socket, just return the original socket
+                    # to avoid connection errors
+                    return sock
+
+                with unittest.mock.patch.object(
+                    ssl.SSLContext, "wrap_socket", capture_context_wrap_socket
+                ):
+                    try:
+                        conn._wrap_socket_with_ssl(mock_sock)
+                    except Exception:
+                        # We expect this to potentially fail since we're not actually connecting
+                        # but we should have captured the context
+                        pass
+
+                # Validate that we captured a context and it has the correct flags applied
+                assert captured_context is not None, "SSL context was not captured"
+
+                # Verify that VERIFY_X509_STRICT was disabled (bit cleared)
+                assert not (
+                    captured_context.options & ssl.VerifyFlags.VERIFY_X509_STRICT
+                ), "VERIFY_X509_STRICT should be disabled but is enabled"
+
+                # Verify that VERIFY_X509_PARTIAL_CHAIN was enabled (bit set)
+                assert (
+                    captured_context.options & ssl.VerifyFlags.VERIFY_X509_PARTIAL_CHAIN
+                ), "VERIFY_X509_PARTIAL_CHAIN should be enabled but is disabled"
+
+            finally:
+                mock_sock.close()
+
+        finally:
+            r.close()

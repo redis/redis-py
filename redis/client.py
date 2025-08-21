@@ -12,6 +12,7 @@ from typing import (
     Mapping,
     Optional,
     Set,
+    Tuple,
     Type,
     Union,
 )
@@ -224,6 +225,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
         ssl_cert_reqs: Union[str, "ssl.VerifyMode"] = "required",
+        ssl_verify_flags_config: Optional[List[Tuple["ssl.VerifyFlags", bool]]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_path: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
@@ -330,6 +332,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_keyfile": ssl_keyfile,
                             "ssl_certfile": ssl_certfile,
                             "ssl_cert_reqs": ssl_cert_reqs,
+                            "ssl_verify_flags_config": ssl_verify_flags_config,
                             "ssl_ca_certs": ssl_ca_certs,
                             "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,

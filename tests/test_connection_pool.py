@@ -19,6 +19,9 @@ from .conftest import (
 )
 from .test_pubsub import wait_for_message
 
+if SSL_AVAILABLE:
+    import ssl
+
 
 class DummyConnection:
     description_format = "DummyConnection<>"
@@ -511,8 +514,6 @@ class TestSSLConnectionURLParsing:
         assert pool.connection_class == MyConnection
 
     def test_cert_reqs_options(self):
-        import ssl
-
         class DummyConnectionPool(redis.ConnectionPool):
             def get_connection(self):
                 return self.make_connection()
@@ -531,6 +532,35 @@ class TestSSLConnectionURLParsing:
 
         pool = DummyConnectionPool.from_url("rediss://?ssl_check_hostname=True")
         assert pool.get_connection().check_hostname is True
+
+    def test_ssl_flags_config_parsing(self):
+        class DummyConnectionPool(redis.ConnectionPool):
+            def get_connection(self):
+                return self.make_connection()
+
+        pool = DummyConnectionPool.from_url(
+            "rediss://?ssl_verify_flags_config=[(VERIFY_X509_STRICT,False), (VERIFY_X509_PARTIAL_CHAIN,True)]"
+        )
+
+        assert pool.get_connection().ssl_verify_flags_config == [
+            (ssl.VerifyFlags.VERIFY_X509_STRICT, False),
+            (ssl.VerifyFlags.VERIFY_X509_PARTIAL_CHAIN, True),
+        ]
+
+    def test_ssl_flags_config_invalid_flag(self):
+        class DummyConnectionPool(redis.ConnectionPool):
+            def get_connection(self):
+                return self.make_connection()
+
+        with pytest.raises(ValueError):
+            DummyConnectionPool.from_url(
+                "rediss://?ssl_verify_flags_config=[(VERIFY_X509,False), (VERIFY_X509_PARTIAL_CHAIN,True)]"
+            )
+
+        with pytest.raises(ValueError):
+            DummyConnectionPool.from_url(
+                "rediss://?ssl_verify_flags_config=[(VERIFY_X509_STRICT,Ok), (VERIFY_X509_PARTIAL_CHAIN,True)]"
+            )
 
 
 class TestConnection:

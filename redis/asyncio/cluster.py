@@ -86,10 +86,11 @@ from redis.utils import (
 )
 
 if SSL_AVAILABLE:
-    from ssl import TLSVersion, VerifyMode
+    from ssl import TLSVersion, VerifyFlags, VerifyMode
 else:
     TLSVersion = None
     VerifyMode = None
+    VerifyFlags = None
 
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
@@ -299,6 +300,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_cert_reqs: Union[str, VerifyMode] = "required",
+        ssl_verify_flags_config: Optional[List[Tuple[VerifyFlags, bool]]] = None,
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = True,
         ssl_keyfile: Optional[str] = None,
@@ -358,6 +360,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     "ssl_ca_certs": ssl_ca_certs,
                     "ssl_ca_data": ssl_ca_data,
                     "ssl_cert_reqs": ssl_cert_reqs,
+                    "ssl_verify_flags_config": ssl_verify_flags_config,
                     "ssl_certfile": ssl_certfile,
                     "ssl_check_hostname": ssl_check_hostname,
                     "ssl_keyfile": ssl_keyfile,

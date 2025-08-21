@@ -1,3 +1,5 @@
+import ssl
+import unittest.mock
 from urllib.parse import urlparse
 import pytest
 import pytest_asyncio
@@ -52,5 +54,81 @@ class TestSSL:
             assert r.connection_pool.connection_class == redis.SSLConnection
             conn = r.connection_pool.make_connection()
             assert conn.check_hostname is False
+        finally:
+            await r.aclose()
+
+    async def test_ssl_flags_config_applied_to_context(self, request):
+        """Test that ssl_flags_config is properly applied to the SSL context in async connections"""
+        ssl_url = request.config.option.redis_ssl_url
+        parsed_url = urlparse(ssl_url)
+
+        # Test with specific SSL verify flags
+        ssl_verify_flags_config = [
+            (ssl.VerifyFlags.VERIFY_X509_STRICT, False),  # Disable strict verification
+            (ssl.VerifyFlags.VERIFY_X509_PARTIAL_CHAIN, True),  # Enable partial chain
+        ]
+
+        r = redis.Redis(
+            host=parsed_url.hostname,
+            port=parsed_url.port,
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_verify_flags_config=ssl_verify_flags_config,
+        )
+
+        try:
+            # Get the connection to trigger SSL context creation
+            conn = r.connection_pool.make_connection()
+            assert isinstance(conn, redis.SSLConnection)
+
+            # Verify that ssl_verify_flags was stored correctly in the RedisSSLContext
+            assert conn.ssl_context.verify_flags_config == ssl_verify_flags_config
+
+            # Verify the flags were processed by checking they're stored in connection
+            assert conn.verify_flags_config is not None
+            assert len(conn.verify_flags_config) == 2
+
+            # Check each flag individually
+            for flag, expected_enabled in ssl_verify_flags_config:
+                found = False
+                for stored_flag, stored_enabled in conn.verify_flags_config:
+                    if stored_flag == flag:
+                        assert stored_enabled == expected_enabled
+                        found = True
+                        break
+                assert found, f"Flag {flag} not found in stored ssl_verify_flags"
+
+            # Test the actual SSL context created by the connection's RedisSSLContext
+            # We need to mock the ssl.create_default_context to capture the context
+            captured_context = None
+            original_create_default_context = ssl.create_default_context
+
+            def capture_context_create_default():
+                nonlocal captured_context
+                captured_context = original_create_default_context()
+                return captured_context
+
+            with unittest.mock.patch(
+                "ssl.create_default_context", capture_context_create_default
+            ):
+                # Trigger SSL context creation by calling get() on the RedisSSLContext
+                ssl_context = conn.ssl_context.get()
+
+                # Validate that we captured a context and it has the correct flags applied
+                assert captured_context is not None, "SSL context was not captured"
+                assert ssl_context is captured_context, (
+                    "Returned context should be the captured one"
+                )
+
+                # Verify that VERIFY_X509_STRICT was disabled (bit cleared)
+                assert not (
+                    captured_context.options & ssl.VerifyFlags.VERIFY_X509_STRICT
+                ), "VERIFY_X509_STRICT should be disabled but is enabled"
+
+                # Verify that VERIFY_X509_PARTIAL_CHAIN was enabled (bit set)
+                assert (
+                    captured_context.options & ssl.VerifyFlags.VERIFY_X509_PARTIAL_CHAIN
+                ), "VERIFY_X509_PARTIAL_CHAIN should be enabled but is disabled"
+
         finally:
             await r.aclose()
