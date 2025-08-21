@@ -2041,7 +2041,7 @@ class ConnectionPool:
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
 
-    def should_update_connection(
+    def _should_update_connection(
         self,
         conn: "Connection",
         matching_pattern: Literal[
@@ -2139,7 +2139,7 @@ class ConnectionPool:
         """
         with self._lock:
             for conn in self._in_use_connections:
-                if self.should_update_connection(
+                if self._should_update_connection(
                     conn,
                     matching_pattern,
                     matching_address,
@@ -2158,7 +2158,7 @@ class ConnectionPool:
 
             if include_free_connections:
                 for conn in self._available_connections:
-                    if self.should_update_connection(
+                    if self._should_update_connection(
                         conn,
                         matching_pattern,
                         matching_address,
@@ -2199,7 +2199,7 @@ class ConnectionPool:
         """
         with self._lock:
             for conn in self._in_use_connections:
-                if self.should_update_connection(
+                if self._should_update_connection(
                     conn, "connected_address", moving_address_src
                 ):
                     conn.mark_for_reconnect()
@@ -2217,7 +2217,7 @@ class ConnectionPool:
 
         with self._lock:
             for conn in self._available_connections:
-                if self.should_update_connection(
+                if self._should_update_connection(
                     conn, "connected_address", moving_address_src
                 ):
                     conn.disconnect()
@@ -2484,7 +2484,7 @@ class BlockingConnectionPool(ConnectionPool):
         with self._lock:
             if include_free_connections:
                 for conn in tuple(self._connections):
-                    if self.should_update_connection(
+                    if self._should_update_connection(
                         conn,
                         matching_pattern,
                         matching_address,
@@ -2504,7 +2504,7 @@ class BlockingConnectionPool(ConnectionPool):
                 connections_in_queue = {conn for conn in self.pool.queue if conn}
                 for conn in self._connections:
                     if conn not in connections_in_queue:
-                        if self.should_update_connection(
+                        if self._should_update_connection(
                             conn,
                             matching_pattern,
                             matching_address,
@@ -2535,7 +2535,7 @@ class BlockingConnectionPool(ConnectionPool):
             connections_in_queue = {conn for conn in self.pool.queue if conn}
             for conn in self._connections:
                 if conn not in connections_in_queue:
-                    if self.should_update_connection(
+                    if self._should_update_connection(
                         conn,
                         matching_pattern="connected_address",
                         matching_address=moving_address_src,
@@ -2557,7 +2557,7 @@ class BlockingConnectionPool(ConnectionPool):
 
             for conn in existing_connections:
                 if conn:
-                    if self.should_update_connection(
+                    if self._should_update_connection(
                         conn, "connected_address", moving_address_src
                     ):
                         conn.disconnect()
