@@ -137,6 +137,11 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         if isinstance(client, Redis):
             db_host = client.get_connection_kwargs()['host']
         else:
+            # We need to use the primary node public IP here and not DNS name.
+            #
+            # The bug exists in Redis Enterprise, if you reach REST API by DNS name
+            # the proxy will choose a random node, and if it's not a primary node it will redirect
+            # it to the primary node, the redirect will fail due to private IP.
             db_host = client.get_primaries()[0].host
 
         base_url = f"https://{db_host}:{self._rest_api_port}"
