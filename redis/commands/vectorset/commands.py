@@ -19,6 +19,15 @@ VSETATTR_CMD = "VSETATTR"
 VGETATTR_CMD = "VGETATTR"
 VRANDMEMBER_CMD = "VRANDMEMBER"
 
+# Return type for vsim command
+VSimResult = Optional[
+    List[
+        Union[
+            List[EncodableT], Dict[EncodableT, Number], Dict[EncodableT, Dict[str, Any]]
+        ]
+    ]
+]
+
 
 class QuantizationOptions(Enum):
     """Quantization options for the VADD command."""
@@ -132,28 +141,7 @@ class VectorSetCommands(CommandsProtocol):
         truth: Optional[bool] = False,
         no_thread: Optional[bool] = False,
         epsilon: Optional[Number] = None,
-    ) -> Union[
-        Awaitable[
-            Optional[
-                List[
-                    Union[
-                        List[EncodableT],
-                        Dict[EncodableT, Number],
-                        Dict[EncodableT, Dict[str, Any]],
-                    ]
-                ]
-            ]
-        ],
-        Optional[
-            List[
-                Union[
-                    List[EncodableT],
-                    Dict[EncodableT, Number],
-                    Dict[EncodableT, Dict[str, Any]],
-                ]
-            ]
-        ],
-    ]:
+    ) -> Union[Awaitable[VSimResult], VSimResult]:
         """
         Compare a vector or element ``input``  with the other vectors in a vector set ``key``.
 
