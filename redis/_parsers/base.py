@@ -299,10 +299,11 @@ class AsyncPushNotificationsParser(Protocol):
                 # push notification from enterprise cluster for node moving
                 id = response[1]
                 ttl = response[2]
-                if response[3] != "null":
-                    host, port = response[3].split(":")
-                else:
+                if response[3] in [b"null", "null"]:
                     host, port = None, None
+                else:
+                    host, port = response[3].decode().split(":")
+
                 notification = NodeMovingEvent(id, host, port, ttl)
                 return await self.node_moving_push_handler_func(notification)
 

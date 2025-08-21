@@ -182,12 +182,17 @@ class NodeMovingEvent(MaintenanceEvent):
             int: Hash value based on event type class name, id,
             new_node_host and new_node_port
         """
+        try:
+            node_port = int(self.new_node_port) if self.new_node_port else None
+        except ValueError:
+            node_port = 0
+
         return hash(
             (
                 self.__class__.__name__,
                 int(self.id),
                 str(self.new_node_host),
-                int(self.new_node_port) if self.new_node_port else None,
+                node_port,
             )
         )
 

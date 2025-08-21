@@ -1067,9 +1067,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Run command that will receive and handle MOVING event
             key_moving = "key_receive_moving_none_0"
             value_moving = "value3_0"
-            moving_event = NodeMovingEvent(
-                id=1, new_node_host=None, new_node_port=None, ttl=MOVING_TIMEOUT
-            )
+
             # the connection used for the command is expected to be reconnected to the new address
             # before it is returned to the pool
             result2 = test_redis_client.set(key_moving, value_moving)
@@ -1081,7 +1079,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.MOVING,
-                expected_maintenance_event_hash=hash(moving_event),
+                expected_maintenance_event_hash=hash(MOVING_NONE_EVENT),
                 expected_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_socket_timeout=self.config.relax_timeout,
