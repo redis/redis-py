@@ -6,6 +6,7 @@ from time import sleep
 
 import pytest
 
+from redis import Redis, RedisCluster
 from redis.client import Pipeline
 from redis.multidb.healthcheck import LagAwareHealthCheck
 from tests.test_scenario.conftest import get_endpoint_config
@@ -13,11 +14,10 @@ from tests.test_scenario.fault_injector_client import ActionRequest, ActionType
 
 logger = logging.getLogger(__name__)
 
-def trigger_network_failure_action(fault_injector_client, event: threading.Event = None):
-    endpoint_config = get_endpoint_config('re-active-active')
+def trigger_network_failure_action(fault_injector_client, config, event: threading.Event = None):
     action_request = ActionRequest(
         action_type=ActionType.NETWORK_FAILURE,
-        parameters={"bdb_id": endpoint_config['bdb_id'], "delay": 3, "cluster_index": 0}
+        parameters={"bdb_id": config['bdb_id'], "delay": 2, "cluster_index": 0}
     )
 
     result = fault_injector_client.trigger_action(action_request)
@@ -33,7 +33,7 @@ def trigger_network_failure_action(fault_injector_client, event: threading.Event
 
     logger.info(f"Action completed. Status: {status_result['status']}")
 
-class TestActiveActiveStandalone:
+class TestActiveActive:
 
     def teardown_method(self, method):
         # Timeout so the cluster could recover from network failure.
@@ -42,19 +42,22 @@ class TestActiveActiveStandalone:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"failure_threshold": 2}
+            {"client_class": Redis, "failure_threshold": 2},
+            {"client_class": RedisCluster, "failure_threshold": 2},
         ],
+        ids=["standalone", "cluster"],
         indirect=True
     )
+    @pytest.mark.timeout(50)
     def test_multi_db_client_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
         event = threading.Event()
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client,event)
+            args=(fault_injector_client,config,event)
         )
-
-        r_multi_db, listener = r_multi_db
 
         # Client initialized on the first command.
         r_multi_db.set('key', 'value')
@@ -65,12 +68,10 @@ class TestActiveActiveStandalone:
             assert r_multi_db.get('key') == 'value'
             sleep(0.5)
 
-        # Execute commands after network failure
-        for _ in range(3):
+        # Execute commands until database failover
+        while not listener.is_changed_flag:
             assert r_multi_db.get('key') == 'value'
             sleep(0.5)
-
-        assert listener.is_changed_flag == True
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -116,19 +117,22 @@ class TestActiveActiveStandalone:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"failure_threshold": 2}
+            {"client_class": Redis, "failure_threshold": 2},
+            {"client_class": RedisCluster, "failure_threshold": 2},
         ],
+        ids=["standalone", "cluster"],
         indirect=True
     )
+    @pytest.mark.timeout(50)
     def test_context_manager_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
         event = threading.Event()
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client,event)
+            args=(fault_injector_client,config,event)
         )
-
-        r_multi_db, listener = r_multi_db
 
         # Client initialized on first pipe execution.
         with r_multi_db.pipeline() as pipe:
@@ -154,8 +158,8 @@ class TestActiveActiveStandalone:
                 assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
             sleep(0.5)
 
-        # Execute pipeline after network failure
-        for _ in range(3):
+        # Execute pipeline until database failover
+        for _ in range(5):
             with r_multi_db.pipeline() as pipe:
                 pipe.set('{hash}key1', 'value1')
                 pipe.set('{hash}key2', 'value2')
@@ -166,24 +170,25 @@ class TestActiveActiveStandalone:
                 assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
             sleep(0.5)
 
-        assert listener.is_changed_flag == True
-
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"failure_threshold": 2}
+            {"client_class": Redis, "failure_threshold": 2},
+            {"client_class": RedisCluster, "failure_threshold": 2},
         ],
+        ids=["standalone", "cluster"],
         indirect=True
     )
+    @pytest.mark.timeout(50)
     def test_chaining_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
         event = threading.Event()
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client,event)
+            args=(fault_injector_client,config,event)
         )
-
-        r_multi_db, listener = r_multi_db
 
         # Client initialized on first pipe execution.
         pipe = r_multi_db.pipeline()
@@ -199,6 +204,7 @@ class TestActiveActiveStandalone:
 
         # Execute pipeline before network failure
         while not event.is_set():
+            pipe = r_multi_db.pipeline()
             pipe.set('{hash}key1', 'value1')
             pipe.set('{hash}key2', 'value2')
             pipe.set('{hash}key3', 'value3')
@@ -208,8 +214,9 @@ class TestActiveActiveStandalone:
             assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
         sleep(0.5)
 
-        # Execute pipeline after network failure
-        for _ in range(3):
+        # Execute pipeline until database failover
+        for _ in range(5):
+            pipe = r_multi_db.pipeline()
             pipe.set('{hash}key1', 'value1')
             pipe.set('{hash}key2', 'value2')
             pipe.set('{hash}key3', 'value3')
@@ -218,25 +225,26 @@ class TestActiveActiveStandalone:
             pipe.get('{hash}key3')
             assert pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
         sleep(0.5)
-
-        assert listener.is_changed_flag == True
 
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"failure_threshold": 2}
+            {"client_class": Redis, "failure_threshold": 2},
+            {"client_class": RedisCluster, "failure_threshold": 2},
         ],
+        ids=["standalone", "cluster"],
         indirect=True
     )
+    @pytest.mark.timeout(50)
     def test_transaction_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
         event = threading.Event()
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client,event)
+            args=(fault_injector_client,config,event)
         )
-
-        r_multi_db, listener = r_multi_db
 
         def callback(pipe: Pipeline):
             pipe.set('{hash}key1', 'value1')
@@ -250,34 +258,35 @@ class TestActiveActiveStandalone:
         r_multi_db.transaction(callback)
         thread.start()
 
-        # Execute pipeline before network failure
+        # Execute transaction before network failure
         while not event.is_set():
             r_multi_db.transaction(callback)
             sleep(0.5)
 
-        # Execute pipeline after network failure
-        for _ in range(3):
+        # Execute transaction until database failover
+        while not listener.is_changed_flag:
             r_multi_db.transaction(callback)
             sleep(0.5)
-
-        assert listener.is_changed_flag == True
 
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"failure_threshold": 2}
+            {"client_class": Redis, "failure_threshold": 2},
+            {"client_class": RedisCluster, "failure_threshold": 2},
         ],
+        ids=["standalone", "cluster"],
         indirect=True
     )
+    @pytest.mark.timeout(50)
     def test_pubsub_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
         event = threading.Event()
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client,event)
+            args=(fault_injector_client,config,event)
         )
-
-        r_multi_db, listener = r_multi_db
         data = json.dumps({'message': 'test'})
         messages_count = 0
 
@@ -292,37 +301,38 @@ class TestActiveActiveStandalone:
         pubsub_thread = pubsub.run_in_thread(sleep_time=0.1, daemon=True)
         thread.start()
 
-        # Execute pipeline before network failure
+        # Execute publish before network failure
         while not event.is_set():
             r_multi_db.publish('test-channel', data)
             sleep(0.5)
 
-        # Execute pipeline after network failure
-        for _ in range(3):
+        # Execute publish until database failover
+        while not listener.is_changed_flag:
             r_multi_db.publish('test-channel', data)
             sleep(0.5)
 
         pubsub_thread.stop()
-
-        assert listener.is_changed_flag == True
         assert messages_count > 2
 
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"failure_threshold": 2}
+            {"client_class": Redis, "failure_threshold": 2},
+            {"client_class": RedisCluster, "failure_threshold": 2},
         ],
+        ids=["standalone", "cluster"],
         indirect=True
     )
+    @pytest.mark.timeout(50)
     def test_sharded_pubsub_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
         event = threading.Event()
         thread = threading.Thread(
             target=trigger_network_failure_action,
             daemon=True,
-            args=(fault_injector_client,event)
+            args=(fault_injector_client,config,event)
         )
-
-        r_multi_db, listener = r_multi_db
         data = json.dumps({'message': 'test'})
         messages_count = 0
 
@@ -334,20 +344,22 @@ class TestActiveActiveStandalone:
 
         # Assign a handler and run in a separate thread.
         pubsub.ssubscribe(**{'test-channel': handler})
-        pubsub_thread = pubsub.run_in_thread(sleep_time=0.1, daemon=True)
+        pubsub_thread = pubsub.run_in_thread(
+            sleep_time=0.1,
+            daemon=True,
+            sharded_pubsub=True
+        )
         thread.start()
 
-        # Execute pipeline before network failure
+        # Execute publish before network failure
         while not event.is_set():
             r_multi_db.spublish('test-channel', data)
             sleep(0.5)
 
-        # Execute pipeline after network failure
-        for _ in range(3):
+        # Execute publish until database failover
+        while not listener.is_changed_flag:
             r_multi_db.spublish('test-channel', data)
             sleep(0.5)
 
         pubsub_thread.stop()
-
-        assert listener.is_changed_flag == True
         assert messages_count > 2

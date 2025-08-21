@@ -39,7 +39,7 @@ class ActiveDatabaseChanged:
 
 class ResubscribeOnActiveDatabaseChanged(EventListenerInterface):
     """
-    Re-subscribe the currently active pub / sub to a new active database.
+    Re-subscribe currently active pub/sub to a new active database.
     """
     def listen(self, event: ActiveDatabaseChanged):
         old_pubsub = event.command_executor.active_pubsub

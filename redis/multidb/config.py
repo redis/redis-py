@@ -50,10 +50,10 @@ class MultiDbConfig:
         databases_config: A list of database configurations.
         client_class: The client class used to manage database connections.
         command_retry: Retry strategy for executing database commands.
-        failure_detectors: Optional list of failure detectors for monitoring database failures.
+        failure_detectors: Optional list of additional failure detectors for monitoring database failures.
         failure_threshold: Threshold for determining database failure.
         failures_interval: Time interval for tracking database failures.
-        additional_health_checks: Optional list of health checks performed on databases.
+        health_checks: Optional list of additional health checks performed on databases.
         health_check_interval: Time interval for executing health checks.
         health_check_retries: Number of retry attempts for performing health checks.
         health_check_backoff: Backoff strategy for health check retries.
@@ -88,7 +88,7 @@ class MultiDbConfig:
     failure_detectors: Optional[List[FailureDetector]] = None
     failure_threshold: int = DEFAULT_FAILURES_THRESHOLD
     failures_interval: float = DEFAULT_FAILURES_DURATION
-    additional_health_checks: Optional[List[HealthCheck]] = None
+    health_checks: Optional[List[HealthCheck]] = None
     health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL
     health_check_retries: int = DEFAULT_HEALTH_CHECK_RETRIES
     health_check_backoff: AbstractBackoff = DEFAULT_HEALTH_CHECK_BACKOFF

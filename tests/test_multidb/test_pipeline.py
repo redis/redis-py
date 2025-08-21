@@ -43,6 +43,7 @@ class TestPipeline:
             pipe = mock_pipe()
             pipe.execute.return_value = ['OK1', 'value1']
             mock_db1.client.pipeline.return_value = pipe
+
             mock_hc.check_health.return_value = True
 
             client = MultiDBClient(mock_multi_db_config)
@@ -77,6 +78,7 @@ class TestPipeline:
             pipe = mock_pipe()
             pipe.execute.return_value = ['OK1', 'value1']
             mock_db1.client.pipeline.return_value = pipe
+
             mock_hc.check_health.side_effect = [False, True, True]
 
             client = MultiDBClient(mock_multi_db_config)
@@ -201,6 +203,7 @@ class TestTransaction:
         with patch.object(mock_multi_db_config,'databases',return_value=databases), \
              patch.object(mock_multi_db_config,'default_health_checks', return_value=[mock_hc]):
             mock_db1.client.transaction.return_value = ['OK1', 'value1']
+
             mock_hc.check_health.return_value = True
 
             client = MultiDBClient(mock_multi_db_config)
@@ -233,6 +236,7 @@ class TestTransaction:
         with patch.object(mock_multi_db_config,'databases',return_value=databases), \
              patch.object(mock_multi_db_config,'default_health_checks', return_value=[mock_hc]):
             mock_db1.client.transaction.return_value = ['OK1', 'value1']
+
             mock_hc.check_health.side_effect = [False, True, True]
 
             client = MultiDBClient(mock_multi_db_config)

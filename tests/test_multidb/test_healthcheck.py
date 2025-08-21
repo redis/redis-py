@@ -3,8 +3,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from redis.backoff import ExponentialBackoff
+from redis.multidb.database import Database
+from redis.multidb.healthcheck import EchoHealthCheck
 from redis.http.http_client import HttpError
-from redis.multidb.database import Database, State
 from redis.multidb.healthcheck import EchoHealthCheck, LagAwareHealthCheck
 from redis.multidb.circuit import State as CBState
 from redis.exceptions import ConnectionError
@@ -19,7 +20,7 @@ class TestEchoHealthCheck:
         """
         mock_client.execute_command.side_effect = [ConnectionError, ConnectionError, 'healthcheck']
         hc = EchoHealthCheck(Retry(backoff=ExponentialBackoff(cap=1.0), retries=3))
-        db = Database(mock_client, mock_cb, 0.9, State.ACTIVE)
+        db = Database(mock_client, mock_cb, 0.9)
 
         assert hc.check_health(db) == True
         assert mock_client.execute_command.call_count == 3
@@ -31,7 +32,7 @@ class TestEchoHealthCheck:
         """
         mock_client.execute_command.side_effect = [ConnectionError, ConnectionError, 'wrong']
         hc = EchoHealthCheck(Retry(backoff=ExponentialBackoff(cap=1.0), retries=3))
-        db = Database(mock_client, mock_cb, 0.9, State.ACTIVE)
+        db = Database(mock_client, mock_cb, 0.9)
 
         assert hc.check_health(db) == False
         assert mock_client.execute_command.call_count == 3
@@ -40,7 +41,7 @@ class TestEchoHealthCheck:
         mock_client.execute_command.side_effect = [ConnectionError, ConnectionError, 'healthcheck']
         mock_cb.state = CBState.HALF_OPEN
         hc = EchoHealthCheck(Retry(backoff=ExponentialBackoff(cap=1.0), retries=3))
-        db = Database(mock_client, mock_cb, 0.9, State.ACTIVE)
+        db = Database(mock_client, mock_cb, 0.9)
 
         assert hc.check_health(db) == True
         assert mock_client.execute_command.call_count == 3
@@ -78,7 +79,7 @@ class TestLagAwareHealthCheck:
         # Inject our mocked http client
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0, State.ACTIVE)
+        db = Database(mock_client, mock_cb, 1.0)
 
         assert hc.check_health(db) is True
         # Base URL must be set correctly
@@ -116,7 +117,7 @@ class TestLagAwareHealthCheck:
         )
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0, State.ACTIVE)
+        db = Database(mock_client, mock_cb, 1.0)
 
         assert hc.check_health(db) is True
         assert mock_http.get.call_count == 2
@@ -141,7 +142,7 @@ class TestLagAwareHealthCheck:
         )
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0, State.ACTIVE)
+        db = Database(mock_client, mock_cb, 1.0)
 
         with pytest.raises(ValueError, match="Could not find a matching bdb"):
             hc.check_health(db)
@@ -169,7 +170,7 @@ class TestLagAwareHealthCheck:
         )
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0, State.ACTIVE)
+        db = Database(mock_client, mock_cb, 1.0)
 
         with pytest.raises(HttpError, match="busy") as e:
             hc.check_health(db)
