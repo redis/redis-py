@@ -488,13 +488,6 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 connected_sockets_count += 1
         assert connected_sockets_count == expected_count
 
-    def _validate_all_timeouts(self, expected_timeout):
-        """Helper method to validate state of in-use connections."""
-        # validate in use connections are still working with set flag for reconnect
-        # and timeout is updated
-        for mock_socket in self.mock_sockets:
-            assert mock_socket.gettimeout() == expected_timeout
-
     def test_client_initialization(self):
         """Test that Redis client is created with maintenance events configuration."""
         # Create a pool and Redis client with maintenance events
@@ -882,6 +875,90 @@ class TestMaintenanceEventsHandlingSingleProxy:
             assert result8 == expected_value8, (
                 f"Command 8 (GET key_receive_failed_over) failed. Expected: {expected_value8}, Got: {result8}"
             )
+
+            # Verify maintenance events were processed correctly
+            # The key is that we have at least 1 socket and all operations succeeded
+            assert len(self.mock_sockets) >= 1, (
+                f"Expected at least 1 socket for operations, got {len(self.mock_sockets)}"
+            )
+
+        finally:
+            if hasattr(test_redis_client.connection_pool, "disconnect"):
+                test_redis_client.connection_pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_failing_over_related_events_handling_integration(self, pool_class):
+        """
+        Test full integration of failing-over-related events (FAILING_OVER/FAILED_OVER) handling.
+
+        This test validates the complete FAILING_OVER -> FAILED_OVER lifecycle:
+        1. Executes 5 Redis commands sequentially
+        2. Injects FAILING_OVER push message before command 2 (SET key_receive_failing_over)
+        3. Validates socket timeout is updated to relaxed value (30s) after FAILING_OVER
+        4. Executes commands 3-4 while timeout remains relaxed
+        5. Injects FAILED_OVER push message before command 5 (SET key_receive_failed_over)
+        6. Validates socket timeout is restored after FAILED_OVER
+        7. Tests both ConnectionPool and BlockingConnectionPool implementations
+        8. Uses proper RESP3 push message format for realistic protocol simulation
+        """
+        # Create a pool and Redis client with maintenance events
+        test_redis_client = self._get_client(pool_class, max_connections=10)
+
+        try:
+            # Command 1: Initial command
+            key1 = "key1"
+            value1 = "value1"
+            result1 = test_redis_client.set(key1, value1)
+
+            # Validate Command 1 result
+            assert result1 is True, "Command 1 (SET key1) failed"
+
+            # Command 2: This SET command will receive FAILING_OVER push message before response
+            key_failing_over = "key_receive_failing_over"
+            value_failing_over = "value4"
+            result2 = test_redis_client.set(key_failing_over, value_failing_over)
+
+            # Validate Command 2 result
+            assert result2 is True, "Command 2 (SET key_receive_failing_over) failed"
+
+            # Step 4: Validate timeout was updated to relaxed value after MIGRATING
+            self._validate_current_timeout(30, "Right after FAILING_OVER is received. ")
+
+            # Command 3: Another command while timeout is still relaxed
+            result3 = test_redis_client.get(key1)
+
+            # Validate Command 3 result
+            expected_value3 = value1.encode()
+            assert result3 == expected_value3, (
+                f"Command 3 (GET key1) failed. Expected {expected_value3}, got {result3}"
+            )
+
+            # Command 4: Execute command (step 5)
+            result4 = test_redis_client.get(key_failing_over)
+
+            # Validate Command 4 result
+            expected_value4 = value_failing_over.encode()
+            assert result4 == expected_value4, (
+                f"Command 4 (GET key_receive_failing_over) failed. Expected {expected_value4}, got {result4}"
+            )
+
+            # Step 6: Validate socket timeout is still relaxed during commands 3-4
+            self._validate_current_timeout(
+                30,
+                "Execute a command with a connection extracted from the pool (after it has received FAILING_OVER)",
+            )
+
+            # Command 5: This SET command will receive
+            # FAILED_OVER push message before actual response
+            key_failed_over = "key_receive_failed_over"
+            value_migrated = "value3"
+            result5 = test_redis_client.set(key_failed_over, value_migrated)
+
+            # Validate Command 5 result
+            assert result5 is True, "Command 5 (SET key_receive_failed_over) failed"
+
+            # Step 8: Validate socket timeout is reversed back to original after FAILED_OVER
+            self._validate_current_timeout(None)
 
             # Verify maintenance events were processed correctly
             # The key is that we have at least 1 socket and all operations succeeded
