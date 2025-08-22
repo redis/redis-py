@@ -132,19 +132,17 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         self._rest_api_port = rest_api_port
 
     def check_health(self, database) -> bool:
-        client = database.client
+        if database.health_check_url is None:
+            raise ValueError(
+                "Database health check url is not set. Please check DatabaseConfig for the current database."
+            )
 
-        if isinstance(client, Redis):
-            db_host = client.get_connection_kwargs()['host']
+        if isinstance(database.client, Redis):
+            db_host = database.client.get_connection_kwargs()["host"]
         else:
-            # We need to use the primary node public IP here and not DNS name.
-            #
-            # The bug exists in Redis Enterprise, if you reach REST API by DNS name
-            # the proxy will choose a random node, and if it's not a primary node it will redirect
-            # it to the primary node, the redirect will fail due to private IP.
-            db_host = client.get_primaries()[0].host
+            db_host = database.client.startup_nodes[0].host
 
-        base_url = f"https://{db_host}:{self._rest_api_port}"
+        base_url = f"{database.health_check_url}:{self._rest_api_port}"
         self._http_client.base_url = base_url
 
         # Find bdb matching to the current database host

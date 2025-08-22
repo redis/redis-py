@@ -1,5 +1,7 @@
 import json
 import os
+import re
+from urllib.parse import urlparse
 
 import pytest
 
@@ -73,7 +75,8 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
              'username': username,
              'password': password,
              'decode_responses': True,
-         }
+         },
+         health_check_url=extract_cluster_fqdn(endpoint_config['endpoints'][0])
      )
      db_configs.append(db_config)
 
@@ -84,7 +87,8 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
              'username': username,
              'password': password,
              'decode_responses': True,
-         }
+         },
+         health_check_url=extract_cluster_fqdn(endpoint_config['endpoints'][1])
      )
      db_configs.append(db_config1)
 
@@ -100,3 +104,22 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
      )
 
      return MultiDBClient(config), listener, endpoint_config
+
+
+def extract_cluster_fqdn(url):
+    """
+    Extract Cluster FQDN from Redis URL
+    """
+    # Parse the URL
+    parsed = urlparse(url)
+
+    # Extract hostname and port
+    hostname = parsed.hostname
+    port = parsed.port
+
+    # Remove the 'redis-XXXX.' prefix using regex
+    # This pattern matches 'redis-' followed by digits and a dot
+    cleaned_hostname = re.sub(r'^redis-\d+\.', '', hostname)
+
+    # Reconstruct the URL
+    return f"https://{cleaned_hostname}"

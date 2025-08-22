@@ -79,11 +79,11 @@ class TestLagAwareHealthCheck:
         # Inject our mocked http client
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0)
+        db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
 
         assert hc.check_health(db) is True
         # Base URL must be set correctly
-        assert hc._http_client.base_url == f"https://{host}:1234"
+        assert hc._http_client.base_url == f"https://healthcheck.example.com:1234"
         # Calls: first to list bdbs, then to availability
         assert mock_http.get.call_count == 2
         first_call = mock_http.get.call_args_list[0]
@@ -117,7 +117,7 @@ class TestLagAwareHealthCheck:
         )
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0)
+        db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
 
         assert hc.check_health(db) is True
         assert mock_http.get.call_count == 2
@@ -142,7 +142,7 @@ class TestLagAwareHealthCheck:
         )
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0)
+        db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
 
         with pytest.raises(ValueError, match="Could not find a matching bdb"):
             hc.check_health(db)
@@ -170,7 +170,7 @@ class TestLagAwareHealthCheck:
         )
         hc._http_client = mock_http
 
-        db = Database(mock_client, mock_cb, 1.0)
+        db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
 
         with pytest.raises(HttpError, match="busy") as e:
             hc.check_health(db)

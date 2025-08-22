@@ -30,12 +30,36 @@ def default_event_dispatcher() -> EventDispatcherInterface:
 
 @dataclass
 class DatabaseConfig:
+    """
+    Dataclass representing the configuration for a database connection.
+
+    This class is used to store configuration settings for a database connection,
+    including client options, connection sourcing details, circuit breaker settings,
+    and cluster-specific properties. It provides a structure for defining these
+    attributes and allows for the creation of customized configurations for various
+    database setups.
+
+    Attributes:
+        weight (float): Weight of the database to define the active one.
+        client_kwargs (dict): Additional parameters for the database client connection.
+        from_url (Optional[str]): Redis URL way of connecting to the database.
+        from_pool (Optional[ConnectionPool]): A pre-configured connection pool to use.
+        circuit (Optional[CircuitBreaker]): Custom circuit breaker implementation.
+        grace_period (float): Grace period after which we need to check if the circuit could be closed again.
+        health_check_url (Optional[str]): URL for health checks. Cluster FQDN is typically used
+            on public Redis Enterprise endpoints.
+
+    Methods:
+        default_circuit_breaker:
+            Generates and returns a default CircuitBreaker instance adapted for use.
+    """
     weight: float = 1.0
     client_kwargs: dict = field(default_factory=dict)
     from_url: Optional[str] = None
     from_pool: Optional[ConnectionPool] = None
     circuit: Optional[CircuitBreaker] = None
     grace_period: float = DEFAULT_GRACE_PERIOD
+    health_check_url: Optional[str] = None
 
     def default_circuit_breaker(self) -> CircuitBreaker:
         circuit_breaker = pybreaker.CircuitBreaker(reset_timeout=self.grace_period)
@@ -117,7 +141,12 @@ class MultiDbConfig:
             circuit = database_config.default_circuit_breaker() \
                 if database_config.circuit is None else database_config.circuit
             databases.add(
-                Database(client=client, circuit=circuit, weight=database_config.weight),
+                Database(
+                    client=client,
+                    circuit=circuit,
+                    weight=database_config.weight,
+                    health_check_url=database_config.health_check_url
+                ),
                 database_config.weight
             )
 
