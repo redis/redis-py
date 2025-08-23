@@ -257,7 +257,48 @@ class Redis(
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
-        Initialize a new Redis client.
+        Initialize a new async Redis client.
+
+        PARAMETER DOCUMENTATION
+        =======================
+
+        host (str, default="localhost"): Redis server hostname or IP address
+        port (int, default=6379): Redis server port number
+        db (Union[str, int], default=0): Redis logical database number (0-15, shared CPU/memory/ACL)
+        password (Optional[str], default=None): Redis server authentication password
+        socket_timeout (Optional[float], default=None): Socket read/write timeout in seconds (None=no timeout)
+        socket_connect_timeout (Optional[float], default=None): Socket connection timeout in seconds (None=system default ~60-120s)
+        socket_keepalive (Optional[bool], default=None): Enable TCP keepalive for dead connection detection (None=disabled)
+        socket_keepalive_options (Optional[Mapping], default=None): Advanced TCP keepalive socket options (e.g. {socket.TCP_KEEPIDLE: 30})
+        connection_pool (Optional[ConnectionPool], default=None): Pre-configured connection pool instance
+        unix_socket_path (Optional[str], default=None): Path to Unix domain socket for local connections
+        encoding (str, default="utf-8"): Character encoding for string values (utf-8, ascii, latin-1, etc.)
+        encoding_errors (str, default="strict"): How to handle encoding/decoding errors (strict, ignore, replace)
+        decode_responses (bool, default=False): Automatically decode byte responses to strings
+        retry_on_timeout (bool, default=False): Deprecated - use retry_on_error list instead
+        retry (Retry, default=Retry(...)): Retry policy configuration for failed operations (defaults: 3 retries on ConnectionError, TimeoutError, BusyLoadingError)
+        retry_on_error (Optional[list], default=None): Additional error types to retry beyond defaults
+        ssl (bool, default=False): Enable SSL/TLS encryption for connections
+        ssl_keyfile (Optional[str], default=None): Path to client private key file for mutual TLS
+        ssl_certfile (Optional[str], default=None): Path to client certificate file for mutual TLS
+        ssl_cert_reqs (Union[str, VerifyMode], default="required"): Certificate verification (required/optional/none)
+        ssl_ca_certs (Optional[str], default=None): Path to CA certificate bundle (None=system default)
+        ssl_ca_data (Optional[str], default=None): CA certificate data as string (alternative to ssl_ca_certs)
+        ssl_check_hostname (bool, default=True): Verify certificate hostname matches connection
+        ssl_min_version (Optional[TLSVersion], default=None): Minimum TLS version (None=system default)
+        ssl_ciphers (Optional[str], default=None): Allowed SSL cipher suites in OpenSSL format (None=system default)
+        max_connections (Optional[int], default=None): Maximum connections in pool (None=unlimited)
+        single_connection_client (bool, default=False): Use single connection instead of pool (not thread-safe)
+        health_check_interval (int, default=0): Seconds before connection health check on acquisition (0=disabled)
+        client_name (Optional[str], default=None): Client name identifier sent to Redis server (visible in CLIENT LIST)
+        lib_name (Optional[str], default="redis-py"): Library name identifier
+        lib_version (Optional[str], default=auto): Library version identifier (auto-detected)
+        username (Optional[str], default=None): Username for Redis ACL authentication (None=use default user)
+        auto_close_connection_pool (Optional[bool], default=None): Deprecated - connection pools are auto-closed by default
+        redis_connect_func (Optional[Callable], default=None): Custom function called after connection (replaces default setup)
+        credential_provider (Optional[CredentialProvider], default=None): Dynamic credential provider (for rotating credentials)
+        protocol (Optional[int], default=2): Redis protocol version (2=RESP2, 3=RESP3, requires Redis 6.0+ for RESP3)
+        event_dispatcher (Optional[EventDispatcher], default=None): Event dispatcher for lifecycle events (None=default with re-auth support)
 
         To specify a retry policy for specific errors, you have two options:
 
