@@ -2195,8 +2195,6 @@ class ConnectionPool:
         Mark all active connections for reconnect.
         This is used when a cluster node is migrated to a different address.
 
-        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
-
         :param moving_address_src: The address of the node that is being moved.
         """
         with self._lock:
@@ -2213,8 +2211,6 @@ class ConnectionPool:
         """
         Disconnect all free/available connections.
         This is used when a cluster node is migrated to a different address.
-
-        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
 
         :param moving_address_src: The address of the node that is being moved.
         """
@@ -2532,8 +2528,6 @@ class BlockingConnectionPool(ConnectionPool):
         Mark all active connections for reconnect.
         This is used when a cluster node is migrated to a different address.
 
-        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
-
         :param moving_address_src: The address of the node that is being moved.
         """
         with self._lock:
@@ -2554,8 +2548,6 @@ class BlockingConnectionPool(ConnectionPool):
         """
         Disconnect all free/available connections.
         This is used when a cluster node is migrated to a different address.
-
-        When this method is called the pool will already be locked, so getting the pool lock inside is not needed.
 
         :param moving_address_src: The address of the node that is being moved.
         """
