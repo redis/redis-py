@@ -30,7 +30,6 @@ from redis.cache import (
     CacheInterface,
     CacheKey,
 )
-from redis.typing import Number
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
@@ -2225,20 +2224,6 @@ class ConnectionPool:
                     conn, "connected_address", moving_address_src
                 ):
                     conn.disconnect()
-
-    def _update_connection_for_reconnect(
-        self,
-        connection: "Connection",
-    ):
-        connection.mark_for_reconnect()
-
-    def _disconnect_and_update_connection_for_reconnect(
-        self,
-        connection: "Connection",
-        tmp_host_address: Optional[str] = None,
-        tmp_relax_timeout: Optional[float] = None,
-    ):
-        connection.disconnect()
 
     async def _mock(self, error: RedisError):
         """
