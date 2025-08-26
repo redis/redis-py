@@ -13,6 +13,8 @@ from redis.exceptions import ConnectionError
 
 from ..ssl_utils import CertificateType, get_tls_certificates
 
+pytestmark = pytest.mark.asyncio
+
 _CLIENT_NAME = "test-suite-client"
 _CMD_SEP = b"\r\n"
 _SUCCESS_RESP = b"+OK" + _CMD_SEP
