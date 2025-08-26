@@ -4,15 +4,13 @@ from unittest.mock import patch, Mock
 import pybreaker
 import pytest
 
-from redis.event import EventDispatcher
-from redis.exceptions import ConnectionError
 from redis.client import Pipeline
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.client import MultiDBClient
-from redis.multidb.config import DEFAULT_HEALTH_CHECK_RETRIES, DEFAULT_HEALTH_CHECK_BACKOFF, DEFAULT_FAILOVER_RETRIES, \
-    DEFAULT_FAILOVER_BACKOFF, DEFAULT_FAILURES_THRESHOLD
+from redis.multidb.config import DEFAULT_FAILOVER_RETRIES, \
+    DEFAULT_FAILOVER_BACKOFF
 from redis.multidb.failover import WeightBasedFailoverStrategy
-from redis.multidb.healthcheck import EchoHealthCheck
+from redis.multidb.healthcheck import EchoHealthCheck, DEFAULT_HEALTH_CHECK_RETRIES, DEFAULT_HEALTH_CHECK_BACKOFF
 from redis.retry import Retry
 from tests.test_multidb.conftest import create_weighted_list
 

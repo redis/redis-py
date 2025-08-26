@@ -1,7 +1,7 @@
 import redis
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Union
+from typing import Union, Optional
 
 from redis import RedisCluster
 from redis.data_structure import WeightedList
@@ -45,6 +45,18 @@ class AbstractDatabase(ABC):
         """Set the circuit breaker for the current database."""
         pass
 
+    @property
+    @abstractmethod
+    def health_check_url(self) -> Optional[str]:
+        """Health check URL associated with the current database."""
+        pass
+
+    @health_check_url.setter
+    @abstractmethod
+    def health_check_url(self, health_check_url: Optional[str]):
+        """Set the health check URL associated with the current database."""
+        pass
+
 Databases = WeightedList[tuple[AbstractDatabase, Number]]
 
 class Database(AbstractDatabase):
@@ -52,7 +64,8 @@ class Database(AbstractDatabase):
             self,
             client: Union[redis.Redis, RedisCluster],
             circuit: CircuitBreaker,
-            weight: float
+            weight: float,
+            health_check_url: Optional[str] = None,
     ):
         """
         Initialize a new Database instance.
@@ -61,12 +74,13 @@ class Database(AbstractDatabase):
             client: Underlying Redis client instance for database operations
             circuit: Circuit breaker for handling database failures
             weight: Weight value used for database failover prioritization
-            state: Initial database state, defaults to DISCONNECTED
+            health_check_url: Health check URL associated with the current database
         """
         self._client = client
         self._cb = circuit
         self._cb.database = self
         self._weight = weight
+        self._health_check_url = health_check_url
 
     @property
     def client(self) -> Union[redis.Redis, RedisCluster]:
@@ -91,3 +105,11 @@ class Database(AbstractDatabase):
     @circuit.setter
     def circuit(self, circuit: CircuitBreaker):
         self._cb = circuit
+
+    @property
+    def health_check_url(self) -> Optional[str]:
+        return self._health_check_url
+
+    @health_check_url.setter
+    def health_check_url(self, health_check_url: Optional[str]):
+        self._health_check_url = health_check_url

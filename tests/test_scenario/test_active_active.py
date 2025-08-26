@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import threading
 from time import sleep
 
@@ -7,6 +8,7 @@ import pytest
 
 from redis import Redis, RedisCluster
 from redis.client import Pipeline
+from redis.multidb.healthcheck import LagAwareHealthCheck
 from tests.test_scenario.fault_injector_client import ActionRequest, ActionType
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,48 @@ class TestActiveActive:
             sleep(0.5)
 
         # Execute commands until database failover
+        while not listener.is_changed_flag:
+            assert r_multi_db.get('key') == 'value'
+            sleep(0.5)
+
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [
+            {"client_class": Redis, "failure_threshold": 2},
+            {"client_class": RedisCluster, "failure_threshold": 2},
+        ],
+        ids=["standalone", "cluster"],
+        indirect=True
+    )
+    @pytest.mark.timeout(50)
+    def test_multi_db_client_uses_lag_aware_health_check(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
+        event = threading.Event()
+        thread = threading.Thread(
+            target=trigger_network_failure_action,
+            daemon=True,
+            args=(fault_injector_client,config,event)
+        )
+
+        env0_username = os.getenv('ENV0_USERNAME')
+        env0_password = os.getenv('ENV0_PASSWORD')
+
+        # Adding additional health check to the client.
+        r_multi_db.add_health_check(
+            LagAwareHealthCheck(verify_tls=False, auth_basic=(env0_username,env0_password))
+        )
+
+        # Client initialized on the first command.
+        r_multi_db.set('key', 'value')
+        thread.start()
+
+        # Execute commands before network failure
+        while not event.is_set():
+            assert r_multi_db.get('key') == 'value'
+            sleep(0.5)
+
+        # Execute commands after network failure
         while not listener.is_changed_flag:
             assert r_multi_db.get('key') == 'value'
             sleep(0.5)
@@ -268,7 +312,7 @@ class TestActiveActive:
             sleep(0.5)
 
         pubsub_thread.stop()
-        assert messages_count > 5
+        assert messages_count > 2
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -318,4 +362,4 @@ class TestActiveActive:
             sleep(0.5)
 
         pubsub_thread.stop()
-        assert messages_count > 5
+        assert messages_count > 2

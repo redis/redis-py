@@ -230,7 +230,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                         database.circuit.state = CBState.OPEN
                     elif is_healthy and database.circuit.state != CBState.CLOSED:
                         database.circuit.state = CBState.CLOSED
-                except (ConnectionError, TimeoutError, socket.timeout, ConnectionRefusedError, ValueError) as e:
+                except Exception as e:
                     if database.circuit.state != CBState.OPEN:
                         database.circuit.state = CBState.OPEN
                     is_healthy = False
