@@ -86,6 +86,7 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         self,
         retry: Retry = Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF),
         rest_api_port: int = 9443,
+        lag_aware_tolerance: int = 100,
         timeout: float = DEFAULT_TIMEOUT,
         auth_basic: Optional[Tuple[str, str]] = None,
         verify_tls: bool = True,
@@ -104,6 +105,7 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         Args:
             retry: Retry configuration for health checks
             rest_api_port: Port number for Redis Enterprise REST API (default: 9443)
+            lag_aware_tolerance: Tolerance in lag between databases in MS (default: 100)
             timeout: Request timeout in seconds (default: DEFAULT_TIMEOUT)
             auth_basic: Tuple of (username, password) for basic authentication
             verify_tls: Whether to verify TLS certificates (default: True)
@@ -130,6 +132,7 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             client_key_password=client_key_password
         )
         self._rest_api_port = rest_api_port
+        self._lag_aware_tolerance = lag_aware_tolerance
 
     def check_health(self, database) -> bool:
         if database.health_check_url is None:
@@ -163,7 +166,8 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             logger.warning("LagAwareHealthCheck failed: Couldn't find a matching bdb")
             raise ValueError("Could not find a matching bdb")
 
-        url = f"/v1/local/bdbs/{matching_bdb['uid']}/endpoint/availability"
+        url = (f"/v1/local/bdbs/{matching_bdb['uid']}/endpoint/availability"
+               f"?extend_check=lag&availability_lag_tolerance_ms={self._lag_aware_tolerance}")
         self._http_client.get(url, expect_json=False)
 
         # Status checked in an http client, otherwise HttpError will be raised

@@ -4,7 +4,6 @@ import pytest
 
 from redis.backoff import ExponentialBackoff
 from redis.multidb.database import Database
-from redis.multidb.healthcheck import EchoHealthCheck
 from redis.http.http_client import HttpError
 from redis.multidb.healthcheck import EchoHealthCheck, LagAwareHealthCheck
 from redis.multidb.circuit import State as CBState
@@ -74,7 +73,7 @@ class TestLagAwareHealthCheck:
 
         hc = LagAwareHealthCheck(
             retry=Retry(backoff=ExponentialBackoff(cap=1.0), retries=3),
-            rest_api_port=1234,
+            rest_api_port=1234, lag_aware_tolerance=150
         )
         # Inject our mocked http client
         hc._http_client = mock_http
@@ -89,7 +88,7 @@ class TestLagAwareHealthCheck:
         first_call = mock_http.get.call_args_list[0]
         second_call = mock_http.get.call_args_list[1]
         assert first_call.args[0] == "/v1/bdbs"
-        assert second_call.args[0] == "/v1/local/bdbs/bdb-1/endpoint/availability"
+        assert second_call.args[0] == "/v1/local/bdbs/bdb-1/endpoint/availability?extend_check=lag&availability_lag_tolerance_ms=150"
         assert second_call.kwargs.get("expect_json") is False
 
     def test_database_is_healthy_when_bdb_matches_by_addr(self, mock_client, mock_cb):
@@ -121,7 +120,7 @@ class TestLagAwareHealthCheck:
 
         assert hc.check_health(db) is True
         assert mock_http.get.call_count == 2
-        assert mock_http.get.call_args_list[1].args[0] == "/v1/local/bdbs/bdb-42/endpoint/availability"
+        assert mock_http.get.call_args_list[1].args[0] == "/v1/local/bdbs/bdb-42/endpoint/availability?extend_check=lag&availability_lag_tolerance_ms=100"
 
     def test_raises_value_error_when_no_matching_bdb(self, mock_client, mock_cb):
         """
