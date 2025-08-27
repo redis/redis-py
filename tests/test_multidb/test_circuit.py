@@ -1,7 +1,7 @@
 import pybreaker
 import pytest
 
-from redis.multidb.circuit import PBCircuitBreakerAdapter, State as CbState, CircuitBreaker
+from redis.multidb.circuit import PBCircuitBreakerAdapter, State as CbState, CircuitBreaker, SyncCircuitBreaker
 
 
 class TestPBCircuitBreaker:
@@ -39,7 +39,7 @@ class TestPBCircuitBreaker:
         adapter = PBCircuitBreakerAdapter(cb=pb_circuit)
         called_count = 0
 
-        def callback(cb: CircuitBreaker, old_state: CbState, new_state: CbState):
+        def callback(cb: SyncCircuitBreaker, old_state: CbState, new_state: CbState):
             nonlocal called_count
             assert old_state == CbState.CLOSED
             assert new_state == CbState.HALF_OPEN

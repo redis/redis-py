@@ -45,48 +45,11 @@ class CircuitBreaker(ABC):
         """Set database associated with this circuit."""
         pass
 
-    @abstractmethod
-    def on_state_changed(self, cb: Callable[["CircuitBreaker", State, State], None]):
-        """Callback called when the state of the circuit changes."""
-        pass
-
-class PBListener(pybreaker.CircuitBreakerListener):
-    """Wrapper for callback to be compatible with pybreaker implementation."""
-    def __init__(
-            self,
-            cb: Callable[[CircuitBreaker, State, State], None],
-            database,
-    ):
-        """
-        Initialize a PBListener instance.
-
-        Args:
-            cb: Callback function that will be called when the circuit breaker state changes.
-            database: Database instance associated with this circuit breaker.
-        """
-
-        self._cb = cb
-        self._database = database
-
-    def state_change(self, cb, old_state, new_state):
-        cb = PBCircuitBreakerAdapter(cb)
-        cb.database = self._database
-        old_state = State(value=old_state.name)
-        new_state = State(value=new_state.name)
-        self._cb(cb, old_state, new_state)
-
-
-class PBCircuitBreakerAdapter(CircuitBreaker):
+class BaseCircuitBreaker(CircuitBreaker):
+    """
+    Base implementation of Circuit Breaker interface.
+    """
     def __init__(self, cb: pybreaker.CircuitBreaker):
-        """
-        Initialize a PBCircuitBreakerAdapter instance.
-
-        This adapter wraps pybreaker's CircuitBreaker implementation to make it compatible
-        with our CircuitBreaker interface.
-
-        Args:
-            cb: A pybreaker CircuitBreaker instance to be adapted.
-        """
         self._cb = cb
         self._state_pb_mapper = {
             State.CLOSED: self._cb.close,
@@ -119,6 +82,53 @@ class PBCircuitBreakerAdapter(CircuitBreaker):
     def database(self, database):
         self._database = database
 
-    def on_state_changed(self, cb: Callable[["CircuitBreaker", State, State], None]):
+class SyncCircuitBreaker(CircuitBreaker):
+    """
+    Synchronous implementation of Circuit Breaker interface.
+    """
+    @abstractmethod
+    def on_state_changed(self, cb: Callable[["SyncCircuitBreaker", State, State], None]):
+        """Callback called when the state of the circuit changes."""
+        pass
+
+class PBListener(pybreaker.CircuitBreakerListener):
+    """Wrapper for callback to be compatible with pybreaker implementation."""
+    def __init__(
+            self,
+            cb: Callable[[SyncCircuitBreaker, State, State], None],
+            database,
+    ):
+        """
+        Initialize a PBListener instance.
+
+        Args:
+            cb: Callback function that will be called when the circuit breaker state changes.
+            database: Database instance associated with this circuit breaker.
+        """
+
+        self._cb = cb
+        self._database = database
+
+    def state_change(self, cb, old_state, new_state):
+        cb = PBCircuitBreakerAdapter(cb)
+        cb.database = self._database
+        old_state = State(value=old_state.name)
+        new_state = State(value=new_state.name)
+        self._cb(cb, old_state, new_state)
+
+class PBCircuitBreakerAdapter(SyncCircuitBreaker, BaseCircuitBreaker):
+    def __init__(self, cb: pybreaker.CircuitBreaker):
+        """
+        Initialize a PBCircuitBreakerAdapter instance.
+
+        This adapter wraps pybreaker's CircuitBreaker implementation to make it compatible
+        with our CircuitBreaker interface.
+
+        Args:
+            cb: A pybreaker CircuitBreaker instance to be adapted.
+        """
+        super().__init__(cb)
+
+    def on_state_changed(self, cb: Callable[["SyncCircuitBreaker", State, State], None]):
         listener = PBListener(cb, self.database)
         self._cb.add_listener(listener)
