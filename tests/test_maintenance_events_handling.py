@@ -28,6 +28,20 @@ AFTER_MOVING_ADDRESS = "1.2.3.4:6379"
 DEFAULT_ADDRESS = "12.45.34.56:6379"
 MOVING_TIMEOUT = 1
 
+MOVING_EVENT = NodeMovingEvent(
+    id=1,
+    new_node_host=AFTER_MOVING_ADDRESS.split(":")[0],
+    new_node_port=int(AFTER_MOVING_ADDRESS.split(":")[1]),
+    ttl=MOVING_TIMEOUT,
+)
+
+MOVING_NONE_EVENT = NodeMovingEvent(
+    id=1,
+    new_node_host=None,
+    new_node_port=None,
+    ttl=MOVING_TIMEOUT,
+)
+
 
 class Helpers:
     """Helper class containing static methods for validation in maintenance events tests."""
@@ -107,6 +121,9 @@ class Helpers:
                 == expected_orig_socket_connect_timeout
             )
             assert connection.maintenance_state == expected_state
+            if expected_state == MaintenanceState.NONE:
+                assert connection.maintenance_event_hash is None
+
             if connection._sock is not None:
                 assert connection._sock.connected is True
                 if connected_to_tmp_address and tmp_address != "any":
@@ -117,6 +134,8 @@ class Helpers:
     @staticmethod
     def validate_conn_kwargs(
         pool,
+        expected_maintenance_state,
+        expected_maintenance_event_hash,
         expected_host_address,
         expected_port,
         expected_socket_timeout,
@@ -126,6 +145,11 @@ class Helpers:
         expected_orig_socket_connect_timeout,
     ):
         """Helper method to validate connection kwargs."""
+        assert pool.connection_kwargs["maintenance_state"] == expected_maintenance_state
+        assert (
+            pool.connection_kwargs["maintenance_event_hash"]
+            == expected_maintenance_event_hash
+        )
         assert pool.connection_kwargs["host"] == expected_host_address
         assert pool.connection_kwargs["port"] == expected_port
         assert pool.connection_kwargs["socket_timeout"] == expected_socket_timeout
@@ -208,6 +232,14 @@ class MockSocket:
                 # Format: >2\r\n$11\r\nFAILED_OVER\r\n:1\r\n (2 elements: FAILED_OVER, id)
                 failed_over_push = ">2\r\n$11\r\nFAILED_OVER\r\n:1\r\n"
                 response = failed_over_push.encode() + response
+            elif b"key_receive_moving_none_" in data:
+                # MOVING push message before SET key_receive_moving_none_X response
+                # Format: >4\r\n$6\r\nMOVING\r\n:1\r\n:1\r\n+null\r\n (4 elements: MOVING, id, ttl, null)
+                # Note: Using + instead of $ to send as simple string instead of bulk string
+                moving_push = (
+                    f">4\r\n$6\r\nMOVING\r\n:1\r\n:{MOVING_TIMEOUT}\r\n+null\r\n"
+                )
+                response = moving_push.encode() + response
             elif b"key_receive_moving_" in data:
                 # MOVING push message before SET key_receive_moving_X response
                 # Format: >4\r\n$6\r\nMOVING\r\n:1\r\n:1\r\n+1.2.3.4:6379\r\n (4 elements: MOVING, id, ttl, host:port)
@@ -455,13 +487,6 @@ class TestMaintenanceEventsHandlingSingleProxy:
             if sock.connected:
                 connected_sockets_count += 1
         assert connected_sockets_count == expected_count
-
-    def _validate_all_timeouts(self, expected_timeout):
-        """Helper method to validate state of in-use connections."""
-        # validate in use connections are still working with set flag for reconnect
-        # and timeout is updated
-        for mock_socket in self.mock_sockets:
-            assert mock_socket.gettimeout() == expected_timeout
 
     def test_client_initialization(self):
         """Test that Redis client is created with maintenance events configuration."""
@@ -862,6 +887,90 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 test_redis_client.connection_pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_failing_over_related_events_handling_integration(self, pool_class):
+        """
+        Test full integration of failing-over-related events (FAILING_OVER/FAILED_OVER) handling.
+
+        This test validates the complete FAILING_OVER -> FAILED_OVER lifecycle:
+        1. Executes 5 Redis commands sequentially
+        2. Injects FAILING_OVER push message before command 2 (SET key_receive_failing_over)
+        3. Validates socket timeout is updated to relaxed value (30s) after FAILING_OVER
+        4. Executes commands 3-4 while timeout remains relaxed
+        5. Injects FAILED_OVER push message before command 5 (SET key_receive_failed_over)
+        6. Validates socket timeout is restored after FAILED_OVER
+        7. Tests both ConnectionPool and BlockingConnectionPool implementations
+        8. Uses proper RESP3 push message format for realistic protocol simulation
+        """
+        # Create a pool and Redis client with maintenance events
+        test_redis_client = self._get_client(pool_class, max_connections=10)
+
+        try:
+            # Command 1: Initial command
+            key1 = "key1"
+            value1 = "value1"
+            result1 = test_redis_client.set(key1, value1)
+
+            # Validate Command 1 result
+            assert result1 is True, "Command 1 (SET key1) failed"
+
+            # Command 2: This SET command will receive FAILING_OVER push message before response
+            key_failing_over = "key_receive_failing_over"
+            value_failing_over = "value4"
+            result2 = test_redis_client.set(key_failing_over, value_failing_over)
+
+            # Validate Command 2 result
+            assert result2 is True, "Command 2 (SET key_receive_failing_over) failed"
+
+            # Step 4: Validate timeout was updated to relaxed value after MIGRATING
+            self._validate_current_timeout(30, "Right after FAILING_OVER is received. ")
+
+            # Command 3: Another command while timeout is still relaxed
+            result3 = test_redis_client.get(key1)
+
+            # Validate Command 3 result
+            expected_value3 = value1.encode()
+            assert result3 == expected_value3, (
+                f"Command 3 (GET key1) failed. Expected {expected_value3}, got {result3}"
+            )
+
+            # Command 4: Execute command (step 5)
+            result4 = test_redis_client.get(key_failing_over)
+
+            # Validate Command 4 result
+            expected_value4 = value_failing_over.encode()
+            assert result4 == expected_value4, (
+                f"Command 4 (GET key_receive_failing_over) failed. Expected {expected_value4}, got {result4}"
+            )
+
+            # Step 6: Validate socket timeout is still relaxed during commands 3-4
+            self._validate_current_timeout(
+                30,
+                "Execute a command with a connection extracted from the pool (after it has received FAILING_OVER)",
+            )
+
+            # Command 5: This SET command will receive
+            # FAILED_OVER push message before actual response
+            key_failed_over = "key_receive_failed_over"
+            value_migrated = "value3"
+            result5 = test_redis_client.set(key_failed_over, value_migrated)
+
+            # Validate Command 5 result
+            assert result5 is True, "Command 5 (SET key_receive_failed_over) failed"
+
+            # Step 8: Validate socket timeout is reversed back to original after FAILED_OVER
+            self._validate_current_timeout(None)
+
+            # Verify maintenance events were processed correctly
+            # The key is that we have at least 1 socket and all operations succeeded
+            assert len(self.mock_sockets) >= 1, (
+                f"Expected at least 1 socket for operations, got {len(self.mock_sockets)}"
+            )
+
+        finally:
+            if hasattr(test_redis_client.connection_pool, "disconnect"):
+                test_redis_client.connection_pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_moving_related_events_handling_integration(self, pool_class):
         """
         Test full integration of moving-related events (MOVING) handling with Redis commands.
@@ -909,8 +1018,12 @@ class TestMaintenanceEventsHandlingSingleProxy:
             assert result2 is True, "Command 2 (SET key_receive_moving) failed"
 
             # Validate pool and connections settings were updated according to MOVING event
+            expected_event_hash = hash(MOVING_EVENT)
+
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
+                expected_maintenance_state=MaintenanceState.MOVING,
+                expected_maintenance_event_hash=expected_event_hash,
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_socket_timeout=self.config.relax_timeout,
@@ -964,6 +1077,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
             )
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
+                expected_maintenance_state=MaintenanceState.NONE,
+                expected_maintenance_event_hash=None,
                 expected_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_socket_timeout=None,
@@ -981,6 +1096,159 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
                 should_be_connected_count=1,
+                connected_to_tmp_address=True,
+                expected_state=MaintenanceState.NONE,
+            )
+        finally:
+            if hasattr(test_redis_client.connection_pool, "disconnect"):
+                test_redis_client.connection_pool.disconnect()
+
+    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
+    def test_moving_none_events_handling_integration(self, pool_class):
+        """
+        Test full integration of moving-related events (MOVING) handling with Redis commands.
+
+        This test validates the complete MOVING event lifecycle,
+        when the push notification doesn't contain host and port:
+        1. Creates multiple connections in the pool
+        2. Executes a Redis command that triggers a MOVING with "null" push message
+        3. Validates that pool configuration is updated with temporary
+           address and timeout - for new connections creation
+        4. Validates that existing connections are marked for disconnection after ttl/2 seconds
+        5. Tests both ConnectionPool and BlockingConnectionPool implementations
+        """
+        # Create a pool and Redis client with maintenance events and pool handler
+        test_redis_client = self._get_client(
+            pool_class, max_connections=10, setup_pool_handler=True
+        )
+
+        try:
+            # Create several connections and return them in the pool
+            connections = []
+            for _ in range(10):
+                connection = test_redis_client.connection_pool.get_connection()
+                connections.append(connection)
+
+            for connection in connections:
+                test_redis_client.connection_pool.release(connection)
+
+            # Take 5 connections to be "in use"
+            in_use_connections = []
+            for _ in range(5):
+                connection = test_redis_client.connection_pool.get_connection()
+                in_use_connections.append(connection)
+
+            # Validate all connections are connected prior MOVING event
+            self._validate_disconnected(0)
+
+            # Run command that will receive and handle MOVING event
+            key_moving = "key_receive_moving_none_0"
+            value_moving = "value3_0"
+
+            # the connection used for the command is expected to be reconnected to the new address
+            # before it is returned to the pool
+            result2 = test_redis_client.set(key_moving, value_moving)
+
+            # Validate Command 2 result
+            assert result2 is True, "Command 2 (SET key_receive_moving) failed"
+
+            # Validate pool and connections settings were updated according to MOVING event
+            Helpers.validate_conn_kwargs(
+                pool=test_redis_client.connection_pool,
+                expected_maintenance_state=MaintenanceState.MOVING,
+                expected_maintenance_event_hash=hash(MOVING_NONE_EVENT),
+                expected_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
+            )
+            self._validate_disconnected(0)
+            self._validate_connected(10)
+            Helpers.validate_in_use_connections_state(
+                in_use_connections,
+                expected_should_reconnect=False,
+                expected_state=MaintenanceState.MOVING,
+                expected_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
+                expected_current_socket_timeout=self.config.relax_timeout,
+                expected_current_peername=DEFAULT_ADDRESS.split(":")[
+                    0
+                ],  # the in use connections reconnect when they complete their current task
+            )
+            Helpers.validate_free_connections_state(
+                pool=test_redis_client.connection_pool,
+                expected_state=MaintenanceState.MOVING,
+                expected_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
+                should_be_connected_count=5,
+                connected_to_tmp_address=False,
+            )
+            # Wait for half of MOVING timeout to expire and the proactive reconnect to run
+            sleep(MOVING_TIMEOUT / 2 + 0.2)
+            Helpers.validate_in_use_connections_state(
+                in_use_connections,
+                expected_should_reconnect=True,
+                expected_state=MaintenanceState.MOVING,
+                expected_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_socket_timeout=self.config.relax_timeout,
+                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
+                expected_current_socket_timeout=self.config.relax_timeout,
+                expected_current_peername=DEFAULT_ADDRESS.split(":")[
+                    0
+                ],  # the in use connections reconnect when they complete their current task
+            )
+            self._validate_disconnected(5)
+            self._validate_connected(5)
+
+            # Wait for MOVING timeout to expire and the moving completed handler to run
+            sleep(MOVING_TIMEOUT / 2 + 0.2)
+            Helpers.validate_in_use_connections_state(
+                in_use_connections,
+                expected_state=MaintenanceState.NONE,
+                expected_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_socket_timeout=None,
+                expected_socket_connect_timeout=None,
+                expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
+                expected_current_socket_timeout=None,
+                expected_current_peername=DEFAULT_ADDRESS.split(":")[0],
+            )
+            Helpers.validate_conn_kwargs(
+                pool=test_redis_client.connection_pool,
+                expected_maintenance_state=MaintenanceState.NONE,
+                expected_maintenance_event_hash=None,
+                expected_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
+                expected_socket_timeout=None,
+                expected_socket_connect_timeout=None,
+                expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
+            )
+            Helpers.validate_free_connections_state(
+                pool=test_redis_client.connection_pool,
+                expected_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_socket_timeout=None,
+                expected_socket_connect_timeout=None,
+                expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
+                expected_orig_socket_timeout=None,
+                expected_orig_socket_connect_timeout=None,
+                should_be_connected_count=0,
                 connected_to_tmp_address=True,
                 expected_state=MaintenanceState.NONE,
             )
@@ -1033,6 +1301,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate pool and connections settings were updated according to MOVING event
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
+                expected_maintenance_state=MaintenanceState.MOVING,
+                expected_maintenance_event_hash=hash(MOVING_EVENT),
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_orig_socket_timeout=None,
@@ -1181,6 +1451,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate pool and connections settings were updated according to MOVING event
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
+                expected_maintenance_state=MaintenanceState.MOVING,
+                expected_maintenance_event_hash=hash(MOVING_EVENT),
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_orig_socket_timeout=None,
@@ -1207,6 +1479,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # MOVING timeout should still be active
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
+                expected_maintenance_state=MaintenanceState.MOVING,
+                expected_maintenance_event_hash=hash(MOVING_EVENT),
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_orig_socket_timeout=None,
@@ -1278,6 +1552,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
             assert result1 is True
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
+                expected_maintenance_state=MaintenanceState.MOVING,
+                expected_maintenance_event_hash=hash(MOVING_EVENT),
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_socket_timeout=self.config.relax_timeout,
@@ -1322,6 +1598,12 @@ class TestMaintenanceEventsHandlingSingleProxy:
             orig_after_moving = AFTER_MOVING_ADDRESS
             # Temporarily modify the global constant for this test
             AFTER_MOVING_ADDRESS = second_moving_address
+            second_moving_event = NodeMovingEvent(
+                id=1,
+                new_node_host=second_moving_address.split(":")[0],
+                new_node_port=int(second_moving_address.split(":")[1]),
+                ttl=MOVING_TIMEOUT,
+            )
             try:
                 key_moving2 = "key_receive_moving_1"
                 value_moving2 = "value3_1"
@@ -1329,6 +1611,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 assert result2 is True
                 Helpers.validate_conn_kwargs(
                     pool=test_redis_client.connection_pool,
+                    expected_maintenance_state=MaintenanceState.MOVING,
+                    expected_maintenance_event_hash=hash(second_moving_event),
                     expected_host_address=second_moving_address.split(":")[0],
                     expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                     expected_socket_timeout=self.config.relax_timeout,
@@ -1371,6 +1655,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
             sleep(MOVING_TIMEOUT + 0.5)
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
+                expected_maintenance_state=MaintenanceState.NONE,
+                expected_maintenance_event_hash=None,
                 expected_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_socket_timeout=None,
@@ -1416,6 +1702,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
         # After all threads, MOVING event should have been handled safely
         Helpers.validate_conn_kwargs(
             pool=test_redis_client.connection_pool,
+            expected_maintenance_state=MaintenanceState.MOVING,
+            expected_maintenance_event_hash=hash(MOVING_EVENT),
             expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
             expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
             expected_socket_timeout=self.config.relax_timeout,
@@ -1447,6 +1735,9 @@ class TestMaintenanceEventsHandlingSingleProxy:
         in_use_connections = []
         for _ in range(3):
             in_use_connections.append(pool.get_connection())
+
+        pool_handler.set_connection(in_use_connections[0])
+
         while len(in_use_connections) > 0:
             pool.release(in_use_connections.pop())
 
@@ -1462,6 +1753,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             id=1, new_node_host=tmp_address, new_node_port=6379, ttl=1
         )
         pool_handler.handle_event(moving_event)
+
         Helpers.validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.MOVING,
