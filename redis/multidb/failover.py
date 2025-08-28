@@ -1,8 +1,7 @@
 from abc import ABC, abstractmethod
 
 from redis.data_structure import WeightedList
-from redis.multidb.database import Databases
-from redis.multidb.database import AbstractDatabase
+from redis.multidb.database import Databases, SyncDatabase
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import NoValidDatabaseException
 from redis.retry import Retry
@@ -13,13 +12,13 @@ class FailoverStrategy(ABC):
 
     @property
     @abstractmethod
-    def database(self) -> AbstractDatabase:
+    def database(self) -> SyncDatabase:
         """Select the database according to the strategy."""
         pass
 
     @abstractmethod
     def set_databases(self, databases: Databases) -> None:
-        """Set the databases strategy operates on."""
+        """Set the database strategy operates on."""
         pass
 
 class WeightBasedFailoverStrategy(FailoverStrategy):
@@ -35,7 +34,7 @@ class WeightBasedFailoverStrategy(FailoverStrategy):
         self._databases = WeightedList()
 
     @property
-    def database(self) -> AbstractDatabase:
+    def database(self) -> SyncDatabase:
         return self._retry.call_with_retry(
             lambda: self._get_active_database(),
             lambda _: dummy_fail()
@@ -44,7 +43,7 @@ class WeightBasedFailoverStrategy(FailoverStrategy):
     def set_databases(self, databases: Databases) -> None:
         self._databases = databases
 
-    def _get_active_database(self) -> AbstractDatabase:
+    def _get_active_database(self) -> SyncDatabase:
         for database, _ in self._databases:
             if database.circuit.state == CBState.CLOSED:
                 return database
