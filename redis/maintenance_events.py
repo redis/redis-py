@@ -430,7 +430,7 @@ class MaintenanceEventsConfig:
         self,
         enabled: bool = True,
         proactive_reconnect: bool = True,
-        relax_timeout: Optional[Number] = 20,
+        relax_timeout: Optional[Number] = 10,
         endpoint_type: Optional[EndpointType] = None,
     ):
         """
