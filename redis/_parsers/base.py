@@ -5,6 +5,7 @@ from asyncio import IncompleteReadError, StreamReader, TimeoutError
 from typing import Awaitable, Callable, List, Optional, Protocol, Union
 
 from redis.maintenance_events import (
+    MaintenanceEvent,
     NodeFailedOverEvent,
     NodeFailingOverEvent,
     NodeMigratedEvent,
@@ -169,6 +170,39 @@ class AsyncBaseParser(BaseParser):
         raise NotImplementedError()
 
 
+class MaintenanceNotificationsParser:
+    """Protocol defining maintenance push notification parsing functionality"""
+
+    @staticmethod
+    def parse_maintenance_start_msg(response, notification_type):
+        # Expected message format is: <event_type> <seq_number> <time>
+        id = response[1]
+        ttl = response[2]
+        return notification_type(id, ttl)
+
+    @staticmethod
+    def parse_maintenance_completed_msg(response, notification_type):
+        # Expected message format is: <event_type> <seq_number>
+        id = response[1]
+        return notification_type(id)
+
+    @staticmethod
+    def parse_moving_msg(response):
+        # Expected message format is: MOVING <seq_number> <time> <endpoint>
+        id = response[1]
+        ttl = response[2]
+        if response[3] in [b"null", "null"]:
+            host, port = None, None
+        else:
+            value = response[3]
+            if isinstance(value, bytes):
+                value = value.decode()
+            host, port = value.split(":")
+            port = int(port) if port is not None else None
+
+        return NodeMovingEvent(id, host, port, ttl)
+
+
 _INVALIDATION_MESSAGE = (b"invalidate", "invalidate")
 _MOVING_MESSAGE = (b"MOVING", "MOVING")
 _MIGRATING_MESSAGE = (b"MIGRATING", "MIGRATING")
@@ -182,6 +216,29 @@ _MAINTENANCE_MESSAGES = (
     *_FAILING_OVER_MESSAGE,
     *_FAILED_OVER_MESSAGE,
 )
+
+MSG_TYPE_TO_EVENT_PARSER_MAPPING: dict[str, tuple[type[MaintenanceEvent], Callable]] = {
+    _MIGRATING_MESSAGE[1]: (
+        NodeMigratingEvent,
+        MaintenanceNotificationsParser.parse_maintenance_start_msg,
+    ),
+    _MIGRATED_MESSAGE[1]: (
+        NodeMigratedEvent,
+        MaintenanceNotificationsParser.parse_maintenance_completed_msg,
+    ),
+    _FAILING_OVER_MESSAGE[1]: (
+        NodeFailingOverEvent,
+        MaintenanceNotificationsParser.parse_maintenance_start_msg,
+    ),
+    _FAILED_OVER_MESSAGE[1]: (
+        NodeFailedOverEvent,
+        MaintenanceNotificationsParser.parse_maintenance_completed_msg,
+    ),
+    _MOVING_MESSAGE[1]: (
+        NodeMovingEvent,
+        MaintenanceNotificationsParser.parse_moving_msg,
+    ),
+}
 
 
 class PushNotificationsParser(Protocol):
@@ -212,36 +269,19 @@ class PushNotificationsParser(Protocol):
             ):
                 return self.invalidation_push_handler_func(response)
 
-            if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
-                # Expected message format is: MOVING <seq_number> <time> <endpoint>
-                id = response[1]
-                ttl = response[2]
-                if response[3] in [b"null", "null"]:
-                    host, port = None, None
-                else:
-                    host, port = response[3].decode().split(":")
+            if isinstance(msg_type, bytes):
+                msg_type = msg_type.decode()
 
-                notification = NodeMovingEvent(id, host, port, ttl)
+            if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
+                parser_function = MSG_TYPE_TO_EVENT_PARSER_MAPPING[msg_type][1]
+
+                notification = parser_function(response)
                 return self.node_moving_push_handler_func(notification)
 
             if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
-                notification = None
-
-                if msg_type in _MIGRATING_MESSAGE:
-                    # Expected message format is: MIGRATING <seq_number> <time> <shard_id-s>
-                    id = response[1]
-                    ttl = response[2]
-                    notification = NodeMigratingEvent(id, ttl)
-                elif msg_type in _MIGRATED_MESSAGE:
-                    id = response[1]
-                    notification = NodeMigratedEvent(id)
-                elif msg_type in _FAILING_OVER_MESSAGE:
-                    id = response[1]
-                    ttl = response[2]
-                    notification = NodeFailingOverEvent(id, ttl)
-                elif msg_type in _FAILED_OVER_MESSAGE:
-                    id = response[1]
-                    notification = NodeFailedOverEvent(id)
+                parser_function = MSG_TYPE_TO_EVENT_PARSER_MAPPING[msg_type][1]
+                notification_type = MSG_TYPE_TO_EVENT_PARSER_MAPPING[msg_type][0]
+                notification = parser_function(response, notification_type)
 
                 if notification is not None:
                     return self.maintenance_push_handler_func(notification)
@@ -295,35 +335,18 @@ class AsyncPushNotificationsParser(Protocol):
             ):
                 return await self.invalidation_push_handler_func(response)
 
-            if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
-                # push notification from enterprise cluster for node moving
-                id = response[1]
-                ttl = response[2]
-                if response[3] in [b"null", "null"]:
-                    host, port = None, None
-                else:
-                    host, port = response[3].decode().split(":")
+            if isinstance(msg_type, bytes):
+                msg_type = msg_type.decode()
 
-                notification = NodeMovingEvent(id, host, port, ttl)
+            if msg_type in _MOVING_MESSAGE and self.node_moving_push_handler_func:
+                parser_function = MSG_TYPE_TO_EVENT_PARSER_MAPPING[msg_type][1]
+                notification = parser_function(response)
                 return await self.node_moving_push_handler_func(notification)
 
             if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
-                notification = None
-
-                if msg_type in _MIGRATING_MESSAGE:
-                    id = response[1]
-                    ttl = response[2]
-                    notification = NodeMigratingEvent(id, ttl)
-                elif msg_type in _MIGRATED_MESSAGE:
-                    id = response[1]
-                    notification = NodeMigratedEvent(id)
-                elif msg_type in _FAILING_OVER_MESSAGE:
-                    id = response[1]
-                    ttl = response[2]
-                    notification = NodeFailingOverEvent(id, ttl)
-                elif msg_type in _FAILED_OVER_MESSAGE:
-                    id = response[1]
-                    notification = NodeFailedOverEvent(id)
+                parser_function = MSG_TYPE_TO_EVENT_PARSER_MAPPING[msg_type][1]
+                notification_type = MSG_TYPE_TO_EVENT_PARSER_MAPPING[msg_type][0]
+                notification = parser_function(response, notification_type)
 
                 if notification is not None:
                     return await self.maintenance_push_handler_func(notification)

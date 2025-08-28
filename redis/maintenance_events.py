@@ -674,17 +674,18 @@ class MaintenanceEventPoolHandler:
         Active connections are marked for reconnect after they complete the current command.
         Inactive connections are disconnected and will be connected on next use.
         """
-        with self._lock and self.pool._lock:
-            # take care for the active connections in the pool
-            # mark them for reconnect after they complete the current command
-            self.pool.update_active_connections_for_reconnect(
-                moving_address_src=moving_address_src,
-            )
-            # take care for the inactive connections in the pool
-            # delete them and create new ones
-            self.pool.disconnect_free_connections(
-                moving_address_src=moving_address_src,
-            )
+        with self._lock:
+            with self.pool._lock:
+                # take care for the active connections in the pool
+                # mark them for reconnect after they complete the current command
+                self.pool.update_active_connections_for_reconnect(
+                    moving_address_src=moving_address_src,
+                )
+                # take care for the inactive connections in the pool
+                # delete them and create new ones
+                self.pool.disconnect_free_connections(
+                    moving_address_src=moving_address_src,
+                )
 
     def handle_node_moved_event(self, event: NodeMovingEvent):
         """
