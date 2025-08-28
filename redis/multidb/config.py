@@ -9,7 +9,7 @@ from redis.asyncio import RedisCluster
 from redis.backoff import ExponentialWithJitterBackoff, AbstractBackoff, NoBackoff
 from redis.data_structure import WeightedList
 from redis.event import EventDispatcher, EventDispatcherInterface
-from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter
+from redis.multidb.circuit import PBCircuitBreakerAdapter, SyncCircuitBreaker
 from redis.multidb.database import Database, Databases
 from redis.multidb.failure_detector import FailureDetector, CommandFailureDetector
 from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_RETRIES, \
@@ -44,7 +44,7 @@ class DatabaseConfig:
         client_kwargs (dict): Additional parameters for the database client connection.
         from_url (Optional[str]): Redis URL way of connecting to the database.
         from_pool (Optional[ConnectionPool]): A pre-configured connection pool to use.
-        circuit (Optional[CircuitBreaker]): Custom circuit breaker implementation.
+        circuit (Optional[SyncCircuitBreaker]): Custom circuit breaker implementation.
         grace_period (float): Grace period after which we need to check if the circuit could be closed again.
         health_check_url (Optional[str]): URL for health checks. Cluster FQDN is typically used
             on public Redis Enterprise endpoints.
@@ -57,11 +57,11 @@ class DatabaseConfig:
     client_kwargs: dict = field(default_factory=dict)
     from_url: Optional[str] = None
     from_pool: Optional[ConnectionPool] = None
-    circuit: Optional[CircuitBreaker] = None
+    circuit: Optional[SyncCircuitBreaker] = None
     grace_period: float = DEFAULT_GRACE_PERIOD
     health_check_url: Optional[str] = None
 
-    def default_circuit_breaker(self) -> CircuitBreaker:
+    def default_circuit_breaker(self) -> SyncCircuitBreaker:
         circuit_breaker = pybreaker.CircuitBreaker(reset_timeout=self.grace_period)
         return PBCircuitBreakerAdapter(circuit_breaker)
 

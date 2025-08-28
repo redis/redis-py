@@ -1,8 +1,7 @@
 from typing import List
 
 from redis.event import EventListenerInterface, OnCommandsFailEvent
-from redis.multidb.config import Databases
-from redis.multidb.database import AbstractDatabase
+from redis.multidb.database import SyncDatabase
 from redis.multidb.failure_detector import FailureDetector
 
 class ActiveDatabaseChanged:
@@ -11,8 +10,8 @@ class ActiveDatabaseChanged:
     """
     def __init__(
             self,
-            old_database: AbstractDatabase,
-            new_database: AbstractDatabase,
+            old_database: SyncDatabase,
+            new_database: SyncDatabase,
             command_executor,
             **kwargs
     ):
@@ -22,11 +21,11 @@ class ActiveDatabaseChanged:
         self._kwargs = kwargs
 
     @property
-    def old_database(self) -> AbstractDatabase:
+    def old_database(self) -> SyncDatabase:
         return self._old_database
 
     @property
-    def new_database(self) -> AbstractDatabase:
+    def new_database(self) -> SyncDatabase:
         return self._new_database
 
     @property
@@ -39,7 +38,7 @@ class ActiveDatabaseChanged:
 
 class ResubscribeOnActiveDatabaseChanged(EventListenerInterface):
     """
-    Re-subscribe currently active pub/sub to a new active database.
+    Re-subscribe the currently active pub / sub to a new active database.
     """
     def listen(self, event: ActiveDatabaseChanged):
         old_pubsub = event.command_executor.active_pubsub
