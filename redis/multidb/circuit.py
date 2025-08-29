@@ -87,7 +87,7 @@ class SyncCircuitBreaker(CircuitBreaker):
     Synchronous implementation of Circuit Breaker interface.
     """
     @abstractmethod
-    def on_state_changed(self, cb: Callable[["SyncCircuitBreaker", State, State], None]):
+    def on_state_changed(self, cb: Callable[["CircuitBreaker", State, State], None]):
         """Callback called when the state of the circuit changes."""
         pass
 
@@ -129,6 +129,6 @@ class PBCircuitBreakerAdapter(SyncCircuitBreaker, BaseCircuitBreaker):
         """
         super().__init__(cb)
 
-    def on_state_changed(self, cb: Callable[["SyncCircuitBreaker", State, State], None]):
+    def on_state_changed(self, cb: Callable[["CircuitBreaker", State, State], None]):
         listener = PBListener(cb, self.database)
         self._cb.add_listener(listener)

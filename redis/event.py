@@ -271,6 +271,9 @@ class OnCommandsFailEvent:
     def exception(self) -> Exception:
         return self._exception
 
+class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
+    pass
+
 class ReAuthConnectionListener(EventListenerInterface):
     """
     Listener that performs re-authentication of given connection.

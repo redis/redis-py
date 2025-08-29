@@ -314,3 +314,9 @@ def dummy_fail():
     Fake function for a Retry object if you don't need to handle each failure.
     """
     pass
+
+async def dummy_fail_async():
+    """
+    Async fake function for a Retry object if you don't need to handle each failure.
+    """
+    pass
