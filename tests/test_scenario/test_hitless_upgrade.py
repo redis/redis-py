@@ -537,9 +537,6 @@ class TestPushNotifications:
         ClientValidations.wait_push_notification(
             client, timeout=MIGRATE_TIMEOUT, connection=second_connection
         )
-        # second_connection.send_command("PING")
-        # resp = second_connection.read_response()
-        # assert resp == b"PONG"
 
         logging.info(
             "Validating connection states after MIGRATING for both connections ..."
