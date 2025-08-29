@@ -1832,7 +1832,7 @@ class ConnectionPool:
     def _update_connection_kwargs_for_maintenance_events(self):
         """Store original connection parameters for maintenance events."""
         if self.connection_kwargs.get("orig_host_address", None) is None:
-            # if orig_host_address is None it means we haven't
+            # If orig_host_address is None it means we haven't
             # configured the original values yet
             self.connection_kwargs.update(
                 {
