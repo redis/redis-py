@@ -47,6 +47,8 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         self.socket_read_size = socket_read_size
         self._buffer = bytearray(socket_read_size)
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
+        self.node_moving_push_handler_func = None
+        self.maintenance_push_handler_func = None
         self.invalidation_push_handler_func = None
         self._hiredis_PushNotificationType = None
 
@@ -141,12 +143,15 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
                 response, self._hiredis_PushNotificationType
             ):
                 response = self.handle_push_response(response)
-                if not push_request:
-                    return self.read_response(
-                        disable_decoding=disable_decoding, push_request=push_request
-                    )
-                else:
+
+                # if this is a push request return the push response
+                if push_request:
                     return response
+
+                return self.read_response(
+                    disable_decoding=disable_decoding,
+                    push_request=push_request,
+                )
             return response
 
         if disable_decoding:
@@ -169,12 +174,13 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
             response, self._hiredis_PushNotificationType
         ):
             response = self.handle_push_response(response)
-            if not push_request:
-                return self.read_response(
-                    disable_decoding=disable_decoding, push_request=push_request
-                )
-            else:
+            if push_request:
                 return response
+            return self.read_response(
+                disable_decoding=disable_decoding,
+                push_request=push_request,
+            )
+
         elif (
             isinstance(response, list)
             and response
