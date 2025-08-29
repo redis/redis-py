@@ -381,7 +381,7 @@ class TestMaintenanceEventsConfig:
         config = MaintenanceEventsConfig()
         assert config.enabled is True
         assert config.proactive_reconnect is True
-        assert config.relax_timeout == 20
+        assert config.relax_timeout == 10
 
     def test_init_custom_values(self):
         """Test MaintenanceEventsConfig initialization with custom values."""

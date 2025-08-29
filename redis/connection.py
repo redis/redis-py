@@ -1720,7 +1720,7 @@ class ConnectionPool:
         self._cache_factory = cache_factory
 
         if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
-            if connection_kwargs.get("protocol") not in [3, "3"]:
+            if self.connection_kwargs.get("protocol") not in [3, "3"]:
                 raise RedisError("Client caching is only supported with RESP version 3")
 
             cache = self.connection_kwargs.get("cache")
@@ -1741,31 +1741,21 @@ class ConnectionPool:
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
 
-        if connection_kwargs.get(
+        if self.connection_kwargs.get(
             "maintenance_events_pool_handler"
-        ) or connection_kwargs.get("maintenance_events_config"):
-            if connection_kwargs.get("protocol") not in [3, "3"]:
+        ) or self.connection_kwargs.get("maintenance_events_config"):
+            if self.connection_kwargs.get("protocol") not in [3, "3"]:
                 raise RedisError(
                     "Push handlers on connection are only supported with RESP version 3"
                 )
-            config = connection_kwargs.get("maintenance_events_config", None) or (
-                connection_kwargs.get("maintenance_events_pool_handler").config
-                if connection_kwargs.get("maintenance_events_pool_handler")
+            config = self.connection_kwargs.get("maintenance_events_config", None) or (
+                self.connection_kwargs.get("maintenance_events_pool_handler").config
+                if self.connection_kwargs.get("maintenance_events_pool_handler")
                 else None
             )
 
             if config and config.enabled:
-                connection_kwargs.update(
-                    {
-                        "orig_host_address": connection_kwargs.get("host"),
-                        "orig_socket_timeout": connection_kwargs.get(
-                            "socket_timeout", None
-                        ),
-                        "orig_socket_connect_timeout": connection_kwargs.get(
-                            "socket_connect_timeout", None
-                        ),
-                    }
-                )
+                self._update_connection_kwargs_for_maintenance_events()
 
         self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
         if self._event_dispatcher is None:
@@ -1821,6 +1811,7 @@ class ConnectionPool:
                 "maintenance_events_config": maintenance_events_pool_handler.config,
             }
         )
+        self._update_connection_kwargs_for_maintenance_events()
 
         self._update_maintenance_events_configs_for_connections(
             maintenance_events_pool_handler
@@ -1837,6 +1828,23 @@ class ConnectionPool:
             for conn in self._in_use_connections:
                 conn.set_maintenance_event_pool_handler(maintenance_events_pool_handler)
                 conn.maintenance_events_config = maintenance_events_pool_handler.config
+
+    def _update_connection_kwargs_for_maintenance_events(self):
+        """Store original connection parameters for maintenance events."""
+        if self.connection_kwargs.get("orig_host_address", None) is None:
+            # If orig_host_address is None it means we haven't
+            # configured the original values yet
+            self.connection_kwargs.update(
+                {
+                    "orig_host_address": self.connection_kwargs.get("host"),
+                    "orig_socket_timeout": self.connection_kwargs.get(
+                        "socket_timeout", None
+                    ),
+                    "orig_socket_connect_timeout": self.connection_kwargs.get(
+                        "socket_connect_timeout", None
+                    ),
+                }
+            )
 
     def reset(self) -> None:
         self._created_connections = 0
