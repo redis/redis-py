@@ -1,22 +1,23 @@
-Active-Active
-=============
+Multi-Database Management
+=========================
 
 MultiDBClient explanation
 --------------------------
 
-Starting from redis-py 6.5.0 we introduce a new type of client to communicate
-with databases in Active-Active setup. `MultiDBClient` is a wrapper around multiple
-Redis or Redis Cluster clients, each of them has 1:1 relation to specific
-database. `MultiDBClient` in most of the cases provides the same API as any other
-client for the best user experience.
+The `MultiDBClient` (introduced in version 6.5.0) manages connections to multiple
+Redis databases and provides automatic failover when one database becomes unavailable.
+Think of it as a smart load balancer that automatically switches to a healthy database
+when your primary one goes down, ensuring your application stays online.
+`MultiDBClient` in most of the cases provides the same API as any other client for
+the best user experience.
 
-The core feature of `MultiDBClient` is automaticaly triggered failover depends on the
-database healthiness. The pre-condition is that each database that is configured
-to be used by MultiDBClient are eventually consistent, so client could choose
-any database in any point of time for communication. `MultiDBClient` always communicates
-with single database, so there's 1 active and N passive databases that acting as a
-stand-by replica. By default, active database is choosed based on the weights that
-has to be assigned for each database.
+The core feature of MultiDBClient is its ability to automatically trigger failover
+when an active database becomes unhealthy.The pre-condition is that all databases
+that are configured to be used by `MultiDBClient` are eventually consistent, so client
+could choose any database in any point in time for communication. `MultiDBClient`
+always communicates with single database, so there's 1 active and N passive
+databases that are acting as a stand-by replica. By default, active database is
+chosen based on the weights that have to be assigned for each database.
 
 We have two mechanisms to verify database healthiness: `Healthcheck` and
 `Failure Detector`.
@@ -58,42 +59,70 @@ The very basic configuration you need to setup a `MultiDBClient`:
     client = MultiDBClient(config)
 
 
-Healthcheck
------------
+Health Monitoring
+-----------------
+The `MultiDBClient` uses two complementary mechanisms to ensure database availability:
 
-By default, we're using healthcheck based on `ECHO` command to verify that database is
-reachable and ready to serve requests (`PING` guarantees first, but not the second).
-Additionaly, you can add your own healthcheck implementation and extend a list of
-healthecks
+Health Checks (Proactive Monitoring)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-All healthchecks are running in the background with given interval and configuration
-defined in `MultiDBConfig` class.
+These checks run continuously in the background at configured intervals to proactively
+detect database issues. They run in the background with a given interval and
+configuration defined in the `MultiDBConfig` class.
 
-Lag-Aware Healthcheck
+By default, MultiDBClient sends ECHO commands to verify each database is healthy.
+
+**Custom Health Checks**
+~~~~~~~~~~~~~~~~~~~~~
+You can add custom health checks for specific requirements:
+
+.. code:: python
+
+    from redis.multidb.healthcheck import AbstractHealthCheck
+    from redis.retry import Retry
+    from redis.utils import dummy_fail
+
+
+    class PingHealthCheck(AbstractHealthCheck):
+        def __init__(self, retry: Retry):
+            super().__init__(retry=retry)
+
+        def check_health(self, database) -> bool:
+            return self._retry.call_with_retry(
+                lambda: self._returns_pong(database),
+                lambda _: dummy_fail()
+            )
+
+        def _returns_pong(self, database) -> bool:
+            expected_message = ["PONG", b"PONG"]
+            actual_message = database.client.execute_command("PING")
+            return actual_message in expected_message
+
+**Lag-Aware Healthcheck (Redis Enterprise Only)**
 ~~~~~~~~~~~~~~~~~~~~~
 
 This is a special type of healthcheck available for Redis Software and Redis Cloud
-that utilizes REST API endpoint to obtain an information about synchronisation lag
-between given database and all other databases in Active-Active setup.
+that utilizes a REST API endpoint to obtain information about the synchronisation
+lag between a given database and all other databases in an Active-Active setup.
 
-To be able to use this type of healthcheck, first you need to adjust your
-`DatabaseConfig` to expose `health_check_url` used by your deployment.
-By default, your Cluster FQDN should be used as URL, unless you have
-some kind of reverse proxy behind an actual REST API endpoint.
+To use this healthcheck, first you need to adjust your `DatabaseConfig`
+to expose `health_check_url` used by your deployment. By default, your
+Cluster FQDN should be used as URL, unless you have some kind of
+reverse proxy behind an actual REST API endpoint.
 
 .. code:: python
 
     database1_config = DatabaseConfig(
         weight=1.0,
         from_url="redis://host1:port1",
-        health_check_url="https://c1.deployment-name-000000.cto.redislabs.com"
+        health_check_url="https://c1.deployment-name-000000.project.env.com"
         client_kwargs={
             'username': "username",
             'password': "password",
         }
     )
 
-Since, Lag-Aware Healthcheck only available for Redis Software and Redis Cloud
+Since, Lag-Aware Healthcheck is only available for Redis Software and Redis Cloud
 it's not in the list of the default healthchecks for `MultiDBClient`. You have
 to provide it manually during client configuration or in runtime.
 
@@ -135,23 +164,26 @@ of lag between databases that your application could tolerate.
     )
 
 
-Failure Detector
-----------------
+Failure Detection (Reactive Monitoring)
+~~~~~~~~~~~~~~~~~~~~~
 
-Unlike healthcheck, `Failure Detector` verifies database healthiness based on organic
-trafic, so the default one reacts to any command failures within a sliding window of
-seconds and mark database as unhealthy if threshold has been exceeded. You can extend
-a list of failure detectors providing your own implementation, configuration defined
-in `MultiDBConfig` class.
+The failure detector watches actual command failures and marks databases as unhealthy
+when error rates exceed thresholds within a sliding time window of a few seconds.
+This catches issues that proactive health checks might miss during real traffic.
+You can extend the list of failure detectors by providing your own implementation,
+configuration defined in the `MultiDBConfig` class.
 
 
 Databases configuration
 -----------------------
 
-You have to provide a configuration for each database in setup separately, using
-`DatabaseConfig` class per database. As mentioned, there's an undelying instance
-of `Redis` or `RedisCluster` client for each database, so you can pass all the
-arguments related to them via `client_kwargs` argument.
+Each database needs a `DatabaseConfig` that specifies how to connect.
+
+Method 1: Using client_kwargs (most flexible)
+~~~~~~~~~~~~~~~~~~~~~
+
+There's an underlying instance of `Redis` or `RedisCluster` client for each database,
+so you can pass all the arguments related to them via `client_kwargs` argument:
 
 .. code:: python
 
@@ -165,11 +197,10 @@ arguments related to them via `client_kwargs` argument.
         }
     )
 
-It also supports `from_url` or `from_pool` capabilites to setup a client using
-Redis URL or custom `ConnectionPool` object.
+Method 2: Using Redis URL
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code:: python
-
+```python
     database_config1 = DatabaseConfig(
         weight=1.0,
         from_url="redis://host1:port1",
@@ -179,15 +210,17 @@ Redis URL or custom `ConnectionPool` object.
         }
     )
 
-    database_config2 = DatabaseConfig(
-        weight=0.9,
-        from_pool=connection_pool,
-    )
+Method 3: Using Custom Connection Pool
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The only exception from `client_kwargs` is the retry configuration. We do not allow
-to pass underlying `Retry` object to avoid nesting retries. All the retries are
-controlled by top-level `Retry` object that you can setup via `command_retry`
-argument (check `MultiDBConfig`)
+```python
+  database_config2 = DatabaseConfig(
+      weight=0.9,
+      from_pool=connection_pool,
+  )
+
+**Important**: Don't pass `Retry` objects in `client_kwargs`. `MultiDBClient`
+handles all retries at the top level through the `command_retry` configuration.
 
 
 Pipeline
@@ -300,7 +333,7 @@ OSS Cluster API support
 As mentioned `MultiDBClient` also supports integration with OSS Cluster API
 databases. If you're instantiating client using Redis URL, the only change
 you need comparing to standalone client is the `client_class` argument.
-DNS server will resolve given URL and will point you to one of the node that
+DNS server will resolve given URL and will point you to one of the nodes that
 could be used to discover overall cluster topology.
 
 .. code:: python
