@@ -200,7 +200,8 @@ so you can pass all the arguments related to them via `client_kwargs` argument:
 Method 2: Using Redis URL
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-```python
+.. code:: python
+
     database_config1 = DatabaseConfig(
         weight=1.0,
         from_url="redis://host1:port1",
@@ -213,7 +214,8 @@ Method 2: Using Redis URL
 Method 3: Using Custom Connection Pool
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-```python
+.. code:: python
+
   database_config2 = DatabaseConfig(
       weight=0.9,
       from_pool=connection_pool,
@@ -223,28 +225,32 @@ Method 3: Using Custom Connection Pool
 handles all retries at the top level through the `command_retry` configuration.
 
 
-Pipeline
---------
+Pipeline Operations
+-------------------
 
-`MultiDBClient` supports pipeline mode with guaranteed pipeline retry in case
-of failover. Unlike, the `Redis` and `RedisCluster` clients you cannot
-execute transactions via pipeline mode, only via `transaction` method
-on `MultiDBClient`. This was done for better retries handling in case
-of failover.
+The `MultiDBClient` supports pipeline mode with guaranteed retry functionality during
+failover scenarios. Unlike standard `Redis` and `RedisCluster` clients, transactions
+cannot be executed through pipeline mode - use the dedicated `transaction()` method
+instead. This design choice ensures better retry handling during failover events.
 
-The overall interface for pipeline execution is the same, you can
-pipeline commands using chaining calls or context manager.
+Pipeline operations support both chaining calls and context manager patterns:
+
+Chaining approach
+~~~~~~~~~~~~~~~~~
 
 .. code:: python
 
-    // Chaining
     client = MultiDBClient(config)
     pipe = client.pipeline()
     pipe.set('key1', 'value1')
     pipe.get('key1')
     pipe.execute() // ['OK', 'value1']
 
-    // Context manager
+Context Manager Approach
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code:: python
+
     client = MultiDBClient(config)
     with client.pipeline() as pipe:
         pipe.set('key1', 'value1')
@@ -255,12 +261,13 @@ pipeline commands using chaining calls or context manager.
 Transaction
 -----------
 
-`MultiDBClient` supports transaction execution via `transaction()` method
-with guaranteed transaction retry in case of failover. Like any other
-client it accepts a callback with underlying `Pipeline` object to build
-your transaction for atomic execution
+The `MultiDBClient` provides transaction support through the `transaction()`
+method with guaranteed retry capabilities during failover. Like other
+`Redis` clients, it accepts a callback function that receives a `Pipeline`
+object for building atomic operations.
 
-CAS behaviour supported as well, so you can provide a list of keys to track.
+CAS behavior is fully supported by providing a list of
+keys to monitor:
 
 .. code:: python
 
@@ -276,22 +283,21 @@ CAS behaviour supported as well, so you can provide a list of keys to track.
 Pub/Sub
 -------
 
-`MultiDBClient` supports Pub/Sub mode with guaranteed re-subscription
-to the same channels in case of failover. So the expectation is that
-both publisher and subscriber are using `MultiDBClient` instance to
-provide seamless experience in terms of failover.
+The MultiDBClient offers Pub/Sub functionality with automatic re-subscription
+to channels during failover events. For optimal failover handling,
+both publishers and subscribers should use MultiDBClient instances.
 
-1. Subscriber failover to another database and re-subscribe to the same
-channels.
+1. **Subscriber failover**: Automatically reconnects to an alternative database
+and re-subscribes to the same channels
 
-2. Publisher failover to another database and starts publishing
-messages to the same channels.
+2. **Publisher failover**: Seamlessly switches to an alternative database and
+continues publishing to the same channels
 
-However, it's still possible to lose messages if order of failover
-will be reversed.
+**Note**: Message loss may occur if failover events happen in reverse order
+(publisher fails before subscriber).
 
-Like the other clients, there's two main methods to consume messages:
-in the main thread and in the separate thread
+Main Thread Message Processing
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: python
 
@@ -305,6 +311,9 @@ in the main thread and in the separate thread
                 // do something with the message
         time.sleep(0.001)
 
+
+Background Thread Processing
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code:: python
 
