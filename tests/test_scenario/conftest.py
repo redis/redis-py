@@ -14,11 +14,13 @@ from tests.test_scenario.fault_injector_client import FaultInjectorClient
 RELAX_TIMEOUT = 30
 CLIENT_TIMEOUT = 5
 
+DEFAULT_ENDPOINT_NAME = "m-standard"
+
 
 @pytest.fixture()
 def endpoint_name(request):
     return request.config.getoption("--endpoint-name") or os.getenv(
-        "REDIS_ENDPOINT_NAME", "m-standard"
+        "REDIS_ENDPOINT_NAME", DEFAULT_ENDPOINT_NAME
     )
 
 
@@ -75,6 +77,8 @@ def _get_client_maint_events(
     host = parsed.hostname
     port = parsed.port
 
+    tls_enabled = True if parsed.scheme == "rediss" else False
+
     if not host:
         raise ValueError(f"Could not parse host from endpoint URL: {endpoints[0]}")
 
@@ -101,6 +105,9 @@ def _get_client_maint_events(
         socket_timeout=CLIENT_TIMEOUT if socket_timeout is None else socket_timeout,
         username=username,
         password=password,
+        ssl=tls_enabled,
+        ssl_cert_reqs="none",
+        ssl_check_hostname=False,
         protocol=3,  # RESP3 required for push notifications
         maintenance_events_config=maintenance_config,
         retry=retry,

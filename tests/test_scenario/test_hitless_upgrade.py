@@ -48,6 +48,7 @@ class TestPushNotifications:
         client_maint_events: Redis,
         fault_injector_client: FaultInjectorClient,
         endpoints_config: Dict[str, Any],
+        endpoint_name: str,
     ):
         # Initialize cleanup flags first to ensure they exist even if setup fails
         self._migration_executed = False
@@ -70,7 +71,7 @@ class TestPushNotifications:
 
         try:
             self.endpoint_id = ClusterOperations.find_endpoint_for_bind(
-                fault_injector_client, endpoints_config
+                fault_injector_client, endpoints_config, endpoint_name
             )
             logging.info(f"Using endpoint: {self.endpoint_id}")
         except Exception as e:
@@ -396,7 +397,9 @@ class TestPushNotifications:
 
         """
         logging.info(f"Testing timeout handling for endpoint type: {endpoint_type}")
-        client = _get_client_maint_events(endpoints_config, endpoint_type)
+        client = _get_client_maint_events(
+            endpoints_config=endpoints_config, endpoint_type=endpoint_type
+        )
 
         # Create three connections in the pool
         logging.info("Creating three connections in the pool.")
@@ -501,7 +504,9 @@ class TestPushNotifications:
         endpoints_config: Dict[str, Any],
     ):
         logging.info(f"Testing timeout handling for endpoint type: {endpoint_type}")
-        client = _get_client_maint_events(endpoints_config, endpoint_type)
+        client = _get_client_maint_events(
+            endpoints_config=endpoints_config, endpoint_type=endpoint_type
+        )
 
         logging.info("Creating one connection in the pool.")
         first_conn = client.connection_pool.get_connection()
@@ -614,7 +619,7 @@ class TestPushNotifications:
     ):
         logging.info("Creating client with disabled notifications.")
         client = _get_client_maint_events(
-            endpoints_config,
+            endpoints_config=endpoints_config,
             enable_maintenance_events=False,
         )
 
@@ -741,7 +746,7 @@ class TestPushNotifications:
         socket_timeout = 0.5
 
         client = _get_client_maint_events(
-            endpoints_config,
+            endpoints_config=endpoints_config,
             endpoint_type=endpoint_type,
             disable_retries=True,
             socket_timeout=socket_timeout,

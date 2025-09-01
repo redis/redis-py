@@ -220,6 +220,7 @@ class ClusterOperations:
     def find_endpoint_for_bind(
         fault_injector: FaultInjectorClient,
         endpoint_config: Dict[str, Any],
+        endpoint_name: str,
         timeout: int = 60,
     ) -> str:
         """Find the endpoint ID from cluster status.
@@ -252,13 +253,13 @@ class ClusterOperations:
             elif endpoints_section_started and line and not line.startswith("DB:ID"):
                 # Parse endpoint line: db:1  m-standard  endpoint:1:1  node:2  single  No
                 parts = line.split()
-                if len(parts) >= 3:
+                if len(parts) >= 3 and parts[1] == endpoint_name:
                     endpoint_full = parts[2]  # endpoint:1:1
                     if endpoint_full.startswith("endpoint:"):
                         endpoint_id = endpoint_full.replace("endpoint:", "")  # 1:1
                         return endpoint_id
 
-        raise ValueError("No endpoint ID found in cluster status")
+        raise ValueError(f"No endpoint ID for {endpoint_name} found in cluster status")
 
     @staticmethod
     def execute_rladmin_migrate(
