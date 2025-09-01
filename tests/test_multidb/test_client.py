@@ -8,7 +8,7 @@ from redis.event import EventDispatcher, OnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.config import DEFAULT_FAILOVER_RETRIES, \
     DEFAULT_FAILOVER_BACKOFF
-from redis.multidb.database import AbstractDatabase
+from redis.multidb.database import SyncDatabase
 from redis.multidb.client import MultiDBClient
 from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failover import WeightBasedFailoverStrategy
@@ -458,7 +458,7 @@ class TestMultiDbClient:
             assert client.set('key', 'value') == 'OK'
 
             with pytest.raises(ValueError, match='Given database is not a member of database list'):
-                client.set_active_database(Mock(spec=AbstractDatabase))
+                client.set_active_database(Mock(spec=SyncDatabase))
 
             mock_hc.check_health.return_value = False
 

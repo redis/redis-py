@@ -1,15 +1,12 @@
 import threading
-import socket
 from typing import List, Any, Callable, Optional
 
 from redis.background import BackgroundScheduler
-from redis.client import PubSubWorkerThread
-from redis.exceptions import ConnectionError, TimeoutError
 from redis.commands import RedisModuleCommands, CoreCommands
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.config import MultiDbConfig, DEFAULT_GRACE_PERIOD
-from redis.multidb.circuit import State as CBState, CircuitBreaker
-from redis.multidb.database import Database, AbstractDatabase, Databases
+from redis.multidb.circuit import State as CBState, SyncCircuitBreaker
+from redis.multidb.database import Database, Databases, SyncDatabase
 from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck
@@ -92,7 +89,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         """
         return self._databases
 
-    def set_active_database(self, database: AbstractDatabase) -> None:
+    def set_active_database(self, database: SyncDatabase) -> None:
         """
         Promote one of the existing databases to become an active.
         """
@@ -115,7 +112,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         raise NoValidDatabaseException('Cannot set active database, database is unhealthy')
 
-    def add_database(self, database: AbstractDatabase):
+    def add_database(self, database: SyncDatabase):
         """
         Adds a new database to the database list.
         """
@@ -129,7 +126,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         self._databases.add(database, database.weight)
         self._change_active_database(database, highest_weighted_db)
 
-    def _change_active_database(self, new_database: AbstractDatabase, highest_weight_database: AbstractDatabase):
+    def _change_active_database(self, new_database: SyncDatabase, highest_weight_database: SyncDatabase):
         if new_database.weight > highest_weight_database.weight and new_database.circuit.state == CBState.CLOSED:
             self.command_executor.active_database = new_database
 
@@ -143,7 +140,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         if highest_weight <= weight and highest_weighted_db.circuit.state == CBState.CLOSED:
             self.command_executor.active_database = highest_weighted_db
 
-    def update_database_weight(self, database: AbstractDatabase, weight: float):
+    def update_database_weight(self, database: SyncDatabase, weight: float):
         """
         Updates a database from the database list.
         """
@@ -210,7 +207,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         return PubSub(self, **kwargs)
 
-    def _check_db_health(self, database: AbstractDatabase, on_error: Callable[[Exception], None] = None) -> None:
+    def _check_db_health(self, database: SyncDatabase, on_error: Callable[[Exception], None] = None) -> None:
         """
         Runs health checks on the given database until first failure.
         """
@@ -247,7 +244,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         for database, _ in self._databases:
             self._check_db_health(database, on_error)
 
-    def _on_circuit_state_change_callback(self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState):
+    def _on_circuit_state_change_callback(self, circuit: SyncCircuitBreaker, old_state: CBState, new_state: CBState):
         if new_state == CBState.HALF_OPEN:
             self._check_db_health(circuit.database)
             return
@@ -255,7 +252,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
             self._bg_scheduler.run_once(DEFAULT_GRACE_PERIOD, _half_open_circuit, circuit)
 
-def _half_open_circuit(circuit: CircuitBreaker):
+def _half_open_circuit(circuit: SyncCircuitBreaker):
     circuit.state = CBState.HALF_OPEN
 
 
@@ -450,8 +447,8 @@ class PubSub:
         exception_handler: Optional[Callable] = None,
         sharded_pubsub: bool = False,
     ) -> "PubSubWorkerThread":
-        return self._client.command_executor.execute_pubsub_run_in_thread(
-            sleep_time=sleep_time,
+        return self._client.command_executor.execute_pubsub_run(
+            sleep_time,
             daemon=daemon,
             exception_handler=exception_handler,
             pubsub=self,

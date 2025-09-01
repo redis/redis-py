@@ -24,7 +24,6 @@ class CommandFailureDetector(FailureDetector):
     """
     Detects a failure based on a threshold of failed commands during a specific period of time.
     """
-
     def __init__(
             self,
             threshold: int,
