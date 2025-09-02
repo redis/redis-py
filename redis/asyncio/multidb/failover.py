@@ -10,7 +10,6 @@ from redis.utils import dummy_fail_async
 
 class AsyncFailoverStrategy(ABC):
 
-    @property
     @abstractmethod
     async def database(self) -> AsyncDatabase:
         """Select the database according to the strategy."""
@@ -33,7 +32,6 @@ class WeightBasedFailoverStrategy(AsyncFailoverStrategy):
         self._retry.update_supported_errors([NoValidDatabaseException])
         self._databases = WeightedList()
 
-    @property
     async def database(self) -> AsyncDatabase:
         return await self._retry.call_with_retry(
             lambda: self._get_active_database(),

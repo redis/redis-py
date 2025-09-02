@@ -39,7 +39,7 @@ class TestAsyncWeightBasedFailoverStrategy:
         strategy = WeightBasedFailoverStrategy(retry=retry)
         strategy.set_databases(databases)
 
-        assert await strategy.database == mock_db1
+        assert await strategy.database() == mock_db1
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -67,7 +67,7 @@ class TestAsyncWeightBasedFailoverStrategy:
         failover_strategy = WeightBasedFailoverStrategy(retry=retry)
         failover_strategy.set_databases(databases)
 
-        assert await failover_strategy.database == mock_db
+        assert await failover_strategy.database() == mock_db
         assert state_mock.call_count == 4
 
     @pytest.mark.asyncio
@@ -97,7 +97,7 @@ class TestAsyncWeightBasedFailoverStrategy:
         failover_strategy.set_databases(databases)
 
         with pytest.raises(NoValidDatabaseException, match='No valid database available for communication'):
-            assert await failover_strategy.database
+            assert await failover_strategy.database()
 
         assert state_mock.call_count == 4
 
@@ -118,4 +118,4 @@ class TestAsyncWeightBasedFailoverStrategy:
         failover_strategy = WeightBasedFailoverStrategy(retry=retry)
 
         with pytest.raises(NoValidDatabaseException, match='No valid database available for communication'):
-            assert await failover_strategy.database
+            assert await failover_strategy.database()

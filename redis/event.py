@@ -43,7 +43,10 @@ class EventDispatcherInterface(ABC):
         pass
 
     @abstractmethod
-    def register_listeners(self, mappings: Dict[Type[object], List[EventListenerInterface]]):
+    def register_listeners(
+            self,
+            mappings: Dict[Type[object], List[Union[EventListenerInterface, AsyncEventListenerInterface]]]
+    ):
         """Register additional listeners."""
         pass
 
@@ -99,7 +102,7 @@ class EventDispatcher(EventDispatcherInterface):
                 listener.listen(event)
 
     async def dispatch_async(self, event: object):
-        with self._async_lock:
+        async with self._async_lock:
             listeners = self._event_listeners_mapping.get(type(event), [])
 
             for listener in listeners:
