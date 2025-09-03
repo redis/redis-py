@@ -22,7 +22,6 @@ from tests.test_scenario.fault_injector_client import (
 from tests.test_scenario.hitless_upgrade_helpers import (
     ClientValidations,
     ClusterOperations,
-    TaskStatuses,
 )
 
 logging.basicConfig(
@@ -135,11 +134,10 @@ class TestPushNotifications:
 
         self._migration_executed = True
 
-        migrate_status, migrate_result = ClusterOperations.get_operation_result(
-            fault_injector_client, migrate_action_id, timeout=MIGRATE_TIMEOUT
+        migrate_result = fault_injector_client.get_operation_result(
+            migrate_action_id, timeout=MIGRATE_TIMEOUT
         )
-        if migrate_status != TaskStatuses.SUCCESS:
-            pytest.fail(f"Failed to execute rladmin migrate: {migrate_result}")
+        logging.debug(f"Migration result: {migrate_result}")
 
     def _execute_bind(
         self,
@@ -153,11 +151,10 @@ class TestPushNotifications:
 
         self._bind_executed = True
 
-        bind_status, bind_result = ClusterOperations.get_operation_result(
-            fault_injector_client, bind_action_id, timeout=BIND_TIMEOUT
+        bind_result = fault_injector_client.get_operation_result(
+            bind_action_id, timeout=BIND_TIMEOUT
         )
-        if bind_status != TaskStatuses.SUCCESS:
-            pytest.fail(f"Failed to execute rladmin bind endpoint: {bind_result}")
+        logging.debug(f"Bind result: {bind_result}")
 
     def _execute_migrate_bind_flow(
         self,

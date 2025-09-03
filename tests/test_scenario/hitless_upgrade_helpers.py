@@ -12,17 +12,6 @@ from tests.test_scenario.fault_injector_client import (
 )
 
 
-class TaskStatuses:
-    """Class to hold completed statuses constants."""
-
-    FAILED = "failed"
-    FINISHED = "finished"
-    SUCCESS = "success"
-    RUNNING = "running"
-
-    COMPLETED_STATUSES = [FAILED, FINISHED, SUCCESS]
-
-
 class ClientValidations:
     @staticmethod
     def wait_push_notification(
@@ -32,7 +21,7 @@ class ClientValidations:
     ):
         """Wait for a push notification to be received."""
         start_time = time.time()
-        check_interval = 1  # Check more frequently during operations
+        check_interval = 0.2  # Check more frequently during operations
         test_conn = (
             connection if connection else redis_client.connection_pool.get_connection()
         )
@@ -40,7 +29,7 @@ class ClientValidations:
         try:
             while time.time() - start_time < timeout:
                 try:
-                    if test_conn.can_read(timeout=0.5):
+                    if test_conn.can_read(timeout=0.2):
                         # reading is important, it triggers the push notification
                         push_response = test_conn.read_response(push_request=True)
                         logging.debug(
@@ -61,34 +50,6 @@ class ClientValidations:
 
 
 class ClusterOperations:
-    @staticmethod
-    def get_operation_result(
-        fault_injector: FaultInjectorClient,
-        action_id: str,
-        timeout: int = 60,
-    ) -> Tuple[str, dict]:
-        """Get the result of a specific action"""
-        start_time = time.time()
-        check_interval = 3
-        while time.time() - start_time < timeout:
-            try:
-                status_result = fault_injector.get_action_status(action_id)
-                operation_status = status_result.get("status", "unknown")
-
-                if operation_status in TaskStatuses.COMPLETED_STATUSES:
-                    logging.debug(
-                        f"Operation {action_id} completed with status: "
-                        f"{operation_status}"
-                    )
-                    return operation_status, status_result
-
-                time.sleep(check_interval)
-            except Exception as e:
-                logging.warning(f"Error checking operation status: {e}")
-                time.sleep(check_interval)
-        else:
-            raise TimeoutError(f"Timeout waiting for operation {action_id}")
-
     @staticmethod
     def get_cluster_nodes_info(
         fault_injector: FaultInjectorClient,
@@ -113,16 +74,9 @@ class ClusterOperations:
                     f"Failed to trigger get cluster status action for bdb_id {bdb_id}: {trigger_action_result}"
                 )
 
-            status, action_status_check_response = (
-                ClusterOperations.get_operation_result(
-                    fault_injector, action_id, timeout=timeout
-                )
+            action_status_check_response = fault_injector.get_operation_result(
+                action_id, timeout=timeout
             )
-
-            if status != TaskStatuses.SUCCESS:
-                pytest.fail(
-                    f"Failed to get cluster nodes info: {action_status_check_response}"
-                )
             logging.info(
                 f"Completed cluster nodes info reading: {action_status_check_response}"
             )
