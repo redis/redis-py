@@ -2,8 +2,8 @@ from abc import abstractmethod
 from typing import Union, Optional
 
 from redis.asyncio import Redis, RedisCluster
-from redis.asyncio.multidb.circuit import AsyncCircuitBreaker
 from redis.data_structure import WeightedList
+from redis.multidb.circuit import CircuitBreaker
 from redis.multidb.database import AbstractDatabase, BaseDatabase
 from redis.typing import Number
 
@@ -24,13 +24,13 @@ class AsyncDatabase(AbstractDatabase):
 
     @property
     @abstractmethod
-    def circuit(self) -> AsyncCircuitBreaker:
+    def circuit(self) -> CircuitBreaker:
         """Circuit breaker for the current database."""
         pass
 
     @circuit.setter
     @abstractmethod
-    def circuit(self, circuit: AsyncCircuitBreaker):
+    def circuit(self, circuit: CircuitBreaker):
         """Set the circuit breaker for the current database."""
         pass
 
@@ -40,7 +40,7 @@ class Database(BaseDatabase, AsyncDatabase):
     def __init__(
             self,
             client: Union[Redis, RedisCluster],
-            circuit: AsyncCircuitBreaker,
+            circuit: CircuitBreaker,
             weight: float,
             health_check_url: Optional[str] = None,
     ):
@@ -58,10 +58,10 @@ class Database(BaseDatabase, AsyncDatabase):
         self._client = client
 
     @property
-    def circuit(self) -> AsyncCircuitBreaker:
+    def circuit(self) -> CircuitBreaker:
         return self._cb
 
     @circuit.setter
-    def circuit(self, circuit: AsyncCircuitBreaker):
+    def circuit(self, circuit: CircuitBreaker):
         self._cb = circuit
 

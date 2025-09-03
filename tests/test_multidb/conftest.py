@@ -4,7 +4,7 @@ import pytest
 
 from redis import Redis
 from redis.data_structure import WeightedList
-from redis.multidb.circuit import State as CBState, SyncCircuitBreaker
+from redis.multidb.circuit import State as CBState, CircuitBreaker
 from redis.multidb.config import MultiDbConfig, DatabaseConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
      DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, Databases
@@ -19,8 +19,8 @@ def mock_client() -> Redis:
     return Mock(spec=Redis)
 
 @pytest.fixture()
-def mock_cb() -> SyncCircuitBreaker:
-    return Mock(spec=SyncCircuitBreaker)
+def mock_cb() -> CircuitBreaker:
+    return Mock(spec=CircuitBreaker)
 
 @pytest.fixture()
 def mock_fd() -> FailureDetector:
@@ -41,7 +41,7 @@ def mock_db(request) -> Database:
      db.client = Mock(spec=Redis)
 
      cb = request.param.get("circuit", {})
-     mock_cb = Mock(spec=SyncCircuitBreaker)
+     mock_cb = Mock(spec=CircuitBreaker)
      mock_cb.grace_period = cb.get("grace_period", 1.0)
      mock_cb.state = cb.get("state", CBState.CLOSED)
 
@@ -55,7 +55,7 @@ def mock_db1(request) -> Database:
      db.client = Mock(spec=Redis)
 
      cb = request.param.get("circuit", {})
-     mock_cb = Mock(spec=SyncCircuitBreaker)
+     mock_cb = Mock(spec=CircuitBreaker)
      mock_cb.grace_period = cb.get("grace_period", 1.0)
      mock_cb.state = cb.get("state", CBState.CLOSED)
 
@@ -69,7 +69,7 @@ def mock_db2(request) -> Database:
      db.client = Mock(spec=Redis)
 
      cb = request.param.get("circuit", {})
-     mock_cb = Mock(spec=SyncCircuitBreaker)
+     mock_cb = Mock(spec=CircuitBreaker)
      mock_cb.grace_period = cb.get("grace_period", 1.0)
      mock_cb.state = cb.get("state", CBState.CLOSED)
 

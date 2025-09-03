@@ -248,6 +248,7 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
                 )
         ):
             await self.set_active_database(await self._failover_strategy.database())
+            print("Active database now with weight {}", format(self._active_database.weight))
             self._schedule_next_fallback()
 
     async def _on_command_fail(self, error, *args):

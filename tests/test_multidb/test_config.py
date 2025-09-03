@@ -1,6 +1,6 @@
 from unittest.mock import Mock
 from redis.connection import ConnectionPool
-from redis.multidb.circuit import PBCircuitBreakerAdapter, SyncCircuitBreaker
+from redis.multidb.circuit import PBCircuitBreakerAdapter, CircuitBreaker
 from redis.multidb.config import MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
     DEFAULT_AUTO_FALLBACK_INTERVAL, DatabaseConfig, DEFAULT_GRACE_PERIOD
 from redis.multidb.database import Database
@@ -49,11 +49,11 @@ class TestMultiDbConfig:
         mock_connection_pools[0].connection_kwargs = {}
         mock_connection_pools[1].connection_kwargs = {}
         mock_connection_pools[2].connection_kwargs = {}
-        mock_cb1 = Mock(spec=SyncCircuitBreaker)
+        mock_cb1 = Mock(spec=CircuitBreaker)
         mock_cb1.grace_period = grace_period
-        mock_cb2 = Mock(spec=SyncCircuitBreaker)
+        mock_cb2 = Mock(spec=CircuitBreaker)
         mock_cb2.grace_period = grace_period
-        mock_cb3 = Mock(spec=SyncCircuitBreaker)
+        mock_cb3 = Mock(spec=CircuitBreaker)
         mock_cb3.grace_period = grace_period
         mock_failure_detectors = [Mock(spec=FailureDetector), Mock(spec=FailureDetector)]
         mock_health_checks = [Mock(spec=HealthCheck), Mock(spec=HealthCheck)]
@@ -113,7 +113,7 @@ class TestDatabaseConfig:
 
     def test_overridden_config(self):
         mock_connection_pool = Mock(spec=ConnectionPool)
-        mock_circuit = Mock(spec=SyncCircuitBreaker)
+        mock_circuit = Mock(spec=CircuitBreaker)
 
         config = DatabaseConfig(
             client_kwargs={'connection_pool': mock_connection_pool}, weight=1.0, circuit=mock_circuit

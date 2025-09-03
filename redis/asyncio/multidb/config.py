@@ -4,7 +4,6 @@ from typing import Optional, List, Type, Union
 import pybreaker
 
 from redis.asyncio import ConnectionPool, Redis, RedisCluster
-from redis.asyncio.multidb.circuit import AsyncCircuitBreaker, AsyncPBCircuitBreakerAdapter
 from redis.asyncio.multidb.database import Databases, Database
 from redis.asyncio.multidb.failover import AsyncFailoverStrategy, WeightBasedFailoverStrategy
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector, FailureDetectorAsyncWrapper
@@ -14,6 +13,7 @@ from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff, AbstractBackoff, NoBackoff
 from redis.data_structure import WeightedList
 from redis.event import EventDispatcherInterface, EventDispatcher
+from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter
 from redis.multidb.failure_detector import CommandFailureDetector
 
 DEFAULT_GRACE_PERIOD = 5.0
@@ -43,7 +43,7 @@ class DatabaseConfig:
         client_kwargs (dict): Additional parameters for the database client connection.
         from_url (Optional[str]): Redis URL way of connecting to the database.
         from_pool (Optional[ConnectionPool]): A pre-configured connection pool to use.
-        circuit (Optional[SyncCircuitBreaker]): Custom circuit breaker implementation.
+        circuit (Optional[CircuitBreaker]): Custom circuit breaker implementation.
         grace_period (float): Grace period after which we need to check if the circuit could be closed again.
         health_check_url (Optional[str]): URL for health checks. Cluster FQDN is typically used
             on public Redis Enterprise endpoints.
@@ -56,13 +56,13 @@ class DatabaseConfig:
     client_kwargs: dict = field(default_factory=dict)
     from_url: Optional[str] = None
     from_pool: Optional[ConnectionPool] = None
-    circuit: Optional[AsyncCircuitBreaker] = None
+    circuit: Optional[CircuitBreaker] = None
     grace_period: float = DEFAULT_GRACE_PERIOD
     health_check_url: Optional[str] = None
 
-    def default_circuit_breaker(self) -> AsyncCircuitBreaker:
+    def default_circuit_breaker(self) -> CircuitBreaker:
         circuit_breaker = pybreaker.CircuitBreaker(reset_timeout=self.grace_period)
-        return AsyncPBCircuitBreakerAdapter(circuit_breaker)
+        return PBCircuitBreakerAdapter(circuit_breaker)
 
 @dataclass
 class MultiDbConfig:

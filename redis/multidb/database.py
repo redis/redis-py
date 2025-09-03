@@ -5,7 +5,7 @@ from typing import Union, Optional
 
 from redis import RedisCluster
 from redis.data_structure import WeightedList
-from redis.multidb.circuit import SyncCircuitBreaker
+from redis.multidb.circuit import CircuitBreaker
 from redis.typing import Number
 
 class AbstractDatabase(ABC):
@@ -74,13 +74,13 @@ class SyncDatabase(AbstractDatabase):
 
     @property
     @abstractmethod
-    def circuit(self) -> SyncCircuitBreaker:
+    def circuit(self) -> CircuitBreaker:
         """Circuit breaker for the current database."""
         pass
 
     @circuit.setter
     @abstractmethod
-    def circuit(self, circuit: SyncCircuitBreaker):
+    def circuit(self, circuit: CircuitBreaker):
         """Set the circuit breaker for the current database."""
         pass
 
@@ -90,7 +90,7 @@ class Database(BaseDatabase, SyncDatabase):
     def __init__(
             self,
             client: Union[redis.Redis, RedisCluster],
-            circuit: SyncCircuitBreaker,
+            circuit: CircuitBreaker,
             weight: float,
             health_check_url: Optional[str] = None,
     ):
@@ -117,9 +117,9 @@ class Database(BaseDatabase, SyncDatabase):
         self._client = client
 
     @property
-    def circuit(self) -> SyncCircuitBreaker:
+    def circuit(self) -> CircuitBreaker:
         return self._cb
 
     @circuit.setter
-    def circuit(self, circuit: SyncCircuitBreaker):
+    def circuit(self, circuit: CircuitBreaker):
         self._cb = circuit
