@@ -1379,7 +1379,7 @@ class SSLConnection(Connection):
             ssl_cert_reqs: The string value for the SSLContext.verify_mode (none, optional, required), or an ssl.VerifyMode. Defaults to "required".
             ssl_ca_certs: The path to a file of concatenated CA certificates in PEM format. Defaults to None.
             ssl_ca_data: Either an ASCII string of one or more PEM-encoded certificates or a bytes-like object of DER-encoded certificates.
-            ssl_check_hostname: If set, match the hostname during the SSL handshake. Defaults to False.
+            ssl_check_hostname: If set, match the hostname during the SSL handshake. Defaults to True.
             ssl_ca_path: The path to a directory containing several CA certificates in PEM format. Defaults to None.
             ssl_password: Password for unlocking an encrypted private key. Defaults to None.
 
