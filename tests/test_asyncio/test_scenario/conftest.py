@@ -1,6 +1,7 @@
 import os
 
 import pytest
+import pytest_asyncio
 
 from redis.asyncio import Redis
 from redis.asyncio.multidb.client import MultiDBClient
@@ -26,8 +27,8 @@ def fault_injector_client():
      url = os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324")
      return FaultInjectorClient(url)
 
-@pytest.fixture()
-def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListener, dict]:
+@pytest_asyncio.fixture()
+async def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListener, dict]:
      client_class = request.param.get('client_class', Redis)
 
      if client_class == Redis:
@@ -85,4 +86,5 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
          health_check_backoff=ExponentialBackoff(cap=5, base=0.5),
      )
 
-     return MultiDBClient(config), listener, endpoint_config
+     async with MultiDBClient(config) as client:
+         return client, listener, endpoint_config

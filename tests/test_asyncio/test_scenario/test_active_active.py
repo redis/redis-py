@@ -4,6 +4,7 @@ from time import sleep
 
 import pytest
 
+from redis.asyncio.client import Pipeline
 from tests.test_scenario.fault_injector_client import ActionRequest, ActionType
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class TestActiveActive:
         # Timeout so the cluster could recover from network failure.
         sleep(5)
 
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "r_multi_db",
         [{"failure_threshold": 2}],
@@ -56,4 +58,132 @@ class TestActiveActive:
         # Execute commands until database failover
         while not listener.is_changed_flag:
             assert await r_multi_db.get('key') == 'value'
+            await asyncio.sleep(0.5)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [{"failure_threshold": 2}],
+        indirect=True
+    )
+    @pytest.mark.timeout(50)
+    async def test_context_manager_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
+        event = asyncio.Event()
+        asyncio.create_task(trigger_network_failure_action(fault_injector_client,config,event))
+
+        # Client initialized on first pipe execution.
+        async with r_multi_db.pipeline() as pipe:
+            pipe.set('{hash}key1', 'value1')
+            pipe.set('{hash}key2', 'value2')
+            pipe.set('{hash}key3', 'value3')
+            pipe.get('{hash}key1')
+            pipe.get('{hash}key2')
+            pipe.get('{hash}key3')
+            assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+
+        # Execute pipeline before network failure
+        while not event.is_set():
+           async with r_multi_db.pipeline() as pipe:
+                pipe.set('{hash}key1', 'value1')
+                pipe.set('{hash}key2', 'value2')
+                pipe.set('{hash}key3', 'value3')
+                pipe.get('{hash}key1')
+                pipe.get('{hash}key2')
+                pipe.get('{hash}key3')
+                assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+           await asyncio.sleep(0.5)
+
+        # Execute pipeline until database failover
+        for _ in range(5):
+            async with r_multi_db.pipeline() as pipe:
+                pipe.set('{hash}key1', 'value1')
+                pipe.set('{hash}key2', 'value2')
+                pipe.set('{hash}key3', 'value3')
+                pipe.get('{hash}key1')
+                pipe.get('{hash}key2')
+                pipe.get('{hash}key3')
+                assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+            await asyncio.sleep(0.5)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [{"failure_threshold": 2}],
+        indirect=True
+    )
+    @pytest.mark.timeout(50)
+    async def test_chaining_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
+        event = asyncio.Event()
+        asyncio.create_task(trigger_network_failure_action(fault_injector_client,config,event))
+
+        # Client initialized on first pipe execution.
+        pipe = r_multi_db.pipeline()
+        pipe.set('{hash}key1', 'value1')
+        pipe.set('{hash}key2', 'value2')
+        pipe.set('{hash}key3', 'value3')
+        pipe.get('{hash}key1')
+        pipe.get('{hash}key2')
+        pipe.get('{hash}key3')
+        assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+
+        # Execute pipeline before network failure
+        while not event.is_set():
+            pipe = r_multi_db.pipeline()
+            pipe.set('{hash}key1', 'value1')
+            pipe.set('{hash}key2', 'value2')
+            pipe.set('{hash}key3', 'value3')
+            pipe.get('{hash}key1')
+            pipe.get('{hash}key2')
+            pipe.get('{hash}key3')
+            assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+        await asyncio.sleep(0.5)
+
+        # Execute pipeline until database failover
+        for _ in range(5):
+            pipe = r_multi_db.pipeline()
+            pipe.set('{hash}key1', 'value1')
+            pipe.set('{hash}key2', 'value2')
+            pipe.set('{hash}key3', 'value3')
+            pipe.get('{hash}key1')
+            pipe.get('{hash}key2')
+            pipe.get('{hash}key3')
+            assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+        await asyncio.sleep(0.5)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [{"failure_threshold": 2}],
+        indirect=True
+    )
+    @pytest.mark.timeout(50)
+    async def test_transaction_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
+        event = asyncio.Event()
+        asyncio.create_task(trigger_network_failure_action(fault_injector_client,config,event))
+
+        async def callback(pipe: Pipeline):
+            pipe.set('{hash}key1', 'value1')
+            pipe.set('{hash}key2', 'value2')
+            pipe.set('{hash}key3', 'value3')
+            pipe.get('{hash}key1')
+            pipe.get('{hash}key2')
+            pipe.get('{hash}key3')
+
+        # Client initialized on first transaction execution.
+        await r_multi_db.transaction(callback) == [True, True, True, 'value1', 'value2', 'value3']
+
+        # Execute transaction before network failure
+        while not event.is_set():
+            await r_multi_db.transaction(callback)
+            await asyncio.sleep(0.5)
+
+        # Execute transaction until database failover
+        while not listener.is_changed_flag:
+            await r_multi_db.transaction(callback) == [True, True, True, 'value1', 'value2', 'value3']
             await asyncio.sleep(0.5)
