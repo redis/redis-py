@@ -108,7 +108,10 @@ class EventDispatcher(EventDispatcherInterface):
             for listener in listeners:
                 await listener.listen(event)
 
-    def register_listeners(self, event_listeners: Dict[Type[object], List[EventListenerInterface]]):
+    def register_listeners(
+            self,
+            event_listeners: Dict[Type[object], List[Union[EventListenerInterface, AsyncEventListenerInterface]]]
+    ):
         with self._lock:
             for event_type in event_listeners:
                 if event_type in self._event_listeners_mapping:

@@ -61,10 +61,10 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         await self._check_databases_health(on_error=raise_exception_on_failed_hc)
 
         # Starts recurring health checks on the background.
-        await self._bg_scheduler.run_recurring_async(
+        asyncio.create_task(self._bg_scheduler.run_recurring_async(
             self._health_check_interval,
             self._check_databases_health,
-        )
+        ))
 
         is_active_db_found = False
 
