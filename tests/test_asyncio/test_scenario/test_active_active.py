@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from time import sleep
 
@@ -187,3 +188,42 @@ class TestActiveActive:
         while not listener.is_changed_flag:
             await r_multi_db.transaction(callback) == [True, True, True, 'value1', 'value2', 'value3']
             await asyncio.sleep(0.5)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "r_multi_db",
+        [{"failure_threshold": 2}],
+        indirect=True
+    )
+    @pytest.mark.timeout(50)
+    async def test_pubsub_failover_to_another_db(self, r_multi_db, fault_injector_client):
+        r_multi_db, listener, config = r_multi_db
+
+        event = asyncio.Event()
+        asyncio.create_task(trigger_network_failure_action(fault_injector_client,config,event))
+
+        data = json.dumps({'message': 'test'})
+        messages_count = 0
+
+        async def handler(message):
+            nonlocal messages_count
+            messages_count += 1
+
+        pubsub = await r_multi_db.pubsub()
+
+        # Assign a handler and run in a separate thread.
+        await pubsub.subscribe(**{'test-channel': handler})
+        task = asyncio.create_task(pubsub.run(poll_timeout=0.1))
+
+        # Execute publish before network failure
+        while not event.is_set():
+            await r_multi_db.publish('test-channel', data)
+            await asyncio.sleep(0.5)
+
+        # Execute publish until database failover
+        while not listener.is_changed_flag:
+            await r_multi_db.publish('test-channel', data)
+            await asyncio.sleep(0.5)
+
+        task.cancel()
+        assert messages_count > 1

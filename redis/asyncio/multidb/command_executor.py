@@ -178,14 +178,10 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
     def command_retry(self) -> Retry:
         return self._command_retry
 
-    async def pubsub(self, **kwargs):
-        async def callback():
-            if self._active_pubsub is None:
-                self._active_pubsub = self._active_database.client.pubsub(**kwargs)
-                self._active_pubsub_kwargs = kwargs
-            return None
-
-        return await self._execute_with_failure_detection(callback)
+    def pubsub(self, **kwargs):
+        if self._active_pubsub is None:
+            self._active_pubsub = self._active_database.client.pubsub(**kwargs)
+            self._active_pubsub_kwargs = kwargs
 
     async def execute_command(self, *args, **options):
         async def callback():
