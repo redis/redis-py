@@ -226,4 +226,5 @@ class TestActiveActive:
             await asyncio.sleep(0.5)
 
         task.cancel()
+        await pubsub.unsubscribe('test-channel') is True
         assert messages_count > 1

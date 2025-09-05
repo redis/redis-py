@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from asyncio import iscoroutinefunction
 from datetime import datetime
 from typing import List, Optional, Callable, Any, Union, Awaitable
 
@@ -221,7 +222,10 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
     async def execute_pubsub_method(self, method_name: str, *args, **kwargs):
         async def callback():
             method = getattr(self.active_pubsub, method_name)
-            return await method(*args, **kwargs)
+            if iscoroutinefunction(method):
+                return await method(*args, **kwargs)
+            else:
+                return method(*args, **kwargs)
 
         return await self._execute_with_failure_detection(callback, *args)
 
