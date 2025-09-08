@@ -204,8 +204,8 @@ class DefaultCache(CacheInterface):
         keys_to_delete = []
 
         for redis_key in redis_keys:
-            if isinstance(redis_key, bytes):
-                redis_key = redis_key.decode()
+            if isinstance(redis_key, str):
+                redis_key = redis_key.encode("utf-8")
             for cache_key in self._cache:
                 if redis_key in cache_key.redis_keys:
                     keys_to_delete.append(cache_key)
