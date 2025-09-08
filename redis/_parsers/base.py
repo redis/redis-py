@@ -191,7 +191,7 @@ class MaintenanceNotificationsParser:
         # Expected message format is: MOVING <seq_number> <time> <endpoint>
         id = response[1]
         ttl = response[2]
-        if response[3] in [b"null", "null"]:
+        if response[3] is None:
             host, port = None, None
         else:
             value = response[3]
