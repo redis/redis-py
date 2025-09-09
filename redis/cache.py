@@ -19,6 +19,7 @@ class EvictionPolicyType(Enum):
 class CacheKey:
     command: str
     redis_keys: tuple
+    redis_args: tuple = ()
 
 
 class CacheEntry:
