@@ -95,8 +95,8 @@ class TestActiveActive:
                 assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
            await asyncio.sleep(0.5)
 
-        # Execute pipeline until database failover
-        for _ in range(5):
+        # Execute commands until database failover
+        while not listener.is_changed_flag:
             async with r_multi_db.pipeline() as pipe:
                 pipe.set('{hash}key1', 'value1')
                 pipe.set('{hash}key2', 'value2')
@@ -143,7 +143,7 @@ class TestActiveActive:
         await asyncio.sleep(0.5)
 
         # Execute pipeline until database failover
-        for _ in range(5):
+        while not listener.is_changed_flag:
             pipe = r_multi_db.pipeline()
             pipe.set('{hash}key1', 'value1')
             pipe.set('{hash}key2', 'value2')
