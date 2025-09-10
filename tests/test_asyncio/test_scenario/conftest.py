@@ -28,7 +28,7 @@ def fault_injector_client():
      return FaultInjectorClient(url)
 
 @pytest_asyncio.fixture()
-async def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListener, dict]:
+async def r_multi_db(request) -> tuple[MultiDbConfig, CheckActiveDatabaseChangedListener, dict]:
      client_class = request.param.get('client_class', Redis)
 
      if client_class == Redis:
@@ -86,5 +86,4 @@ async def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChanged
          health_check_backoff=ExponentialBackoff(cap=5, base=0.5),
      )
 
-     async with MultiDBClient(config) as client:
-         return client, listener, endpoint_config
+     return config, listener, endpoint_config
