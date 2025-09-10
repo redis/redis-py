@@ -45,7 +45,7 @@ class TestActiveActive:
         r_multi_db, listener, config = r_multi_db
 
         event = asyncio.Event()
-        asyncio.create_task(trigger_network_failure_action(fault_injector_client,config,event))
+        asyncio.create_task(trigger_network_failure_action(fault_injector_client, config, event))
 
         # Client initialized on the first command.
         await r_multi_db.set('key', 'value')
