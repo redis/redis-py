@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from datetime import datetime
-from typing import List, Optional, Callable, Any
+from typing import List, Optional, Callable, Any, Union, Awaitable
 
 from redis.asyncio.client import PubSub, Pipeline
 from redis.asyncio.multidb.database import Databases, AsyncDatabase, Database
@@ -13,6 +13,7 @@ from redis.asyncio.retry import Retry
 from redis.event import EventDispatcherInterface, AsyncOnCommandsFailEvent
 from redis.multidb.command_executor import CommandExecutor, BaseCommandExecutor
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
+from redis.typing import KeyT
 
 
 class AsyncCommandExecutor(CommandExecutor):
@@ -194,17 +195,30 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
 
     async def execute_pipeline(self, command_stack: tuple):
         async def callback():
-            with self._active_database.client.pipeline() as pipe:
+            async with self._active_database.client.pipeline() as pipe:
                 for command, options in command_stack:
-                    await pipe.execute_command(*command, **options)
+                    pipe.execute_command(*command, **options)
 
                 return await pipe.execute()
 
         return await self._execute_with_failure_detection(callback, command_stack)
 
-    async def execute_transaction(self, transaction: Callable[[Pipeline], None], *watches, **options):
+    async def execute_transaction(
+            self,
+            func: Callable[["Pipeline"], Union[Any, Awaitable[Any]]],
+            *watches: KeyT,
+            shard_hint: Optional[str] = None,
+            value_from_callable: bool = False,
+            watch_delay: Optional[float] = None,
+    ):
         async def callback():
-            return await self._active_database.client.transaction(transaction, *watches, **options)
+            return await self._active_database.client.transaction(
+                func,
+                *watches,
+                shard_hint=shard_hint,
+                value_from_callable=value_from_callable,
+                watch_delay=watch_delay
+            )
 
         return await self._execute_with_failure_detection(callback)
 
