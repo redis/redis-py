@@ -1,13 +1,14 @@
 from unittest.mock import Mock
-from redis.connection import ConnectionPool
-from redis.multidb.circuit import PBCircuitBreakerAdapter, CircuitBreaker
-from redis.multidb.config import MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
-    DEFAULT_AUTO_FALLBACK_INTERVAL, DatabaseConfig, DEFAULT_GRACE_PERIOD
-from redis.multidb.database import Database
-from redis.multidb.failure_detector import CommandFailureDetector, FailureDetector
-from redis.multidb.healthcheck import EchoHealthCheck, HealthCheck
-from redis.multidb.failover import WeightBasedFailoverStrategy, FailoverStrategy
-from redis.retry import Retry
+
+from redis.asyncio import ConnectionPool
+from redis.asyncio.multidb.config import DatabaseConfig, MultiDbConfig, DEFAULT_GRACE_PERIOD, \
+    DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_AUTO_FALLBACK_INTERVAL
+from redis.asyncio.multidb.database import Database
+from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy, AsyncFailoverStrategy
+from redis.asyncio.multidb.failure_detector import FailureDetectorAsyncWrapper, AsyncFailureDetector
+from redis.asyncio.multidb.healthcheck import EchoHealthCheck, HealthCheck
+from redis.asyncio.retry import Retry
+from redis.multidb.circuit import CircuitBreaker
 
 
 class TestMultiDbConfig:
@@ -35,7 +36,7 @@ class TestMultiDbConfig:
             i+=1
 
         assert len(config.default_failure_detectors()) == 1
-        assert isinstance(config.default_failure_detectors()[0], CommandFailureDetector)
+        assert isinstance(config.default_failure_detectors()[0], FailureDetectorAsyncWrapper)
         assert len(config.default_health_checks()) == 1
         assert isinstance(config.default_health_checks()[0], EchoHealthCheck)
         assert config.health_check_interval == DEFAULT_HEALTH_CHECK_INTERVAL
@@ -55,10 +56,10 @@ class TestMultiDbConfig:
         mock_cb2.grace_period = grace_period
         mock_cb3 = Mock(spec=CircuitBreaker)
         mock_cb3.grace_period = grace_period
-        mock_failure_detectors = [Mock(spec=FailureDetector), Mock(spec=FailureDetector)]
+        mock_failure_detectors = [Mock(spec=AsyncFailureDetector), Mock(spec=AsyncFailureDetector)]
         mock_health_checks = [Mock(spec=HealthCheck), Mock(spec=HealthCheck)]
         health_check_interval = 10
-        mock_failover_strategy = Mock(spec=FailoverStrategy)
+        mock_failover_strategy = Mock(spec=AsyncFailoverStrategy)
         auto_fallback_interval = 10
         db_configs = [
                 DatabaseConfig(
@@ -109,7 +110,7 @@ class TestDatabaseConfig:
 
         assert config.client_kwargs == {'host': 'host1', 'port': 'port1'}
         assert config.weight == 1.0
-        assert isinstance(config.default_circuit_breaker(), PBCircuitBreakerAdapter)
+        assert isinstance(config.default_circuit_breaker(), CircuitBreaker)
 
     def test_overridden_config(self):
         mock_connection_pool = Mock(spec=ConnectionPool)

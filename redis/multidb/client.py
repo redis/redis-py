@@ -5,7 +5,7 @@ from redis.background import BackgroundScheduler
 from redis.commands import RedisModuleCommands, CoreCommands
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.config import MultiDbConfig, DEFAULT_GRACE_PERIOD
-from redis.multidb.circuit import State as CBState, SyncCircuitBreaker
+from redis.multidb.circuit import State as CBState, CircuitBreaker
 from redis.multidb.database import Database, Databases, SyncDatabase
 from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failure_detector import FailureDetector
@@ -244,7 +244,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         for database, _ in self._databases:
             self._check_db_health(database, on_error)
 
-    def _on_circuit_state_change_callback(self, circuit: SyncCircuitBreaker, old_state: CBState, new_state: CBState):
+    def _on_circuit_state_change_callback(self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState):
         if new_state == CBState.HALF_OPEN:
             self._check_db_health(circuit.database)
             return
@@ -252,7 +252,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
             self._bg_scheduler.run_once(DEFAULT_GRACE_PERIOD, _half_open_circuit, circuit)
 
-def _half_open_circuit(circuit: SyncCircuitBreaker):
+def _half_open_circuit(circuit: CircuitBreaker):
     circuit.state = CBState.HALF_OPEN
 
 

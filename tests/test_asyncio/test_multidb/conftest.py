@@ -2,16 +2,15 @@ from unittest.mock import Mock
 
 import pytest
 
-from redis import Redis
+from redis.asyncio.multidb.config import MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_AUTO_FALLBACK_INTERVAL, \
+    DatabaseConfig
+from redis.asyncio.multidb.failover import AsyncFailoverStrategy
+from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
+from redis.asyncio.multidb.healthcheck import HealthCheck
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import State as CBState, CircuitBreaker
-from redis.multidb.config import MultiDbConfig, DatabaseConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
-     DEFAULT_AUTO_FALLBACK_INTERVAL
-from redis.multidb.database import Database, Databases
-from redis.multidb.failover import FailoverStrategy
-from redis.multidb.failure_detector import FailureDetector
-from redis.multidb.healthcheck import HealthCheck
-from tests.conftest import mock_ed
+from redis.asyncio import Redis
+from redis.asyncio.multidb.database import Database, Databases
 
 
 @pytest.fixture()
@@ -23,12 +22,12 @@ def mock_cb() -> CircuitBreaker:
     return Mock(spec=CircuitBreaker)
 
 @pytest.fixture()
-def mock_fd() -> FailureDetector:
-     return Mock(spec=FailureDetector)
+def mock_fd() -> AsyncFailureDetector:
+     return Mock(spec=AsyncFailureDetector)
 
 @pytest.fixture()
-def mock_fs() -> FailoverStrategy:
-     return Mock(spec=FailoverStrategy)
+def mock_fs() -> AsyncFailoverStrategy:
+     return Mock(spec=AsyncFailoverStrategy)
 
 @pytest.fixture()
 def mock_hc() -> HealthCheck:
@@ -99,10 +98,11 @@ def mock_multi_db_config(
 
      return config
 
+
 def create_weighted_list(*databases) -> Databases:
-     dbs = WeightedList()
+    dbs = WeightedList()
 
-     for db in databases:
-          dbs.add(db, db.weight)
+    for db in databases:
+        dbs.add(db, db.weight)
 
-     return dbs
+    return dbs

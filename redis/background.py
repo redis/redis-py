@@ -1,6 +1,7 @@
 import asyncio
 import threading
-from typing import Callable
+from typing import Callable, Coroutine, Any
+
 
 class BackgroundScheduler:
     """
@@ -45,7 +46,35 @@ class BackgroundScheduler:
         )
         thread.start()
 
-    def _call_later(self, loop: asyncio.AbstractEventLoop, delay: float, callback: Callable, *args):
+    async def run_recurring_async(
+            self,
+            interval: float,
+            coro: Callable[..., Coroutine[Any, Any, Any]],
+            *args
+    ):
+        """
+        Runs recurring coroutine with given interval in seconds in the current event loop.
+        To be used only from an async context. No additional threads are created.
+        """
+        loop = asyncio.get_running_loop()
+        wrapped = _async_to_sync_wrapper(loop, coro, *args)
+
+        def tick():
+            # Schedule the coroutine
+            wrapped()
+            # Schedule next tick
+            self._next_timer = loop.call_later(interval, tick)
+
+        # Schedule first tick
+        self._next_timer = loop.call_later(interval, tick)
+
+    def _call_later(
+            self,
+            loop: asyncio.AbstractEventLoop,
+            delay: float,
+            callback: Callable,
+            *args
+    ):
         self._next_timer = loop.call_later(delay, callback, *args)
 
     def _call_later_recurring(
@@ -87,3 +116,20 @@ def _start_event_loop_in_thread(event_loop: asyncio.AbstractEventLoop, call_soon
     asyncio.set_event_loop(event_loop)
     event_loop.call_soon(call_soon_cb, event_loop, *args)
     event_loop.run_forever()
+
+def _async_to_sync_wrapper(loop, coro_func, *args, **kwargs):
+    """
+    Wraps an asynchronous function so it can be used with loop.call_later.
+
+    :param loop: The event loop in which the coroutine will be executed.
+    :param coro_func: The coroutine function to wrap.
+    :param args: Positional arguments to pass to the coroutine function.
+    :param kwargs: Keyword arguments to pass to the coroutine function.
+    :return: A regular function suitable for loop.call_later.
+    """
+
+    def wrapped():
+        # Schedule the coroutine in the event loop
+        asyncio.ensure_future(coro_func(*args, **kwargs), loop=loop)
+
+    return wrapped

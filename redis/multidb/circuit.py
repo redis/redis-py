@@ -45,6 +45,11 @@ class CircuitBreaker(ABC):
         """Set database associated with this circuit."""
         pass
 
+    @abstractmethod
+    def on_state_changed(self, cb: Callable[["CircuitBreaker", State, State], None]):
+        """Callback called when the state of the circuit changes."""
+        pass
+
 class BaseCircuitBreaker(CircuitBreaker):
     """
     Base implementation of Circuit Breaker interface.
@@ -82,12 +87,8 @@ class BaseCircuitBreaker(CircuitBreaker):
     def database(self, database):
         self._database = database
 
-class SyncCircuitBreaker(CircuitBreaker):
-    """
-    Synchronous implementation of Circuit Breaker interface.
-    """
     @abstractmethod
-    def on_state_changed(self, cb: Callable[["SyncCircuitBreaker", State, State], None]):
+    def on_state_changed(self, cb: Callable[["CircuitBreaker", State, State], None]):
         """Callback called when the state of the circuit changes."""
         pass
 
@@ -95,7 +96,7 @@ class PBListener(pybreaker.CircuitBreakerListener):
     """Wrapper for callback to be compatible with pybreaker implementation."""
     def __init__(
             self,
-            cb: Callable[[SyncCircuitBreaker, State, State], None],
+            cb: Callable[[CircuitBreaker, State, State], None],
             database,
     ):
         """
@@ -116,7 +117,7 @@ class PBListener(pybreaker.CircuitBreakerListener):
         new_state = State(value=new_state.name)
         self._cb(cb, old_state, new_state)
 
-class PBCircuitBreakerAdapter(SyncCircuitBreaker, BaseCircuitBreaker):
+class PBCircuitBreakerAdapter(BaseCircuitBreaker):
     def __init__(self, cb: pybreaker.CircuitBreaker):
         """
         Initialize a PBCircuitBreakerAdapter instance.
@@ -129,6 +130,6 @@ class PBCircuitBreakerAdapter(SyncCircuitBreaker, BaseCircuitBreaker):
         """
         super().__init__(cb)
 
-    def on_state_changed(self, cb: Callable[["SyncCircuitBreaker", State, State], None]):
+    def on_state_changed(self, cb: Callable[["CircuitBreaker", State, State], None]):
         listener = PBListener(cb, self.database)
         self._cb.add_listener(listener)
