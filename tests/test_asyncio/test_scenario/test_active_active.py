@@ -133,17 +133,17 @@ class TestActiveActive:
                     assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
                await asyncio.sleep(0.5)
 
-            # Execute pipeline until database failover
-            for _ in range(5):
-                async with r_multi_db.pipeline() as pipe:
-                    pipe.set('{hash}key1', 'value1')
-                    pipe.set('{hash}key2', 'value2')
-                    pipe.set('{hash}key3', 'value3')
-                    pipe.get('{hash}key1')
-                    pipe.get('{hash}key2')
-                    pipe.get('{hash}key3')
-                    assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
-                await asyncio.sleep(0.5)
+        # Execute commands until database failover
+        while not listener.is_changed_flag:
+            async with r_multi_db.pipeline() as pipe:
+                pipe.set('{hash}key1', 'value1')
+                pipe.set('{hash}key2', 'value2')
+                pipe.set('{hash}key3', 'value3')
+                pipe.get('{hash}key1')
+                pipe.get('{hash}key2')
+                pipe.get('{hash}key3')
+                assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+            await asyncio.sleep(0.5)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -175,17 +175,17 @@ class TestActiveActive:
                 assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
             await asyncio.sleep(0.5)
 
-            # Execute pipeline until database failover
-            for _ in range(5):
-                pipe = r_multi_db.pipeline()
-                pipe.set('{hash}key1', 'value1')
-                pipe.set('{hash}key2', 'value2')
-                pipe.set('{hash}key3', 'value3')
-                pipe.get('{hash}key1')
-                pipe.get('{hash}key2')
-                pipe.get('{hash}key3')
-                assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
-            await asyncio.sleep(0.5)
+        # Execute pipeline until database failover
+        while not listener.is_changed_flag:
+            pipe = r_multi_db.pipeline()
+            pipe.set('{hash}key1', 'value1')
+            pipe.set('{hash}key2', 'value2')
+            pipe.set('{hash}key3', 'value3')
+            pipe.get('{hash}key1')
+            pipe.get('{hash}key2')
+            pipe.get('{hash}key3')
+            assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
+        await asyncio.sleep(0.5)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

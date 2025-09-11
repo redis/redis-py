@@ -65,7 +65,7 @@ class EchoHealthCheck(AbstractHealthCheck):
         expected_message = ["healthcheck", b"healthcheck"]
 
         if isinstance(database.client, Redis):
-            actual_message = await database.client.execute_command("ECHO" ,"healthcheck")
+            actual_message = await database.client.execute_command("ECHO", "healthcheck")
             return actual_message in expected_message
         else:
             # For a cluster checks if all nodes are healthy.
