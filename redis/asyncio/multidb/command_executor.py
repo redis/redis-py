@@ -3,6 +3,7 @@ from asyncio import iscoroutinefunction
 from datetime import datetime
 from typing import List, Optional, Callable, Any, Union, Awaitable
 
+from redis.asyncio import RedisCluster
 from redis.asyncio.client import PubSub, Pipeline
 from redis.asyncio.multidb.database import Databases, AsyncDatabase, Database
 from redis.asyncio.multidb.event import AsyncActiveDatabaseChanged, RegisterCommandFailure, \
@@ -181,6 +182,9 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
 
     def pubsub(self, **kwargs):
         if self._active_pubsub is None:
+            if isinstance(self._active_database.client, RedisCluster):
+                raise ValueError("PubSub is not supported for RedisCluster")
+
             self._active_pubsub = self._active_database.client.pubsub(**kwargs)
             self._active_pubsub_kwargs = kwargs
 

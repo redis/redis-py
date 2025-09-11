@@ -1,3 +1,4 @@
+import logging
 import threading
 from typing import List, Any, Callable, Optional
 
@@ -11,6 +12,7 @@ from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck
 
+logger = logging.getLogger(__name__)
 
 class MultiDBClient(RedisModuleCommands, CoreCommands):
     """
@@ -231,6 +233,8 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                     if database.circuit.state != CBState.OPEN:
                         database.circuit.state = CBState.OPEN
                     is_healthy = False
+
+                    logger.exception('Health check failed, due to exception', exc_info=e)
 
                     if on_error:
                         on_error(e)
