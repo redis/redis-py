@@ -865,16 +865,28 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 # Don't treat this as a node failure - just re-raise the error
                 # without reinitializing the cluster.
                 raise
-            except (ConnectionError, TimeoutError):
-                # Connection retries are being handled in the node's
-                # Retry object.
-                # Remove the failed node from the startup nodes before we try
-                # to reinitialize the cluster
-                self.nodes_manager.startup_nodes.pop(target_node.name, None)
+            except (ConnectionError, TimeoutError) as e:
+                if len(self.nodes_manager.startup_nodes) == 1:
+                    # keep at least one node for retrying
+                    ce = RedisClusterException(
+                        'Redis Cluster cannot be connected. '
+                        'Connection or Timeout Errors across all startup nodes'
+                    )
+                    ce.__cause__ = e
+                    e = ce
+                else:
+                    # Connection retries are being handled in the node's
+                    # Retry object.
+                    # Remove the failed node from the startup nodes before we
+                    # try to reinitialize the cluster
+                    self.nodes_manager.startup_nodes.pop(
+                        target_node.name,
+                        None
+                    )
                 # Hard force of reinitialize of the node/slots setup
                 # and try again with the new setup
                 await self.aclose()
-                raise
+                raise e
             except (ClusterDownError, SlotNotCoveredError):
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
