@@ -37,7 +37,7 @@ class TestActiveActive:
 
     def teardown_method(self, method):
         # Timeout so the cluster could recover from network failure.
-        sleep(6)
+        sleep(10)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
