@@ -337,9 +337,6 @@ class PubSub:
     def __enter__(self) -> "PubSub":
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
-        self.reset()
-
     def __del__(self) -> None:
         try:
             # if this object went out of scope prior to shutting down
@@ -350,7 +347,7 @@ class PubSub:
             pass
 
     def reset(self) -> None:
-        pass
+        return self._client.command_executor.execute_pubsub_method('reset')
 
     def close(self) -> None:
         self.reset()
@@ -358,6 +355,9 @@ class PubSub:
     @property
     def subscribed(self) -> bool:
         return self._client.command_executor.active_pubsub.subscribed
+
+    def execute_command(self, *args):
+        return self._client.command_executor.execute_pubsub_method('execute_command', *args)
 
     def psubscribe(self, *args, **kwargs):
         """

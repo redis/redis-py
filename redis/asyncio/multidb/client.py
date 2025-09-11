@@ -1,6 +1,7 @@
 import asyncio
 from typing import Callable, Optional, Coroutine, Any, List, Union, Awaitable
 
+from redis.asyncio.client import PubSubHandler
 from redis.asyncio.multidb.command_executor import DefaultCommandExecutor
 from redis.asyncio.multidb.database import AsyncDatabase, Databases
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
@@ -10,7 +11,7 @@ from redis.asyncio.multidb.config import MultiDbConfig, DEFAULT_GRACE_PERIOD
 from redis.background import BackgroundScheduler
 from redis.commands import AsyncRedisModuleCommands, AsyncCoreCommands
 from redis.multidb.exception import NoValidDatabaseException
-from redis.typing import KeyT
+from redis.typing import KeyT, EncodableT, ChannelT
 
 
 class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
@@ -222,6 +223,17 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             watch_delay=watch_delay,
         )
 
+    async def pubsub(self, **kwargs):
+        """
+        Return a Publish/Subscribe object. With this object, you can
+        subscribe to channels and listen for messages that get published to
+        them.
+        """
+        if not self.initialized:
+            await self.initialize()
+
+        return PubSub(self, **kwargs)
+
     async def _check_databases_health(
             self,
             on_error: Optional[Callable[[Exception], Coroutine[Any, Any, None]]] = None,
@@ -341,3 +353,122 @@ class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
             return await self._client.command_executor.execute_pipeline(tuple(self._command_stack))
         finally:
             await self.reset()
+
+class PubSub:
+    """
+    PubSub object for multi database client.
+    """
+    def __init__(self, client: MultiDBClient, **kwargs):
+        """Initialize the PubSub object for a multi-database client.
+
+        Args:
+            client: MultiDBClient instance to use for pub/sub operations
+            **kwargs: Additional keyword arguments to pass to the underlying pubsub implementation
+        """
+
+        self._client = client
+        self._client.command_executor.pubsub(**kwargs)
+
+    async def __aenter__(self) -> "PubSub":
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+        await self.aclose()
+
+    async def aclose(self):
+        return await self._client.command_executor.execute_pubsub_method('aclose')
+
+    @property
+    def subscribed(self) -> bool:
+        return self._client.command_executor.active_pubsub.subscribed
+
+    async def execute_command(self, *args: EncodableT):
+        return await self._client.command_executor.execute_pubsub_method('execute_command', *args)
+
+    async def psubscribe(self, *args: ChannelT, **kwargs: PubSubHandler):
+        """
+        Subscribe to channel patterns. Patterns supplied as keyword arguments
+        expect a pattern name as the key and a callable as the value. A
+        pattern's callable will be invoked automatically when a message is
+        received on that pattern rather than producing a message via
+        ``listen()``.
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            'psubscribe',
+            *args,
+            **kwargs
+        )
+
+    async def punsubscribe(self, *args: ChannelT):
+        """
+        Unsubscribe from the supplied patterns. If empty, unsubscribe from
+        all patterns.
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            'punsubscribe',
+            *args
+        )
+
+    async def subscribe(self, *args: ChannelT, **kwargs: Callable):
+        """
+        Subscribe to channels. Channels supplied as keyword arguments expect
+        a channel name as the key and a callable as the value. A channel's
+        callable will be invoked automatically when a message is received on
+        that channel rather than producing a message via ``listen()`` or
+        ``get_message()``.
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            'subscribe',
+            *args,
+            **kwargs
+        )
+
+    async def unsubscribe(self, *args):
+        """
+        Unsubscribe from the supplied channels. If empty, unsubscribe from
+        all channels
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            'unsubscribe',
+            *args
+        )
+
+    async def get_message(
+        self, ignore_subscribe_messages: bool = False, timeout: Optional[float] = 0.0
+    ):
+        """
+        Get the next message if one is available, otherwise None.
+
+        If timeout is specified, the system will wait for `timeout` seconds
+        before returning. Timeout should be specified as a floating point
+        number or None to wait indefinitely.
+        """
+        return await self._client.command_executor.execute_pubsub_method(
+            'get_message',
+            ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+        )
+
+    async def run(
+        self,
+        *,
+        exception_handler: Optional["PSWorkerThreadExcHandlerT"] = None,
+        poll_timeout: float = 1.0,
+    ) -> None:
+        """Process pub/sub messages using registered callbacks.
+
+        This is the equivalent of :py:meth:`redis.PubSub.run_in_thread` in
+        redis-py, but it is a coroutine. To launch it as a separate task, use
+        ``asyncio.create_task``:
+
+            >>> task = asyncio.create_task(pubsub.run())
+
+        To shut it down, use asyncio cancellation:
+
+            >>> task.cancel()
+            >>> await task
+        """
+        return await self._client.command_executor.execute_pubsub_run(
+            exception_handler=exception_handler,
+            sleep_time=poll_timeout,
+            pubsub=self
+        )
