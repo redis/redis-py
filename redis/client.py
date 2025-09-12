@@ -658,12 +658,30 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if self._single_connection_client:
             self.single_connection_lock.acquire()
         try:
-            return conn.retry.call_with_retry(
+            result = conn.retry.call_with_retry(
                 lambda: self._send_command_parse_response(
                     conn, command_name, *args, **options
                 ),
                 lambda _: self._close_connection(conn),
             )
+
+            # Clean up iter_req_id for SCAN family commands when the cursor returns to 0
+            iter_req_id = options.get("iter_req_id")
+            if iter_req_id and command_name.upper() in (
+                "SCAN",
+                "SSCAN",
+                "HSCAN",
+                "ZSCAN",
+            ):
+                if (
+                    isinstance(result, (list, tuple))
+                    and len(result) >= 2
+                    and result[0] == 0
+                ):
+                    if hasattr(pool, "cleanup"):
+                        pool.cleanup(iter_req_id)
+
+            return result
 
         finally:
             if conn and conn.should_reconnect():
