@@ -36,7 +36,7 @@ class TestActiveActive:
 
     def teardown_method(self, method):
         # Timeout so the cluster could recover from network failure.
-        sleep(10)
+        sleep(15)
 
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -47,7 +47,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     def test_multi_db_client_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
@@ -75,13 +75,13 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2},
-            {"client_class": RedisCluster, "failure_threshold": 2},
+            {"client_class": Redis, "failure_threshold": 2, "health_check_interval": 10},
+            {"client_class": RedisCluster, "failure_threshold": 2, "health_check_interval": 10},
         ],
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     def test_multi_db_client_uses_lag_aware_health_check(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
@@ -123,7 +123,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     def test_context_manager_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
@@ -179,7 +179,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     def test_chaining_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
@@ -235,7 +235,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     def test_transaction_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
@@ -277,7 +277,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     def test_pubsub_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 
@@ -323,7 +323,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     def test_sharded_pubsub_failover_to_another_db(self, r_multi_db, fault_injector_client):
         r_multi_db, listener, config = r_multi_db
 

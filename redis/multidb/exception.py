@@ -1,2 +1,10 @@
 class NoValidDatabaseException(Exception):
     pass
+
+class UnhealthyDatabaseException(Exception):
+    """Exception raised when a database is unhealthy due to an underlying exception."""
+
+    def __init__(self, message, database, original_exception):
+        super().__init__(message)
+        self.database = database
+        self.original_exception = original_exception
