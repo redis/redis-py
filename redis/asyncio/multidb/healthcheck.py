@@ -1,67 +1,167 @@
+import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Union
+from enum import Enum
+from typing import Optional, Tuple, Union, List
 
 from redis.asyncio import Redis
 from redis.asyncio.http.http_client import AsyncHTTPClientWrapper, DEFAULT_TIMEOUT
 from redis.asyncio.retry import Retry
-from redis.retry import Retry as SyncRetry
-from redis.backoff import ExponentialWithJitterBackoff
+from redis.backoff import NoBackoff
 from redis.http.http_client import HttpClient
-from redis.utils import dummy_fail_async
+from redis.multidb.exception import UnhealthyDatabaseException
 
-DEFAULT_HEALTH_CHECK_RETRIES = 3
-DEFAULT_HEALTH_CHECK_BACKOFF = ExponentialWithJitterBackoff(cap=10)
+DEFAULT_HEALTH_CHECK_PROBES = 3
+DEFAULT_HEALTH_CHECK_INTERVAL = 5
+DEFAULT_HEALTH_CHECK_DELAY = 0.5
 
 logger = logging.getLogger(__name__)
 
 class HealthCheck(ABC):
-
-    @property
-    @abstractmethod
-    def retry(self) -> Retry:
-        """The retry object to use for health checks."""
-        pass
 
     @abstractmethod
     async def check_health(self, database) -> bool:
         """Function to determine the health status."""
         pass
 
-class AbstractHealthCheck(HealthCheck):
-    def __init__(
-            self,
-            retry: Retry = Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
-    ) -> None:
-        self._retry = retry
-        self._retry.update_supported_errors([ConnectionRefusedError])
-
+class HealthCheckPolicy(ABC):
+    """
+    Health checks execution policy.
+    """
     @property
-    def retry(self) -> Retry:
-        return self._retry
-
     @abstractmethod
-    async def check_health(self, database) -> bool:
+    def health_check_probes(self) -> int:
+        """Number of probes to execute health checks."""
         pass
 
-class EchoHealthCheck(AbstractHealthCheck):
-    def __init__(
-        self,
-        retry: Retry = Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
-    ) -> None:
-        """
-        Check database healthiness by sending an echo request.
-        """
-        super().__init__(
-            retry=retry,
-        )
-    async def check_health(self, database) -> bool:
-        return await self._retry.call_with_retry(
-            lambda: self._returns_echoed_message(database),
-            lambda _: dummy_fail_async()
-        )
+    @property
+    @abstractmethod
+    def health_check_delay(self) -> float:
+        """Delay between health check probes."""
+        pass
 
-    async def _returns_echoed_message(self, database) -> bool:
+    @abstractmethod
+    async def execute(self, health_checks: List[HealthCheck], database) -> bool:
+        """Execute health checks and return database health status."""
+        pass
+
+class AbstractHealthCheckPolicy(HealthCheckPolicy):
+    def __init__(self, health_check_probes: int, health_check_delay: float):
+        if health_check_probes < 1:
+            raise ValueError("health_check_probes must be greater than 0")
+        self._health_check_probes = health_check_probes
+        self._health_check_delay = health_check_delay
+
+    @property
+    def health_check_probes(self) -> int:
+        return self._health_check_probes
+
+    @property
+    def health_check_delay(self) -> float:
+        return self._health_check_delay
+
+    @abstractmethod
+    async def execute(self, health_checks: List[HealthCheck], database) -> bool:
+        pass
+
+class HealthyAllPolicy(AbstractHealthCheckPolicy):
+    """
+    Policy that returns True if all health check probes are successful.
+    """
+    def __init__(self, health_check_probes: int, health_check_delay: float):
+        super().__init__(health_check_probes, health_check_delay)
+
+    async def execute(self, health_checks: List[HealthCheck], database) -> bool:
+        for health_check in health_checks:
+            for attempt in range(self.health_check_probes):
+                try:
+                    if not await health_check.check_health(database):
+                        return False
+                except Exception as e:
+                    raise UnhealthyDatabaseException(
+                        f"Unhealthy database", database, e
+                    )
+
+                if attempt < self.health_check_probes - 1:
+                    await asyncio.sleep(self._health_check_delay)
+        return True
+
+class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
+    """
+    Policy that returns True if a majority of health check probes are successful.
+    """
+    def __init__(self, health_check_probes: int, health_check_delay: float):
+        super().__init__(health_check_probes, health_check_delay)
+
+    async def execute(self, health_checks: List[HealthCheck], database) -> bool:
+        for health_check in health_checks:
+            if self.health_check_probes % 2 == 0:
+                unsuccessful_probes = self.health_check_probes / 2
+            else:
+                unsuccessful_probes = (self.health_check_probes + 1) / 2
+
+            for attempt in range(self.health_check_probes):
+                try:
+                    if not await health_check.check_health(database):
+                        unsuccessful_probes -= 1
+                        if unsuccessful_probes <= 0:
+                            return False
+                except Exception as e:
+                    unsuccessful_probes -= 1
+                    if unsuccessful_probes <= 0:
+                        raise UnhealthyDatabaseException(
+                            f"Unhealthy database", database, e
+                        )
+
+                if attempt < self.health_check_probes - 1:
+                    await asyncio.sleep(self._health_check_delay)
+        return True
+
+class HealthyAnyPolicy(AbstractHealthCheckPolicy):
+    """
+    Policy that returns True if at least one health check probe is successful.
+    """
+    def __init__(self, health_check_probes: int, health_check_delay: float):
+        super().__init__(health_check_probes, health_check_delay)
+
+    async def execute(self, health_checks: List[HealthCheck], database) -> bool:
+        is_healthy = False
+
+        for health_check in health_checks:
+            exception = None
+
+            for attempt in range(self.health_check_probes):
+                try:
+                    if await health_check.check_health(database):
+                        is_healthy = True
+                        break
+                    else:
+                        is_healthy = False
+                except Exception as e:
+                    exception = UnhealthyDatabaseException(
+                        f"Unhealthy database", database, e
+                    )
+
+                if attempt < self.health_check_probes - 1:
+                    await asyncio.sleep(self._health_check_delay)
+
+            if not is_healthy and not exception:
+                return is_healthy
+            elif not is_healthy and exception:
+                raise exception
+
+        return is_healthy
+
+class HealthCheckPolicies(Enum):
+    HEALTHY_ALL = HealthyAllPolicy
+    HEALTHY_MAJORITY = HealthyMajorityPolicy
+    HEALTHY_ANY = HealthyAnyPolicy
+
+class EchoHealthCheck(HealthCheck):
+    """
+    Health check based on ECHO command.
+    """
+    async def check_health(self, database) -> bool:
         expected_message = ["healthcheck", b"healthcheck"]
 
         if isinstance(database.client, Redis):
@@ -78,14 +178,13 @@ class EchoHealthCheck(AbstractHealthCheck):
 
             return True
 
-class LagAwareHealthCheck(AbstractHealthCheck):
+class LagAwareHealthCheck(HealthCheck):
     """
     Health check available for Redis Enterprise deployments.
     Verify via REST API that the database is healthy based on different lags.
     """
     def __init__(
         self,
-        retry: SyncRetry = SyncRetry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF),
         rest_api_port: int = 9443,
         lag_aware_tolerance: int = 100,
         timeout: float = DEFAULT_TIMEOUT,
@@ -104,7 +203,6 @@ class LagAwareHealthCheck(AbstractHealthCheck):
         Initialize LagAwareHealthCheck with the specified parameters.
 
         Args:
-            retry: Retry configuration for health checks
             rest_api_port: Port number for Redis Enterprise REST API (default: 9443)
             lag_aware_tolerance: Tolerance in lag between databases in MS (default: 100)
             timeout: Request timeout in seconds (default: DEFAULT_TIMEOUT)
@@ -117,14 +215,11 @@ class LagAwareHealthCheck(AbstractHealthCheck):
             client_key_file: Path to client private key file for mutual TLS
             client_key_password: Password for encrypted client private key
         """
-        super().__init__(
-            retry=retry,
-        )
         self._http_client = AsyncHTTPClientWrapper(
             HttpClient(
                 timeout=timeout,
                 auth_basic=auth_basic,
-                retry=self.retry,
+                retry=Retry(NoBackoff(), retries=0),
                 verify_tls=verify_tls,
                 ca_file=ca_file,
                 ca_path=ca_path,

@@ -58,6 +58,7 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
     def health_check_delay(self) -> float:
         return self._health_check_delay
 
+    @abstractmethod
     def execute(self, health_checks: List[HealthCheck], database) -> bool:
         pass
 

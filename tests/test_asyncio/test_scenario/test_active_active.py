@@ -37,7 +37,7 @@ class TestActiveActive:
 
     def teardown_method(self, method):
         # Timeout so the cluster could recover from network failure.
-        sleep(10)
+        sleep(15)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -49,7 +49,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     async def test_multi_db_client_failover_to_another_db(self, r_multi_db, fault_injector_client):
         client_config, listener, endpoint_config = r_multi_db
 
@@ -83,7 +83,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     async def test_multi_db_client_uses_lag_aware_health_check(self, r_multi_db, fault_injector_client):
         client_config, listener, endpoint_config = r_multi_db
 
@@ -113,7 +113,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     async def test_context_manager_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
         client_config, listener, endpoint_config = r_multi_db
 
@@ -155,7 +155,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     async def test_chaining_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
         client_config, listener, endpoint_config = r_multi_db
 
@@ -197,7 +197,7 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     async def test_transaction_failover_to_another_db(self, r_multi_db, fault_injector_client):
         client_config, listener, endpoint_config = r_multi_db
 
@@ -229,7 +229,7 @@ class TestActiveActive:
         [{"failure_threshold": 2}],
         indirect=True
     )
-    @pytest.mark.timeout(50)
+    @pytest.mark.timeout(60)
     async def test_pubsub_failover_to_another_db(self, r_multi_db, fault_injector_client):
         client_config, listener, endpoint_config = r_multi_db
 

@@ -82,10 +82,10 @@ async def r_multi_db(request) -> tuple[MultiDbConfig, CheckActiveDatabaseChanged
          command_retry=command_retry,
          failure_threshold=failure_threshold,
          health_checks=health_checks,
-         health_check_retries=3,
+         health_check_probes=3,
          health_check_interval=health_check_interval,
          event_dispatcher=event_dispatcher,
-         health_check_backoff=ExponentialBackoff(cap=5, base=0.5),
+         health_check_delay=ExponentialBackoff(cap=5, base=0.5),
      )
 
      return config, listener, endpoint_config

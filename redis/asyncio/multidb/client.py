@@ -6,12 +6,12 @@ from redis.asyncio.client import PubSubHandler
 from redis.asyncio.multidb.command_executor import DefaultCommandExecutor
 from redis.asyncio.multidb.database import AsyncDatabase, Databases
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
-from redis.asyncio.multidb.healthcheck import HealthCheck
+from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
 from redis.multidb.circuit import State as CBState, CircuitBreaker
 from redis.asyncio.multidb.config import MultiDbConfig, DEFAULT_GRACE_PERIOD
 from redis.background import BackgroundScheduler
 from redis.commands import AsyncRedisModuleCommands, AsyncCoreCommands
-from redis.multidb.exception import NoValidDatabaseException
+from redis.multidb.exception import NoValidDatabaseException, UnhealthyDatabaseException
 from redis.typing import KeyT, EncodableT, ChannelT
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,10 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             self._health_checks.extend(config.health_checks)
 
         self._health_check_interval = config.health_check_interval
+        self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value(
+            config.health_check_probes,
+            config.health_check_delay
+        )
         self._failure_detectors = config.default_failure_detectors()
 
         if config.failure_detectors is not None:
@@ -244,42 +248,45 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         Runs health checks as a recurring task.
         Runs health checks against all databases.
         """
-        for database, _ in self._databases:
-            async with self._hc_lock:
-                await self._check_db_health(database, on_error)
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(
+                    asyncio.create_task(self._check_db_health(database))
+                    for database, _ in self._databases
+                ),
+                return_exceptions=True,
+            ),
+            timeout=self._health_check_interval,
+        )
 
-    async def _check_db_health(
-            self,
-            database: AsyncDatabase,
-            on_error: Optional[Callable[[Exception], Coroutine[Any, Any, None]]] = None,
-    ) -> None:
+        for result in results:
+            if isinstance(result, UnhealthyDatabaseException):
+                unhealthy_db = result.database
+                unhealthy_db.circuit.state = CBState.OPEN
+
+                logger.exception(
+                    'Health check failed, due to exception',
+                    exc_info=result.original_exception
+                )
+
+                if on_error:
+                    on_error(result.original_exception)
+
+    async def _check_db_health(self, database: AsyncDatabase,) -> bool:
         """
         Runs health checks on the given database until first failure.
         """
-        is_healthy = True
-
         # Health check will setup circuit state
-        for health_check in self._health_checks:
-            if not is_healthy:
-                # If one of the health checks failed, it's considered unhealthy
-                break
+        is_healthy = await self._health_check_policy.execute(self._health_checks, database)
 
-            try:
-                is_healthy = await health_check.check_health(database)
+        if not is_healthy:
+            if database.circuit.state != CBState.OPEN:
+                database.circuit.state = CBState.OPEN
+            return is_healthy
+        elif is_healthy and database.circuit.state != CBState.CLOSED:
+            database.circuit.state = CBState.CLOSED
 
-                if not is_healthy and database.circuit.state != CBState.OPEN:
-                    database.circuit.state = CBState.OPEN
-                elif is_healthy and database.circuit.state != CBState.CLOSED:
-                    database.circuit.state = CBState.CLOSED
-            except Exception as e:
-                if database.circuit.state != CBState.OPEN:
-                    database.circuit.state = CBState.OPEN
-                is_healthy = False
-
-                logger.exception('Health check failed, due to exception', exc_info=e)
-
-                if on_error:
-                    await on_error(e)
+        return is_healthy
 
     def _on_circuit_state_change_callback(self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState):
         loop = asyncio.get_running_loop()

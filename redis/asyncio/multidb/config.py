@@ -7,8 +7,8 @@ from redis.asyncio import ConnectionPool, Redis, RedisCluster
 from redis.asyncio.multidb.database import Databases, Database
 from redis.asyncio.multidb.failover import AsyncFailoverStrategy, WeightBasedFailoverStrategy
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector, FailureDetectorAsyncWrapper
-from redis.asyncio.multidb.healthcheck import HealthCheck, DEFAULT_HEALTH_CHECK_RETRIES, DEFAULT_HEALTH_CHECK_BACKOFF, \
-    EchoHealthCheck
+from redis.asyncio.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_INTERVAL, \
+    DEFAULT_HEALTH_CHECK_PROBES, DEFAULT_HEALTH_CHECK_DELAY, HealthCheckPolicies
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff, AbstractBackoff, NoBackoff
 from redis.data_structure import WeightedList
@@ -17,9 +17,9 @@ from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter
 from redis.multidb.failure_detector import CommandFailureDetector
 
 DEFAULT_GRACE_PERIOD = 5.0
-DEFAULT_HEALTH_CHECK_INTERVAL = 5
 DEFAULT_FAILURES_THRESHOLD = 3
 DEFAULT_FAILURES_DURATION = 2
+DEFAULT_HEALTH_CHECK_POLICY: HealthCheckPolicies = HealthCheckPolicies.HEALTHY_ALL
 DEFAULT_FAILOVER_RETRIES = 3
 DEFAULT_FAILOVER_BACKOFF = ExponentialWithJitterBackoff(cap=3)
 DEFAULT_AUTO_FALLBACK_INTERVAL = -1
@@ -78,8 +78,8 @@ class MultiDbConfig:
         failures_interval: Time interval for tracking database failures.
         health_checks: Optional list of additional health checks performed on databases.
         health_check_interval: Time interval for executing health checks.
-        health_check_retries: Number of retry attempts for performing health checks.
-        health_check_backoff: Backoff strategy for health check retries.
+        health_check_probes: Number of attempts to evaluate the health of a database.
+        health_check_delay: Delay between health check attempts.
         failover_strategy: Optional strategy for handling database failover scenarios.
         failover_retries: Number of retries allowed for failover operations.
         failover_backoff: Backoff strategy for failover retries.
@@ -113,8 +113,9 @@ class MultiDbConfig:
     failures_interval: float = DEFAULT_FAILURES_DURATION
     health_checks: Optional[List[HealthCheck]] = None
     health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL
-    health_check_retries: int = DEFAULT_HEALTH_CHECK_RETRIES
-    health_check_backoff: AbstractBackoff = DEFAULT_HEALTH_CHECK_BACKOFF
+    health_check_probes: int = DEFAULT_HEALTH_CHECK_PROBES
+    health_check_delay: float = DEFAULT_HEALTH_CHECK_DELAY
+    health_check_policy: HealthCheckPolicies = DEFAULT_HEALTH_CHECK_POLICY
     failover_strategy: Optional[AsyncFailoverStrategy] = None
     failover_retries: int = DEFAULT_FAILOVER_RETRIES
     failover_backoff: AbstractBackoff = DEFAULT_FAILOVER_BACKOFF
@@ -160,7 +161,7 @@ class MultiDbConfig:
 
     def default_health_checks(self) -> List[HealthCheck]:
         return [
-            EchoHealthCheck(retry=Retry(retries=self.health_check_retries, backoff=self.health_check_backoff)),
+            EchoHealthCheck(),
         ]
 
     def default_failover_strategy(self) -> AsyncFailoverStrategy:
