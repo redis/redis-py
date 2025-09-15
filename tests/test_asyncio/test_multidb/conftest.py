@@ -2,11 +2,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from redis.asyncio.multidb.config import MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_AUTO_FALLBACK_INTERVAL, \
-    DatabaseConfig, DEFAULT_HEALTH_CHECK_POLICY
+from redis.asyncio.multidb.config import MultiDbConfig, DatabaseConfig, DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.asyncio.multidb.failover import AsyncFailoverStrategy
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
-from redis.asyncio.multidb.healthcheck import HealthCheck, DEFAULT_HEALTH_CHECK_PROBES
+from redis.asyncio.multidb.healthcheck import HealthCheck, DEFAULT_HEALTH_CHECK_PROBES, DEFAULT_HEALTH_CHECK_INTERVAL, \
+    DEFAULT_HEALTH_CHECK_POLICY
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import State as CBState, CircuitBreaker
 from redis.asyncio import Redis

@@ -6,12 +6,10 @@ import pytest
 
 from redis.asyncio.client import Pipeline
 from redis.asyncio.multidb.client import MultiDBClient
-from redis.asyncio.multidb.config import DEFAULT_FAILOVER_RETRIES
 from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy
 from redis.asyncio.multidb.healthcheck import EchoHealthCheck
 from redis.asyncio.retry import Retry
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
-from redis.multidb.config import DEFAULT_FAILOVER_BACKOFF
 from tests.test_asyncio.test_multidb.conftest import create_weighted_list
 
 
@@ -147,9 +145,7 @@ class TestPipeline:
             mock_db2.client.pipeline.return_value = pipe2
 
             mock_multi_db_config.health_check_interval = 0.1
-            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
-            )
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
 
@@ -297,9 +293,7 @@ class TestTransaction:
             mock_db2.client.transaction.return_value = ['OK2', 'value']
 
             mock_multi_db_config.health_check_interval = 0.1
-            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
-            )
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
 

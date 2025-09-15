@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 
 from redis.multidb.failure_detector import FailureDetector
 
+DEFAULT_FAILURES_THRESHOLD = 3
+DEFAULT_FAILURES_DURATION = 2
 
 class AsyncFailureDetector(ABC):
 

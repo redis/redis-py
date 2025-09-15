@@ -5,23 +5,19 @@ import pybreaker
 
 from redis.asyncio import ConnectionPool, Redis, RedisCluster
 from redis.asyncio.multidb.database import Databases, Database
-from redis.asyncio.multidb.failover import AsyncFailoverStrategy, WeightBasedFailoverStrategy
-from redis.asyncio.multidb.failure_detector import AsyncFailureDetector, FailureDetectorAsyncWrapper
+from redis.asyncio.multidb.failover import AsyncFailoverStrategy, WeightBasedFailoverStrategy, DEFAULT_FAILOVER_DELAY, \
+    DEFAULT_FAILOVER_ATTEMPTS
+from redis.asyncio.multidb.failure_detector import AsyncFailureDetector, FailureDetectorAsyncWrapper, \
+    DEFAULT_FAILURES_THRESHOLD, DEFAULT_FAILURES_DURATION
 from redis.asyncio.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_INTERVAL, \
-    DEFAULT_HEALTH_CHECK_PROBES, DEFAULT_HEALTH_CHECK_DELAY, HealthCheckPolicies
+    DEFAULT_HEALTH_CHECK_PROBES, DEFAULT_HEALTH_CHECK_DELAY, HealthCheckPolicies, DEFAULT_HEALTH_CHECK_POLICY
 from redis.asyncio.retry import Retry
-from redis.backoff import ExponentialWithJitterBackoff, AbstractBackoff, NoBackoff
+from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.data_structure import WeightedList
 from redis.event import EventDispatcherInterface, EventDispatcher
-from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter
+from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter, DEFAULT_GRACE_PERIOD
 from redis.multidb.failure_detector import CommandFailureDetector
 
-DEFAULT_GRACE_PERIOD = 5.0
-DEFAULT_FAILURES_THRESHOLD = 3
-DEFAULT_FAILURES_DURATION = 2
-DEFAULT_HEALTH_CHECK_POLICY: HealthCheckPolicies = HealthCheckPolicies.HEALTHY_ALL
-DEFAULT_FAILOVER_RETRIES = 3
-DEFAULT_FAILOVER_BACKOFF = ExponentialWithJitterBackoff(cap=3)
 DEFAULT_AUTO_FALLBACK_INTERVAL = -1
 
 def default_event_dispatcher() -> EventDispatcherInterface:
@@ -117,8 +113,8 @@ class MultiDbConfig:
     health_check_delay: float = DEFAULT_HEALTH_CHECK_DELAY
     health_check_policy: HealthCheckPolicies = DEFAULT_HEALTH_CHECK_POLICY
     failover_strategy: Optional[AsyncFailoverStrategy] = None
-    failover_retries: int = DEFAULT_FAILOVER_RETRIES
-    failover_backoff: AbstractBackoff = DEFAULT_FAILOVER_BACKOFF
+    failover_retries: int = DEFAULT_FAILOVER_ATTEMPTS
+    failover_delay: float = DEFAULT_FAILOVER_DELAY
     auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL
     event_dispatcher: EventDispatcherInterface = field(default_factory=default_event_dispatcher)
 
@@ -166,5 +162,6 @@ class MultiDbConfig:
 
     def default_failover_strategy(self) -> AsyncFailoverStrategy:
         return WeightBasedFailoverStrategy(
-            retry=Retry(retries=self.failover_retries, backoff=self.failover_backoff),
+            failover_delay=self.failover_delay,
+            failover_attempts=self.failover_retries,
         )

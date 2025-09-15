@@ -5,12 +5,10 @@ import pybreaker
 import pytest
 
 from redis.asyncio.multidb.client import MultiDBClient
-from redis.asyncio.multidb.config import DEFAULT_FAILOVER_RETRIES, DEFAULT_FAILOVER_BACKOFF
 from redis.asyncio.multidb.database import AsyncDatabase
 from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
 from redis.asyncio.multidb.healthcheck import EchoHealthCheck, HealthCheck
-from redis.asyncio.retry import Retry
 from redis.event import EventDispatcher, AsyncOnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.exception import NoValidDatabaseException
@@ -120,9 +118,7 @@ class TestMultiDbClient:
             mock_db1.client.execute_command.side_effect = ['healthcheck', 'OK1', 'error', 'error', 'healthcheck', 'OK1']
             mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'OK2', 'error', 'error']
             mock_multi_db_config.health_check_interval = 0.1
-            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
-            )
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
             assert await client.set('key', 'value') == 'OK1'
@@ -158,9 +154,7 @@ class TestMultiDbClient:
             mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'OK2', 'healthcheck', 'healthcheck', 'healthcheck']
             mock_multi_db_config.health_check_interval = 0.1
             mock_multi_db_config.auto_fallback_interval = 0.2
-            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
-            )
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
             assert await client.set('key', 'value') == 'OK1'
