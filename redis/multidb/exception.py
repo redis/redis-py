@@ -8,3 +8,7 @@ class UnhealthyDatabaseException(Exception):
         super().__init__(message)
         self.database = database
         self.original_exception = original_exception
+
+class TemporaryUnavailableException(Exception):
+    """Exception raised when all databases in setup is temporary unavailable."""
+    pass

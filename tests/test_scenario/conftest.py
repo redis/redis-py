@@ -9,9 +9,9 @@ from redis import Redis
 from redis.backoff import NoBackoff, ExponentialBackoff
 from redis.event import EventDispatcher, EventListenerInterface
 from redis.multidb.client import MultiDBClient
-from redis.multidb.config import DatabaseConfig, MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
-    DEFAULT_FAILURES_THRESHOLD
+from redis.multidb.config import DatabaseConfig, MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL
 from redis.multidb.event import ActiveDatabaseChanged
+from redis.multidb.failure_detector import DEFAULT_FAILURES_THRESHOLD
 from redis.multidb.healthcheck import EchoHealthCheck, DEFAULT_HEALTH_CHECK_DELAY
 from redis.retry import Retry
 from tests.test_scenario.fault_injector_client import FaultInjectorClient

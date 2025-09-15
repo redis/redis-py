@@ -6,15 +6,12 @@ import pytest
 
 from redis.event import EventDispatcher, OnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
-from redis.multidb.config import DEFAULT_FAILOVER_RETRIES, \
-    DEFAULT_FAILOVER_BACKOFF
 from redis.multidb.database import SyncDatabase
 from redis.multidb.client import MultiDBClient
 from redis.multidb.exception import NoValidDatabaseException
-from redis.multidb.failover import WeightBasedFailoverStrategy
+from redis.multidb.failover import WeightBasedFailoverStrategy, DEFAULT_FAILOVER_ATTEMPTS, DEFAULT_FAILOVER_DELAY
 from redis.multidb.failure_detector import FailureDetector
-from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_PROBES
-from redis.retry import Retry
+from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
 from tests.test_multidb.conftest import create_weighted_list
 
 
@@ -120,7 +117,8 @@ class TestMultiDbClient:
             mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'OK2', 'error', 'error']
             mock_multi_db_config.health_check_interval = 0.2
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
+                failover_attempts=DEFAULT_FAILOVER_ATTEMPTS,
+                failover_delay=DEFAULT_FAILOVER_DELAY
             )
 
             client = MultiDBClient(mock_multi_db_config)
@@ -157,7 +155,8 @@ class TestMultiDbClient:
             mock_multi_db_config.health_check_interval = 0.2
             mock_multi_db_config.auto_fallback_interval = 0.4
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
+                failover_attempts=DEFAULT_FAILOVER_ATTEMPTS,
+                failover_delay=DEFAULT_FAILOVER_DELAY
             )
 
             client = MultiDBClient(mock_multi_db_config)

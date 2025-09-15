@@ -155,6 +155,8 @@ class HealthCheckPolicies(Enum):
     HEALTHY_MAJORITY = HealthyMajorityPolicy
     HEALTHY_ANY = HealthyAnyPolicy
 
+DEFAULT_HEALTH_CHECK_POLICY: HealthCheckPolicies = HealthCheckPolicies.HEALTHY_ALL
+
 class EchoHealthCheck(HealthCheck):
     """
     Health check based on ECHO command.

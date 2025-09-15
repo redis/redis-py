@@ -6,11 +6,11 @@ from redis import Redis
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import State as CBState, CircuitBreaker
 from redis.multidb.config import MultiDbConfig, DatabaseConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
-    DEFAULT_AUTO_FALLBACK_INTERVAL, DEFAULT_HEALTH_CHECK_POLICY
+    DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, Databases
 from redis.multidb.failover import FailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
-from redis.multidb.healthcheck import HealthCheck, DEFAULT_HEALTH_CHECK_PROBES
+from redis.multidb.healthcheck import HealthCheck, DEFAULT_HEALTH_CHECK_PROBES, DEFAULT_HEALTH_CHECK_POLICY
 from tests.conftest import mock_ed
 
 
