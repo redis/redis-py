@@ -17,6 +17,7 @@ class ClientValidations:
     def wait_push_notification(
         redis_client: Redis,
         timeout: int = 120,
+        fail_on_timeout: bool = True,
         connection: Optional[Connection] = None,
     ):
         """Wait for a push notification to be received."""
@@ -35,11 +36,15 @@ class ClientValidations:
                         logging.debug(
                             f"Push notification has been received. Response: {push_response}"
                         )
+                        if test_conn.should_reconnect():
+                            logging.debug("Connection is marked for reconnect")
                         return
                 except Exception as e:
                     logging.error(f"Error reading push notification: {e}")
                     break
                 time.sleep(check_interval)
+            if fail_on_timeout:
+                pytest.fail("Timeout waiting for push notification")
         finally:
             # Release the connection back to the pool
             try:
@@ -214,6 +219,40 @@ class ClusterOperations:
                         return endpoint_id
 
         raise ValueError(f"No endpoint ID for {endpoint_name} found in cluster status")
+
+    @staticmethod
+    def execute_failover(
+        fault_injector: FaultInjectorClient,
+        endpoint_config: Dict[str, Any],
+        timeout: int = 60,
+    ) -> Dict[str, Any]:
+        """Execute failover command and wait for completion."""
+
+        try:
+            bdb_id = endpoint_config.get("bdb_id")
+            failover_action = ActionRequest(
+                action_type=ActionType.FAILOVER,
+                parameters={
+                    "bdb_id": bdb_id,
+                },
+            )
+            trigger_action_result = fault_injector.trigger_action(failover_action)
+            action_id = trigger_action_result.get("action_id")
+            if not action_id:
+                raise ValueError(
+                    f"Failed to trigger fail over action for bdb_id {bdb_id}: {trigger_action_result}"
+                )
+
+            action_status_check_response = fault_injector.get_operation_result(
+                action_id, timeout=timeout
+            )
+            logging.info(
+                f"Completed cluster nodes info reading: {action_status_check_response}"
+            )
+            return action_status_check_response
+
+        except Exception as e:
+            pytest.fail(f"Failed to get cluster nodes info: {e}")
 
     @staticmethod
     def execute_rladmin_migrate(

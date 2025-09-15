@@ -55,12 +55,14 @@ def client_maint_events(endpoints_config):
 
 def _get_client_maint_events(
     endpoints_config,
+    protocol: int = 3,
     enable_maintenance_events: bool = True,
     endpoint_type: Optional[EndpointType] = None,
     enable_relax_timeout: bool = True,
     enable_proactive_reconnect: bool = True,
     disable_retries: bool = False,
     socket_timeout: Optional[float] = None,
+    host_config: Optional[str] = None,
 ):
     """Create Redis client with maintenance events enabled."""
 
@@ -74,10 +76,8 @@ def _get_client_maint_events(
         raise ValueError("No endpoints found in configuration")
 
     parsed = urlparse(endpoints[0])
-    host = parsed.hostname
+    host = parsed.hostname if host_config is None else host_config
     port = parsed.port
-
-    tls_enabled = True if parsed.scheme == "rediss" else False
 
     if not host:
         raise ValueError(f"Could not parse host from endpoint URL: {endpoints[0]}")
@@ -99,6 +99,9 @@ def _get_client_maint_events(
     else:
         retry = Retry(backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3)
 
+    tls_enabled = True if parsed.scheme == "rediss" else False
+    logging.info(f"TLS enabled: {tls_enabled}")
+
     client = Redis(
         host=host,
         port=port,
@@ -108,7 +111,7 @@ def _get_client_maint_events(
         ssl=tls_enabled,
         ssl_cert_reqs="none",
         ssl_check_hostname=False,
-        protocol=3,  # RESP3 required for push notifications
+        protocol=protocol,  # RESP3 required for push notifications
         maintenance_events_config=maintenance_config,
         retry=retry,
     )
