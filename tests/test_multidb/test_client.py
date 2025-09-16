@@ -9,7 +9,7 @@ from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.database import SyncDatabase
 from redis.multidb.client import MultiDBClient
 from redis.multidb.exception import NoValidDatabaseException
-from redis.multidb.failover import WeightBasedFailoverStrategy, DEFAULT_FAILOVER_ATTEMPTS, DEFAULT_FAILOVER_DELAY
+from redis.multidb.failover import WeightBasedFailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
 from tests.test_multidb.conftest import create_weighted_list
@@ -116,10 +116,7 @@ class TestMultiDbClient:
             mock_db1.client.execute_command.side_effect = ['healthcheck', 'OK1', 'error', 'error', 'healthcheck', 'OK1']
             mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'OK2', 'error', 'error']
             mock_multi_db_config.health_check_interval = 0.2
-            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                failover_attempts=DEFAULT_FAILOVER_ATTEMPTS,
-                failover_delay=DEFAULT_FAILOVER_DELAY
-            )
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
             assert client.set('key', 'value') == 'OK1'
@@ -154,10 +151,7 @@ class TestMultiDbClient:
             mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'OK2', 'healthcheck', 'healthcheck', 'healthcheck']
             mock_multi_db_config.health_check_interval = 0.2
             mock_multi_db_config.auto_fallback_interval = 0.4
-            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                failover_attempts=DEFAULT_FAILOVER_ATTEMPTS,
-                failover_delay=DEFAULT_FAILOVER_DELAY
-            )
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
             assert client.set('key', 'value') == 'OK1'

@@ -61,8 +61,7 @@ class TestDefaultCommandExecutor:
     ):
         mock_db1.client.execute_command.return_value = 'OK1'
         mock_db2.client.execute_command.return_value = 'OK2'
-        mock_selector = PropertyMock(side_effect=[mock_db1, mock_db2])
-        type(mock_fs).database = mock_selector
+        mock_fs.database.side_effect = [mock_db1, mock_db2]
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
         executor = DefaultCommandExecutor(
@@ -78,7 +77,7 @@ class TestDefaultCommandExecutor:
 
         assert executor.execute_command('SET', 'key', 'value') == 'OK2'
         assert mock_ed.register_listeners.call_count == 1
-        assert mock_selector.call_count == 2
+        assert mock_fs.database.call_count == 2
 
     @pytest.mark.parametrize(
         'mock_db,mock_db1,mock_db2',
@@ -96,8 +95,7 @@ class TestDefaultCommandExecutor:
     ):
         mock_db1.client.execute_command.return_value = 'OK1'
         mock_db2.client.execute_command.return_value = 'OK2'
-        mock_selector = PropertyMock(side_effect=[mock_db1, mock_db2, mock_db1])
-        type(mock_fs).database = mock_selector
+        mock_fs.database.side_effect = [mock_db1, mock_db2, mock_db1]
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
         executor = DefaultCommandExecutor(
@@ -119,7 +117,7 @@ class TestDefaultCommandExecutor:
 
         assert executor.execute_command('SET', 'key', 'value') == 'OK1'
         assert mock_ed.register_listeners.call_count == 1
-        assert mock_selector.call_count == 3
+        assert mock_fs.database.call_count == 3
 
     @pytest.mark.parametrize(
         'mock_db,mock_db1,mock_db2',
@@ -137,8 +135,7 @@ class TestDefaultCommandExecutor:
     ):
         mock_db1.client.execute_command.side_effect = ['OK1', ConnectionError, ConnectionError, ConnectionError, 'OK1']
         mock_db2.client.execute_command.side_effect = ['OK2', ConnectionError, ConnectionError, ConnectionError]
-        mock_selector = PropertyMock(side_effect=[mock_db1, mock_db2, mock_db1])
-        type(mock_fs).database = mock_selector
+        mock_fs.database.side_effect = [mock_db1, mock_db2, mock_db1]
         threshold = 3
         fd = CommandFailureDetector(threshold, 1)
         ed = EventDispatcher()
@@ -157,4 +154,4 @@ class TestDefaultCommandExecutor:
         assert executor.execute_command('SET', 'key', 'value') == 'OK1'
         assert executor.execute_command('SET', 'key', 'value') == 'OK2'
         assert executor.execute_command('SET', 'key', 'value') == 'OK1'
-        assert mock_selector.call_count == 3
+        assert mock_fs.database.call_count == 3

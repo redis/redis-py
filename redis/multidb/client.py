@@ -50,6 +50,8 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             databases=self._databases,
             command_retry=self._command_retry,
             failover_strategy=self._failover_strategy,
+            failover_attempts=config.failover_attempts,
+            failover_delay=config.failover_delay,
             event_dispatcher=self._event_dispatcher,
             auto_fallback_interval=self._auto_fallback_interval,
         )

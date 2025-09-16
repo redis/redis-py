@@ -140,11 +140,8 @@ class TestPipeline:
             pipe2.execute.return_value = ['OK2', 'value']
             mock_db2.client.pipeline.return_value = pipe2
 
-            mock_multi_db_config.health_check_interval = 0.2
-            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                failover_attempts=DEFAULT_FAILOVER_ATTEMPTS,
-                failover_delay=DEFAULT_FAILOVER_DELAY
-            )
+            mock_multi_db_config.health_check_interval = 0.1
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
 
@@ -154,7 +151,7 @@ class TestPipeline:
 
             assert pipe.execute() == ['OK1', 'value']
 
-            sleep(0.3)
+            sleep(0.15)
 
             with client.pipeline() as pipe:
                 pipe.set('key1', 'value')
@@ -162,7 +159,7 @@ class TestPipeline:
 
             assert pipe.execute() == ['OK2', 'value']
 
-            sleep(0.2)
+            sleep(0.1)
 
             with client.pipeline() as pipe:
                 pipe.set('key1', 'value')
@@ -170,7 +167,7 @@ class TestPipeline:
 
             assert pipe.execute() == ['OK', 'value']
 
-            sleep(0.2)
+            sleep(0.1)
 
             with client.pipeline() as pipe:
                 pipe.set('key1', 'value')
@@ -289,11 +286,8 @@ class TestTransaction:
             mock_db1.client.transaction.return_value = ['OK1', 'value']
             mock_db2.client.transaction.return_value = ['OK2', 'value']
 
-            mock_multi_db_config.health_check_interval = 0.2
-            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                failover_attempts=DEFAULT_FAILOVER_ATTEMPTS,
-                failover_delay=DEFAULT_FAILOVER_DELAY
-            )
+            mock_multi_db_config.health_check_interval = 0.1
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
 
@@ -302,9 +296,9 @@ class TestTransaction:
                 pipe.get('key1')
 
             assert client.transaction(callback) == ['OK1', 'value']
-            sleep(0.3)
+            sleep(0.15)
             assert client.transaction(callback) == ['OK2', 'value']
-            sleep(0.2)
+            sleep(0.1)
             assert client.transaction(callback) == ['OK', 'value']
-            sleep(0.2)
+            sleep(0.1)
             assert client.transaction(callback) == ['OK1', 'value']
