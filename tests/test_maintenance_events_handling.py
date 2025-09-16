@@ -236,9 +236,7 @@ class MockSocket:
                 # MOVING push message before SET key_receive_moving_none_X response
                 # Format: >4\r\n$6\r\nMOVING\r\n:1\r\n:1\r\n+null\r\n (4 elements: MOVING, id, ttl, null)
                 # Note: Using + instead of $ to send as simple string instead of bulk string
-                moving_push = (
-                    f">4\r\n$6\r\nMOVING\r\n:1\r\n:{MOVING_TIMEOUT}\r\n+null\r\n"
-                )
+                moving_push = f">4\r\n$6\r\nMOVING\r\n:1\r\n:{MOVING_TIMEOUT}\r\n_\r\n"
                 response = moving_push.encode() + response
             elif b"key_receive_moving_" in data:
                 # MOVING push message before SET key_receive_moving_X response

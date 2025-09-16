@@ -1,7 +1,22 @@
 import json
+import logging
+import time
 import urllib.request
 from typing import Dict, Any, Optional, Union
 from enum import Enum
+
+import pytest
+
+
+class TaskStatuses:
+    """Class to hold completed statuses constants."""
+
+    FAILED = "failed"
+    FINISHED = "finished"
+    SUCCESS = "success"
+    RUNNING = "running"
+
+    COMPLETED_STATUSES = [FAILED, FINISHED, SUCCESS]
 
 
 class ActionType(str, Enum):
@@ -103,3 +118,32 @@ class FaultInjectorClient:
                 error_body = json.loads(e.read().decode("utf-8"))
                 raise ValueError(f"Validation Error: {error_body}")
             raise
+
+    def get_operation_result(
+        self,
+        action_id: str,
+        timeout: int = 60,
+    ) -> Dict[str, Any]:
+        """Get the result of a specific action"""
+        start_time = time.time()
+        check_interval = 3
+        while time.time() - start_time < timeout:
+            try:
+                status_result = self.get_action_status(action_id)
+                operation_status = status_result.get("status", "unknown")
+
+                if operation_status in TaskStatuses.COMPLETED_STATUSES:
+                    logging.debug(
+                        f"Operation {action_id} completed with status: "
+                        f"{operation_status}"
+                    )
+                    if operation_status != TaskStatuses.SUCCESS:
+                        pytest.fail(f"Operation {action_id} failed: {status_result}")
+                    return status_result
+
+                time.sleep(check_interval)
+            except Exception as e:
+                logging.warning(f"Error checking operation status: {e}")
+                time.sleep(check_interval)
+        else:
+            raise TimeoutError(f"Timeout waiting for operation {action_id}")
