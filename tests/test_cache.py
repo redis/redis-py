@@ -1034,7 +1034,7 @@ class TestUnitDefaultCache:
             )
         )
 
-        assert cache.delete_by_redis_keys([b"foo", b"foo1"]) == [True, True]
+        assert cache.delete_by_redis_keys([b"foo", b"foo1"]) == [True, True, True]
         assert len(cache.collection) == 1
         assert cache.get(cache_key4).cache_value == b"bar3"
 
