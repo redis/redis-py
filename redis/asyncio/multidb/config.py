@@ -77,8 +77,8 @@ class MultiDbConfig:
         health_check_probes: Number of attempts to evaluate the health of a database.
         health_check_delay: Delay between health check attempts.
         failover_strategy: Optional strategy for handling database failover scenarios.
-        failover_retries: Number of retries allowed for failover operations.
-        failover_backoff: Backoff strategy for failover retries.
+        failover_attempts: Number of retries allowed for failover operations.
+        failover_delay: Delay between failover attempts.
         auto_fallback_interval: Time interval to trigger automatic fallback.
         event_dispatcher: Interface for dispatching events related to database operations.
 
@@ -113,7 +113,7 @@ class MultiDbConfig:
     health_check_delay: float = DEFAULT_HEALTH_CHECK_DELAY
     health_check_policy: HealthCheckPolicies = DEFAULT_HEALTH_CHECK_POLICY
     failover_strategy: Optional[AsyncFailoverStrategy] = None
-    failover_retries: int = DEFAULT_FAILOVER_ATTEMPTS
+    failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS
     failover_delay: float = DEFAULT_FAILOVER_DELAY
     auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL
     event_dispatcher: EventDispatcherInterface = field(default_factory=default_event_dispatcher)
@@ -161,7 +161,4 @@ class MultiDbConfig:
         ]
 
     def default_failover_strategy(self) -> AsyncFailoverStrategy:
-        return WeightBasedFailoverStrategy(
-            failover_delay=self.failover_delay,
-            failover_attempts=self.failover_retries,
-        )
+        return WeightBasedFailoverStrategy()

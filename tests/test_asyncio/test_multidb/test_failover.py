@@ -1,14 +1,11 @@
 import asyncio
-from unittest.mock import PropertyMock
 
 import pytest
 
-from redis.backoff import NoBackoff, ExponentialBackoff
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import NoValidDatabaseException, TemporaryUnavailableException
-from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy
-from redis.asyncio.retry import Retry
+from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy, DefaultStrategyExecutor
 
 
 class TestAsyncWeightBasedFailoverStrategy:
@@ -53,26 +50,38 @@ class TestAsyncWeightBasedFailoverStrategy:
         ],
         indirect=True,
     )
-    async def test_get_valid_database_with_failover_attempts(self, mock_db, mock_db1, mock_db2):
-        state_mock = PropertyMock(
-            side_effect=[CBState.OPEN, CBState.OPEN, CBState.OPEN, CBState.CLOSED]
-        )
-        type(mock_db.circuit).state = state_mock
-        failover_attempts = 3
+    async def test_throws_exception_on_empty_databases(self, mock_db, mock_db1, mock_db2):
+        failover_strategy = WeightBasedFailoverStrategy()
 
-        databases = WeightedList()
-        databases.add(mock_db, mock_db.weight)
-        databases.add(mock_db1, mock_db1.weight)
-        databases.add(mock_db2, mock_db2.weight)
-        failover_strategy = WeightBasedFailoverStrategy(
+        with pytest.raises(NoValidDatabaseException, match='No valid database available for communication'):
+            assert await failover_strategy.database()
+
+class TestDefaultStrategyExecutor:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'mock_db',
+        [
+            {'weight': 0.2, 'circuit': {'state': CBState.CLOSED}},
+        ],
+        indirect=True,
+    )
+    async def test_execute_returns_valid_database_with_failover_attempts(self, mock_db, mock_fs):
+        failover_attempts = 3
+        mock_fs.database.side_effect = [
+            NoValidDatabaseException,
+            NoValidDatabaseException,
+            NoValidDatabaseException,
+            mock_db
+        ]
+        executor = DefaultStrategyExecutor(
+            mock_fs,
             failover_attempts=failover_attempts,
             failover_delay=0.1
         )
-        failover_strategy.set_databases(databases)
 
         for i in range(failover_attempts + 1):
             try:
-                database = await failover_strategy.database()
+                database = await executor.execute()
                 assert database == mock_db
             except TemporaryUnavailableException as e:
                 assert e.args[0] == (
@@ -82,41 +91,27 @@ class TestAsyncWeightBasedFailoverStrategy:
                 await asyncio.sleep(0.11)
                 pass
 
-        assert state_mock.call_count == 4
+        assert mock_fs.database.call_count == 4
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        'mock_db,mock_db1,mock_db2',
-        [
-            (
-                    {'weight': 0.2, 'circuit': {'state': CBState.OPEN}},
-                    {'weight': 0.7, 'circuit': {'state': CBState.OPEN}},
-                    {'weight': 0.5, 'circuit': {'state': CBState.OPEN}},
-            ),
-        ],
-        indirect=True,
-    )
-    async def test_get_valid_database_throws_exception_on_attempts_exceed(self, mock_db, mock_db1, mock_db2):
-        state_mock = PropertyMock(
-            side_effect=[CBState.OPEN, CBState.OPEN, CBState.OPEN, CBState.OPEN]
-        )
-        type(mock_db.circuit).state = state_mock
+    async def test_execute_throws_exception_on_attempts_exceed(self, mock_fs):
         failover_attempts = 3
-
-        databases = WeightedList()
-        databases.add(mock_db, mock_db.weight)
-        databases.add(mock_db1, mock_db1.weight)
-        databases.add(mock_db2, mock_db2.weight)
-        failover_strategy = WeightBasedFailoverStrategy(
+        mock_fs.database.side_effect = [
+            NoValidDatabaseException,
+            NoValidDatabaseException,
+            NoValidDatabaseException,
+            NoValidDatabaseException
+        ]
+        executor = DefaultStrategyExecutor(
+            mock_fs,
             failover_attempts=failover_attempts,
             failover_delay=0.1
         )
-        failover_strategy.set_databases(databases)
 
-        with pytest.raises(NoValidDatabaseException, match='No valid database available for communication'):
+        with pytest.raises(NoValidDatabaseException):
             for i in range(failover_attempts + 1):
                 try:
-                    database = await failover_strategy.database()
+                    await executor.execute()
                 except TemporaryUnavailableException as e:
                     assert e.args[0] == (
                         "No database connections currently available. "
@@ -125,36 +120,22 @@ class TestAsyncWeightBasedFailoverStrategy:
                     await asyncio.sleep(0.11)
                     pass
 
-        assert state_mock.call_count == 4
+            assert mock_fs.database.call_count == 4
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        'mock_db,mock_db1,mock_db2',
-        [
-            (
-                    {'weight': 0.2, 'circuit': {'state': CBState.OPEN}},
-                    {'weight': 0.7, 'circuit': {'state': CBState.OPEN}},
-                    {'weight': 0.5, 'circuit': {'state': CBState.OPEN}},
-            ),
-        ],
-        indirect=True,
-    )
-    async def test_get_valid_database_throws_exception_on_attempts_does_not_exceed_delay(self, mock_db, mock_db1, mock_db2):
-        state_mock = PropertyMock(
-            side_effect=[CBState.OPEN, CBState.OPEN, CBState.OPEN, CBState.OPEN]
-        )
-        type(mock_db.circuit).state = state_mock
+    async def test_execute_throws_exception_on_attempts_does_not_exceed_delay(self, mock_fs):
         failover_attempts = 3
-
-        databases = WeightedList()
-        databases.add(mock_db, mock_db.weight)
-        databases.add(mock_db1, mock_db1.weight)
-        databases.add(mock_db2, mock_db2.weight)
-        failover_strategy = WeightBasedFailoverStrategy(
+        mock_fs.database.side_effect = [
+            NoValidDatabaseException,
+            NoValidDatabaseException,
+            NoValidDatabaseException,
+            NoValidDatabaseException
+        ]
+        executor = DefaultStrategyExecutor(
+            mock_fs,
             failover_attempts=failover_attempts,
             failover_delay=0.1
         )
-        failover_strategy.set_databases(databases)
 
         with pytest.raises(TemporaryUnavailableException, match=(
                         "No database connections currently available. "
@@ -162,7 +143,7 @@ class TestAsyncWeightBasedFailoverStrategy:
                     )):
             for i in range(failover_attempts + 1):
                 try:
-                    database = await failover_strategy.database()
+                    await executor.execute()
                 except TemporaryUnavailableException as e:
                     assert e.args[0] == (
                         "No database connections currently available. "
@@ -171,22 +152,4 @@ class TestAsyncWeightBasedFailoverStrategy:
                     if i == failover_attempts:
                         raise e
 
-        assert state_mock.call_count == 4
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        'mock_db,mock_db1,mock_db2',
-        [
-            (
-                    {'weight': 0.2, 'circuit': {'state': CBState.OPEN}},
-                    {'weight': 0.7, 'circuit': {'state': CBState.OPEN}},
-                    {'weight': 0.5, 'circuit': {'state': CBState.OPEN}},
-            ),
-        ],
-        indirect=True,
-    )
-    async def test_throws_exception_on_empty_databases(self, mock_db, mock_db1, mock_db2):
-        failover_strategy = WeightBasedFailoverStrategy(failover_attempts=0, failover_delay=0)
-
-        with pytest.raises(NoValidDatabaseException, match='No valid database available for communication'):
-            assert await failover_strategy.database()
+            assert mock_fs.database.call_count == 4
