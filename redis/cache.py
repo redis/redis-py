@@ -28,6 +28,7 @@ class CacheKey:
             when commands have the same keys but different arguments.
             Changing this field will affect cache key uniqueness.
     """
+
     command: str
     redis_keys: tuple
     redis_args: tuple = ()  # Additional arguments for the Redis command; affects cache key uniqueness.
