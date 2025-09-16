@@ -4,7 +4,7 @@ from typing import Callable
 
 import pybreaker
 
-DEFAULT_GRACE_PERIOD = 5.0
+DEFAULT_GRACE_PERIOD = 60
 
 class State(Enum):
     CLOSED = 'closed'

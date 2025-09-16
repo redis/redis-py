@@ -18,7 +18,7 @@ from redis.event import EventDispatcherInterface, EventDispatcher
 from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter, DEFAULT_GRACE_PERIOD
 from redis.multidb.failure_detector import CommandFailureDetector
 
-DEFAULT_AUTO_FALLBACK_INTERVAL = -1
+DEFAULT_AUTO_FALLBACK_INTERVAL = 120
 
 def default_event_dispatcher() -> EventDispatcherInterface:
     return EventDispatcher()

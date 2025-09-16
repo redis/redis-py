@@ -13,6 +13,8 @@ from redis.retry import Retry
 DEFAULT_HEALTH_CHECK_PROBES = 3
 DEFAULT_HEALTH_CHECK_INTERVAL = 5
 DEFAULT_HEALTH_CHECK_DELAY = 0.5
+DEFAULT_LAG_AWARE_TOLERANCE = 5000
+
 logger = logging.getLogger(__name__)
 
 class HealthCheck(ABC):
@@ -187,7 +189,7 @@ class LagAwareHealthCheck(HealthCheck):
     def __init__(
         self,
         rest_api_port: int = 9443,
-        lag_aware_tolerance: int = 100,
+        lag_aware_tolerance: int = DEFAULT_LAG_AWARE_TOLERANCE,
         timeout: float = DEFAULT_TIMEOUT,
         auth_basic: Optional[Tuple[str, str]] = None,
         verify_tls: bool = True,

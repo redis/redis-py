@@ -19,7 +19,7 @@ from redis.multidb.failover import FailoverStrategy, WeightBasedFailoverStrategy
     DEFAULT_FAILOVER_DELAY
 from redis.retry import Retry
 
-DEFAULT_AUTO_FALLBACK_INTERVAL = -1
+DEFAULT_AUTO_FALLBACK_INTERVAL = 120
 
 def default_event_dispatcher() -> EventDispatcherInterface:
     return EventDispatcher()

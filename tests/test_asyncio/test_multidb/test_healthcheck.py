@@ -287,7 +287,7 @@ class TestLagAwareHealthCheck:
 
         assert await hc.check_health(db) is True
         assert mock_http.get.call_count == 2
-        assert mock_http.get.call_args_list[1].args[0] == "/v1/bdbs/bdb-42/availability?extend_check=lag&availability_lag_tolerance_ms=100"
+        assert mock_http.get.call_args_list[1].args[0] == "/v1/bdbs/bdb-42/availability?extend_check=lag&availability_lag_tolerance_ms=5000"
 
     @pytest.mark.asyncio
     async def test_raises_value_error_when_no_matching_bdb(self, mock_client, mock_cb):

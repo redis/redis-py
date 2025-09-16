@@ -7,7 +7,7 @@ from typing_extensions import Optional
 
 from redis.multidb.circuit import State as CBState
 
-DEFAULT_FAILURES_THRESHOLD = 3
+DEFAULT_FAILURES_THRESHOLD = 1000
 DEFAULT_FAILURES_DURATION = 2
 
 class FailureDetector(ABC):
