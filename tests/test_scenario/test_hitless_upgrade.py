@@ -30,15 +30,15 @@ from tests.test_scenario.hitless_upgrade_helpers import (
 )
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
-    filemode="w",
-    filename="./test_hitless_upgrade.log",
 )
 
 BIND_TIMEOUT = 30
 MIGRATE_TIMEOUT = 60
 FAILOVER_TIMEOUT = 15
+
+DEFAULT_BIND_TTL = 15
 
 
 class TestPushNotifications:
@@ -767,7 +767,7 @@ class TestPushNotifications:
         assert errors.empty(), f"Errors occurred in threads: {errors.queue}"
 
         logging.info("Waiting for moving ttl to expire")
-        time.sleep(15)
+        time.sleep(DEFAULT_BIND_TTL)
         bind_thread.join()
 
     @pytest.mark.timeout(300)  # 5 minutes timeout
@@ -1021,7 +1021,7 @@ class TestPushNotifications:
         )
 
         logging.info("Waiting for moving ttl to expire")
-        time.sleep(20)
+        time.sleep(DEFAULT_BIND_TTL)
 
         logging.info("Validating connection states after MOVING has expired ...")
         self._validate_default_notif_disabled_state(
