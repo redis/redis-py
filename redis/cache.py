@@ -199,7 +199,9 @@ class DefaultCache(CacheInterface):
 
         return response
 
-    def delete_by_redis_keys(self, redis_keys: Union[List[bytes], List[str]]) -> List[bool]:
+    def delete_by_redis_keys(
+        self, redis_keys: Union[List[bytes], List[str]]
+    ) -> List[bool]:
         response = []
         keys_to_delete = []
 
