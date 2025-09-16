@@ -216,10 +216,13 @@ class DefaultCache(CacheInterface):
                 except UnicodeDecodeError:
                     pass  # Non-UTF-8 bytes, skip str version
 
-            for cache_key in self._cache:
+            matched = False
+            for cache_key in list(self._cache):
                 if any(candidate in cache_key.redis_keys for candidate in candidates):
                     keys_to_delete.append(cache_key)
-                    response.append(True)
+                    matched = True
+
+            response.append(matched)
 
         for key in keys_to_delete:
             self._cache.pop(key)
