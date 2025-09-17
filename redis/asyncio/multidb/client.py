@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Callable, Optional, Coroutine, Any, List, Union, Awaitable
 
 from redis.asyncio.client import PubSubHandler
@@ -13,6 +14,7 @@ from redis.commands import AsyncRedisModuleCommands, AsyncCoreCommands
 from redis.multidb.exception import NoValidDatabaseException
 from redis.typing import KeyT, EncodableT, ChannelT
 
+logger = logging.getLogger(__name__)
 
 class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
     """
@@ -273,6 +275,8 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
                 if database.circuit.state != CBState.OPEN:
                     database.circuit.state = CBState.OPEN
                 is_healthy = False
+
+                logger.exception('Health check failed, due to exception', exc_info=e)
 
                 if on_error:
                     await on_error(e)
