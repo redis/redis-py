@@ -3,6 +3,7 @@ ARGV
 BFCommands
 balancer
 CacheImpl
+cancelling
 CAS
 CFCommands
 CMSCommands
@@ -21,6 +22,8 @@ failover
 FQDN
 Grokzen's
 Healthcheck
+HealthCheckPolicies
+healthcheck
 healthchecks
 INCR
 IOError
