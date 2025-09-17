@@ -1,6 +1,7 @@
 APM
 ARGV
 BFCommands
+balancer
 CacheImpl
 CAS
 CFCommands
@@ -10,10 +11,17 @@ ClusterNodes
 ClusterPipeline
 ClusterPubSub
 ConnectionPool
+config
 CoreCommands
+DatabaseConfig
+DNS
 EVAL
 EVALSHA
+failover
+FQDN
 Grokzen's
+Healthcheck
+healthchecks
 INCR
 IOError
 Instrumentations
@@ -21,6 +29,7 @@ JSONCommands
 Jaeger
 Ludovico
 Magnocavallo
+MultiDBClient
 McCurdy
 NOSCRIPT
 NUMPAT
@@ -52,6 +61,7 @@ SpanKind
 Specfiying
 StatusCode
 TCP
+TLS
 TOPKCommands
 TimeSeriesCommands
 Uptrace

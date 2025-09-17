@@ -61,6 +61,13 @@ The very basic configuration you need to setup a `MultiDBClient`:
 
 Health Monitoring
 -----------------
+To avoid false positives, you can configure amount of health check probes and also
+define one of the health check policies to evaluate probes result.
+
+**HealthCheckPolicies.HEALTHY_ALL** - (default) All probes should be successful
+**HealthCheckPolicies.HEALTHY_MAJORITY** - Majority of probes should be successful
+**HealthCheckPolicies.HEALTHY_ANY** - Any of probes should be successful
+
 The `MultiDBClient` uses two complementary mechanisms to ensure database availability:
 
 Health Checks (Proactive Monitoring)
@@ -102,7 +109,7 @@ You can add custom health checks for specific requirements:
 ~~~~~~~~~~~~~~~~~~~~~
 
 This is a special type of healthcheck available for Redis Software and Redis Cloud
-that utilizes a REST API endpoint to obtain information about the synchronisation
+that utilizes a REST API endpoint to obtain information about the synchronization
 lag between a given database and all other databases in an Active-Active setup.
 
 To use this healthcheck, first you need to adjust your `DatabaseConfig`
@@ -146,7 +153,7 @@ to provide it manually during client configuration or in runtime.
         LagAwareHealthCheck(auth_basic=('username','password'), verify_tls=False)
     )
 
-As mentioned we utilise REST API endpoint for Lag-Aware healthchecks, so it accepts
+As mentioned we utilize REST API endpoint for Lag-Aware healthchecks, so it accepts
 different type of HTTP-related configuration: authentication credentials, request
 timeout, TLS related configuration, etc. (check `LagAwareHealthCheck` class).
 
@@ -172,6 +179,40 @@ when error rates exceed thresholds within a sliding time window of a few seconds
 This catches issues that proactive health checks might miss during real traffic.
 You can extend the list of failure detectors by providing your own implementation,
 configuration defined in the `MultiDBConfig` class.
+
+
+Failover strategy
+~~~~~~~~~~~~~~~~~
+
+This component is responsible for failover when active database becomes unavailable.
+By default, we're using `WeightBasedFailoverStrategy` to pick a database with the
+highest weight to failover. You can provide your own strategy if you would like
+to have your custom mechanism of failover.
+
+.. code:: python
+
+    class CustomFailoverStrategy(FailoverStrategy):
+        def __init__(self):
+            self._databases: Databases = None
+
+        def database(self) -> SyncDatabase:
+            for database, _ in self._databases:
+                random_int = random.randint(0, 1)
+
+                if random_int == 1 and database.circuit.state == State.CLOSED:
+                    return database
+
+            // Exception should be raised if theres no suitable databases for failover
+            raise NoValidDatabaseException("No available database for failover")
+
+In case if there's no available databases for failover, we raise `TemporaryUnavailableException`.
+This exception signals that you can still trying to send requests until final
+`NoValidDatabaseException` will be thrown. The window for requests is configurable
+and depends on two parameters `failover_attempts` and `failover_delay`. By default,
+`failover_attempts=10` and `failover_delay=12s`, which means that you can still send requests
+for 10*12 = 120 seconds until final exception will be thrown. In meanwhile, you can switch to
+another data source (cache) and if healthy database will apears you can switch back making
+this transparent to the end user.
 
 
 Databases configuration
@@ -423,3 +464,19 @@ correct Pub/Sub configuration.
     for _ in range(10):
         client.spublish('test-channel', data)
         sleep(0.1)
+
+Async implementation
+--------------------
+
+`MultiDBClient` is available with async API, which looks exactly as it's sync
+analogue. The core difference is that it fully relies on `EventLoop` instead of
+`threading` module.
+
+Async client comes with async context manager support and is recommended for
+graceful task cancelling.
+
+.. code:: python
+
+    async with MultiDBClient(client_config) as client:
+        await client.set('key', 'value')
+        return await client.get('key')
