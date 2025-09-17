@@ -43,7 +43,10 @@ class EventDispatcherInterface(ABC):
         pass
 
     @abstractmethod
-    def register_listeners(self, mappings: Dict[Type[object], List[EventListenerInterface]]):
+    def register_listeners(
+            self,
+            mappings: Dict[Type[object], List[Union[EventListenerInterface, AsyncEventListenerInterface]]]
+    ):
         """Register additional listeners."""
         pass
 
@@ -99,13 +102,16 @@ class EventDispatcher(EventDispatcherInterface):
                 listener.listen(event)
 
     async def dispatch_async(self, event: object):
-        with self._async_lock:
+        async with self._async_lock:
             listeners = self._event_listeners_mapping.get(type(event), [])
 
             for listener in listeners:
                 await listener.listen(event)
 
-    def register_listeners(self, event_listeners: Dict[Type[object], List[EventListenerInterface]]):
+    def register_listeners(
+            self,
+            event_listeners: Dict[Type[object], List[Union[EventListenerInterface, AsyncEventListenerInterface]]]
+    ):
         with self._lock:
             for event_type in event_listeners:
                 if event_type in self._event_listeners_mapping:
@@ -270,6 +276,9 @@ class OnCommandsFailEvent:
     @property
     def exception(self) -> Exception:
         return self._exception
+
+class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
+    pass
 
 class ReAuthConnectionListener(EventListenerInterface):
     """

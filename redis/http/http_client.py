@@ -68,7 +68,6 @@ class HttpClient:
     def __init__(
         self,
         base_url: str = "",
-        *,
         headers: Optional[Mapping[str, str]] = None,
         timeout: float = DEFAULT_TIMEOUT,
         retry: Retry = Retry(
@@ -131,7 +130,6 @@ class HttpClient:
     def get(
         self,
         path: str,
-        *,
         params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
@@ -150,7 +148,6 @@ class HttpClient:
     def delete(
         self,
         path: str,
-        *,
         params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
@@ -169,7 +166,6 @@ class HttpClient:
     def post(
         self,
         path: str,
-        *,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
         params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
@@ -190,7 +186,6 @@ class HttpClient:
     def put(
         self,
         path: str,
-        *,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
         params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
@@ -211,7 +206,6 @@ class HttpClient:
     def patch(
         self,
         path: str,
-        *,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
         params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
@@ -234,7 +228,6 @@ class HttpClient:
         self,
         method: str,
         path: str,
-        *,
         params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
         body: Optional[Union[bytes, str]] = None,
@@ -319,7 +312,6 @@ class HttpClient:
         self,
         method: str,
         path: str,
-        *,
         params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
@@ -340,7 +332,7 @@ class HttpClient:
             return resp.json()
         return resp
 
-    def _prepare_body(self, *, json_body: Optional[Any] = None, data: Optional[Union[bytes, str]] = None) -> Optional[Union[bytes, str]]:
+    def _prepare_body(self, json_body: Optional[Any] = None, data: Optional[Union[bytes, str]] = None) -> Optional[Union[bytes, str]]:
         if json_body is not None and data is not None:
             raise ValueError("Provide either json_body or data, not both.")
         if json_body is not None:

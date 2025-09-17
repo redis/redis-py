@@ -1,21 +1,20 @@
 from dataclasses import dataclass, field
-from typing import List, Type, Union
+from typing import Optional, List, Type, Union
 
 import pybreaker
-from typing_extensions import Optional
 
-from redis import Redis, ConnectionPool
-from redis.asyncio import RedisCluster
+from redis.asyncio import ConnectionPool, Redis, RedisCluster
+from redis.asyncio.multidb.database import Databases, Database
+from redis.asyncio.multidb.failover import AsyncFailoverStrategy, WeightBasedFailoverStrategy
+from redis.asyncio.multidb.failure_detector import AsyncFailureDetector, FailureDetectorAsyncWrapper
+from redis.asyncio.multidb.healthcheck import HealthCheck, DEFAULT_HEALTH_CHECK_RETRIES, DEFAULT_HEALTH_CHECK_BACKOFF, \
+    EchoHealthCheck
+from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff, AbstractBackoff, NoBackoff
 from redis.data_structure import WeightedList
-from redis.event import EventDispatcher, EventDispatcherInterface
-from redis.multidb.circuit import PBCircuitBreakerAdapter, CircuitBreaker
-from redis.multidb.database import Database, Databases
-from redis.multidb.failure_detector import FailureDetector, CommandFailureDetector
-from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_RETRIES, \
-    DEFAULT_HEALTH_CHECK_BACKOFF
-from redis.multidb.failover import FailoverStrategy, WeightBasedFailoverStrategy
-from redis.retry import Retry
+from redis.event import EventDispatcherInterface, EventDispatcher
+from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter
+from redis.multidb.failure_detector import CommandFailureDetector
 
 DEFAULT_GRACE_PERIOD = 5.0
 DEFAULT_HEALTH_CHECK_INTERVAL = 5
@@ -109,14 +108,14 @@ class MultiDbConfig:
     command_retry: Retry = Retry(
         backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
     )
-    failure_detectors: Optional[List[FailureDetector]] = None
+    failure_detectors: Optional[List[AsyncFailureDetector]] = None
     failure_threshold: int = DEFAULT_FAILURES_THRESHOLD
     failures_interval: float = DEFAULT_FAILURES_DURATION
     health_checks: Optional[List[HealthCheck]] = None
     health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL
     health_check_retries: int = DEFAULT_HEALTH_CHECK_RETRIES
     health_check_backoff: AbstractBackoff = DEFAULT_HEALTH_CHECK_BACKOFF
-    failover_strategy: Optional[FailoverStrategy] = None
+    failover_strategy: Optional[AsyncFailoverStrategy] = None
     failover_retries: int = DEFAULT_FAILOVER_RETRIES
     failover_backoff: AbstractBackoff = DEFAULT_FAILOVER_BACKOFF
     auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL
@@ -152,9 +151,11 @@ class MultiDbConfig:
 
         return databases
 
-    def default_failure_detectors(self) -> List[FailureDetector]:
+    def default_failure_detectors(self) -> List[AsyncFailureDetector]:
         return [
-            CommandFailureDetector(threshold=self.failure_threshold, duration=self.failures_interval),
+            FailureDetectorAsyncWrapper(
+                CommandFailureDetector(threshold=self.failure_threshold, duration=self.failures_interval)
+            ),
         ]
 
     def default_health_checks(self) -> List[HealthCheck]:
@@ -162,7 +163,7 @@ class MultiDbConfig:
             EchoHealthCheck(retry=Retry(retries=self.health_check_retries, backoff=self.health_check_backoff)),
         ]
 
-    def default_failover_strategy(self) -> FailoverStrategy:
+    def default_failover_strategy(self) -> AsyncFailoverStrategy:
         return WeightBasedFailoverStrategy(
             retry=Retry(retries=self.failover_retries, backoff=self.failover_backoff),
         )
