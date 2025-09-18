@@ -7,6 +7,8 @@ from typing_extensions import Optional
 
 from redis.multidb.circuit import State as CBState
 
+DEFAULT_FAILURES_THRESHOLD = 1000
+DEFAULT_FAILURES_DURATION = 2
 
 class FailureDetector(ABC):
 
@@ -26,8 +28,8 @@ class CommandFailureDetector(FailureDetector):
     """
     def __init__(
             self,
-            threshold: int,
-            duration: float,
+            threshold: int = DEFAULT_FAILURES_THRESHOLD,
+            duration: float = DEFAULT_FAILURES_DURATION,
             error_types: Optional[List[Type[Exception]]] = None,
     ) -> None:
         """

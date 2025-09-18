@@ -1,5 +1,7 @@
 import logging
 import threading
+from concurrent.futures import as_completed
+from concurrent.futures.thread import ThreadPoolExecutor
 from typing import List, Any, Callable, Optional
 
 from redis.background import BackgroundScheduler
@@ -8,9 +10,9 @@ from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.config import MultiDbConfig, DEFAULT_GRACE_PERIOD
 from redis.multidb.circuit import State as CBState, CircuitBreaker
 from redis.multidb.database import Database, Databases, SyncDatabase
-from redis.multidb.exception import NoValidDatabaseException
+from redis.multidb.exception import NoValidDatabaseException, UnhealthyDatabaseException
 from redis.multidb.failure_detector import FailureDetector
-from redis.multidb.healthcheck import HealthCheck
+from redis.multidb.healthcheck import HealthCheck, HealthCheckPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,10 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             self._health_checks.extend(config.health_checks)
 
         self._health_check_interval = config.health_check_interval
+        self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value(
+            config.health_check_probes,
+            config.health_check_delay
+        )
         self._failure_detectors = config.default_failure_detectors()
 
         if config.failure_detectors is not None:
@@ -44,6 +50,8 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             databases=self._databases,
             command_retry=self._command_retry,
             failover_strategy=self._failover_strategy,
+            failover_attempts=config.failover_attempts,
+            failover_delay=config.failover_delay,
             event_dispatcher=self._event_dispatcher,
             auto_fallback_interval=self._auto_fallback_interval,
         )
@@ -209,44 +217,48 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         return PubSub(self, **kwargs)
 
-    def _check_db_health(self, database: SyncDatabase, on_error: Callable[[Exception], None] = None) -> None:
+    def _check_db_health(self, database: SyncDatabase) -> bool:
         """
         Runs health checks on the given database until first failure.
         """
-        is_healthy = True
+        # Health check will setup circuit state
+        is_healthy = self._health_check_policy.execute(self._health_checks, database)
 
-        with self._hc_lock:
-            # Health check will setup circuit state
-            for health_check in self._health_checks:
-                if not is_healthy:
-                    # If one of the health checks failed, it's considered unhealthy
-                    break
+        if not is_healthy:
+            if database.circuit.state != CBState.OPEN:
+                database.circuit.state = CBState.OPEN
+            return is_healthy
+        elif is_healthy and database.circuit.state != CBState.CLOSED:
+            database.circuit.state = CBState.CLOSED
 
-                try:
-                    is_healthy = health_check.check_health(database)
-
-                    if not is_healthy and database.circuit.state != CBState.OPEN:
-                        database.circuit.state = CBState.OPEN
-                    elif is_healthy and database.circuit.state != CBState.CLOSED:
-                        database.circuit.state = CBState.CLOSED
-                except Exception as e:
-                    if database.circuit.state != CBState.OPEN:
-                        database.circuit.state = CBState.OPEN
-                    is_healthy = False
-
-                    logger.exception('Health check failed, due to exception', exc_info=e)
-
-                    if on_error:
-                        on_error(e)
-
+        return is_healthy
 
     def _check_databases_health(self, on_error: Callable[[Exception], None] = None):
         """
         Runs health checks as a recurring task.
         Runs health checks against all databases.
         """
-        for database, _ in self._databases:
-            self._check_db_health(database, on_error)
+        with ThreadPoolExecutor(max_workers=len(self._databases)) as executor:
+            # Submit all health checks
+            futures = {
+                executor.submit(self._check_db_health, database)
+                for database, _ in self._databases
+            }
+
+            for future in as_completed(futures, timeout=self._health_check_interval):
+                try:
+                    future.result()
+                except UnhealthyDatabaseException as e:
+                    unhealthy_db = e.database
+                    unhealthy_db.circuit.state = CBState.OPEN
+
+                    logger.exception(
+                        'Health check failed, due to exception',
+                        exc_info=e.original_exception
+                    )
+
+                    if on_error:
+                        on_error(e.original_exception)
 
     def _on_circuit_state_change_callback(self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState):
         if new_state == CBState.HALF_OPEN:

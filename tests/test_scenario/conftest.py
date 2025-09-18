@@ -9,10 +9,10 @@ from redis import Redis
 from redis.backoff import NoBackoff, ExponentialBackoff
 from redis.event import EventDispatcher, EventListenerInterface
 from redis.multidb.client import MultiDBClient
-from redis.multidb.config import DatabaseConfig, MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
-    DEFAULT_FAILURES_THRESHOLD
+from redis.multidb.config import DatabaseConfig, MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL
 from redis.multidb.event import ActiveDatabaseChanged
-from redis.multidb.healthcheck import EchoHealthCheck
+from redis.multidb.failure_detector import DEFAULT_FAILURES_THRESHOLD
+from redis.multidb.healthcheck import EchoHealthCheck, DEFAULT_HEALTH_CHECK_DELAY
 from redis.retry import Retry
 from tests.test_scenario.fault_injector_client import FaultInjectorClient
 
@@ -61,6 +61,7 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
      # Retry configuration different for health checks as initial health check require more time in case
      # if infrastructure wasn't restored from the previous test.
      health_check_interval = request.param.get('health_check_interval', DEFAULT_HEALTH_CHECK_INTERVAL)
+     health_check_delay = request.param.get('health_check_delay', DEFAULT_HEALTH_CHECK_DELAY)
      event_dispatcher = EventDispatcher()
      listener = CheckActiveDatabaseChangedListener()
      event_dispatcher.register_listeners({
@@ -97,10 +98,10 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
          databases_config=db_configs,
          command_retry=command_retry,
          failure_threshold=failure_threshold,
-         health_check_retries=3,
+         health_check_probes=3,
          health_check_interval=health_check_interval,
          event_dispatcher=event_dispatcher,
-         health_check_backoff=ExponentialBackoff(cap=5, base=0.5),
+         health_check_delay=health_check_delay,
      )
 
      return MultiDBClient(config), listener, endpoint_config

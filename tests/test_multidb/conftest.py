@@ -6,11 +6,11 @@ from redis import Redis
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import State as CBState, CircuitBreaker
 from redis.multidb.config import MultiDbConfig, DatabaseConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
-     DEFAULT_AUTO_FALLBACK_INTERVAL
+    DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, Databases
 from redis.multidb.failover import FailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
-from redis.multidb.healthcheck import HealthCheck
+from redis.multidb.healthcheck import HealthCheck, DEFAULT_HEALTH_CHECK_PROBES, DEFAULT_HEALTH_CHECK_POLICY
 from tests.conftest import mock_ed
 
 
@@ -80,18 +80,18 @@ def mock_db2(request) -> Database:
 def mock_multi_db_config(
         request, mock_fd, mock_fs, mock_hc, mock_ed
 ) -> MultiDbConfig:
-     hc_interval = request.param.get('hc_interval', None)
-     if hc_interval is None:
-          hc_interval = DEFAULT_HEALTH_CHECK_INTERVAL
-
-     auto_fallback_interval = request.param.get('auto_fallback_interval', None)
-     if auto_fallback_interval is None:
-          auto_fallback_interval = DEFAULT_AUTO_FALLBACK_INTERVAL
+     hc_interval = request.param.get('hc_interval', DEFAULT_HEALTH_CHECK_INTERVAL)
+     auto_fallback_interval = request.param.get('auto_fallback_interval', DEFAULT_AUTO_FALLBACK_INTERVAL)
+     health_check_policy = request.param.get('health_check_policy', DEFAULT_HEALTH_CHECK_POLICY)
+     health_check_probes = request.param.get('health_check_probes', DEFAULT_HEALTH_CHECK_PROBES)
 
      config = MultiDbConfig(
           databases_config=[Mock(spec=DatabaseConfig)],
           failure_detectors=[mock_fd],
           health_check_interval=hc_interval,
+          health_check_delay=0.05,
+          health_check_policy=health_check_policy,
+          health_check_probes=health_check_probes,
           failover_strategy=mock_fs,
           auto_fallback_interval=auto_fallback_interval,
           event_dispatcher=mock_ed
