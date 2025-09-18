@@ -1043,7 +1043,7 @@ def parse_url(url: str) -> ConnectKwargs:
             if "ssl_verify_flags_config" in kwargs:
                 # flags are passed in as a string representation of a list,
                 # e.g. [(VERIFY_X509_STRICT, False), (VERIFY_X509_PARTIAL_CHAIN, True)]
-                # To parse it sucessfully, we need transform the flags to strings with quotes.
+                # To parse it successfully, we need to transform the flags to strings with quotes.
                 verify_flags_config_str = kwargs.pop("ssl_verify_flags_config")
                 # First wrap any VERIFY_* name in quotes
                 verify_flags_config_str = re.sub(
@@ -1051,7 +1051,7 @@ def parse_url(url: str) -> ConnectKwargs:
                 )
 
                 # transform the string to a list of tuples - the first element of each tuple is a string containing the name of the flag,
-                # and the second is a boolean that indicates if the flad should be enabled or disabled
+                # and the second is a boolean that indicates if the flag should be enabled or disabled
                 verify_flags_config = ast.literal_eval(verify_flags_config_str)
 
                 verify_flags_config_config_parsed = []

@@ -1394,8 +1394,8 @@ class SSLConnection(Connection):
                                 ]
                               Example:
                                 [
-                                    (ssl.VERIFY_X509_STRICT, False),       # disable strict
-                                    (ssl.VERIFY_X509_PARTIAL_CHAIN, True), # ensure partial chain is enabled
+                                    (ssl.VerifyFlags.VERIFY_X509_STRICT, False),       # disable strict
+                                    (ssl.VerifyFlags.VERIFY_X509_PARTIAL_CHAIN, True), # ensure partial chain is enabled
                                 ]
             ssl_ca_certs: The path to a file of concatenated CA certificates in PEM format. Defaults to None.
             ssl_ca_data: Either an ASCII string of one or more PEM-encoded certificates or a bytes-like object of DER-encoded certificates.
@@ -1662,7 +1662,7 @@ def parse_url(url):
             if "ssl_verify_flags_config" in kwargs:
                 # flags are passed in as a string representation of a list,
                 # e.g. [(VERIFY_X509_STRICT, False), (VERIFY_X509_PARTIAL_CHAIN, True)]
-                # To parse it sucessfully, we need transform the flags to strings with quotes.
+                # To parse it successfully, we need to transform the flags to strings with quotes.
                 verify_flags_config_str = kwargs.pop("ssl_verify_flags_config")
                 # First wrap any VERIFY_* name in quotes
                 verify_flags_config_str = re.sub(
@@ -1670,7 +1670,7 @@ def parse_url(url):
                 )
 
                 # transform the string to a list of tuples - the first element of each tuple is a string containing the name of the flag,
-                # and the second is a boolean that indicates if the flad should be enabled or disabled
+                # and the second is a boolean that indicates if the flag should be enabled or disabled
                 verify_flags_config = ast.literal_eval(verify_flags_config_str)
 
                 ssl_verify_flags_config_parsed = []
