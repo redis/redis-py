@@ -21,7 +21,7 @@ class AsyncFailoverStrategy(ABC):
         """Set the database strategy operates on."""
         pass
 
-class StrategyExecutor(ABC):
+class FailoverStrategyExecutor(ABC):
 
     @property
     @abstractmethod
@@ -63,7 +63,7 @@ class WeightBasedFailoverStrategy(AsyncFailoverStrategy):
     def set_databases(self, databases: Databases) -> None:
         self._databases = databases
 
-class DefaultStrategyExecutor(StrategyExecutor):
+class DefaultFailoverStrategyExecutor(FailoverStrategyExecutor):
     """
     Executes given failover strategy.
     """

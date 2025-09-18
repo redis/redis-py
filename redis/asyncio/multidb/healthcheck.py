@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, Tuple, Union, List
 
+from pygments.lexers.julia import allowed_variable
+
 from redis.asyncio import Redis
 from redis.asyncio.http.http_client import AsyncHTTPClientWrapper, DEFAULT_TIMEOUT
 from redis.asyncio.retry import Retry
@@ -97,19 +99,19 @@ class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
     async def execute(self, health_checks: List[HealthCheck], database) -> bool:
         for health_check in health_checks:
             if self.health_check_probes % 2 == 0:
-                unsuccessful_probes = self.health_check_probes / 2
+                allowed_unsuccessful_probes = self.health_check_probes / 2
             else:
-                unsuccessful_probes = (self.health_check_probes + 1) / 2
+                allowed_unsuccessful_probes = (self.health_check_probes + 1) / 2
 
             for attempt in range(self.health_check_probes):
                 try:
                     if not await health_check.check_health(database):
-                        unsuccessful_probes -= 1
-                        if unsuccessful_probes <= 0:
+                        allowed_unsuccessful_probes -= 1
+                        if allowed_unsuccessful_probes <= 0:
                             return False
                 except Exception as e:
-                    unsuccessful_probes -= 1
-                    if unsuccessful_probes <= 0:
+                    allowed_unsuccessful_probes -= 1
+                    if allowed_unsuccessful_probes <= 0:
                         raise UnhealthyDatabaseException(
                             f"Unhealthy database", database, e
                         )
@@ -174,7 +176,7 @@ class EchoHealthCheck(HealthCheck):
             # For a cluster checks if all nodes are healthy.
             all_nodes = database.client.get_nodes()
             for node in all_nodes:
-                actual_message = await node.execute_command("ECHO" ,"healthcheck")
+                actual_message = await node.execute_command("ECHO", "healthcheck")
 
                 if actual_message not in expected_message:
                     return False

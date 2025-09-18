@@ -8,7 +8,7 @@ from redis.asyncio.client import PubSub, Pipeline
 from redis.asyncio.multidb.database import Databases, AsyncDatabase, Database
 from redis.asyncio.multidb.event import AsyncActiveDatabaseChanged, RegisterCommandFailure, \
     ResubscribeOnActiveDatabaseChanged
-from redis.asyncio.multidb.failover import AsyncFailoverStrategy, StrategyExecutor, DefaultStrategyExecutor, \
+from redis.asyncio.multidb.failover import AsyncFailoverStrategy, FailoverStrategyExecutor, DefaultFailoverStrategyExecutor, \
     DEFAULT_FAILOVER_ATTEMPTS, DEFAULT_FAILOVER_DELAY
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
 from redis.multidb.circuit import State as CBState
@@ -63,7 +63,7 @@ class AsyncCommandExecutor(CommandExecutor):
 
     @property
     @abstractmethod
-    def strategy_executor(self) -> StrategyExecutor:
+    def failover_strategy_executor(self) -> FailoverStrategyExecutor:
         """Returns failover strategy executor."""
         pass
 
@@ -137,7 +137,7 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
         self._databases = databases
         self._failure_detectors = failure_detectors
         self._command_retry = command_retry
-        self._strategy_executor = DefaultStrategyExecutor(
+        self._failover_strategy_executor = DefaultFailoverStrategyExecutor(
             failover_strategy,
             failover_attempts,
             failover_delay
@@ -182,8 +182,8 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
         self._active_pubsub = pubsub
 
     @property
-    def strategy_executor(self) -> StrategyExecutor:
-        return self._strategy_executor
+    def failover_strategy_executor(self) -> FailoverStrategyExecutor:
+        return self._failover_strategy_executor
 
     @property
     def command_retry(self) -> Retry:
@@ -274,7 +274,7 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
                     and self._next_fallback_attempt <= datetime.now()
                 )
         ):
-            await self.set_active_database(await self._strategy_executor.execute())
+            await self.set_active_database(await self._failover_strategy_executor.execute())
             self._schedule_next_fallback()
 
     async def _on_command_fail(self, error, *args):

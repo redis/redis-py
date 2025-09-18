@@ -8,8 +8,8 @@ from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, Databases, SyncDatabase
 from redis.multidb.circuit import State as CBState
 from redis.multidb.event import RegisterCommandFailure, ActiveDatabaseChanged, ResubscribeOnActiveDatabaseChanged
-from redis.multidb.failover import FailoverStrategy, StrategyExecutor, DEFAULT_FAILOVER_ATTEMPTS, \
-    DEFAULT_FAILOVER_DELAY, DefaultStrategyExecutor
+from redis.multidb.failover import FailoverStrategy, FailoverStrategyExecutor, DEFAULT_FAILOVER_ATTEMPTS, \
+    DEFAULT_FAILOVER_DELAY, DefaultFailoverStrategyExecutor
 from redis.multidb.failure_detector import FailureDetector
 from redis.retry import Retry
 
@@ -95,7 +95,7 @@ class SyncCommandExecutor(CommandExecutor):
 
     @property
     @abstractmethod
-    def strategy_executor(self) -> StrategyExecutor:
+    def failover_strategy_executor(self) -> FailoverStrategyExecutor:
         """Returns failover strategy executor."""
         pass
 
@@ -168,7 +168,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         self._databases = databases
         self._failure_detectors = failure_detectors
         self._command_retry = command_retry
-        self._strategy_executor = DefaultStrategyExecutor(
+        self._failover_strategy_executor = DefaultFailoverStrategyExecutor(
             failover_strategy,
             failover_attempts,
             failover_delay
@@ -218,8 +218,8 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         self._active_pubsub = pubsub
 
     @property
-    def strategy_executor(self) -> StrategyExecutor:
-        return self._strategy_executor
+    def failover_strategy_executor(self) -> FailoverStrategyExecutor:
+        return self._failover_strategy_executor
 
     def execute_command(self, *args, **options):
         def callback():
@@ -294,7 +294,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
                     and self._next_fallback_attempt <= datetime.now()
                 )
         ):
-            self.active_database = self._strategy_executor.execute()
+            self.active_database = self._failover_strategy_executor.execute()
             self._schedule_next_fallback()
 
     def _setup_event_dispatcher(self):

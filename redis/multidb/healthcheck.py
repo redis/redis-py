@@ -4,6 +4,8 @@ from enum import Enum
 from time import sleep
 from typing import Optional, Tuple, Union, List
 
+from pygments.lexers.julia import allowed_variable
+
 from redis import Redis
 from redis.backoff import NoBackoff
 from redis.http.http_client import DEFAULT_TIMEOUT, HttpClient
@@ -96,19 +98,19 @@ class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
     def execute(self, health_checks: List[HealthCheck], database) -> bool:
         for health_check in health_checks:
             if self.health_check_probes % 2 == 0:
-                unsuccessful_probes = self.health_check_probes / 2
+                allowed_unsuccessful_probes = self.health_check_probes / 2
             else:
-                unsuccessful_probes = (self.health_check_probes + 1) / 2
+                allowed_unsuccessful_probes = (self.health_check_probes + 1) / 2
 
             for attempt in range(self.health_check_probes):
                 try:
                     if not health_check.check_health(database):
-                        unsuccessful_probes -= 1
-                        if unsuccessful_probes <= 0:
+                        allowed_unsuccessful_probes -= 1
+                        if allowed_unsuccessful_probes <= 0:
                             return False
                 except Exception as e:
-                    unsuccessful_probes -= 1
-                    if unsuccessful_probes <= 0:
+                    allowed_unsuccessful_probes -= 1
+                    if allowed_unsuccessful_probes <= 0:
                         raise UnhealthyDatabaseException(
                             f"Unhealthy database", database, e
                         )
@@ -167,13 +169,13 @@ class EchoHealthCheck(HealthCheck):
         expected_message = ["healthcheck", b"healthcheck"]
 
         if isinstance(database.client, Redis):
-            actual_message = database.client.execute_command("ECHO" ,"healthcheck")
+            actual_message = database.client.execute_command("ECHO", "healthcheck")
             return actual_message in expected_message
         else:
             # For a cluster checks if all nodes are healthy.
             all_nodes = database.client.get_nodes()
             for node in all_nodes:
-                actual_message = node.redis_connection.execute_command("ECHO" ,"healthcheck")
+                actual_message = node.redis_connection.execute_command("ECHO", "healthcheck")
 
                 if actual_message not in expected_message:
                     return False

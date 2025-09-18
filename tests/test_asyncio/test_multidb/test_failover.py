@@ -5,7 +5,7 @@ import pytest
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import NoValidDatabaseException, TemporaryUnavailableException
-from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy, DefaultStrategyExecutor
+from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy, DefaultFailoverStrategyExecutor
 
 
 class TestAsyncWeightBasedFailoverStrategy:
@@ -73,7 +73,7 @@ class TestDefaultStrategyExecutor:
             NoValidDatabaseException,
             mock_db
         ]
-        executor = DefaultStrategyExecutor(
+        executor = DefaultFailoverStrategyExecutor(
             mock_fs,
             failover_attempts=failover_attempts,
             failover_delay=0.1
@@ -102,7 +102,7 @@ class TestDefaultStrategyExecutor:
             NoValidDatabaseException,
             NoValidDatabaseException
         ]
-        executor = DefaultStrategyExecutor(
+        executor = DefaultFailoverStrategyExecutor(
             mock_fs,
             failover_attempts=failover_attempts,
             failover_delay=0.1
@@ -131,7 +131,7 @@ class TestDefaultStrategyExecutor:
             NoValidDatabaseException,
             NoValidDatabaseException
         ]
-        executor = DefaultStrategyExecutor(
+        executor = DefaultFailoverStrategyExecutor(
             mock_fs,
             failover_attempts=failover_attempts,
             failover_delay=0.1

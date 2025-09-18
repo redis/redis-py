@@ -10,5 +10,5 @@ class UnhealthyDatabaseException(Exception):
         self.original_exception = original_exception
 
 class TemporaryUnavailableException(Exception):
-    """Exception raised when all databases in setup is temporary unavailable."""
+    """Exception raised when all databases in setup are temporary unavailable."""
     pass
