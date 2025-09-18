@@ -8,7 +8,8 @@ from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, Databases, SyncDatabase
 from redis.multidb.circuit import State as CBState
 from redis.multidb.event import RegisterCommandFailure, ActiveDatabaseChanged, ResubscribeOnActiveDatabaseChanged
-from redis.multidb.failover import FailoverStrategy
+from redis.multidb.failover import FailoverStrategy, FailoverStrategyExecutor, DEFAULT_FAILOVER_ATTEMPTS, \
+    DEFAULT_FAILOVER_DELAY, DefaultFailoverStrategyExecutor
 from redis.multidb.failure_detector import FailureDetector
 from redis.retry import Retry
 
@@ -94,8 +95,8 @@ class SyncCommandExecutor(CommandExecutor):
 
     @property
     @abstractmethod
-    def failover_strategy(self) -> FailoverStrategy:
-        """Returns failover strategy."""
+    def failover_strategy_executor(self) -> FailoverStrategyExecutor:
+        """Returns failover strategy executor."""
         pass
 
     @property
@@ -142,6 +143,8 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
             command_retry: Retry,
             failover_strategy: FailoverStrategy,
             event_dispatcher: EventDispatcherInterface,
+            failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS,
+            failover_delay: float = DEFAULT_FAILOVER_DELAY,
             auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
     ):
         """
@@ -153,6 +156,8 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
             command_retry: Retry policy for failed command execution
             failover_strategy: Strategy for handling database failover
             event_dispatcher: Interface for dispatching events
+            failover_attempts: Number of failover attempts
+            failover_delay: Delay between failover attempts
             auto_fallback_interval: Time interval in seconds between attempts to fall back to a primary database
         """
         super().__init__(auto_fallback_interval)
@@ -163,7 +168,11 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         self._databases = databases
         self._failure_detectors = failure_detectors
         self._command_retry = command_retry
-        self._failover_strategy = failover_strategy
+        self._failover_strategy_executor = DefaultFailoverStrategyExecutor(
+            failover_strategy,
+            failover_attempts,
+            failover_delay
+        )
         self._event_dispatcher = event_dispatcher
         self._active_database: Optional[Database] = None
         self._active_pubsub: Optional[PubSub] = None
@@ -209,8 +218,8 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         self._active_pubsub = pubsub
 
     @property
-    def failover_strategy(self) -> FailoverStrategy:
-        return self._failover_strategy
+    def failover_strategy_executor(self) -> FailoverStrategyExecutor:
+        return self._failover_strategy_executor
 
     def execute_command(self, *args, **options):
         def callback():
@@ -285,7 +294,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
                     and self._next_fallback_attempt <= datetime.now()
                 )
         ):
-            self.active_database = self._failover_strategy.database
+            self.active_database = self._failover_strategy_executor.execute()
             self._schedule_next_fallback()
 
     def _setup_event_dispatcher(self):

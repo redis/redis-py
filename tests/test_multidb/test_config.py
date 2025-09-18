@@ -1,8 +1,8 @@
 from unittest.mock import Mock
 from redis.connection import ConnectionPool
-from redis.multidb.circuit import PBCircuitBreakerAdapter, CircuitBreaker
+from redis.multidb.circuit import PBCircuitBreakerAdapter, CircuitBreaker, DEFAULT_GRACE_PERIOD
 from redis.multidb.config import MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
-    DEFAULT_AUTO_FALLBACK_INTERVAL, DatabaseConfig, DEFAULT_GRACE_PERIOD
+    DEFAULT_AUTO_FALLBACK_INTERVAL, DatabaseConfig
 from redis.multidb.database import Database
 from redis.multidb.failure_detector import CommandFailureDetector, FailureDetector
 from redis.multidb.healthcheck import EchoHealthCheck, HealthCheck

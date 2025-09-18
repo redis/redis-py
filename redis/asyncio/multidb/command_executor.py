@@ -8,7 +8,8 @@ from redis.asyncio.client import PubSub, Pipeline
 from redis.asyncio.multidb.database import Databases, AsyncDatabase, Database
 from redis.asyncio.multidb.event import AsyncActiveDatabaseChanged, RegisterCommandFailure, \
     ResubscribeOnActiveDatabaseChanged
-from redis.asyncio.multidb.failover import AsyncFailoverStrategy
+from redis.asyncio.multidb.failover import AsyncFailoverStrategy, FailoverStrategyExecutor, DefaultFailoverStrategyExecutor, \
+    DEFAULT_FAILOVER_ATTEMPTS, DEFAULT_FAILOVER_DELAY
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
 from redis.multidb.circuit import State as CBState
 from redis.asyncio.retry import Retry
@@ -62,8 +63,8 @@ class AsyncCommandExecutor(CommandExecutor):
 
     @property
     @abstractmethod
-    def failover_strategy(self) -> AsyncFailoverStrategy:
-        """Returns failover strategy."""
+    def failover_strategy_executor(self) -> FailoverStrategyExecutor:
+        """Returns failover strategy executor."""
         pass
 
     @property
@@ -111,6 +112,8 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
             command_retry: Retry,
             failover_strategy: AsyncFailoverStrategy,
             event_dispatcher: EventDispatcherInterface,
+            failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS,
+            failover_delay: float = DEFAULT_FAILOVER_DELAY,
             auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
     ):
         """
@@ -122,6 +125,8 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
             command_retry: Retry policy for failed command execution
             failover_strategy: Strategy for handling database failover
             event_dispatcher: Interface for dispatching events
+            failover_attempts: Number of failover attempts
+            failover_delay: Delay between failover attempts
             auto_fallback_interval: Time interval in seconds between attempts to fall back to a primary database
         """
         super().__init__(auto_fallback_interval)
@@ -132,7 +137,11 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
         self._databases = databases
         self._failure_detectors = failure_detectors
         self._command_retry = command_retry
-        self._failover_strategy = failover_strategy
+        self._failover_strategy_executor = DefaultFailoverStrategyExecutor(
+            failover_strategy,
+            failover_attempts,
+            failover_delay
+        )
         self._event_dispatcher = event_dispatcher
         self._active_database: Optional[Database] = None
         self._active_pubsub: Optional[PubSub] = None
@@ -173,8 +182,8 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
         self._active_pubsub = pubsub
 
     @property
-    def failover_strategy(self) -> AsyncFailoverStrategy:
-        return self._failover_strategy
+    def failover_strategy_executor(self) -> FailoverStrategyExecutor:
+        return self._failover_strategy_executor
 
     @property
     def command_retry(self) -> Retry:
@@ -265,7 +274,7 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
                     and self._next_fallback_attempt <= datetime.now()
                 )
         ):
-            await self.set_active_database(await self._failover_strategy.database())
+            await self.set_active_database(await self._failover_strategy_executor.execute())
             self._schedule_next_fallback()
 
     async def _on_command_fail(self, error, *args):

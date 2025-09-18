@@ -4,6 +4,8 @@ from typing import Callable
 
 import pybreaker
 
+DEFAULT_GRACE_PERIOD = 60
+
 class State(Enum):
     CLOSED = 'closed'
     OPEN = 'open'
