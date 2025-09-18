@@ -65,7 +65,7 @@ class TestSSL:
         # Test with specific SSL verify flags
         ssl_verify_flags_config = [
             (ssl.VerifyFlags.VERIFY_X509_STRICT, False),  # Disable strict verification
-            (ssl.VerifyFlags.VERIFY_X509_PARTIAL_CHAIN, True),  # Enable partial chain
+            (ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN, True),  # Enable partial chain
         ]
 
         r = redis.Redis(
@@ -125,10 +125,10 @@ class TestSSL:
                     captured_context.options & ssl.VerifyFlags.VERIFY_X509_STRICT
                 ), "VERIFY_X509_STRICT should be disabled but is enabled"
 
-                # Verify that VERIFY_X509_PARTIAL_CHAIN was enabled (bit set)
+                # Verify that VERIFY_CRL_CHECK_CHAIN was enabled (bit set)
                 assert (
-                    captured_context.options & ssl.VerifyFlags.VERIFY_X509_PARTIAL_CHAIN
-                ), "VERIFY_X509_PARTIAL_CHAIN should be enabled but is disabled"
+                    captured_context.options & ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN
+                ), "VERIFY_CRL_CHECK_CHAIN should be enabled but is disabled"
 
         finally:
             await r.aclose()

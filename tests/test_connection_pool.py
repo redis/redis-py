@@ -539,12 +539,12 @@ class TestSSLConnectionURLParsing:
                 return self.make_connection()
 
         pool = DummyConnectionPool.from_url(
-            "rediss://?ssl_verify_flags_config=[(VERIFY_X509_STRICT,False), (VERIFY_X509_PARTIAL_CHAIN,True)]"
+            "rediss://?ssl_verify_flags_config=[(VERIFY_X509_STRICT,False), (VERIFY_CRL_CHECK_CHAIN,True)]"
         )
 
         assert pool.get_connection().ssl_verify_flags_config == [
             (ssl.VerifyFlags.VERIFY_X509_STRICT, False),
-            (ssl.VerifyFlags.VERIFY_X509_PARTIAL_CHAIN, True),
+            (ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN, True),
         ]
 
     def test_ssl_flags_config_invalid_flag(self):
@@ -554,12 +554,12 @@ class TestSSLConnectionURLParsing:
 
         with pytest.raises(ValueError):
             DummyConnectionPool.from_url(
-                "rediss://?ssl_verify_flags_config=[(VERIFY_X509,False), (VERIFY_X509_PARTIAL_CHAIN,True)]"
+                "rediss://?ssl_verify_flags_config=[(VERIFY_X509,False), (VERIFY_CRL_CHECK_CHAIN,True)]"
             )
 
         with pytest.raises(ValueError):
             DummyConnectionPool.from_url(
-                "rediss://?ssl_verify_flags_config=[(VERIFY_X509_STRICT,Ok), (VERIFY_X509_PARTIAL_CHAIN,True)]"
+                "rediss://?ssl_verify_flags_config=[(VERIFY_X509_STRICT,Ok), (VERIFY_CRL_CHECK_CHAIN,True)]"
             )
 
 
