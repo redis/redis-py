@@ -56,6 +56,10 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
+from redis.maintenance_events import (
+    MaintenanceEventPoolHandler,
+    MaintenanceEventsConfig,
+)
 from redis.retry import Retry
 from redis.utils import (
     _set_info_logger,
@@ -244,6 +248,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
+        maintenance_events_config: Optional[MaintenanceEventsConfig] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -367,6 +372,23 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             "3",
         ]:
             raise RedisError("Client caching is only supported with RESP version 3")
+
+        if maintenance_events_config and self.connection_pool.get_protocol() not in [
+            3,
+            "3",
+        ]:
+            raise RedisError(
+                "Push handlers on connection are only supported with RESP version 3"
+            )
+        if maintenance_events_config and maintenance_events_config.enabled:
+            self.maintenance_events_pool_handler = MaintenanceEventPoolHandler(
+                self.connection_pool, maintenance_events_config
+            )
+            self.connection_pool.set_maintenance_events_pool_handler(
+                self.maintenance_events_pool_handler
+            )
+        else:
+            self.maintenance_events_pool_handler = None
 
         self.single_connection_lock = threading.RLock()
         self.connection = None
@@ -565,8 +587,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         return Monitor(self.connection_pool)
 
     def client(self):
+        maintenance_events_config = (
+            None
+            if self.maintenance_events_pool_handler is None
+            else self.maintenance_events_pool_handler.config
+        )
         return self.__class__(
-            connection_pool=self.connection_pool, single_connection_client=True
+            connection_pool=self.connection_pool,
+            single_connection_client=True,
+            maintenance_events_config=maintenance_events_config,
         )
 
     def __enter__(self):
@@ -635,7 +664,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 ),
                 lambda error: self._close_connection(conn, error, *args),
             )
+
         finally:
+            if conn and conn.should_reconnect():
+                self._close_connection(conn)
+                conn.connect()
             if self._single_connection_client:
                 self.single_connection_lock.release()
             if not self.connection:
@@ -686,11 +719,7 @@ class Monitor:
         self.connection = self.connection_pool.get_connection()
 
     def __enter__(self):
-        self.connection.send_command("MONITOR")
-        # check that monitor returns 'OK', but don't return it to user
-        response = self.connection.read_response()
-        if not bool_ok(response):
-            raise RedisError(f"MONITOR failed: {response}")
+        self._start_monitor()
         return self
 
     def __exit__(self, *args):
@@ -700,8 +729,13 @@ class Monitor:
     def next_command(self):
         """Parse the response from a monitor command"""
         response = self.connection.read_response()
+
+        if response is None:
+            return None
+
         if isinstance(response, bytes):
             response = self.connection.encoder.decode(response, force=True)
+
         command_time, command_data = response.split(" ", 1)
         m = self.monitor_re.match(command_data)
         db_id, client_info, command = m.groups()
@@ -736,6 +770,14 @@ class Monitor:
         """Listen for commands coming to the server."""
         while True:
             yield self.next_command()
+
+    def _start_monitor(self):
+        self.connection.send_command("MONITOR")
+        # check that monitor returns 'OK', but don't return it to user
+        response = self.connection.read_response()
+
+        if not bool_ok(response):
+            raise RedisError(f"MONITOR failed: {response}")
 
 
 class PubSub:
@@ -881,7 +923,7 @@ class PubSub:
         """
         ttl = 10
         conn = self.connection
-        while self.health_check_response_counter > 0 and ttl > 0:
+        while conn and self.health_check_response_counter > 0 and ttl > 0:
             if self._execute(conn, conn.can_read, timeout=conn.socket_timeout):
                 response = self._execute(conn, conn.read_response)
                 if self.is_health_check_response(response):
@@ -911,10 +953,16 @@ class PubSub:
         called by the # connection to resubscribe us to any channels and
         patterns we were previously listening to
         """
-        return conn.retry.call_with_retry(
+
+        if conn.should_reconnect():
+            self._reconnect(conn)
+
+        response = conn.retry.call_with_retry(
             lambda: command(*args, **kwargs),
             lambda _: self._reconnect(conn),
         )
+
+        return response
 
     def parse_response(self, block=True, timeout=0):
         """Parse the response from a publish/subscribe command"""
@@ -1125,6 +1173,7 @@ class PubSub:
                 return None
 
         response = self.parse_response(block=(timeout is None), timeout=timeout)
+
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None
@@ -1148,6 +1197,7 @@ class PubSub:
             return None
         if isinstance(response, bytes):
             response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
+
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
             message = {
@@ -1359,6 +1409,7 @@ class Pipeline(Redis):
         # clean up the other instance attributes
         self.watching = False
         self.explicit_transaction = False
+
         # we can safely return the connection to the pool here since we're
         # sure we're no longer WATCHing anything
         if self.connection:
@@ -1518,6 +1569,7 @@ class Pipeline(Redis):
                 if command_name in self.response_callbacks:
                     r = self.response_callbacks[command_name](r, **options)
             data.append(r)
+
         return data
 
     def _execute_pipeline(self, connection, commands, raise_on_error):
@@ -1525,16 +1577,17 @@ class Pipeline(Redis):
         all_cmds = connection.pack_commands([args for args, _ in commands])
         connection.send_packed_command(all_cmds)
 
-        response = []
+        responses = []
         for args, options in commands:
             try:
-                response.append(self.parse_response(connection, args[0], **options))
+                responses.append(self.parse_response(connection, args[0], **options))
             except ResponseError as e:
-                response.append(e)
+                responses.append(e)
 
         if raise_on_error:
-            self.raise_first_error(commands, response)
-        return response
+            self.raise_first_error(commands, responses)
+
+        return responses
 
     def raise_first_error(self, commands, response):
         for i, r in enumerate(response):
@@ -1619,6 +1672,8 @@ class Pipeline(Redis):
                 lambda error: self._disconnect_raise_on_watching(conn, error),
             )
         finally:
+            # in reset() the connection is disconnected before returned to the pool if
+            # it is marked for reconnect.
             self.reset()
 
     def discard(self):

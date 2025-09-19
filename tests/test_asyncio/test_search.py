@@ -1815,3 +1815,181 @@ async def test_binary_and_text_fields(decoded_r: redis.Redis):
     assert docs[0]["first_name"] == mixed_data["first_name"], (
         "The text field is not decoded correctly"
     )
+
+
+# SVS-VAMANA Async Tests
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.1.224")
+async def test_async_svs_vamana_basic_functionality(decoded_r: redis.Redis):
+    await decoded_r.ft().create_index(
+        (
+            VectorField(
+                "v",
+                "SVS-VAMANA",
+                {"TYPE": "FLOAT32", "DIM": 4, "DISTANCE_METRIC": "L2"},
+            ),
+        )
+    )
+
+    vectors = [
+        [1.0, 2.0, 3.0, 4.0],
+        [2.0, 3.0, 4.0, 5.0],
+        [3.0, 4.0, 5.0, 6.0],
+        [10.0, 11.0, 12.0, 13.0],
+    ]
+
+    for i, vec in enumerate(vectors):
+        await decoded_r.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+
+    query = "*=>[KNN 3 @v $vec]"
+    q = Query(query).return_field("__v_score").sort_by("__v_score", True)
+    res = await decoded_r.ft().search(
+        q, query_params={"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
+    )
+
+    if is_resp2_connection(decoded_r):
+        assert res.total == 3
+        assert "doc0" == res.docs[0].id
+    else:
+        assert res["total_results"] == 3
+        assert "doc0" == res["results"][0]["id"]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.1.224")
+async def test_async_svs_vamana_distance_metrics(decoded_r: redis.Redis):
+    # Test COSINE distance
+    await decoded_r.ft().create_index(
+        (
+            VectorField(
+                "v",
+                "SVS-VAMANA",
+                {"TYPE": "FLOAT32", "DIM": 3, "DISTANCE_METRIC": "COSINE"},
+            ),
+        )
+    )
+
+    vectors = [[1.0, 0.0, 0.0], [0.707, 0.707, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]
+
+    for i, vec in enumerate(vectors):
+        await decoded_r.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+
+    query = Query("*=>[KNN 2 @v $vec as score]").sort_by("score").no_content()
+    query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
+
+    res = await decoded_r.ft().search(query, query_params=query_params)
+    if is_resp2_connection(decoded_r):
+        assert res.total == 2
+        assert "doc0" == res.docs[0].id
+    else:
+        assert res["total_results"] == 2
+        assert "doc0" == res["results"][0]["id"]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.1.224")
+async def test_async_svs_vamana_vector_types(decoded_r: redis.Redis):
+    # Test FLOAT16
+    await decoded_r.ft("idx16").create_index(
+        (
+            VectorField(
+                "v16",
+                "SVS-VAMANA",
+                {"TYPE": "FLOAT16", "DIM": 4, "DISTANCE_METRIC": "L2"},
+            ),
+        )
+    )
+
+    vectors = [[1.5, 2.5, 3.5, 4.5], [2.5, 3.5, 4.5, 5.5], [3.5, 4.5, 5.5, 6.5]]
+
+    for i, vec in enumerate(vectors):
+        await decoded_r.hset(
+            f"doc16_{i}", "v16", np.array(vec, dtype=np.float16).tobytes()
+        )
+
+    query = Query("*=>[KNN 2 @v16 $vec as score]").no_content()
+    query_params = {"vec": np.array(vectors[0], dtype=np.float16).tobytes()}
+
+    res = await decoded_r.ft("idx16").search(query, query_params=query_params)
+    if is_resp2_connection(decoded_r):
+        assert res.total == 2
+        assert "doc16_0" == res.docs[0].id
+    else:
+        assert res["total_results"] == 2
+        assert "doc16_0" == res["results"][0]["id"]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.1.224")
+async def test_async_svs_vamana_compression(decoded_r: redis.Redis):
+    await decoded_r.ft().create_index(
+        (
+            VectorField(
+                "v",
+                "SVS-VAMANA",
+                {
+                    "TYPE": "FLOAT32",
+                    "DIM": 8,
+                    "DISTANCE_METRIC": "L2",
+                    "COMPRESSION": "LVQ8",
+                    "TRAINING_THRESHOLD": 1024,
+                },
+            ),
+        )
+    )
+
+    vectors = []
+    for i in range(20):
+        vec = [float(i + j) for j in range(8)]
+        vectors.append(vec)
+        await decoded_r.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+
+    query = Query("*=>[KNN 5 @v $vec as score]").no_content()
+    query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
+
+    res = await decoded_r.ft().search(query, query_params=query_params)
+    if is_resp2_connection(decoded_r):
+        assert res.total == 5
+        assert "doc0" == res.docs[0].id
+    else:
+        assert res["total_results"] == 5
+        assert "doc0" == res["results"][0]["id"]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.1.224")
+async def test_async_svs_vamana_build_parameters(decoded_r: redis.Redis):
+    await decoded_r.ft().create_index(
+        (
+            VectorField(
+                "v",
+                "SVS-VAMANA",
+                {
+                    "TYPE": "FLOAT32",
+                    "DIM": 6,
+                    "DISTANCE_METRIC": "COSINE",
+                    "CONSTRUCTION_WINDOW_SIZE": 300,
+                    "GRAPH_MAX_DEGREE": 64,
+                    "SEARCH_WINDOW_SIZE": 20,
+                    "EPSILON": 0.05,
+                },
+            ),
+        )
+    )
+
+    vectors = []
+    for i in range(15):
+        vec = [float(i + j) for j in range(6)]
+        vectors.append(vec)
+        await decoded_r.hset(f"doc{i}", "v", np.array(vec, dtype=np.float32).tobytes())
+
+    query = Query("*=>[KNN 3 @v $vec as score]").no_content()
+    query_params = {"vec": np.array(vectors[0], dtype=np.float32).tobytes()}
+
+    res = await decoded_r.ft().search(query, query_params=query_params)
+    if is_resp2_connection(decoded_r):
+        assert res.total == 3
+        assert "doc0" == res.docs[0].id
+    else:
+        assert res["total_results"] == 3
+        assert "doc0" == res["results"][0]["id"]
