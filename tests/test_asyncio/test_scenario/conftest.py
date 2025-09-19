@@ -4,14 +4,13 @@ import pytest
 import pytest_asyncio
 
 from redis.asyncio import Redis
-from redis.asyncio.multidb.client import MultiDBClient
 from redis.asyncio.multidb.config import DEFAULT_FAILURES_THRESHOLD, DEFAULT_HEALTH_CHECK_INTERVAL, DatabaseConfig, \
     MultiDbConfig
 from redis.asyncio.multidb.event import AsyncActiveDatabaseChanged
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialBackoff
 from redis.event import AsyncEventListenerInterface, EventDispatcher
-from tests.test_scenario.conftest import get_endpoint_config, extract_cluster_fqdn
+from tests.test_scenario.conftest import get_endpoints_config, extract_cluster_fqdn
 from tests.test_scenario.fault_injector_client import FaultInjectorClient
 
 
@@ -32,9 +31,9 @@ async def r_multi_db(request) -> tuple[MultiDbConfig, CheckActiveDatabaseChanged
      client_class = request.param.get('client_class', Redis)
 
      if client_class == Redis:
-        endpoint_config = get_endpoint_config('re-active-active')
+        endpoint_config = get_endpoints_config('re-active-active')
      else:
-        endpoint_config = get_endpoint_config('re-active-active-oss-cluster')
+        endpoint_config = get_endpoints_config('re-active-active-oss-cluster')
 
      username = endpoint_config.get('username', None)
      password = endpoint_config.get('password', None)
