@@ -250,16 +250,21 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         Runs health checks as a recurring task.
         Runs health checks against all databases.
         """
-        results = await asyncio.wait_for(
-            asyncio.gather(
-                *(
-                    asyncio.create_task(self._check_db_health(database))
-                    for database, _ in self._databases
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    *(
+                        asyncio.create_task(self._check_db_health(database))
+                        for database, _ in self._databases
+                    ),
+                    return_exceptions=True,
                 ),
-                return_exceptions=True,
-            ),
-            timeout=self._health_check_interval,
-        )
+                timeout=self._health_check_interval,
+            )
+        except asyncio.TimeoutError:
+            raise asyncio.TimeoutError(
+                "Health check execution exceeds health_check_interval"
+            )
 
         for result in results:
             if isinstance(result, UnhealthyDatabaseException):

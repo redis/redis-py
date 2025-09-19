@@ -96,8 +96,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2, "health_check_interval": 10},
-            {"client_class": RedisCluster, "failure_threshold": 2, "health_check_interval": 10},
+            {"client_class": Redis, "failure_threshold": 2, "health_check_interval": 20},
+            {"client_class": RedisCluster, "failure_threshold": 2, "health_check_interval": 20},
         ],
         ids=["standalone", "cluster"],
         indirect=True
