@@ -123,7 +123,11 @@ class TestActiveActive:
 
         # Adding additional health check to the client.
         r_multi_db.add_health_check(
-            LagAwareHealthCheck(verify_tls=False, auth_basic=(env0_username,env0_password))
+            LagAwareHealthCheck(
+                verify_tls=False,
+                auth_basic=(env0_username,env0_password),
+                lag_aware_tolerance=10000
+            )
         )
 
         # Client initialized on the first command.

@@ -95,10 +95,22 @@ class TestActiveActive:
         "r_multi_db",
         [
             {"client_class": Redis, "failure_threshold": 2, "health_checks":
-                [LagAwareHealthCheck(verify_tls=False, auth_basic=(os.getenv('ENV0_USERNAME'),os.getenv('ENV0_PASSWORD')))]
+                [
+                    LagAwareHealthCheck(
+                        verify_tls=False,
+                        auth_basic=(os.getenv('ENV0_USERNAME'),os.getenv('ENV0_PASSWORD')),
+                        lag_aware_tolerance=10000
+                    )
+                ]
             },
             {"client_class": RedisCluster, "failure_threshold": 2, "health_checks":
-                [LagAwareHealthCheck(verify_tls=False, auth_basic=(os.getenv('ENV0_USERNAME'),os.getenv('ENV0_PASSWORD')))]
+                [
+                    LagAwareHealthCheck(
+                        verify_tls=False,
+                        auth_basic=(os.getenv('ENV0_USERNAME'), os.getenv('ENV0_PASSWORD')),
+                        lag_aware_tolerance=10000
+                    )
+                ]
             },
         ],
         ids=["standalone", "cluster"],
