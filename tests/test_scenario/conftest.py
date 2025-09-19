@@ -40,8 +40,7 @@ def endpoint_name(request):
     )
 
 
-@pytest.fixture()
-def endpoints_config(endpoint_name: str):
+def get_endpoints_config(endpoint_name: str):
     endpoints_config = os.getenv("REDIS_ENDPOINTS_CONFIG_PATH", None)
 
     if not (endpoints_config and os.path.exists(endpoints_config)):
@@ -69,9 +68,9 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
      client_class = request.param.get('client_class', Redis)
 
      if client_class == Redis:
-        endpoint_config = endpoints_config('re-active-active')
+        endpoint_config = get_endpoints_config('re-active-active')
      else:
-        endpoint_config = endpoints_config('re-active-active-oss-cluster')
+        endpoint_config = get_endpoints_config('re-active-active-oss-cluster')
 
      username = endpoint_config.get('username', None)
      password = endpoint_config.get('password', None)

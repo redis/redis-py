@@ -4,8 +4,6 @@ from enum import Enum
 from time import sleep
 from typing import Optional, Tuple, Union, List
 
-from pygments.lexers.julia import allowed_variable
-
 from redis import Redis
 from redis.backoff import NoBackoff
 from redis.http.http_client import DEFAULT_TIMEOUT, HttpClient
