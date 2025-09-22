@@ -305,6 +305,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
             loop.call_later(DEFAULT_GRACE_PERIOD, _half_open_circuit, circuit)
 
+    async def aclose(self):
+        await self.command_executor.active_database.client.aclose()
+
 def _half_open_circuit(circuit: CircuitBreaker):
     circuit.state = CBState.HALF_OPEN
 

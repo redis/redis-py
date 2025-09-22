@@ -75,7 +75,7 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
      username = endpoint_config.get('username', None)
      password = endpoint_config.get('password', None)
      failure_threshold = request.param.get('failure_threshold', DEFAULT_FAILURES_THRESHOLD)
-     command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=1, base=0.05), retries=10))
+     command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=0.1, base=0.01), retries=10))
 
      # Retry configuration different for health checks as initial health check require more time in case
      # if infrastructure wasn't restored from the previous test.

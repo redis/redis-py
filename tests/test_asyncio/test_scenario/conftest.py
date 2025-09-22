@@ -1,9 +1,12 @@
+import asyncio
 import os
+from typing import Any, AsyncGenerator
 
 import pytest
 import pytest_asyncio
 
 from redis.asyncio import Redis
+from redis.asyncio.multidb.client import MultiDBClient
 from redis.asyncio.multidb.config import DEFAULT_FAILURES_THRESHOLD, DEFAULT_HEALTH_CHECK_INTERVAL, DatabaseConfig, \
     MultiDbConfig
 from redis.asyncio.multidb.event import AsyncActiveDatabaseChanged
@@ -27,7 +30,7 @@ def fault_injector_client():
      return FaultInjectorClient(url)
 
 @pytest_asyncio.fixture()
-async def r_multi_db(request) -> tuple[MultiDbConfig, CheckActiveDatabaseChangedListener, dict]:
+async def r_multi_db(request) -> AsyncGenerator[tuple[MultiDBClient, CheckActiveDatabaseChangedListener, Any], Any]:
      client_class = request.param.get('client_class', Redis)
 
      if client_class == Redis:
@@ -38,7 +41,7 @@ async def r_multi_db(request) -> tuple[MultiDbConfig, CheckActiveDatabaseChanged
      username = endpoint_config.get('username', None)
      password = endpoint_config.get('password', None)
      failure_threshold = request.param.get('failure_threshold', DEFAULT_FAILURES_THRESHOLD)
-     command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=1, base=0.05), retries=10))
+     command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=0.1, base=0.01), retries=10))
 
      # Retry configuration different for health checks as initial health check require more time in case
      # if infrastructure wasn't restored from the previous test.
@@ -86,4 +89,11 @@ async def r_multi_db(request) -> tuple[MultiDbConfig, CheckActiveDatabaseChanged
          event_dispatcher=event_dispatcher,
      )
 
-     return config, listener, endpoint_config
+     client = MultiDBClient(config)
+
+     async def teardown():
+         await client.aclose()
+         await asyncio.sleep(15)
+
+     yield client, listener, endpoint_config
+     await teardown()

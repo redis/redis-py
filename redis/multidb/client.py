@@ -271,6 +271,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
             self._bg_scheduler.run_once(DEFAULT_GRACE_PERIOD, _half_open_circuit, circuit)
 
+    def close(self):
+        self.command_executor.active_database.client.close()
+
 def _half_open_circuit(circuit: CircuitBreaker):
     circuit.state = CBState.HALF_OPEN
 
