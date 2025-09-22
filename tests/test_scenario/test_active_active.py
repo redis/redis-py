@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 def trigger_network_failure_action(fault_injector_client, config, event: threading.Event = None):
     action_request = ActionRequest(
         action_type=ActionType.NETWORK_FAILURE,
-        parameters={"bdb_id": config['bdb_id'], "delay": 2, "cluster_index": 0}
+        parameters={"bdb_id": config['bdb_id'], "delay": 3, "cluster_index": 0}
     )
 
     result = fault_injector_client.trigger_action(action_request)
