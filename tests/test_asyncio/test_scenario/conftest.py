@@ -45,7 +45,7 @@ async def r_multi_db(request) -> AsyncGenerator[tuple[MultiDBClient, CheckActive
 
      # Retry configuration different for health checks as initial health check require more time in case
      # if infrastructure wasn't restored from the previous test.
-     health_check_interval = request.param.get('health_check_interval', DEFAULT_HEALTH_CHECK_INTERVAL)
+     health_check_interval = request.param.get('health_check_interval', 10)
      health_checks = request.param.get('health_checks', [])
      event_dispatcher = EventDispatcher()
      listener = CheckActiveDatabaseChangedListener()

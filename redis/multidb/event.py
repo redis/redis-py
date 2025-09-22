@@ -65,6 +65,10 @@ class CloseConnectionOnActiveDatabaseChanged(EventListenerInterface):
         if isinstance(event.old_database.client, Redis):
             event.old_database.client.connection_pool.update_active_connections_for_reconnect()
             event.old_database.client.connection_pool.disconnect()
+        else:
+            for node in event.old_database.client.nodes_manager.nodes_cache.values():
+                node.redis_connection.connection_pool.update_active_connections_for_reconnect()
+                node.redis_connection.connection_pool.disconnect()
 
 class RegisterCommandFailure(EventListenerInterface):
     """

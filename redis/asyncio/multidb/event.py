@@ -62,6 +62,7 @@ class CloseConnectionOnActiveDatabaseChanged(AsyncEventListenerInterface):
         await event.old_database.client.aclose()
 
         if isinstance(event.old_database.client, Redis):
+            await event.old_database.client.connection_pool.update_active_connections_for_reconnect()
             await event.old_database.client.connection_pool.disconnect()
 
 class RegisterCommandFailure(AsyncEventListenerInterface):
