@@ -1,7 +1,6 @@
 from typing import List
 
 from redis.client import Redis
-from sphinx.events import EventListener
 
 from redis.event import EventListenerInterface, OnCommandsFailEvent
 from redis.multidb.database import SyncDatabase
@@ -64,6 +63,7 @@ class CloseConnectionOnActiveDatabaseChanged(EventListenerInterface):
         event.old_database.client.close()
 
         if isinstance(event.old_database.client, Redis):
+            event.old_database.client.connection_pool.update_active_connections_for_reconnect()
             event.old_database.client.connection_pool.disconnect()
 
 class RegisterCommandFailure(EventListenerInterface):
