@@ -5,7 +5,7 @@ from typing import Any, AsyncGenerator
 import pytest
 import pytest_asyncio
 
-from redis.asyncio import Redis
+from redis.asyncio import Redis, RedisCluster
 from redis.asyncio.multidb.client import MultiDBClient
 from redis.asyncio.multidb.config import DEFAULT_FAILURES_THRESHOLD, DEFAULT_HEALTH_CHECK_INTERVAL, DatabaseConfig, \
     MultiDbConfig
@@ -93,6 +93,10 @@ async def r_multi_db(request) -> AsyncGenerator[tuple[MultiDBClient, CheckActive
 
      async def teardown():
          await client.aclose()
+
+         if isinstance(client.command_executor.active_database.client, Redis):
+            await client.command_executor.active_database.client.connection_pool.disconnect()
+
          await asyncio.sleep(15)
 
      yield client, listener, endpoint_config

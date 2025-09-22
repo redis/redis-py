@@ -51,7 +51,7 @@ class ResubscribeOnActiveDatabaseChanged(AsyncEventListenerInterface):
             new_pubsub.patterns = old_pubsub.patterns
             await new_pubsub.on_connect(None)
             event.command_executor.active_pubsub = new_pubsub
-            await old_pubsub.close()
+            await old_pubsub.aclose()
 
 class RegisterCommandFailure(AsyncEventListenerInterface):
     """

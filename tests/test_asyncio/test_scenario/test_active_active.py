@@ -186,13 +186,13 @@ class TestActiveActive:
                 )
                 await asyncio.sleep(0.5)
 
-        # Execute commands until database failover
-        while not listener.is_changed_flag:
-            await retry.call_with_retry(
-                lambda: callback(),
-                lambda _: dummy_fail_async()
-            )
-            await asyncio.sleep(0.5)
+            # Execute commands until database failover
+            while not listener.is_changed_flag:
+                await retry.call_with_retry(
+                    lambda: callback(),
+                    lambda _: dummy_fail_async()
+                )
+                await asyncio.sleep(0.5)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -235,13 +235,13 @@ class TestActiveActive:
                 )
                 await asyncio.sleep(0.5)
 
-        # Execute pipeline until database failover
-        while not listener.is_changed_flag:
-            await retry.call_with_retry(
-                lambda: callback(),
-                lambda _: dummy_fail_async()
-            )
-            await asyncio.sleep(0.5)
+            # Execute pipeline until database failover
+            while not listener.is_changed_flag:
+                await retry.call_with_retry(
+                    lambda: callback(),
+                    lambda _: dummy_fail_async()
+                )
+                await asyncio.sleep(0.5)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -352,5 +352,4 @@ class TestActiveActive:
             # A timeout to ensure that an async handler will handle all previous messages.
             await asyncio.sleep(0.1)
             task.cancel()
-            await pubsub.unsubscribe('test-channel') is True
             assert messages_count >= 2
