@@ -1,5 +1,6 @@
 from typing import List
 
+from redis.asyncio import Redis
 from redis.asyncio.multidb.database import AsyncDatabase
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
 from redis.event import AsyncEventListenerInterface, AsyncOnCommandsFailEvent
@@ -52,6 +53,16 @@ class ResubscribeOnActiveDatabaseChanged(AsyncEventListenerInterface):
             await new_pubsub.on_connect(None)
             event.command_executor.active_pubsub = new_pubsub
             await old_pubsub.aclose()
+
+class CloseConnectionOnActiveDatabaseChanged(AsyncEventListenerInterface):
+    """
+    Close connection to the old active database.
+    """
+    async def listen(self, event: AsyncActiveDatabaseChanged):
+        await event.old_database.client.aclose()
+
+        if isinstance(event.old_database.client, Redis):
+            await event.old_database.client.connection_pool.disconnect()
 
 class RegisterCommandFailure(AsyncEventListenerInterface):
     """

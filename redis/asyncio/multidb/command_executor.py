@@ -7,7 +7,7 @@ from redis.asyncio import RedisCluster
 from redis.asyncio.client import PubSub, Pipeline
 from redis.asyncio.multidb.database import Databases, AsyncDatabase, Database
 from redis.asyncio.multidb.event import AsyncActiveDatabaseChanged, RegisterCommandFailure, \
-    ResubscribeOnActiveDatabaseChanged
+    ResubscribeOnActiveDatabaseChanged, CloseConnectionOnActiveDatabaseChanged
 from redis.asyncio.multidb.failover import AsyncFailoverStrategy, FailoverStrategyExecutor, DefaultFailoverStrategyExecutor, \
     DEFAULT_FAILOVER_ATTEMPTS, DEFAULT_FAILOVER_DELAY
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
@@ -286,7 +286,8 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
         """
         failure_listener = RegisterCommandFailure(self._failure_detectors)
         resubscribe_listener = ResubscribeOnActiveDatabaseChanged()
+        close_connection_listener = CloseConnectionOnActiveDatabaseChanged()
         self._event_dispatcher.register_listeners({
             AsyncOnCommandsFailEvent: [failure_listener],
-            AsyncActiveDatabaseChanged: [resubscribe_listener],
+            AsyncActiveDatabaseChanged: [close_connection_listener, resubscribe_listener],
         })

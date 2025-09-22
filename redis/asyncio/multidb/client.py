@@ -59,7 +59,8 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         self._hc_lock = asyncio.Lock()
         self._bg_scheduler = BackgroundScheduler()
         self._config = config
-        self._hc_task = None
+        self._recurring_hc_task = None
+        self._hc_tasks = []
         self._half_open_state_task = None
 
     async def __aenter__(self: "MultiDBClient") -> "MultiDBClient":
@@ -68,10 +69,12 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        if self._hc_task:
-            self._hc_task.cancel()
+        if self._recurring_hc_task:
+            self._recurring_hc_task.cancel()
         if self._half_open_state_task:
             self._half_open_state_task.cancel()
+        for hc_task in self._hc_tasks:
+            hc_task.cancel()
 
     async def initialize(self):
         """
@@ -84,7 +87,7 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         await self._check_databases_health(on_error=raise_exception_on_failed_hc)
 
         # Starts recurring health checks on the background.
-        self._hc_task = asyncio.create_task(self._bg_scheduler.run_recurring_async(
+        self._recurring_hc_task = asyncio.create_task(self._bg_scheduler.run_recurring_async(
             self._health_check_interval,
             self._check_databases_health,
         ))
@@ -251,12 +254,10 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         Runs health checks against all databases.
         """
         try:
+            self._hc_tasks = [asyncio.create_task(self._check_db_health(database)) for database, _ in self._databases]
             results = await asyncio.wait_for(
                 asyncio.gather(
-                    *(
-                        asyncio.create_task(self._check_db_health(database))
-                        for database, _ in self._databases
-                    ),
+                    *self._hc_tasks,
                     return_exceptions=True,
                 ),
                 timeout=self._health_check_interval,
