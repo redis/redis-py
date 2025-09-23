@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from redis import Redis
+from redis import Redis, ConnectionPool
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import State as CBState, CircuitBreaker
 from redis.multidb.config import MultiDbConfig, DatabaseConfig, DEFAULT_HEALTH_CHECK_INTERVAL, \
@@ -39,6 +39,7 @@ def mock_db(request) -> Database:
      db = Mock(spec=Database)
      db.weight = request.param.get("weight", 1.0)
      db.client = Mock(spec=Redis)
+     db.client.connection_pool = Mock(spec=ConnectionPool)
 
      cb = request.param.get("circuit", {})
      mock_cb = Mock(spec=CircuitBreaker)
@@ -53,6 +54,7 @@ def mock_db1(request) -> Database:
      db = Mock(spec=Database)
      db.weight = request.param.get("weight", 1.0)
      db.client = Mock(spec=Redis)
+     db.client.connection_pool = Mock(spec=ConnectionPool)
 
      cb = request.param.get("circuit", {})
      mock_cb = Mock(spec=CircuitBreaker)
@@ -67,6 +69,7 @@ def mock_db2(request) -> Database:
      db = Mock(spec=Database)
      db.weight = request.param.get("weight", 1.0)
      db.client = Mock(spec=Redis)
+     db.client.connection_pool = Mock(spec=ConnectionPool)
 
      cb = request.param.get("circuit", {})
      mock_cb = Mock(spec=CircuitBreaker)

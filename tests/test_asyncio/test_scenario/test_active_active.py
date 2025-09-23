@@ -43,8 +43,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2},
-            {"client_class": RedisCluster, "failure_threshold": 2},
+            {"client_class": Redis, "min_num_failures": 2},
+            {"client_class": RedisCluster, "min_num_failures": 2},
         ],
         ids=["standalone", "cluster"],
         indirect=True
@@ -89,7 +89,7 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2, "health_checks":
+            {"client_class": Redis, "min_num_failures": 2, "health_checks":
                 [
                     LagAwareHealthCheck(
                         verify_tls=False,
@@ -98,7 +98,7 @@ class TestActiveActive:
                 ],
              "health_check_interval": 20,
             },
-            {"client_class": RedisCluster, "failure_threshold": 2, "health_checks":
+            {"client_class": RedisCluster, "min_num_failures": 2, "health_checks":
                 [
                     LagAwareHealthCheck(
                         verify_tls=False,
@@ -149,8 +149,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2},
-            {"client_class": RedisCluster, "failure_threshold": 2},
+            {"client_class": Redis, "min_num_failures": 2},
+            {"client_class": RedisCluster, "min_num_failures": 2},
         ],
         ids=["standalone", "cluster"],
         indirect=True
@@ -198,8 +198,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2},
-            {"client_class": RedisCluster, "failure_threshold": 2},
+            {"client_class": Redis, "min_num_failures": 2},
+            {"client_class": RedisCluster, "min_num_failures": 2},
         ],
         ids=["standalone", "cluster"],
         indirect=True
@@ -247,8 +247,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2},
-            {"client_class": RedisCluster, "failure_threshold": 2},
+            {"client_class": Redis, "min_num_failures": 2},
+            {"client_class": RedisCluster, "min_num_failures": 2},
         ],
         ids=["standalone", "cluster"],
         indirect=True
@@ -294,7 +294,7 @@ class TestActiveActive:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "r_multi_db",
-        [{"failure_threshold": 2}],
+        [{"min_num_failures": 2}],
         indirect=True
     )
     @pytest.mark.timeout(200)

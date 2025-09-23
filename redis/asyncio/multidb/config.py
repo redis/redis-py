@@ -7,8 +7,7 @@ from redis.asyncio import ConnectionPool, Redis, RedisCluster
 from redis.asyncio.multidb.database import Databases, Database
 from redis.asyncio.multidb.failover import AsyncFailoverStrategy, WeightBasedFailoverStrategy, DEFAULT_FAILOVER_DELAY, \
     DEFAULT_FAILOVER_ATTEMPTS
-from redis.asyncio.multidb.failure_detector import AsyncFailureDetector, FailureDetectorAsyncWrapper, \
-    DEFAULT_FAILURES_THRESHOLD, DEFAULT_FAILURES_DURATION
+from redis.asyncio.multidb.failure_detector import AsyncFailureDetector, FailureDetectorAsyncWrapper
 from redis.asyncio.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_INTERVAL, \
     DEFAULT_HEALTH_CHECK_PROBES, DEFAULT_HEALTH_CHECK_DELAY, HealthCheckPolicies, DEFAULT_HEALTH_CHECK_POLICY
 from redis.asyncio.retry import Retry
@@ -16,7 +15,8 @@ from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.data_structure import WeightedList
 from redis.event import EventDispatcherInterface, EventDispatcher
 from redis.multidb.circuit import CircuitBreaker, PBCircuitBreakerAdapter, DEFAULT_GRACE_PERIOD
-from redis.multidb.failure_detector import CommandFailureDetector
+from redis.multidb.failure_detector import CommandFailureDetector, DEFAULT_MIN_NUM_FAILURES, \
+    DEFAULT_FAILURE_RATE_THRESHOLD, DEFAULT_FAILURES_DETECTION_WINDOW
 
 DEFAULT_AUTO_FALLBACK_INTERVAL = 120
 
@@ -70,8 +70,9 @@ class MultiDbConfig:
         client_class: The client class used to manage database connections.
         command_retry: Retry strategy for executing database commands.
         failure_detectors: Optional list of additional failure detectors for monitoring database failures.
-        failure_threshold: Threshold for determining database failure.
-        failures_interval: Time interval for tracking database failures.
+        min_num_failures: Minimal count of failures required for failover
+        failure_rate_threshold: Percentage of failures required for failover
+        failures_detection_window: Time interval for tracking database failures.
         health_checks: Optional list of additional health checks performed on databases.
         health_check_interval: Time interval for executing health checks.
         health_check_probes: Number of attempts to evaluate the health of a database.
@@ -105,8 +106,9 @@ class MultiDbConfig:
         backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
     )
     failure_detectors: Optional[List[AsyncFailureDetector]] = None
-    failure_threshold: int = DEFAULT_FAILURES_THRESHOLD
-    failures_interval: float = DEFAULT_FAILURES_DURATION
+    min_num_failures: int = DEFAULT_MIN_NUM_FAILURES
+    failure_rate_threshold: float = DEFAULT_FAILURE_RATE_THRESHOLD
+    failures_detection_window: float = DEFAULT_FAILURES_DETECTION_WINDOW
     health_checks: Optional[List[HealthCheck]] = None
     health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL
     health_check_probes: int = DEFAULT_HEALTH_CHECK_PROBES
@@ -151,7 +153,11 @@ class MultiDbConfig:
     def default_failure_detectors(self) -> List[AsyncFailureDetector]:
         return [
             FailureDetectorAsyncWrapper(
-                CommandFailureDetector(threshold=self.failure_threshold, duration=self.failures_interval)
+                CommandFailureDetector(
+                    min_num_failures=self.min_num_failures,
+                    failure_rate_threshold=self.failure_rate_threshold,
+                    failure_detection_window=self.failures_detection_window
+                )
             ),
         ]
 
