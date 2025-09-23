@@ -1,5 +1,6 @@
 """Tests for Redis Enterprise moving push notifications with real cluster operations."""
 
+from concurrent.futures import ThreadPoolExecutor
 import logging
 from queue import Queue
 from threading import Thread
@@ -721,31 +722,29 @@ class TestPushNotifications:
         bind_thread.start()
 
         errors = Queue()
-        commands_threads = []
         threads_count = 10
+        futures = []
+
         logging.info(f"Starting {threads_count} command execution threads...")
-        for _ in range(threads_count):
-            thread = Thread(
-                target=execute_commands,
-                name="command_execution_thread",
-                args=(
-                    moving_event,
-                    errors,
-                ),
-            )
-            thread.start()
-            commands_threads.append(thread)
+        # Start the worker pool and submit N identical worker tasks
+        with ThreadPoolExecutor(
+            max_workers=threads_count, thread_name_prefix="command_execution_thread"
+        ) as executor:
+            futures = [
+                executor.submit(execute_commands, moving_event, errors)
+                for _ in range(threads_count)
+            ]
 
-        logging.info("Waiting for MOVING push notification ...")
-        # this will consume the notification in one of the connections
-        # and will handle the states of the rest
-        ClientValidations.wait_push_notification(client, timeout=BIND_TIMEOUT)
-        # set the event to stop the command execution threads
-        moving_event.set()
+            logging.info("Waiting for MOVING push notification ...")
+            # this will consume the notification in one of the connections
+            # and will handle the states of the rest
+            ClientValidations.wait_push_notification(client, timeout=BIND_TIMEOUT)
+            # set the event to stop the command execution threads
+            moving_event.set()
 
-        # wait for all command execution threads to stop
-        for thread in commands_threads:
-            thread.join()
+            # Wait for all workers to finish and propagate any exceptions
+            for f in futures:
+                f.result()
 
         # validate that all connections are either disconnected
         # or connected to the new address
