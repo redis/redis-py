@@ -435,9 +435,9 @@ def _is_private_fqdn(host: str) -> bool:
     return False
 
 
-class MaintenanceEventsConfig:
+class MaintNotificationsConfig:
     """
-    Configuration class for maintenance events handling behaviour. Events are received through
+    Configuration class for maintenance notifications handling behaviour. Notifications are received through
     push notifications.
 
     This class defines how the Redis client should react to different push notifications
@@ -453,10 +453,10 @@ class MaintenanceEventsConfig:
         endpoint_type: Optional[EndpointType] = None,
     ):
         """
-        Initialize a new MaintenanceEventsConfig.
+        Initialize a new MaintNotificationsConfig.
 
         Args:
-            enabled (bool): Whether to enable maintenance events handling.
+            enabled (bool): Whether to enable maintenance notifications handling.
                 Defaults to False.
             proactive_reconnect (bool): Whether to proactively reconnect when a node is replaced.
                 Defaults to True.
@@ -550,15 +550,15 @@ class MaintenanceEventsConfig:
         return EndpointType.INTERNAL_FQDN if is_private else EndpointType.EXTERNAL_FQDN
 
 
-class MaintenanceEventPoolHandler:
+class MaintNotificationsPoolHandler:
     def __init__(
         self,
         pool: Union["ConnectionPool", "BlockingConnectionPool"],
-        config: MaintenanceEventsConfig,
+        config: MaintNotificationsConfig,
     ) -> None:
         self.pool = pool
         self.config = config
-        self._processed_events = set()
+        self._processed_notifications = set()
         self._lock = threading.RLock()
         self.connection = None
 
@@ -567,28 +567,28 @@ class MaintenanceEventPoolHandler:
 
     def remove_expired_notifications(self):
         with self._lock:
-            for notification in tuple(self._processed_events):
+            for notification in tuple(self._processed_notifications):
                 if notification.is_expired():
-                    self._processed_events.remove(notification)
+                    self._processed_notifications.remove(notification)
 
-    def handle_event(self, notification: MaintenanceEvent):
+    def handle_notification(self, notification: MaintenanceEvent):
         self.remove_expired_notifications()
 
         if isinstance(notification, NodeMovingEvent):
-            return self.handle_node_moving_event(notification)
+            return self.handle_node_moving_notification(notification)
         else:
             logging.error(f"Unhandled notification type: {notification}")
 
-    def handle_node_moving_event(self, event: NodeMovingEvent):
+    def handle_node_moving_notification(self, notification: NodeMovingEvent):
         if (
             not self.config.proactive_reconnect
             and not self.config.is_relaxed_timeouts_enabled()
         ):
             return
         with self._lock:
-            if event in self._processed_events:
+            if notification in self._processed_notifications:
                 # nothing to do in the connection pool handling
-                # the event has already been handled or is expired
+                # the notification has already been handled or is expired
                 # just return
                 return
 
@@ -614,9 +614,9 @@ class MaintenanceEventPoolHandler:
                     # connection settings for matching connections
                     self.pool.update_connections_settings(
                         state=MaintenanceState.MOVING,
-                        maintenance_event_hash=hash(event),
+                        maintenance_event_hash=hash(notification),
                         relaxed_timeout=self.config.relaxed_timeout,
-                        host_address=event.new_node_host,
+                        host_address=notification.new_node_host,
                         matching_address=moving_address_src,
                         matching_pattern="connected_address",
                         update_event_hash=True,
@@ -624,11 +624,11 @@ class MaintenanceEventPoolHandler:
                     )
 
                     if self.config.proactive_reconnect:
-                        if event.new_node_host is not None:
+                        if notification.new_node_host is not None:
                             self.run_proactive_reconnect(moving_address_src)
                         else:
                             threading.Timer(
-                                event.ttl / 2,
+                                notification.ttl / 2,
                                 self.run_proactive_reconnect,
                                 args=(moving_address_src,),
                             ).start()
@@ -639,15 +639,15 @@ class MaintenanceEventPoolHandler:
                     # if relax timeouts are enabled - update timeouts
                     kwargs: dict = {
                         "maintenance_state": MaintenanceState.MOVING,
-                        "maintenance_event_hash": hash(event),
+                        "maintenance_event_hash": hash(notification),
                     }
-                    if event.new_node_host is not None:
+                    if notification.new_node_host is not None:
                         # the host is not updated if the new node host is None
                         # this happens when the MOVING push notification does not contain
                         # the new node host - in this case we only update the timeouts
                         kwargs.update(
                             {
-                                "host": event.new_node_host,
+                                "host": notification.new_node_host,
                             }
                         )
                     if self.config.is_relaxed_timeouts_enabled():
@@ -663,10 +663,12 @@ class MaintenanceEventPoolHandler:
                         self.pool.set_in_maintenance(False)
 
             threading.Timer(
-                event.ttl, self.handle_node_moved_event, args=(event,)
+                notification.ttl,
+                self.handle_node_moved_notification,
+                args=(notification,),
             ).start()
 
-            self._processed_events.add(event)
+            self._processed_notifications.add(notification)
 
     def run_proactive_reconnect(self, moving_address_src: Optional[str] = None):
         """
@@ -687,17 +689,20 @@ class MaintenanceEventPoolHandler:
                     moving_address_src=moving_address_src,
                 )
 
-    def handle_node_moved_event(self, event: NodeMovingEvent):
+    def handle_node_moved_notification(self, notification: NodeMovingEvent):
         """
-        Handle the cleanup after a node moving event expires.
+        Handle the cleanup after a node moving notification expires.
         """
-        event_hash = hash(event)
+        notification_hash = hash(notification)
 
         with self._lock:
-            # if the current maintenance_event_hash in kwargs is not matching the event
-            # it means there has been a new moving event after this one
+            # if the current maintenance_event_hash in kwargs is not matching the notification
+            # it means there has been a new moving notification after this one
             # and we don't need to revert the kwargs yet
-            if self.pool.connection_kwargs.get("maintenance_event_hash") == event_hash:
+            if (
+                self.pool.connection_kwargs.get("maintenance_event_hash")
+                == notification_hash
+            ):
                 orig_host = self.pool.connection_kwargs.get("orig_host_address")
                 orig_socket_timeout = self.pool.connection_kwargs.get(
                     "orig_socket_timeout"
@@ -722,7 +727,7 @@ class MaintenanceEventPoolHandler:
                     relaxed_timeout=-1,
                     state=MaintenanceState.NONE,
                     maintenance_event_hash=None,
-                    matching_event_hash=event_hash,
+                    matching_event_hash=notification_hash,
                     matching_pattern="event_hash",
                     update_event_hash=True,
                     reset_relaxed_timeout=reset_relaxed_timeout,
@@ -731,9 +736,9 @@ class MaintenanceEventPoolHandler:
                 )
 
 
-class MaintenanceEventConnectionHandler:
-    # 1 = "starting maintenance" events, 0 = "completed maintenance" events
-    _EVENT_TYPES: dict[type["MaintenanceEvent"], int] = {
+class MaintNotificationsConnectionHandler:
+    # 1 = "starting maintenance" notifications, 0 = "completed maintenance" notifications
+    _NOTIFICATION_TYPES: dict[type["MaintenanceEvent"], int] = {
         NodeMigratingEvent: 1,
         NodeFailingOverEvent: 1,
         NodeMigratedEvent: 0,
@@ -741,25 +746,27 @@ class MaintenanceEventConnectionHandler:
     }
 
     def __init__(
-        self, connection: "ConnectionInterface", config: MaintenanceEventsConfig
+        self, connection: "ConnectionInterface", config: MaintNotificationsConfig
     ) -> None:
         self.connection = connection
         self.config = config
 
-    def handle_event(self, event: MaintenanceEvent):
-        # get the event type by checking its class in the _EVENT_TYPES dict
-        event_type = self._EVENT_TYPES.get(event.__class__, None)
+    def handle_notification(self, notification: MaintenanceEvent):
+        # get the notification type by checking its class in the _NOTIFICATION_TYPES dict
+        notification_type = self._NOTIFICATION_TYPES.get(notification.__class__, None)
 
-        if event_type is None:
-            logging.error(f"Unhandled event type: {event}")
+        if notification_type is None:
+            logging.error(f"Unhandled notification type: {notification}")
             return
 
-        if event_type:
-            self.handle_maintenance_start_event(MaintenanceState.MAINTENANCE)
+        if notification_type:
+            self.handle_maintenance_start_notification(MaintenanceState.MAINTENANCE)
         else:
-            self.handle_maintenance_completed_event()
+            self.handle_maintenance_completed_notification()
 
-    def handle_maintenance_start_event(self, maintenance_state: MaintenanceState):
+    def handle_maintenance_start_notification(
+        self, maintenance_state: MaintenanceState
+    ):
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING
             or not self.config.is_relaxed_timeouts_enabled()
@@ -773,7 +780,7 @@ class MaintenanceEventConnectionHandler:
         # extend the timeout for all created connections
         self.connection.update_current_socket_timeout(self.config.relaxed_timeout)
 
-    def handle_maintenance_completed_event(self):
+    def handle_maintenance_completed_notification(self):
         # Only reset timeouts if state is not MOVING and relaxed timeouts are enabled
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING

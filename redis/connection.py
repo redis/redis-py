@@ -48,9 +48,9 @@ from .exceptions import (
     TimeoutError,
 )
 from .maintenance_events import (
-    MaintenanceEventConnectionHandler,
-    MaintenanceEventPoolHandler,
-    MaintenanceEventsConfig,
+    MaintNotificationsConnectionHandler,
+    MaintNotificationsPoolHandler,
+    MaintNotificationsConfig,
     MaintenanceState,
 )
 from .retry import Retry
@@ -345,8 +345,10 @@ class AbstractConnection(ConnectionInterface):
         protocol: Optional[int] = 2,
         command_packer: Optional[Callable[[], None]] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
-        maintenance_events_pool_handler: Optional[MaintenanceEventPoolHandler] = None,
-        maintenance_events_config: Optional[MaintenanceEventsConfig] = None,
+        maint_notifications_pool_handler: Optional[
+            MaintNotificationsPoolHandler
+        ] = None,
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         maintenance_state: "MaintenanceState" = MaintenanceState.NONE,
         maintenance_event_hash: Optional[int] = None,
         orig_host_address: Optional[str] = None,
@@ -428,11 +430,11 @@ class AbstractConnection(ConnectionInterface):
             parser_class = _RESP3Parser
         self.set_parser(parser_class)
 
-        self.maintenance_events_config = maintenance_events_config
+        self.maint_notifications_config = maint_notifications_config
 
         # Set up maintenance events if enabled
         self._configure_maintenance_events(
-            maintenance_events_pool_handler,
+            maint_notifications_pool_handler,
             orig_host_address,
             orig_socket_timeout,
             orig_socket_connect_timeout,
@@ -499,31 +501,31 @@ class AbstractConnection(ConnectionInterface):
 
     def _configure_maintenance_events(
         self,
-        maintenance_events_pool_handler=None,
+        maint_notifications_pool_handler=None,
         orig_host_address=None,
         orig_socket_timeout=None,
         orig_socket_connect_timeout=None,
     ):
         """Enable maintenance events by setting up handlers and storing original connection parameters."""
         if (
-            not self.maintenance_events_config
-            or not self.maintenance_events_config.enabled
+            not self.maint_notifications_config
+            or not self.maint_notifications_config.enabled
         ):
-            self._maintenance_event_connection_handler = None
+            self._maint_notifications_connection_handler = None
             return
 
         # Set up pool handler if available
-        if maintenance_events_pool_handler:
+        if maint_notifications_pool_handler:
             self._parser.set_node_moving_push_handler(
-                maintenance_events_pool_handler.handle_event
+                maint_notifications_pool_handler.handle_notification
             )
 
         # Set up connection handler
-        self._maintenance_event_connection_handler = MaintenanceEventConnectionHandler(
-            self, self.maintenance_events_config
+        self._maint_notifications_connection_handler = (
+            MaintNotificationsConnectionHandler(self, self.maint_notifications_config)
         )
         self._parser.set_maintenance_push_handler(
-            self._maintenance_event_connection_handler.handle_event
+            self._maint_notifications_connection_handler.handle_notification
         )
 
         # Store original connection parameters
@@ -538,26 +540,26 @@ class AbstractConnection(ConnectionInterface):
         )
 
     def set_maintenance_event_pool_handler(
-        self, maintenance_event_pool_handler: MaintenanceEventPoolHandler
+        self, maint_notifications_pool_handler: MaintNotificationsPoolHandler
     ):
-        maintenance_event_pool_handler.set_connection(self)
+        maint_notifications_pool_handler.set_connection(self)
         self._parser.set_node_moving_push_handler(
-            maintenance_event_pool_handler.handle_event
+            maint_notifications_pool_handler.handle_notification
         )
 
         # Update maintenance event connection handler if it doesn't exist
-        if not self._maintenance_event_connection_handler:
-            self._maintenance_event_connection_handler = (
-                MaintenanceEventConnectionHandler(
-                    self, maintenance_event_pool_handler.config
+        if not self._maint_notifications_connection_handler:
+            self._maint_notifications_connection_handler = (
+                MaintNotificationsConnectionHandler(
+                    self, maint_notifications_pool_handler.config
                 )
             )
             self._parser.set_maintenance_push_handler(
-                self._maintenance_event_connection_handler.handle_event
+                self._maint_notifications_connection_handler.handle_notification
             )
         else:
-            self._maintenance_event_connection_handler.config = (
-                maintenance_event_pool_handler.config
+            self._maint_notifications_connection_handler.config = (
+                maint_notifications_pool_handler.config
             )
 
     def connect(self):
@@ -688,13 +690,13 @@ class AbstractConnection(ConnectionInterface):
         # and we have a host to determine the endpoint type from
         if (
             self.protocol not in [2, "2"]
-            and self.maintenance_events_config
-            and self.maintenance_events_config.enabled
-            and self._maintenance_event_connection_handler
+            and self.maint_notifications_config
+            and self.maint_notifications_config.enabled
+            and self._maint_notifications_connection_handler
             and hasattr(self, "host")
         ):
             try:
-                endpoint_type = self.maintenance_events_config.get_endpoint_type(
+                endpoint_type = self.maint_notifications_config.get_endpoint_type(
                     self.host, self
                 )
                 self.send_command(
@@ -1742,20 +1744,20 @@ class ConnectionPool:
         connection_kwargs.pop("cache_config", None)
 
         if self.connection_kwargs.get(
-            "maintenance_events_pool_handler"
-        ) or self.connection_kwargs.get("maintenance_events_config"):
+            "maint_notifications_pool_handler"
+        ) or self.connection_kwargs.get("maint_notifications_config"):
             if self.connection_kwargs.get("protocol") not in [3, "3"]:
                 raise RedisError(
                     "Push handlers on connection are only supported with RESP version 3"
                 )
-            config = self.connection_kwargs.get("maintenance_events_config", None) or (
-                self.connection_kwargs.get("maintenance_events_pool_handler").config
-                if self.connection_kwargs.get("maintenance_events_pool_handler")
+            config = self.connection_kwargs.get("maint_notifications_config", None) or (
+                self.connection_kwargs.get("maint_notifications_pool_handler").config
+                if self.connection_kwargs.get("maint_notifications_pool_handler")
                 else None
             )
 
             if config and config.enabled:
-                self._update_connection_kwargs_for_maintenance_events()
+                self._update_connection_kwargs_for_maint_notifications()
 
         self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
         if self._event_dispatcher is None:
@@ -1791,46 +1793,54 @@ class ConnectionPool:
         """
         return self.connection_kwargs.get("protocol", None)
 
-    def maintenance_events_pool_handler_enabled(self):
+    def maint_notifications_pool_handler_enabled(self):
         """
         Returns:
-            True if the maintenance events pool handler is enabled, False otherwise.
+            True if the maintenance notifications pool handler is enabled, False otherwise.
         """
-        maintenance_events_config = self.connection_kwargs.get(
-            "maintenance_events_config", None
+        maint_notifications_config = self.connection_kwargs.get(
+            "maint_notifications_config", None
         )
 
-        return maintenance_events_config and maintenance_events_config.enabled
+        return maint_notifications_config and maint_notifications_config.enabled
 
-    def set_maintenance_events_pool_handler(
-        self, maintenance_events_pool_handler: MaintenanceEventPoolHandler
+    def set_maint_notifications_pool_handler(
+        self, maint_notifications_pool_handler: MaintNotificationsPoolHandler
     ):
         self.connection_kwargs.update(
             {
-                "maintenance_events_pool_handler": maintenance_events_pool_handler,
-                "maintenance_events_config": maintenance_events_pool_handler.config,
+                "maint_notifications_pool_handler": maint_notifications_pool_handler,
+                "maint_notifications_config": maint_notifications_pool_handler.config,
             }
         )
-        self._update_connection_kwargs_for_maintenance_events()
+        self._update_connection_kwargs_for_maint_notifications()
 
-        self._update_maintenance_events_configs_for_connections(
-            maintenance_events_pool_handler
+        self._update_maint_notifications_configs_for_connections(
+            maint_notifications_pool_handler
         )
 
-    def _update_maintenance_events_configs_for_connections(
-        self, maintenance_events_pool_handler
+    def _update_maint_notifications_configs_for_connections(
+        self, maint_notifications_pool_handler
     ):
-        """Update the maintenance events config for all connections in the pool."""
+        """Update the maintenance notifications config for all connections in the pool."""
         with self._lock:
             for conn in self._available_connections:
-                conn.set_maintenance_event_pool_handler(maintenance_events_pool_handler)
-                conn.maintenance_events_config = maintenance_events_pool_handler.config
+                conn.set_maintenance_event_pool_handler(
+                    maint_notifications_pool_handler
+                )
+                conn.maint_notifications_config = (
+                    maint_notifications_pool_handler.config
+                )
             for conn in self._in_use_connections:
-                conn.set_maintenance_event_pool_handler(maintenance_events_pool_handler)
-                conn.maintenance_events_config = maintenance_events_pool_handler.config
+                conn.set_maintenance_event_pool_handler(
+                    maint_notifications_pool_handler
+                )
+                conn.maint_notifications_config = (
+                    maint_notifications_pool_handler.config
+                )
 
-    def _update_connection_kwargs_for_maintenance_events(self):
-        """Store original connection parameters for maintenance events."""
+    def _update_connection_kwargs_for_maint_notifications(self):
+        """Store original connection parameters for maintenance notifications."""
         if self.connection_kwargs.get("orig_host_address", None) is None:
             # If orig_host_address is None it means we haven't
             # configured the original values yet
@@ -1936,7 +1946,7 @@ class ConnectionPool:
                 if (
                     connection.can_read()
                     and self.cache is None
-                    and not self.maintenance_events_pool_handler_enabled()
+                    and not self.maint_notifications_pool_handler_enabled()
                 ):
                     raise ConnectionError("Connection has data")
             except (ConnectionError, TimeoutError, OSError):
@@ -2569,20 +2579,24 @@ class BlockingConnectionPool(ConnectionPool):
                     ):
                         conn.disconnect()
 
-    def _update_maintenance_events_config_for_connections(
-        self, maintenance_events_config
+    def _update_maint_notifications_config_for_connections(
+        self, maint_notifications_config
     ):
         for conn in tuple(self._connections):
-            conn.maintenance_events_config = maintenance_events_config
+            conn.maint_notifications_config = maint_notifications_config
 
-    def _update_maintenance_events_configs_for_connections(
-        self, maintenance_events_pool_handler
+    def _update_maint_notifications_configs_for_connections(
+        self, maint_notifications_pool_handler
     ):
-        """Update the maintenance events config for all connections in the pool."""
+        """Update the maintenance notifications config for all connections in the pool."""
         with self._lock:
             for conn in tuple(self._connections):
-                conn.set_maintenance_event_pool_handler(maintenance_events_pool_handler)
-                conn.maintenance_events_config = maintenance_events_pool_handler.config
+                conn.set_maintenance_event_pool_handler(
+                    maint_notifications_pool_handler
+                )
+                conn.maint_notifications_config = (
+                    maint_notifications_pool_handler.config
+                )
 
     def set_in_maintenance(self, in_maintenance: bool):
         """

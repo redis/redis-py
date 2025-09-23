@@ -14,12 +14,12 @@ from redis.connection import (
     MaintenanceState,
 )
 from redis.maintenance_events import (
-    MaintenanceEventsConfig,
+    MaintNotificationsConfig,
     NodeMigratingEvent,
     NodeMigratedEvent,
     NodeFailingOverEvent,
     NodeFailedOverEvent,
-    MaintenanceEventPoolHandler,
+    MaintNotificationsPoolHandler,
     NodeMovingEvent,
 )
 
@@ -371,7 +371,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         self.select_patcher.start()
 
         # Create maintenance events config
-        self.config = MaintenanceEventsConfig(
+        self.config = MaintNotificationsConfig(
             enabled=True, proactive_reconnect=True, relaxed_timeout=30
         )
 
@@ -384,7 +384,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         self,
         pool_class,
         max_connections=10,
-        maintenance_events_config=None,
+        maint_notifications_config=None,
         setup_pool_handler=False,
     ):
         """Helper method to create a pool and Redis client with maintenance events configuration.
@@ -392,7 +392,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         Args:
             pool_class: The connection pool class (ConnectionPool or BlockingConnectionPool)
             max_connections: Maximum number of connections in the pool (default: 10)
-            maintenance_events_config: Optional MaintenanceEventsConfig to use. If not provided,
+            maint_notifications_config: Optional MaintNotificationsConfig to use. If not provided,
                                      uses self.config from setup_method (default: None)
             setup_pool_handler: Whether to set up pool handler for moving events (default: False)
 
@@ -400,8 +400,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
             tuple: (test_pool, test_redis_client)
         """
         config = (
-            maintenance_events_config
-            if maintenance_events_config is not None
+            maint_notifications_config
+            if maint_notifications_config is not None
             else self.config
         )
 
@@ -410,16 +410,16 @@ class TestMaintenanceEventsHandlingSingleProxy:
             port=int(DEFAULT_ADDRESS.split(":")[1]),
             max_connections=max_connections,
             protocol=3,  # Required for maintenance events
-            maintenance_events_config=config,
+            maint_notifications_config=config,
         )
         test_redis_client = Redis(connection_pool=test_pool)
 
         # Set up pool handler for moving events if requested
         if setup_pool_handler:
-            pool_handler = MaintenanceEventPoolHandler(
+            pool_handler = MaintNotificationsPoolHandler(
                 test_redis_client.connection_pool, config
             )
-            test_redis_client.connection_pool.set_maintenance_events_pool_handler(
+            test_redis_client.connection_pool.set_maint_notifications_pool_handler(
                 pool_handler
             )
 
@@ -433,7 +433,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         assert hasattr(parser_handler, "__self__")
         assert hasattr(parser_handler, "__func__")
         assert parser_handler.__self__ is pool_handler
-        assert parser_handler.__func__ is pool_handler.handle_event.__func__
+        assert parser_handler.__func__ is pool_handler.handle_notification.__func__
 
         # Test that the maintenance handler function is correctly set
         maintenance_handler = conn._parser.maintenance_push_handler_func
@@ -443,15 +443,15 @@ class TestMaintenanceEventsHandlingSingleProxy:
         # The maintenance handler should be bound to the connection's
         # maintenance event connection handler
         assert (
-            maintenance_handler.__self__ is conn._maintenance_event_connection_handler
+            maintenance_handler.__self__ is conn._maint_notifications_connection_handler
         )
         assert (
             maintenance_handler.__func__
-            is conn._maintenance_event_connection_handler.handle_event.__func__
+            is conn._maint_notifications_connection_handler.handle_notification.__func__
         )
 
         # Validate that the connection's maintenance handler has the same config object
-        assert conn._maintenance_event_connection_handler.config is config
+        assert conn._maint_notifications_connection_handler.config is config
 
     def _validate_current_timeout(self, expected_timeout, error_msg=None):
         """Helper method to validate the current timeout for the calling thread."""
@@ -492,11 +492,11 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
         test_redis_client = Redis(
             protocol=3,  # Required for maintenance events
-            maintenance_events_config=self.config,
+            maint_notifications_config=self.config,
         )
 
         pool_handler = test_redis_client.connection_pool.connection_kwargs.get(
-            "maintenance_events_pool_handler"
+            "maint_notifications_pool_handler"
         )
         assert pool_handler is not None
         assert pool_handler.config == self.config
@@ -513,7 +513,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         assert hasattr(parser_handler, "__self__")
         assert hasattr(parser_handler, "__func__")
         assert parser_handler.__self__ is pool_handler
-        assert parser_handler.__func__ is pool_handler.handle_event.__func__
+        assert parser_handler.__func__ is pool_handler.handle_notification.__func__
 
         # Test that the maintenance handler function is correctly set
         maintenance_handler = conn._parser.maintenance_push_handler_func
@@ -523,25 +523,25 @@ class TestMaintenanceEventsHandlingSingleProxy:
         # The maintenance handler should be bound to the connection's
         # maintenance event connection handler
         assert (
-            maintenance_handler.__self__ is conn._maintenance_event_connection_handler
+            maintenance_handler.__self__ is conn._maint_notifications_connection_handler
         )
         assert (
             maintenance_handler.__func__
-            is conn._maintenance_event_connection_handler.handle_event.__func__
+            is conn._maint_notifications_connection_handler.handle_notification.__func__
         )
 
         # Validate that the connection's maintenance handler has the same config object
-        assert conn._maintenance_event_connection_handler.config is self.config
+        assert conn._maint_notifications_connection_handler.config is self.config
 
     def test_maint_handler_init_for_existing_connections(self):
         """Test that maintenance event handlers are properly set on existing and new connections
         when configuration is enabled after client creation."""
 
         # Create a Redis client with disabled maintenance events configuration
-        disabled_config = MaintenanceEventsConfig(enabled=False)
+        disabled_config = MaintNotificationsConfig(enabled=False)
         test_redis_client = Redis(
             protocol=3,  # Required for maintenance events
-            maintenance_events_config=disabled_config,
+            maint_notifications_config=disabled_config,
         )
 
         # Extract an existing connection before enabling maintenance events
@@ -549,17 +549,17 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
         # Verify that maintenance events are initially disabled
         assert existing_conn._parser.node_moving_push_handler_func is None
-        assert existing_conn._maintenance_event_connection_handler is None
+        assert existing_conn._maint_notifications_connection_handler is None
         assert existing_conn._parser.maintenance_push_handler_func is None
 
         # Create a new enabled configuration and set up pool handler
-        enabled_config = MaintenanceEventsConfig(
+        enabled_config = MaintNotificationsConfig(
             enabled=True, proactive_reconnect=True, relaxed_timeout=30
         )
-        pool_handler = MaintenanceEventPoolHandler(
+        pool_handler = MaintNotificationsPoolHandler(
             test_redis_client.connection_pool, enabled_config
         )
-        test_redis_client.connection_pool.set_maintenance_events_pool_handler(
+        test_redis_client.connection_pool.set_maint_notifications_pool_handler(
             pool_handler
         )
 
@@ -587,23 +587,23 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
         try:
             assert (
-                test_pool.connection_kwargs.get("maintenance_events_config")
+                test_pool.connection_kwargs.get("maint_notifications_config")
                 == self.config
             )
             # Pool should have maintenance events enabled
-            assert test_pool.maintenance_events_pool_handler_enabled() is True
+            assert test_pool.maint_notifications_pool_handler_enabled() is True
 
             # Create and set a pool handler
-            pool_handler = MaintenanceEventPoolHandler(test_pool, self.config)
-            test_pool.set_maintenance_events_pool_handler(pool_handler)
+            pool_handler = MaintNotificationsPoolHandler(test_pool, self.config)
+            test_pool.set_maint_notifications_pool_handler(pool_handler)
 
             # Validate that the handler is properly set on the pool
             assert (
-                test_pool.connection_kwargs.get("maintenance_events_pool_handler")
+                test_pool.connection_kwargs.get("maint_notifications_pool_handler")
                 == pool_handler
             )
             assert (
-                test_pool.connection_kwargs.get("maintenance_events_config")
+                test_pool.connection_kwargs.get("maint_notifications_config")
                 == pool_handler.config
             )
 
@@ -640,7 +640,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
             # Verify that the connection has maintenance event handler
             connection = test_redis_client.connection_pool.get_connection()
-            assert hasattr(connection, "_maintenance_event_connection_handler")
+            assert hasattr(connection, "_maint_notifications_connection_handler")
             test_redis_client.connection_pool.release(connection)
 
         finally:
@@ -655,7 +655,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
         try:
             # Create and set a pool handler
-            pool_handler = MaintenanceEventPoolHandler(test_pool, self.config)
+            pool_handler = MaintNotificationsPoolHandler(test_pool, self.config)
 
             # Create a migrating event (not handled by pool handler)
             migrating_event = NodeMigratingEvent(id=1, ttl=5)
@@ -666,17 +666,17 @@ class TestMaintenanceEventsHandlingSingleProxy:
                     pool_handler, "remove_expired_notifications"
                 ) as mock_remove_expired,
                 patch.object(
-                    pool_handler, "handle_node_moving_event"
+                    pool_handler, "handle_node_moving_notification"
                 ) as mock_handle_moving,
                 patch("redis.maintenance_events.logging.error") as mock_logging_error,
             ):
                 # Pool handler should return None for migrating events (not its responsibility)
-                pool_handler.handle_event(migrating_event)
+                pool_handler.handle_notification(migrating_event)
 
                 # Validate that remove_expired_notifications has been called once
                 mock_remove_expired.assert_called_once()
 
-                # Validate that handle_node_moving_event hasn't been called
+                # Validate that handle_node_moving_notification hasn't been called
                 mock_handle_moving.assert_not_called()
 
                 # Validate that logging.error has been called once
@@ -783,14 +783,14 @@ class TestMaintenanceEventsHandlingSingleProxy:
         5. Tests the complete lifecycle: MIGRATING -> MIGRATED -> FAILING_OVER -> FAILED_OVER
         """
         # Create config with disabled relaxed timeout
-        disabled_config = MaintenanceEventsConfig(
+        disabled_config = MaintNotificationsConfig(
             enabled=True,
             relaxed_timeout=-1,  # This means the relaxed timeout is Disabled
         )
 
         # Create a pool and Redis client with disabled relaxed timeout config
         test_redis_client = self._get_client(
-            pool_class, max_connections=5, maintenance_events_config=disabled_config
+            pool_class, max_connections=5, maint_notifications_config=disabled_config
         )
 
         try:
@@ -1727,7 +1727,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             pool_class, max_connections=5, setup_pool_handler=True
         )
         pool = test_redis_client.connection_pool
-        pool_handler = pool.connection_kwargs["maintenance_events_pool_handler"]
+        pool_handler = pool.connection_kwargs["maint_notifications_pool_handler"]
 
         # Create and release some connections
         in_use_connections = []
@@ -1750,7 +1750,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         moving_event = NodeMovingEvent(
             id=1, new_node_host=tmp_address, new_node_port=6379, ttl=1
         )
-        pool_handler.handle_event(moving_event)
+        pool_handler.handle_notification(moving_event)
 
         Helpers.validate_in_use_connections_state(
             in_use_connections,
@@ -1779,7 +1779,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
         # 2. MIGRATING event (simulate direct connection handler call)
         for conn in in_use_connections:
-            conn._maintenance_event_connection_handler.handle_event(
+            conn._maint_notifications_connection_handler.handle_notification(
                 NodeMigratingEvent(id=2, ttl=1)
             )
         Helpers.validate_in_use_connections_state(
@@ -1797,7 +1797,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
         # 3. MIGRATED event (simulate direct connection handler call)
         for conn in in_use_connections:
-            conn._maintenance_event_connection_handler.handle_event(
+            conn._maint_notifications_connection_handler.handle_notification(
                 NodeMigratedEvent(id=2)
             )
         # State should not change for connections that are in MOVING state
@@ -1816,7 +1816,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
         # 4. FAILING_OVER event (simulate direct connection handler call)
         for conn in in_use_connections:
-            conn._maintenance_event_connection_handler.handle_event(
+            conn._maint_notifications_connection_handler.handle_notification(
                 NodeFailingOverEvent(id=3, ttl=1)
             )
         # State should not change for connections that are in MOVING state
@@ -1835,7 +1835,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
         # 5. FAILED_OVER event (simulate direct connection handler call)
         for conn in in_use_connections:
-            conn._maintenance_event_connection_handler.handle_event(
+            conn._maint_notifications_connection_handler.handle_notification(
                 NodeFailedOverEvent(id=3)
             )
         # State should not change for connections that are in MOVING state
@@ -1853,7 +1853,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         )
 
         # 6. MOVED event (simulate timer expiry)
-        pool_handler.handle_node_moved_event(moving_event)
+        pool_handler.handle_node_moved_notification(moving_event)
         Helpers.validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.NONE,
@@ -1951,7 +1951,7 @@ class TestMaintenanceEventsHandlingMultipleProxies:
         self.getaddrinfo_patcher.start()
 
         # Create maintenance events config
-        self.config = MaintenanceEventsConfig(
+        self.config = MaintNotificationsConfig(
             enabled=True, proactive_reconnect=True, relaxed_timeout=30
         )
 
@@ -1971,12 +1971,12 @@ class TestMaintenanceEventsHandlingMultipleProxies:
             port=12345,
             max_connections=10,
             protocol=3,  # Required for maintenance events
-            maintenance_events_config=self.config,
+            maint_notifications_config=self.config,
         )
-        pool.set_maintenance_events_pool_handler(
-            MaintenanceEventPoolHandler(pool, self.config)
+        pool.set_maint_notifications_pool_handler(
+            MaintNotificationsPoolHandler(pool, self.config)
         )
-        pool_handler = pool.connection_kwargs["maintenance_events_pool_handler"]
+        pool_handler = pool.connection_kwargs["maint_notifications_pool_handler"]
 
         # Create and release some connections
         key1 = "1.2.3.4"
@@ -1996,7 +1996,7 @@ class TestMaintenanceEventsHandlingMultipleProxies:
         conn = in_use_connections[key1][0]
         pool_handler.set_connection(conn)
         new_ip = "13.14.15.16"
-        pool_handler.handle_event(
+        pool_handler.handle_notification(
             NodeMovingEvent(id=1, new_node_host=new_ip, new_node_port=6379, ttl=1)
         )
 
@@ -2044,7 +2044,7 @@ class TestMaintenanceEventsHandlingMultipleProxies:
         conn = in_use_connections[key2][0]
         pool_handler.set_connection(conn)
         new_ip_2 = "17.18.19.20"
-        pool_handler.handle_event(
+        pool_handler.handle_notification(
             NodeMovingEvent(id=2, new_node_host=new_ip_2, new_node_port=6379, ttl=2)
         )
 
@@ -2084,27 +2084,27 @@ class TestMaintenanceEventsHandlingMultipleProxies:
 
         # MIGRATING event on connection that has already been marked as MOVING
         conn = in_use_connections[key2][0]
-        conn_event_handler = conn._maintenance_event_connection_handler
-        conn_event_handler.handle_event(NodeMigratingEvent(id=3, ttl=1))
+        conn_event_handler = conn._maint_notifications_connection_handler
+        conn_event_handler.handle_notification(NodeMigratingEvent(id=3, ttl=1))
         # validate connection does not lose its MOVING state
         assert conn.maintenance_state == MaintenanceState.MOVING
         # MIGRATED event
-        conn_event_handler.handle_event(NodeMigratedEvent(id=3))
+        conn_event_handler.handle_notification(NodeMigratedEvent(id=3))
         # validate connection does not lose its MOVING state and relaxed timeout
         assert conn.maintenance_state == MaintenanceState.MOVING
         assert conn.socket_timeout == self.config.relaxed_timeout
 
         # Send Migrating event to con with ip = key3
         conn = in_use_connections[key3][0]
-        conn_event_handler = conn._maintenance_event_connection_handler
-        conn_event_handler.handle_event(NodeMigratingEvent(id=3, ttl=1))
+        conn_event_handler = conn._maint_notifications_connection_handler
+        conn_event_handler.handle_notification(NodeMigratingEvent(id=3, ttl=1))
         # validate connection is in MIGRATING state
         assert conn.maintenance_state == MaintenanceState.MAINTENANCE
 
         assert conn.socket_timeout == self.config.relaxed_timeout
 
         # Send MIGRATED event to con with ip = key3
-        conn_event_handler.handle_event(NodeMigratedEvent(id=3))
+        conn_event_handler.handle_notification(NodeMigratedEvent(id=3))
         # validate connection is in MOVING state
         assert conn.maintenance_state == MaintenanceState.NONE
         assert conn.socket_timeout is None

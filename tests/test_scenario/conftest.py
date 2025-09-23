@@ -7,7 +7,7 @@ import pytest
 
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.client import Redis
-from redis.maintenance_events import EndpointType, MaintenanceEventsConfig
+from redis.maintenance_events import EndpointType, MaintNotificationsConfig
 from redis.retry import Retry
 from tests.test_scenario.fault_injector_client import FaultInjectorClient
 
@@ -85,15 +85,15 @@ def _get_client_maint_events(
     logging.info(f"Connecting to Redis Enterprise: {host}:{port} with user: {username}")
 
     # Configure maintenance events
-    maintenance_config = MaintenanceEventsConfig(
+    maintenance_config = MaintNotificationsConfig(
         enabled=enable_maintenance_events,
         proactive_reconnect=enable_proactive_reconnect,
         relaxed_timeout=RELAXED_TIMEOUT if enable_relaxed_timeout else -1,
         endpoint_type=endpoint_type,
     )
 
-    # Create Redis client with maintenance events config
-    # This will automatically create the MaintenanceEventPoolHandler
+    # Create Redis client with maintenance notifications config
+    # This will automatically create the MaintNotificationsPoolHandler
     if disable_retries:
         retry = Retry(NoBackoff(), 0)
     else:
@@ -112,12 +112,12 @@ def _get_client_maint_events(
         ssl_cert_reqs="none",
         ssl_check_hostname=False,
         protocol=protocol,  # RESP3 required for push notifications
-        maintenance_events_config=maintenance_config,
+        maint_notifications_config=maintenance_config,
         retry=retry,
     )
     logging.info("Redis client created with maintenance events enabled")
     logging.info(f"Client uses Protocol: {client.connection_pool.get_protocol()}")
-    maintenance_handler_exists = client.maintenance_events_pool_handler is not None
+    maintenance_handler_exists = client.maint_notifications_pool_handler is not None
     logging.info(f"Maintenance events pool handler: {maintenance_handler_exists}")
 
     return client
