@@ -11,7 +11,7 @@ from redis.maintenance_events import EndpointType, MaintenanceEventsConfig
 from redis.retry import Retry
 from tests.test_scenario.fault_injector_client import FaultInjectorClient
 
-RELAX_TIMEOUT = 30
+RELAXED_TIMEOUT = 30
 CLIENT_TIMEOUT = 5
 
 DEFAULT_ENDPOINT_NAME = "m-standard"
@@ -58,7 +58,7 @@ def _get_client_maint_events(
     protocol: int = 3,
     enable_maintenance_events: bool = True,
     endpoint_type: Optional[EndpointType] = None,
-    enable_relax_timeout: bool = True,
+    enable_relaxed_timeout: bool = True,
     enable_proactive_reconnect: bool = True,
     disable_retries: bool = False,
     socket_timeout: Optional[float] = None,
@@ -88,7 +88,7 @@ def _get_client_maint_events(
     maintenance_config = MaintenanceEventsConfig(
         enabled=enable_maintenance_events,
         proactive_reconnect=enable_proactive_reconnect,
-        relax_timeout=RELAX_TIMEOUT if enable_relax_timeout else -1,
+        relaxed_timeout=RELAXED_TIMEOUT if enable_relaxed_timeout else -1,
         endpoint_type=endpoint_type,
     )
 

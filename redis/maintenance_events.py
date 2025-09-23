@@ -449,7 +449,7 @@ class MaintenanceEventsConfig:
         self,
         enabled: bool = True,
         proactive_reconnect: bool = True,
-        relax_timeout: Optional[Number] = 10,
+        relaxed_timeout: Optional[Number] = 10,
         endpoint_type: Optional[EndpointType] = None,
     ):
         """
@@ -460,8 +460,8 @@ class MaintenanceEventsConfig:
                 Defaults to False.
             proactive_reconnect (bool): Whether to proactively reconnect when a node is replaced.
                 Defaults to True.
-            relax_timeout (Number): The relax timeout to use for the connection during maintenance.
-                If -1 is provided - the relax timeout is disabled. Defaults to 20.
+            relaxed_timeout (Number): The relaxed timeout to use for the connection during maintenance.
+                If -1 is provided - the relaxed timeout is disabled. Defaults to 20.
             endpoint_type (Optional[EndpointType]): Override for the endpoint type to use in CLIENT MAINT_NOTIFICATIONS.
                 If None, the endpoint type will be automatically determined based on the host and TLS configuration.
                 Defaults to None.
@@ -470,7 +470,7 @@ class MaintenanceEventsConfig:
             ValueError: If endpoint_type is provided but is not a valid endpoint type.
         """
         self.enabled = enabled
-        self.relax_timeout = relax_timeout
+        self.relaxed_timeout = relaxed_timeout
         self.proactive_reconnect = proactive_reconnect
         self.endpoint_type = endpoint_type
 
@@ -479,21 +479,21 @@ class MaintenanceEventsConfig:
             f"{self.__class__.__name__}("
             f"enabled={self.enabled}, "
             f"proactive_reconnect={self.proactive_reconnect}, "
-            f"relax_timeout={self.relax_timeout}, "
+            f"relaxed_timeout={self.relaxed_timeout}, "
             f"endpoint_type={self.endpoint_type!r}"
             f")"
         )
 
-    def is_relax_timeouts_enabled(self) -> bool:
+    def is_relaxed_timeouts_enabled(self) -> bool:
         """
-        Check if the relax_timeout is enabled. The '-1' value is used to disable the relax_timeout.
-        If relax_timeout is set to None, it will make the operation blocking
+        Check if the relaxed_timeout is enabled. The '-1' value is used to disable the relaxed_timeout.
+        If relaxed_timeout is set to None, it will make the operation blocking
         and waiting until any response is received.
 
         Returns:
-            True if the relax_timeout is enabled, False otherwise.
+            True if the relaxed_timeout is enabled, False otherwise.
         """
-        return self.relax_timeout != -1
+        return self.relaxed_timeout != -1
 
     def get_endpoint_type(
         self, host: str, connection: "ConnectionInterface"
@@ -582,7 +582,7 @@ class MaintenanceEventPoolHandler:
     def handle_node_moving_event(self, event: NodeMovingEvent):
         if (
             not self.config.proactive_reconnect
-            and not self.config.is_relax_timeouts_enabled()
+            and not self.config.is_relaxed_timeouts_enabled()
         ):
             return
         with self._lock:
@@ -595,7 +595,7 @@ class MaintenanceEventPoolHandler:
             with self.pool._lock:
                 if (
                     self.config.proactive_reconnect
-                    or self.config.is_relax_timeouts_enabled()
+                    or self.config.is_relaxed_timeouts_enabled()
                 ):
                     # Get the current connected address - if any
                     # This is the address that is being moved
@@ -615,7 +615,7 @@ class MaintenanceEventPoolHandler:
                     self.pool.update_connections_settings(
                         state=MaintenanceState.MOVING,
                         maintenance_event_hash=hash(event),
-                        relax_timeout=self.config.relax_timeout,
+                        relaxed_timeout=self.config.relaxed_timeout,
                         host_address=event.new_node_host,
                         matching_address=moving_address_src,
                         matching_pattern="connected_address",
@@ -650,11 +650,11 @@ class MaintenanceEventPoolHandler:
                                 "host": event.new_node_host,
                             }
                         )
-                    if self.config.is_relax_timeouts_enabled():
+                    if self.config.is_relaxed_timeouts_enabled():
                         kwargs.update(
                             {
-                                "socket_timeout": self.config.relax_timeout,
-                                "socket_connect_timeout": self.config.relax_timeout,
+                                "socket_timeout": self.config.relaxed_timeout,
+                                "socket_connect_timeout": self.config.relaxed_timeout,
                             }
                         )
                     self.pool.update_connection_kwargs(**kwargs)
@@ -715,17 +715,17 @@ class MaintenanceEventPoolHandler:
                 self.pool.update_connection_kwargs(**kwargs)
 
             with self.pool._lock:
-                reset_relax_timeout = self.config.is_relax_timeouts_enabled()
+                reset_relaxed_timeout = self.config.is_relaxed_timeouts_enabled()
                 reset_host_address = self.config.proactive_reconnect
 
                 self.pool.update_connections_settings(
-                    relax_timeout=-1,
+                    relaxed_timeout=-1,
                     state=MaintenanceState.NONE,
                     maintenance_event_hash=None,
                     matching_event_hash=event_hash,
                     matching_pattern="event_hash",
                     update_event_hash=True,
-                    reset_relax_timeout=reset_relax_timeout,
+                    reset_relaxed_timeout=reset_relaxed_timeout,
                     reset_host_address=reset_host_address,
                     include_free_connections=True,
                 )
@@ -762,24 +762,26 @@ class MaintenanceEventConnectionHandler:
     def handle_maintenance_start_event(self, maintenance_state: MaintenanceState):
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING
-            or not self.config.is_relax_timeouts_enabled()
+            or not self.config.is_relaxed_timeouts_enabled()
         ):
             return
 
         self.connection.maintenance_state = maintenance_state
-        self.connection.set_tmp_settings(tmp_relax_timeout=self.config.relax_timeout)
+        self.connection.set_tmp_settings(
+            tmp_relaxed_timeout=self.config.relaxed_timeout
+        )
         # extend the timeout for all created connections
-        self.connection.update_current_socket_timeout(self.config.relax_timeout)
+        self.connection.update_current_socket_timeout(self.config.relaxed_timeout)
 
     def handle_maintenance_completed_event(self):
-        # Only reset timeouts if state is not MOVING and relax timeouts are enabled
+        # Only reset timeouts if state is not MOVING and relaxed timeouts are enabled
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING
-            or not self.config.is_relax_timeouts_enabled()
+            or not self.config.is_relaxed_timeouts_enabled()
         ):
             return
-        self.connection.reset_tmp_settings(reset_relax_timeout=True)
+        self.connection.reset_tmp_settings(reset_relaxed_timeout=True)
         # Maintenance completed - reset the connection
-        # timeouts by providing -1 as the relax timeout
+        # timeouts by providing -1 as the relaxed timeout
         self.connection.update_current_socket_timeout(-1)
         self.connection.maintenance_state = MaintenanceState.NONE

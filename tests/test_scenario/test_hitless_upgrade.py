@@ -19,7 +19,7 @@ from redis.maintenance_events import (
 )
 from tests.test_scenario.conftest import (
     CLIENT_TIMEOUT,
-    RELAX_TIMEOUT,
+    RELAXED_TIMEOUT,
     _get_client_maint_events,
 )
 from tests.test_scenario.fault_injector_client import (
@@ -227,7 +227,7 @@ class TestPushNotifications:
         for conn in connections:
             if (
                 conn._sock is not None
-                and conn._sock.gettimeout() == RELAX_TIMEOUT
+                and conn._sock.gettimeout() == RELAXED_TIMEOUT
                 and conn.maintenance_state == MaintenanceState.MAINTENANCE
             ):
                 matching_conns_count += 1
@@ -261,7 +261,7 @@ class TestPushNotifications:
             )
             if (
                 conn._sock is not None
-                and conn._sock.gettimeout() == RELAX_TIMEOUT
+                and conn._sock.gettimeout() == RELAXED_TIMEOUT
                 and conn.maintenance_state == MaintenanceState.MOVING
                 and endpoint_configured_correctly
             ):
@@ -269,7 +269,7 @@ class TestPushNotifications:
             elif (
                 conn._sock is None
                 and conn.maintenance_state == MaintenanceState.MOVING
-                and conn.socket_timeout == RELAX_TIMEOUT
+                and conn.socket_timeout == RELAXED_TIMEOUT
                 and endpoint_configured_correctly
             ):
                 matching_disconnected_conns_count += 1
@@ -405,7 +405,7 @@ class TestPushNotifications:
         logging.info("Validating connection migrating state...")
         conn = client_maint_events.connection_pool.get_connection()
         assert conn.maintenance_state == MaintenanceState.MAINTENANCE
-        assert conn._sock.gettimeout() == RELAX_TIMEOUT
+        assert conn._sock.gettimeout() == RELAXED_TIMEOUT
         client_maint_events.connection_pool.release(conn)
 
         logging.info("Waiting for MIGRATED push notifications...")
@@ -438,7 +438,7 @@ class TestPushNotifications:
         logging.info("Validating connection states...")
         conn = client_maint_events.connection_pool.get_connection()
         assert conn.maintenance_state == MaintenanceState.MOVING
-        assert conn._sock.gettimeout() == RELAX_TIMEOUT
+        assert conn._sock.gettimeout() == RELAXED_TIMEOUT
 
         logging.info("Waiting for moving ttl to expire")
         time.sleep(BIND_TIMEOUT)

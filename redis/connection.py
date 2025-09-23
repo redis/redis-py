@@ -289,7 +289,7 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
-    def update_current_socket_timeout(self, relax_timeout: Optional[float] = None):
+    def update_current_socket_timeout(self, relaxed_timeout: Optional[float] = None):
         """
         Update the timeout for the current socket.
         """
@@ -299,7 +299,7 @@ class ConnectionInterface:
     def set_tmp_settings(
         self,
         tmp_host_address: Optional[str] = None,
-        tmp_relax_timeout: Optional[float] = None,
+        tmp_relaxed_timeout: Optional[float] = None,
     ):
         """
         Updates temporary host address and timeout settings for the connection.
@@ -310,7 +310,7 @@ class ConnectionInterface:
     def reset_tmp_settings(
         self,
         reset_host_address: bool = False,
-        reset_relax_timeout: bool = False,
+        reset_relaxed_timeout: bool = False,
     ):
         """
         Resets temporary host address and timeout settings for the connection.
@@ -1022,9 +1022,9 @@ class AbstractConnection(ConnectionInterface):
     def should_reconnect(self):
         return self._should_reconnect
 
-    def update_current_socket_timeout(self, relax_timeout: Optional[float] = None):
+    def update_current_socket_timeout(self, relaxed_timeout: Optional[float] = None):
         if self._sock:
-            timeout = relax_timeout if relax_timeout != -1 else self.socket_timeout
+            timeout = relaxed_timeout if relaxed_timeout != -1 else self.socket_timeout
             self._sock.settimeout(timeout)
             self.update_parser_buffer_timeout(timeout)
 
@@ -1035,25 +1035,25 @@ class AbstractConnection(ConnectionInterface):
     def set_tmp_settings(
         self,
         tmp_host_address: Optional[Union[str, object]] = SENTINEL,
-        tmp_relax_timeout: Optional[float] = None,
+        tmp_relaxed_timeout: Optional[float] = None,
     ):
         """
         The value of SENTINEL is used to indicate that the property should not be updated.
         """
         if tmp_host_address is not SENTINEL:
             self.host = tmp_host_address
-        if tmp_relax_timeout != -1:
-            self.socket_timeout = tmp_relax_timeout
-            self.socket_connect_timeout = tmp_relax_timeout
+        if tmp_relaxed_timeout != -1:
+            self.socket_timeout = tmp_relaxed_timeout
+            self.socket_connect_timeout = tmp_relaxed_timeout
 
     def reset_tmp_settings(
         self,
         reset_host_address: bool = False,
-        reset_relax_timeout: bool = False,
+        reset_relaxed_timeout: bool = False,
     ):
         if reset_host_address:
             self.host = self.orig_host_address
-        if reset_relax_timeout:
+        if reset_relaxed_timeout:
             self.socket_timeout = self.orig_socket_timeout
             self.socket_connect_timeout = self.orig_socket_connect_timeout
 
@@ -2081,10 +2081,10 @@ class ConnectionPool:
         state: Optional["MaintenanceState"] = None,
         maintenance_event_hash: Optional[int] = None,
         host_address: Optional[str] = None,
-        relax_timeout: Optional[float] = None,
+        relaxed_timeout: Optional[float] = None,
         update_event_hash: bool = False,
         reset_host_address: bool = False,
-        reset_relax_timeout: bool = False,
+        reset_relaxed_timeout: bool = False,
     ):
         """
         Update the settings for a single connection.
@@ -2099,23 +2099,23 @@ class ConnectionPool:
         if host_address is not None:
             conn.set_tmp_settings(tmp_host_address=host_address)
 
-        if relax_timeout is not None:
-            conn.set_tmp_settings(tmp_relax_timeout=relax_timeout)
+        if relaxed_timeout is not None:
+            conn.set_tmp_settings(tmp_relaxed_timeout=relaxed_timeout)
 
-        if reset_relax_timeout or reset_host_address:
+        if reset_relaxed_timeout or reset_host_address:
             conn.reset_tmp_settings(
                 reset_host_address=reset_host_address,
-                reset_relax_timeout=reset_relax_timeout,
+                reset_relaxed_timeout=reset_relaxed_timeout,
             )
 
-        conn.update_current_socket_timeout(relax_timeout)
+        conn.update_current_socket_timeout(relaxed_timeout)
 
     def update_connections_settings(
         self,
         state: Optional["MaintenanceState"] = None,
         maintenance_event_hash: Optional[int] = None,
         host_address: Optional[str] = None,
-        relax_timeout: Optional[float] = None,
+        relaxed_timeout: Optional[float] = None,
         matching_address: Optional[str] = None,
         matching_event_hash: Optional[int] = None,
         matching_pattern: Literal[
@@ -2123,7 +2123,7 @@ class ConnectionPool:
         ] = "connected_address",
         update_event_hash: bool = False,
         reset_host_address: bool = False,
-        reset_relax_timeout: bool = False,
+        reset_relaxed_timeout: bool = False,
         include_free_connections: bool = True,
     ):
         """
@@ -2136,13 +2136,13 @@ class ConnectionPool:
         :param maintenance_event_hash: The hash of the maintenance event
                                         to set for the connection.
         :param host_address: The host address to set for the connection.
-        :param relax_timeout: The relax timeout to set for the connection.
+        :param relaxed_timeout: The relaxed timeout to set for the connection.
         :param matching_address: The address to match for the connection.
         :param matching_event_hash: The event hash to match for the connection.
         :param matching_pattern: The pattern to match for the connection.
         :param update_event_hash: Whether to update the event hash for the connection.
         :param reset_host_address: Whether to reset the host address to the original address.
-        :param reset_relax_timeout: Whether to reset the relax timeout to the original timeout.
+        :param reset_relaxed_timeout: Whether to reset the relaxed timeout to the original timeout.
         :param include_free_connections: Whether to include free/available connections.
         """
         with self._lock:
@@ -2158,10 +2158,10 @@ class ConnectionPool:
                         state=state,
                         maintenance_event_hash=maintenance_event_hash,
                         host_address=host_address,
-                        relax_timeout=relax_timeout,
+                        relaxed_timeout=relaxed_timeout,
                         update_event_hash=update_event_hash,
                         reset_host_address=reset_host_address,
-                        reset_relax_timeout=reset_relax_timeout,
+                        reset_relaxed_timeout=reset_relaxed_timeout,
                     )
 
             if include_free_connections:
@@ -2177,10 +2177,10 @@ class ConnectionPool:
                             state=state,
                             maintenance_event_hash=maintenance_event_hash,
                             host_address=host_address,
-                            relax_timeout=relax_timeout,
+                            relaxed_timeout=relaxed_timeout,
                             update_event_hash=update_event_hash,
                             reset_host_address=reset_host_address,
-                            reset_relax_timeout=reset_relax_timeout,
+                            reset_relaxed_timeout=reset_relaxed_timeout,
                         )
 
     def update_connection_kwargs(
@@ -2473,7 +2473,7 @@ class BlockingConnectionPool(ConnectionPool):
         self,
         state: Optional["MaintenanceState"] = None,
         maintenance_event_hash: Optional[int] = None,
-        relax_timeout: Optional[float] = None,
+        relaxed_timeout: Optional[float] = None,
         host_address: Optional[str] = None,
         matching_address: Optional[str] = None,
         matching_event_hash: Optional[int] = None,
@@ -2482,7 +2482,7 @@ class BlockingConnectionPool(ConnectionPool):
         ] = "connected_address",
         update_event_hash: bool = False,
         reset_host_address: bool = False,
-        reset_relax_timeout: bool = False,
+        reset_relaxed_timeout: bool = False,
         include_free_connections: bool = True,
     ):
         """
@@ -2502,10 +2502,10 @@ class BlockingConnectionPool(ConnectionPool):
                             state=state,
                             maintenance_event_hash=maintenance_event_hash,
                             host_address=host_address,
-                            relax_timeout=relax_timeout,
+                            relaxed_timeout=relaxed_timeout,
                             update_event_hash=update_event_hash,
                             reset_host_address=reset_host_address,
-                            reset_relax_timeout=reset_relax_timeout,
+                            reset_relaxed_timeout=reset_relaxed_timeout,
                         )
             else:
                 connections_in_queue = {conn for conn in self.pool.queue if conn}
@@ -2522,10 +2522,10 @@ class BlockingConnectionPool(ConnectionPool):
                                 state=state,
                                 maintenance_event_hash=maintenance_event_hash,
                                 host_address=host_address,
-                                relax_timeout=relax_timeout,
+                                relaxed_timeout=relaxed_timeout,
                                 update_event_hash=update_event_hash,
                                 reset_host_address=reset_host_address,
-                                reset_relax_timeout=reset_relax_timeout,
+                                reset_relaxed_timeout=reset_relaxed_timeout,
                             )
 
     def update_active_connections_for_reconnect(

@@ -381,52 +381,52 @@ class TestMaintenanceEventsConfig:
         config = MaintenanceEventsConfig()
         assert config.enabled is True
         assert config.proactive_reconnect is True
-        assert config.relax_timeout == 10
+        assert config.relaxed_timeout == 10
 
     def test_init_custom_values(self):
         """Test MaintenanceEventsConfig initialization with custom values."""
         config = MaintenanceEventsConfig(
-            enabled=True, proactive_reconnect=False, relax_timeout=30
+            enabled=True, proactive_reconnect=False, relaxed_timeout=30
         )
         assert config.enabled is True
         assert config.proactive_reconnect is False
-        assert config.relax_timeout == 30
+        assert config.relaxed_timeout == 30
 
     def test_repr(self):
         """Test MaintenanceEventsConfig string representation."""
         config = MaintenanceEventsConfig(
-            enabled=True, proactive_reconnect=False, relax_timeout=30
+            enabled=True, proactive_reconnect=False, relaxed_timeout=30
         )
         repr_str = repr(config)
         assert "MaintenanceEventsConfig" in repr_str
         assert "enabled=True" in repr_str
         assert "proactive_reconnect=False" in repr_str
-        assert "relax_timeout=30" in repr_str
+        assert "relaxed_timeout=30" in repr_str
 
-    def test_is_relax_timeouts_enabled_true(self):
-        """Test is_relax_timeouts_enabled returns True for positive timeout."""
-        config = MaintenanceEventsConfig(relax_timeout=20)
-        assert config.is_relax_timeouts_enabled() is True
+    def test_is_relaxed_timeouts_enabled_true(self):
+        """Test is_relaxed_timeouts_enabled returns True for positive timeout."""
+        config = MaintenanceEventsConfig(relaxed_timeout=20)
+        assert config.is_relaxed_timeouts_enabled() is True
 
-    def test_is_relax_timeouts_enabled_false(self):
-        """Test is_relax_timeouts_enabled returns False for -1 timeout."""
-        config = MaintenanceEventsConfig(relax_timeout=-1)
-        assert config.is_relax_timeouts_enabled() is False
+    def test_is_relaxed_timeouts_enabled_false(self):
+        """Test is_relaxed_timeouts_enabled returns False for -1 timeout."""
+        config = MaintenanceEventsConfig(relaxed_timeout=-1)
+        assert config.is_relaxed_timeouts_enabled() is False
 
-    def test_is_relax_timeouts_enabled_zero(self):
-        """Test is_relax_timeouts_enabled returns True for zero timeout."""
-        config = MaintenanceEventsConfig(relax_timeout=0)
-        assert config.is_relax_timeouts_enabled() is True
+    def test_is_relaxed_timeouts_enabled_zero(self):
+        """Test is_relaxed_timeouts_enabled returns True for zero timeout."""
+        config = MaintenanceEventsConfig(relaxed_timeout=0)
+        assert config.is_relaxed_timeouts_enabled() is True
 
-    def test_is_relax_timeouts_enabled_none(self):
-        """Test is_relax_timeouts_enabled returns True for None timeout."""
-        config = MaintenanceEventsConfig(relax_timeout=None)
-        assert config.is_relax_timeouts_enabled() is True
+    def test_is_relaxed_timeouts_enabled_none(self):
+        """Test is_relaxed_timeouts_enabled returns True for None timeout."""
+        config = MaintenanceEventsConfig(relaxed_timeout=None)
+        assert config.is_relaxed_timeouts_enabled() is True
 
-    def test_relax_timeout_none_is_saved_as_none(self):
-        """Test that None value for relax_timeout is saved as None."""
-        config = MaintenanceEventsConfig(relax_timeout=None)
-        assert config.relax_timeout is None
+    def test_relaxed_timeout_none_is_saved_as_none(self):
+        """Test that None value for relaxed_timeout is saved as None."""
+        config = MaintenanceEventsConfig(relaxed_timeout=None)
+        assert config.relaxed_timeout is None
 
 
 class TestMaintenanceEventPoolHandler:
@@ -439,7 +439,7 @@ class TestMaintenanceEventPoolHandler:
         self.mock_pool._lock.__enter__.return_value = None
         self.mock_pool._lock.__exit__.return_value = None
         self.config = MaintenanceEventsConfig(
-            enabled=True, proactive_reconnect=True, relax_timeout=20
+            enabled=True, proactive_reconnect=True, relaxed_timeout=20
         )
         self.handler = MaintenanceEventPoolHandler(self.mock_pool, self.config)
 
@@ -493,7 +493,7 @@ class TestMaintenanceEventPoolHandler:
 
     def test_handle_node_moving_event_disabled_config(self):
         """Test node moving event handling when both features are disabled."""
-        config = MaintenanceEventsConfig(proactive_reconnect=False, relax_timeout=-1)
+        config = MaintenanceEventsConfig(proactive_reconnect=False, relaxed_timeout=-1)
         handler = MaintenanceEventPoolHandler(self.mock_pool, config)
         event = NodeMovingEvent(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
@@ -587,7 +587,7 @@ class TestMaintenanceEventConnectionHandler:
     def setup_method(self):
         """Set up test fixtures."""
         self.mock_connection = Mock()
-        self.config = MaintenanceEventsConfig(enabled=True, relax_timeout=20)
+        self.config = MaintenanceEventsConfig(enabled=True, relaxed_timeout=20)
         self.handler = MaintenanceEventConnectionHandler(
             self.mock_connection, self.config
         )
@@ -647,8 +647,8 @@ class TestMaintenanceEventConnectionHandler:
         assert result is None
 
     def test_handle_maintenance_start_event_disabled(self):
-        """Test maintenance start event handling when relax timeouts are disabled."""
-        config = MaintenanceEventsConfig(relax_timeout=-1)
+        """Test maintenance start event handling when relaxed timeouts are disabled."""
+        config = MaintenanceEventsConfig(relaxed_timeout=-1)
         handler = MaintenanceEventConnectionHandler(self.mock_connection, config)
 
         result = handler.handle_maintenance_start_event(MaintenanceState.MAINTENANCE)
@@ -675,12 +675,12 @@ class TestMaintenanceEventConnectionHandler:
         assert self.mock_connection.maintenance_state == MaintenanceState.MAINTENANCE
         self.mock_connection.update_current_socket_timeout.assert_called_once_with(20)
         self.mock_connection.set_tmp_settings.assert_called_once_with(
-            tmp_relax_timeout=20
+            tmp_relaxed_timeout=20
         )
 
     def test_handle_maintenance_completed_event_disabled(self):
-        """Test maintenance completed event handling when relax timeouts are disabled."""
-        config = MaintenanceEventsConfig(relax_timeout=-1)
+        """Test maintenance completed event handling when relaxed timeouts are disabled."""
+        config = MaintenanceEventsConfig(relaxed_timeout=-1)
         handler = MaintenanceEventConnectionHandler(self.mock_connection, config)
 
         result = handler.handle_maintenance_completed_event()
@@ -705,7 +705,7 @@ class TestMaintenanceEventConnectionHandler:
 
         self.mock_connection.update_current_socket_timeout.assert_called_once_with(-1)
         self.mock_connection.reset_tmp_settings.assert_called_once_with(
-            reset_relax_timeout=True
+            reset_relaxed_timeout=True
         )
 
 
