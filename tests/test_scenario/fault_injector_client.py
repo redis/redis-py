@@ -2,6 +2,7 @@ import json
 import logging
 import time
 import urllib.request
+import urllib.error
 from typing import Dict, Any, Optional, Union
 from enum import Enum
 
@@ -94,7 +95,7 @@ class FaultInjectorClient:
         return self._make_request("GET", f"/action/{action_id}")
 
     def execute_rladmin_command(
-        self, command: str, bdb_id: str = None
+        self, command: str, bdb_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute rladmin command directly as string"""
         url = f"{self.base_url}/rladmin"
@@ -146,4 +147,4 @@ class FaultInjectorClient:
                 logging.warning(f"Error checking operation status: {e}")
                 time.sleep(check_interval)
         else:
-            raise TimeoutError(f"Timeout waiting for operation {action_id}")
+            pytest.fail(f"Timeout waiting for operation {action_id}")
