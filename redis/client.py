@@ -57,8 +57,8 @@ from redis.exceptions import (
 )
 from redis.lock import Lock
 from redis.maintenance_events import (
-    MaintNotificationsPoolHandler,
     MaintNotificationsConfig,
+    MaintNotificationsPoolHandler,
 )
 from redis.retry import Retry
 from redis.utils import (

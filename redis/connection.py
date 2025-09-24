@@ -48,10 +48,10 @@ from .exceptions import (
     TimeoutError,
 )
 from .maintenance_events import (
+    MaintenanceState,
+    MaintNotificationsConfig,
     MaintNotificationsConnectionHandler,
     MaintNotificationsPoolHandler,
-    MaintNotificationsConfig,
-    MaintenanceState,
 )
 from .retry import Retry
 from .utils import (
@@ -177,7 +177,9 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
-    def set_maintenance_event_pool_handler(self, maintenance_event_pool_handler):
+    def set_maintenance_notification_pool_handler(
+        self, maintenance_notification_pool_handler
+    ):
         pass
 
     @abstractmethod
@@ -350,7 +352,7 @@ class AbstractConnection(ConnectionInterface):
         ] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         maintenance_state: "MaintenanceState" = MaintenanceState.NONE,
-        maintenance_event_hash: Optional[int] = None,
+        maintenance_notification_hash: Optional[int] = None,
         orig_host_address: Optional[str] = None,
         orig_socket_timeout: Optional[float] = None,
         orig_socket_connect_timeout: Optional[float] = None,
@@ -432,8 +434,8 @@ class AbstractConnection(ConnectionInterface):
 
         self.maint_notifications_config = maint_notifications_config
 
-        # Set up maintenance events if enabled
-        self._configure_maintenance_events(
+        # Set up maintenance notifications if enabled
+        self._configure_maintenance_notifications(
             maint_notifications_pool_handler,
             orig_host_address,
             orig_socket_timeout,
@@ -442,7 +444,7 @@ class AbstractConnection(ConnectionInterface):
 
         self._should_reconnect = False
         self.maintenance_state = maintenance_state
-        self.maintenance_event_hash = maintenance_event_hash
+        self.maintenance_notification_hash = maintenance_notification_hash
 
         self._command_packer = self._construct_command_packer(command_packer)
 
@@ -499,14 +501,14 @@ class AbstractConnection(ConnectionInterface):
         """
         self._parser = parser_class(socket_read_size=self._socket_read_size)
 
-    def _configure_maintenance_events(
+    def _configure_maintenance_notifications(
         self,
         maint_notifications_pool_handler=None,
         orig_host_address=None,
         orig_socket_timeout=None,
         orig_socket_connect_timeout=None,
     ):
-        """Enable maintenance events by setting up handlers and storing original connection parameters."""
+        """Enable maintenance notifications by setting up handlers and storing original connection parameters."""
         if (
             not self.maint_notifications_config
             or not self.maint_notifications_config.enabled
@@ -539,7 +541,7 @@ class AbstractConnection(ConnectionInterface):
             else self.socket_connect_timeout
         )
 
-    def set_maintenance_event_pool_handler(
+    def set_maintenance_notification_pool_handler(
         self, maint_notifications_pool_handler: MaintNotificationsPoolHandler
     ):
         maint_notifications_pool_handler.set_connection(self)
@@ -547,7 +549,7 @@ class AbstractConnection(ConnectionInterface):
             maint_notifications_pool_handler.handle_notification
         )
 
-        # Update maintenance event connection handler if it doesn't exist
+        # Update maintenance notification connection handler if it doesn't exist
         if not self._maint_notifications_connection_handler:
             self._maint_notifications_connection_handler = (
                 MaintNotificationsConnectionHandler(
@@ -686,7 +688,7 @@ class AbstractConnection(ConnectionInterface):
             ):
                 raise ConnectionError("Invalid RESP version")
 
-        # Send maintenance notifications handshake if RESP3 is active and maintenance events are enabled
+        # Send maintenance notifications handshake if RESP3 is active and maintenance notifications are enabled
         # and we have a host to determine the endpoint type from
         if (
             self.protocol not in [2, "2"]
@@ -1825,14 +1827,14 @@ class ConnectionPool:
         """Update the maintenance notifications config for all connections in the pool."""
         with self._lock:
             for conn in self._available_connections:
-                conn.set_maintenance_event_pool_handler(
+                conn.set_maintenance_notification_pool_handler(
                     maint_notifications_pool_handler
                 )
                 conn.maint_notifications_config = (
                     maint_notifications_pool_handler.config
                 )
             for conn in self._in_use_connections:
-                conn.set_maintenance_event_pool_handler(
+                conn.set_maintenance_notification_pool_handler(
                     maint_notifications_pool_handler
                 )
                 conn.maint_notifications_config = (
@@ -2063,13 +2065,13 @@ class ConnectionPool:
         self,
         conn: "Connection",
         matching_pattern: Literal[
-            "connected_address", "configured_address", "event_hash"
+            "connected_address", "configured_address", "notification_hash"
         ] = "connected_address",
         matching_address: Optional[str] = None,
-        matching_event_hash: Optional[int] = None,
+        matching_notification_hash: Optional[int] = None,
     ) -> bool:
         """
-        Check if the connection should be updated based on the matching address.
+        Check if the connection should be updated based on the matching criteria.
         """
         if matching_pattern == "connected_address":
             if matching_address and conn.getpeername() != matching_address:
@@ -2077,10 +2079,10 @@ class ConnectionPool:
         elif matching_pattern == "configured_address":
             if matching_address and conn.host != matching_address:
                 return False
-        elif matching_pattern == "event_hash":
+        elif matching_pattern == "notification_hash":
             if (
-                matching_event_hash
-                and conn.maintenance_event_hash != matching_event_hash
+                matching_notification_hash
+                and conn.maintenance_notification_hash != matching_notification_hash
             ):
                 return False
         return True
@@ -2089,10 +2091,10 @@ class ConnectionPool:
         self,
         conn: "Connection",
         state: Optional["MaintenanceState"] = None,
-        maintenance_event_hash: Optional[int] = None,
+        maintenance_notification_hash: Optional[int] = None,
         host_address: Optional[str] = None,
         relaxed_timeout: Optional[float] = None,
-        update_event_hash: bool = False,
+        update_notification_hash: bool = False,
         reset_host_address: bool = False,
         reset_relaxed_timeout: bool = False,
     ):
@@ -2102,9 +2104,9 @@ class ConnectionPool:
         if state:
             conn.maintenance_state = state
 
-        if update_event_hash:
-            # update the event hash only if requested
-            conn.maintenance_event_hash = maintenance_event_hash
+        if update_notification_hash:
+            # update the notification hash only if requested
+            conn.maintenance_notification_hash = maintenance_notification_hash
 
         if host_address is not None:
             conn.set_tmp_settings(tmp_host_address=host_address)
@@ -2123,15 +2125,15 @@ class ConnectionPool:
     def update_connections_settings(
         self,
         state: Optional["MaintenanceState"] = None,
-        maintenance_event_hash: Optional[int] = None,
+        maintenance_notification_hash: Optional[int] = None,
         host_address: Optional[str] = None,
         relaxed_timeout: Optional[float] = None,
         matching_address: Optional[str] = None,
-        matching_event_hash: Optional[int] = None,
+        matching_notification_hash: Optional[int] = None,
         matching_pattern: Literal[
-            "connected_address", "configured_address", "event_hash"
+            "connected_address", "configured_address", "notification_hash"
         ] = "connected_address",
-        update_event_hash: bool = False,
+        update_notification_hash: bool = False,
         reset_host_address: bool = False,
         reset_relaxed_timeout: bool = False,
         include_free_connections: bool = True,
@@ -2143,14 +2145,14 @@ class ConnectionPool:
         This method does not affect the connection kwargs.
 
         :param state: The maintenance state to set for the connection.
-        :param maintenance_event_hash: The hash of the maintenance event
-                                        to set for the connection.
+        :param maintenance_notification_hash: The hash of the maintenance notification
+                                               to set for the connection.
         :param host_address: The host address to set for the connection.
         :param relaxed_timeout: The relaxed timeout to set for the connection.
         :param matching_address: The address to match for the connection.
-        :param matching_event_hash: The event hash to match for the connection.
+        :param matching_notification_hash: The notification hash to match for the connection.
         :param matching_pattern: The pattern to match for the connection.
-        :param update_event_hash: Whether to update the event hash for the connection.
+        :param update_notification_hash: Whether to update the notification hash for the connection.
         :param reset_host_address: Whether to reset the host address to the original address.
         :param reset_relaxed_timeout: Whether to reset the relaxed timeout to the original timeout.
         :param include_free_connections: Whether to include free/available connections.
@@ -2161,15 +2163,15 @@ class ConnectionPool:
                     conn,
                     matching_pattern,
                     matching_address,
-                    matching_event_hash,
+                    matching_notification_hash,
                 ):
                     self.update_connection_settings(
                         conn,
                         state=state,
-                        maintenance_event_hash=maintenance_event_hash,
+                        maintenance_notification_hash=maintenance_notification_hash,
                         host_address=host_address,
                         relaxed_timeout=relaxed_timeout,
-                        update_event_hash=update_event_hash,
+                        update_notification_hash=update_notification_hash,
                         reset_host_address=reset_host_address,
                         reset_relaxed_timeout=reset_relaxed_timeout,
                     )
@@ -2180,15 +2182,15 @@ class ConnectionPool:
                         conn,
                         matching_pattern,
                         matching_address,
-                        matching_event_hash,
+                        matching_notification_hash,
                     ):
                         self.update_connection_settings(
                             conn,
                             state=state,
-                            maintenance_event_hash=maintenance_event_hash,
+                            maintenance_notification_hash=maintenance_notification_hash,
                             host_address=host_address,
                             relaxed_timeout=relaxed_timeout,
-                            update_event_hash=update_event_hash,
+                            update_notification_hash=update_notification_hash,
                             reset_host_address=reset_host_address,
                             reset_relaxed_timeout=reset_relaxed_timeout,
                         )
@@ -2482,15 +2484,15 @@ class BlockingConnectionPool(ConnectionPool):
     def update_connections_settings(
         self,
         state: Optional["MaintenanceState"] = None,
-        maintenance_event_hash: Optional[int] = None,
+        maintenance_notification_hash: Optional[int] = None,
         relaxed_timeout: Optional[float] = None,
         host_address: Optional[str] = None,
         matching_address: Optional[str] = None,
-        matching_event_hash: Optional[int] = None,
+        matching_notification_hash: Optional[int] = None,
         matching_pattern: Literal[
-            "connected_address", "configured_address", "event_hash"
+            "connected_address", "configured_address", "notification_hash"
         ] = "connected_address",
-        update_event_hash: bool = False,
+        update_notification_hash: bool = False,
         reset_host_address: bool = False,
         reset_relaxed_timeout: bool = False,
         include_free_connections: bool = True,
@@ -2505,15 +2507,15 @@ class BlockingConnectionPool(ConnectionPool):
                         conn,
                         matching_pattern,
                         matching_address,
-                        matching_event_hash,
+                        matching_notification_hash,
                     ):
                         self.update_connection_settings(
                             conn,
                             state=state,
-                            maintenance_event_hash=maintenance_event_hash,
+                            maintenance_notification_hash=maintenance_notification_hash,
                             host_address=host_address,
                             relaxed_timeout=relaxed_timeout,
-                            update_event_hash=update_event_hash,
+                            update_notification_hash=update_notification_hash,
                             reset_host_address=reset_host_address,
                             reset_relaxed_timeout=reset_relaxed_timeout,
                         )
@@ -2525,15 +2527,15 @@ class BlockingConnectionPool(ConnectionPool):
                             conn,
                             matching_pattern,
                             matching_address,
-                            matching_event_hash,
+                            matching_notification_hash,
                         ):
                             self.update_connection_settings(
                                 conn,
                                 state=state,
-                                maintenance_event_hash=maintenance_event_hash,
+                                maintenance_notification_hash=maintenance_notification_hash,
                                 host_address=host_address,
                                 relaxed_timeout=relaxed_timeout,
-                                update_event_hash=update_event_hash,
+                                update_notification_hash=update_notification_hash,
                                 reset_host_address=reset_host_address,
                                 reset_relaxed_timeout=reset_relaxed_timeout,
                             )
@@ -2591,7 +2593,7 @@ class BlockingConnectionPool(ConnectionPool):
         """Update the maintenance notifications config for all connections in the pool."""
         with self._lock:
             for conn in tuple(self._connections):
-                conn.set_maintenance_event_pool_handler(
+                conn.set_maintenance_notification_pool_handler(
                     maint_notifications_pool_handler
                 )
                 conn.maint_notifications_config = (
@@ -2603,6 +2605,6 @@ class BlockingConnectionPool(ConnectionPool):
         Sets a flag that this Blocking ConnectionPool is in maintenance mode.
 
         This is used to prevent new connections from being created while we are in maintenance mode.
-        The pool will be in maintenance mode only when we are processing a MOVING event.
+        The pool will be in maintenance mode only when we are processing a MOVING notification.
         """
         self._in_maintenance = in_maintenance

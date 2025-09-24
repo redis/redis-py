@@ -5,12 +5,12 @@ import pytest
 from redis.connection import ConnectionInterface
 
 from redis.maintenance_events import (
-    MaintenanceEvent,
-    NodeMovingEvent,
-    NodeMigratingEvent,
-    NodeMigratedEvent,
-    NodeFailingOverEvent,
-    NodeFailedOverEvent,
+    MaintenanceNotification,
+    NodeMovingNotification,
+    NodeMigratingNotification,
+    NodeMigratedNotification,
+    NodeFailingOverNotification,
+    NodeFailedOverNotification,
     MaintNotificationsConfig,
     MaintNotificationsPoolHandler,
     MaintNotificationsConnectionHandler,
@@ -19,25 +19,25 @@ from redis.maintenance_events import (
 )
 
 
-class TestMaintenanceEvent:
-    """Test the base MaintenanceEvent class functionality through concrete subclasses."""
+class TestMaintenanceNotification:
+    """Test the base MaintenanceNotification class functionality through concrete subclasses."""
 
     def test_abstract_class_cannot_be_instantiated(self):
-        """Test that MaintenanceEvent cannot be instantiated directly."""
+        """Test that MaintenanceNotification cannot be instantiated directly."""
         with patch("time.monotonic", return_value=1000):
             with pytest.raises(TypeError):
-                MaintenanceEvent(id=1, ttl=10)  # type: ignore
+                MaintenanceNotification(id=1, ttl=10)  # type: ignore
 
     def test_init_through_subclass(self):
-        """Test MaintenanceEvent initialization through concrete subclass."""
+        """Test MaintenanceNotification initialization through concrete subclass."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeMovingEvent(
+            notification = NodeMovingNotification(
                 id=1, new_node_host="localhost", new_node_port=6379, ttl=10
             )
-            assert event.id == 1
-            assert event.ttl == 10
-            assert event.creation_time == 1000
-            assert event.expire_at == 1010
+            assert notification.id == 1
+            assert notification.ttl == 10
+            assert notification.creation_time == 1000
+            assert notification.expire_at == 1010
 
     @pytest.mark.parametrize(
         ("current_time", "expected_expired_state"),
@@ -47,54 +47,54 @@ class TestMaintenanceEvent:
         ],
     )
     def test_is_expired(self, current_time, expected_expired_state):
-        """Test is_expired returns False for non-expired event."""
+        """Test is_expired returns False for non-expired notification."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeMovingEvent(
+            notification = NodeMovingNotification(
                 id=1, new_node_host="localhost", new_node_port=6379, ttl=10
             )
 
         with patch("time.monotonic", return_value=current_time):
-            assert event.is_expired() == expected_expired_state
+            assert notification.is_expired() == expected_expired_state
 
     def test_is_expired_exact_boundary(self):
         """Test is_expired at exact expiration boundary."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeMovingEvent(
+            notification = NodeMovingNotification(
                 id=1, new_node_host="localhost", new_node_port=6379, ttl=10
             )
 
         with patch("time.monotonic", return_value=1010):  # Exactly at expiration
-            assert not event.is_expired()
+            assert not notification.is_expired()
 
         with patch("time.monotonic", return_value=1011):  # 1 second past expiration
-            assert event.is_expired()
+            assert notification.is_expired()
 
 
-class TestNodeMovingEvent:
-    """Test the NodeMovingEvent class."""
+class TestNodeMovingNotification:
+    """Test the NodeMovingNotification class."""
 
     def test_init(self):
-        """Test NodeMovingEvent initialization."""
+        """Test NodeMovingNotification initialization."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeMovingEvent(
+            notification = NodeMovingNotification(
                 id=1, new_node_host="localhost", new_node_port=6379, ttl=10
             )
-            assert event.id == 1
-            assert event.new_node_host == "localhost"
-            assert event.new_node_port == 6379
-            assert event.ttl == 10
-            assert event.creation_time == 1000
+            assert notification.id == 1
+            assert notification.new_node_host == "localhost"
+            assert notification.new_node_port == 6379
+            assert notification.ttl == 10
+            assert notification.creation_time == 1000
 
     def test_repr(self):
-        """Test NodeMovingEvent string representation."""
+        """Test NodeMovingNotification string representation."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeMovingEvent(
+            notification = NodeMovingNotification(
                 id=1, new_node_host="localhost", new_node_port=6379, ttl=10
             )
 
         with patch("time.monotonic", return_value=1005):  # 5 seconds later
-            repr_str = repr(event)
-            assert "NodeMovingEvent" in repr_str
+            repr_str = repr(notification)
+            assert "NodeMovingNotification" in repr_str
             assert "id=1" in repr_str
             assert "new_node_host='localhost'" in repr_str
             assert "new_node_port=6379" in repr_str
@@ -103,274 +103,282 @@ class TestNodeMovingEvent:
             assert "expired=False" in repr_str
 
     def test_equality_none_id_none_port(self):
-        """Test equality for events with same id and host and port - None."""
-        event1 = NodeMovingEvent(id=1, new_node_host=None, new_node_port=None, ttl=10)
-        event2 = NodeMovingEvent(
+        """Test equality for notifications with same id and host and port - None."""
+        notification1 = NodeMovingNotification(
+            id=1, new_node_host=None, new_node_port=None, ttl=10
+        )
+        notification2 = NodeMovingNotification(
             id=1, new_node_host=None, new_node_port=None, ttl=20
         )  # Different TTL
-        assert event1 == event2
+        assert notification1 == notification2
 
     def test_equality_same_id_host_port(self):
-        """Test equality for events with same id, host, and port."""
-        event1 = NodeMovingEvent(
+        """Test equality for notifications with same id, host, and port."""
+        notification1 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
-        event2 = NodeMovingEvent(
+        notification2 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=20
         )  # Different TTL
-        assert event1 == event2
+        assert notification1 == notification2
 
     def test_equality_same_id_different_host(self):
-        """Test inequality for events with same id but different host."""
-        event1 = NodeMovingEvent(
+        """Test inequality for notifications with same id but different host."""
+        notification1 = NodeMovingNotification(
             id=1, new_node_host="host1", new_node_port=6379, ttl=10
         )
-        event2 = NodeMovingEvent(
+        notification2 = NodeMovingNotification(
             id=1, new_node_host="host2", new_node_port=6379, ttl=10
         )
-        assert event1 != event2
+        assert notification1 != notification2
 
     def test_equality_same_id_different_port(self):
-        """Test inequality for events with same id but different port."""
-        event1 = NodeMovingEvent(
+        """Test inequality for notifications with same id but different port."""
+        notification1 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
-        event2 = NodeMovingEvent(
+        notification2 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6380, ttl=10
         )
-        assert event1 != event2
+        assert notification1 != notification2
 
     def test_equality_different_id(self):
-        """Test inequality for events with different id."""
-        event1 = NodeMovingEvent(
+        """Test inequality for notifications with different id."""
+        notification1 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
-        event2 = NodeMovingEvent(
+        notification2 = NodeMovingNotification(
             id=2, new_node_host="localhost", new_node_port=6379, ttl=10
         )
-        assert event1 != event2
+        assert notification1 != notification2
 
     def test_equality_different_type(self):
-        """Test inequality for events of different types."""
-        event1 = NodeMovingEvent(
+        """Test inequality for notifications of different types."""
+        notification1 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
-        event2 = NodeMigratingEvent(id=1, ttl=10)
-        assert event1 != event2
+        notification2 = NodeMigratingNotification(id=1, ttl=10)
+        assert notification1 != notification2
 
     def test_hash_same_id_host_port(self):
-        """Test hash consistency for events with same id, host, and port."""
-        event1 = NodeMovingEvent(
+        """Test hash consistency for notifications with same id, host, and port."""
+        notification1 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
-        event2 = NodeMovingEvent(
+        notification2 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=20
         )  # Different TTL
-        assert hash(event1) == hash(event2)
+        assert hash(notification1) == hash(notification2)
 
     def test_hash_different_host(self):
-        """Test hash difference for events with different host."""
-        event1 = NodeMovingEvent(
+        """Test hash difference for notifications with different host."""
+        notification1 = NodeMovingNotification(
             id=1, new_node_host="host1", new_node_port=6379, ttl=10
         )
-        event2 = NodeMovingEvent(
+        notification2 = NodeMovingNotification(
             id=1, new_node_host="host2", new_node_port=6379, ttl=10
         )
-        assert hash(event1) != hash(event2)
+        assert hash(notification1) != hash(notification2)
 
     def test_hash_different_port(self):
-        """Test hash difference for events with different port."""
-        event1 = NodeMovingEvent(
+        """Test hash difference for notifications with different port."""
+        notification1 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
-        event2 = NodeMovingEvent(
+        notification2 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6380, ttl=10
         )
-        assert hash(event1) != hash(event2)
+        assert hash(notification1) != hash(notification2)
 
     def test_hash_different_id(self):
-        """Test hash difference for events with different id."""
-        event1 = NodeMovingEvent(
+        """Test hash difference for notifications with different id."""
+        notification1 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
-        event2 = NodeMovingEvent(
+        notification2 = NodeMovingNotification(
             id=2, new_node_host="localhost", new_node_port=6379, ttl=10
         )
-        assert hash(event1) != hash(event2)
+        assert hash(notification1) != hash(notification2)
 
     def test_set_functionality(self):
-        """Test that events can be used in sets correctly."""
-        event1 = NodeMovingEvent(
+        """Test that notifications can be used in sets correctly."""
+        notification1 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
-        event2 = NodeMovingEvent(
+        notification2 = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=20
         )  # Same id, host, port - should be considered the same
-        event3 = NodeMovingEvent(
+        notification3 = NodeMovingNotification(
             id=1, new_node_host="host2", new_node_port=6380, ttl=10
         )  # Same id but different host/port - should be different
-        event4 = NodeMovingEvent(
+        notification4 = NodeMovingNotification(
             id=2, new_node_host="localhost", new_node_port=6379, ttl=10
         )  # Different id - should be different
 
-        event_set = {event1, event2, event3, event4}
-        assert len(event_set) == 3  # event1 and event2 should be considered the same
+        notification_set = {notification1, notification2, notification3, notification4}
+        assert (
+            len(notification_set) == 3
+        )  # notification1 and notification2 should be considered the same
 
 
-class TestNodeMigratingEvent:
-    """Test the NodeMigratingEvent class."""
+class TestNodeMigratingNotification:
+    """Test the NodeMigratingNotification class."""
 
     def test_init(self):
-        """Test NodeMigratingEvent initialization."""
+        """Test NodeMigratingNotification initialization."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeMigratingEvent(id=1, ttl=5)
-            assert event.id == 1
-            assert event.ttl == 5
-            assert event.creation_time == 1000
+            notification = NodeMigratingNotification(id=1, ttl=5)
+            assert notification.id == 1
+            assert notification.ttl == 5
+            assert notification.creation_time == 1000
 
     def test_repr(self):
-        """Test NodeMigratingEvent string representation."""
+        """Test NodeMigratingNotification string representation."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeMigratingEvent(id=1, ttl=5)
+            notification = NodeMigratingNotification(id=1, ttl=5)
 
         with patch("time.monotonic", return_value=1002):  # 2 seconds later
-            repr_str = repr(event)
-            assert "NodeMigratingEvent" in repr_str
+            repr_str = repr(notification)
+            assert "NodeMigratingNotification" in repr_str
             assert "id=1" in repr_str
             assert "ttl=5" in repr_str
             assert "remaining=3.0s" in repr_str
             assert "expired=False" in repr_str
 
     def test_equality_and_hash(self):
-        """Test equality and hash for NodeMigratingEvent."""
-        event1 = NodeMigratingEvent(id=1, ttl=5)
-        event2 = NodeMigratingEvent(id=1, ttl=10)  # Same id, different ttl
-        event3 = NodeMigratingEvent(id=2, ttl=5)  # Different id
+        """Test equality and hash for NodeMigratingNotification."""
+        notification1 = NodeMigratingNotification(id=1, ttl=5)
+        notification2 = NodeMigratingNotification(
+            id=1, ttl=10
+        )  # Same id, different ttl
+        notification3 = NodeMigratingNotification(id=2, ttl=5)  # Different id
 
-        assert event1 == event2
-        assert event1 != event3
-        assert hash(event1) == hash(event2)
-        assert hash(event1) != hash(event3)
+        assert notification1 == notification2
+        assert notification1 != notification3
+        assert hash(notification1) == hash(notification2)
+        assert hash(notification1) != hash(notification3)
 
 
-class TestNodeMigratedEvent:
-    """Test the NodeMigratedEvent class."""
+class TestNodeMigratedNotification:
+    """Test the NodeMigratedNotification class."""
 
     def test_init(self):
-        """Test NodeMigratedEvent initialization."""
+        """Test NodeMigratedNotification initialization."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeMigratedEvent(id=1)
-            assert event.id == 1
-            assert event.ttl == NodeMigratedEvent.DEFAULT_TTL
-            assert event.creation_time == 1000
+            notification = NodeMigratedNotification(id=1)
+            assert notification.id == 1
+            assert notification.ttl == NodeMigratedNotification.DEFAULT_TTL
+            assert notification.creation_time == 1000
 
     def test_default_ttl(self):
         """Test that DEFAULT_TTL is used correctly."""
-        assert NodeMigratedEvent.DEFAULT_TTL == 5
-        event = NodeMigratedEvent(id=1)
-        assert event.ttl == 5
+        assert NodeMigratedNotification.DEFAULT_TTL == 5
+        notification = NodeMigratedNotification(id=1)
+        assert notification.ttl == 5
 
     def test_repr(self):
-        """Test NodeMigratedEvent string representation."""
+        """Test NodeMigratedNotification string representation."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeMigratedEvent(id=1)
+            notification = NodeMigratedNotification(id=1)
 
         with patch("time.monotonic", return_value=1001):  # 1 second later
-            repr_str = repr(event)
-            assert "NodeMigratedEvent" in repr_str
+            repr_str = repr(notification)
+            assert "NodeMigratedNotification" in repr_str
             assert "id=1" in repr_str
             assert "ttl=5" in repr_str
             assert "remaining=4.0s" in repr_str
             assert "expired=False" in repr_str
 
     def test_equality_and_hash(self):
-        """Test equality and hash for NodeMigratedEvent."""
-        event1 = NodeMigratedEvent(id=1)
-        event2 = NodeMigratedEvent(id=1)  # Same id
-        event3 = NodeMigratedEvent(id=2)  # Different id
+        """Test equality and hash for NodeMigratedNotification."""
+        notification1 = NodeMigratedNotification(id=1)
+        notification2 = NodeMigratedNotification(id=1)  # Same id
+        notification3 = NodeMigratedNotification(id=2)  # Different id
 
-        assert event1 == event2
-        assert event1 != event3
-        assert hash(event1) == hash(event2)
-        assert hash(event1) != hash(event3)
+        assert notification1 == notification2
+        assert notification1 != notification3
+        assert hash(notification1) == hash(notification2)
+        assert hash(notification1) != hash(notification3)
 
 
-class TestNodeFailingOverEvent:
-    """Test the NodeFailingOverEvent class."""
+class TestNodeFailingOverNotification:
+    """Test the NodeFailingOverNotification class."""
 
     def test_init(self):
-        """Test NodeFailingOverEvent initialization."""
+        """Test NodeFailingOverNotification initialization."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeFailingOverEvent(id=1, ttl=5)
-            assert event.id == 1
-            assert event.ttl == 5
-            assert event.creation_time == 1000
+            notification = NodeFailingOverNotification(id=1, ttl=5)
+            assert notification.id == 1
+            assert notification.ttl == 5
+            assert notification.creation_time == 1000
 
     def test_repr(self):
-        """Test NodeFailingOverEvent string representation."""
+        """Test NodeFailingOverNotification string representation."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeFailingOverEvent(id=1, ttl=5)
+            notification = NodeFailingOverNotification(id=1, ttl=5)
 
         with patch("time.monotonic", return_value=1002):  # 2 seconds later
-            repr_str = repr(event)
-            assert "NodeFailingOverEvent" in repr_str
+            repr_str = repr(notification)
+            assert "NodeFailingOverNotification" in repr_str
             assert "id=1" in repr_str
             assert "ttl=5" in repr_str
             assert "remaining=3.0s" in repr_str
             assert "expired=False" in repr_str
 
     def test_equality_and_hash(self):
-        """Test equality and hash for NodeFailingOverEvent."""
-        event1 = NodeFailingOverEvent(id=1, ttl=5)
-        event2 = NodeFailingOverEvent(id=1, ttl=10)  # Same id, different ttl
-        event3 = NodeFailingOverEvent(id=2, ttl=5)  # Different id
+        """Test equality and hash for NodeFailingOverNotification."""
+        notification1 = NodeFailingOverNotification(id=1, ttl=5)
+        notification2 = NodeFailingOverNotification(
+            id=1, ttl=10
+        )  # Same id, different ttl
+        notification3 = NodeFailingOverNotification(id=2, ttl=5)  # Different id
 
-        assert event1 == event2
-        assert event1 != event3
-        assert hash(event1) == hash(event2)
-        assert hash(event1) != hash(event3)
+        assert notification1 == notification2
+        assert notification1 != notification3
+        assert hash(notification1) == hash(notification2)
+        assert hash(notification1) != hash(notification3)
 
 
-class TestNodeFailedOverEvent:
-    """Test the NodeFailedOverEvent class."""
+class TestNodeFailedOverNotification:
+    """Test the NodeFailedOverNotification class."""
 
     def test_init(self):
-        """Test NodeFailedOverEvent initialization."""
+        """Test NodeFailedOverNotification initialization."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeFailedOverEvent(id=1)
-            assert event.id == 1
-            assert event.ttl == NodeFailedOverEvent.DEFAULT_TTL
-            assert event.creation_time == 1000
+            notification = NodeFailedOverNotification(id=1)
+            assert notification.id == 1
+            assert notification.ttl == NodeFailedOverNotification.DEFAULT_TTL
+            assert notification.creation_time == 1000
 
     def test_default_ttl(self):
         """Test that DEFAULT_TTL is used correctly."""
-        assert NodeFailedOverEvent.DEFAULT_TTL == 5
-        event = NodeFailedOverEvent(id=1)
-        assert event.ttl == 5
+        assert NodeFailedOverNotification.DEFAULT_TTL == 5
+        notification = NodeFailedOverNotification(id=1)
+        assert notification.ttl == 5
 
     def test_repr(self):
-        """Test NodeFailedOverEvent string representation."""
+        """Test NodeFailedOverNotification string representation."""
         with patch("time.monotonic", return_value=1000):
-            event = NodeFailedOverEvent(id=1)
+            notification = NodeFailedOverNotification(id=1)
 
         with patch("time.monotonic", return_value=1001):  # 1 second later
-            repr_str = repr(event)
-            assert "NodeFailedOverEvent" in repr_str
+            repr_str = repr(notification)
+            assert "NodeFailedOverNotification" in repr_str
             assert "id=1" in repr_str
             assert "ttl=5" in repr_str
             assert "remaining=4.0s" in repr_str
             assert "expired=False" in repr_str
 
     def test_equality_and_hash(self):
-        """Test equality and hash for NodeFailedOverEvent."""
-        event1 = NodeFailedOverEvent(id=1)
-        event2 = NodeFailedOverEvent(id=1)  # Same id
-        event3 = NodeFailedOverEvent(id=2)  # Different id
+        """Test equality and hash for NodeFailedOverNotification."""
+        notification1 = NodeFailedOverNotification(id=1)
+        notification2 = NodeFailedOverNotification(id=1)  # Same id
+        notification3 = NodeFailedOverNotification(id=2)  # Different id
 
-        assert event1 == event2
-        assert event1 != event3
-        assert hash(event1) == hash(event2)
-        assert hash(event1) != hash(event3)
+        assert notification1 == notification2
+        assert notification1 != notification3
+        assert hash(notification1) == hash(notification2)
+        assert hash(notification1) != hash(notification3)
 
 
 class TestMaintNotificationsConfig:
@@ -453,30 +461,34 @@ class TestMaintNotificationsPoolHandler:
     def test_remove_expired_notifications(self):
         """Test removal of expired notifications."""
         with patch("time.monotonic", return_value=1000):
-            event1 = NodeMovingEvent(
+            notification1 = NodeMovingNotification(
                 id=1, new_node_host="host1", new_node_port=6379, ttl=10
             )
-            event2 = NodeMovingEvent(
+            notification2 = NodeMovingNotification(
                 id=2, new_node_host="host2", new_node_port=6380, ttl=5
             )
-            self.handler._processed_notifications.add(event1)
-            self.handler._processed_notifications.add(event2)
+            self.handler._processed_notifications.add(notification1)
+            self.handler._processed_notifications.add(notification2)
 
-        # Move time forward but not enough to expire event2 (expires at 1005)
+        # Move time forward but not enough to expire notification2 (expires at 1005)
         with patch("time.monotonic", return_value=1003):
             self.handler.remove_expired_notifications()
-            assert event1 in self.handler._processed_notifications
-            assert event2 in self.handler._processed_notifications  # Not expired yet
+            assert notification1 in self.handler._processed_notifications
+            assert (
+                notification2 in self.handler._processed_notifications
+            )  # Not expired yet
 
-        # Move time forward to expire event2 but not event1
+        # Move time forward to expire notification2 but not notification1
         with patch("time.monotonic", return_value=1006):
             self.handler.remove_expired_notifications()
-            assert event1 in self.handler._processed_notifications
-            assert event2 not in self.handler._processed_notifications  # Now expired
+            assert notification1 in self.handler._processed_notifications
+            assert (
+                notification2 not in self.handler._processed_notifications
+            )  # Now expired
 
     def test_handle_notification_node_moving(self):
-        """Test handling of NodeMovingEvent."""
-        notification = NodeMovingEvent(
+        """Test handling of NodeMovingNotification."""
+        notification = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
 
@@ -488,7 +500,9 @@ class TestMaintNotificationsPoolHandler:
 
     def test_handle_notification_unknown_type(self):
         """Test handling of unknown notification type."""
-        notification = NodeMigratingEvent(id=1, ttl=5)  # Not handled by pool handler
+        notification = NodeMigratingNotification(
+            id=1, ttl=5
+        )  # Not handled by pool handler
 
         result = self.handler.handle_notification(notification)
         assert result is None
@@ -497,7 +511,7 @@ class TestMaintNotificationsPoolHandler:
         """Test node moving notification handling when both features are disabled."""
         config = MaintNotificationsConfig(proactive_reconnect=False, relaxed_timeout=-1)
         handler = MaintNotificationsPoolHandler(self.mock_pool, config)
-        notification = NodeMovingEvent(
+        notification = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
 
@@ -507,7 +521,7 @@ class TestMaintNotificationsPoolHandler:
 
     def test_handle_node_moving_notification_already_processed(self):
         """Test node moving notification handling when notification already processed."""
-        notification = NodeMovingEvent(
+        notification = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
         self.handler._processed_notifications.add(notification)
@@ -517,7 +531,7 @@ class TestMaintNotificationsPoolHandler:
 
     def test_handle_node_moving_notification_success(self):
         """Test successful node moving notification handling."""
-        notification = NodeMovingEvent(
+        notification = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
 
@@ -543,7 +557,7 @@ class TestMaintNotificationsPoolHandler:
 
     def test_handle_node_moving_notification_with_no_host_and_port(self):
         """Test successful node moving notification handling."""
-        notification = NodeMovingEvent(
+        notification = NodeMovingNotification(
             id=1, new_node_host=None, new_node_port=None, ttl=2
         )
 
@@ -577,13 +591,13 @@ class TestMaintNotificationsPoolHandler:
             # Verify pool methods were called
             self.mock_pool.update_connections_settings.assert_called_once()
 
-    def test_handle_node_moved_event(self):
-        """Test handling of node moved event (cleanup)."""
-        event = NodeMovingEvent(
+    def test_handle_node_moved_notification(self):
+        """Test handling of node moved notification (cleanup)."""
+        notification = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
         self.mock_pool.connection_kwargs = {"host": "localhost"}
-        self.handler.handle_node_moved_notification(event)
+        self.handler.handle_node_moved_notification(notification)
 
         # Verify cleanup methods were called
         self.mock_pool.update_connections_settings.assert_called_once()
@@ -606,8 +620,8 @@ class TestMaintNotificationsConnectionHandler:
         assert self.handler.config == self.config
 
     def test_handle_notification_migrating(self):
-        """Test handling of NodeMigratingEvent."""
-        notification = NodeMigratingEvent(id=1, ttl=5)
+        """Test handling of NodeMigratingNotification."""
+        notification = NodeMigratingNotification(id=1, ttl=5)
 
         with patch.object(
             self.handler, "handle_maintenance_start_notification"
@@ -616,8 +630,8 @@ class TestMaintNotificationsConnectionHandler:
             mock_handle.assert_called_once_with(MaintenanceState.MAINTENANCE)
 
     def test_handle_notification_migrated(self):
-        """Test handling of NodeMigratedEvent."""
-        notification = NodeMigratedEvent(id=1)
+        """Test handling of NodeMigratedNotification."""
+        notification = NodeMigratedNotification(id=1)
 
         with patch.object(
             self.handler, "handle_maintenance_completed_notification"
@@ -626,8 +640,8 @@ class TestMaintNotificationsConnectionHandler:
             mock_handle.assert_called_once_with()
 
     def test_handle_notification_failing_over(self):
-        """Test handling of NodeFailingOverEvent."""
-        notification = NodeFailingOverEvent(id=1, ttl=5)
+        """Test handling of NodeFailingOverNotification."""
+        notification = NodeFailingOverNotification(id=1, ttl=5)
 
         with patch.object(
             self.handler, "handle_maintenance_start_notification"
@@ -636,8 +650,8 @@ class TestMaintNotificationsConnectionHandler:
             mock_handle.assert_called_once_with(MaintenanceState.MAINTENANCE)
 
     def test_handle_notification_failed_over(self):
-        """Test handling of NodeFailedOverEvent."""
-        notification = NodeFailedOverEvent(id=1)
+        """Test handling of NodeFailedOverNotification."""
+        notification = NodeFailedOverNotification(id=1)
 
         with patch.object(
             self.handler, "handle_maintenance_completed_notification"
@@ -647,7 +661,7 @@ class TestMaintNotificationsConnectionHandler:
 
     def test_handle_notification_unknown_type(self):
         """Test handling of unknown notification type."""
-        notification = NodeMovingEvent(
+        notification = NodeMovingNotification(
             id=1, new_node_host="localhost", new_node_port=6379, ttl=10
         )
 

@@ -49,14 +49,14 @@ def fault_injector_client():
 
 
 @pytest.fixture()
-def client_maint_events(endpoints_config):
-    return _get_client_maint_events(endpoints_config)
+def client_maint_notifications(endpoints_config):
+    return _get_client_maint_notifications(endpoints_config)
 
 
-def _get_client_maint_events(
+def _get_client_maint_notifications(
     endpoints_config,
     protocol: int = 3,
-    enable_maintenance_events: bool = True,
+    enable_maintenance_notifications: bool = True,
     endpoint_type: Optional[EndpointType] = None,
     enable_relaxed_timeout: bool = True,
     enable_proactive_reconnect: bool = True,
@@ -64,7 +64,7 @@ def _get_client_maint_events(
     socket_timeout: Optional[float] = None,
     host_config: Optional[str] = None,
 ):
-    """Create Redis client with maintenance events enabled."""
+    """Create Redis client with maintenance notifications enabled."""
 
     # Get credentials from the configuration
     username = endpoints_config.get("username")
@@ -84,9 +84,9 @@ def _get_client_maint_events(
 
     logging.info(f"Connecting to Redis Enterprise: {host}:{port} with user: {username}")
 
-    # Configure maintenance events
+    # Configure maintenance notifications
     maintenance_config = MaintNotificationsConfig(
-        enabled=enable_maintenance_events,
+        enabled=enable_maintenance_notifications,
         proactive_reconnect=enable_proactive_reconnect,
         relaxed_timeout=RELAXED_TIMEOUT if enable_relaxed_timeout else -1,
         endpoint_type=endpoint_type,
@@ -115,9 +115,11 @@ def _get_client_maint_events(
         maint_notifications_config=maintenance_config,
         retry=retry,
     )
-    logging.info("Redis client created with maintenance events enabled")
+    logging.info("Redis client created with maintenance notifications enabled")
     logging.info(f"Client uses Protocol: {client.connection_pool.get_protocol()}")
     maintenance_handler_exists = client.maint_notifications_pool_handler is not None
-    logging.info(f"Maintenance events pool handler: {maintenance_handler_exists}")
+    logging.info(
+        f"Maintenance notifications pool handler: {maintenance_handler_exists}"
+    )
 
     return client
