@@ -14,7 +14,7 @@ from redis import Redis
 from redis.connection import ConnectionInterface
 from redis.maintenance_events import (
     EndpointType,
-    MaintenanceEventsConfig,
+    MaintNotificationsConfig,
     MaintenanceState,
 )
 from tests.test_scenario.conftest import (
@@ -255,7 +255,7 @@ class TestPushNotifications:
                     and conn.host != conn.orig_host_address
                     and (
                         configured_endpoint_type
-                        == MaintenanceEventsConfig().get_endpoint_type(conn.host, conn)
+                        == MaintNotificationsConfig().get_endpoint_type(conn.host, conn)
                     )
                 )
             )
@@ -330,7 +330,7 @@ class TestPushNotifications:
     @pytest.mark.timeout(300)  # 5 minutes timeout for this test
     def test_receive_failing_over_and_failed_over_push_notification(
         self,
-        client_maint_events: Redis,
+        client_maint_notifications: Redis,
         fault_injector_client: FaultInjectorClient,
         endpoints_config: Dict[str, Any],
     ):
@@ -339,7 +339,7 @@ class TestPushNotifications:
 
         """
         logging.info("Creating one connection in the pool.")
-        conn = client_maint_events.connection_pool.get_connection()
+        conn = client_maint_notifications.connection_pool.get_connection()
 
         logging.info("Executing failover command...")
         failover_thread = Thread(
@@ -351,16 +351,16 @@ class TestPushNotifications:
 
         logging.info("Waiting for FAILING_OVER push notifications...")
         ClientValidations.wait_push_notification(
-            client_maint_events, timeout=FAILOVER_TIMEOUT, connection=conn
+            client_maint_notifications, timeout=FAILOVER_TIMEOUT, connection=conn
         )
 
         logging.info("Validating connection maintenance state...")
         assert conn.maintenance_state == MaintenanceState.MAINTENANCE
-        assert conn._sock.gettimeout() == RELAX_TIMEOUT
+        assert conn._sock.gettimeout() == RELAXED_TIMEOUT
 
         logging.info("Waiting for FAILED_OVER push notifications...")
         ClientValidations.wait_push_notification(
-            client_maint_events, timeout=FAILOVER_TIMEOUT, connection=conn
+            client_maint_notifications, timeout=FAILOVER_TIMEOUT, connection=conn
         )
 
         logging.info("Validating connection default states is restored...")
@@ -368,7 +368,7 @@ class TestPushNotifications:
         assert conn._sock.gettimeout() == CLIENT_TIMEOUT
 
         logging.info("Releasing connection back to the pool...")
-        client_maint_events.connection_pool.release(conn)
+        client_maint_notifications.connection_pool.release(conn)
 
         failover_thread.join()
 
@@ -675,7 +675,7 @@ class TestPushNotifications:
         # and connected to the new address
         endpoint_type = EndpointType.EXTERNAL_IP
         logging.info("Testing old connection shutdown during MOVING")
-        client = _get_client_maint_events(
+        client = _get_client_maint_notifications(
             endpoints_config=endpoints_config, endpoint_type=endpoint_type
         )
 
@@ -753,12 +753,12 @@ class TestPushNotifications:
             if conn._sock is not None:
                 assert conn.get_resolved_ip() == conn.host
                 assert conn.maintenance_state == MaintenanceState.MOVING
-                assert conn._sock.gettimeout() == RELAX_TIMEOUT
+                assert conn._sock.gettimeout() == RELAXED_TIMEOUT
                 assert conn.host != conn.orig_host_address
                 assert not conn.should_reconnect()
             else:
                 assert conn.maintenance_state == MaintenanceState.MOVING
-                assert conn.socket_timeout == RELAX_TIMEOUT
+                assert conn.socket_timeout == RELAXED_TIMEOUT
                 assert conn.host != conn.orig_host_address
                 assert not conn.should_reconnect()
 
@@ -772,12 +772,12 @@ class TestPushNotifications:
     @pytest.mark.timeout(300)  # 5 minutes timeout
     def test_new_connections_receive_moving(
         self,
-        client_maint_events: Redis,
+        client_maint_notifications: Redis,
         fault_injector_client: FaultInjectorClient,
         endpoints_config: Dict[str, Any],
     ):
         logging.info("Creating one connection in the pool.")
-        first_conn = client_maint_events.connection_pool.get_connection()
+        first_conn = client_maint_notifications.connection_pool.get_connection()
 
         logging.info("Executing rladmin migrate command...")
         migrate_thread = Thread(
@@ -795,16 +795,16 @@ class TestPushNotifications:
         logging.info("Waiting for MIGRATING push notifications...")
         # this will consume the notification in the provided connection
         ClientValidations.wait_push_notification(
-            client_maint_events, timeout=MIGRATE_TIMEOUT, connection=first_conn
+            client_maint_notifications, timeout=MIGRATE_TIMEOUT, connection=first_conn
         )
 
         self._validate_maintenance_state(
-            client_maint_events, expected_matching_conns_count=1
+            client_maint_notifications, expected_matching_conns_count=1
         )
 
         logging.info("Waiting for MIGRATED push notifications on both connections ...")
         ClientValidations.wait_push_notification(
-            client_maint_events, timeout=MIGRATE_TIMEOUT, connection=first_conn
+            client_maint_notifications, timeout=MIGRATE_TIMEOUT, connection=first_conn
         )
 
         migrate_thread.join()
@@ -820,18 +820,18 @@ class TestPushNotifications:
 
         logging.info("Waiting for MOVING push notifications on random connection ...")
         ClientValidations.wait_push_notification(
-            client_maint_events, timeout=BIND_TIMEOUT, connection=first_conn
+            client_maint_notifications, timeout=BIND_TIMEOUT, connection=first_conn
         )
 
         old_address = first_conn._sock.getpeername()[0]
         logging.info(f"The node address before bind: {old_address}")
         logging.info(
-            "Creating new client to connect to the same node - new connections to this node should receive the moving event..."
+            "Creating new client to connect to the same node - new connections to this node should receive the moving notification..."
         )
 
         endpoint_type = EndpointType.EXTERNAL_IP
-        # create new client with new pool that should also receive the moving event
-        new_client = _get_client_maint_events(
+        # create new client with new pool that should also receive the moving notification
+        new_client = _get_client_maint_notifications(
             endpoints_config=endpoints_config,
             endpoint_type=endpoint_type,
             host_config=old_address,
@@ -841,7 +841,7 @@ class TestPushNotifications:
         # part of the client connection setup, so we don't need
         # to wait for it explicitly with wait_push_notification
         logging.info(
-            "Creating one connection in the new pool that should receive the moving event."
+            "Creating one connection in the new pool that should receive the moving notification."
         )
         new_client_conn = new_client.connection_pool.get_connection()
 
@@ -859,17 +859,17 @@ class TestPushNotifications:
         new_client.connection_pool.release(new_client_conn)
         new_client.close()
 
-        client_maint_events.connection_pool.release(first_conn)
+        client_maint_notifications.connection_pool.release(first_conn)
 
     @pytest.mark.timeout(300)  # 5 minutes timeout
     def test_new_connections_receive_migrating(
         self,
-        client_maint_events: Redis,
+        client_maint_notifications: Redis,
         fault_injector_client: FaultInjectorClient,
         endpoints_config: Dict[str, Any],
     ):
         logging.info("Creating one connection in the pool.")
-        first_conn = client_maint_events.connection_pool.get_connection()
+        first_conn = client_maint_notifications.connection_pool.get_connection()
 
         logging.info("Executing rladmin migrate command...")
         migrate_thread = Thread(
@@ -887,35 +887,37 @@ class TestPushNotifications:
         logging.info("Waiting for MIGRATING push notifications...")
         # this will consume the notification in the provided connection
         ClientValidations.wait_push_notification(
-            client_maint_events, timeout=MIGRATE_TIMEOUT, connection=first_conn
+            client_maint_notifications, timeout=MIGRATE_TIMEOUT, connection=first_conn
         )
 
         self._validate_maintenance_state(
-            client_maint_events, expected_matching_conns_count=1
+            client_maint_notifications, expected_matching_conns_count=1
         )
 
-        # validate that new connections will also receive the migrating event
+        # validate that new connections will also receive the migrating notification
         # it should be received as part of the client connection setup flow
         logging.info(
-            "Creating second connection that should receive the migrating event as well."
+            "Creating second connection that should receive the migrating notification as well."
         )
-        second_connection = client_maint_events.connection_pool.get_connection()
+        second_connection = client_maint_notifications.connection_pool.get_connection()
         self._validate_maintenance_state(
-            client_maint_events, expected_matching_conns_count=2
+            client_maint_notifications, expected_matching_conns_count=2
         )
 
         logging.info("Waiting for MIGRATED push notifications on both connections ...")
         ClientValidations.wait_push_notification(
-            client_maint_events, timeout=MIGRATE_TIMEOUT, connection=first_conn
+            client_maint_notifications, timeout=MIGRATE_TIMEOUT, connection=first_conn
         )
         ClientValidations.wait_push_notification(
-            client_maint_events, timeout=MIGRATE_TIMEOUT, connection=second_connection
+            client_maint_notifications,
+            timeout=MIGRATE_TIMEOUT,
+            connection=second_connection,
         )
 
         migrate_thread.join()
 
-        client_maint_events.connection_pool.release(first_conn)
-        client_maint_events.connection_pool.release(second_connection)
+        client_maint_notifications.connection_pool.release(first_conn)
+        client_maint_notifications.connection_pool.release(second_connection)
 
     @pytest.mark.timeout(300)
     def test_disabled_handling_during_migrating_and_moving(
