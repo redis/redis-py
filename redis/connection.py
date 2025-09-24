@@ -47,7 +47,7 @@ from .exceptions import (
     ResponseError,
     TimeoutError,
 )
-from .maintenance_events import (
+from .maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
     MaintNotificationsConnectionHandler,
