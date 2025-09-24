@@ -7,11 +7,11 @@ import pytest
 
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.client import Redis
-from redis.maintenance_events import EndpointType, MaintenanceEventsConfig
+from redis.maintenance_events import EndpointType, MaintNotificationsConfig
 from redis.retry import Retry
 from tests.test_scenario.fault_injector_client import FaultInjectorClient
 
-RELAX_TIMEOUT = 30
+RELAXED_TIMEOUT = 30
 CLIENT_TIMEOUT = 5
 
 DEFAULT_ENDPOINT_NAME = "m-standard"
@@ -49,22 +49,22 @@ def fault_injector_client():
 
 
 @pytest.fixture()
-def client_maint_events(endpoints_config):
-    return _get_client_maint_events(endpoints_config)
+def client_maint_notifications(endpoints_config):
+    return _get_client_maint_notifications(endpoints_config)
 
 
-def _get_client_maint_events(
+def _get_client_maint_notifications(
     endpoints_config,
     protocol: int = 3,
-    enable_maintenance_events: bool = True,
+    enable_maintenance_notifications: bool = True,
     endpoint_type: Optional[EndpointType] = None,
-    enable_relax_timeout: bool = True,
+    enable_relaxed_timeout: bool = True,
     enable_proactive_reconnect: bool = True,
     disable_retries: bool = False,
     socket_timeout: Optional[float] = None,
     host_config: Optional[str] = None,
 ):
-    """Create Redis client with maintenance events enabled."""
+    """Create Redis client with maintenance notifications enabled."""
 
     # Get credentials from the configuration
     username = endpoints_config.get("username")
@@ -84,16 +84,16 @@ def _get_client_maint_events(
 
     logging.info(f"Connecting to Redis Enterprise: {host}:{port} with user: {username}")
 
-    # Configure maintenance events
-    maintenance_config = MaintenanceEventsConfig(
-        enabled=enable_maintenance_events,
+    # Configure maintenance notifications
+    maintenance_config = MaintNotificationsConfig(
+        enabled=enable_maintenance_notifications,
         proactive_reconnect=enable_proactive_reconnect,
-        relax_timeout=RELAX_TIMEOUT if enable_relax_timeout else -1,
+        relaxed_timeout=RELAXED_TIMEOUT if enable_relaxed_timeout else -1,
         endpoint_type=endpoint_type,
     )
 
-    # Create Redis client with maintenance events config
-    # This will automatically create the MaintenanceEventPoolHandler
+    # Create Redis client with maintenance notifications config
+    # This will automatically create the MaintNotificationsPoolHandler
     if disable_retries:
         retry = Retry(NoBackoff(), 0)
     else:
@@ -112,12 +112,14 @@ def _get_client_maint_events(
         ssl_cert_reqs="none",
         ssl_check_hostname=False,
         protocol=protocol,  # RESP3 required for push notifications
-        maintenance_events_config=maintenance_config,
+        maint_notifications_config=maintenance_config,
         retry=retry,
     )
-    logging.info("Redis client created with maintenance events enabled")
+    logging.info("Redis client created with maintenance notifications enabled")
     logging.info(f"Client uses Protocol: {client.connection_pool.get_protocol()}")
-    maintenance_handler_exists = client.maintenance_events_pool_handler is not None
-    logging.info(f"Maintenance events pool handler: {maintenance_handler_exists}")
+    maintenance_handler_exists = client.maint_notifications_pool_handler is not None
+    logging.info(
+        f"Maintenance notifications pool handler: {maintenance_handler_exists}"
+    )
 
     return client
