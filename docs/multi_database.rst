@@ -39,7 +39,7 @@ Key concepts
   healthy database.
 
 - Events:
-  The client emits events like "active database changed" and "commands failed". Pub/Sub resubscription
+  The client emits events like "active database changed" and "commands failed". Pub/Sub re-subscription
   on database switch is handled automatically.
 
 Synchronous usage
@@ -316,7 +316,7 @@ reverse proxy behind an actual REST API endpoint.
 Failure detection
 -----------------
 
-A CommandFailureDetector observes failures within a time window, if minimal number of failures
+A `CommandFailureDetector` observes failures within a time window, if minimal number of failures
 and failures rate reached it triggers fail over.
 
 .. code-block:: python
@@ -450,7 +450,7 @@ Best practices
 - Assign the highest weight to your primary database and lower weights to replicas or DR sites.
 - Keep health_check_interval short enough to promptly detect failures but avoid excessive load.
 - Tune command_retry and failover attempts to your SLA and workload profile.
-- Use auto_fallback_interval if you want the client to fail iver back to your primary automatically.
+- Use auto_fallback_interval if you want the client to fail over back to your primary automatically.
 - Handle `TemporaryUnavailableException` to be able to recover before giving up, in meantime you
 can switch data source (f.e cache). `NoValidDatabaseException` indicates that there's no healthy
 database to operate.
@@ -463,11 +463,11 @@ Troubleshooting
 
 - TemporaryUnavailableException
   Indicates that currently there's no healthy database, but you can still send requests until
-  NoValidDatabaseException will be thrown. Probe interval configured with `failure_attemtps`
+  `NoValidDatabaseException` will be thrown. Probe interval configured with `failure_attemtps`
   and `failure_delay` parameters.
 
 - Health checks always failing:
-  Verify connectivity and, for clusters, that all nodes are reachable. For LagAwareHealthCheck,
+  Verify connectivity and, for clusters, that all nodes are reachable. For `LagAwareHealthCheck`,
   ensure health_check_url points to your Redis Enterprise endpoint and authentication/TLS options
   are configured properly.
 

@@ -16,6 +16,7 @@ config
 CoreCommands
 DatabaseConfig
 DNS
+EchoHealthCheck
 EVAL
 EVALSHA
 failover
@@ -32,9 +33,11 @@ JSONCommands
 Jaeger
 Ludovico
 Magnocavallo
+MultiDbConfig
 MultiDBClient
 McCurdy
 NOSCRIPT
+NoValidDatabaseException
 NUMPAT
 NUMPT
 NUMSUB
@@ -55,6 +58,7 @@ RedisInstrumentor
 RedisJSON
 RedisTimeSeries
 SHA
+SLA
 SearchCommands
 SentinelCommands
 SentinelConnectionPool
@@ -64,6 +68,7 @@ SpanKind
 Specfiying
 StatusCode
 TCP
+TemporaryUnavailableException
 TLS
 TOPKCommands
 TimeSeriesCommands
@@ -104,6 +109,7 @@ json
 keyslot
 keyspace
 kwarg
+kwargs
 linters
 localhost
 lua
