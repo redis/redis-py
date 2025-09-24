@@ -1,15 +1,171 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from redis.backoff import ExponentialBackoff
 from redis.multidb.database import Database
 from redis.http.http_client import HttpError
-from redis.multidb.healthcheck import EchoHealthCheck, LagAwareHealthCheck
+from redis.multidb.healthcheck import EchoHealthCheck, LagAwareHealthCheck, HealthCheck, HealthyAllPolicy, \
+    UnhealthyDatabaseException, HealthyMajorityPolicy, HealthyAnyPolicy
 from redis.multidb.circuit import State as CBState
-from redis.exceptions import ConnectionError
-from redis.retry import Retry
 
+class TestHealthyAllPolicy:
+    def test_policy_returns_true_for_all_successful_probes(self):
+        mock_hc1 = Mock(spec=HealthCheck)
+        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1.check_health.return_value = True
+        mock_hc2.check_health.return_value = True
+        mock_db = Mock(spec=Database)
+
+        policy = HealthyAllPolicy(3, 0.01)
+        assert policy.execute([mock_hc1, mock_hc2], mock_db) == True
+        assert mock_hc1.check_health.call_count == 3
+        assert mock_hc2.check_health.call_count == 3
+
+    def test_policy_returns_false_on_first_failed_probe(self):
+        mock_hc1 = Mock(spec=HealthCheck)
+        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1.check_health.side_effect = [True, True, False]
+        mock_hc2.check_health.return_value = True
+        mock_db = Mock(spec=Database)
+
+        policy = HealthyAllPolicy(3, 0.01)
+        assert policy.execute([mock_hc1, mock_hc2], mock_db) == False
+        assert mock_hc1.check_health.call_count == 3
+        assert mock_hc2.check_health.call_count == 0
+
+    def test_policy_raise_unhealthy_database_exception(self):
+        mock_hc1 = Mock(spec=HealthCheck)
+        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1.check_health.side_effect = [True, True, ConnectionError]
+        mock_hc2.check_health.return_value = True
+        mock_db = Mock(spec=Database)
+
+        policy = HealthyAllPolicy(3, 0.01)
+        with pytest.raises(UnhealthyDatabaseException, match='Unhealthy database'):
+            policy.execute([mock_hc1, mock_hc2], mock_db)
+            assert mock_hc1.check_health.call_count == 3
+            assert mock_hc2.check_health.call_count == 0
+
+class TestHealthyMajorityPolicy:
+    @pytest.mark.parametrize(
+        "probes,hc1_side_effect,hc2_side_effect,hc1_call_count,hc2_call_count,expected_result",
+        [
+            (3, [True, False, False], [True, True, True], 3, 0, False),
+            (3, [True, True, True], [True, False, False], 3, 3, False),
+            (3, [True, False, True], [True, True, True], 3, 3, True),
+            (3, [True, True, True], [True, False, True], 3, 3, True),
+            (3, [True, True, False], [True, False, True], 3, 3, True),
+            (4, [True, True, False, False], [True, True, True, True], 4, 0, False),
+            (4, [True, True, True, True], [True, True, False, False], 4, 4, False),
+            (4, [False, True, True, True], [True, True, True, True], 4, 4, True),
+            (4, [True, True, True, True], [True, False, True, True], 4, 4, True),
+            (4, [False, True, True, True], [True, True, False, True], 4, 4, True),
+        ],
+        ids=[
+            'HC1 - no majority - odd', 'HC2 - no majority - odd', 'HC1 - majority- odd',
+            'HC2 - majority - odd', 'HC1 + HC2 - majority - odd', 'HC1 - no majority - even',
+            'HC2 - no majority - even','HC1 - majority - even', 'HC2 - majority - even',
+            'HC1 + HC2 - majority - even'
+        ]
+    )
+    def test_policy_returns_true_for_majority_successful_probes(
+            self,
+            probes,
+            hc1_side_effect,
+            hc2_side_effect,
+            hc1_call_count,
+            hc2_call_count,
+            expected_result
+    ):
+        mock_hc1 = Mock(spec=HealthCheck)
+        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1.check_health.side_effect = hc1_side_effect
+        mock_hc2.check_health.side_effect = hc2_side_effect
+        mock_db = Mock(spec=Database)
+
+        policy = HealthyMajorityPolicy(probes, 0.01)
+        assert policy.execute([mock_hc1, mock_hc2], mock_db) == expected_result
+        assert mock_hc1.check_health.call_count == hc1_call_count
+        assert mock_hc2.check_health.call_count == hc2_call_count
+
+    @pytest.mark.parametrize(
+        "probes,hc1_side_effect,hc2_side_effect,hc1_call_count,hc2_call_count",
+        [
+            (3, [True, ConnectionError, ConnectionError], [True, True, True], 3, 0),
+            (3, [True, True, True], [True, ConnectionError, ConnectionError], 3, 3),
+            (4, [True, ConnectionError, ConnectionError, True], [True, True, True, True], 3, 0),
+            (4, [True, True, True, True], [True, ConnectionError, ConnectionError, False], 4, 3),
+        ],
+        ids=[
+            'HC1 - majority- odd', 'HC2 - majority - odd',
+            'HC1 - majority - even', 'HC2 - majority - even',
+        ]
+    )
+    def test_policy_raise_unhealthy_database_exception_on_majority_probes_exceptions(
+            self,
+            probes,
+            hc1_side_effect,
+            hc2_side_effect,
+            hc1_call_count,
+            hc2_call_count
+    ):
+        mock_hc1 = Mock(spec=HealthCheck)
+        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1.check_health.side_effect = hc1_side_effect
+        mock_hc2.check_health.side_effect = hc2_side_effect
+        mock_db = Mock(spec=Database)
+
+        policy = HealthyAllPolicy(3, 0.01)
+        with pytest.raises(UnhealthyDatabaseException, match='Unhealthy database'):
+            policy.execute([mock_hc1, mock_hc2], mock_db)
+            assert mock_hc1.check_health.call_count == hc1_call_count
+            assert mock_hc2.check_health.call_count == hc2_call_count
+
+class TestHealthyAnyPolicy:
+    @pytest.mark.parametrize(
+        "hc1_side_effect,hc2_side_effect,hc1_call_count,hc2_call_count,expected_result",
+        [
+            ([False, False, False], [True, True, True], 3, 0, False),
+            ([False, False, True], [False, False, False], 3, 3, False),
+            ([False, True, True], [False, False, True], 2, 3, True),
+            ([True, True, True], [False, True, False], 1, 2, True),
+        ],
+        ids=[
+            'HC1 - no successful', 'HC2 - no successful',
+            'HC1 - successful', 'HC2 - successful',
+        ]
+    )
+    def test_policy_returns_true_for_any_successful_probe(
+            self,
+            hc1_side_effect,
+            hc2_side_effect,
+            hc1_call_count,
+            hc2_call_count,
+            expected_result
+    ):
+        mock_hc1 = Mock(spec=HealthCheck)
+        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1.check_health.side_effect = hc1_side_effect
+        mock_hc2.check_health.side_effect = hc2_side_effect
+        mock_db = Mock(spec=Database)
+
+        policy = HealthyAnyPolicy(3, 0.01)
+        assert policy.execute([mock_hc1, mock_hc2], mock_db) == expected_result
+        assert mock_hc1.check_health.call_count == hc1_call_count
+        assert mock_hc2.check_health.call_count == hc2_call_count
+
+    def test_policy_raise_unhealthy_database_exception_if_exception_occurs_on_failed_health_check(self):
+        mock_hc1 = Mock(spec=HealthCheck)
+        mock_hc2 = Mock(spec=HealthCheck)
+        mock_hc1.check_health.side_effect = [False, False, ConnectionError]
+        mock_hc2.check_health.side_effect = [True, True, True]
+        mock_db = Mock(spec=Database)
+
+        policy = HealthyAnyPolicy(3, 0.01)
+        with pytest.raises(UnhealthyDatabaseException, match='Unhealthy database'):
+            policy.execute([mock_hc1, mock_hc2], mock_db)
+            assert mock_hc1.check_health.call_count == 3
+            assert mock_hc2.check_health.call_count == 0
 
 class TestEchoHealthCheck:
     def test_database_is_healthy_on_echo_response(self, mock_client, mock_cb):
@@ -17,33 +173,33 @@ class TestEchoHealthCheck:
         Mocking responses to mix error and actual responses to ensure that health check retry
         according to given configuration.
         """
-        mock_client.execute_command.side_effect = [ConnectionError, ConnectionError, 'healthcheck']
-        hc = EchoHealthCheck(Retry(backoff=ExponentialBackoff(cap=1.0), retries=3))
+        mock_client.execute_command.return_value = 'healthcheck'
+        hc = EchoHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
         assert hc.check_health(db) == True
-        assert mock_client.execute_command.call_count == 3
+        assert mock_client.execute_command.call_count == 1
 
     def test_database_is_unhealthy_on_incorrect_echo_response(self, mock_client, mock_cb):
         """
         Mocking responses to mix error and actual responses to ensure that health check retry
         according to given configuration.
         """
-        mock_client.execute_command.side_effect = [ConnectionError, ConnectionError, 'wrong']
-        hc = EchoHealthCheck(Retry(backoff=ExponentialBackoff(cap=1.0), retries=3))
+        mock_client.execute_command.return_value = 'wrong'
+        hc = EchoHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
         assert hc.check_health(db) == False
-        assert mock_client.execute_command.call_count == 3
+        assert mock_client.execute_command.call_count == 1
 
     def test_database_close_circuit_on_successful_healthcheck(self, mock_client, mock_cb):
-        mock_client.execute_command.side_effect = [ConnectionError, ConnectionError, 'healthcheck']
+        mock_client.execute_command.return_value = 'healthcheck'
         mock_cb.state = CBState.HALF_OPEN
-        hc = EchoHealthCheck(Retry(backoff=ExponentialBackoff(cap=1.0), retries=3))
+        hc = EchoHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
         assert hc.check_health(db) == True
-        assert mock_client.execute_command.call_count == 3
+        assert mock_client.execute_command.call_count == 1
 
 
 class TestLagAwareHealthCheck:
@@ -72,7 +228,6 @@ class TestLagAwareHealthCheck:
         ]
 
         hc = LagAwareHealthCheck(
-            retry=Retry(backoff=ExponentialBackoff(cap=1.0), retries=3),
             rest_api_port=1234, lag_aware_tolerance=150
         )
         # Inject our mocked http client
@@ -111,16 +266,14 @@ class TestLagAwareHealthCheck:
             None,
         ]
 
-        hc = LagAwareHealthCheck(
-            retry=Retry(backoff=ExponentialBackoff(cap=1.0), retries=3),
-        )
+        hc = LagAwareHealthCheck()
         hc._http_client = mock_http
 
         db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
 
         assert hc.check_health(db) is True
         assert mock_http.get.call_count == 2
-        assert mock_http.get.call_args_list[1].args[0] == "/v1/bdbs/bdb-42/availability?extend_check=lag&availability_lag_tolerance_ms=100"
+        assert mock_http.get.call_args_list[1].args[0] == "/v1/bdbs/bdb-42/availability?extend_check=lag&availability_lag_tolerance_ms=5000"
 
     def test_raises_value_error_when_no_matching_bdb(self, mock_client, mock_cb):
         """
@@ -136,9 +289,7 @@ class TestLagAwareHealthCheck:
             {"uid": "b", "endpoints": [{"dns_name": "another.example.com", "addr": ["10.0.0.10"]}]},
         ]
 
-        hc = LagAwareHealthCheck(
-            retry=Retry(backoff=ExponentialBackoff(cap=1.0), retries=3),
-        )
+        hc = LagAwareHealthCheck()
         hc._http_client = mock_http
 
         db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")
@@ -164,9 +315,7 @@ class TestLagAwareHealthCheck:
             HttpError(url=f"https://{host}:9443/v1/bdbs/bdb-err/availability", status=503, message="busy"),
         ]
 
-        hc = LagAwareHealthCheck(
-            retry=Retry(backoff=ExponentialBackoff(cap=1.0), retries=3),
-        )
+        hc = LagAwareHealthCheck()
         hc._http_client = mock_http
 
         db = Database(mock_client, mock_cb, 1.0, "https://healthcheck.example.com")

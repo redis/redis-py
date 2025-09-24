@@ -676,7 +676,8 @@ def parse_client_info(value):
         "omem",
         "tot-mem",
     }:
-        client_info[int_key] = int(client_info[int_key])
+        if int_key in client_info:
+            client_info[int_key] = int(client_info[int_key])
     return client_info
 
 

@@ -6,16 +6,12 @@ import pytest
 
 from redis.event import EventDispatcher, OnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
-from redis.multidb.config import DEFAULT_FAILOVER_RETRIES, \
-    DEFAULT_FAILOVER_BACKOFF
 from redis.multidb.database import SyncDatabase
 from redis.multidb.client import MultiDBClient
 from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failover import WeightBasedFailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
-from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_RETRIES, \
-    DEFAULT_HEALTH_CHECK_BACKOFF
-from redis.retry import Retry
+from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
 from tests.test_multidb.conftest import create_weighted_list
 
 
@@ -46,7 +42,7 @@ class TestMultiDbClient:
             client = MultiDBClient(mock_multi_db_config)
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
             assert client.set('key', 'value') == 'OK1'
-            assert mock_hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 9
 
             assert mock_db.circuit.state == CBState.CLOSED
             assert mock_db1.circuit.state == CBState.CLOSED
@@ -73,12 +69,12 @@ class TestMultiDbClient:
              patch.object(mock_multi_db_config,'default_health_checks', return_value=[mock_hc]):
             mock_db1.client.execute_command.return_value = 'OK1'
 
-            mock_hc.check_health.side_effect = [False, True, True]
+            mock_hc.check_health.side_effect = [False, True, True, True, True, True, True]
 
             client = MultiDBClient(mock_multi_db_config)
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
             assert client.set('key', 'value') == 'OK1'
-            assert mock_hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 7
 
             assert mock_db.circuit.state == CBState.CLOSED
             assert mock_db1.circuit.state == CBState.CLOSED
@@ -88,7 +84,7 @@ class TestMultiDbClient:
         'mock_multi_db_config,mock_db, mock_db1, mock_db2',
         [
             (
-                    {},
+                    {"health_check_probes" : 1},
                     {'weight': 0.2, 'circuit': {'state': CBState.CLOSED}},
                     {'weight': 0.7, 'circuit': {'state': CBState.CLOSED}},
                     {'weight': 0.5, 'circuit': {'state': CBState.CLOSED}},
@@ -114,31 +110,28 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
         with patch.object(mock_multi_db_config,'databases',return_value=databases), \
-             patch.object(mock_multi_db_config,'default_health_checks', return_value=[EchoHealthCheck(
-                    retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
-                )]):
+             patch.object(mock_multi_db_config,'default_health_checks', return_value=[EchoHealthCheck()]):
+
             mock_db.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'healthcheck', 'OK', 'error']
             mock_db1.client.execute_command.side_effect = ['healthcheck', 'OK1', 'error', 'error', 'healthcheck', 'OK1']
             mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'OK2', 'error', 'error']
-            mock_multi_db_config.health_check_interval = 0.1
-            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
-            )
+            mock_multi_db_config.health_check_interval = 0.2
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
             assert client.set('key', 'value') == 'OK1'
-            sleep(0.15)
+            sleep(0.3)
             assert client.set('key', 'value') == 'OK2'
-            sleep(0.1)
+            sleep(0.2)
             assert client.set('key', 'value') == 'OK'
-            sleep(0.1)
+            sleep(0.2)
             assert client.set('key', 'value') == 'OK1'
 
     @pytest.mark.parametrize(
         'mock_multi_db_config,mock_db, mock_db1, mock_db2',
         [
             (
-                    {},
+                    {"health_check_probes" : 1},
                     {'weight': 0.2, 'circuit': {'state': CBState.CLOSED}},
                     {'weight': 0.7, 'circuit': {'state': CBState.CLOSED}},
                     {'weight': 0.5, 'circuit': {'state': CBState.CLOSED}},
@@ -152,23 +145,19 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
         with patch.object(mock_multi_db_config,'databases',return_value=databases), \
-             patch.object(mock_multi_db_config,'default_health_checks', return_value=[EchoHealthCheck(
-                    retry=Retry(retries=DEFAULT_HEALTH_CHECK_RETRIES, backoff=DEFAULT_HEALTH_CHECK_BACKOFF)
-                )]):
+             patch.object(mock_multi_db_config,'default_health_checks', return_value=[EchoHealthCheck()]):
             mock_db.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'healthcheck', 'healthcheck', 'healthcheck']
             mock_db1.client.execute_command.side_effect = ['healthcheck', 'OK1', 'error', 'healthcheck', 'healthcheck', 'OK1']
             mock_db2.client.execute_command.side_effect = ['healthcheck', 'healthcheck', 'OK2', 'healthcheck', 'healthcheck', 'healthcheck']
-            mock_multi_db_config.health_check_interval = 0.1
-            mock_multi_db_config.auto_fallback_interval = 0.2
-            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy(
-                retry=Retry(retries=DEFAULT_FAILOVER_RETRIES, backoff=DEFAULT_FAILOVER_BACKOFF)
-            )
+            mock_multi_db_config.health_check_interval = 0.2
+            mock_multi_db_config.auto_fallback_interval = 0.4
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
             assert client.set('key', 'value') == 'OK1'
-            sleep(0.15)
+            sleep(0.30)
             assert client.set('key', 'value') == 'OK2'
-            sleep(0.22)
+            sleep(0.44)
             assert client.set('key', 'value') == 'OK1'
 
     @pytest.mark.parametrize(
@@ -256,10 +245,10 @@ class TestMultiDbClient:
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
 
             assert client.set('key', 'value') == 'OK2'
-            assert mock_hc.check_health.call_count == 2
+            assert mock_hc.check_health.call_count == 6
 
             client.add_database(mock_db1)
-            assert mock_hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 9
 
             assert client.set('key', 'value') == 'OK1'
 
@@ -291,7 +280,7 @@ class TestMultiDbClient:
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
 
             assert client.set('key', 'value') == 'OK1'
-            assert mock_hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 9
 
             client.remove_database(mock_db1)
 
@@ -325,7 +314,7 @@ class TestMultiDbClient:
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
 
             assert client.set('key', 'value') == 'OK1'
-            assert mock_hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 9
 
             client.update_database_weight(mock_db2, 0.8)
             assert mock_db2.weight == 0.8
@@ -366,7 +355,7 @@ class TestMultiDbClient:
             client = MultiDBClient(mock_multi_db_config)
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
             assert client.set('key', 'value') == 'OK1'
-            assert mock_hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 9
 
             # Simulate failing command events that lead to a failure detection
             for i in range(5):
@@ -410,7 +399,7 @@ class TestMultiDbClient:
             client = MultiDBClient(mock_multi_db_config)
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
             assert client.set('key', 'value') == 'OK1'
-            assert mock_hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 9
 
             another_hc = Mock(spec=HealthCheck)
             another_hc.check_health.return_value = True
@@ -418,8 +407,8 @@ class TestMultiDbClient:
             client.add_health_check(another_hc)
             client._check_db_health(mock_db1)
 
-            assert mock_hc.check_health.call_count == 4
-            assert another_hc.check_health.call_count == 1
+            assert mock_hc.check_health.call_count == 12
+            assert another_hc.check_health.call_count == 3
 
     @pytest.mark.parametrize(
         'mock_multi_db_config,mock_db, mock_db1, mock_db2',
@@ -448,7 +437,7 @@ class TestMultiDbClient:
             client = MultiDBClient(mock_multi_db_config)
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
             assert client.set('key', 'value') == 'OK1'
-            assert mock_hc.check_health.call_count == 3
+            assert mock_hc.check_health.call_count == 9
 
             client.set_active_database(mock_db)
             assert client.set('key', 'value') == 'OK'

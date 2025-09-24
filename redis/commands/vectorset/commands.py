@@ -1,6 +1,6 @@
 import json
 from enum import Enum
-from typing import Awaitable, Dict, List, Optional, Union
+from typing import Any, Awaitable, Dict, List, Optional, Union
 
 from redis.client import NEVER_DECODE
 from redis.commands.helpers import get_protocol_version
@@ -19,6 +19,15 @@ VSETATTR_CMD = "VSETATTR"
 VGETATTR_CMD = "VGETATTR"
 VRANDMEMBER_CMD = "VRANDMEMBER"
 
+# Return type for vsim command
+VSimResult = Optional[
+    List[
+        Union[
+            List[EncodableT], Dict[EncodableT, Number], Dict[EncodableT, Dict[str, Any]]
+        ]
+    ]
+]
+
 
 class QuantizationOptions(Enum):
     """Quantization options for the VADD command."""
@@ -33,6 +42,7 @@ class CallbacksOptions(Enum):
 
     RAW = "RAW"
     WITHSCORES = "WITHSCORES"
+    WITHATTRIBS = "WITHATTRIBS"
     ALLOW_DECODING = "ALLOW_DECODING"
     RESP3 = "RESP3"
 
@@ -77,7 +87,7 @@ class VectorSetCommands(CommandsProtocol):
         ``numlinks`` sets the number of links to create for the vector.
                 If not provided, the default number of links is used.
 
-        For more information see https://redis.io/commands/vadd
+        For more information, see https://redis.io/commands/vadd.
         """
         if not vector or not element:
             raise DataError("Both vector and element must be provided")
@@ -123,36 +133,40 @@ class VectorSetCommands(CommandsProtocol):
         key: KeyT,
         input: Union[List[float], bytes, str],
         with_scores: Optional[bool] = False,
+        with_attribs: Optional[bool] = False,
         count: Optional[int] = None,
         ef: Optional[Number] = None,
         filter: Optional[str] = None,
         filter_ef: Optional[str] = None,
         truth: Optional[bool] = False,
         no_thread: Optional[bool] = False,
-    ) -> Union[
-        Awaitable[Optional[List[Union[List[EncodableT], Dict[EncodableT, Number]]]]],
-        Optional[List[Union[List[EncodableT], Dict[EncodableT, Number]]]],
-    ]:
+        epsilon: Optional[Number] = None,
+    ) -> Union[Awaitable[VSimResult], VSimResult]:
         """
         Compare a vector or element ``input``  with the other vectors in a vector set ``key``.
 
-        ``with_scores`` sets if the results should be returned with the
-                similarity scores of the elements in the result.
+        ``with_scores`` sets if similarity scores should be returned for each element in the result.
+
+        ``with_attribs`` ``with_attribs`` sets if the results should be returned with the
+                attributes of the elements in the result, or None when no attributes are present.
 
         ``count`` sets the number of results to return.
 
         ``ef`` sets the exploration factor.
 
-        ``filter`` sets filter that should be applied for the search.
+        ``filter`` sets the filter that should be applied for the search.
 
         ``filter_ef`` sets the max filtering effort.
 
-        ``truth`` when enabled forces the command to perform linear scan.
+        ``truth`` when enabled, forces the command to perform a linear scan.
 
         ``no_thread`` when enabled forces the command to execute the search
                 on the data structure in the main thread.
 
-        For more information see https://redis.io/commands/vsim
+        ``epsilon`` floating point between 0 and 1, if specified will return
+                only elements with distance no further than the specified one.
+
+        For more information, see https://redis.io/commands/vsim.
         """
 
         if not input:
@@ -169,12 +183,23 @@ class VectorSetCommands(CommandsProtocol):
         else:
             pieces.extend(["ELE", input])
 
-        if with_scores:
-            pieces.append("WITHSCORES")
-            options[CallbacksOptions.WITHSCORES.value] = True
+        if with_scores or with_attribs:
+            if get_protocol_version(self.client) in ["3", 3]:
+                options[CallbacksOptions.RESP3.value] = True
+
+            if with_scores:
+                pieces.append("WITHSCORES")
+                options[CallbacksOptions.WITHSCORES.value] = True
+
+            if with_attribs:
+                pieces.append("WITHATTRIBS")
+                options[CallbacksOptions.WITHATTRIBS.value] = True
 
         if count:
             pieces.extend(["COUNT", count])
+
+        if epsilon:
+            pieces.extend(["EPSILON", epsilon])
 
         if ef:
             pieces.extend(["EF", ef])
@@ -203,7 +228,7 @@ class VectorSetCommands(CommandsProtocol):
 
         Raises `redis.exceptions.ResponseError` if the vector set doesn't exist.
 
-        For more information see https://redis.io/commands/vdim
+        For more information, see https://redis.io/commands/vdim.
         """
         return self.execute_command(VDIM_CMD, key)
 
@@ -213,7 +238,7 @@ class VectorSetCommands(CommandsProtocol):
 
         Raises `redis.exceptions.ResponseError` if the vector set doesn't exist.
 
-        For more information see https://redis.io/commands/vcard
+        For more information, see https://redis.io/commands/vcard.
         """
         return self.execute_command(VCARD_CMD, key)
 
@@ -221,7 +246,7 @@ class VectorSetCommands(CommandsProtocol):
         """
         Remove an element from a vector set.
 
-        For more information see https://redis.io/commands/vrem
+        For more information, see https://redis.io/commands/vrem.
         """
         return self.execute_command(VREM_CMD, key, element)
 
@@ -235,10 +260,10 @@ class VectorSetCommands(CommandsProtocol):
         Get the approximated vector of an element ``element`` from vector set ``key``.
 
         ``raw`` is a boolean flag that indicates whether to return the
-                interal representation used by the vector.
+                internal representation used by the vector.
 
 
-        For more information see https://redis.io/commands/vembed
+        For more information, see https://redis.io/commands/vemb.
         """
         options = {}
         pieces = []
@@ -286,7 +311,7 @@ class VectorSetCommands(CommandsProtocol):
         If the ``WITHSCORES`` option is provided, the result is a list of dicts,
         where each dict contains the neighbors for one level, with the scores as values.
 
-        For more information see https://redis.io/commands/vlinks
+        For more information, see https://redis.io/commands/vlinks
         """
         options = {}
         pieces = []
@@ -302,7 +327,7 @@ class VectorSetCommands(CommandsProtocol):
         """
         Get information about a vector set.
 
-        For more information see https://redis.io/commands/vinfo
+        For more information, see https://redis.io/commands/vinfo.
         """
         return self.execute_command(VINFO_CMD, key)
 
@@ -313,7 +338,7 @@ class VectorSetCommands(CommandsProtocol):
         Associate or remove JSON attributes ``attributes`` of element ``element``
         for vector set ``key``.
 
-        For more information see https://redis.io/commands/vsetattr
+        For more information, see https://redis.io/commands/vsetattr
         """
         if attributes is None:
             attributes_json = "{}"
@@ -329,12 +354,12 @@ class VectorSetCommands(CommandsProtocol):
         self, key: KeyT, element: str
     ) -> Union[Optional[Awaitable[dict]], Optional[dict]]:
         """
-        Retrieve the JSON attributes of an element ``elemet`` for vector set ``key``.
+        Retrieve the JSON attributes of an element ``element `` for vector set ``key``.
 
         If the element does not exist, or if the vector set does not exist, None is
         returned.
 
-        For more information see https://redis.io/commands/vgetattr
+        For more information, see https://redis.io/commands/vgetattr.
         """
         return self.execute_command(VGETATTR_CMD, key, element)
 
@@ -358,7 +383,7 @@ class VectorSetCommands(CommandsProtocol):
 
         If the vector set does not exist, ``None`` is returned.
 
-        For more information see https://redis.io/commands/vrandmember
+        For more information, see https://redis.io/commands/vrandmember.
         """
         pieces = []
         pieces.append(key)

@@ -1314,6 +1314,103 @@ class TestRedisCommands:
         assert int(binascii.hexlify(r["res3"]), 16) == 0x000000FF
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_diff(self, r):
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
+        r["c"] = b"\x80"
+
+        result = r.bitop("DIFF", "result", "a", "b", "c")
+        assert result == 1
+        assert r["result"] == b"\x30"
+
+        r.bitop("DIFF", "result2", "a", "nonexistent")
+        assert r["result2"] == b"\xf0"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_diff1(self, r):
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
+        r["c"] = b"\x80"
+
+        result = r.bitop("DIFF1", "result", "a", "b", "c")
+        assert result == 1
+        assert r["result"] == b"\x00"
+
+        r["d"] = b"\x0f"
+        r["e"] = b"\x03"
+        r.bitop("DIFF1", "result2", "d", "e")
+        assert r["result2"] == b"\x00"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_andor(self, r):
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
+        r["c"] = b"\x80"
+
+        result = r.bitop("ANDOR", "result", "a", "b", "c")
+        assert result == 1
+        assert r["result"] == b"\xc0"
+
+        r["x"] = b"\xf0"
+        r["y"] = b"\x0f"
+        r.bitop("ANDOR", "result2", "x", "y")
+        assert r["result2"] == b"\x00"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_one(self, r):
+        r["a"] = b"\xf0"
+        r["b"] = b"\xc0"
+        r["c"] = b"\x80"
+
+        result = r.bitop("ONE", "result", "a", "b", "c")
+        assert result == 1
+        assert r["result"] == b"\x30"
+
+        r["x"] = b"\xf0"
+        r["y"] = b"\x0f"
+        r.bitop("ONE", "result2", "x", "y")
+        assert r["result2"] == b"\xff"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_new_operations_with_empty_keys(self, r):
+        r["a"] = b"\xff"
+
+        r.bitop("DIFF", "empty_result", "nonexistent", "a")
+        assert r.get("empty_result") == b"\x00"
+
+        r.bitop("DIFF1", "empty_result2", "a", "nonexistent")
+        assert r.get("empty_result2") == b"\x00"
+
+        r.bitop("ANDOR", "empty_result3", "a", "nonexistent")
+        assert r.get("empty_result3") == b"\x00"
+
+        r.bitop("ONE", "empty_result4", "nonexistent")
+        assert r.get("empty_result4") is None
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    def test_bitop_new_operations_return_values(self, r):
+        r["a"] = b"\xff\x00\xff"
+        r["b"] = b"\x00\xff"
+
+        result1 = r.bitop("DIFF", "result1", "a", "b")
+        assert result1 == 3
+
+        result2 = r.bitop("DIFF1", "result2", "a", "b")
+        assert result2 == 3
+
+        result3 = r.bitop("ANDOR", "result3", "a", "b")
+        assert result3 == 3
+
+        result4 = r.bitop("ONE", "result4", "a", "b")
+        assert result4 == 3
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.7")
     def test_bitpos(self, r):
         key = "key:bitpos"
@@ -4998,6 +5095,145 @@ class TestRedisCommands:
         m3 = r.xadd(stream, {"foo": "bar"})
         r.xadd(stream, {"foo": "bar"})
         assert r.xtrim(stream, None, approximate=True, minid=m3) == 0
+
+    @skip_if_server_version_lt("8.1.224")
+    def test_xdelex(self, r):
+        stream = "stream"
+
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        m3 = r.xadd(stream, {"foo": "bar"})
+        m4 = r.xadd(stream, {"foo": "bar"})
+
+        # Test XDELEX with default ref_policy (KEEPREF)
+        result = r.xdelex(stream, m1)
+        assert result == [1]
+
+        # Test XDELEX with explicit KEEPREF
+        result = r.xdelex(stream, m2, ref_policy="KEEPREF")
+        assert result == [1]
+
+        # Test XDELEX with DELREF
+        result = r.xdelex(stream, m3, ref_policy="DELREF")
+        assert result == [1]
+
+        # Test XDELEX with ACKED
+        result = r.xdelex(stream, m4, ref_policy="ACKED")
+        assert result == [1]
+
+        # Test with non-existent ID
+        result = r.xdelex(stream, "999999-0", ref_policy="KEEPREF")
+        assert result == [-1]
+
+        # Test with multiple IDs
+        m5 = r.xadd(stream, {"foo": "bar"})
+        m6 = r.xadd(stream, {"foo": "bar"})
+        result = r.xdelex(stream, m5, m6, ref_policy="KEEPREF")
+        assert result == [1, 1]  # Both entries deleted
+
+        # Test error cases
+        with pytest.raises(redis.DataError):
+            r.xdelex(stream, "123-0", ref_policy="INVALID")
+
+        with pytest.raises(redis.DataError):
+            r.xdelex(stream)  # No IDs provided
+
+    @skip_if_server_version_lt("8.1.224")
+    def test_xackdel(self, r):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+
+        m1 = r.xadd(stream, {"foo": "bar"})
+        m2 = r.xadd(stream, {"foo": "bar"})
+        m3 = r.xadd(stream, {"foo": "bar"})
+        m4 = r.xadd(stream, {"foo": "bar"})
+        r.xgroup_create(stream, group, 0)
+
+        r.xreadgroup(group, consumer, streams={stream: ">"})
+
+        # Test XACKDEL with default ref_policy (KEEPREF)
+        result = r.xackdel(stream, group, m1)
+        assert result == [1]
+
+        # Test XACKDEL with explicit KEEPREF
+        result = r.xackdel(stream, group, m2, ref_policy="KEEPREF")
+        assert result == [1]
+
+        # Test XACKDEL with DELREF
+        result = r.xackdel(stream, group, m3, ref_policy="DELREF")
+        assert result == [1]
+
+        # Test XACKDEL with ACKED
+        result = r.xackdel(stream, group, m4, ref_policy="ACKED")
+        assert result == [1]
+
+        # Test with non-existent ID
+        result = r.xackdel(stream, group, "999999-0", ref_policy="KEEPREF")
+        assert result == [-1]
+
+        # Test error cases
+        with pytest.raises(redis.DataError):
+            r.xackdel(stream, group, m1, ref_policy="INVALID")
+
+        with pytest.raises(redis.DataError):
+            r.xackdel(stream, group)  # No IDs provided
+
+    @skip_if_server_version_lt("8.1.224")
+    def test_xtrim_with_options(self, r):
+        stream = "stream"
+
+        r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XTRIM with KEEPREF ref_policy
+        assert r.xtrim(stream, maxlen=2, approximate=False, ref_policy="KEEPREF") == 2
+
+        r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XTRIM with DELREF ref_policy
+        assert r.xtrim(stream, maxlen=2, approximate=False, ref_policy="DELREF") == 2
+
+        r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo": "bar"})
+
+        # Test XTRIM with ACKED ref_policy
+        assert r.xtrim(stream, maxlen=2, approximate=False, ref_policy="ACKED") == 2
+
+        # Test error case
+        with pytest.raises(redis.DataError):
+            r.xtrim(stream, maxlen=2, ref_policy="INVALID")
+
+    @skip_if_server_version_lt("8.1.224")
+    def test_xadd_with_options(self, r):
+        stream = "stream"
+
+        # Test XADD with KEEPREF ref_policy
+        r.xadd(
+            stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="KEEPREF"
+        )
+        r.xadd(
+            stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="KEEPREF"
+        )
+        r.xadd(
+            stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="KEEPREF"
+        )
+        assert r.xlen(stream) == 2
+
+        # Test XADD with DELREF ref_policy
+        r.xadd(stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="DELREF")
+        assert r.xlen(stream) == 2
+
+        # Test XADD with ACKED ref_policy
+        r.xadd(stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="ACKED")
+        assert r.xlen(stream) == 2
+
+        # Test error case
+        with pytest.raises(redis.DataError):
+            r.xadd(stream, {"foo": "bar"}, ref_policy="INVALID")
 
     def test_bitfield_operations(self, r):
         # comments show affected bits

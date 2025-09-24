@@ -432,6 +432,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self._initialize = True
         self._lock: Optional[asyncio.Lock] = None
 
+        # When used as an async context manager, we need to increment and decrement
+        # a usage counter so that we can close the connection pool when no one is
+        # using the client.
+        self._usage_counter = 0
+        self._usage_lock = asyncio.Lock()
+
     async def initialize(self) -> "RedisCluster":
         """Get all nodes from startup nodes & creates connections if not initialized."""
         if self._initialize:
@@ -468,10 +474,47 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         await self.aclose()
 
     async def __aenter__(self) -> "RedisCluster":
-        return await self.initialize()
+        """
+        Async context manager entry. Increments a usage counter so that the
+        connection pool is only closed (via aclose()) when no context is using
+        the client.
+        """
+        await self._increment_usage()
+        try:
+            # Initialize the client (i.e. establish connection, etc.)
+            return await self.initialize()
+        except Exception:
+            # If initialization fails, decrement the counter to keep it in sync
+            await self._decrement_usage()
+            raise
 
-    async def __aexit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        await self.aclose()
+    async def _increment_usage(self) -> int:
+        """
+        Helper coroutine to increment the usage counter while holding the lock.
+        Returns the new value of the usage counter.
+        """
+        async with self._usage_lock:
+            self._usage_counter += 1
+            return self._usage_counter
+
+    async def _decrement_usage(self) -> int:
+        """
+        Helper coroutine to decrement the usage counter while holding the lock.
+        Returns the new value of the usage counter.
+        """
+        async with self._usage_lock:
+            self._usage_counter -= 1
+            return self._usage_counter
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        """
+        Async context manager exit. Decrements a usage counter. If this is the
+        last exit (counter becomes zero), the client closes its connection pool.
+        """
+        current_usage = await asyncio.shield(self._decrement_usage())
+        if current_usage == 0:
+            # This was the last active context, so disconnect the pool.
+            await asyncio.shield(self.aclose())
 
     def __await__(self) -> Generator[Any, None, "RedisCluster"]:
         return self.initialize().__await__()
@@ -815,7 +858,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     moved = False
 
                 return await target_node.execute_command(*args, **kwargs)
-            except (BusyLoadingError, MaxConnectionsError):
+            except BusyLoadingError:
+                raise
+            except MaxConnectionsError:
+                # MaxConnectionsError indicates client-side resource exhaustion
+                # (too many connections in the pool), not a node failure.
+                # Don't treat this as a node failure - just re-raise the error
+                # without reinitializing the cluster.
                 raise
             except (ConnectionError, TimeoutError):
                 # Connection retries are being handled in the node's

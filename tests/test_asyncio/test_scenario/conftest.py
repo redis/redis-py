@@ -1,9 +1,11 @@
+import asyncio
 import os
+from typing import Any, AsyncGenerator
 
 import pytest
 import pytest_asyncio
 
-from redis.asyncio import Redis
+from redis.asyncio import Redis, RedisCluster
 from redis.asyncio.multidb.client import MultiDBClient
 from redis.asyncio.multidb.config import DEFAULT_FAILURES_THRESHOLD, DEFAULT_HEALTH_CHECK_INTERVAL, DatabaseConfig, \
     MultiDbConfig
@@ -11,7 +13,7 @@ from redis.asyncio.multidb.event import AsyncActiveDatabaseChanged
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialBackoff
 from redis.event import AsyncEventListenerInterface, EventDispatcher
-from tests.test_scenario.conftest import get_endpoint_config, extract_cluster_fqdn
+from tests.test_scenario.conftest import get_endpoints_config, extract_cluster_fqdn
 from tests.test_scenario.fault_injector_client import FaultInjectorClient
 
 
@@ -28,22 +30,22 @@ def fault_injector_client():
      return FaultInjectorClient(url)
 
 @pytest_asyncio.fixture()
-async def r_multi_db(request) -> tuple[MultiDbConfig, CheckActiveDatabaseChangedListener, dict]:
+async def r_multi_db(request) -> AsyncGenerator[tuple[MultiDBClient, CheckActiveDatabaseChangedListener, Any], Any]:
      client_class = request.param.get('client_class', Redis)
 
      if client_class == Redis:
-        endpoint_config = get_endpoint_config('re-active-active')
+        endpoint_config = get_endpoints_config('re-active-active')
      else:
-        endpoint_config = get_endpoint_config('re-active-active-oss-cluster')
+        endpoint_config = get_endpoints_config('re-active-active-oss-cluster')
 
      username = endpoint_config.get('username', None)
      password = endpoint_config.get('password', None)
      failure_threshold = request.param.get('failure_threshold', DEFAULT_FAILURES_THRESHOLD)
-     command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=2, base=0.05), retries=10))
+     command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=0.1, base=0.01), retries=10))
 
      # Retry configuration different for health checks as initial health check require more time in case
      # if infrastructure wasn't restored from the previous test.
-     health_check_interval = request.param.get('health_check_interval', DEFAULT_HEALTH_CHECK_INTERVAL)
+     health_check_interval = request.param.get('health_check_interval', 10)
      health_checks = request.param.get('health_checks', [])
      event_dispatcher = EventDispatcher()
      listener = CheckActiveDatabaseChangedListener()
@@ -82,10 +84,20 @@ async def r_multi_db(request) -> tuple[MultiDbConfig, CheckActiveDatabaseChanged
          command_retry=command_retry,
          failure_threshold=failure_threshold,
          health_checks=health_checks,
-         health_check_retries=3,
+         health_check_probes=3,
          health_check_interval=health_check_interval,
          event_dispatcher=event_dispatcher,
-         health_check_backoff=ExponentialBackoff(cap=5, base=0.5),
      )
 
-     return config, listener, endpoint_config
+     client = MultiDBClient(config)
+
+     async def teardown():
+         await client.aclose()
+
+         if isinstance(client.command_executor.active_database.client, Redis):
+            await client.command_executor.active_database.client.connection_pool.disconnect()
+
+         await asyncio.sleep(15)
+
+     yield client, listener, endpoint_config
+     await teardown()
