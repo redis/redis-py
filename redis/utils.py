@@ -1,9 +1,10 @@
 import datetime
 import logging
 import textwrap
+from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, TypeVar, Union
 
 from redis.exceptions import DataError
 from redis.typing import AbsExpiryT, EncodableT, ExpiryT
@@ -150,18 +151,21 @@ def warn_deprecated_arg_usage(
     warnings.warn(msg, category=DeprecationWarning, stacklevel=stacklevel)
 
 
+C = TypeVar("C", bound=Callable)
+
+
 def deprecated_args(
     args_to_warn: list = ["*"],
     allowed_args: list = [],
     reason: str = "",
     version: str = "",
-):
+) -> Callable[[C], C]:
     """
     Decorator to mark specified args of a function as deprecated.
     If '*' is in args_to_warn, all arguments will be marked as deprecated.
     """
 
-    def decorator(func):
+    def decorator(func: C) -> C:
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Get function argument names

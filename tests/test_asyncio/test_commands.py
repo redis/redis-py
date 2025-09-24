@@ -880,6 +880,103 @@ class TestRedisCommands:
         assert int(binascii.hexlify(await r.get("res3")), 16) == 0x000000FF
 
     @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    async def test_bitop_diff(self, r: redis.Redis):
+        await r.set("a", b"\xf0")
+        await r.set("b", b"\xc0")
+        await r.set("c", b"\x80")
+
+        result = await r.bitop("DIFF", "result", "a", "b", "c")
+        assert result == 1
+        assert await r.get("result") == b"\x30"
+
+        await r.bitop("DIFF", "result2", "a", "nonexistent")
+        assert await r.get("result2") == b"\xf0"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    async def test_bitop_diff1(self, r: redis.Redis):
+        await r.set("a", b"\xf0")
+        await r.set("b", b"\xc0")
+        await r.set("c", b"\x80")
+
+        result = await r.bitop("DIFF1", "result", "a", "b", "c")
+        assert result == 1
+        assert await r.get("result") == b"\x00"
+
+        await r.set("d", b"\x0f")
+        await r.set("e", b"\x03")
+        await r.bitop("DIFF1", "result2", "d", "e")
+        assert await r.get("result2") == b"\x00"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    async def test_bitop_andor(self, r: redis.Redis):
+        await r.set("a", b"\xf0")
+        await r.set("b", b"\xc0")
+        await r.set("c", b"\x80")
+
+        result = await r.bitop("ANDOR", "result", "a", "b", "c")
+        assert result == 1
+        assert await r.get("result") == b"\xc0"
+
+        await r.set("x", b"\xf0")
+        await r.set("y", b"\x0f")
+        await r.bitop("ANDOR", "result2", "x", "y")
+        assert await r.get("result2") == b"\x00"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    async def test_bitop_one(self, r: redis.Redis):
+        await r.set("a", b"\xf0")
+        await r.set("b", b"\xc0")
+        await r.set("c", b"\x80")
+
+        result = await r.bitop("ONE", "result", "a", "b", "c")
+        assert result == 1
+        assert await r.get("result") == b"\x30"
+
+        await r.set("x", b"\xf0")
+        await r.set("y", b"\x0f")
+        await r.bitop("ONE", "result2", "x", "y")
+        assert await r.get("result2") == b"\xff"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    async def test_bitop_new_operations_with_empty_keys(self, r: redis.Redis):
+        await r.set("a", b"\xff")
+
+        await r.bitop("DIFF", "empty_result", "nonexistent", "a")
+        assert await r.get("empty_result") == b"\x00"
+
+        await r.bitop("DIFF1", "empty_result2", "a", "nonexistent")
+        assert await r.get("empty_result2") == b"\x00"
+
+        await r.bitop("ANDOR", "empty_result3", "a", "nonexistent")
+        assert await r.get("empty_result3") == b"\x00"
+
+        await r.bitop("ONE", "empty_result4", "nonexistent")
+        assert await r.get("empty_result4") is None
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.1.224")
+    async def test_bitop_new_operations_return_values(self, r: redis.Redis):
+        await r.set("a", b"\xff\x00\xff")
+        await r.set("b", b"\x00\xff")
+
+        result1 = await r.bitop("DIFF", "result1", "a", "b")
+        assert result1 == 3
+
+        result2 = await r.bitop("DIFF1", "result2", "a", "b")
+        assert result2 == 3
+
+        result3 = await r.bitop("ANDOR", "result3", "a", "b")
+        assert result3 == 3
+
+        result4 = await r.bitop("ONE", "result4", "a", "b")
+        assert result4 == 3
+
+    @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.7")
     async def test_bitpos(self, r: redis.Redis):
         key = "key:bitpos"
@@ -3367,6 +3464,156 @@ class TestRedisCommands:
 
         # 1 message is trimmed
         assert await r.xtrim(stream, 3, approximate=False) == 1
+
+    @skip_if_server_version_lt("8.1.224")
+    async def test_xdelex(self, r: redis.Redis):
+        stream = "stream"
+
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        m2 = await r.xadd(stream, {"foo": "bar"})
+        m3 = await r.xadd(stream, {"foo": "bar"})
+        m4 = await r.xadd(stream, {"foo": "bar"})
+
+        # Test XDELEX with default ref_policy (KEEPREF)
+        result = await r.xdelex(stream, m1)
+        assert result == [1]
+
+        # Test XDELEX with explicit KEEPREF
+        result = await r.xdelex(stream, m2, ref_policy="KEEPREF")
+        assert result == [1]
+
+        # Test XDELEX with DELREF
+        result = await r.xdelex(stream, m3, ref_policy="DELREF")
+        assert result == [1]
+
+        # Test XDELEX with ACKED
+        result = await r.xdelex(stream, m4, ref_policy="ACKED")
+        assert result == [1]
+
+        # Test with non-existent ID
+        result = await r.xdelex(stream, "999999-0", ref_policy="KEEPREF")
+        assert result == [-1]
+
+        # Test with multiple IDs
+        m5 = await r.xadd(stream, {"foo": "bar"})
+        m6 = await r.xadd(stream, {"foo": "bar"})
+        result = await r.xdelex(stream, m5, m6, ref_policy="KEEPREF")
+        assert result == [1, 1]
+
+        # Test error cases
+        with pytest.raises(redis.DataError):
+            await r.xdelex(stream, "123-0", ref_policy="INVALID")
+
+        with pytest.raises(redis.DataError):
+            await r.xdelex(stream)  # No IDs provided
+
+    @skip_if_server_version_lt("8.1.224")
+    async def test_xackdel(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        consumer = "consumer"
+
+        m1 = await r.xadd(stream, {"foo": "bar"})
+        m2 = await r.xadd(stream, {"foo": "bar"})
+        m3 = await r.xadd(stream, {"foo": "bar"})
+        m4 = await r.xadd(stream, {"foo": "bar"})
+        await r.xgroup_create(stream, group, 0)
+
+        await r.xreadgroup(group, consumer, streams={stream: ">"})
+
+        # Test XACKDEL with default ref_policy (KEEPREF)
+        result = await r.xackdel(stream, group, m1)
+        assert result == [1]
+
+        # Test XACKDEL with explicit KEEPREF
+        result = await r.xackdel(stream, group, m2, ref_policy="KEEPREF")
+        assert result == [1]
+
+        # Test XACKDEL with DELREF
+        result = await r.xackdel(stream, group, m3, ref_policy="DELREF")
+        assert result == [1]
+
+        # Test XACKDEL with ACKED
+        result = await r.xackdel(stream, group, m4, ref_policy="ACKED")
+        assert result == [1]
+
+        # Test with non-existent ID
+        result = await r.xackdel(stream, group, "999999-0", ref_policy="KEEPREF")
+        assert result == [-1]
+
+        # Test error cases
+        with pytest.raises(redis.DataError):
+            await r.xackdel(stream, group, m1, ref_policy="INVALID")
+
+        with pytest.raises(redis.DataError):
+            await r.xackdel(stream, group)  # No IDs provided
+
+    @skip_if_server_version_lt("8.1.224")
+    async def test_xtrim_with_options(self, r: redis.Redis):
+        stream = "stream"
+
+        await r.xadd(stream, {"foo": "bar"})
+        await r.xadd(stream, {"foo": "bar"})
+        await r.xadd(stream, {"foo": "bar"})
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XTRIM with KEEPREF ref_policy
+        assert (
+            await r.xtrim(stream, maxlen=2, approximate=False, ref_policy="KEEPREF")
+            == 2
+        )
+
+        await r.xadd(stream, {"foo": "bar"})
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XTRIM with DELREF ref_policy
+        assert (
+            await r.xtrim(stream, maxlen=2, approximate=False, ref_policy="DELREF") == 2
+        )
+
+        await r.xadd(stream, {"foo": "bar"})
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XTRIM with ACKED ref_policy
+        assert (
+            await r.xtrim(stream, maxlen=2, approximate=False, ref_policy="ACKED") == 2
+        )
+
+        # Test error case
+        with pytest.raises(redis.DataError):
+            await r.xtrim(stream, maxlen=2, ref_policy="INVALID")
+
+    @skip_if_server_version_lt("8.1.224")
+    async def test_xadd_with_options(self, r: redis.Redis):
+        stream = "stream"
+
+        # Test XADD with KEEPREF ref_policy
+        await r.xadd(
+            stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="KEEPREF"
+        )
+        await r.xadd(
+            stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="KEEPREF"
+        )
+        await r.xadd(
+            stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="KEEPREF"
+        )
+        assert await r.xlen(stream) == 2
+
+        # Test XADD with DELREF ref_policy
+        await r.xadd(
+            stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="DELREF"
+        )
+        assert await r.xlen(stream) == 2
+
+        # Test XADD with ACKED ref_policy
+        await r.xadd(
+            stream, {"foo": "bar"}, maxlen=2, approximate=False, ref_policy="ACKED"
+        )
+        assert await r.xlen(stream) == 2
+
+        # Test error case
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, ref_policy="INVALID")
 
     @pytest.mark.onlynoncluster
     async def test_bitfield_operations(self, r: redis.Redis):

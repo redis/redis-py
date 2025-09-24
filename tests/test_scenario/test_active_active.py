@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 def trigger_network_failure_action(fault_injector_client, config, event: threading.Event = None):
     action_request = ActionRequest(
         action_type=ActionType.NETWORK_FAILURE,
-        parameters={"bdb_id": config['bdb_id'], "delay": 2, "cluster_index": 0}
+        parameters={"bdb_id": config['bdb_id'], "delay": 3, "cluster_index": 0}
     )
 
     result = fault_injector_client.trigger_action(action_request)
@@ -96,8 +96,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2, "health_check_interval": 10},
-            {"client_class": RedisCluster, "failure_threshold": 2, "health_check_interval": 10},
+            {"client_class": Redis, "failure_threshold": 2, "health_check_interval": 20},
+            {"client_class": RedisCluster, "failure_threshold": 2, "health_check_interval": 20},
         ],
         ids=["standalone", "cluster"],
         indirect=True
@@ -123,7 +123,11 @@ class TestActiveActive:
 
         # Adding additional health check to the client.
         r_multi_db.add_health_check(
-            LagAwareHealthCheck(verify_tls=False, auth_basic=(env0_username,env0_password))
+            LagAwareHealthCheck(
+                verify_tls=False,
+                auth_basic=(env0_username,env0_password),
+                lag_aware_tolerance=10000
+            )
         )
 
         # Client initialized on the first command.

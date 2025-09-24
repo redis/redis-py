@@ -4,11 +4,10 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, Tuple, Union, List
 
-from pygments.lexers.julia import allowed_variable
 
 from redis.asyncio import Redis
 from redis.asyncio.http.http_client import AsyncHTTPClientWrapper, DEFAULT_TIMEOUT
-from redis.asyncio.retry import Retry
+from redis.retry import Retry
 from redis.backoff import NoBackoff
 from redis.http.http_client import HttpClient
 from redis.multidb.exception import UnhealthyDatabaseException

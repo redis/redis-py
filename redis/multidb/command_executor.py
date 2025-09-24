@@ -7,7 +7,8 @@ from redis.event import EventDispatcherInterface, OnCommandsFailEvent
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, Databases, SyncDatabase
 from redis.multidb.circuit import State as CBState
-from redis.multidb.event import RegisterCommandFailure, ActiveDatabaseChanged, ResubscribeOnActiveDatabaseChanged
+from redis.multidb.event import RegisterCommandFailure, ActiveDatabaseChanged, ResubscribeOnActiveDatabaseChanged, \
+    CloseConnectionOnActiveDatabaseChanged
 from redis.multidb.failover import FailoverStrategy, FailoverStrategyExecutor, DEFAULT_FAILOVER_ATTEMPTS, \
     DEFAULT_FAILOVER_DELAY, DefaultFailoverStrategyExecutor
 from redis.multidb.failure_detector import FailureDetector
@@ -303,7 +304,8 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         """
         failure_listener = RegisterCommandFailure(self._failure_detectors)
         resubscribe_listener = ResubscribeOnActiveDatabaseChanged()
+        close_connection_listener = CloseConnectionOnActiveDatabaseChanged()
         self._event_dispatcher.register_listeners({
             OnCommandsFailEvent: [failure_listener],
-            ActiveDatabaseChanged: [resubscribe_listener],
+            ActiveDatabaseChanged: [close_connection_listener, resubscribe_listener],
         })

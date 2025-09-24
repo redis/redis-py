@@ -212,6 +212,7 @@ class AbstractConnection:
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
+        self._should_reconnect = False
 
         try:
             p = int(protocol)
@@ -295,13 +296,18 @@ class AbstractConnection:
         """Connects to the Redis server if not already connected"""
         await self.connect_check_health(check_health=True)
 
-    async def connect_check_health(self, check_health: bool = True):
+    async def connect_check_health(
+        self, check_health: bool = True, retry_socket_connect: bool = True
+    ):
         if self.is_connected:
             return
         try:
-            await self.retry.call_with_retry(
-                lambda: self._connect(), lambda error: self.disconnect()
-            )
+            if retry_socket_connect:
+                await self.retry.call_with_retry(
+                    lambda: self._connect(), lambda error: self.disconnect()
+                )
+            else:
+                await self._connect()
         except asyncio.CancelledError:
             raise  # in 3.7 and earlier, this is an Exception, not BaseException
         except (socket.timeout, asyncio.TimeoutError):
@@ -336,6 +342,12 @@ class AbstractConnection:
             task = callback(self)
             if task and inspect.isawaitable(task):
                 await task
+
+    def mark_for_reconnect(self):
+        self._should_reconnect = True
+
+    def should_reconnect(self):
+        return self._should_reconnect
 
     @abstractmethod
     async def _connect(self):
@@ -1037,6 +1049,7 @@ class ConnectionPool:
     By default, TCP connections are created unless ``connection_class``
     is specified. Use :py:class:`~redis.UnixDomainSocketConnection` for
     unix sockets.
+    :py:class:`~redis.SSLConnection` can be used for SSL enabled connections.
 
     Any additional keyword arguments are passed to the constructor of
     ``connection_class``.
@@ -1192,6 +1205,9 @@ class ConnectionPool:
         # Connections should always be returned to the correct pool,
         # not doing so is an error that will cause an exception here.
         self._in_use_connections.remove(connection)
+        if connection.should_reconnect():
+            await connection.disconnect()
+
         self._available_connections.append(connection)
         await self._event_dispatcher.dispatch_async(
             AsyncAfterConnectionReleasedEvent(connection)
@@ -1218,6 +1234,14 @@ class ConnectionPool:
         exc = next((r for r in resp if isinstance(r, BaseException)), None)
         if exc:
             raise exc
+
+    async def update_active_connections_for_reconnect(self):
+        """
+        Mark all active connections for reconnect.
+        """
+        async with self._lock:
+            for conn in self._in_use_connections:
+                    conn.mark_for_reconnect()
 
     async def aclose(self) -> None:
         """Close the pool, disconnecting all connections"""

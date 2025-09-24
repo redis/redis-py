@@ -1,7 +1,22 @@
 import json
+import logging
+import time
 import urllib.request
 from typing import Dict, Any, Optional, Union
 from enum import Enum
+
+import pytest
+
+
+class TaskStatuses:
+    """Class to hold completed statuses constants."""
+
+    FAILED = "failed"
+    FINISHED = "finished"
+    SUCCESS = "success"
+    RUNNING = "running"
+
+    COMPLETED_STATUSES = [FAILED, FINISHED, SUCCESS]
 
 
 class ActionType(str, Enum):
@@ -11,6 +26,7 @@ class ActionType(str, Enum):
     SEQUENCE_OF_ACTIONS = "sequence_of_actions"
     NETWORK_FAILURE = "network_failure"
     EXECUTE_RLUTIL_COMMAND = "execute_rlutil_command"
+    EXECUTE_RLADMIN_COMMAND = "execute_rladmin_command"
 
 
 class RestartDmcParams:
@@ -22,39 +38,45 @@ class RestartDmcParams:
 
 
 class ActionRequest:
-    def __init__(self, action_type: ActionType, parameters: Union[Dict[str, Any], RestartDmcParams]):
+    def __init__(
+        self,
+        action_type: ActionType,
+        parameters: Union[Dict[str, Any], RestartDmcParams],
+    ):
         self.type = action_type
         self.parameters = parameters
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "type": self.type,
-            "parameters": self.parameters.to_dict() if isinstance(self.parameters,
-                                                                  RestartDmcParams) else self.parameters
+            "type": self.type.value,  # Use the string value of the enum
+            "parameters": self.parameters.to_dict()
+            if isinstance(self.parameters, RestartDmcParams)
+            else self.parameters,
         }
 
 
 class FaultInjectorClient:
     def __init__(self, base_url: str):
-        self.base_url = base_url.rstrip('/')
+        self.base_url = base_url.rstrip("/")
 
-    def _make_request(self, method: str, path: str, data: Optional[Dict] = None) -> Dict[str, Any]:
+    def _make_request(
+        self, method: str, path: str, data: Optional[Dict] = None
+    ) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
         headers = {"Content-Type": "application/json"} if data else {}
 
+        request_data = json.dumps(data).encode("utf-8") if data else None
+
         request = urllib.request.Request(
-            url,
-            method=method,
-            data=json.dumps(data).encode('utf-8') if data else None,
-            headers=headers
+            url, method=method, data=request_data, headers=headers
         )
 
         try:
             with urllib.request.urlopen(request) as response:
-                return json.loads(response.read().decode('utf-8'))
+                return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             if e.code == 422:
-                error_body = json.loads(e.read().decode('utf-8'))
+                error_body = json.loads(e.read().decode("utf-8"))
                 raise ValueError(f"Validation Error: {error_body}")
             raise
 
@@ -64,8 +86,64 @@ class FaultInjectorClient:
 
     def trigger_action(self, action_request: ActionRequest) -> Dict[str, Any]:
         """Trigger a new action"""
-        return self._make_request("POST", "/action", action_request.to_dict())
+        request_data = action_request.to_dict()
+        return self._make_request("POST", "/action", request_data)
 
     def get_action_status(self, action_id: str) -> Dict[str, Any]:
         """Get the status of a specific action"""
         return self._make_request("GET", f"/action/{action_id}")
+
+    def execute_rladmin_command(
+        self, command: str, bdb_id: str = None
+    ) -> Dict[str, Any]:
+        """Execute rladmin command directly as string"""
+        url = f"{self.base_url}/rladmin"
+
+        # The fault injector expects the raw command string
+        command_string = f"rladmin {command}"
+        if bdb_id:
+            command_string = f"rladmin -b {bdb_id} {command}"
+
+        headers = {"Content-Type": "text/plain"}
+
+        request = urllib.request.Request(
+            url, method="POST", data=command_string.encode("utf-8"), headers=headers
+        )
+
+        try:
+            with urllib.request.urlopen(request) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if e.code == 422:
+                error_body = json.loads(e.read().decode("utf-8"))
+                raise ValueError(f"Validation Error: {error_body}")
+            raise
+
+    def get_operation_result(
+        self,
+        action_id: str,
+        timeout: int = 60,
+    ) -> Dict[str, Any]:
+        """Get the result of a specific action"""
+        start_time = time.time()
+        check_interval = 3
+        while time.time() - start_time < timeout:
+            try:
+                status_result = self.get_action_status(action_id)
+                operation_status = status_result.get("status", "unknown")
+
+                if operation_status in TaskStatuses.COMPLETED_STATUSES:
+                    logging.debug(
+                        f"Operation {action_id} completed with status: "
+                        f"{operation_status}"
+                    )
+                    if operation_status != TaskStatuses.SUCCESS:
+                        pytest.fail(f"Operation {action_id} failed: {status_result}")
+                    return status_result
+
+                time.sleep(check_interval)
+            except Exception as e:
+                logging.warning(f"Error checking operation status: {e}")
+                time.sleep(check_interval)
+        else:
+            raise TimeoutError(f"Timeout waiting for operation {action_id}")

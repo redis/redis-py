@@ -245,20 +245,23 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                 for database, _ in self._databases
             }
 
-            for future in as_completed(futures, timeout=self._health_check_interval):
-                try:
-                    future.result()
-                except UnhealthyDatabaseException as e:
-                    unhealthy_db = e.database
-                    unhealthy_db.circuit.state = CBState.OPEN
+            try:
+                for future in as_completed(futures, timeout=self._health_check_interval):
+                    try:
+                        future.result()
+                    except UnhealthyDatabaseException as e:
+                        unhealthy_db = e.database
+                        unhealthy_db.circuit.state = CBState.OPEN
 
-                    logger.exception(
-                        'Health check failed, due to exception',
-                        exc_info=e.original_exception
-                    )
+                        logger.exception(
+                            'Health check failed, due to exception',
+                            exc_info=e.original_exception
+                        )
 
-                    if on_error:
-                        on_error(e.original_exception)
+                        if on_error:
+                            on_error(e.original_exception)
+            except TimeoutError:
+                raise TimeoutError("Health check execution exceeds health_check_interval")
 
     def _on_circuit_state_change_callback(self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState):
         if new_state == CBState.HALF_OPEN:
@@ -267,6 +270,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
             self._bg_scheduler.run_once(DEFAULT_GRACE_PERIOD, _half_open_circuit, circuit)
+
+    def close(self):
+        self.command_executor.active_database.client.close()
 
 def _half_open_circuit(circuit: CircuitBreaker):
     circuit.state = CBState.HALF_OPEN

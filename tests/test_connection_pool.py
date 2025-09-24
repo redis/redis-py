@@ -33,6 +33,9 @@ class DummyConnection:
     def can_read(self):
         return False
 
+    def should_reconnect(self):
+        return False
+
 
 class TestConnectionPool:
     def get_pool(
@@ -50,10 +53,14 @@ class TestConnectionPool:
         return pool
 
     def test_connection_creation(self):
-        connection_kwargs = {"foo": "bar", "biz": "baz"}
+        connection_kwargs = {
+            "foo": "bar",
+            "biz": "baz",
+        }
         pool = self.get_pool(
             connection_kwargs=connection_kwargs, connection_class=DummyConnection
         )
+
         connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)
         assert connection.kwargs == connection_kwargs
@@ -76,11 +83,13 @@ class TestConnectionPool:
         assert c1 != c2
 
     def test_max_connections(self, master_host):
-        connection_kwargs = {"host": master_host[0], "port": master_host[1]}
-        pool = self.get_pool(max_connections=2, connection_kwargs=connection_kwargs)
+        # Use DummyConnection to avoid actual connection to Redis
+        # This prevents authentication issues and makes the test more reliable
+        # while still properly testing the MaxConnectionsError behavior
+        pool = self.get_pool(max_connections=2, connection_class=DummyConnection)
         pool.get_connection()
         pool.get_connection()
-        with pytest.raises(redis.ConnectionError):
+        with pytest.raises(redis.MaxConnectionsError):
             pool.get_connection()
 
     def test_reuse_previously_released_connection(self, master_host):
@@ -147,6 +156,7 @@ class TestBlockingConnectionPool:
             "host": master_host[0],
             "port": master_host[1],
         }
+
         pool = self.get_pool(connection_kwargs=connection_kwargs)
         connection = pool.get_connection()
         assert isinstance(connection, DummyConnection)

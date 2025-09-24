@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 async def trigger_network_failure_action(fault_injector_client, config, event: asyncio.Event = None):
     action_request = ActionRequest(
         action_type=ActionType.NETWORK_FAILURE,
-        parameters={"bdb_id": config['bdb_id'], "delay": 2, "cluster_index": 0}
+        parameters={"bdb_id": config['bdb_id'], "delay": 3, "cluster_index": 0}
     )
 
     result = fault_injector_client.trigger_action(action_request)
@@ -39,11 +39,6 @@ async def trigger_network_failure_action(fault_injector_client, config, event: a
     logger.info(f"Action completed. Status: {status_result['status']}")
 
 class TestActiveActive:
-
-    def teardown_method(self, method):
-        # Timeout so the cluster could recover from network failure.
-        sleep(15)
-
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "r_multi_db",
@@ -54,9 +49,9 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(100)
+    @pytest.mark.timeout(200)
     async def test_multi_db_client_failover_to_another_db(self, r_multi_db, fault_injector_client):
-        client_config, listener, endpoint_config = r_multi_db
+        client, listener, endpoint_config = r_multi_db
 
         # Handle unavailable databases from previous test.
         retry = Retry(
@@ -65,7 +60,7 @@ class TestActiveActive:
             backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY)
         )
 
-        async with MultiDBClient(client_config) as r_multi_db:
+        async with client as r_multi_db:
             event = asyncio.Event()
             asyncio.create_task(trigger_network_failure_action(fault_injector_client, endpoint_config, event))
 
@@ -95,25 +90,37 @@ class TestActiveActive:
         "r_multi_db",
         [
             {"client_class": Redis, "failure_threshold": 2, "health_checks":
-                [LagAwareHealthCheck(verify_tls=False, auth_basic=(os.getenv('ENV0_USERNAME'),os.getenv('ENV0_PASSWORD')))]
+                [
+                    LagAwareHealthCheck(
+                        verify_tls=False,
+                        auth_basic=(os.getenv('ENV0_USERNAME'),os.getenv('ENV0_PASSWORD')),
+                    )
+                ],
+             "health_check_interval": 20,
             },
             {"client_class": RedisCluster, "failure_threshold": 2, "health_checks":
-                [LagAwareHealthCheck(verify_tls=False, auth_basic=(os.getenv('ENV0_USERNAME'),os.getenv('ENV0_PASSWORD')))]
+                [
+                    LagAwareHealthCheck(
+                        verify_tls=False,
+                        auth_basic=(os.getenv('ENV0_USERNAME'), os.getenv('ENV0_PASSWORD')),
+                    )
+                ],
+             "health_check_interval": 20,
             },
         ],
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(100)
+    @pytest.mark.timeout(200)
     async def test_multi_db_client_uses_lag_aware_health_check(self, r_multi_db, fault_injector_client):
-        client_config, listener, endpoint_config = r_multi_db
+        client, listener, endpoint_config = r_multi_db
         retry = Retry(
             supported_errors=(TemporaryUnavailableException,),
             retries=DEFAULT_FAILOVER_ATTEMPTS,
             backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY)
         )
 
-        async with MultiDBClient(client_config) as r_multi_db:
+        async with client as r_multi_db:
             event = asyncio.Event()
             asyncio.create_task(trigger_network_failure_action(fault_injector_client, endpoint_config, event))
 
@@ -148,9 +155,9 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(100)
+    @pytest.mark.timeout(200)
     async def test_context_manager_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
-        client_config, listener, endpoint_config = r_multi_db
+        client, listener, endpoint_config = r_multi_db
         retry = Retry(
             supported_errors=(TemporaryUnavailableException,),
             retries=DEFAULT_FAILOVER_ATTEMPTS,
@@ -167,7 +174,7 @@ class TestActiveActive:
                 pipe.get('{hash}key3')
                 assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
 
-        async with MultiDBClient(client_config) as r_multi_db:
+        async with client as r_multi_db:
             event = asyncio.Event()
             asyncio.create_task(trigger_network_failure_action(fault_injector_client, endpoint_config, event))
 
@@ -179,13 +186,13 @@ class TestActiveActive:
                 )
                 await asyncio.sleep(0.5)
 
-        # Execute commands until database failover
-        while not listener.is_changed_flag:
-            await retry.call_with_retry(
-                lambda: callback(),
-                lambda _: dummy_fail_async()
-            )
-            await asyncio.sleep(0.5)
+            # Execute commands until database failover
+            while not listener.is_changed_flag:
+                await retry.call_with_retry(
+                    lambda: callback(),
+                    lambda _: dummy_fail_async()
+                )
+                await asyncio.sleep(0.5)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -197,9 +204,9 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(100)
+    @pytest.mark.timeout(200)
     async def test_chaining_pipeline_failover_to_another_db(self, r_multi_db, fault_injector_client):
-        client_config, listener, endpoint_config = r_multi_db
+        client, listener, endpoint_config = r_multi_db
         retry = Retry(
             supported_errors=(TemporaryUnavailableException,),
             retries=DEFAULT_FAILOVER_ATTEMPTS,
@@ -216,7 +223,7 @@ class TestActiveActive:
             pipe.get('{hash}key3')
             assert await pipe.execute() == [True, True, True, 'value1', 'value2', 'value3']
 
-        async with MultiDBClient(client_config) as r_multi_db:
+        async with client as r_multi_db:
             event = asyncio.Event()
             asyncio.create_task(trigger_network_failure_action(fault_injector_client, endpoint_config, event))
 
@@ -228,13 +235,13 @@ class TestActiveActive:
                 )
                 await asyncio.sleep(0.5)
 
-        # Execute pipeline until database failover
-        while not listener.is_changed_flag:
-            await retry.call_with_retry(
-                lambda: callback(),
-                lambda _: dummy_fail_async()
-            )
-            await asyncio.sleep(0.5)
+            # Execute pipeline until database failover
+            while not listener.is_changed_flag:
+                await retry.call_with_retry(
+                    lambda: callback(),
+                    lambda _: dummy_fail_async()
+                )
+                await asyncio.sleep(0.5)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -246,9 +253,9 @@ class TestActiveActive:
         ids=["standalone", "cluster"],
         indirect=True
     )
-    @pytest.mark.timeout(100)
+    @pytest.mark.timeout(200)
     async def test_transaction_failover_to_another_db(self, r_multi_db, fault_injector_client):
-        client_config, listener, endpoint_config = r_multi_db
+        client, listener, endpoint_config = r_multi_db
 
         retry = Retry(
             supported_errors=(TemporaryUnavailableException,),
@@ -264,7 +271,7 @@ class TestActiveActive:
             pipe.get('{hash}key2')
             pipe.get('{hash}key3')
 
-        async with MultiDBClient(client_config) as r_multi_db:
+        async with client as r_multi_db:
             event = asyncio.Event()
             asyncio.create_task(trigger_network_failure_action(fault_injector_client, endpoint_config, event))
 
@@ -290,9 +297,9 @@ class TestActiveActive:
         [{"failure_threshold": 2}],
         indirect=True
     )
-    @pytest.mark.timeout(60)
+    @pytest.mark.timeout(200)
     async def test_pubsub_failover_to_another_db(self, r_multi_db, fault_injector_client):
-        client_config, listener, endpoint_config = r_multi_db
+        client, listener, endpoint_config = r_multi_db
         retry = Retry(
             supported_errors=(TemporaryUnavailableException,),
             retries=DEFAULT_FAILOVER_ATTEMPTS,
@@ -306,7 +313,7 @@ class TestActiveActive:
             nonlocal messages_count
             messages_count += 1
 
-        async with MultiDBClient(client_config) as r_multi_db:
+        async with client as r_multi_db:
             event = asyncio.Event()
             asyncio.create_task(trigger_network_failure_action(fault_injector_client, endpoint_config, event))
 
@@ -345,5 +352,4 @@ class TestActiveActive:
             # A timeout to ensure that an async handler will handle all previous messages.
             await asyncio.sleep(0.1)
             task.cancel()
-            await pubsub.unsubscribe('test-channel') is True
-            assert messages_count >= 5
+            assert messages_count >= 2

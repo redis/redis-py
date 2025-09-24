@@ -1,5 +1,7 @@
 from typing import List
 
+from redis.client import Redis
+
 from redis.event import EventListenerInterface, OnCommandsFailEvent
 from redis.multidb.database import SyncDatabase
 from redis.multidb.failure_detector import FailureDetector
@@ -52,6 +54,21 @@ class ResubscribeOnActiveDatabaseChanged(EventListenerInterface):
             new_pubsub.on_connect(None)
             event.command_executor.active_pubsub = new_pubsub
             old_pubsub.close()
+
+class CloseConnectionOnActiveDatabaseChanged(EventListenerInterface):
+    """
+    Close connection to the old active database.
+    """
+    def listen(self, event: ActiveDatabaseChanged):
+        event.old_database.client.close()
+
+        if isinstance(event.old_database.client, Redis):
+            event.old_database.client.connection_pool.update_active_connections_for_reconnect()
+            event.old_database.client.connection_pool.disconnect()
+        else:
+            for node in event.old_database.client.nodes_manager.nodes_cache.values():
+                node.redis_connection.connection_pool.update_active_connections_for_reconnect()
+                node.redis_connection.connection_pool.disconnect()
 
 class RegisterCommandFailure(EventListenerInterface):
     """
