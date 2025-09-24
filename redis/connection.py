@@ -177,9 +177,7 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
-    def set_maintenance_notification_pool_handler(
-        self, maintenance_notification_pool_handler
-    ):
+    def set_maint_notifications_pool_handler(self, maint_notifications_pool_handler):
         pass
 
     @abstractmethod
@@ -541,7 +539,7 @@ class AbstractConnection(ConnectionInterface):
             else self.socket_connect_timeout
         )
 
-    def set_maintenance_notification_pool_handler(
+    def set_maint_notifications_pool_handler(
         self, maint_notifications_pool_handler: MaintNotificationsPoolHandler
     ):
         maint_notifications_pool_handler.set_connection(self)
@@ -1827,14 +1825,14 @@ class ConnectionPool:
         """Update the maintenance notifications config for all connections in the pool."""
         with self._lock:
             for conn in self._available_connections:
-                conn.set_maintenance_notification_pool_handler(
+                conn.set_maint_notifications_pool_handler(
                     maint_notifications_pool_handler
                 )
                 conn.maint_notifications_config = (
                     maint_notifications_pool_handler.config
                 )
             for conn in self._in_use_connections:
-                conn.set_maintenance_notification_pool_handler(
+                conn.set_maint_notifications_pool_handler(
                     maint_notifications_pool_handler
                 )
                 conn.maint_notifications_config = (
@@ -2593,7 +2591,7 @@ class BlockingConnectionPool(ConnectionPool):
         """Update the maintenance notifications config for all connections in the pool."""
         with self._lock:
             for conn in tuple(self._connections):
-                conn.set_maintenance_notification_pool_handler(
+                conn.set_maint_notifications_pool_handler(
                     maint_notifications_pool_handler
                 )
                 conn.maint_notifications_config = (
