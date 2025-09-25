@@ -56,6 +56,9 @@ def get_endpoints_config(endpoint_name: str):
             f"Failed to load endpoints config file: {endpoints_config}"
         ) from e
 
+@pytest.fixture()
+def endpoints_config(endpoint_name: str):
+    return get_endpoints_config(endpoint_name)
 
 @pytest.fixture()
 def fault_injector_client():
