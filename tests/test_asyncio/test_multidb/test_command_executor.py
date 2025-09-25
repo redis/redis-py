@@ -46,6 +46,7 @@ class TestDefaultCommandExecutor:
         await executor.set_active_database(mock_db2)
         assert await executor.execute_command('SET', 'key', 'value') == 'OK2'
         assert mock_ed.register_listeners.call_count == 1
+        assert mock_fd.register_command_execution.call_count == 2
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -82,6 +83,7 @@ class TestDefaultCommandExecutor:
         assert await executor.execute_command('SET', 'key', 'value') == 'OK2'
         assert mock_ed.register_listeners.call_count == 1
         assert mock_selector.call_count == 2
+        assert mock_fd.register_command_execution.call_count == 2
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -124,6 +126,7 @@ class TestDefaultCommandExecutor:
         assert await executor.execute_command('SET', 'key', 'value') == 'OK1'
         assert mock_ed.register_listeners.call_count == 1
         assert mock_selector.call_count == 3
+        assert mock_fd.register_command_execution.call_count == 3
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
