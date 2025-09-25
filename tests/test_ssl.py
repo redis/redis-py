@@ -329,15 +329,22 @@ class TestSSL:
         finally:
             r.close()
 
-    def test_ssl_verify_flags_config_applied_to_context(self, request):
-        """Test that ssl_verify_flags_config is properly applied to the SSL context"""
+    def test_ssl_verify_flags_applied_to_context(self, request):
+        """
+        Test that ssl_include_verify_flags and ssl_exclude_verify_flags
+        are properly applied to the SSL context
+        """
         ssl_url = request.config.option.redis_ssl_url
         parsed_url = urlparse(ssl_url)
 
         # Test with specific SSL verify flags
-        ssl_verify_flags_config = [
-            (ssl.VerifyFlags.VERIFY_X509_STRICT, False),  # Disable strict verification
-            (ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN, True),  # Enable partial chain
+        ssl_include_verify_flags = [
+            ssl.VerifyFlags.VERIFY_CRL_CHECK_LEAF,  # Disable strict verification
+            ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN,  # Enable partial chain
+        ]
+
+        ssl_exclude_verify_flags = [
+            ssl.VerifyFlags.VERIFY_X509_STRICT,  # Disable trusted first
         ]
 
         r = redis.Redis(
@@ -345,7 +352,8 @@ class TestSSL:
             port=parsed_url.port,
             ssl=True,
             ssl_cert_reqs="none",
-            ssl_verify_flags_config=ssl_verify_flags_config,
+            ssl_include_verify_flags=ssl_include_verify_flags,
+            ssl_exclude_verify_flags=ssl_exclude_verify_flags,
         )
 
         try:
@@ -354,18 +362,21 @@ class TestSSL:
             assert isinstance(conn, redis.SSLConnection)
 
             # Verify the flags were processed by checking they're stored in connection
-            assert conn.ssl_verify_flags_config is not None
-            assert len(conn.ssl_verify_flags_config) == 2
+            assert conn.ssl_include_verify_flags is not None
+            assert len(conn.ssl_include_verify_flags) == 2
+
+            assert conn.ssl_exclude_verify_flags is not None
+            assert len(conn.ssl_exclude_verify_flags) == 1
 
             # Check each flag individually
-            for flag, expected_enabled in ssl_verify_flags_config:
-                found = False
-                for stored_flag, stored_enabled in conn.ssl_verify_flags_config:
-                    if stored_flag == flag:
-                        assert stored_enabled == expected_enabled
-                        found = True
-                        break
-                assert found, f"Flag {flag} not found in stored ssl_verify_flags_config"
+            for flag in ssl_include_verify_flags:
+                assert flag in conn.ssl_include_verify_flags, (
+                    f"Flag {flag} not found in stored ssl_include_verify_flags"
+                )
+            for flag in ssl_exclude_verify_flags:
+                assert flag in conn.ssl_exclude_verify_flags, (
+                    f"Flag {flag} not found in stored ssl_exclude_verify_flags"
+                )
 
             # Test the actual SSL context created by the connection
             # We need to create a mock socket and call _wrap_socket_with_ssl to get the context
@@ -400,12 +411,13 @@ class TestSSL:
 
                 # Verify that VERIFY_X509_STRICT was disabled (bit cleared)
                 assert not (
-                    captured_context.options & ssl.VerifyFlags.VERIFY_X509_STRICT
+                    captured_context.verify_flags & ssl.VerifyFlags.VERIFY_X509_STRICT
                 ), "VERIFY_X509_STRICT should be disabled but is enabled"
 
                 # Verify that VERIFY_CRL_CHECK_CHAIN was enabled (bit set)
                 assert (
-                    captured_context.options & ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN
+                    captured_context.verify_flags
+                    & ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN
                 ), "VERIFY_CRL_CHECK_CHAIN should be enabled but is disabled"
 
             finally:

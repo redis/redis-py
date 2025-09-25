@@ -539,12 +539,42 @@ class TestSSLConnectionURLParsing:
                 return self.make_connection()
 
         pool = DummyConnectionPool.from_url(
-            "rediss://?ssl_verify_flags_config=[(VERIFY_X509_STRICT,False), (VERIFY_CRL_CHECK_CHAIN,True)]"
+            "rediss://?ssl_include_verify_flags=VERIFY_X509_STRICT,VERIFY_CRL_CHECK_CHAIN"
         )
 
-        assert pool.get_connection().ssl_verify_flags_config == [
-            (ssl.VerifyFlags.VERIFY_X509_STRICT, False),
-            (ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN, True),
+        assert pool.get_connection().ssl_include_verify_flags == [
+            ssl.VerifyFlags.VERIFY_X509_STRICT,
+            ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN,
+        ]
+
+        pool = DummyConnectionPool.from_url(
+            "rediss://?ssl_include_verify_flags=[VERIFY_X509_STRICT, VERIFY_CRL_CHECK_CHAIN]"
+        )
+
+        assert pool.get_connection().ssl_include_verify_flags == [
+            ssl.VerifyFlags.VERIFY_X509_STRICT,
+            ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN,
+        ]
+
+        pool = DummyConnectionPool.from_url(
+            "rediss://?ssl_exclude_verify_flags=VERIFY_X509_STRICT, VERIFY_CRL_CHECK_CHAIN"
+        )
+
+        assert pool.get_connection().ssl_exclude_verify_flags == [
+            ssl.VerifyFlags.VERIFY_X509_STRICT,
+            ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN,
+        ]
+
+        pool = DummyConnectionPool.from_url(
+            "rediss://?ssl_include_verify_flags=VERIFY_X509_STRICT, VERIFY_CRL_CHECK_CHAIN&ssl_exclude_verify_flags=VERIFY_CRL_CHECK_LEAF"
+        )
+
+        assert pool.get_connection().ssl_include_verify_flags == [
+            ssl.VerifyFlags.VERIFY_X509_STRICT,
+            ssl.VerifyFlags.VERIFY_CRL_CHECK_CHAIN,
+        ]
+        assert pool.get_connection().ssl_exclude_verify_flags == [
+            ssl.VerifyFlags.VERIFY_CRL_CHECK_LEAF,
         ]
 
     def test_ssl_flags_config_invalid_flag(self):
@@ -554,12 +584,12 @@ class TestSSLConnectionURLParsing:
 
         with pytest.raises(ValueError):
             DummyConnectionPool.from_url(
-                "rediss://?ssl_verify_flags_config=[(VERIFY_X509,False), (VERIFY_CRL_CHECK_CHAIN,True)]"
+                "rediss://?ssl_include_verify_flags=[VERIFY_X509,VERIFY_CRL_CHECK_CHAIN]"
             )
 
         with pytest.raises(ValueError):
             DummyConnectionPool.from_url(
-                "rediss://?ssl_verify_flags_config=[(VERIFY_X509_STRICT,Ok), (VERIFY_CRL_CHECK_CHAIN,True)]"
+                "rediss://?ssl_exclude_verify_flags=[VERIFY_X509_STRICT1, VERIFY_CRL_CHECK_CHAIN]"
             )
 
 

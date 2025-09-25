@@ -1,9 +1,7 @@
-import ast
 import asyncio
 import copy
 import enum
 import inspect
-import re
 import socket
 import sys
 import warnings
@@ -796,7 +794,8 @@ class SSLConnection(Connection):
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
         ssl_cert_reqs: Union[str, ssl.VerifyMode] = "required",
-        ssl_verify_flags_config: Optional[List[Tuple["ssl.VerifyFlags", bool]]] = None,
+        ssl_include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = True,
@@ -811,7 +810,8 @@ class SSLConnection(Connection):
             keyfile=ssl_keyfile,
             certfile=ssl_certfile,
             cert_reqs=ssl_cert_reqs,
-            verify_flags_config=ssl_verify_flags_config,
+            include_verify_flags=ssl_include_verify_flags,
+            exclude_verify_flags=ssl_exclude_verify_flags,
             ca_certs=ssl_ca_certs,
             ca_data=ssl_ca_data,
             check_hostname=ssl_check_hostname,
@@ -838,8 +838,12 @@ class SSLConnection(Connection):
         return self.ssl_context.cert_reqs
 
     @property
-    def verify_flags_config(self):
-        return self.ssl_context.verify_flags_config
+    def include_verify_flags(self):
+        return self.ssl_context.include_verify_flags
+
+    @property
+    def exclude_verify_flags(self):
+        return self.ssl_context.exclude_verify_flags
 
     @property
     def ca_certs(self):
@@ -863,7 +867,8 @@ class RedisSSLContext:
         "keyfile",
         "certfile",
         "cert_reqs",
-        "verify_flags_config",
+        "include_verify_flags",
+        "exclude_verify_flags",
         "ca_certs",
         "ca_data",
         "context",
@@ -877,7 +882,8 @@ class RedisSSLContext:
         keyfile: Optional[str] = None,
         certfile: Optional[str] = None,
         cert_reqs: Optional[Union[str, ssl.VerifyMode]] = None,
-        verify_flags_config: Optional[List[Tuple[ssl.VerifyFlags, bool]]] = None,
+        include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
         check_hostname: bool = False,
@@ -903,7 +909,8 @@ class RedisSSLContext:
                 )
             cert_reqs = CERT_REQS[cert_reqs]
         self.cert_reqs = cert_reqs
-        self.verify_flags_config = verify_flags_config
+        self.include_verify_flags = include_verify_flags
+        self.exclude_verify_flags = exclude_verify_flags
         self.ca_certs = ca_certs
         self.ca_data = ca_data
         self.check_hostname = (
@@ -918,12 +925,12 @@ class RedisSSLContext:
             context = ssl.create_default_context()
             context.check_hostname = self.check_hostname
             context.verify_mode = self.cert_reqs
-            if self.verify_flags_config:
-                for flag, enabled in self.verify_flags_config:
-                    if enabled:
-                        context.options |= flag
-                    else:
-                        context.options &= ~flag
+            if self.include_verify_flags:
+                for flag in self.include_verify_flags:
+                    context.verify_flags |= flag
+            if self.exclude_verify_flags:
+                for flag in self.exclude_verify_flags:
+                    context.verify_flags &= ~flag
             if self.certfile and self.keyfile:
                 context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
             if self.ca_certs or self.ca_data:
@@ -971,6 +978,20 @@ def to_bool(value) -> Optional[bool]:
     return bool(value)
 
 
+def parse_ssl_verify_flags(value):
+    # flags are passed in as a string representation of a list,
+    # e.g. VERIFY_X509_STRICT, VERIFY_X509_PARTIAL_CHAIN
+    verify_flags_str = value.replace("[", "").replace("]", "")
+
+    verify_flags = []
+    for flag in verify_flags_str.split(","):
+        flag = flag.strip()
+        if not hasattr(VerifyFlags, flag):
+            raise ValueError(f"Invalid ssl verify flag: {flag}")
+        verify_flags.append(getattr(VerifyFlags, flag))
+    return verify_flags
+
+
 URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyType(
     {
         "db": int,
@@ -981,6 +1002,8 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "max_connections": int,
         "health_check_interval": int,
         "ssl_check_hostname": to_bool,
+        "ssl_include_verify_flags": parse_ssl_verify_flags,
+        "ssl_exclude_verify_flags": parse_ssl_verify_flags,
         "timeout": float,
     }
 )
@@ -1040,33 +1063,6 @@ def parse_url(url: str) -> ConnectKwargs:
         if parsed.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection
 
-            if "ssl_verify_flags_config" in kwargs:
-                # flags are passed in as a string representation of a list,
-                # e.g. [(VERIFY_X509_STRICT, False), (VERIFY_X509_PARTIAL_CHAIN, True)]
-                # To parse it successfully, we need to transform the flags to strings with quotes.
-                verify_flags_config_str = kwargs.pop("ssl_verify_flags_config")
-                # First wrap any VERIFY_* name in quotes
-                verify_flags_config_str = re.sub(
-                    r"\b(VERIFY_[A-Z0-9_]+)\b", r'"\1"', verify_flags_config_str
-                )
-
-                # transform the string to a list of tuples - the first element of each tuple is a string containing the name of the flag,
-                # and the second is a boolean that indicates if the flag should be enabled or disabled
-                verify_flags_config = ast.literal_eval(verify_flags_config_str)
-
-                verify_flags_config_config_parsed = []
-                for flag, enabled in verify_flags_config:
-                    if not hasattr(VerifyFlags, flag):
-                        raise ValueError(f"Invalid verify flag: {flag}")
-                    if not isinstance(enabled, bool):
-                        raise ValueError(
-                            f"Invalid verify flag enabled/disabled value: {enabled}"
-                        )
-                    verify_flags_config_config_parsed.append(
-                        (getattr(VerifyFlags, flag), enabled)
-                    )
-
-                kwargs["ssl_verify_flags_config"] = verify_flags_config_config_parsed
     else:
         valid_schemes = "redis://, rediss://, unix://"
         raise ValueError(

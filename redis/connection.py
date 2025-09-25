@@ -1,7 +1,5 @@
-import ast
 import copy
 import os
-import re
 import socket
 import sys
 import threading
@@ -18,7 +16,6 @@ from typing import (
     List,
     Literal,
     Optional,
-    Tuple,
     Type,
     TypeVar,
     Union,
@@ -1365,7 +1362,8 @@ class SSLConnection(Connection):
         ssl_keyfile=None,
         ssl_certfile=None,
         ssl_cert_reqs="required",
-        ssl_verify_flags_config: Optional[List[Tuple["VerifyFlags", bool]]] = None,
+        ssl_include_verify_flags: Optional[List["VerifyFlags"]] = None,
+        ssl_exclude_verify_flags: Optional[List["VerifyFlags"]] = None,
         ssl_ca_certs=None,
         ssl_ca_data=None,
         ssl_check_hostname=True,
@@ -1386,17 +1384,8 @@ class SSLConnection(Connection):
             ssl_certfile: Path to an ssl certificate. Defaults to None.
             ssl_cert_reqs: The string value for the SSLContext.verify_mode (none, optional, required),
                            or an ssl.VerifyMode. Defaults to "required".
-            ssl_verify_flags_config: A list with flags configuration to be set on the SSLContext. Defaults to None.
-                              Valid format is as follows:
-                                [
-                                    (config_flag, enabled/disabled),
-                                    ...
-                                ]
-                              Example:
-                                [
-                                    (ssl.VerifyFlags.VERIFY_X509_STRICT, False),       # disable strict
-                                    (ssl.VerifyFlags.VERIFY_X509_PARTIAL_CHAIN, True), # ensure partial chain is enabled
-                                ]
+            ssl_include_verify_flags: A list of flags to be included in the SSLContext.verify_flags. Defaults to None.
+            ssl_exclude_verify_flags: A list of flags to be excluded from the SSLContext.verify_flags. Defaults to None.
             ssl_ca_certs: The path to a file of concatenated CA certificates in PEM format. Defaults to None.
             ssl_ca_data: Either an ASCII string of one or more PEM-encoded certificates or a bytes-like object of DER-encoded certificates.
             ssl_check_hostname: If set, match the hostname during the SSL handshake. Defaults to True.
@@ -1432,7 +1421,8 @@ class SSLConnection(Connection):
                 )
             ssl_cert_reqs = CERT_REQS[ssl_cert_reqs]
         self.cert_reqs = ssl_cert_reqs
-        self.ssl_verify_flags_config = ssl_verify_flags_config
+        self.ssl_include_verify_flags = ssl_include_verify_flags
+        self.ssl_exclude_verify_flags = ssl_exclude_verify_flags
         self.ca_certs = ssl_ca_certs
         self.ca_data = ssl_ca_data
         self.ca_path = ssl_ca_path
@@ -1472,12 +1462,12 @@ class SSLConnection(Connection):
         context = ssl.create_default_context()
         context.check_hostname = self.check_hostname
         context.verify_mode = self.cert_reqs
-        if self.ssl_verify_flags_config:
-            for flag, enabled in self.ssl_verify_flags_config:
-                if enabled:
-                    context.options |= flag
-                else:
-                    context.options &= ~flag
+        if self.ssl_include_verify_flags:
+            for flag in self.ssl_include_verify_flags:
+                context.verify_flags |= flag
+        if self.ssl_exclude_verify_flags:
+            for flag in self.ssl_exclude_verify_flags:
+                context.verify_flags &= ~flag
         if self.certfile or self.keyfile:
             context.load_cert_chain(
                 certfile=self.certfile,
@@ -1591,6 +1581,20 @@ def to_bool(value):
     return bool(value)
 
 
+def parse_ssl_verify_flags(value):
+    # flags are passed in as a string representation of a list,
+    # e.g. VERIFY_X509_STRICT, VERIFY_X509_PARTIAL_CHAIN
+    verify_flags_str = value.replace("[", "").replace("]", "")
+
+    verify_flags = []
+    for flag in verify_flags_str.split(","):
+        flag = flag.strip()
+        if not hasattr(VerifyFlags, flag):
+            raise ValueError(f"Invalid ssl verify flag: {flag}")
+        verify_flags.append(getattr(VerifyFlags, flag))
+    return verify_flags
+
+
 URL_QUERY_ARGUMENT_PARSERS = {
     "db": int,
     "socket_timeout": float,
@@ -1601,6 +1605,8 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
+    "ssl_include_verify_flags": parse_ssl_verify_flags,
+    "ssl_exclude_verify_flags": parse_ssl_verify_flags,
     "timeout": float,
 }
 
@@ -1658,34 +1664,6 @@ def parse_url(url):
 
         if url.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection
-
-            if "ssl_verify_flags_config" in kwargs:
-                # flags are passed in as a string representation of a list,
-                # e.g. [(VERIFY_X509_STRICT, False), (VERIFY_X509_PARTIAL_CHAIN, True)]
-                # To parse it successfully, we need to transform the flags to strings with quotes.
-                verify_flags_config_str = kwargs.pop("ssl_verify_flags_config")
-                # First wrap any VERIFY_* name in quotes
-                verify_flags_config_str = re.sub(
-                    r"\b(VERIFY_[A-Z0-9_]+)\b", r'"\1"', verify_flags_config_str
-                )
-
-                # transform the string to a list of tuples - the first element of each tuple is a string containing the name of the flag,
-                # and the second is a boolean that indicates if the flag should be enabled or disabled
-                verify_flags_config = ast.literal_eval(verify_flags_config_str)
-
-                ssl_verify_flags_config_parsed = []
-                for flag, enabled in verify_flags_config:
-                    if not hasattr(VerifyFlags, flag):
-                        raise ValueError(f"Invalid ssl verify flag: {flag}")
-                    if not isinstance(enabled, bool):
-                        raise ValueError(
-                            f"Invalid ssl verify flag enabled/disabled value: {enabled}"
-                        )
-                    ssl_verify_flags_config_parsed.append(
-                        (getattr(VerifyFlags, flag), enabled)
-                    )
-
-                kwargs["ssl_verify_flags_config"] = ssl_verify_flags_config_parsed
 
     return kwargs
 
