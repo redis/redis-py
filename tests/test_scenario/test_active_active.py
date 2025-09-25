@@ -41,7 +41,7 @@ class TestActiveActive:
 
     def teardown_method(self, method):
         # Timeout so the cluster could recover from network failure.
-        sleep(20)
+        sleep(10)
 
     @pytest.mark.parametrize(
         "r_multi_db",

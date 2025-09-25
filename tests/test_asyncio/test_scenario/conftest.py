@@ -98,7 +98,7 @@ async def r_multi_db(request) -> AsyncGenerator[tuple[MultiDBClient, CheckActive
          if isinstance(client.command_executor.active_database.client, Redis):
             await client.command_executor.active_database.client.connection_pool.disconnect()
 
-         await asyncio.sleep(20)
+         await asyncio.sleep(10)
 
      yield client, listener, endpoint_config
      await teardown()
