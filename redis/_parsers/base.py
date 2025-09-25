@@ -4,7 +4,7 @@ from abc import ABC
 from asyncio import IncompleteReadError, StreamReader, TimeoutError
 from typing import Awaitable, Callable, List, Optional, Protocol, Union
 
-from redis.maintenance_events import (
+from redis.maint_notifications import (
     MaintenanceNotification,
     NodeFailedOverNotification,
     NodeFailingOverNotification,

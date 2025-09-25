@@ -13,7 +13,7 @@ from redis.connection import (
     BlockingConnectionPool,
     MaintenanceState,
 )
-from redis.maintenance_events import (
+from redis.maint_notifications import (
     MaintNotificationsConfig,
     NodeMigratingNotification,
     NodeMigratedNotification,
@@ -668,7 +668,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
                 patch.object(
                     pool_handler, "handle_node_moving_notification"
                 ) as mock_handle_moving,
-                patch("redis.maintenance_events.logging.error") as mock_logging_error,
+                patch("redis.maint_notifications.logging.error") as mock_logging_error,
             ):
                 # Pool handler should return None for migrating notifications (not its responsibility)
                 pool_handler.handle_notification(migrating_notification)
