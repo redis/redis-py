@@ -7,7 +7,7 @@ import pytest
 
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.client import Redis
-from redis.maintenance_events import EndpointType, MaintNotificationsConfig
+from redis.maint_notifications import EndpointType, MaintNotificationsConfig
 from redis.retry import Retry
 from tests.test_scenario.fault_injector_client import FaultInjectorClient
 

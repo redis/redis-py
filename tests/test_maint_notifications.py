@@ -4,7 +4,7 @@ import pytest
 
 from redis.connection import ConnectionInterface
 
-from redis.maintenance_events import (
+from redis.maint_notifications import (
     MaintenanceNotification,
     NodeMovingNotification,
     NodeMigratingNotification,

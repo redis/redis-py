@@ -56,7 +56,7 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
-from redis.maintenance_events import (
+from redis.maint_notifications import (
     MaintNotificationsConfig,
     MaintNotificationsPoolHandler,
 )

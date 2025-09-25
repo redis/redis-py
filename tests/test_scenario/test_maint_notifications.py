@@ -12,7 +12,7 @@ import pytest
 
 from redis import Redis
 from redis.connection import ConnectionInterface
-from redis.maintenance_events import (
+from redis.maint_notifications import (
     EndpointType,
     MaintNotificationsConfig,
     MaintenanceState,
@@ -25,7 +25,7 @@ from tests.test_scenario.conftest import (
 from tests.test_scenario.fault_injector_client import (
     FaultInjectorClient,
 )
-from tests.test_scenario.hitless_upgrade_helpers import (
+from tests.test_scenario.maint_notifications_helpers import (
     ClientValidations,
     ClusterOperations,
 )
@@ -33,6 +33,7 @@ from tests.test_scenario.hitless_upgrade_helpers import (
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S:%f",
 )
 
 BIND_TIMEOUT = 30
