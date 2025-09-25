@@ -12,6 +12,8 @@ from redis.backoff import NoBackoff
 from redis.cluster import PRIMARY
 from tests.conftest import skip_if_server_version_lt
 
+pytestmark = pytest.mark.asyncio
+
 
 def _find_source_and_target_node_for_slot(
     r: RedisCluster, slot: int

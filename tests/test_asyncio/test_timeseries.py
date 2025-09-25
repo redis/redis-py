@@ -12,6 +12,8 @@ from tests.conftest import (
     skip_ifmodversion_lt,
 )
 
+pytestmark = pytest.mark.asyncio
+
 
 @pytest_asyncio.fixture()
 async def decoded_r(create_redis, stack_url):
