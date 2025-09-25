@@ -13,14 +13,14 @@ from redis.connection import (
     BlockingConnectionPool,
     MaintenanceState,
 )
-from redis.maintenance_events import (
-    MaintenanceEventsConfig,
-    NodeMigratingEvent,
-    NodeMigratedEvent,
-    NodeFailingOverEvent,
-    NodeFailedOverEvent,
-    MaintenanceEventPoolHandler,
-    NodeMovingEvent,
+from redis.maint_notifications import (
+    MaintNotificationsConfig,
+    NodeMigratingNotification,
+    NodeMigratedNotification,
+    NodeFailingOverNotification,
+    NodeFailedOverNotification,
+    MaintNotificationsPoolHandler,
+    NodeMovingNotification,
 )
 
 
@@ -28,14 +28,14 @@ AFTER_MOVING_ADDRESS = "1.2.3.4:6379"
 DEFAULT_ADDRESS = "12.45.34.56:6379"
 MOVING_TIMEOUT = 1
 
-MOVING_EVENT = NodeMovingEvent(
+MOVING_NOTIFICATION = NodeMovingNotification(
     id=1,
     new_node_host=AFTER_MOVING_ADDRESS.split(":")[0],
     new_node_port=int(AFTER_MOVING_ADDRESS.split(":")[1]),
     ttl=MOVING_TIMEOUT,
 )
 
-MOVING_NONE_EVENT = NodeMovingEvent(
+MOVING_NONE_NOTIFICATION = NodeMovingNotification(
     id=1,
     new_node_host=None,
     new_node_port=None,
@@ -44,7 +44,7 @@ MOVING_NONE_EVENT = NodeMovingEvent(
 
 
 class Helpers:
-    """Helper class containing static methods for validation in maintenance events tests."""
+    """Helper class containing static methods for validation in maintenance notifications tests."""
 
     @staticmethod
     def validate_in_use_connections_state(
@@ -122,7 +122,7 @@ class Helpers:
             )
             assert connection.maintenance_state == expected_state
             if expected_state == MaintenanceState.NONE:
-                assert connection.maintenance_event_hash is None
+                assert connection.maintenance_notification_hash is None
 
             if connection._sock is not None:
                 assert connection._sock.connected is True
@@ -135,7 +135,7 @@ class Helpers:
     def validate_conn_kwargs(
         pool,
         expected_maintenance_state,
-        expected_maintenance_event_hash,
+        expected_maintenance_notification_hash,
         expected_host_address,
         expected_port,
         expected_socket_timeout,
@@ -147,8 +147,8 @@ class Helpers:
         """Helper method to validate connection kwargs."""
         assert pool.connection_kwargs["maintenance_state"] == expected_maintenance_state
         assert (
-            pool.connection_kwargs["maintenance_event_hash"]
-            == expected_maintenance_event_hash
+            pool.connection_kwargs["maintenance_notification_hash"]
+            == expected_maintenance_notification_hash
         )
         assert pool.connection_kwargs["host"] == expected_host_address
         assert pool.connection_kwargs["port"] == expected_port
@@ -181,7 +181,7 @@ class MockSocket:
         self.closed = False
         self.command_count = 0
         self.pending_responses = []
-        # Track socket timeout changes for maintenance events validation
+        # Track socket timeout changes for maintenance notifications validation
         self.timeout = None
         self.thread_timeouts = {}  # Track last applied timeout per thread
         self.moving_sent = False
@@ -337,8 +337,8 @@ class MockSocket:
         pass
 
 
-class TestMaintenanceEventsHandlingSingleProxy:
-    """Integration tests for maintenance events handling with real connection pool."""
+class TestMaintenanceNotificationsHandlingSingleProxy:
+    """Integration tests for maintenance notifications handling with real connection pool."""
 
     def setup_method(self):
         """Set up test fixtures with mocked sockets."""
@@ -370,9 +370,9 @@ class TestMaintenanceEventsHandlingSingleProxy:
         self.select_patcher = patch("select.select", side_effect=mock_select)
         self.select_patcher.start()
 
-        # Create maintenance events config
-        self.config = MaintenanceEventsConfig(
-            enabled=True, proactive_reconnect=True, relax_timeout=30
+        # Create maintenance notifications config
+        self.config = MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=30
         )
 
     def teardown_method(self):
@@ -384,24 +384,24 @@ class TestMaintenanceEventsHandlingSingleProxy:
         self,
         pool_class,
         max_connections=10,
-        maintenance_events_config=None,
+        maint_notifications_config=None,
         setup_pool_handler=False,
     ):
-        """Helper method to create a pool and Redis client with maintenance events configuration.
+        """Helper method to create a pool and Redis client with maintenance notifications configuration.
 
         Args:
             pool_class: The connection pool class (ConnectionPool or BlockingConnectionPool)
             max_connections: Maximum number of connections in the pool (default: 10)
-            maintenance_events_config: Optional MaintenanceEventsConfig to use. If not provided,
+            maint_notifications_config: Optional MaintNotificationsConfig to use. If not provided,
                                      uses self.config from setup_method (default: None)
-            setup_pool_handler: Whether to set up pool handler for moving events (default: False)
+            setup_pool_handler: Whether to set up pool handler for moving notifications (default: False)
 
         Returns:
             tuple: (test_pool, test_redis_client)
         """
         config = (
-            maintenance_events_config
-            if maintenance_events_config is not None
+            maint_notifications_config
+            if maint_notifications_config is not None
             else self.config
         )
 
@@ -409,17 +409,17 @@ class TestMaintenanceEventsHandlingSingleProxy:
             host=DEFAULT_ADDRESS.split(":")[0],
             port=int(DEFAULT_ADDRESS.split(":")[1]),
             max_connections=max_connections,
-            protocol=3,  # Required for maintenance events
-            maintenance_events_config=config,
+            protocol=3,  # Required for maintenance notifications
+            maint_notifications_config=config,
         )
         test_redis_client = Redis(connection_pool=test_pool)
 
-        # Set up pool handler for moving events if requested
+        # Set up pool handler for moving notifications if requested
         if setup_pool_handler:
-            pool_handler = MaintenanceEventPoolHandler(
+            pool_handler = MaintNotificationsPoolHandler(
                 test_redis_client.connection_pool, config
             )
-            test_redis_client.connection_pool.set_maintenance_events_pool_handler(
+            test_redis_client.connection_pool.set_maint_notifications_pool_handler(
                 pool_handler
             )
 
@@ -433,7 +433,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         assert hasattr(parser_handler, "__self__")
         assert hasattr(parser_handler, "__func__")
         assert parser_handler.__self__ is pool_handler
-        assert parser_handler.__func__ is pool_handler.handle_event.__func__
+        assert parser_handler.__func__ is pool_handler.handle_notification.__func__
 
         # Test that the maintenance handler function is correctly set
         maintenance_handler = conn._parser.maintenance_push_handler_func
@@ -441,17 +441,17 @@ class TestMaintenanceEventsHandlingSingleProxy:
         assert hasattr(maintenance_handler, "__self__")
         assert hasattr(maintenance_handler, "__func__")
         # The maintenance handler should be bound to the connection's
-        # maintenance event connection handler
+        # maintenance notification connection handler
         assert (
-            maintenance_handler.__self__ is conn._maintenance_event_connection_handler
+            maintenance_handler.__self__ is conn._maint_notifications_connection_handler
         )
         assert (
             maintenance_handler.__func__
-            is conn._maintenance_event_connection_handler.handle_event.__func__
+            is conn._maint_notifications_connection_handler.handle_notification.__func__
         )
 
         # Validate that the connection's maintenance handler has the same config object
-        assert conn._maintenance_event_connection_handler.config is config
+        assert conn._maint_notifications_connection_handler.config is config
 
     def _validate_current_timeout(self, expected_timeout, error_msg=None):
         """Helper method to validate the current timeout for the calling thread."""
@@ -487,16 +487,16 @@ class TestMaintenanceEventsHandlingSingleProxy:
         assert connected_sockets_count == expected_count
 
     def test_client_initialization(self):
-        """Test that Redis client is created with maintenance events configuration."""
-        # Create a pool and Redis client with maintenance events
+        """Test that Redis client is created with maintenance notifications configuration."""
+        # Create a pool and Redis client with maintenance notifications
 
         test_redis_client = Redis(
-            protocol=3,  # Required for maintenance events
-            maintenance_events_config=self.config,
+            protocol=3,  # Required for maintenance notifications
+            maint_notifications_config=self.config,
         )
 
         pool_handler = test_redis_client.connection_pool.connection_kwargs.get(
-            "maintenance_events_pool_handler"
+            "maint_notifications_pool_handler"
         )
         assert pool_handler is not None
         assert pool_handler.config == self.config
@@ -513,7 +513,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         assert hasattr(parser_handler, "__self__")
         assert hasattr(parser_handler, "__func__")
         assert parser_handler.__self__ is pool_handler
-        assert parser_handler.__func__ is pool_handler.handle_event.__func__
+        assert parser_handler.__func__ is pool_handler.handle_notification.__func__
 
         # Test that the maintenance handler function is correctly set
         maintenance_handler = conn._parser.maintenance_push_handler_func
@@ -521,49 +521,49 @@ class TestMaintenanceEventsHandlingSingleProxy:
         assert hasattr(maintenance_handler, "__self__")
         assert hasattr(maintenance_handler, "__func__")
         # The maintenance handler should be bound to the connection's
-        # maintenance event connection handler
+        # maintenance notification connection handler
         assert (
-            maintenance_handler.__self__ is conn._maintenance_event_connection_handler
+            maintenance_handler.__self__ is conn._maint_notifications_connection_handler
         )
         assert (
             maintenance_handler.__func__
-            is conn._maintenance_event_connection_handler.handle_event.__func__
+            is conn._maint_notifications_connection_handler.handle_notification.__func__
         )
 
         # Validate that the connection's maintenance handler has the same config object
-        assert conn._maintenance_event_connection_handler.config is self.config
+        assert conn._maint_notifications_connection_handler.config is self.config
 
     def test_maint_handler_init_for_existing_connections(self):
-        """Test that maintenance event handlers are properly set on existing and new connections
+        """Test that maintenance notification handlers are properly set on existing and new connections
         when configuration is enabled after client creation."""
 
-        # Create a Redis client with disabled maintenance events configuration
-        disabled_config = MaintenanceEventsConfig(enabled=False)
+        # Create a Redis client with disabled maintenance notifications configuration
+        disabled_config = MaintNotificationsConfig(enabled=False)
         test_redis_client = Redis(
-            protocol=3,  # Required for maintenance events
-            maintenance_events_config=disabled_config,
+            protocol=3,  # Required for maintenance notifications
+            maint_notifications_config=disabled_config,
         )
 
-        # Extract an existing connection before enabling maintenance events
+        # Extract an existing connection before enabling maintenance notifications
         existing_conn = test_redis_client.connection_pool.get_connection()
 
-        # Verify that maintenance events are initially disabled
+        # Verify that maintenance notifications are initially disabled
         assert existing_conn._parser.node_moving_push_handler_func is None
-        assert existing_conn._maintenance_event_connection_handler is None
+        assert existing_conn._maint_notifications_connection_handler is None
         assert existing_conn._parser.maintenance_push_handler_func is None
 
         # Create a new enabled configuration and set up pool handler
-        enabled_config = MaintenanceEventsConfig(
-            enabled=True, proactive_reconnect=True, relax_timeout=30
+        enabled_config = MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=30
         )
-        pool_handler = MaintenanceEventPoolHandler(
+        pool_handler = MaintNotificationsPoolHandler(
             test_redis_client.connection_pool, enabled_config
         )
-        test_redis_client.connection_pool.set_maintenance_events_pool_handler(
+        test_redis_client.connection_pool.set_maint_notifications_pool_handler(
             pool_handler
         )
 
-        # Validate the existing connection after enabling maintenance events
+        # Validate the existing connection after enabling maintenance notifications
         # Both existing and new connections should now have full handler setup
         self._validate_connection_handlers(existing_conn, pool_handler, enabled_config)
 
@@ -576,9 +576,9 @@ class TestMaintenanceEventsHandlingSingleProxy:
         test_redis_client.connection_pool.release(new_conn)
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_connection_pool_creation_with_maintenance_events(self, pool_class):
-        """Test that connection pools are created with maintenance events configuration."""
-        # Create a pool and Redis client with maintenance events
+    def test_connection_pool_creation_with_maintenance_notifications(self, pool_class):
+        """Test that connection pools are created with maintenance notifications configuration."""
+        # Create a pool and Redis client with maintenance notifications
         max_connections = 3 if pool_class == BlockingConnectionPool else 10
         test_redis_client = self._get_client(
             pool_class, max_connections=max_connections
@@ -587,23 +587,23 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
         try:
             assert (
-                test_pool.connection_kwargs.get("maintenance_events_config")
+                test_pool.connection_kwargs.get("maint_notifications_config")
                 == self.config
             )
-            # Pool should have maintenance events enabled
-            assert test_pool.maintenance_events_pool_handler_enabled() is True
+            # Pool should have maintenance notifications enabled
+            assert test_pool.maint_notifications_pool_handler_enabled() is True
 
             # Create and set a pool handler
-            pool_handler = MaintenanceEventPoolHandler(test_pool, self.config)
-            test_pool.set_maintenance_events_pool_handler(pool_handler)
+            pool_handler = MaintNotificationsPoolHandler(test_pool, self.config)
+            test_pool.set_maint_notifications_pool_handler(pool_handler)
 
             # Validate that the handler is properly set on the pool
             assert (
-                test_pool.connection_kwargs.get("maintenance_events_pool_handler")
+                test_pool.connection_kwargs.get("maint_notifications_pool_handler")
                 == pool_handler
             )
             assert (
-                test_pool.connection_kwargs.get("maintenance_events_config")
+                test_pool.connection_kwargs.get("maint_notifications_config")
                 == pool_handler.config
             )
 
@@ -621,7 +621,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         Test basic Redis operations work with mocked sockets and proper response parsing.
         Basically with test - the mocked socket is validated.
         """
-        # Create a pool and Redis client with maintenance events
+        # Create a pool and Redis client with maintenance notifications
         test_redis_client = self._get_client(pool_class, max_connections=5)
 
         try:
@@ -638,27 +638,27 @@ class TestMaintenanceEventsHandlingSingleProxy:
             assert self.mock_sockets[0].connected
             assert len(self.mock_sockets[0].sent_data) >= 2  # HELLO, SET, GET commands
 
-            # Verify that the connection has maintenance event handler
+            # Verify that the connection has maintenance notification handler
             connection = test_redis_client.connection_pool.get_connection()
-            assert hasattr(connection, "_maintenance_event_connection_handler")
+            assert hasattr(connection, "_maint_notifications_connection_handler")
             test_redis_client.connection_pool.release(connection)
 
         finally:
             if hasattr(test_redis_client.connection_pool, "disconnect"):
                 test_redis_client.connection_pool.disconnect()
 
-    def test_pool_handler_with_migrating_event(self):
-        """Test that pool handler correctly handles migrating events."""
-        # Create a pool and Redis client with maintenance events
+    def test_pool_handler_with_migrating_notification(self):
+        """Test that pool handler correctly handles migrating notifications."""
+        # Create a pool and Redis client with maintenance notifications
         test_redis_client = self._get_client(ConnectionPool)
         test_pool = test_redis_client.connection_pool
 
         try:
             # Create and set a pool handler
-            pool_handler = MaintenanceEventPoolHandler(test_pool, self.config)
+            pool_handler = MaintNotificationsPoolHandler(test_pool, self.config)
 
-            # Create a migrating event (not handled by pool handler)
-            migrating_event = NodeMigratingEvent(id=1, ttl=5)
+            # Create a migrating notification (not handled by pool handler)
+            migrating_notification = NodeMigratingNotification(id=1, ttl=5)
 
             # Mock the required functions
             with (
@@ -666,17 +666,17 @@ class TestMaintenanceEventsHandlingSingleProxy:
                     pool_handler, "remove_expired_notifications"
                 ) as mock_remove_expired,
                 patch.object(
-                    pool_handler, "handle_node_moving_event"
+                    pool_handler, "handle_node_moving_notification"
                 ) as mock_handle_moving,
-                patch("redis.maintenance_events.logging.error") as mock_logging_error,
+                patch("redis.maint_notifications.logging.error") as mock_logging_error,
             ):
-                # Pool handler should return None for migrating events (not its responsibility)
-                pool_handler.handle_event(migrating_event)
+                # Pool handler should return None for migrating notifications (not its responsibility)
+                pool_handler.handle_notification(migrating_notification)
 
                 # Validate that remove_expired_notifications has been called once
                 mock_remove_expired.assert_called_once()
 
-                # Validate that handle_node_moving_event hasn't been called
+                # Validate that handle_node_moving_notification hasn't been called
                 mock_handle_moving.assert_not_called()
 
                 # Validate that logging.error has been called once
@@ -687,9 +687,9 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 test_pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_migration_related_events_handling_integration(self, pool_class):
+    def test_migration_related_notifications_handling_integration(self, pool_class):
         """
-        Test full integration of migration-related events (MIGRATING/MIGRATED) handling.
+        Test full integration of migration-related notifications (MIGRATING/MIGRATED) handling.
 
         This test validates the complete migration lifecycle:
         1. Executes 5 Redis commands sequentially
@@ -701,7 +701,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         7. Tests both ConnectionPool and BlockingConnectionPool implementations
         8. Uses proper RESP3 push message format for realistic protocol simulation
         """
-        # Create a pool and Redis client with maintenance events
+        # Create a pool and Redis client with maintenance notifications
         test_redis_client = self._get_client(pool_class, max_connections=10)
 
         try:
@@ -760,7 +760,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Step 8: Validate socket timeout is reversed back to original after MIGRATED
             self._validate_current_timeout(None)
 
-            # Verify maintenance events were processed correctly
+            # Verify maintenance notifications were processed correctly
             # The key is that we have at least 1 socket and all operations succeeded
             assert len(self.mock_sockets) >= 1, (
                 f"Expected at least 1 socket for operations, got {len(self.mock_sockets)}"
@@ -771,26 +771,26 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 test_redis_client.connection_pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_migrating_event_with_disabled_relax_timeout(self, pool_class):
+    def test_migrating_notification_with_disabled_relaxed_timeout(self, pool_class):
         """
-        Test maintenance events handling when relax timeout is disabled.
+        Test maintenance notifications handling when relaxed timeout is disabled.
 
-        This test validates that when relax_timeout is disabled (-1):
-        1. MIGRATING, MIGRATED, FAILING_OVER, and FAILED_OVER events are received and processed
+        This test validates that when relaxed_timeout is disabled (-1):
+        1. MIGRATING, MIGRATED, FAILING_OVER, and FAILED_OVER notifications are received and processed
         2. No timeout updates are applied to connections
-        3. Socket timeouts remain unchanged during all maintenance events
+        3. Socket timeouts remain unchanged during all maintenance notifications
         4. Tests both ConnectionPool and BlockingConnectionPool implementations
         5. Tests the complete lifecycle: MIGRATING -> MIGRATED -> FAILING_OVER -> FAILED_OVER
         """
-        # Create config with disabled relax timeout
-        disabled_config = MaintenanceEventsConfig(
+        # Create config with disabled relaxed timeout
+        disabled_config = MaintNotificationsConfig(
             enabled=True,
-            relax_timeout=-1,  # This means the relax timeout is Disabled
+            relaxed_timeout=-1,  # This means the relaxed timeout is Disabled
         )
 
-        # Create a pool and Redis client with disabled relax timeout config
+        # Create a pool and Redis client with disabled relaxed timeout config
         test_redis_client = self._get_client(
-            pool_class, max_connections=5, maintenance_events_config=disabled_config
+            pool_class, max_connections=5, maint_notifications_config=disabled_config
         )
 
         try:
@@ -810,7 +810,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate Command 2 result
             assert result2 is True, "Command 2 (SET key_receive_migrating) failed"
 
-            # Validate timeout was NOT updated (relax is disabled)
+            # Validate timeout was NOT updated (relaxed is disabled)
             # Should remain at default timeout (None), not relaxed to 30s
             self._validate_current_timeout(None)
 
@@ -831,7 +831,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate Command 4 result
             assert result4 is True, "Command 4 (SET key_receive_migrated) failed"
 
-            # Validate timeout is still NOT updated after MIGRATED (relax is disabled)
+            # Validate timeout is still NOT updated after MIGRATED (relaxed is disabled)
             self._validate_current_timeout(None)
 
             # Command 5: This SET command will receive FAILING_OVER push message before response
@@ -842,7 +842,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate Command 5 result
             assert result5 is True, "Command 5 (SET key_receive_failing_over) failed"
 
-            # Validate timeout is still NOT updated after FAILING_OVER (relax is disabled)
+            # Validate timeout is still NOT updated after FAILING_OVER (relaxed is disabled)
             self._validate_current_timeout(None)
 
             # Command 6: Another command to verify timeout remains unchanged during failover
@@ -862,10 +862,10 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate Command 7 result
             assert result7 is True, "Command 7 (SET key_receive_failed_over) failed"
 
-            # Validate timeout is still NOT updated after FAILED_OVER (relax is disabled)
+            # Validate timeout is still NOT updated after FAILED_OVER (relaxed is disabled)
             self._validate_current_timeout(None)
 
-            # Command 8: Final command to verify timeout remains unchanged after all events
+            # Command 8: Final command to verify timeout remains unchanged after all notifications
             result8 = test_redis_client.get(key_failed_over)
 
             # Validate Command 8 result
@@ -874,7 +874,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 f"Command 8 (GET key_receive_failed_over) failed. Expected: {expected_value8}, Got: {result8}"
             )
 
-            # Verify maintenance events were processed correctly
+            # Verify maintenance notifications were processed correctly
             # The key is that we have at least 1 socket and all operations succeeded
             assert len(self.mock_sockets) >= 1, (
                 f"Expected at least 1 socket for operations, got {len(self.mock_sockets)}"
@@ -885,9 +885,9 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 test_redis_client.connection_pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_failing_over_related_events_handling_integration(self, pool_class):
+    def test_failing_over_related_notifications_handling_integration(self, pool_class):
         """
-        Test full integration of failing-over-related events (FAILING_OVER/FAILED_OVER) handling.
+        Test full integration of failing-over-related notifications (FAILING_OVER/FAILED_OVER) handling.
 
         This test validates the complete FAILING_OVER -> FAILED_OVER lifecycle:
         1. Executes 5 Redis commands sequentially
@@ -899,7 +899,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         7. Tests both ConnectionPool and BlockingConnectionPool implementations
         8. Uses proper RESP3 push message format for realistic protocol simulation
         """
-        # Create a pool and Redis client with maintenance events
+        # Create a pool and Redis client with maintenance notifications
         test_redis_client = self._get_client(pool_class, max_connections=10)
 
         try:
@@ -958,7 +958,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Step 8: Validate socket timeout is reversed back to original after FAILED_OVER
             self._validate_current_timeout(None)
 
-            # Verify maintenance events were processed correctly
+            # Verify maintenance notifications were processed correctly
             # The key is that we have at least 1 socket and all operations succeeded
             assert len(self.mock_sockets) >= 1, (
                 f"Expected at least 1 socket for operations, got {len(self.mock_sockets)}"
@@ -969,11 +969,11 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 test_redis_client.connection_pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_moving_related_events_handling_integration(self, pool_class):
+    def test_moving_related_notifications_handling_integration(self, pool_class):
         """
-        Test full integration of moving-related events (MOVING) handling with Redis commands.
+        Test full integration of moving-related notifications (MOVING) handling with Redis commands.
 
-        This test validates the complete MOVING event lifecycle:
+        This test validates the complete MOVING notification lifecycle:
         1. Creates multiple connections in the pool
         2. Executes a Redis command that triggers a MOVING push message
         3. Validates that pool configuration is updated with temporary
@@ -981,7 +981,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         4. Validates that existing connections are marked for disconnection
         5. Tests both ConnectionPool and BlockingConnectionPool implementations
         """
-        # Create a pool and Redis client with maintenance events and pool handler
+        # Create a pool and Redis client with maintenance notifications and pool handler
         test_redis_client = self._get_client(
             pool_class, max_connections=10, setup_pool_handler=True
         )
@@ -1002,10 +1002,10 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 connection = test_redis_client.connection_pool.get_connection()
                 in_use_connections.append(connection)
 
-            # Validate all connections are connected prior MOVING event
+            # Validate all connections are connected prior MOVING notification
             self._validate_disconnected(0)
 
-            # Run command that will receive and handle MOVING event
+            # Run command that will receive and handle MOVING notification
             key_moving = "key_receive_moving_0"
             value_moving = "value3_0"
             # the connection used for the command is expected to be reconnected to the new address
@@ -1015,17 +1015,17 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate Command 2 result
             assert result2 is True, "Command 2 (SET key_receive_moving) failed"
 
-            # Validate pool and connections settings were updated according to MOVING event
-            expected_event_hash = hash(MOVING_EVENT)
+            # Validate pool and connections settings were updated according to MOVING notification
+            expected_notification_hash = hash(MOVING_NOTIFICATION)
 
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.MOVING,
-                expected_maintenance_event_hash=expected_event_hash,
+                expected_maintenance_notification_hash=expected_notification_hash,
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
@@ -1036,12 +1036,12 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 in_use_connections,
                 expected_state=MaintenanceState.MOVING,
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
-                expected_current_socket_timeout=self.config.relax_timeout,
+                expected_current_socket_timeout=self.config.relaxed_timeout,
                 expected_current_peername=DEFAULT_ADDRESS.split(":")[
                     0
                 ],  # the in use connections reconnect when they complete their current task
@@ -1050,8 +1050,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 pool=test_redis_client.connection_pool,
                 expected_state=MaintenanceState.MOVING,
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
@@ -1076,7 +1076,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.NONE,
-                expected_maintenance_event_hash=None,
+                expected_maintenance_notification_hash=None,
                 expected_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_socket_timeout=None,
@@ -1102,11 +1102,11 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 test_redis_client.connection_pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_moving_none_events_handling_integration(self, pool_class):
+    def test_moving_none_notifications_handling_integration(self, pool_class):
         """
-        Test full integration of moving-related events (MOVING) handling with Redis commands.
+        Test full integration of moving-related notifications (MOVING) handling with Redis commands.
 
-        This test validates the complete MOVING event lifecycle,
+        This test validates the complete MOVING notification lifecycle,
         when the push notification doesn't contain host and port:
         1. Creates multiple connections in the pool
         2. Executes a Redis command that triggers a MOVING with "null" push message
@@ -1115,7 +1115,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
         4. Validates that existing connections are marked for disconnection after ttl/2 seconds
         5. Tests both ConnectionPool and BlockingConnectionPool implementations
         """
-        # Create a pool and Redis client with maintenance events and pool handler
+        # Create a pool and Redis client with maintenance notifications and pool handler
         test_redis_client = self._get_client(
             pool_class, max_connections=10, setup_pool_handler=True
         )
@@ -1136,10 +1136,10 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 connection = test_redis_client.connection_pool.get_connection()
                 in_use_connections.append(connection)
 
-            # Validate all connections are connected prior MOVING event
+            # Validate all connections are connected prior MOVING notification
             self._validate_disconnected(0)
 
-            # Run command that will receive and handle MOVING event
+            # Run command that will receive and handle MOVING notification
             key_moving = "key_receive_moving_none_0"
             value_moving = "value3_0"
 
@@ -1150,15 +1150,15 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate Command 2 result
             assert result2 is True, "Command 2 (SET key_receive_moving) failed"
 
-            # Validate pool and connections settings were updated according to MOVING event
+            # Validate pool and connections settings were updated according to MOVING notification
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.MOVING,
-                expected_maintenance_event_hash=hash(MOVING_NONE_EVENT),
+                expected_maintenance_notification_hash=hash(MOVING_NONE_NOTIFICATION),
                 expected_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
@@ -1170,12 +1170,12 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 expected_should_reconnect=False,
                 expected_state=MaintenanceState.MOVING,
                 expected_host_address=DEFAULT_ADDRESS.split(":")[0],
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
-                expected_current_socket_timeout=self.config.relax_timeout,
+                expected_current_socket_timeout=self.config.relaxed_timeout,
                 expected_current_peername=DEFAULT_ADDRESS.split(":")[
                     0
                 ],  # the in use connections reconnect when they complete their current task
@@ -1184,8 +1184,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 pool=test_redis_client.connection_pool,
                 expected_state=MaintenanceState.MOVING,
                 expected_host_address=DEFAULT_ADDRESS.split(":")[0],
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
@@ -1199,12 +1199,12 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 expected_should_reconnect=True,
                 expected_state=MaintenanceState.MOVING,
                 expected_host_address=DEFAULT_ADDRESS.split(":")[0],
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
-                expected_current_socket_timeout=self.config.relax_timeout,
+                expected_current_socket_timeout=self.config.relaxed_timeout,
                 expected_current_peername=DEFAULT_ADDRESS.split(":")[
                     0
                 ],  # the in use connections reconnect when they complete their current task
@@ -1229,7 +1229,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.NONE,
-                expected_maintenance_event_hash=None,
+                expected_maintenance_notification_hash=None,
                 expected_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_socket_timeout=None,
@@ -1257,14 +1257,14 @@ class TestMaintenanceEventsHandlingSingleProxy:
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_create_new_conn_while_moving_not_expired(self, pool_class):
         """
-        Test creating new connections while MOVING event is active (not expired).
+        Test creating new connections while MOVING notification is active (not expired).
 
         This test validates that:
-        1. After MOVING event is processed, new connections are created with temporary address
+        1. After MOVING notification is processed, new connections are created with temporary address
         2. New connections inherit the relaxed timeout settings
         3. Pool configuration is properly applied to newly created connections
         """
-        # Create a pool and Redis client with maintenance events and pool handler
+        # Create a pool and Redis client with maintenance notifications and pool handler
         test_redis_client = self._get_client(
             pool_class, max_connections=10, setup_pool_handler=True
         )
@@ -1285,10 +1285,10 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 connection = test_redis_client.connection_pool.get_connection()
                 in_use_connections.append(connection)
 
-            # Validate all connections are connected prior MOVING event
+            # Validate all connections are connected prior MOVING notification
             self._validate_disconnected(0)
 
-            # Run command that will receive and handle MOVING event
+            # Run command that will receive and handle MOVING notification
             key_moving = "key_receive_moving_0"
             value_moving = "value3_0"
             result = test_redis_client.set(key_moving, value_moving)
@@ -1296,18 +1296,18 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate command result
             assert result is True, "SET key_receive_moving command failed"
 
-            # Validate pool and connections settings were updated according to MOVING event
+            # Validate pool and connections settings were updated according to MOVING notification
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.MOVING,
-                expected_maintenance_event_hash=hash(MOVING_EVENT),
+                expected_maintenance_notification_hash=hash(MOVING_NOTIFICATION),
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
             )
 
             # Now get several more connections to force creation of new ones
@@ -1319,11 +1319,11 @@ class TestMaintenanceEventsHandlingSingleProxy:
 
             new_connection = test_redis_client.connection_pool.get_connection()
 
-            # Validate that new connections are created with temporary address and relax timeout
+            # Validate that new connections are created with temporary address and relaxed timeout
             # and when connecting those configs are used
             # get_connection() returns a connection that is already connected
             assert new_connection.host == AFTER_MOVING_ADDRESS.split(":")[0]
-            assert new_connection.socket_timeout is self.config.relax_timeout
+            assert new_connection.socket_timeout is self.config.relaxed_timeout
             # New connections should be connected to the temporary address
             assert new_connection._sock is not None
             assert new_connection._sock.connected is True
@@ -1331,7 +1331,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 new_connection._sock.getpeername()[0]
                 == AFTER_MOVING_ADDRESS.split(":")[0]
             )
-            assert new_connection._sock.gettimeout() == self.config.relax_timeout
+            assert new_connection._sock.gettimeout() == self.config.relaxed_timeout
 
         finally:
             if hasattr(test_redis_client.connection_pool, "disconnect"):
@@ -1340,14 +1340,14 @@ class TestMaintenanceEventsHandlingSingleProxy:
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_create_new_conn_after_moving_expires(self, pool_class):
         """
-        Test creating new connections after MOVING event expires.
+        Test creating new connections after MOVING notification expires.
 
         This test validates that:
         1. After MOVING timeout expires, new connections use original address
         2. Pool configuration is reset to original values
         3. New connections don't inherit temporary settings
         """
-        # Create a pool and Redis client with maintenance events and pool handler
+        # Create a pool and Redis client with maintenance notifications and pool handler
         test_redis_client = self._get_client(
             pool_class, max_connections=10, setup_pool_handler=True
         )
@@ -1368,7 +1368,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 connection = test_redis_client.connection_pool.get_connection()
                 in_use_connections.append(connection)
 
-            # Run command that will receive and handle MOVING event
+            # Run command that will receive and handle MOVING notification
             key_moving = "key_receive_moving_0"
             value_moving = "value3_0"
             result = test_redis_client.set(key_moving, value_moving)
@@ -1403,18 +1403,18 @@ class TestMaintenanceEventsHandlingSingleProxy:
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_receive_migrated_after_moving(self, pool_class):
         """
-        Test receiving MIGRATED event after MOVING event.
+        Test receiving MIGRATED notification after MOVING notification.
 
         This test validates the complete MOVING -> MIGRATED lifecycle:
-        1. MOVING event is processed and temporary settings are applied
-        2. MIGRATED event is received during command execution
+        1. MOVING notification is processed and temporary settings are applied
+        2. MIGRATED notification is received during command execution
         3. Temporary settings are cleared after MIGRATED
         4. Pool configuration is restored to original values
 
         Note: When MIGRATED comes after MOVING and MOVING hasn't yet expired,
         it should not decrease timeouts (future refactoring consideration).
         """
-        # Create a pool and Redis client with maintenance events and pool handler
+        # Create a pool and Redis client with maintenance notifications and pool handler
         test_redis_client = self._get_client(
             pool_class, max_connections=10, setup_pool_handler=True
         )
@@ -1435,10 +1435,10 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 connection = test_redis_client.connection_pool.get_connection()
                 in_use_connections.append(connection)
 
-            # Validate all connections are connected prior MOVING event
+            # Validate all connections are connected prior MOVING notification
             self._validate_disconnected(0)
 
-            # Step 1: Run command that will receive and handle MOVING event
+            # Step 1: Run command that will receive and handle MOVING notification
             key_moving = "key_receive_moving_0"
             value_moving = "value3_0"
             result_moving = test_redis_client.set(key_moving, value_moving)
@@ -1446,23 +1446,23 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate MOVING command result
             assert result_moving is True, "SET key_receive_moving command failed"
 
-            # Validate pool and connections settings were updated according to MOVING event
+            # Validate pool and connections settings were updated according to MOVING notification
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.MOVING,
-                expected_maintenance_event_hash=hash(MOVING_EVENT),
+                expected_maintenance_notification_hash=hash(MOVING_NOTIFICATION),
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
             )
 
             # TODO validate current socket timeout
 
-            # Step 2: Run command that will receive and handle MIGRATED event
+            # Step 2: Run command that will receive and handle MIGRATED notification
             # This should clear the temporary settings
             key_migrated = "key_receive_migrated_0"
             value_migrated = "migrated_value"
@@ -1471,21 +1471,21 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate MIGRATED command result
             assert result_migrated is True, "SET key_receive_migrated command failed"
 
-            # Step 3: Validate that MIGRATED event was processed but MOVING settings remain
-            # (MIGRATED doesn't automatically clear MOVING settings - they are separate events)
+            # Step 3: Validate that MIGRATED notification was processed but MOVING settings remain
+            # (MIGRATED doesn't automatically clear MOVING settings - they are separate notifications)
             # MOVING settings should still be active
             # MOVING timeout should still be active
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.MOVING,
-                expected_maintenance_event_hash=hash(MOVING_EVENT),
+                expected_maintenance_notification_hash=hash(MOVING_NOTIFICATION),
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
             )
 
             # Step 4: Create new connections after MIGRATED to verify they still use MOVING settings
@@ -1498,7 +1498,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             # Validate that new connections are created with MOVING settings (still active)
             for connection in new_connections:
                 assert connection.host == AFTER_MOVING_ADDRESS.split(":")[0]
-                # Note: New connections may not inherit the exact relax timeout value
+                # Note: New connections may not inherit the exact relaxed timeout value
                 # but they should have the temporary host address
                 # New connections should be connected
                 if connection._sock is not None:
@@ -1517,10 +1517,10 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 test_redis_client.connection_pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_overlapping_moving_events(self, pool_class):
+    def test_overlapping_moving_notifications(self, pool_class):
         """
-        Test handling of overlapping/duplicate MOVING events (e.g., two MOVING events before the first expires).
-        Ensures that the second MOVING event updates the pool and connections as expected, and that expiry/cleanup works.
+        Test handling of overlapping/duplicate MOVING notifications (e.g., two MOVING notifications before the first expires).
+        Ensures that the second MOVING notification updates the pool and connections as expected, and that expiry/cleanup works.
         """
         global AFTER_MOVING_ADDRESS
         test_redis_client = self._get_client(
@@ -1543,7 +1543,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 conn = test_redis_client.connection_pool.get_connection()
                 in_use_connections.append(conn)
 
-            # Trigger first MOVING event
+            # Trigger first MOVING notification
             key_moving1 = "key_receive_moving_0"
             value_moving1 = "value3_0"
             result1 = test_redis_client.set(key_moving1, value_moving1)
@@ -1551,26 +1551,26 @@ class TestMaintenanceEventsHandlingSingleProxy:
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.MOVING,
-                expected_maintenance_event_hash=hash(MOVING_EVENT),
+                expected_maintenance_notification_hash=hash(MOVING_NOTIFICATION),
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
             )
-            # Validate all connections reflect the first MOVING event
+            # Validate all connections reflect the first MOVING notification
             Helpers.validate_in_use_connections_state(
                 in_use_connections,
                 expected_state=MaintenanceState.MOVING,
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
-                expected_current_socket_timeout=self.config.relax_timeout,
+                expected_current_socket_timeout=self.config.relaxed_timeout,
                 expected_current_peername=DEFAULT_ADDRESS.split(":")[0],
             )
             Helpers.validate_free_connections_state(
@@ -1579,8 +1579,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 connected_to_tmp_address=True,
                 expected_state=MaintenanceState.MOVING,
                 expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
-                expected_socket_timeout=self.config.relax_timeout,
-                expected_socket_connect_timeout=self.config.relax_timeout,
+                expected_socket_timeout=self.config.relaxed_timeout,
+                expected_socket_connect_timeout=self.config.relaxed_timeout,
                 expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_orig_socket_timeout=None,
                 expected_orig_socket_connect_timeout=None,
@@ -1590,13 +1590,13 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 conn.disconnect()
                 conn.connect()
 
-            # Before the first MOVING expires, trigger a second MOVING event (simulate new address)
+            # Before the first MOVING expires, trigger a second MOVING notification (simulate new address)
             # Validate the orig properties are not changed!
             second_moving_address = "5.6.7.8:6380"
             orig_after_moving = AFTER_MOVING_ADDRESS
             # Temporarily modify the global constant for this test
             AFTER_MOVING_ADDRESS = second_moving_address
-            second_moving_event = NodeMovingEvent(
+            second_moving_notification = NodeMovingNotification(
                 id=1,
                 new_node_host=second_moving_address.split(":")[0],
                 new_node_port=int(second_moving_address.split(":")[1]),
@@ -1610,26 +1610,28 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 Helpers.validate_conn_kwargs(
                     pool=test_redis_client.connection_pool,
                     expected_maintenance_state=MaintenanceState.MOVING,
-                    expected_maintenance_event_hash=hash(second_moving_event),
+                    expected_maintenance_notification_hash=hash(
+                        second_moving_notification
+                    ),
                     expected_host_address=second_moving_address.split(":")[0],
                     expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
-                    expected_socket_timeout=self.config.relax_timeout,
-                    expected_socket_connect_timeout=self.config.relax_timeout,
+                    expected_socket_timeout=self.config.relaxed_timeout,
+                    expected_socket_connect_timeout=self.config.relaxed_timeout,
                     expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                     expected_orig_socket_timeout=None,
                     expected_orig_socket_connect_timeout=None,
                 )
-                # Validate all connections reflect the second MOVING event
+                # Validate all connections reflect the second MOVING notification
                 Helpers.validate_in_use_connections_state(
                     in_use_connections,
                     expected_state=MaintenanceState.MOVING,
                     expected_host_address=second_moving_address.split(":")[0],
-                    expected_socket_timeout=self.config.relax_timeout,
-                    expected_socket_connect_timeout=self.config.relax_timeout,
+                    expected_socket_timeout=self.config.relaxed_timeout,
+                    expected_socket_connect_timeout=self.config.relaxed_timeout,
                     expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                     expected_orig_socket_timeout=None,
                     expected_orig_socket_connect_timeout=None,
-                    expected_current_socket_timeout=self.config.relax_timeout,
+                    expected_current_socket_timeout=self.config.relaxed_timeout,
                     expected_current_peername=orig_after_moving.split(":")[0],
                 )
                 # print(test_redis_client.connection_pool._available_connections)
@@ -1640,8 +1642,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
                     tmp_address=second_moving_address.split(":")[0],
                     expected_state=MaintenanceState.MOVING,
                     expected_host_address=second_moving_address.split(":")[0],
-                    expected_socket_timeout=self.config.relax_timeout,
-                    expected_socket_connect_timeout=self.config.relax_timeout,
+                    expected_socket_timeout=self.config.relaxed_timeout,
+                    expected_socket_connect_timeout=self.config.relaxed_timeout,
                     expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
                     expected_orig_socket_timeout=None,
                     expected_orig_socket_connect_timeout=None,
@@ -1654,7 +1656,7 @@ class TestMaintenanceEventsHandlingSingleProxy:
             Helpers.validate_conn_kwargs(
                 pool=test_redis_client.connection_pool,
                 expected_maintenance_state=MaintenanceState.NONE,
-                expected_maintenance_event_hash=None,
+                expected_maintenance_notification_hash=None,
                 expected_host_address=DEFAULT_ADDRESS.split(":")[0],
                 expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
                 expected_socket_timeout=None,
@@ -1668,10 +1670,10 @@ class TestMaintenanceEventsHandlingSingleProxy:
                 test_redis_client.connection_pool.disconnect()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_thread_safety_concurrent_event_handling(self, pool_class):
+    def test_thread_safety_concurrent_notification_handling(self, pool_class):
         """
-        Test thread-safety under concurrent maintenance event handling.
-        Simulates multiple threads triggering MOVING events and performing operations concurrently.
+        Test thread-safety under concurrent maintenance notification handling.
+        Simulates multiple threads triggering MOVING notifications and performing operations concurrently.
         """
         import threading
 
@@ -1697,15 +1699,15 @@ class TestMaintenanceEventsHandlingSingleProxy:
             t.join()
         assert all(results), f"Not all threads succeeded: {results}"
         assert not errors, f"Errors occurred in threads: {errors}"
-        # After all threads, MOVING event should have been handled safely
+        # After all threads, MOVING notification should have been handled safely
         Helpers.validate_conn_kwargs(
             pool=test_redis_client.connection_pool,
             expected_maintenance_state=MaintenanceState.MOVING,
-            expected_maintenance_event_hash=hash(MOVING_EVENT),
+            expected_maintenance_notification_hash=hash(MOVING_NOTIFICATION),
             expected_host_address=AFTER_MOVING_ADDRESS.split(":")[0],
             expected_port=int(DEFAULT_ADDRESS.split(":")[1]),
-            expected_socket_timeout=self.config.relax_timeout,
-            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_socket_timeout=self.config.relaxed_timeout,
+            expected_socket_connect_timeout=self.config.relaxed_timeout,
             expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
@@ -1717,17 +1719,17 @@ class TestMaintenanceEventsHandlingSingleProxy:
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
     def test_moving_migrating_migrated_moved_state_transitions(self, pool_class):
         """
-        Test moving configs are not lost if the per connection events get picked up after moving is handled.
-        Sequence of events: MOVING, MIGRATING, MIGRATED, FAILING_OVER, FAILED_OVER, MOVED.
-        Note: FAILING_OVER and FAILED_OVER events do not change the connection state when already in MOVING state.
-        Checks the state after each event for all connections and for new connections created during each state.
+        Test moving configs are not lost if the per connection notifications get picked up after moving is handled.
+        Sequence of notifications: MOVING, MIGRATING, MIGRATED, FAILING_OVER, FAILED_OVER, MOVED.
+        Note: FAILING_OVER and FAILED_OVER notifications do not change the connection state when already in MOVING state.
+        Checks the state after each notification for all connections and for new connections created during each state.
         """
         # Setup
         test_redis_client = self._get_client(
             pool_class, max_connections=5, setup_pool_handler=True
         )
         pool = test_redis_client.connection_pool
-        pool_handler = pool.connection_kwargs["maintenance_events_pool_handler"]
+        pool_handler = pool.connection_kwargs["maint_notifications_pool_handler"]
 
         # Create and release some connections
         in_use_connections = []
@@ -1745,23 +1747,23 @@ class TestMaintenanceEventsHandlingSingleProxy:
             conn = pool.get_connection()
             in_use_connections.append(conn)
 
-        # 1. MOVING event
+        # 1. MOVING notification
         tmp_address = "22.23.24.25"
-        moving_event = NodeMovingEvent(
+        moving_notification = NodeMovingNotification(
             id=1, new_node_host=tmp_address, new_node_port=6379, ttl=1
         )
-        pool_handler.handle_event(moving_event)
+        pool_handler.handle_notification(moving_notification)
 
         Helpers.validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.MOVING,
             expected_host_address=tmp_address,
-            expected_socket_timeout=self.config.relax_timeout,
-            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_socket_timeout=self.config.relaxed_timeout,
+            expected_socket_connect_timeout=self.config.relaxed_timeout,
             expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
-            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_socket_timeout=self.config.relaxed_timeout,
             expected_current_peername=DEFAULT_ADDRESS.split(":")[0],
         )
         Helpers.validate_free_connections_state(
@@ -1770,90 +1772,90 @@ class TestMaintenanceEventsHandlingSingleProxy:
             connected_to_tmp_address=False,
             expected_state=MaintenanceState.MOVING,
             expected_host_address=tmp_address,
-            expected_socket_timeout=self.config.relax_timeout,
-            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_socket_timeout=self.config.relaxed_timeout,
+            expected_socket_connect_timeout=self.config.relaxed_timeout,
             expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
         )
 
-        # 2. MIGRATING event (simulate direct connection handler call)
+        # 2. MIGRATING notification (simulate direct connection handler call)
         for conn in in_use_connections:
-            conn._maintenance_event_connection_handler.handle_event(
-                NodeMigratingEvent(id=2, ttl=1)
+            conn._maint_notifications_connection_handler.handle_notification(
+                NodeMigratingNotification(id=2, ttl=1)
             )
         Helpers.validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.MOVING,
             expected_host_address=tmp_address,
-            expected_socket_timeout=self.config.relax_timeout,
-            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_socket_timeout=self.config.relaxed_timeout,
+            expected_socket_connect_timeout=self.config.relaxed_timeout,
             expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
-            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_socket_timeout=self.config.relaxed_timeout,
             expected_current_peername=DEFAULT_ADDRESS.split(":")[0],
         )
 
-        # 3. MIGRATED event (simulate direct connection handler call)
+        # 3. MIGRATED notification (simulate direct connection handler call)
         for conn in in_use_connections:
-            conn._maintenance_event_connection_handler.handle_event(
-                NodeMigratedEvent(id=2)
-            )
-        # State should not change for connections that are in MOVING state
-        Helpers.validate_in_use_connections_state(
-            in_use_connections,
-            expected_state=MaintenanceState.MOVING,
-            expected_host_address=tmp_address,
-            expected_socket_timeout=self.config.relax_timeout,
-            expected_socket_connect_timeout=self.config.relax_timeout,
-            expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
-            expected_orig_socket_timeout=None,
-            expected_orig_socket_connect_timeout=None,
-            expected_current_socket_timeout=self.config.relax_timeout,
-            expected_current_peername=DEFAULT_ADDRESS.split(":")[0],
-        )
-
-        # 4. FAILING_OVER event (simulate direct connection handler call)
-        for conn in in_use_connections:
-            conn._maintenance_event_connection_handler.handle_event(
-                NodeFailingOverEvent(id=3, ttl=1)
+            conn._maint_notifications_connection_handler.handle_notification(
+                NodeMigratedNotification(id=2)
             )
         # State should not change for connections that are in MOVING state
         Helpers.validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.MOVING,
             expected_host_address=tmp_address,
-            expected_socket_timeout=self.config.relax_timeout,
-            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_socket_timeout=self.config.relaxed_timeout,
+            expected_socket_connect_timeout=self.config.relaxed_timeout,
             expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
-            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_socket_timeout=self.config.relaxed_timeout,
             expected_current_peername=DEFAULT_ADDRESS.split(":")[0],
         )
 
-        # 5. FAILED_OVER event (simulate direct connection handler call)
+        # 4. FAILING_OVER notification (simulate direct connection handler call)
         for conn in in_use_connections:
-            conn._maintenance_event_connection_handler.handle_event(
-                NodeFailedOverEvent(id=3)
+            conn._maint_notifications_connection_handler.handle_notification(
+                NodeFailingOverNotification(id=3, ttl=1)
             )
         # State should not change for connections that are in MOVING state
         Helpers.validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.MOVING,
             expected_host_address=tmp_address,
-            expected_socket_timeout=self.config.relax_timeout,
-            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_socket_timeout=self.config.relaxed_timeout,
+            expected_socket_connect_timeout=self.config.relaxed_timeout,
             expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
-            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_socket_timeout=self.config.relaxed_timeout,
             expected_current_peername=DEFAULT_ADDRESS.split(":")[0],
         )
 
-        # 6. MOVED event (simulate timer expiry)
-        pool_handler.handle_node_moved_event(moving_event)
+        # 5. FAILED_OVER notification (simulate direct connection handler call)
+        for conn in in_use_connections:
+            conn._maint_notifications_connection_handler.handle_notification(
+                NodeFailedOverNotification(id=3)
+            )
+        # State should not change for connections that are in MOVING state
+        Helpers.validate_in_use_connections_state(
+            in_use_connections,
+            expected_state=MaintenanceState.MOVING,
+            expected_host_address=tmp_address,
+            expected_socket_timeout=self.config.relaxed_timeout,
+            expected_socket_connect_timeout=self.config.relaxed_timeout,
+            expected_orig_host_address=DEFAULT_ADDRESS.split(":")[0],
+            expected_orig_socket_timeout=None,
+            expected_orig_socket_connect_timeout=None,
+            expected_current_socket_timeout=self.config.relaxed_timeout,
+            expected_current_peername=DEFAULT_ADDRESS.split(":")[0],
+        )
+
+        # 6. MOVED notification (simulate timer expiry)
+        pool_handler.handle_node_moved_notification(moving_notification)
         Helpers.validate_in_use_connections_state(
             in_use_connections,
             expected_state=MaintenanceState.NONE,
@@ -1889,8 +1891,8 @@ class TestMaintenanceEventsHandlingSingleProxy:
             pool.disconnect()
 
 
-class TestMaintenanceEventsHandlingMultipleProxies:
-    """Integration tests for maintenance events handling with real connection pool."""
+class TestMaintenanceNotificationsHandlingMultipleProxies:
+    """Integration tests for maintenance notifications handling with real connection pool."""
 
     def setup_method(self):
         """Set up test fixtures with mocked sockets."""
@@ -1950,9 +1952,9 @@ class TestMaintenanceEventsHandlingMultipleProxies:
         )
         self.getaddrinfo_patcher.start()
 
-        # Create maintenance events config
-        self.config = MaintenanceEventsConfig(
-            enabled=True, proactive_reconnect=True, relax_timeout=30
+        # Create maintenance notifications config
+        self.config = MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=30
         )
 
     def teardown_method(self):
@@ -1970,13 +1972,13 @@ class TestMaintenanceEventsHandlingMultipleProxies:
             host=self.orig_host,
             port=12345,
             max_connections=10,
-            protocol=3,  # Required for maintenance events
-            maintenance_events_config=self.config,
+            protocol=3,  # Required for maintenance notifications
+            maint_notifications_config=self.config,
         )
-        pool.set_maintenance_events_pool_handler(
-            MaintenanceEventPoolHandler(pool, self.config)
+        pool.set_maint_notifications_pool_handler(
+            MaintNotificationsPoolHandler(pool, self.config)
         )
-        pool_handler = pool.connection_kwargs["maintenance_events_pool_handler"]
+        pool_handler = pool.connection_kwargs["maint_notifications_pool_handler"]
 
         # Create and release some connections
         key1 = "1.2.3.4"
@@ -1992,12 +1994,14 @@ class TestMaintenanceEventsHandlingMultipleProxies:
             while len(conns) > 1:
                 pool.release(conns.pop())
 
-        # Send MOVING event to con with ip = key1
+        # Send MOVING notification to con with ip = key1
         conn = in_use_connections[key1][0]
         pool_handler.set_connection(conn)
         new_ip = "13.14.15.16"
-        pool_handler.handle_event(
-            NodeMovingEvent(id=1, new_node_host=new_ip, new_node_port=6379, ttl=1)
+        pool_handler.handle_notification(
+            NodeMovingNotification(
+                id=1, new_node_host=new_ip, new_node_port=6379, ttl=1
+            )
         )
 
         # validate in use connection and ip1
@@ -2005,12 +2009,12 @@ class TestMaintenanceEventsHandlingMultipleProxies:
             in_use_connections[key1],
             expected_state=MaintenanceState.MOVING,
             expected_host_address=new_ip,
-            expected_socket_timeout=self.config.relax_timeout,
-            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_socket_timeout=self.config.relaxed_timeout,
+            expected_socket_connect_timeout=self.config.relaxed_timeout,
             expected_orig_host_address=self.orig_host,
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
-            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_socket_timeout=self.config.relaxed_timeout,
             expected_current_peername=key1,
         )
         # validate free connections for ip1
@@ -2024,8 +2028,8 @@ class TestMaintenanceEventsHandlingMultipleProxies:
                 changed_free_connections += 1
                 assert conn.maintenance_state == MaintenanceState.MOVING
                 assert conn.host == new_ip
-                assert conn.socket_timeout == self.config.relax_timeout
-                assert conn.socket_connect_timeout == self.config.relax_timeout
+                assert conn.socket_timeout == self.config.relaxed_timeout
+                assert conn.socket_connect_timeout == self.config.relaxed_timeout
                 assert conn.orig_host_address == self.orig_host
                 assert conn.orig_socket_timeout is None
                 assert conn.orig_socket_connect_timeout is None
@@ -2040,12 +2044,14 @@ class TestMaintenanceEventsHandlingMultipleProxies:
         assert changed_free_connections == 2
         assert len(free_connections) == 4
 
-        # Send second MOVING event to con with ip = key2
+        # Send second MOVING notification to con with ip = key2
         conn = in_use_connections[key2][0]
         pool_handler.set_connection(conn)
         new_ip_2 = "17.18.19.20"
-        pool_handler.handle_event(
-            NodeMovingEvent(id=2, new_node_host=new_ip_2, new_node_port=6379, ttl=2)
+        pool_handler.handle_notification(
+            NodeMovingNotification(
+                id=2, new_node_host=new_ip_2, new_node_port=6379, ttl=2
+            )
         )
 
         # validate in use connection and ip2
@@ -2053,12 +2059,12 @@ class TestMaintenanceEventsHandlingMultipleProxies:
             in_use_connections[key2],
             expected_state=MaintenanceState.MOVING,
             expected_host_address=new_ip_2,
-            expected_socket_timeout=self.config.relax_timeout,
-            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_socket_timeout=self.config.relaxed_timeout,
+            expected_socket_connect_timeout=self.config.relaxed_timeout,
             expected_orig_host_address=self.orig_host,
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
-            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_socket_timeout=self.config.relaxed_timeout,
             expected_current_peername=key2,
         )
         # validate free connections for ip2
@@ -2072,46 +2078,50 @@ class TestMaintenanceEventsHandlingMultipleProxies:
                 changed_free_connections += 1
                 assert conn.maintenance_state == MaintenanceState.MOVING
                 assert conn.host == new_ip_2
-                assert conn.socket_timeout == self.config.relax_timeout
-                assert conn.socket_connect_timeout == self.config.relax_timeout
+                assert conn.socket_timeout == self.config.relaxed_timeout
+                assert conn.socket_connect_timeout == self.config.relaxed_timeout
                 assert conn.orig_host_address == self.orig_host
                 assert conn.orig_socket_timeout is None
                 assert conn.orig_socket_connect_timeout is None
             # here I can't validate the other connections since some of
-            # them are in MOVING state from the first event
+            # them are in MOVING state from the first notification
             # and some are in NONE state
         assert changed_free_connections == 1
 
-        # MIGRATING event on connection that has already been marked as MOVING
+        # MIGRATING notification on connection that has already been marked as MOVING
         conn = in_use_connections[key2][0]
-        conn_event_handler = conn._maintenance_event_connection_handler
-        conn_event_handler.handle_event(NodeMigratingEvent(id=3, ttl=1))
+        conn_notification_handler = conn._maint_notifications_connection_handler
+        conn_notification_handler.handle_notification(
+            NodeMigratingNotification(id=3, ttl=1)
+        )
         # validate connection does not lose its MOVING state
         assert conn.maintenance_state == MaintenanceState.MOVING
-        # MIGRATED event
-        conn_event_handler.handle_event(NodeMigratedEvent(id=3))
-        # validate connection does not lose its MOVING state and relax timeout
+        # MIGRATED notification
+        conn_notification_handler.handle_notification(NodeMigratedNotification(id=3))
+        # validate connection does not lose its MOVING state and relaxed timeout
         assert conn.maintenance_state == MaintenanceState.MOVING
-        assert conn.socket_timeout == self.config.relax_timeout
+        assert conn.socket_timeout == self.config.relaxed_timeout
 
-        # Send Migrating event to con with ip = key3
+        # Send Migrating notification to con with ip = key3
         conn = in_use_connections[key3][0]
-        conn_event_handler = conn._maintenance_event_connection_handler
-        conn_event_handler.handle_event(NodeMigratingEvent(id=3, ttl=1))
+        conn_notification_handler = conn._maint_notifications_connection_handler
+        conn_notification_handler.handle_notification(
+            NodeMigratingNotification(id=3, ttl=1)
+        )
         # validate connection is in MIGRATING state
         assert conn.maintenance_state == MaintenanceState.MAINTENANCE
 
-        assert conn.socket_timeout == self.config.relax_timeout
+        assert conn.socket_timeout == self.config.relaxed_timeout
 
-        # Send MIGRATED event to con with ip = key3
-        conn_event_handler.handle_event(NodeMigratedEvent(id=3))
+        # Send MIGRATED notification to con with ip = key3
+        conn_notification_handler.handle_notification(NodeMigratedNotification(id=3))
         # validate connection is in MOVING state
         assert conn.maintenance_state == MaintenanceState.NONE
         assert conn.socket_timeout is None
 
-        # sleep to expire only the first MOVING events
+        # sleep to expire only the first MOVING notifications
         sleep(1.3)
-        # validate only the connections affected by the first MOVING event
+        # validate only the connections affected by the first MOVING notification
         # have lost their MOVING state
         Helpers.validate_in_use_connections_state(
             in_use_connections[key1],
@@ -2129,12 +2139,12 @@ class TestMaintenanceEventsHandlingMultipleProxies:
             in_use_connections[key2],
             expected_state=MaintenanceState.MOVING,
             expected_host_address=new_ip_2,
-            expected_socket_timeout=self.config.relax_timeout,
-            expected_socket_connect_timeout=self.config.relax_timeout,
+            expected_socket_timeout=self.config.relaxed_timeout,
+            expected_socket_connect_timeout=self.config.relaxed_timeout,
             expected_orig_host_address=self.orig_host,
             expected_orig_socket_timeout=None,
             expected_orig_socket_connect_timeout=None,
-            expected_current_socket_timeout=self.config.relax_timeout,
+            expected_current_socket_timeout=self.config.relaxed_timeout,
             expected_current_peername=key2,
         )
         Helpers.validate_in_use_connections_state(
@@ -2152,7 +2162,7 @@ class TestMaintenanceEventsHandlingMultipleProxies:
         )
         # TODO validate free connections
 
-        # sleep to expire the second MOVING events
+        # sleep to expire the second MOVING notifications
         sleep(1)
         # validate all connections have lost their MOVING state
         Helpers.validate_in_use_connections_state(
