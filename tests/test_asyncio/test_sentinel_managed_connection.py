@@ -1,11 +1,10 @@
 import socket
+from unittest import mock
 
 import pytest
 from redis.asyncio.retry import Retry
 from redis.asyncio.sentinel import SentinelManagedConnection
 from redis.backoff import NoBackoff
-
-from .compat import mock
 
 pytestmark = pytest.mark.asyncio
 
@@ -34,4 +33,5 @@ async def test_connect_retry_on_timeout_error(connect_args):
     conn._connect.side_effect = mock_connect
     await conn.connect()
     assert conn._connect.call_count == 3
+    assert connection_pool.get_master_address.call_count == 3
     await conn.disconnect()

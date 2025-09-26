@@ -9,6 +9,7 @@ vagrant/.vagrant
 .cache
 .eggs
 .idea
+.vscode
 .coverage
 env
 venv
@@ -19,3 +20,10 @@ coverage.xml
 prof
 profile_output*
 docker/stunnel/keys
+/dockers/*/node-*/*
+/dockers/*/tls/*
+/dockers/standalone/
+/dockers/cluster/
+/dockers/replica/
+/dockers/sentinel/
+/dockers/redis-stack/

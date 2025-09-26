@@ -129,6 +129,36 @@ class TestLock:
             async with self.get_lock(r, "foo", blocking_timeout=0.1):
                 pass
 
+    async def test_context_manager_not_raise_on_release_lock_not_owned_error(self, r):
+        try:
+            async with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=False
+            ):
+                await asyncio.sleep(0.15)
+        except LockNotOwnedError:
+            pytest.fail("LockNotOwnedError should not have been raised")
+
+        with pytest.raises(LockNotOwnedError):
+            async with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=True
+            ):
+                await asyncio.sleep(0.15)
+
+    async def test_context_manager_not_raise_on_release_lock_error(self, r):
+        try:
+            async with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=False
+            ) as lock:
+                await lock.release()
+        except LockError:
+            pytest.fail("LockError should not have been raised")
+
+        with pytest.raises(LockError):
+            async with self.get_lock(
+                r, "foo", timeout=0.1, raise_on_release_error=True
+            ) as lock:
+                await lock.release()
+
     async def test_high_sleep_small_blocking_timeout(self, r):
         lock1 = self.get_lock(r, "foo")
         assert await lock1.acquire(blocking=False)
@@ -174,11 +204,12 @@ class TestLock:
         await lock.release()
 
     async def test_extend_lock_float(self, r):
-        lock = self.get_lock(r, "foo", timeout=10.0)
+        lock = self.get_lock(r, "foo", timeout=10.5)
         assert await lock.acquire(blocking=False)
-        assert 8000 < (await r.pttl("foo")) <= 10000
-        assert await lock.extend(10.0)
-        assert 16000 < (await r.pttl("foo")) <= 20000
+        assert 10400 < (await r.pttl("foo")) <= 10500
+        old_ttl = await r.pttl("foo")
+        assert await lock.extend(10.5)
+        assert old_ttl + 10400 < (await r.pttl("foo")) <= old_ttl + 10500
         await lock.release()
 
     async def test_extending_unlocked_lock_raises_error(self, r):

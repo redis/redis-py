@@ -1,10 +1,4 @@
 import asyncio
-from unittest import mock
-
-try:
-    mock.AsyncMock
-except AttributeError:
-    from unittest import mock
 
 try:
     from contextlib import aclosing

@@ -1,5 +1,7 @@
 from typing import List, Optional, Union
 
+from redis.commands.search.dialect import DEFAULT_DIALECT
+
 
 class Query:
     """
@@ -7,7 +9,7 @@ class Query:
     the query string. The query string is set in the constructor, and other
     options have setter functions.
 
-    The setter functions return the query object, so they can be chained,
+    The setter functions return the query object so they can be chained.
     i.e. `Query("foo").verbatim().filter(...)` etc.
     """
 
@@ -40,7 +42,7 @@ class Query:
         self._highlight_fields: List = []
         self._language: Optional[str] = None
         self._expander: Optional[str] = None
-        self._dialect: Optional[int] = None
+        self._dialect: int = DEFAULT_DIALECT
 
     def query_string(self) -> str:
         """Return the query string of this query only."""
@@ -93,12 +95,12 @@ class Query:
     ) -> "Query":
         """
         Return an abridged format of the field, containing only the segments of
-        the field which contain the matching term(s).
+        the field that contain the matching term(s).
 
         If `fields` is specified, then only the mentioned fields are
-        summarized; otherwise all results are summarized.
+        summarized; otherwise, all results are summarized.
 
-        Server side defaults are used for each option (except `fields`)
+        Server-side defaults are used for each option (except `fields`)
         if not specified
 
         - **fields** List of fields to summarize. All fields are summarized
@@ -128,7 +130,7 @@ class Query:
         """
         Apply specified markup to matched term(s) within the returned field(s).
 
-        - **fields** If specified then only those mentioned fields are
+        - **fields** If specified, then only those mentioned fields are
         highlighted, otherwise all fields are highlighted
         - **tags** A list of two strings to surround the match.
         """
@@ -152,7 +154,7 @@ class Query:
         return self
 
     def slop(self, slop: int) -> "Query":
-        """Allow a maximum of N intervening non matched terms between
+        """Allow a maximum of N intervening non-matched terms between
         phrase terms (0 means exact phrase).
         """
         self._slop = slop
@@ -167,7 +169,7 @@ class Query:
         """
         Match only documents where the query terms appear in
         the same order in the document.
-        i.e. for the query "hello world", we do not match "world hello"
+        i.e., for the query "hello world", we do not match "world hello"
         """
         self._in_order = True
         return self
@@ -176,6 +178,8 @@ class Query:
         """
         Use a different scoring function to evaluate document relevance.
         Default is `TFIDF`.
+
+        Since Redis 8.0 default was changed to BM25STD.
 
         :param scorer: The scoring function to use
                        (e.g. `TFIDF.DOCNORM` or `BM25`)
@@ -254,7 +258,7 @@ class Query:
         return self
 
     def verbatim(self) -> "Query":
-        """Set the query to be verbatim, i.e. use no query expansion
+        """Set the query to be verbatim, i.e., use no query expansion
         or stemming.
         """
         self._verbatim = True
@@ -288,7 +292,7 @@ class Query:
         """
         Limit the search to specific TEXT fields only.
 
-        - **fields**: A list of strings, case sensitive field names
+        - **fields**: A list of strings; case-sensitive field names
         from the defined schema.
         """
         self._fields = fields
@@ -297,7 +301,7 @@ class Query:
     def add_filter(self, flt: "Filter") -> "Query":
         """
         Add a numeric or geo filter to the query.
-        **Currently only one of each filter is supported by the engine**
+        **Currently, only one of each filter is supported by the engine**
 
         - **flt**: A NumericFilter or GeoFilter object, used on a
         corresponding field
@@ -311,14 +315,14 @@ class Query:
         Add a sortby field to the query.
 
         - **field** - the name of the field to sort by
-        - **asc** - when `True`, sorting will be done in asceding order
+        - **asc** - when `True`, sorting will be done in ascending order
         """
         self._sortby = SortbyField(field, asc)
         return self
 
     def expander(self, expander: str) -> "Query":
         """
-        Add a expander field to the query.
+        Add an expander field to the query.
 
         - **expander** - the name of the expander
         """

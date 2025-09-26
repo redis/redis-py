@@ -1,0 +1,66 @@
+name: Hiredis-py integration tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      redis-py-branch:
+        description: 'redis-py branch to run tests on'
+        required: true
+        default: 'master'
+      hiredis-branch:
+        description: 'hiredis-py branch to run tests on'
+        required: true
+        default: 'master'
+
+concurrency:
+  group: ${{ github.event.pull_request.number || github.ref }}-hiredis-integration
+  cancel-in-progress: true
+
+permissions:
+  contents: read  #  to fetch code (actions/checkout)
+
+env:
+  CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  # this speeds up coverage with Python 3.12: https://github.com/nedbat/coveragepy/issues/1665
+  COVERAGE_CORE: sysmon
+  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: '8.0.2'
+  CURRENT_REDIS_VERSION: '8.0.2'
+
+jobs:
+  redis_version:
+    runs-on: ubuntu-latest
+    outputs:
+      CURRENT: ${{ env.CURRENT_REDIS_VERSION }}
+    steps:
+      - name: Compute outputs
+        run: |
+          echo "CURRENT=${{ env.CURRENT_REDIS_VERSION }}" >> $GITHUB_OUTPUT
+
+  hiredis-tests:
+    runs-on: ubuntu-latest
+    needs: [redis_version]
+    timeout-minutes: 60
+    strategy:
+      max-parallel: 15
+      fail-fast: false
+      matrix:
+        redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
+        python-version: [ '3.9', '3.13']
+        parser-backend: [ 'hiredis' ]
+        hiredis-version: [ 'unstable' ]
+        event-loop: [ 'asyncio' ]
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+    name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.redis-py-branch }}
+      - name: Run tests
+        uses: ./.github/actions/run-tests
+        with:
+          python-version: ${{ matrix.python-version }}
+          parser-backend: ${{ matrix.parser-backend }}
+          redis-version: ${{ matrix.redis-version }}
+          hiredis-version: ${{ matrix.hiredis-version }}
+          hiredis-branch: ${{ inputs.hiredis-branch }}

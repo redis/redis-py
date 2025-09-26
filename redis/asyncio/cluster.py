@@ -2,29 +2,29 @@ import asyncio
 import collections
 import random
 import socket
-import ssl
+import threading
+import time
 import warnings
+from abc import ABC, abstractmethod
+from copy import copy
+from itertools import chain
 from typing import (
     Any,
     Callable,
+    Coroutine,
     Deque,
     Dict,
     Generator,
     List,
     Mapping,
     Optional,
+    Set,
     Tuple,
     Type,
     TypeVar,
     Union,
 )
 
-from redis._cache import (
-    DEFAULT_ALLOW_LIST,
-    DEFAULT_DENY_LIST,
-    DEFAULT_EVICTION_POLICY,
-    AbstractCache,
-)
 from redis._parsers import AsyncCommandsParser, Encoder
 from redis._parsers.helpers import (
     _RedisCallbacks,
@@ -32,10 +32,11 @@ from redis._parsers.helpers import (
     _RedisCallbacksRESP3,
 )
 from redis.asyncio.client import ResponseCallbackT
-from redis.asyncio.connection import Connection, DefaultParser, SSLConnection, parse_url
+from redis.asyncio.connection import Connection, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
 from redis.asyncio.retry import Retry
-from redis.backoff import default_backoff
+from redis.auth.token import TokenInterface
+from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractRedis
 from redis.cluster import (
     PIPELINE_BLOCKED_COMMANDS,
@@ -44,6 +45,7 @@ from redis.cluster import (
     SLOT_ID,
     AbstractRedisCluster,
     LoadBalancer,
+    LoadBalancingStrategy,
     block_pipeline_command,
     get_node_name,
     parse_cluster_slots,
@@ -51,49 +53,47 @@ from redis.cluster import (
 from redis.commands import READ_COMMANDS, AsyncRedisClusterCommands
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.credentials import CredentialProvider
+from redis.event import AfterAsyncClusterInstantiationEvent, EventDispatcher
 from redis.exceptions import (
     AskError,
     BusyLoadingError,
-    ClusterCrossSlotError,
     ClusterDownError,
     ClusterError,
     ConnectionError,
+    CrossSlotTransactionError,
     DataError,
-    MasterDownError,
+    ExecAbortError,
+    InvalidPipelineStack,
     MaxConnectionsError,
     MovedError,
     RedisClusterException,
+    RedisError,
     ResponseError,
     SlotNotCoveredError,
     TimeoutError,
     TryAgainError,
+    WatchError,
 )
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
+    SSL_AVAILABLE,
+    deprecated_args,
     deprecated_function,
-    dict_merge,
     get_lib_version,
     safe_str,
     str_if_bytes,
+    truncate_text,
 )
+
+if SSL_AVAILABLE:
+    from ssl import TLSVersion, VerifyMode
+else:
+    TLSVersion = None
+    VerifyMode = None
 
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
 )
-
-
-class ClusterParser(DefaultParser):
-    EXCEPTION_CLASSES = dict_merge(
-        DefaultParser.EXCEPTION_CLASSES,
-        {
-            "ASK": AskError,
-            "CLUSTERDOWN": ClusterDownError,
-            "CROSSSLOT": ClusterCrossSlotError,
-            "MASTERDOWN": MasterDownError,
-            "MOVED": MovedError,
-            "TRYAGAIN": TryAgainError,
-        },
-    )
 
 
 class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands):
@@ -136,9 +136,23 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         | See:
           https://redis.io/docs/manual/scaling/#redis-cluster-configuration-parameters
     :param read_from_replicas:
-        | Enable read from replicas in READONLY mode. You can read possibly stale data.
+        | @deprecated - please use load_balancing_strategy instead
+        | Enable read from replicas in READONLY mode.
           When set to true, read commands will be assigned between the primary and
           its replications in a Round-Robin manner.
+          The data read from replicas is eventually consistent with the data in primary nodes.
+    :param load_balancing_strategy:
+        | Enable read from replicas in READONLY mode and defines the load balancing
+          strategy that will be used for cluster node selection.
+          The data read from replicas is eventually consistent with the data in primary nodes.
+    :param dynamic_startup_nodes:
+        | Set the RedisCluster's startup nodes to all the discovered nodes.
+          If true (default value), the cluster's discovered nodes will be used to
+          determine the cluster nodes-slots mapping in the next topology refresh.
+          It will remove the initial passed startup nodes if their endpoints aren't
+          listed in the CLUSTER SLOTS output.
+          If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
+          specific IP addresses, it is best to set it to false.
     :param reinitialize_steps:
         | Specifies the number of MOVED errors that need to occur before reinitializing
           the whole cluster topology. If a MOVED error occurs and the cluster does not
@@ -148,19 +162,23 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
           To avoid reinitializing the cluster on moved errors, set reinitialize_steps to
           0.
     :param cluster_error_retry_attempts:
-        | Number of times to retry before raising an error when :class:`~.TimeoutError`
-          or :class:`~.ConnectionError` or :class:`~.ClusterDownError` are encountered
-    :param connection_error_retry_attempts:
-        | Number of times to retry before reinitializing when :class:`~.TimeoutError`
-          or :class:`~.ConnectionError` are encountered.
-          The default backoff strategy will be set if Retry object is not passed (see
-          default_backoff in backoff.py). To change it, pass a custom Retry object
-          using the "retry" keyword.
+        | @deprecated - Please configure the 'retry' object instead
+          In case 'retry' object is set - this argument is ignored!
+
+          Number of times to retry before raising an error when :class:`~.TimeoutError`,
+          :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError`
+          or :class:`~.ClusterDownError` are encountered
+    :param retry:
+        | A retry object that defines the retry strategy and the number of
+          retries for the cluster client.
+          In current implementation for the cluster client (starting form redis-py version 6.0.0)
+          the retry object is not yet fully utilized, instead it is used just to determine
+          the number of retries for the cluster client.
+          In the future releases the retry object will be used to handle the cluster client retries!
     :param max_connections:
         | Maximum number of connections per node. If there are no free connections & the
           maximum number of connections are already created, a
-          :class:`~.MaxConnectionsError` is raised. This error may be retried as defined
-          by :attr:`connection_error_retry_attempts`
+          :class:`~.MaxConnectionsError` is raised.
     :param address_remap:
         | An optional callable which, when provided with an internal network
           address of a node, e.g. a `(host, port)` tuple, will return the address
@@ -216,10 +234,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
     __slots__ = (
         "_initialize",
         "_lock",
-        "cluster_error_retry_attempts",
+        "retry",
         "command_flags",
         "commands_parser",
-        "connection_error_retry_attempts",
         "connection_kwargs",
         "encoder",
         "node_flags",
@@ -231,6 +248,18 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         "result_callbacks",
     )
 
+    @deprecated_args(
+        args_to_warn=["read_from_replicas"],
+        reason="Please configure the 'load_balancing_strategy' instead",
+        version="5.3.0",
+    )
+    @deprecated_args(
+        args_to_warn=[
+            "cluster_error_retry_attempts",
+        ],
+        reason="Please configure the 'retry' object instead",
+        version="6.0.0",
+    )
     def __init__(
         self,
         host: Optional[str] = None,
@@ -239,10 +268,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         startup_nodes: Optional[List["ClusterNode"]] = None,
         require_full_coverage: bool = True,
         read_from_replicas: bool = False,
+        load_balancing_strategy: Optional[LoadBalancingStrategy] = None,
+        dynamic_startup_nodes: bool = True,
         reinitialize_steps: int = 5,
         cluster_error_retry_attempts: int = 3,
-        connection_error_retry_attempts: int = 3,
         max_connections: int = 2**31,
+        retry: Optional["Retry"] = None,
+        retry_on_error: Optional[List[Type[Exception]]] = None,
         # Client related kwargs
         db: Union[str, int] = 0,
         path: Optional[str] = None,
@@ -262,27 +294,19 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         socket_keepalive: bool = False,
         socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
         socket_timeout: Optional[float] = None,
-        retry: Optional["Retry"] = None,
-        retry_on_error: Optional[List[Type[Exception]]] = None,
         # SSL related kwargs
         ssl: bool = False,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
-        ssl_cert_reqs: str = "required",
+        ssl_cert_reqs: Union[str, VerifyMode] = "required",
         ssl_certfile: Optional[str] = None,
-        ssl_check_hostname: bool = False,
+        ssl_check_hostname: bool = True,
         ssl_keyfile: Optional[str] = None,
-        ssl_min_version: Optional[ssl.TLSVersion] = None,
+        ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
         protocol: Optional[int] = 2,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
-        cache_enabled: bool = False,
-        client_cache: Optional[AbstractCache] = None,
-        cache_max_size: int = 100,
-        cache_ttl: int = 0,
-        cache_policy: str = DEFAULT_EVICTION_POLICY,
-        cache_deny_list: List[str] = DEFAULT_DENY_LIST,
-        cache_allow_list: List[str] = DEFAULT_ALLOW_LIST,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ) -> None:
         if db:
             raise RedisClusterException(
@@ -306,7 +330,6 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         kwargs: Dict[str, Any] = {
             "max_connections": max_connections,
             "connection_class": Connection,
-            "parser_class": ClusterParser,
             # Client related kwargs
             "credential_provider": credential_provider,
             "username": username,
@@ -324,16 +347,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             "socket_keepalive": socket_keepalive,
             "socket_keepalive_options": socket_keepalive_options,
             "socket_timeout": socket_timeout,
-            "retry": retry,
             "protocol": protocol,
-            # Client cache related kwargs
-            "cache_enabled": cache_enabled,
-            "client_cache": client_cache,
-            "cache_max_size": cache_max_size,
-            "cache_ttl": cache_ttl,
-            "cache_policy": cache_policy,
-            "cache_deny_list": cache_deny_list,
-            "cache_allow_list": cache_allow_list,
         }
 
         if ssl:
@@ -352,21 +366,19 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 }
             )
 
-        if read_from_replicas:
+        if read_from_replicas or load_balancing_strategy:
             # Call our on_connect function to configure READONLY mode
             kwargs["redis_connect_func"] = self.on_connect
 
-        self.retry = retry
-        if retry or retry_on_error or connection_error_retry_attempts > 0:
-            # Set a retry object for all cluster nodes
-            self.retry = retry or Retry(
-                default_backoff(), connection_error_retry_attempts
+        if retry:
+            self.retry = retry
+        else:
+            self.retry = Retry(
+                backoff=ExponentialWithJitterBackoff(base=1, cap=10),
+                retries=cluster_error_retry_attempts,
             )
-            if not retry_on_error:
-                # Default errors for retrying
-                retry_on_error = [ConnectionError, TimeoutError]
+        if retry_on_error:
             self.retry.update_supported_errors(retry_on_error)
-            kwargs.update({"retry": self.retry})
 
         kwargs["response_callbacks"] = _RedisCallbacks.copy()
         if kwargs.get("protocol") in ["3", 3]:
@@ -387,17 +399,23 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if host and port:
             startup_nodes.append(ClusterNode(host, port, **self.connection_kwargs))
 
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
+
         self.nodes_manager = NodesManager(
             startup_nodes,
             require_full_coverage,
             kwargs,
+            dynamic_startup_nodes=dynamic_startup_nodes,
             address_remap=address_remap,
+            event_dispatcher=self._event_dispatcher,
         )
         self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self.read_from_replicas = read_from_replicas
+        self.load_balancing_strategy = load_balancing_strategy
         self.reinitialize_steps = reinitialize_steps
-        self.cluster_error_retry_attempts = cluster_error_retry_attempts
-        self.connection_error_retry_attempts = connection_error_retry_attempts
         self.reinitialize_counter = 0
         self.commands_parser = AsyncCommandsParser()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
@@ -412,6 +430,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         self._initialize = True
         self._lock: Optional[asyncio.Lock] = None
+
+        # When used as an async context manager, we need to increment and decrement
+        # a usage counter so that we can close the connection pool when no one is
+        # using the client.
+        self._usage_counter = 0
+        self._usage_lock = asyncio.Lock()
 
     async def initialize(self) -> "RedisCluster":
         """Get all nodes from startup nodes & creates connections if not initialized."""
@@ -449,10 +473,47 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         await self.aclose()
 
     async def __aenter__(self) -> "RedisCluster":
-        return await self.initialize()
+        """
+        Async context manager entry. Increments a usage counter so that the
+        connection pool is only closed (via aclose()) when no context is using
+        the client.
+        """
+        await self._increment_usage()
+        try:
+            # Initialize the client (i.e. establish connection, etc.)
+            return await self.initialize()
+        except Exception:
+            # If initialization fails, decrement the counter to keep it in sync
+            await self._decrement_usage()
+            raise
 
-    async def __aexit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        await self.aclose()
+    async def _increment_usage(self) -> int:
+        """
+        Helper coroutine to increment the usage counter while holding the lock.
+        Returns the new value of the usage counter.
+        """
+        async with self._usage_lock:
+            self._usage_counter += 1
+            return self._usage_counter
+
+    async def _decrement_usage(self) -> int:
+        """
+        Helper coroutine to decrement the usage counter while holding the lock.
+        Returns the new value of the usage counter.
+        """
+        async with self._usage_lock:
+            self._usage_counter -= 1
+            return self._usage_counter
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        """
+        Async context manager exit. Decrements a usage counter. If this is the
+        last exit (counter becomes zero), the client closes its connection pool.
+        """
+        current_usage = await asyncio.shield(self._decrement_usage())
+        if current_usage == 0:
+            # This was the last active context, so disconnect the pool.
+            await asyncio.shield(self.aclose())
 
     def __await__(self) -> Generator[Any, None, "RedisCluster"]:
         return self.initialize().__await__()
@@ -568,15 +629,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         """Get the kwargs passed to :class:`~redis.asyncio.connection.Connection`."""
         return self.connection_kwargs
 
-    def get_retry(self) -> Optional["Retry"]:
-        return self.retry
-
-    def set_retry(self, retry: "Retry") -> None:
+    def set_retry(self, retry: Retry) -> None:
         self.retry = retry
-        for node in self.get_nodes():
-            node.connection_kwargs.update({"retry": retry})
-            for conn in node._connections:
-                conn.retry = retry
 
     def set_response_callback(self, command: str, callback: ResponseCallbackT) -> None:
         """Set a custom response callback."""
@@ -613,6 +667,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             self.nodes_manager.get_node_from_slot(
                 await self._determine_slot(command, *args),
                 self.read_from_replicas and command in READ_COMMANDS,
+                self.load_balancing_strategy if command in READ_COMMANDS else None,
             )
         ]
 
@@ -694,8 +749,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         """
         Execute a raw command on the appropriate cluster node or target_nodes.
 
-        It will retry the command as specified by :attr:`cluster_error_retry_attempts` &
-        then raise an exception.
+        It will retry the command as specified by the retries property of
+        the :attr:`retry` & then raise an exception.
 
         :param args:
             | Raw command args
@@ -711,7 +766,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         command = args[0]
         target_nodes = []
         target_nodes_specified = False
-        retry_attempts = self.cluster_error_retry_attempts
+        retry_attempts = self.retry.get_retries()
 
         passed_targets = kwargs.pop("target_nodes", None)
         if passed_targets and not self._is_node_flag(passed_targets):
@@ -793,12 +848,22 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     # refresh the target node
                     slot = await self._determine_slot(*args)
                     target_node = self.nodes_manager.get_node_from_slot(
-                        slot, self.read_from_replicas and args[0] in READ_COMMANDS
+                        slot,
+                        self.read_from_replicas and args[0] in READ_COMMANDS,
+                        self.load_balancing_strategy
+                        if args[0] in READ_COMMANDS
+                        else None,
                     )
                     moved = False
 
                 return await target_node.execute_command(*args, **kwargs)
-            except (BusyLoadingError, MaxConnectionsError):
+            except BusyLoadingError:
+                raise
+            except MaxConnectionsError:
+                # MaxConnectionsError indicates client-side resource exhaustion
+                # (too many connections in the pool), not a node failure.
+                # Don't treat this as a node failure - just re-raise the error
+                # without reinitializing the cluster.
                 raise
             except (ConnectionError, TimeoutError):
                 # Connection retries are being handled in the node's
@@ -810,10 +875,16 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 # and try again with the new setup
                 await self.aclose()
                 raise
-            except ClusterDownError:
+            except (ClusterDownError, SlotNotCoveredError):
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
+
+                # SlotNotCoveredError can occur when the cluster is not fully
+                # initialized or can be temporary issue.
+                # We will try to reinitialize the cluster topology
+                # and retry executing the command
+
                 await self.aclose()
                 await asyncio.sleep(0.25)
                 raise
@@ -859,10 +930,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         if shard_hint:
             raise RedisClusterException("shard_hint is deprecated in cluster mode")
 
-        if transaction:
-            raise RedisClusterException("transaction is deprecated in cluster mode")
-
-        return ClusterPipeline(self)
+        return ClusterPipeline(self, transaction)
 
     def lock(
         self,
@@ -873,6 +941,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         blocking_timeout: Optional[float] = None,
         lock_class: Optional[Type[Lock]] = None,
         thread_local: bool = True,
+        raise_on_release_error: bool = True,
     ) -> Lock:
         """
         Return a new Lock object using key ``name`` that mimics
@@ -919,6 +988,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                      thread-1 would see the token value as "xyz" and would be
                      able to successfully release the thread-2's lock.
 
+        ``raise_on_release_error`` indicates whether to raise an exception when
+        the lock is no longer owned when exiting the context manager. By default,
+        this is True, meaning an exception will be raised. If False, the warning
+        will be logged and the exception will be suppressed.
+
         In some use cases it's necessary to disable thread local storage. For
         example, if you have code where one thread acquires a lock and passes
         that lock instance to a worker thread to release later. If thread
@@ -936,19 +1010,32 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             blocking=blocking,
             blocking_timeout=blocking_timeout,
             thread_local=thread_local,
+            raise_on_release_error=raise_on_release_error,
         )
 
-    def flush_cache(self):
-        if self.nodes_manager:
-            self.nodes_manager.flush_cache()
-
-    def delete_command_from_cache(self, command):
-        if self.nodes_manager:
-            self.nodes_manager.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key):
-        if self.nodes_manager:
-            self.nodes_manager.invalidate_key_from_cache(key)
+    async def transaction(
+        self, func: Coroutine[None, "ClusterPipeline", Any], *watches, **kwargs
+    ):
+        """
+        Convenience method for executing the callable `func` as a transaction
+        while watching all keys specified in `watches`. The 'func' callable
+        should expect a single argument which is a Pipeline object.
+        """
+        shard_hint = kwargs.pop("shard_hint", None)
+        value_from_callable = kwargs.pop("value_from_callable", False)
+        watch_delay = kwargs.pop("watch_delay", None)
+        async with self.pipeline(True, shard_hint) as pipe:
+            while True:
+                try:
+                    if watches:
+                        await pipe.watch(*watches)
+                    func_value = await func(pipe)
+                    exec_value = await pipe.execute()
+                    return func_value if value_from_callable else exec_value
+                except WatchError:
+                    if watch_delay is not None and watch_delay > 0:
+                        time.sleep(watch_delay)
+                    continue
 
 
 class ClusterNode:
@@ -962,6 +1049,8 @@ class ClusterNode:
     __slots__ = (
         "_connections",
         "_free",
+        "_lock",
+        "_event_dispatcher",
         "connection_class",
         "connection_kwargs",
         "host",
@@ -999,6 +1088,9 @@ class ClusterNode:
 
         self._connections: List[Connection] = []
         self._free: Deque[Connection] = collections.deque(maxlen=self.max_connections)
+        self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
+        if self._event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
 
     def __repr__(self) -> str:
         return (
@@ -1044,11 +1136,33 @@ class ClusterNode:
             return self._free.popleft()
         except IndexError:
             if len(self._connections) < self.max_connections:
-                connection = self.connection_class(**self.connection_kwargs)
+                # We are configuring the connection pool not to retry
+                # connections on lower level clients to avoid retrying
+                # connections to nodes that are not reachable
+                # and to avoid blocking the connection pool.
+                # The only error that will have some handling in the lower
+                # level clients is ConnectionError which will trigger disconnection
+                # of the socket.
+                # The retries will be handled on cluster client level
+                # where we will have proper handling of the cluster topology
+                retry = Retry(
+                    backoff=NoBackoff(),
+                    retries=0,
+                    supported_errors=(ConnectionError,),
+                )
+                connection_kwargs = self.connection_kwargs.copy()
+                connection_kwargs["retry"] = retry
+                connection = self.connection_class(**connection_kwargs)
                 self._connections.append(connection)
                 return connection
 
             raise MaxConnectionsError()
+
+    def release(self, connection: Connection) -> None:
+        """
+        Release connection back to free queue.
+        """
+        self._free.append(connection)
 
     async def parse_response(
         self, connection: Connection, command: str, **kwargs: Any
@@ -1067,6 +1181,9 @@ class ClusterNode:
         if EMPTY_RESPONSE in kwargs:
             kwargs.pop(EMPTY_RESPONSE)
 
+        # Remove keys entry, it needs only for cache.
+        kwargs.pop("keys", None)
+
         # Return response
         if command in self.response_callbacks:
             return self.response_callbacks[command](response, **kwargs)
@@ -1076,25 +1193,16 @@ class ClusterNode:
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
-        keys = kwargs.pop("keys", None)
 
-        response_from_cache = await connection._get_from_local_cache(args)
-        if response_from_cache is not None:
+        # Execute command
+        await connection.send_packed_command(connection.pack_command(*args), False)
+
+        # Read response
+        try:
+            return await self.parse_response(connection, args[0], **kwargs)
+        finally:
+            # Release connection
             self._free.append(connection)
-            return response_from_cache
-        else:
-            # Execute command
-            await connection.send_packed_command(connection.pack_command(*args), False)
-
-            # Read response
-            try:
-                response = await self.parse_response(connection, args[0], **kwargs)
-                if keys:
-                    connection._add_to_local_cache(args, response, keys)
-                return response
-            finally:
-                # Release connection
-                self._free.append(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
@@ -1121,22 +1229,39 @@ class ClusterNode:
 
         return ret
 
-    def flush_cache(self):
-        for connection in self._connections:
-            connection.flush_cache()
+    async def re_auth_callback(self, token: TokenInterface):
+        tmp_queue = collections.deque()
+        while self._free:
+            conn = self._free.popleft()
+            await conn.retry.call_with_retry(
+                lambda: conn.send_command(
+                    "AUTH", token.try_get("oid"), token.get_value()
+                ),
+                lambda error: self._mock(error),
+            )
+            await conn.retry.call_with_retry(
+                lambda: conn.read_response(), lambda error: self._mock(error)
+            )
+            tmp_queue.append(conn)
 
-    def delete_command_from_cache(self, command):
-        for connection in self._connections:
-            connection.delete_command_from_cache(command)
+        while tmp_queue:
+            conn = tmp_queue.popleft()
+            self._free.append(conn)
 
-    def invalidate_key_from_cache(self, key):
-        for connection in self._connections:
-            connection.invalidate_key_from_cache(key)
+    async def _mock(self, error: RedisError):
+        """
+        Dummy functions, needs to be passed as error callback to retry object.
+        :param error:
+        :return:
+        """
+        pass
 
 
 class NodesManager:
     __slots__ = (
+        "_dynamic_startup_nodes",
         "_moved_exception",
+        "_event_dispatcher",
         "connection_kwargs",
         "default_node",
         "nodes_cache",
@@ -1152,7 +1277,9 @@ class NodesManager:
         startup_nodes: List["ClusterNode"],
         require_full_coverage: bool,
         connection_kwargs: Dict[str, Any],
+        dynamic_startup_nodes: bool = True,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ) -> None:
         self.startup_nodes = {node.name: node for node in startup_nodes}
         self.require_full_coverage = require_full_coverage
@@ -1163,7 +1290,13 @@ class NodesManager:
         self.nodes_cache: Dict[str, "ClusterNode"] = {}
         self.slots_cache: Dict[int, List["ClusterNode"]] = {}
         self.read_load_balancer = LoadBalancer()
+
+        self._dynamic_startup_nodes: bool = dynamic_startup_nodes
         self._moved_exception: MovedError = None
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
 
     def get_node(
         self,
@@ -1180,9 +1313,7 @@ class NodesManager:
             return self.nodes_cache.get(node_name)
         else:
             raise DataError(
-                "get_node requires one of the following: "
-                "1. node name "
-                "2. host and port"
+                "get_node requires one of the following: 1. node name 2. host and port"
             )
 
     def set_nodes(
@@ -1202,6 +1333,9 @@ class NodesManager:
                     continue
                 task = asyncio.create_task(old[name].disconnect())  # noqa
             old[name] = node
+
+    def update_moved_exception(self, exception):
+        self._moved_exception = exception
 
     def _update_moved_slots(self) -> None:
         e = self._moved_exception
@@ -1242,17 +1376,23 @@ class NodesManager:
         self._moved_exception = None
 
     def get_node_from_slot(
-        self, slot: int, read_from_replicas: bool = False
+        self,
+        slot: int,
+        read_from_replicas: bool = False,
+        load_balancing_strategy=None,
     ) -> "ClusterNode":
         if self._moved_exception:
             self._update_moved_slots()
 
+        if read_from_replicas is True and load_balancing_strategy is None:
+            load_balancing_strategy = LoadBalancingStrategy.ROUND_ROBIN
+
         try:
-            if read_from_replicas:
-                # get the server index in a Round-Robin manner
+            if len(self.slots_cache[slot]) > 1 and load_balancing_strategy:
+                # get the server index using the strategy defined in load_balancing_strategy
                 primary_name = self.slots_cache[slot][0].name
                 node_idx = self.read_load_balancer.get_server_index(
-                    primary_name, len(self.slots_cache[slot])
+                    primary_name, len(self.slots_cache[slot]), load_balancing_strategy
                 )
                 return self.slots_cache[slot][node_idx]
             return self.slots_cache[slot][0]
@@ -1277,10 +1417,18 @@ class NodesManager:
         startup_nodes_reachable = False
         fully_covered = False
         exception = None
-        for startup_node in self.startup_nodes.values():
+        # Convert to tuple to prevent RuntimeError if self.startup_nodes
+        # is modified during iteration
+        for startup_node in tuple(self.startup_nodes.values()):
             try:
                 # Make sure cluster mode is enabled on this node
                 try:
+                    self._event_dispatcher.dispatch(
+                        AfterAsyncClusterInstantiationEvent(
+                            self.nodes_cache,
+                            self.connection_kwargs.get("credential_provider", None),
+                        )
+                    )
                     cluster_slots = await startup_node.execute_command("CLUSTER SLOTS")
                 except ResponseError:
                     raise RedisClusterException(
@@ -1358,7 +1506,7 @@ class NodesManager:
                             if len(disagreements) > 5:
                                 raise RedisClusterException(
                                     f"startup_nodes could not agree on a valid "
-                                    f'slots cache: {", ".join(disagreements)}'
+                                    f"slots cache: {', '.join(disagreements)}"
                                 )
 
             # Validate if all slots are covered or if we should try next startup node
@@ -1389,8 +1537,10 @@ class NodesManager:
         # Set the tmp variables to the real variables
         self.slots_cache = tmp_slots
         self.set_nodes(self.nodes_cache, tmp_nodes_cache, remove_old=True)
-        # Populate the startup nodes with all discovered nodes
-        self.set_nodes(self.startup_nodes, self.nodes_cache, remove_old=True)
+
+        if self._dynamic_startup_nodes:
+            # Populate the startup nodes with all discovered nodes
+            self.set_nodes(self.startup_nodes, self.nodes_cache, remove_old=True)
 
         # Set the default node
         self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
@@ -1415,18 +1565,6 @@ class NodesManager:
         if self.address_remap:
             return self.address_remap((host, port))
         return host, port
-
-    def flush_cache(self):
-        for node in self.nodes_cache.values():
-            node.flush_cache()
-
-    def delete_command_from_cache(self, command):
-        for node in self.nodes_cache.values():
-            node.delete_command_from_cache(command)
-
-    def invalidate_key_from_cache(self, key):
-        for node in self.nodes_cache.values():
-            node.invalidate_key_from_cache(key)
 
 
 class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommands):
@@ -1466,41 +1604,38 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         | Existing :class:`~.RedisCluster` client
     """
 
-    __slots__ = ("_command_stack", "_client")
+    __slots__ = ("cluster_client", "_transaction", "_execution_strategy")
 
-    def __init__(self, client: RedisCluster) -> None:
-        self._client = client
-
-        self._command_stack: List["PipelineCommand"] = []
+    def __init__(
+        self, client: RedisCluster, transaction: Optional[bool] = None
+    ) -> None:
+        self.cluster_client = client
+        self._transaction = transaction
+        self._execution_strategy: ExecutionStrategy = (
+            PipelineStrategy(self)
+            if not self._transaction
+            else TransactionStrategy(self)
+        )
 
     async def initialize(self) -> "ClusterPipeline":
-        if self._client._initialize:
-            await self._client.initialize()
-        self._command_stack = []
+        await self._execution_strategy.initialize()
         return self
 
     async def __aenter__(self) -> "ClusterPipeline":
         return await self.initialize()
 
     async def __aexit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        self._command_stack = []
+        await self.reset()
 
     def __await__(self) -> Generator[Any, None, "ClusterPipeline"]:
         return self.initialize().__await__()
-
-    def __enter__(self) -> "ClusterPipeline":
-        self._command_stack = []
-        return self
-
-    def __exit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        self._command_stack = []
 
     def __bool__(self) -> bool:
         "Pipeline instances should  always evaluate to True on Python 3+"
         return True
 
     def __len__(self) -> int:
-        return len(self._command_stack)
+        return len(self._execution_strategy)
 
     def execute_command(
         self, *args: Union[KeyT, EncodableT], **kwargs: Any
@@ -1516,11 +1651,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
               or List[:class:`~.ClusterNode`] or Dict[Any, :class:`~.ClusterNode`]
             - Rest of the kwargs are passed to the Redis connection
         """
-        kwargs.pop("keys", None)  # the keys are used only for client side caching
-        self._command_stack.append(
-            PipelineCommand(len(self._command_stack), *args, **kwargs)
-        )
-        return self
+        return self._execution_strategy.execute_command(*args, **kwargs)
 
     async def execute(
         self, raise_on_error: bool = True, allow_redirections: bool = True
@@ -1528,7 +1659,7 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         """
         Execute the pipeline.
 
-        It will retry the commands as specified by :attr:`cluster_error_retry_attempts`
+        It will retry the commands as specified by retries specified in :attr:`retry`
         & then raise an exception.
 
         :param raise_on_error:
@@ -1540,35 +1671,294 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
         :raises RedisClusterException: if target_nodes is not provided & the command
             can't be mapped to a slot
         """
-        if not self._command_stack:
+        try:
+            return await self._execution_strategy.execute(
+                raise_on_error, allow_redirections
+            )
+        finally:
+            await self.reset()
+
+    def _split_command_across_slots(
+        self, command: str, *keys: KeyT
+    ) -> "ClusterPipeline":
+        for slot_keys in self.cluster_client._partition_keys_by_slot(keys).values():
+            self.execute_command(command, *slot_keys)
+
+        return self
+
+    async def reset(self):
+        """
+        Reset back to empty pipeline.
+        """
+        await self._execution_strategy.reset()
+
+    def multi(self):
+        """
+        Start a transactional block of the pipeline after WATCH commands
+        are issued. End the transactional block with `execute`.
+        """
+        self._execution_strategy.multi()
+
+    async def discard(self):
+        """ """
+        await self._execution_strategy.discard()
+
+    async def watch(self, *names):
+        """Watches the values at keys ``names``"""
+        await self._execution_strategy.watch(*names)
+
+    async def unwatch(self):
+        """Unwatches all previously specified keys"""
+        await self._execution_strategy.unwatch()
+
+    async def unlink(self, *names):
+        await self._execution_strategy.unlink(*names)
+
+    def mset_nonatomic(
+        self, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> "ClusterPipeline":
+        return self._execution_strategy.mset_nonatomic(mapping)
+
+
+for command in PIPELINE_BLOCKED_COMMANDS:
+    command = command.replace(" ", "_").lower()
+    if command == "mset_nonatomic":
+        continue
+
+    setattr(ClusterPipeline, command, block_pipeline_command(command))
+
+
+class PipelineCommand:
+    def __init__(self, position: int, *args: Any, **kwargs: Any) -> None:
+        self.args = args
+        self.kwargs = kwargs
+        self.position = position
+        self.result: Union[Any, Exception] = None
+
+    def __repr__(self) -> str:
+        return f"[{self.position}] {self.args} ({self.kwargs})"
+
+
+class ExecutionStrategy(ABC):
+    @abstractmethod
+    async def initialize(self) -> "ClusterPipeline":
+        """
+        Initialize the execution strategy.
+
+        See ClusterPipeline.initialize()
+        """
+        pass
+
+    @abstractmethod
+    def execute_command(
+        self, *args: Union[KeyT, EncodableT], **kwargs: Any
+    ) -> "ClusterPipeline":
+        """
+        Append a raw command to the pipeline.
+
+        See ClusterPipeline.execute_command()
+        """
+        pass
+
+    @abstractmethod
+    async def execute(
+        self, raise_on_error: bool = True, allow_redirections: bool = True
+    ) -> List[Any]:
+        """
+        Execute the pipeline.
+
+        It will retry the commands as specified by retries specified in :attr:`retry`
+        & then raise an exception.
+
+        See ClusterPipeline.execute()
+        """
+        pass
+
+    @abstractmethod
+    def mset_nonatomic(
+        self, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> "ClusterPipeline":
+        """
+        Executes multiple MSET commands according to the provided slot/pairs mapping.
+
+        See ClusterPipeline.mset_nonatomic()
+        """
+        pass
+
+    @abstractmethod
+    async def reset(self):
+        """
+        Resets current execution strategy.
+
+        See: ClusterPipeline.reset()
+        """
+        pass
+
+    @abstractmethod
+    def multi(self):
+        """
+        Starts transactional context.
+
+        See: ClusterPipeline.multi()
+        """
+        pass
+
+    @abstractmethod
+    async def watch(self, *names):
+        """
+        Watch given keys.
+
+        See: ClusterPipeline.watch()
+        """
+        pass
+
+    @abstractmethod
+    async def unwatch(self):
+        """
+        Unwatches all previously specified keys
+
+        See: ClusterPipeline.unwatch()
+        """
+        pass
+
+    @abstractmethod
+    async def discard(self):
+        pass
+
+    @abstractmethod
+    async def unlink(self, *names):
+        """
+        "Unlink a key specified by ``names``"
+
+        See: ClusterPipeline.unlink()
+        """
+        pass
+
+    @abstractmethod
+    def __len__(self) -> int:
+        pass
+
+
+class AbstractStrategy(ExecutionStrategy):
+    def __init__(self, pipe: ClusterPipeline) -> None:
+        self._pipe: ClusterPipeline = pipe
+        self._command_queue: List["PipelineCommand"] = []
+
+    async def initialize(self) -> "ClusterPipeline":
+        if self._pipe.cluster_client._initialize:
+            await self._pipe.cluster_client.initialize()
+        self._command_queue = []
+        return self._pipe
+
+    def execute_command(
+        self, *args: Union[KeyT, EncodableT], **kwargs: Any
+    ) -> "ClusterPipeline":
+        self._command_queue.append(
+            PipelineCommand(len(self._command_queue), *args, **kwargs)
+        )
+        return self._pipe
+
+    def _annotate_exception(self, exception, number, command):
+        """
+        Provides extra context to the exception prior to it being handled
+        """
+        cmd = " ".join(map(safe_str, command))
+        msg = (
+            f"Command # {number} ({truncate_text(cmd)}) of pipeline "
+            f"caused error: {exception.args[0]}"
+        )
+        exception.args = (msg,) + exception.args[1:]
+
+    @abstractmethod
+    def mset_nonatomic(
+        self, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> "ClusterPipeline":
+        pass
+
+    @abstractmethod
+    async def execute(
+        self, raise_on_error: bool = True, allow_redirections: bool = True
+    ) -> List[Any]:
+        pass
+
+    @abstractmethod
+    async def reset(self):
+        pass
+
+    @abstractmethod
+    def multi(self):
+        pass
+
+    @abstractmethod
+    async def watch(self, *names):
+        pass
+
+    @abstractmethod
+    async def unwatch(self):
+        pass
+
+    @abstractmethod
+    async def discard(self):
+        pass
+
+    @abstractmethod
+    async def unlink(self, *names):
+        pass
+
+    def __len__(self) -> int:
+        return len(self._command_queue)
+
+
+class PipelineStrategy(AbstractStrategy):
+    def __init__(self, pipe: ClusterPipeline) -> None:
+        super().__init__(pipe)
+
+    def mset_nonatomic(
+        self, mapping: Mapping[AnyKeyT, EncodableT]
+    ) -> "ClusterPipeline":
+        encoder = self._pipe.cluster_client.encoder
+
+        slots_pairs = {}
+        for pair in mapping.items():
+            slot = key_slot(encoder.encode(pair[0]))
+            slots_pairs.setdefault(slot, []).extend(pair)
+
+        for pairs in slots_pairs.values():
+            self.execute_command("MSET", *pairs)
+
+        return self._pipe
+
+    async def execute(
+        self, raise_on_error: bool = True, allow_redirections: bool = True
+    ) -> List[Any]:
+        if not self._command_queue:
             return []
 
         try:
-            for _ in range(self._client.cluster_error_retry_attempts):
-                if self._client._initialize:
-                    await self._client.initialize()
-
+            retry_attempts = self._pipe.cluster_client.retry.get_retries()
+            while True:
                 try:
+                    if self._pipe.cluster_client._initialize:
+                        await self._pipe.cluster_client.initialize()
                     return await self._execute(
-                        self._client,
-                        self._command_stack,
+                        self._pipe.cluster_client,
+                        self._command_queue,
                         raise_on_error=raise_on_error,
                         allow_redirections=allow_redirections,
                     )
-                except BaseException as e:
-                    if type(e) in self.__class__.ERRORS_ALLOW_RETRY:
-                        # Try again with the new cluster setup.
-                        exception = e
-                        await self._client.aclose()
+
+                except RedisCluster.ERRORS_ALLOW_RETRY as e:
+                    if retry_attempts > 0:
+                        # Try again with the new cluster setup. All other errors
+                        # should be raised.
+                        retry_attempts -= 1
+                        await self._pipe.cluster_client.aclose()
                         await asyncio.sleep(0.25)
                     else:
                         # All other errors should be raised.
-                        raise
-
-            # If it fails the configured number of times then raise an exception
-            raise exception
+                        raise e
         finally:
-            self._command_stack = []
+            await self.reset()
 
     async def _execute(
         self,
@@ -1626,65 +2016,424 @@ class ClusterPipeline(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterComm
                     if isinstance(result, Exception):
                         command = " ".join(map(safe_str, cmd.args))
                         msg = (
-                            f"Command # {cmd.position + 1} ({command}) of pipeline "
-                            f"caused error: {result.args}"
+                            f"Command # {cmd.position + 1} "
+                            f"({truncate_text(command)}) "
+                            f"of pipeline caused error: {result.args}"
                         )
                         result.args = (msg,) + result.args[1:]
                         raise result
 
-            default_node = nodes.get(client.get_default_node().name)
-            if default_node is not None:
-                # This pipeline execution used the default node, check if we need
-                # to replace it.
-                # Note: when the error is raised we'll reset the default node in the
-                # caller function.
-                for cmd in default_node[1]:
-                    # Check if it has a command that failed with a relevant
-                    # exception
-                    if type(cmd.result) in self.__class__.ERRORS_ALLOW_RETRY:
-                        client.replace_default_node()
-                        break
+            default_cluster_node = client.get_default_node()
+
+            # Check whether the default node was used. In some cases,
+            # 'client.get_default_node()' may return None. The check below
+            # prevents a potential AttributeError.
+            if default_cluster_node is not None:
+                default_node = nodes.get(default_cluster_node.name)
+                if default_node is not None:
+                    # This pipeline execution used the default node, check if we need
+                    # to replace it.
+                    # Note: when the error is raised we'll reset the default node in the
+                    # caller function.
+                    for cmd in default_node[1]:
+                        # Check if it has a command that failed with a relevant
+                        # exception
+                        if type(cmd.result) in RedisCluster.ERRORS_ALLOW_RETRY:
+                            client.replace_default_node()
+                            break
 
         return [cmd.result for cmd in stack]
 
-    def _split_command_across_slots(
-        self, command: str, *keys: KeyT
-    ) -> "ClusterPipeline":
-        for slot_keys in self._client._partition_keys_by_slot(keys).values():
-            self.execute_command(command, *slot_keys)
+    async def reset(self):
+        """
+        Reset back to empty pipeline.
+        """
+        self._command_queue = []
 
-        return self
+    def multi(self):
+        raise RedisClusterException(
+            "method multi() is not supported outside of transactional context"
+        )
+
+    async def watch(self, *names):
+        raise RedisClusterException(
+            "method watch() is not supported outside of transactional context"
+        )
+
+    async def unwatch(self):
+        raise RedisClusterException(
+            "method unwatch() is not supported outside of transactional context"
+        )
+
+    async def discard(self):
+        raise RedisClusterException(
+            "method discard() is not supported outside of transactional context"
+        )
+
+    async def unlink(self, *names):
+        if len(names) != 1:
+            raise RedisClusterException(
+                "unlinking multiple keys is not implemented in pipeline command"
+            )
+
+        return self.execute_command("UNLINK", names[0])
+
+
+class TransactionStrategy(AbstractStrategy):
+    NO_SLOTS_COMMANDS = {"UNWATCH"}
+    IMMEDIATE_EXECUTE_COMMANDS = {"WATCH", "UNWATCH"}
+    UNWATCH_COMMANDS = {"DISCARD", "EXEC", "UNWATCH"}
+    SLOT_REDIRECT_ERRORS = (AskError, MovedError)
+    CONNECTION_ERRORS = (
+        ConnectionError,
+        OSError,
+        ClusterDownError,
+        SlotNotCoveredError,
+    )
+
+    def __init__(self, pipe: ClusterPipeline) -> None:
+        super().__init__(pipe)
+        self._explicit_transaction = False
+        self._watching = False
+        self._pipeline_slots: Set[int] = set()
+        self._transaction_node: Optional[ClusterNode] = None
+        self._transaction_connection: Optional[Connection] = None
+        self._executing = False
+        self._retry = copy(self._pipe.cluster_client.retry)
+        self._retry.update_supported_errors(
+            RedisCluster.ERRORS_ALLOW_RETRY + self.SLOT_REDIRECT_ERRORS
+        )
+
+    def _get_client_and_connection_for_transaction(
+        self,
+    ) -> Tuple[ClusterNode, Connection]:
+        """
+        Find a connection for a pipeline transaction.
+
+        For running an atomic transaction, watch keys ensure that contents have not been
+        altered as long as the watch commands for those keys were sent over the same
+        connection. So once we start watching a key, we fetch a connection to the
+        node that owns that slot and reuse it.
+        """
+        if not self._pipeline_slots:
+            raise RedisClusterException(
+                "At least a command with a key is needed to identify a node"
+            )
+
+        node: ClusterNode = self._pipe.cluster_client.nodes_manager.get_node_from_slot(
+            list(self._pipeline_slots)[0], False
+        )
+        self._transaction_node = node
+
+        if not self._transaction_connection:
+            connection: Connection = self._transaction_node.acquire_connection()
+            self._transaction_connection = connection
+
+        return self._transaction_node, self._transaction_connection
+
+    def execute_command(self, *args: Union[KeyT, EncodableT], **kwargs: Any) -> "Any":
+        # Given the limitation of ClusterPipeline sync API, we have to run it in thread.
+        response = None
+        error = None
+
+        def runner():
+            nonlocal response
+            nonlocal error
+            try:
+                response = asyncio.run(self._execute_command(*args, **kwargs))
+            except Exception as e:
+                error = e
+
+        thread = threading.Thread(target=runner)
+        thread.start()
+        thread.join()
+
+        if error:
+            raise error
+
+        return response
+
+    async def _execute_command(
+        self, *args: Union[KeyT, EncodableT], **kwargs: Any
+    ) -> Any:
+        if self._pipe.cluster_client._initialize:
+            await self._pipe.cluster_client.initialize()
+
+        slot_number: Optional[int] = None
+        if args[0] not in self.NO_SLOTS_COMMANDS:
+            slot_number = await self._pipe.cluster_client._determine_slot(*args)
+
+        if (
+            self._watching or args[0] in self.IMMEDIATE_EXECUTE_COMMANDS
+        ) and not self._explicit_transaction:
+            if args[0] == "WATCH":
+                self._validate_watch()
+
+            if slot_number is not None:
+                if self._pipeline_slots and slot_number not in self._pipeline_slots:
+                    raise CrossSlotTransactionError(
+                        "Cannot watch or send commands on different slots"
+                    )
+
+                self._pipeline_slots.add(slot_number)
+            elif args[0] not in self.NO_SLOTS_COMMANDS:
+                raise RedisClusterException(
+                    f"Cannot identify slot number for command: {args[0]},"
+                    "it cannot be triggered in a transaction"
+                )
+
+            return self._immediate_execute_command(*args, **kwargs)
+        else:
+            if slot_number is not None:
+                self._pipeline_slots.add(slot_number)
+
+            return super().execute_command(*args, **kwargs)
+
+    def _validate_watch(self):
+        if self._explicit_transaction:
+            raise RedisError("Cannot issue a WATCH after a MULTI")
+
+        self._watching = True
+
+    async def _immediate_execute_command(self, *args, **options):
+        return await self._retry.call_with_retry(
+            lambda: self._get_connection_and_send_command(*args, **options),
+            self._reinitialize_on_error,
+        )
+
+    async def _get_connection_and_send_command(self, *args, **options):
+        redis_node, connection = self._get_client_and_connection_for_transaction()
+        return await self._send_command_parse_response(
+            connection, redis_node, args[0], *args, **options
+        )
+
+    async def _send_command_parse_response(
+        self,
+        connection: Connection,
+        redis_node: ClusterNode,
+        command_name,
+        *args,
+        **options,
+    ):
+        """
+        Send a command and parse the response
+        """
+
+        await connection.send_command(*args)
+        output = await redis_node.parse_response(connection, command_name, **options)
+
+        if command_name in self.UNWATCH_COMMANDS:
+            self._watching = False
+        return output
+
+    async def _reinitialize_on_error(self, error):
+        if self._watching:
+            if type(error) in self.SLOT_REDIRECT_ERRORS and self._executing:
+                raise WatchError("Slot rebalancing occurred while watching keys")
+
+        if (
+            type(error) in self.SLOT_REDIRECT_ERRORS
+            or type(error) in self.CONNECTION_ERRORS
+        ):
+            if self._transaction_connection:
+                self._transaction_connection = None
+
+            self._pipe.cluster_client.reinitialize_counter += 1
+            if (
+                self._pipe.cluster_client.reinitialize_steps
+                and self._pipe.cluster_client.reinitialize_counter
+                % self._pipe.cluster_client.reinitialize_steps
+                == 0
+            ):
+                await self._pipe.cluster_client.nodes_manager.initialize()
+                self.reinitialize_counter = 0
+            else:
+                self._pipe.cluster_client.nodes_manager.update_moved_exception(error)
+
+        self._executing = False
+
+    def _raise_first_error(self, responses, stack):
+        """
+        Raise the first exception on the stack
+        """
+        for r, cmd in zip(responses, stack):
+            if isinstance(r, Exception):
+                self._annotate_exception(r, cmd.position + 1, cmd.args)
+                raise r
 
     def mset_nonatomic(
         self, mapping: Mapping[AnyKeyT, EncodableT]
     ) -> "ClusterPipeline":
-        encoder = self._client.encoder
+        raise NotImplementedError("Method is not supported in transactional context.")
 
-        slots_pairs = {}
-        for pair in mapping.items():
-            slot = key_slot(encoder.encode(pair[0]))
-            slots_pairs.setdefault(slot, []).extend(pair)
+    async def execute(
+        self, raise_on_error: bool = True, allow_redirections: bool = True
+    ) -> List[Any]:
+        stack = self._command_queue
+        if not stack and (not self._watching or not self._pipeline_slots):
+            return []
 
-        for pairs in slots_pairs.values():
-            self.execute_command("MSET", *pairs)
+        return await self._execute_transaction_with_retries(stack, raise_on_error)
 
-        return self
+    async def _execute_transaction_with_retries(
+        self, stack: List["PipelineCommand"], raise_on_error: bool
+    ):
+        return await self._retry.call_with_retry(
+            lambda: self._execute_transaction(stack, raise_on_error),
+            self._reinitialize_on_error,
+        )
 
+    async def _execute_transaction(
+        self, stack: List["PipelineCommand"], raise_on_error: bool
+    ):
+        if len(self._pipeline_slots) > 1:
+            raise CrossSlotTransactionError(
+                "All keys involved in a cluster transaction must map to the same slot"
+            )
 
-for command in PIPELINE_BLOCKED_COMMANDS:
-    command = command.replace(" ", "_").lower()
-    if command == "mset_nonatomic":
-        continue
+        self._executing = True
 
-    setattr(ClusterPipeline, command, block_pipeline_command(command))
+        redis_node, connection = self._get_client_and_connection_for_transaction()
 
+        stack = chain(
+            [PipelineCommand(0, "MULTI")],
+            stack,
+            [PipelineCommand(0, "EXEC")],
+        )
+        commands = [c.args for c in stack if EMPTY_RESPONSE not in c.kwargs]
+        packed_commands = connection.pack_commands(commands)
+        await connection.send_packed_command(packed_commands)
+        errors = []
 
-class PipelineCommand:
-    def __init__(self, position: int, *args: Any, **kwargs: Any) -> None:
-        self.args = args
-        self.kwargs = kwargs
-        self.position = position
-        self.result: Union[Any, Exception] = None
+        # parse off the response for MULTI
+        # NOTE: we need to handle ResponseErrors here and continue
+        # so that we read all the additional command messages from
+        # the socket
+        try:
+            await redis_node.parse_response(connection, "MULTI")
+        except ResponseError as e:
+            self._annotate_exception(e, 0, "MULTI")
+            errors.append(e)
+        except self.CONNECTION_ERRORS as cluster_error:
+            self._annotate_exception(cluster_error, 0, "MULTI")
+            raise
 
-    def __repr__(self) -> str:
-        return f"[{self.position}] {self.args} ({self.kwargs})"
+        # and all the other commands
+        for i, command in enumerate(self._command_queue):
+            if EMPTY_RESPONSE in command.kwargs:
+                errors.append((i, command.kwargs[EMPTY_RESPONSE]))
+            else:
+                try:
+                    _ = await redis_node.parse_response(connection, "_")
+                except self.SLOT_REDIRECT_ERRORS as slot_error:
+                    self._annotate_exception(slot_error, i + 1, command.args)
+                    errors.append(slot_error)
+                except self.CONNECTION_ERRORS as cluster_error:
+                    self._annotate_exception(cluster_error, i + 1, command.args)
+                    raise
+                except ResponseError as e:
+                    self._annotate_exception(e, i + 1, command.args)
+                    errors.append(e)
+
+        response = None
+        # parse the EXEC.
+        try:
+            response = await redis_node.parse_response(connection, "EXEC")
+        except ExecAbortError:
+            if errors:
+                raise errors[0]
+            raise
+
+        self._executing = False
+
+        # EXEC clears any watched keys
+        self._watching = False
+
+        if response is None:
+            raise WatchError("Watched variable changed.")
+
+        # put any parse errors into the response
+        for i, e in errors:
+            response.insert(i, e)
+
+        if len(response) != len(self._command_queue):
+            raise InvalidPipelineStack(
+                "Unexpected response length for cluster pipeline EXEC."
+                " Command stack was {} but response had length {}".format(
+                    [c.args[0] for c in self._command_queue], len(response)
+                )
+            )
+
+        # find any errors in the response and raise if necessary
+        if raise_on_error or len(errors) > 0:
+            self._raise_first_error(
+                response,
+                self._command_queue,
+            )
+
+        # We have to run response callbacks manually
+        data = []
+        for r, cmd in zip(response, self._command_queue):
+            if not isinstance(r, Exception):
+                command_name = cmd.args[0]
+                if command_name in self._pipe.cluster_client.response_callbacks:
+                    r = self._pipe.cluster_client.response_callbacks[command_name](
+                        r, **cmd.kwargs
+                    )
+            data.append(r)
+        return data
+
+    async def reset(self):
+        self._command_queue = []
+
+        # make sure to reset the connection state in the event that we were
+        # watching something
+        if self._transaction_connection:
+            try:
+                if self._watching:
+                    # call this manually since our unwatch or
+                    # immediate_execute_command methods can call reset()
+                    await self._transaction_connection.send_command("UNWATCH")
+                    await self._transaction_connection.read_response()
+                # we can safely return the connection to the pool here since we're
+                # sure we're no longer WATCHing anything
+                self._transaction_node.release(self._transaction_connection)
+                self._transaction_connection = None
+            except self.CONNECTION_ERRORS:
+                # disconnect will also remove any previous WATCHes
+                if self._transaction_connection:
+                    await self._transaction_connection.disconnect()
+
+        # clean up the other instance attributes
+        self._transaction_node = None
+        self._watching = False
+        self._explicit_transaction = False
+        self._pipeline_slots = set()
+        self._executing = False
+
+    def multi(self):
+        if self._explicit_transaction:
+            raise RedisError("Cannot issue nested calls to MULTI")
+        if self._command_queue:
+            raise RedisError(
+                "Commands without an initial WATCH have already been issued"
+            )
+        self._explicit_transaction = True
+
+    async def watch(self, *names):
+        if self._explicit_transaction:
+            raise RedisError("Cannot issue a WATCH after a MULTI")
+
+        return await self.execute_command("WATCH", *names)
+
+    async def unwatch(self):
+        if self._watching:
+            return await self.execute_command("UNWATCH")
+
+        return True
+
+    async def discard(self):
+        await self.reset()
+
+    async def unlink(self, *names):
+        return self.execute_command("UNLINK", *names)

@@ -17,8 +17,8 @@ Nodes <#specifying-target-nodes>`__ \| `Multi-key
 Commands <#multi-key-commands>`__ \| `Known PubSub
 Limitations <#known-pubsub-limitations>`__
 
-Creating clusters
------------------
+Connecting to cluster
+---------------------
 
 Connecting redis-py to a Redis Cluster instance(s) requires at a minimum
 a single node for cluster discovery. There are multiple ways in which a
@@ -187,8 +187,8 @@ When a ClusterPubSub instance is created without specifying a node, a
 single node will be transparently chosen for the pubsub connection on
 the first command execution. The node will be determined by: 1. Hashing
 the channel name in the request to find its keyslot 2. Selecting a node
-that handles the keyslot: If read_from_replicas is set to true, a
-replica can be selected.
+that handles the keyslot: If read_from_replicas is set to true or
+load_balancing_strategy is provided, a replica can be selected.
 
 Known PubSub Limitations
 ------------------------
@@ -216,9 +216,12 @@ By default, Redis Cluster always returns MOVE redirection response on
 accessing a replica node. You can overcome this limitation and scale
 read commands by triggering READONLY mode.
 
-To enable READONLY mode pass read_from_replicas=True to RedisCluster
-constructor. When set to true, read commands will be assigned between
+To enable READONLY mode pass read_from_replicas=True or define
+a load_balancing_strategy to RedisCluster constructor.
+When read_from_replicas is set to true read commands will be assigned between
 the primary and its replications in a Round-Robin manner.
+With load_balancing_strategy you can define a custom strategy for
+assigning read commands to the replicas and primary nodes.
 
 READONLY mode can be set at runtime by calling the readonly() method
 with target_nodes=‘replicas’, and read-write access can be restored by
