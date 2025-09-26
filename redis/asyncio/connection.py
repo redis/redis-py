@@ -30,11 +30,12 @@ from ..utils import SSL_AVAILABLE
 
 if SSL_AVAILABLE:
     import ssl
-    from ssl import SSLContext, TLSVersion
+    from ssl import SSLContext, TLSVersion, VerifyFlags
 else:
     ssl = None
     TLSVersion = None
     SSLContext = None
+    VerifyFlags = None
 
 from ..auth.token import TokenInterface
 from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
@@ -793,6 +794,8 @@ class SSLConnection(Connection):
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
         ssl_cert_reqs: Union[str, ssl.VerifyMode] = "required",
+        ssl_include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = True,
@@ -807,6 +810,8 @@ class SSLConnection(Connection):
             keyfile=ssl_keyfile,
             certfile=ssl_certfile,
             cert_reqs=ssl_cert_reqs,
+            include_verify_flags=ssl_include_verify_flags,
+            exclude_verify_flags=ssl_exclude_verify_flags,
             ca_certs=ssl_ca_certs,
             ca_data=ssl_ca_data,
             check_hostname=ssl_check_hostname,
@@ -833,6 +838,14 @@ class SSLConnection(Connection):
         return self.ssl_context.cert_reqs
 
     @property
+    def include_verify_flags(self):
+        return self.ssl_context.include_verify_flags
+
+    @property
+    def exclude_verify_flags(self):
+        return self.ssl_context.exclude_verify_flags
+
+    @property
     def ca_certs(self):
         return self.ssl_context.ca_certs
 
@@ -854,6 +867,8 @@ class RedisSSLContext:
         "keyfile",
         "certfile",
         "cert_reqs",
+        "include_verify_flags",
+        "exclude_verify_flags",
         "ca_certs",
         "ca_data",
         "context",
@@ -867,6 +882,8 @@ class RedisSSLContext:
         keyfile: Optional[str] = None,
         certfile: Optional[str] = None,
         cert_reqs: Optional[Union[str, ssl.VerifyMode]] = None,
+        include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
         check_hostname: bool = False,
@@ -892,6 +909,8 @@ class RedisSSLContext:
                 )
             cert_reqs = CERT_REQS[cert_reqs]
         self.cert_reqs = cert_reqs
+        self.include_verify_flags = include_verify_flags
+        self.exclude_verify_flags = exclude_verify_flags
         self.ca_certs = ca_certs
         self.ca_data = ca_data
         self.check_hostname = (
@@ -906,6 +925,12 @@ class RedisSSLContext:
             context = ssl.create_default_context()
             context.check_hostname = self.check_hostname
             context.verify_mode = self.cert_reqs
+            if self.include_verify_flags:
+                for flag in self.include_verify_flags:
+                    context.verify_flags |= flag
+            if self.exclude_verify_flags:
+                for flag in self.exclude_verify_flags:
+                    context.verify_flags &= ~flag
             if self.certfile and self.keyfile:
                 context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
             if self.ca_certs or self.ca_data:
@@ -953,6 +978,20 @@ def to_bool(value) -> Optional[bool]:
     return bool(value)
 
 
+def parse_ssl_verify_flags(value):
+    # flags are passed in as a string representation of a list,
+    # e.g. VERIFY_X509_STRICT, VERIFY_X509_PARTIAL_CHAIN
+    verify_flags_str = value.replace("[", "").replace("]", "")
+
+    verify_flags = []
+    for flag in verify_flags_str.split(","):
+        flag = flag.strip()
+        if not hasattr(VerifyFlags, flag):
+            raise ValueError(f"Invalid ssl verify flag: {flag}")
+        verify_flags.append(getattr(VerifyFlags, flag))
+    return verify_flags
+
+
 URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyType(
     {
         "db": int,
@@ -963,6 +1002,8 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "max_connections": int,
         "health_check_interval": int,
         "ssl_check_hostname": to_bool,
+        "ssl_include_verify_flags": parse_ssl_verify_flags,
+        "ssl_exclude_verify_flags": parse_ssl_verify_flags,
         "timeout": float,
     }
 )
@@ -1021,6 +1062,7 @@ def parse_url(url: str) -> ConnectKwargs:
 
         if parsed.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection
+
     else:
         valid_schemes = "redis://, rediss://, unix://"
         raise ValueError(
