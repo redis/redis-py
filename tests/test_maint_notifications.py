@@ -387,7 +387,7 @@ class TestMaintNotificationsConfig:
     def test_init_defaults(self):
         """Test MaintNotificationsConfig initialization with defaults."""
         config = MaintNotificationsConfig()
-        assert config.enabled is True
+        assert config.enabled == "auto"
         assert config.proactive_reconnect is True
         assert config.relaxed_timeout == 10
 
