@@ -5,7 +5,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 from redis.typing import Number
 
@@ -447,7 +447,7 @@ class MaintNotificationsConfig:
 
     def __init__(
         self,
-        enabled: bool = True,
+        enabled: Union[bool, Literal["auto"]] = "auto",
         proactive_reconnect: bool = True,
         relaxed_timeout: Optional[Number] = 10,
         endpoint_type: Optional[EndpointType] = None,

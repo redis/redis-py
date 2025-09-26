@@ -686,8 +686,12 @@ class AbstractConnection(ConnectionInterface):
             ):
                 raise ConnectionError("Invalid RESP version")
 
-        # Send maintenance notifications handshake if RESP3 is active and maintenance notifications are enabled
+        # Send maintenance notifications handshake if RESP3 is active
+        # and maintenance notifications are enabled
         # and we have a host to determine the endpoint type from
+        # When the maint_notifications_config enabled mode is "auto",
+        # we just log a warning if the handshake fails
+        # When the mode is enabled=True, we raise an exception in case of failure
         if (
             self.protocol not in [2, "2"]
             and self.maint_notifications_config
@@ -709,15 +713,21 @@ class AbstractConnection(ConnectionInterface):
                 )
                 response = self.read_response()
                 if str_if_bytes(response) != "OK":
-                    raise ConnectionError(
+                    raise ResponseError(
                         "The server doesn't support maintenance notifications"
                     )
             except Exception as e:
-                # Log warning but don't fail the connection
-                import logging
+                if (
+                    isinstance(e, ResponseError)
+                    and self.maint_notifications_config.enabled == "auto"
+                ):
+                    # Log warning but don't fail the connection
+                    import logging
 
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to enable maintenance notifications: {e}")
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Failed to enable maintenance notifications: {e}")
+                else:
+                    raise
 
         # if a client_name is given, set it
         if self.client_name:
