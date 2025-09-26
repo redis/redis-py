@@ -1038,6 +1038,40 @@ class TestUnitDefaultCache:
         assert len(cache.collection) == 1
         assert cache.get(cache_key4).cache_value == b"bar3"
 
+    def test_delete_by_redis_keys_with_non_utf8_bytes_key(self, mock_connection):
+        """cache fails to invalidate entries when redis_keys contain non-UTF-8 bytes."""
+        cache = DefaultCache(CacheConfig(max_size=5))
+
+        # Valid UTF-8 key works
+        utf8_key = b"foo"
+        utf8_cache_key = CacheKey(command="GET", redis_keys=(utf8_key,))
+        assert cache.set(
+            CacheEntry(
+                cache_key=utf8_cache_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        # Non-UTF-8 bytes key
+        bad_key = b"f\xffoo"
+        bad_cache_key = CacheKey(command="GET", redis_keys=(bad_key,))
+        assert cache.set(
+            CacheEntry(
+                cache_key=bad_cache_key,
+                cache_value=b"bar2",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        # Delete both keys: utf8 should succeed, non-utf8 exposes bug
+        results = cache.delete_by_redis_keys([utf8_key, bad_key])
+
+        assert results[0] is True
+        assert results[1] is True, "Cache did not remove entry for non-UTF8 bytes key"
+
     def test_flush(self, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
