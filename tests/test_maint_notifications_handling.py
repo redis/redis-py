@@ -457,7 +457,7 @@ class TestMaintenanceNotificationsHandshake(TestMaintenanceNotificationsBase):
             test_redis_client.close()
 
     def test_handshake_success_when_auto_and_command_not_supported(self):
-        """Test that handshake is performed correctly."""
+        """Test that when maintenance notifications are set to 'auto', the client gracefully handles unsupported MAINT_NOTIFICATIONS commands and normal Redis operations succeed."""
         maint_notifications_config = MaintNotificationsConfig(
             enabled="auto", endpoint_type=EndpointType.INTERNAL_IP
         )
