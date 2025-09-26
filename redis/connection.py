@@ -1608,6 +1608,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "ssl_include_verify_flags": parse_ssl_verify_flags,
     "ssl_exclude_verify_flags": parse_ssl_verify_flags,
     "timeout": float,
+    "is_master": to_bool,
 }
 
 
