@@ -456,8 +456,13 @@ class MaintNotificationsConfig:
         Initialize a new MaintNotificationsConfig.
 
         Args:
-            enabled (bool): Whether to enable maintenance notifications handling.
-                Defaults to False.
+            enabled (bool | "auto"): Controls maintenance notifications handling behavior.
+                - True: The CLIENT MAINT_NOTIFICATIONS command must succeed during connection setup,
+                otherwise a ResponseError is raised.
+                - "auto": The CLIENT MAINT_NOTIFICATIONS command is attempted but failures are
+                gracefully handled - a warning is logged and normal operation continues.
+                - False: Maintenance notifications are completely disabled.
+                Defaults to "auto".
             proactive_reconnect (bool): Whether to proactively reconnect when a node is replaced.
                 Defaults to True.
             relaxed_timeout (Number): The relaxed timeout to use for the connection during maintenance.
