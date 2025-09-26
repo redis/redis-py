@@ -215,6 +215,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         encoding: str = "utf-8",
         encoding_errors: str = "strict",
         decode_responses: bool = False,
+        check_server_ready: bool = False,
         retry_on_timeout: bool = False,
         retry: Retry = Retry(
             backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
@@ -274,10 +275,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         provided pool will be used.
 
         Args:
-
-        single_connection_client:
-            if `True`, connection pool is not used. In that case `Redis`
-            instance use is not thread safe.
+            check_server_ready: if `True`, an extra handshake is performed by sending a PING command, since
+                connect and send operations work even when Redis server is not ready.
+            single_connection_client:
+                if `True`, connection pool is not used. In that case `Redis`
+                instance use is not thread safe.
         """
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -294,6 +296,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "encoding": encoding,
                 "encoding_errors": encoding_errors,
                 "decode_responses": decode_responses,
+                "check_server_ready": check_server_ready,
                 "retry_on_error": retry_on_error,
                 "retry": copy.deepcopy(retry),
                 "max_connections": max_connections,
