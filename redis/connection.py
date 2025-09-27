@@ -68,8 +68,10 @@ from .utils import (
 
 if SSL_AVAILABLE:
     import ssl
+    from ssl import VerifyFlags
 else:
     ssl = None
+    VerifyFlags = None
 
 if HIREDIS_AVAILABLE:
     import hiredis
@@ -686,8 +688,12 @@ class AbstractConnection(ConnectionInterface):
             ):
                 raise ConnectionError("Invalid RESP version")
 
-        # Send maintenance notifications handshake if RESP3 is active and maintenance notifications are enabled
+        # Send maintenance notifications handshake if RESP3 is active
+        # and maintenance notifications are enabled
         # and we have a host to determine the endpoint type from
+        # When the maint_notifications_config enabled mode is "auto",
+        # we just log a warning if the handshake fails
+        # When the mode is enabled=True, we raise an exception in case of failure
         if (
             self.protocol not in [2, "2"]
             and self.maint_notifications_config
@@ -709,15 +715,21 @@ class AbstractConnection(ConnectionInterface):
                 )
                 response = self.read_response()
                 if str_if_bytes(response) != "OK":
-                    raise ConnectionError(
+                    raise ResponseError(
                         "The server doesn't support maintenance notifications"
                     )
             except Exception as e:
-                # Log warning but don't fail the connection
-                import logging
+                if (
+                    isinstance(e, ResponseError)
+                    and self.maint_notifications_config.enabled == "auto"
+                ):
+                    # Log warning but don't fail the connection
+                    import logging
 
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to enable maintenance notifications: {e}")
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Failed to enable maintenance notifications: {e}")
+                else:
+                    raise
 
         # if a client_name is given, set it
         if self.client_name:
@@ -1362,6 +1374,8 @@ class SSLConnection(Connection):
         ssl_keyfile=None,
         ssl_certfile=None,
         ssl_cert_reqs="required",
+        ssl_include_verify_flags: Optional[List["VerifyFlags"]] = None,
+        ssl_exclude_verify_flags: Optional[List["VerifyFlags"]] = None,
         ssl_ca_certs=None,
         ssl_ca_data=None,
         ssl_check_hostname=True,
@@ -1380,7 +1394,10 @@ class SSLConnection(Connection):
         Args:
             ssl_keyfile: Path to an ssl private key. Defaults to None.
             ssl_certfile: Path to an ssl certificate. Defaults to None.
-            ssl_cert_reqs: The string value for the SSLContext.verify_mode (none, optional, required), or an ssl.VerifyMode. Defaults to "required".
+            ssl_cert_reqs: The string value for the SSLContext.verify_mode (none, optional, required),
+                           or an ssl.VerifyMode. Defaults to "required".
+            ssl_include_verify_flags: A list of flags to be included in the SSLContext.verify_flags. Defaults to None.
+            ssl_exclude_verify_flags: A list of flags to be excluded from the SSLContext.verify_flags. Defaults to None.
             ssl_ca_certs: The path to a file of concatenated CA certificates in PEM format. Defaults to None.
             ssl_ca_data: Either an ASCII string of one or more PEM-encoded certificates or a bytes-like object of DER-encoded certificates.
             ssl_check_hostname: If set, match the hostname during the SSL handshake. Defaults to True.
@@ -1416,6 +1433,8 @@ class SSLConnection(Connection):
                 )
             ssl_cert_reqs = CERT_REQS[ssl_cert_reqs]
         self.cert_reqs = ssl_cert_reqs
+        self.ssl_include_verify_flags = ssl_include_verify_flags
+        self.ssl_exclude_verify_flags = ssl_exclude_verify_flags
         self.ca_certs = ssl_ca_certs
         self.ca_data = ssl_ca_data
         self.ca_path = ssl_ca_path
@@ -1455,6 +1474,12 @@ class SSLConnection(Connection):
         context = ssl.create_default_context()
         context.check_hostname = self.check_hostname
         context.verify_mode = self.cert_reqs
+        if self.ssl_include_verify_flags:
+            for flag in self.ssl_include_verify_flags:
+                context.verify_flags |= flag
+        if self.ssl_exclude_verify_flags:
+            for flag in self.ssl_exclude_verify_flags:
+                context.verify_flags &= ~flag
         if self.certfile or self.keyfile:
             context.load_cert_chain(
                 certfile=self.certfile,
@@ -1568,6 +1593,20 @@ def to_bool(value):
     return bool(value)
 
 
+def parse_ssl_verify_flags(value):
+    # flags are passed in as a string representation of a list,
+    # e.g. VERIFY_X509_STRICT, VERIFY_X509_PARTIAL_CHAIN
+    verify_flags_str = value.replace("[", "").replace("]", "")
+
+    verify_flags = []
+    for flag in verify_flags_str.split(","):
+        flag = flag.strip()
+        if not hasattr(VerifyFlags, flag):
+            raise ValueError(f"Invalid ssl verify flag: {flag}")
+        verify_flags.append(getattr(VerifyFlags, flag))
+    return verify_flags
+
+
 URL_QUERY_ARGUMENT_PARSERS = {
     "db": int,
     "socket_timeout": float,
@@ -1578,6 +1617,8 @@ URL_QUERY_ARGUMENT_PARSERS = {
     "max_connections": int,
     "health_check_interval": int,
     "ssl_check_hostname": to_bool,
+    "ssl_include_verify_flags": parse_ssl_verify_flags,
+    "ssl_exclude_verify_flags": parse_ssl_verify_flags,
     "timeout": float,
 }
 
