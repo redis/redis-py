@@ -6,6 +6,8 @@ from redis.asyncio import Redis
 from redis.asyncio.cluster import RedisCluster
 from redis.asyncio.connection import async_timeout
 
+pytestmark = pytest.mark.asyncio
+
 
 class DelayProxy:
     def __init__(self, addr, redis_addr, delay: float = 0.0):
