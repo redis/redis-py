@@ -1268,6 +1268,7 @@ class NodesManager:
         "_dynamic_startup_nodes",
         "_moved_exception",
         "_event_dispatcher",
+        "_background_tasks",
         "connection_kwargs",
         "default_node",
         "nodes_cache",
@@ -1297,6 +1298,7 @@ class NodesManager:
         self.slots_cache: Dict[int, List["ClusterNode"]] = {}
         self.read_load_balancer = LoadBalancer()
 
+        self._background_tasks: Set[asyncio.Task] = set()
         self._dynamic_startup_nodes: bool = dynamic_startup_nodes
         self._moved_exception: MovedError = None
         if event_dispatcher is None:
@@ -1331,13 +1333,17 @@ class NodesManager:
         if remove_old:
             for name in list(old.keys()):
                 if name not in new:
-                    task = asyncio.create_task(old.pop(name).disconnect())  # noqa
+                    task = asyncio.create_task(old.pop(name).disconnect())
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
 
         for name, node in new.items():
             if name in old:
                 if old[name] is node:
                     continue
-                task = asyncio.create_task(old[name].disconnect())  # noqa
+                task = asyncio.create_task(old[name].disconnect())
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
             old[name] = node
 
     def update_moved_exception(self, exception):
