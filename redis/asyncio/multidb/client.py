@@ -280,7 +280,7 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
                 if on_error:
                     on_error(result.original_exception)
 
-    async def _check_db_health(self, database: AsyncDatabase,) -> bool:
+    async def _check_db_health(self, database: AsyncDatabase) -> bool:
         """
         Runs health checks on the given database until first failure.
         """
@@ -307,7 +307,8 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             loop.call_later(DEFAULT_GRACE_PERIOD, _half_open_circuit, circuit)
 
     async def aclose(self):
-        await self.command_executor.active_database.client.aclose()
+        if self.command_executor.active_database:
+            await self.command_executor.active_database.client.aclose()
 
 def _half_open_circuit(circuit: CircuitBreaker):
     circuit.state = CBState.HALF_OPEN
