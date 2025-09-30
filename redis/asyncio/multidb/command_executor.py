@@ -199,7 +199,9 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
 
     async def execute_command(self, *args, **options):
         async def callback():
-            return await self._active_database.client.execute_command(*args, **options)
+            response = await self._active_database.client.execute_command(*args, **options)
+            await self._register_command_execution(args)
+            return response
 
         return await self._execute_with_failure_detection(callback, args)
 
@@ -209,7 +211,9 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
                 for command, options in command_stack:
                     pipe.execute_command(*command, **options)
 
-                return await pipe.execute()
+                response = await pipe.execute()
+                await self._register_command_execution(command_stack)
+                return response
 
         return await self._execute_with_failure_detection(callback, command_stack)
 
@@ -222,13 +226,15 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
             watch_delay: Optional[float] = None,
     ):
         async def callback():
-            return await self._active_database.client.transaction(
+            response = await self._active_database.client.transaction(
                 func,
                 *watches,
                 shard_hint=shard_hint,
                 value_from_callable=value_from_callable,
                 watch_delay=watch_delay
             )
+            await self._register_command_execution(())
+            return response
 
         return await self._execute_with_failure_detection(callback)
 
@@ -236,9 +242,12 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
         async def callback():
             method = getattr(self.active_pubsub, method_name)
             if iscoroutinefunction(method):
-                return await method(*args, **kwargs)
+                response = await method(*args, **kwargs)
             else:
-                return method(*args, **kwargs)
+                response = method(*args, **kwargs)
+
+            await self._register_command_execution(args)
+            return response
 
         return await self._execute_with_failure_detection(callback, *args)
 
@@ -279,6 +288,10 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
 
     async def _on_command_fail(self, error, *args):
         await self._event_dispatcher.dispatch_async(AsyncOnCommandsFailEvent(args, error))
+
+    async def _register_command_execution(self, cmd: tuple):
+        for detector in self._failure_detectors:
+            await detector.register_command_execution(cmd)
 
     def _setup_event_dispatcher(self):
         """

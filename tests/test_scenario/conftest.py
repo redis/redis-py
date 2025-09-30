@@ -13,7 +13,7 @@ from redis.event import EventDispatcher, EventListenerInterface
 from redis.multidb.client import MultiDBClient
 from redis.multidb.config import DatabaseConfig, MultiDbConfig, DEFAULT_HEALTH_CHECK_INTERVAL
 from redis.multidb.event import ActiveDatabaseChanged
-from redis.multidb.failure_detector import DEFAULT_FAILURES_THRESHOLD
+from redis.multidb.failure_detector import DEFAULT_MIN_NUM_FAILURES
 from redis.multidb.healthcheck import EchoHealthCheck, DEFAULT_HEALTH_CHECK_DELAY
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.client import Redis
@@ -56,6 +56,9 @@ def get_endpoints_config(endpoint_name: str):
             f"Failed to load endpoints config file: {endpoints_config}"
         ) from e
 
+@pytest.fixture()
+def endpoints_config(endpoint_name: str):
+    return get_endpoints_config(endpoint_name)
 
 @pytest.fixture()
 def fault_injector_client():
@@ -74,7 +77,7 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
 
      username = endpoint_config.get('username', None)
      password = endpoint_config.get('password', None)
-     failure_threshold = request.param.get('failure_threshold', DEFAULT_FAILURES_THRESHOLD)
+     min_num_failures = request.param.get('min_num_failures', DEFAULT_MIN_NUM_FAILURES)
      command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=0.1, base=0.01), retries=10))
 
      # Retry configuration different for health checks as initial health check require more time in case
@@ -116,7 +119,7 @@ def r_multi_db(request) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListen
          client_class=client_class,
          databases_config=db_configs,
          command_retry=command_retry,
-         failure_threshold=failure_threshold,
+         min_num_failures=min_num_failures,
          health_check_probes=3,
          health_check_interval=health_check_interval,
          event_dispatcher=event_dispatcher,

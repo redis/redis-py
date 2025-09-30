@@ -224,7 +224,9 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
 
     def execute_command(self, *args, **options):
         def callback():
-            return self._active_database.client.execute_command(*args, **options)
+            response = self._active_database.client.execute_command(*args, **options)
+            self._register_command_execution(args)
+            return response
 
         return self._execute_with_failure_detection(callback, args)
 
@@ -234,13 +236,17 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
                 for command, options in command_stack:
                     pipe.execute_command(*command, **options)
 
-                return pipe.execute()
+                response = pipe.execute()
+                self._register_command_execution(command_stack)
+                return response
 
         return self._execute_with_failure_detection(callback, command_stack)
 
     def execute_transaction(self, transaction: Callable[[Pipeline], None], *watches, **options):
         def callback():
-            return self._active_database.client.transaction(transaction, *watches, **options)
+            response = self._active_database.client.transaction(transaction, *watches, **options)
+            self._register_command_execution(())
+            return response
 
         return self._execute_with_failure_detection(callback)
 
@@ -256,7 +262,9 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
     def execute_pubsub_method(self, method_name: str, *args, **kwargs):
         def callback():
             method = getattr(self.active_pubsub, method_name)
-            return method(*args, **kwargs)
+            response = method(*args, **kwargs)
+            self._register_command_execution(args)
+            return response
 
         return self._execute_with_failure_detection(callback, *args)
 
@@ -297,6 +305,10 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         ):
             self.active_database = self._failover_strategy_executor.execute()
             self._schedule_next_fallback()
+
+    def _register_command_execution(self, cmd: tuple):
+        for detector in self._failure_detectors:
+            detector.register_command_execution(cmd)
 
     def _setup_event_dispatcher(self):
         """

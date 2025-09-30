@@ -9,7 +9,7 @@ from redis.asyncio.multidb.healthcheck import HealthCheck, DEFAULT_HEALTH_CHECK_
     DEFAULT_HEALTH_CHECK_POLICY
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import State as CBState, CircuitBreaker
-from redis.asyncio import Redis
+from redis.asyncio import Redis, ConnectionPool
 from redis.asyncio.multidb.database import Database, Databases
 
 @pytest.fixture()
@@ -37,6 +37,7 @@ def mock_db(request) -> Database:
      db = Mock(spec=Database)
      db.weight = request.param.get("weight", 1.0)
      db.client = Mock(spec=Redis)
+     db.client.connection_pool = Mock(spec=ConnectionPool)
 
      cb = request.param.get("circuit", {})
      mock_cb = Mock(spec=CircuitBreaker)
@@ -51,6 +52,7 @@ def mock_db1(request) -> Database:
      db = Mock(spec=Database)
      db.weight = request.param.get("weight", 1.0)
      db.client = Mock(spec=Redis)
+     db.client.connection_pool = Mock(spec=ConnectionPool)
 
      cb = request.param.get("circuit", {})
      mock_cb = Mock(spec=CircuitBreaker)
@@ -65,6 +67,7 @@ def mock_db2(request) -> Database:
      db = Mock(spec=Database)
      db.weight = request.param.get("weight", 1.0)
      db.client = Mock(spec=Redis)
+     db.client.connection_pool = Mock(spec=ConnectionPool)
 
      cb = request.param.get("circuit", {})
      mock_cb = Mock(spec=CircuitBreaker)

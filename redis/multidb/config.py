@@ -11,8 +11,8 @@ from redis.data_structure import WeightedList
 from redis.event import EventDispatcher, EventDispatcherInterface
 from redis.multidb.circuit import PBCircuitBreakerAdapter, CircuitBreaker, DEFAULT_GRACE_PERIOD
 from redis.multidb.database import Database, Databases
-from redis.multidb.failure_detector import FailureDetector, CommandFailureDetector, DEFAULT_FAILURES_THRESHOLD, \
-    DEFAULT_FAILURES_DURATION
+from redis.multidb.failure_detector import FailureDetector, CommandFailureDetector, DEFAULT_MIN_NUM_FAILURES, \
+    DEFAULT_FAILURES_DETECTION_WINDOW, DEFAULT_FAILURE_RATE_THRESHOLD
 from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_PROBES, \
     DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_HEALTH_CHECK_DELAY, HealthCheckPolicies, DEFAULT_HEALTH_CHECK_POLICY
 from redis.multidb.failover import FailoverStrategy, WeightBasedFailoverStrategy, DEFAULT_FAILOVER_ATTEMPTS, \
@@ -71,8 +71,9 @@ class MultiDbConfig:
         client_class: The client class used to manage database connections.
         command_retry: Retry strategy for executing database commands.
         failure_detectors: Optional list of additional failure detectors for monitoring database failures.
-        failure_threshold: Threshold for determining database failure.
-        failures_interval: Time interval for tracking database failures.
+        min_num_failures: Minimal count of failures required for failover
+        failure_rate_threshold: Percentage of failures required for failover
+        failures_detection_window: Time interval for tracking database failures.
         health_checks: Optional list of additional health checks performed on databases.
         health_check_interval: Time interval for executing health checks.
         health_check_probes: Number of attempts to evaluate the health of a database.
@@ -107,8 +108,9 @@ class MultiDbConfig:
         backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
     )
     failure_detectors: Optional[List[FailureDetector]] = None
-    failure_threshold: int = DEFAULT_FAILURES_THRESHOLD
-    failures_interval: float = DEFAULT_FAILURES_DURATION
+    min_num_failures: int = DEFAULT_MIN_NUM_FAILURES
+    failure_rate_threshold: float = DEFAULT_FAILURE_RATE_THRESHOLD
+    failures_detection_window: float = DEFAULT_FAILURES_DETECTION_WINDOW
     health_checks: Optional[List[HealthCheck]] = None
     health_check_interval: float = DEFAULT_HEALTH_CHECK_INTERVAL
     health_check_probes: int = DEFAULT_HEALTH_CHECK_PROBES
@@ -152,7 +154,11 @@ class MultiDbConfig:
 
     def default_failure_detectors(self) -> List[FailureDetector]:
         return [
-            CommandFailureDetector(threshold=self.failure_threshold, duration=self.failures_interval),
+            CommandFailureDetector(
+                min_num_failures=self.min_num_failures,
+                failure_rate_threshold=self.failure_rate_threshold,
+                failure_detection_window=self.failures_detection_window
+            ),
         ]
 
     def default_health_checks(self) -> List[HealthCheck]:

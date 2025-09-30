@@ -7,12 +7,13 @@ import pytest_asyncio
 
 from redis.asyncio import Redis, RedisCluster
 from redis.asyncio.multidb.client import MultiDBClient
-from redis.asyncio.multidb.config import DEFAULT_FAILURES_THRESHOLD, DEFAULT_HEALTH_CHECK_INTERVAL, DatabaseConfig, \
+from redis.asyncio.multidb.config import DEFAULT_HEALTH_CHECK_INTERVAL, DatabaseConfig, \
     MultiDbConfig
 from redis.asyncio.multidb.event import AsyncActiveDatabaseChanged
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialBackoff
 from redis.event import AsyncEventListenerInterface, EventDispatcher
+from redis.multidb.failure_detector import DEFAULT_MIN_NUM_FAILURES
 from tests.test_scenario.conftest import get_endpoints_config, extract_cluster_fqdn
 from tests.test_scenario.fault_injector_client import FaultInjectorClient
 
@@ -40,7 +41,7 @@ async def r_multi_db(request) -> AsyncGenerator[tuple[MultiDBClient, CheckActive
 
      username = endpoint_config.get('username', None)
      password = endpoint_config.get('password', None)
-     failure_threshold = request.param.get('failure_threshold', DEFAULT_FAILURES_THRESHOLD)
+     min_num_failures = request.param.get('min_num_failures', DEFAULT_MIN_NUM_FAILURES)
      command_retry = request.param.get('command_retry', Retry(ExponentialBackoff(cap=0.1, base=0.01), retries=10))
 
      # Retry configuration different for health checks as initial health check require more time in case
@@ -82,7 +83,7 @@ async def r_multi_db(request) -> AsyncGenerator[tuple[MultiDBClient, CheckActive
          client_class=client_class,
          databases_config=db_configs,
          command_retry=command_retry,
-         failure_threshold=failure_threshold,
+         min_num_failures=min_num_failures,
          health_checks=health_checks,
          health_check_probes=3,
          health_check_interval=health_check_interval,
@@ -94,10 +95,13 @@ async def r_multi_db(request) -> AsyncGenerator[tuple[MultiDBClient, CheckActive
      async def teardown():
          await client.aclose()
 
-         if isinstance(client.command_executor.active_database.client, Redis):
+         if (
+                 client.command_executor.active_database
+                 and isinstance(client.command_executor.active_database.client, Redis)
+         ):
             await client.command_executor.active_database.client.connection_pool.disconnect()
 
-         await asyncio.sleep(15)
+         await asyncio.sleep(10)
 
      yield client, listener, endpoint_config
      await teardown()

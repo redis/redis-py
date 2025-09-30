@@ -41,13 +41,13 @@ class TestActiveActive:
 
     def teardown_method(self, method):
         # Timeout so the cluster could recover from network failure.
-        sleep(15)
+        sleep(10)
 
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2},
-            {"client_class": RedisCluster, "failure_threshold": 2},
+            {"client_class": Redis, "min_num_failures": 2},
+            {"client_class": RedisCluster, "min_num_failures": 2},
         ],
         ids=["standalone", "cluster"],
         indirect=True
@@ -96,8 +96,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2, "health_check_interval": 20},
-            {"client_class": RedisCluster, "failure_threshold": 2, "health_check_interval": 20},
+            {"client_class": Redis, "min_num_failures": 2, "health_check_interval": 20},
+            {"client_class": RedisCluster, "min_num_failures": 2, "health_check_interval": 20},
         ],
         ids=["standalone", "cluster"],
         indirect=True
@@ -156,8 +156,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2},
-            {"client_class": RedisCluster, "failure_threshold": 2},
+            {"client_class": Redis, "min_num_failures": 2},
+            {"client_class": RedisCluster, "min_num_failures": 2},
         ],
         ids=["standalone", "cluster"],
         indirect=True
@@ -214,8 +214,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2},
-            {"client_class": RedisCluster, "failure_threshold": 2},
+            {"client_class": Redis, "min_num_failures": 2},
+            {"client_class": RedisCluster, "min_num_failures": 2},
         ],
         ids=["standalone", "cluster"],
         indirect=True
@@ -273,8 +273,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2},
-            {"client_class": RedisCluster, "failure_threshold": 2},
+            {"client_class": Redis, "min_num_failures": 2},
+            {"client_class": RedisCluster, "min_num_failures": 2},
         ],
         ids=["standalone", "cluster"],
         indirect=True
@@ -329,8 +329,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2},
-            {"client_class": RedisCluster, "failure_threshold": 2},
+            {"client_class": Redis, "min_num_failures": 2},
+            {"client_class": RedisCluster, "min_num_failures": 2},
         ],
         ids=["standalone", "cluster"],
         indirect=True
@@ -389,8 +389,8 @@ class TestActiveActive:
     @pytest.mark.parametrize(
         "r_multi_db",
         [
-            {"client_class": Redis, "failure_threshold": 2},
-            {"client_class": RedisCluster, "failure_threshold": 2},
+            {"client_class": Redis, "min_num_failures": 2},
+            {"client_class": RedisCluster, "min_num_failures": 2},
         ],
         ids=["standalone", "cluster"],
         indirect=True
