@@ -148,7 +148,7 @@ MultiDBClient
 ^^^^^^^^^^^^^
 
 The client provides the same API as `Redis` or `RedisCluster` client, so it's
-interchangable to provide a seemless upgrade for your application. As well
+interchangeable to provide a seamless upgrade for your application. As well
 client provides an option to reconfigure it in runtime (add health checks,
 failure detectors or even new databases).
 
@@ -336,7 +336,8 @@ reverse proxy behind an actual REST API endpoint.
 ~~~~~~~~~~~~~~~~~~~~~
 You can add custom health checks for specific requirements:
 
-.. code:: python
+.. code-block:: python
+
     from redis.multidb.healthcheck import AbstractHealthCheck
     from redis.retry import Retry
     from redis.utils import dummy_fail
@@ -365,7 +366,7 @@ implementation, configuration defined in the `MultiDBConfig` class.
 
 By default failure detector is configured for 1000 failures and 10% failure rate
 threshold within a 2 seconds sliding window, this could be adjusted regarding
-your applciation specifics and traffic.
+your application specifics and traffic.
 
 .. code-block:: python
 
