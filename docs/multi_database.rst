@@ -18,14 +18,15 @@ Key concepts
   and HALF_OPEN (probing). Health checks toggle these states to avoid hammering a downed database.
 
 - Health checks:
-  A set of checks determines whether a database is healthy. By default, an "ECHO" check runs against
-  the database (all cluster nodes must pass for a cluster). You can add custom checks. A Redis Enterprise
-  specific "lag-aware" health check is also available.
+  A set of checks determines whether a database is healthy in proactive manner.
+  By default, an "ECHO" check runs against the database (all cluster nodes must
+  pass for a cluster). You can add custom checks. A Redis Enterprise specific
+  "lag-aware" health check is also available.
 
 - Failure detector:
-  A detector observes command failures over a moving window. You can specify an exact number of failures
-  and failures rate to have more fine-grain tuned configuration of triggering fail over based on organic
-  traffic.
+  A detector observes command failures over a moving window (reactive monitoring).
+  You can specify an exact number of failures and failures rate to have more
+  fine-grain tuned configuration of triggering fail over based on organic traffic.
 
 - Failover strategy:
   The default strategy is weight-based. It prefers the highest-weight healthy database.
@@ -142,6 +143,15 @@ The asyncio API mirrors the synchronous one and provides async/await semantics.
 
     asyncio.run(main())
 
+
+MultiDBClient
+^^^^^^^^^^^^^
+
+The client provides the same API as `Redis` or `RedisCluster` client, so it's
+interchangable to provide a seemless upgrade for your application. As well
+client provides an option to reconfigure it in runtime (add health checks,
+failure detectors or even new databases).
+
 Configuration
 -------------
 
@@ -247,8 +257,15 @@ Method 3: Using Custom Connection Pool
 **Important**: Don't pass `Retry` objects in `client_kwargs`. `MultiDBClient`
 handles all retries at the top level through the `command_retry` configuration.
 
-Health checks
--------------
+Health Monitoring
+-----------------
+The `MultiDBClient` uses two complementary mechanisms to ensure database availability:
+
+Health Checks (Proactive Monitoring)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+These checks run continuously in the background at configured intervals to proactively
+detect database issues. They run in the background with a given interval and
+configuration defined in the `MultiDBConfig` class.
 
 To avoid false positives, you can configure amount of health check probes and also
 define one of the health check policies to evaluate probes result.
@@ -260,7 +277,8 @@ define one of the health check policies to evaluate probes result.
 EchoHealthCheck (default)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The default health check sends ECHO to the database (and to all nodes for clusters).
+The default health check sends the [ECHO](https://redis.io/docs/latest/commands/echo/)
+to the database (and to all nodes for clusters).
 
 Lag-Aware Healthcheck (Redis Enterprise Only)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -313,17 +331,46 @@ reverse proxy behind an actual REST API endpoint.
 
     client = MultiDBClient(cfg)
 
-Failure detection
+
+**Custom Health Checks**
+~~~~~~~~~~~~~~~~~~~~~
+You can add custom health checks for specific requirements:
+
+.. code:: python
+    from redis.multidb.healthcheck import AbstractHealthCheck
+    from redis.retry import Retry
+    from redis.utils import dummy_fail
+    class PingHealthCheck(AbstractHealthCheck):
+        def __init__(self, retry: Retry):
+            super().__init__(retry=retry)
+        def check_health(self, database) -> bool:
+            return self._retry.call_with_retry(
+                lambda: self._returns_pong(database),
+                lambda _: dummy_fail()
+            )
+        def _returns_pong(self, database) -> bool:
+            expected_message = ["PONG", b"PONG"]
+            actual_message = database.client.execute_command("PING")
+            return actual_message in expected_message
+
+
+Failure Detection (Reactive Monitoring)
 -----------------
 
-A `CommandFailureDetector` observes failures within a time window, if minimal number of failures
-and failures rate reached it triggers fail over.
+The failure detector monitor actual command failures and marks databases as unhealthy
+when failures count and failure rate exceed thresholds within a sliding time window
+of a few seconds. This catches issues that proactive health checks might miss during
+real traffic. You can extend the list of failure detectors by providing your own
+implementation, configuration defined in the `MultiDBConfig` class.
+
+By default failure detector is configured for 1000 failures and 10% failure rate
+threshold within a 2 seconds sliding window, this could be adjusted regarding
+your applciation specifics and traffic.
 
 .. code-block:: python
 
     from redis.multidb.config import MultiDbConfig, DatabaseConfig
     from redis.multidb.client import MultiDBClient
-    from redis.multidb.failure_detector import CommandFailureDetector
 
     cfg = MultiDbConfig(
         databases_config=[
@@ -336,7 +383,6 @@ and failures rate reached it triggers fail over.
     client = MultiDBClient(cfg)
 
     # Add an additional detector, optionally limited to specific exception types:
-    from redis.exceptions import TimeoutError
     client.add_failure_detector(
         CustomFailureDetector()
     )
@@ -447,13 +493,13 @@ the active database is healthy and up-to-date before running the stack.
 Best practices
 --------------
 
-- Assign the highest weight to your primary database and lower weights to replicas or DR sites.
-- Keep health_check_interval short enough to promptly detect failures but avoid excessive load.
-- Tune command_retry and failover attempts to your SLA and workload profile.
-- Use auto_fallback_interval if you want the client to fail over back to your primary automatically.
-- Handle `TemporaryUnavailableException` to be able to recover before giving up, in meantime you
-can switch data source (f.e cache). `NoValidDatabaseException` indicates that there's no healthy
-database to operate.
+- Assign the highest weight to your primary database and lower weights to replicas or disaster recovery sites.
+- Keep `health_check_interval` short enough to promptly detect failures but avoid excessive load.
+- Tune `command_retry` and failover attempts to your SLA and workload profile.
+- Use `auto_fallback_interval` if you want the client to fail over back to your primary automatically.
+- Handle `TemporaryUnavailableException` to be able to recover before giving up. In the meantime, you
+can switch the data source (e.g. cache). `NoValidDatabaseException` indicates that there are no healthy
+databases to operate.
 
 Troubleshooting
 ---------------
@@ -462,13 +508,12 @@ Troubleshooting
   Indicates no healthy database is available. Check circuit breaker states and health checks.
 
 - TemporaryUnavailableException
-  Indicates that currently there's no healthy database, but you can still send requests until
-  `NoValidDatabaseException` will be thrown. Probe interval configured with `failure_attemtps`
-  and `failure_delay` parameters.
+  Indicates that currently there are no healthy databases, but you can still send requests until
+  `NoValidDatabaseException` is thrown. Probe interval is configured with `failure_attemtps`
 
 - Health checks always failing:
   Verify connectivity and, for clusters, that all nodes are reachable. For `LagAwareHealthCheck`,
-  ensure health_check_url points to your Redis Enterprise endpoint and authentication/TLS options
+  ensure `health_check_url` points to your Redis Enterprise endpoint and authentication/TLS options
   are configured properly.
 
 - Pub/Sub not receiving messages after failover:
