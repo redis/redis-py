@@ -270,9 +270,9 @@ configuration defined in the `MultiDBConfig` class.
 To avoid false positives, you can configure amount of health check probes and also
 define one of the health check policies to evaluate probes result.
 
-**HealthCheckPolicies.HEALTHY_ALL** - (default) All probes should be successful
-**HealthCheckPolicies.HEALTHY_MAJORITY** - Majority of probes should be successful
-**HealthCheckPolicies.HEALTHY_ANY** - Any of probes should be successful
+**HealthCheckPolicies.HEALTHY_ALL** - (default) All probes should be successful. 
+**HealthCheckPolicies.HEALTHY_MAJORITY** - Majority of probes should be successful. 
+**HealthCheckPolicies.HEALTHY_ANY** - Any of probes should be successful. 
 
 EchoHealthCheck (default)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
