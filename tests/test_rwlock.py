@@ -1,9 +1,11 @@
+import threading
 import time as mod_time
 
 import pytest
 
 from redis.client import Redis
 from redis.exceptions import LockError
+from redis.exceptions import LockMaxWritersError
 from redis.exceptions import LockNotOwnedError
 from redis.rwlock import RwLock
 
@@ -245,3 +247,36 @@ class TestLock:
             with lock.write(blocking_timeout=0.05, sleep=0.01):
                 pass
         rguard.release()
+
+    def test_unique_writer(self, r: Redis):
+        lock = RwLock(r, 'foo', timeout=1, max_writers=1)
+        guard1 = lock.write()
+        assert guard1.acquire()
+        guard2 = lock.write()
+        with pytest.raises(LockMaxWritersError):
+            guard2.acquire()
+
+    def test_max_writers(self, r: Redis):
+        lock = RwLock(r, 'foo', timeout=1, blocking_timeout=50e-3, sleep=10e-3, max_writers=2)
+        guard1 = lock.write()
+        assert guard1.acquire()
+        result = []
+
+        # Spawn a thread to wait on the lock
+        def target():
+            with lock.write():
+                result.append(1)
+        thread = threading.Thread(target=target)
+        thread.start()
+
+        # Third writer fails
+        guard2 = lock.write()
+        with pytest.raises(LockMaxWritersError):
+            guard2.acquire()
+
+        guard1.release()
+        thread.join()
+
+        # Thread acquired after guard1 was released
+        assert len(result) == 1
+        assert not lock.is_write_locked()

@@ -13,15 +13,12 @@ from uuid import uuid1
 from typing_extensions import override
 
 from redis.exceptions import LockError
+from redis.exceptions import LockMaxWritersError
 from redis.exceptions import LockNotOwnedError
 from redis.typing import Number
 
 if TYPE_CHECKING:
     from redis import Redis
-
-
-class CannotBlock(Exception):
-    pass
 
 
 class RwLock:
@@ -113,14 +110,14 @@ class RwLock:
                 if write_locked then
                     count = count + 1
                 end
-                if count == max_writers then
+                if count >= max_writers then
                     op = 'update'
                 end
             end
 
             local blocked
             if op == 'update' then
-                blocked = redis.call('zadd', semaphore_key, 'XX', time + semaphore_expiration, token) > 0
+                blocked = redis.call('zadd', semaphore_key, 'XX', 'CH', time + semaphore_expiration, token) > 0
             elseif op == 'create' then
                 redis.call('zadd', semaphore_key, time + semaphore_expiration, token)
                 blocked = true
@@ -161,16 +158,10 @@ class RwLock:
     LUA_REACQUIRE_READER_SCRIPT = """
         local token = ARGV[1]
 
-        local score = redis.call('zmscore', KEYS[1], token)
-        if not score[1] then
-            return 0
-        end
-
         local timespec = redis.call('time')
         local time = timespec[1] + 1e-6 * timespec[2]
         local expiry = time + ARGV[2]
-        redis.call('zadd', KEYS[1], expiry, token)
-        return 1
+        return redis.call('zadd', KEYS[1], 'XX', 'CH', expiry, token) > 0
     """
 
     # KEYS[1] - writer lock name
@@ -227,7 +218,8 @@ class RwLock:
         ``max_writers``: If set to a positive number, the maximum number
         of writers that may contend the lock. For example, if set to 1,
         then only one writer may hold or wait on the lock at a time. Any
-        additional writers will fail to acquire the lock.
+        additional writers will fail to acquire the lock and raise
+        ``LockMaxWritersError``.
         """
         self.redis = redis
         self.prefix = prefix
@@ -308,6 +300,10 @@ class RwLock:
             blocking=blocking if blocking is not None else self.blocking,
             blocking_timeout=blocking_timeout if blocking_timeout is not None else self.blocking_timeout,
         )
+
+    def is_write_locked(self) -> bool:
+        """Returns `True` if the lock is currently held by any writer."""
+        return bool(self.redis.exists(self._writer_lock_name()))
 
 
 class BaseLockGuard(abc.ABC):
@@ -394,11 +390,8 @@ class BaseLockGuard(abc.ABC):
             stop_trying = not blocking or (
                 stop_trying_at is not None and next_try_at > stop_trying_at
             )
-            try:
-                if self._acquire(should_block=not stop_trying):
-                    return True
-            except CannotBlock:
-                return False
+            if self._acquire(should_block=not stop_trying):
+                return True
             if stop_trying:
                 return False
             mod_time.sleep(sleep)
@@ -493,7 +486,7 @@ class WriteLockGuard(BaseLockGuard):
             client=self.redis,
         )
         if should_block and code == 2:
-            raise CannotBlock
+            raise LockMaxWritersError
         else:
             return code == 0
 
