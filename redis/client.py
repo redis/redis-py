@@ -56,9 +56,9 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
-from redis.maintenance_events import (
-    MaintenanceEventPoolHandler,
-    MaintenanceEventsConfig,
+from redis.maint_notifications import (
+    MaintNotificationsConfig,
+    MaintNotificationsPoolHandler,
 )
 from redis.retry import Retry
 from redis.utils import (
@@ -224,6 +224,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
         ssl_cert_reqs: Union[str, "ssl.VerifyMode"] = "required",
+        ssl_include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_path: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
@@ -248,7 +250,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
-        maintenance_events_config: Optional[MaintenanceEventsConfig] = None,
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -330,6 +332,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_keyfile": ssl_keyfile,
                             "ssl_certfile": ssl_certfile,
                             "ssl_cert_reqs": ssl_cert_reqs,
+                            "ssl_include_verify_flags": ssl_include_verify_flags,
+                            "ssl_exclude_verify_flags": ssl_exclude_verify_flags,
                             "ssl_ca_certs": ssl_ca_certs,
                             "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,
@@ -373,22 +377,22 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ]:
             raise RedisError("Client caching is only supported with RESP version 3")
 
-        if maintenance_events_config and self.connection_pool.get_protocol() not in [
+        if maint_notifications_config and self.connection_pool.get_protocol() not in [
             3,
             "3",
         ]:
             raise RedisError(
                 "Push handlers on connection are only supported with RESP version 3"
             )
-        if maintenance_events_config and maintenance_events_config.enabled:
-            self.maintenance_events_pool_handler = MaintenanceEventPoolHandler(
-                self.connection_pool, maintenance_events_config
+        if maint_notifications_config and maint_notifications_config.enabled:
+            self.maint_notifications_pool_handler = MaintNotificationsPoolHandler(
+                self.connection_pool, maint_notifications_config
             )
-            self.connection_pool.set_maintenance_events_pool_handler(
-                self.maintenance_events_pool_handler
+            self.connection_pool.set_maint_notifications_pool_handler(
+                self.maint_notifications_pool_handler
             )
         else:
-            self.maintenance_events_pool_handler = None
+            self.maint_notifications_pool_handler = None
 
         self.single_connection_lock = threading.RLock()
         self.connection = None
@@ -587,15 +591,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         return Monitor(self.connection_pool)
 
     def client(self):
-        maintenance_events_config = (
+        maint_notifications_config = (
             None
-            if self.maintenance_events_pool_handler is None
-            else self.maintenance_events_pool_handler.config
+            if self.maint_notifications_pool_handler is None
+            else self.maint_notifications_pool_handler.config
         )
         return self.__class__(
             connection_pool=self.connection_pool,
             single_connection_client=True,
-            maintenance_events_config=maintenance_events_config,
+            maint_notifications_config=maint_notifications_config,
         )
 
     def __enter__(self):
