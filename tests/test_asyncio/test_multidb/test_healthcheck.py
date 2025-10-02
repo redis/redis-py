@@ -282,9 +282,7 @@ class TestLagAwareHealthCheck:
 
         assert await hc.check_health(db) is True
         # Base URL must be set correctly
-        assert (
-            hc._http_client.client.base_url == "https://healthcheck.example.com:1234"
-        )
+        assert hc._http_client.client.base_url == "https://healthcheck.example.com:1234"
         # Calls: first to list bdbs, then to availability
         assert mock_http.get.call_count == 2
         first_call = mock_http.get.call_args_list[0]
