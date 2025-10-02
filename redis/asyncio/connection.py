@@ -149,6 +149,7 @@ class AbstractConnection:
         encoding_errors: str = "strict",
         decode_responses: bool = False,
         parser_class: Type[BaseParser] = DefaultParser,
+        check_server_ready: bool = False,
         socket_read_size: int = 65536,
         health_check_interval: float = 0,
         client_name: Optional[str] = None,
@@ -205,6 +206,7 @@ class AbstractConnection:
         self.health_check_interval = health_check_interval
         self.next_health_check: float = -1
         self.encoder = encoder_class(encoding, encoding_errors, decode_responses)
+        self.check_server_ready = check_server_ready
         self.redis_connect_func = redis_connect_func
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
@@ -304,11 +306,13 @@ class AbstractConnection:
         try:
             if retry_socket_connect:
                 await self.retry.call_with_retry(
-                    lambda: self._connect(), lambda error: self.disconnect()
+                    lambda: self._connect_check_server_ready(),
+                    lambda error: self.disconnect(),
                 )
             else:
-                await self._connect()
+                await self._connect_check_server_ready()
         except asyncio.CancelledError:
+            self._close()
             raise  # in 3.7 and earlier, this is an Exception, not BaseException
         except (socket.timeout, asyncio.TimeoutError):
             raise TimeoutError("Timeout connecting to server")
@@ -342,6 +346,33 @@ class AbstractConnection:
             task = callback(self)
             if task and inspect.isawaitable(task):
                 await task
+
+    async def _connect_check_server_ready(self):
+        await self._connect()
+
+        # Doing handshake since connect and send operations work even when Redis is not ready
+        if self.check_server_ready:
+            try:
+                await self.send_command("PING", check_health=False)
+
+                if self.socket_timeout is not None:
+                    async with async_timeout(self.socket_timeout):
+                        response = str_if_bytes(await self._reader.read(1024))
+                else:
+                    response = str_if_bytes(await self._reader.read(1024))
+
+                if not (response.startswith("+PONG") or response.startswith("-NOAUTH")):
+                    raise ResponseError(f"Invalid PING response: {response}")
+            except (
+                socket.timeout,
+                asyncio.TimeoutError,
+                ResponseError,
+                ConnectionResetError,
+            ) as e:
+                # `socket_keepalive_options` might contain invalid options
+                # causing an error. Do not leave the connection open.
+                self._close()
+                raise ConnectionError(self._error_message(e))
 
     @abstractmethod
     async def _connect(self):
@@ -532,8 +563,7 @@ class AbstractConnection:
                     self._send_packed_command(command), self.socket_timeout
                 )
             else:
-                self._writer.writelines(command)
-                await self._writer.drain()
+                await self._send_packed_command(command)
         except asyncio.TimeoutError:
             await self.disconnect(nowait=True)
             raise TimeoutError("Timeout writing to socket") from None
@@ -776,7 +806,7 @@ class Connection(AbstractConnection):
             except (OSError, TypeError):
                 # `socket_keepalive_options` might contain invalid options
                 # causing an error. Do not leave the connection open.
-                writer.close()
+                self._close()
                 raise
 
     def _host_error(self) -> str:
@@ -961,7 +991,6 @@ class UnixDomainSocketConnection(AbstractConnection):
             reader, writer = await asyncio.open_unix_connection(path=self.path)
         self._reader = reader
         self._writer = writer
-        await self.on_connect()
 
     def _host_error(self) -> str:
         return self.path

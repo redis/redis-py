@@ -52,9 +52,9 @@ class TestSSL:
         p = urlparse(ssl_url)[1].split(":")
         r = redis.Redis(host=p[0], port=p[1], ssl=False)
 
-        with pytest.raises(ConnectionError) as e:
+        with pytest.raises(ConnectionError):
             r.ping()
-        assert "Connection closed by server" in str(e)
+
         r.close()
 
     def test_validating_self_signed_certificate(self, request):

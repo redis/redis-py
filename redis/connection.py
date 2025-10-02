@@ -575,17 +575,17 @@ class AbstractConnection(ConnectionInterface):
             return
         try:
             if retry_socket_connect:
-                sock = self.retry.call_with_retry(
-                    lambda: self._connect(), lambda error: self.disconnect(error)
+                self.retry.call_with_retry(
+                    lambda: self._connect(),
+                    lambda error: self.disconnect(error),
                 )
             else:
-                sock = self._connect()
+                self._connect()
         except socket.timeout:
             raise TimeoutError("Timeout connecting to server")
         except OSError as e:
             raise ConnectionError(self._error_message(e))
 
-        self._sock = sock
         try:
             if self.redis_connect_func is None:
                 # Use the default on_connect function
@@ -608,7 +608,7 @@ class AbstractConnection(ConnectionInterface):
                 callback(self)
 
     @abstractmethod
-    def _connect(self):
+    def _connect(self) -> None:
         pass
 
     @abstractmethod
@@ -625,6 +625,12 @@ class AbstractConnection(ConnectionInterface):
         "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
         parser = self._parser
+
+        if check_health:
+            self.retry.call_with_retry(
+                lambda: self._send_ping(),
+                lambda error: self.disconnect(error),
+            )
 
         auth_args = None
         # if credential provider or username and/or password are set, authenticate
@@ -680,7 +686,7 @@ class AbstractConnection(ConnectionInterface):
                 # update cluster exception classes
                 self._parser.EXCEPTION_CLASSES = parser.EXCEPTION_CLASSES
                 self._parser.on_connect(self)
-            self.send_command("HELLO", self.protocol, check_health=check_health)
+            self.send_command("HELLO", self.protocol, check_health=False)
             self.handshake_metadata = self.read_response()
             if (
                 self.handshake_metadata.get(b"proto") != self.protocol
@@ -711,7 +717,7 @@ class AbstractConnection(ConnectionInterface):
                     "ON",
                     "moving-endpoint-type",
                     endpoint_type.value,
-                    check_health=check_health,
+                    check_health=False,
                 )
                 response = self.read_response()
                 if str_if_bytes(response) != "OK":
@@ -737,7 +743,7 @@ class AbstractConnection(ConnectionInterface):
                 "CLIENT",
                 "SETNAME",
                 self.client_name,
-                check_health=check_health,
+                check_health=False,
             )
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
@@ -750,7 +756,7 @@ class AbstractConnection(ConnectionInterface):
                     "SETINFO",
                     "LIB-NAME",
                     self.lib_name,
-                    check_health=check_health,
+                    check_health=False,
                 )
                 self.read_response()
         except ResponseError:
@@ -763,7 +769,7 @@ class AbstractConnection(ConnectionInterface):
                     "SETINFO",
                     "LIB-VER",
                     self.lib_version,
-                    check_health=check_health,
+                    check_health=False,
                 )
                 self.read_response()
         except ResponseError:
@@ -771,7 +777,7 @@ class AbstractConnection(ConnectionInterface):
 
         # if a database is specified, switch to it
         if self.db:
-            self.send_command("SELECT", self.db, check_health=check_health)
+            self.send_command("SELECT", self.db, check_health=False)
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
@@ -800,8 +806,16 @@ class AbstractConnection(ConnectionInterface):
     def _send_ping(self):
         """Send PING, expect PONG in return"""
         self.send_command("PING", check_health=False)
-        if str_if_bytes(self.read_response()) != "PONG":
-            raise ConnectionError("Bad response from PING health check")
+        try:
+            # Do not disconnect on error here, since we want to keep the connection in case of AuthenticationError
+            # since we are raising ConnectionError in all other cases and ping_failed already disconnects,
+            # connection reload is already handled
+            if str_if_bytes(self.read_response(disconnect_on_error=False)) != "PONG":
+                raise ConnectionError("Bad response from PING health check")
+        except AuthenticationError:
+            # if we get an authentication error, the server is healthy
+            self._parser.on_disconnect()
+            self._parser.on_connect(self)
 
     def _ping_failed(self, error):
         """Function to call when PING fails"""
@@ -1097,7 +1111,7 @@ class Connection(AbstractConnection):
             pieces.append(("client_name", self.client_name))
         return pieces
 
-    def _connect(self):
+    def _connect(self) -> None:
         "Create a TCP socket connection"
         # we want to mimic what socket.create_connection does to support
         # ipv4/ipv6, but we want to set options prior to calling
@@ -1128,7 +1142,8 @@ class Connection(AbstractConnection):
 
                 # set the socket_timeout now that we're connected
                 sock.settimeout(self.socket_timeout)
-                return sock
+                self._sock = sock
+                return
 
             except OSError as _:
                 err = _
@@ -1448,15 +1463,15 @@ class SSLConnection(Connection):
         self.ssl_ciphers = ssl_ciphers
         super().__init__(**kwargs)
 
-    def _connect(self):
+    def _connect(self) -> None:
         """
         Wrap the socket with SSL support, handling potential errors.
         """
-        sock = super()._connect()
+        super()._connect()
         try:
-            return self._wrap_socket_with_ssl(sock)
+            self._sock = self._wrap_socket_with_ssl(self._sock)
         except (OSError, RedisError):
-            sock.close()
+            self._sock.close()
             raise
 
     def _wrap_socket_with_ssl(self, sock):
@@ -1559,7 +1574,7 @@ class UnixDomainSocketConnection(AbstractConnection):
             pieces.append(("client_name", self.client_name))
         return pieces
 
-    def _connect(self):
+    def _connect(self) -> None:
         "Create a Unix domain socket connection"
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(self.socket_connect_timeout)
@@ -1574,7 +1589,7 @@ class UnixDomainSocketConnection(AbstractConnection):
             sock.close()
             raise
         sock.settimeout(self.socket_timeout)
-        return sock
+        self._sock = sock
 
     def _host_error(self):
         return self.path
