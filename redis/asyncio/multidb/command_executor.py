@@ -1,29 +1,29 @@
 from abc import abstractmethod
 from asyncio import iscoroutinefunction
 from datetime import datetime
-from typing import List, Optional, Callable, Any, Union, Awaitable
+from typing import Any, Awaitable, Callable, List, Optional, Union
 
 from redis.asyncio import RedisCluster
-from redis.asyncio.client import PubSub, Pipeline
-from redis.asyncio.multidb.database import Databases, AsyncDatabase, Database
+from redis.asyncio.client import Pipeline, PubSub
+from redis.asyncio.multidb.database import AsyncDatabase, Database, Databases
 from redis.asyncio.multidb.event import (
     AsyncActiveDatabaseChanged,
+    CloseConnectionOnActiveDatabaseChanged,
     RegisterCommandFailure,
     ResubscribeOnActiveDatabaseChanged,
-    CloseConnectionOnActiveDatabaseChanged,
 )
 from redis.asyncio.multidb.failover import (
-    AsyncFailoverStrategy,
-    FailoverStrategyExecutor,
-    DefaultFailoverStrategyExecutor,
     DEFAULT_FAILOVER_ATTEMPTS,
     DEFAULT_FAILOVER_DELAY,
+    AsyncFailoverStrategy,
+    DefaultFailoverStrategyExecutor,
+    FailoverStrategyExecutor,
 )
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
-from redis.multidb.circuit import State as CBState
 from redis.asyncio.retry import Retry
-from redis.event import EventDispatcherInterface, AsyncOnCommandsFailEvent
-from redis.multidb.command_executor import CommandExecutor, BaseCommandExecutor
+from redis.event import AsyncOnCommandsFailEvent, EventDispatcherInterface
+from redis.multidb.circuit import State as CBState
+from redis.multidb.command_executor import BaseCommandExecutor, CommandExecutor
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.typing import KeyT
 

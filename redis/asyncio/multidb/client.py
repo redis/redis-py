@@ -1,18 +1,19 @@
 import asyncio
 import logging
-from typing import Callable, Optional, Coroutine, Any, List, Union, Awaitable
+from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Union
 
-from redis.asyncio.client import PubSubHandler
+from redis.asyncio.client import PSWorkerThreadExcHandlerT, PubSubHandler
 from redis.asyncio.multidb.command_executor import DefaultCommandExecutor
+from redis.asyncio.multidb.config import DEFAULT_GRACE_PERIOD, MultiDbConfig
 from redis.asyncio.multidb.database import AsyncDatabase, Databases
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
 from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
-from redis.multidb.circuit import State as CBState, CircuitBreaker
-from redis.asyncio.multidb.config import MultiDbConfig, DEFAULT_GRACE_PERIOD
 from redis.background import BackgroundScheduler
-from redis.commands import AsyncRedisModuleCommands, AsyncCoreCommands
+from redis.commands import AsyncCoreCommands, AsyncRedisModuleCommands
+from redis.multidb.circuit import CircuitBreaker
+from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import NoValidDatabaseException, UnhealthyDatabaseException
-from redis.typing import KeyT, EncodableT, ChannelT
+from redis.typing import ChannelT, EncodableT, KeyT
 
 logger = logging.getLogger(__name__)
 

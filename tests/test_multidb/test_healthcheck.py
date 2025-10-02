@@ -25,7 +25,7 @@ class TestHealthyAllPolicy:
         mock_db = Mock(spec=Database)
 
         policy = HealthyAllPolicy(3, 0.01)
-        assert policy.execute([mock_hc1, mock_hc2], mock_db) == True
+        assert policy.execute([mock_hc1, mock_hc2], mock_db)
         assert mock_hc1.check_health.call_count == 3
         assert mock_hc2.check_health.call_count == 3
 
@@ -37,7 +37,7 @@ class TestHealthyAllPolicy:
         mock_db = Mock(spec=Database)
 
         policy = HealthyAllPolicy(3, 0.01)
-        assert policy.execute([mock_hc1, mock_hc2], mock_db) == False
+        assert not policy.execute([mock_hc1, mock_hc2], mock_db)
         assert mock_hc1.check_health.call_count == 3
         assert mock_hc2.check_health.call_count == 0
 
@@ -207,7 +207,7 @@ class TestEchoHealthCheck:
         hc = EchoHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
-        assert hc.check_health(db) == True
+        assert hc.check_health(db)
         assert mock_client.execute_command.call_count == 1
 
     def test_database_is_unhealthy_on_incorrect_echo_response(
@@ -221,7 +221,7 @@ class TestEchoHealthCheck:
         hc = EchoHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
-        assert hc.check_health(db) == False
+        assert not hc.check_health(db)
         assert mock_client.execute_command.call_count == 1
 
     def test_database_close_circuit_on_successful_healthcheck(
@@ -232,7 +232,7 @@ class TestEchoHealthCheck:
         hc = EchoHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
-        assert hc.check_health(db) == True
+        assert hc.check_health(db)
         assert mock_client.execute_command.call_count == 1
 
 
@@ -271,7 +271,7 @@ class TestLagAwareHealthCheck:
 
         assert hc.check_health(db) is True
         # Base URL must be set correctly
-        assert hc._http_client.base_url == f"https://healthcheck.example.com:1234"
+        assert hc._http_client.base_url == "https://healthcheck.example.com:1234"
         # Calls: first to list bdbs, then to availability
         assert mock_http.get.call_count == 2
         first_call = mock_http.get.call_args_list[0]

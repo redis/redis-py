@@ -5,10 +5,9 @@ from typing import Any, AsyncGenerator
 import pytest
 import pytest_asyncio
 
-from redis.asyncio import Redis, RedisCluster
+from redis.asyncio import Redis
 from redis.asyncio.multidb.client import MultiDBClient
 from redis.asyncio.multidb.config import (
-    DEFAULT_HEALTH_CHECK_INTERVAL,
     DatabaseConfig,
     MultiDbConfig,
 )

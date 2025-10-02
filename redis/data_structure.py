@@ -1,5 +1,5 @@
 import threading
-from typing import List, Any, TypeVar, Generic, Union
+from typing import Any, Generic, List, TypeVar
 
 from redis.typing import Number
 

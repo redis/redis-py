@@ -1,24 +1,24 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import List, Optional, Callable, Any
+from typing import Any, Callable, List, Optional
 
 from redis.client import Pipeline, PubSub, PubSubWorkerThread
 from redis.event import EventDispatcherInterface, OnCommandsFailEvent
+from redis.multidb.circuit import State as CBState
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, Databases, SyncDatabase
-from redis.multidb.circuit import State as CBState
 from redis.multidb.event import (
-    RegisterCommandFailure,
     ActiveDatabaseChanged,
-    ResubscribeOnActiveDatabaseChanged,
     CloseConnectionOnActiveDatabaseChanged,
+    RegisterCommandFailure,
+    ResubscribeOnActiveDatabaseChanged,
 )
 from redis.multidb.failover import (
-    FailoverStrategy,
-    FailoverStrategyExecutor,
     DEFAULT_FAILOVER_ATTEMPTS,
     DEFAULT_FAILOVER_DELAY,
     DefaultFailoverStrategyExecutor,
+    FailoverStrategy,
+    FailoverStrategyExecutor,
 )
 from redis.multidb.failure_detector import FailureDetector
 from redis.retry import Retry

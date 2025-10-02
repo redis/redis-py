@@ -1,43 +1,43 @@
 from dataclasses import dataclass, field
-from typing import Optional, List, Type, Union
+from typing import List, Optional, Type, Union
 
 import pybreaker
 
 from redis.asyncio import ConnectionPool, Redis, RedisCluster
-from redis.asyncio.multidb.database import Databases, Database
+from redis.asyncio.multidb.database import Database, Databases
 from redis.asyncio.multidb.failover import (
+    DEFAULT_FAILOVER_ATTEMPTS,
+    DEFAULT_FAILOVER_DELAY,
     AsyncFailoverStrategy,
     WeightBasedFailoverStrategy,
-    DEFAULT_FAILOVER_DELAY,
-    DEFAULT_FAILOVER_ATTEMPTS,
 )
 from redis.asyncio.multidb.failure_detector import (
     AsyncFailureDetector,
     FailureDetectorAsyncWrapper,
 )
 from redis.asyncio.multidb.healthcheck import (
-    HealthCheck,
-    EchoHealthCheck,
-    DEFAULT_HEALTH_CHECK_INTERVAL,
-    DEFAULT_HEALTH_CHECK_PROBES,
     DEFAULT_HEALTH_CHECK_DELAY,
-    HealthCheckPolicies,
+    DEFAULT_HEALTH_CHECK_INTERVAL,
     DEFAULT_HEALTH_CHECK_POLICY,
+    DEFAULT_HEALTH_CHECK_PROBES,
+    EchoHealthCheck,
+    HealthCheck,
+    HealthCheckPolicies,
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.data_structure import WeightedList
-from redis.event import EventDispatcherInterface, EventDispatcher
+from redis.event import EventDispatcher, EventDispatcherInterface
 from redis.multidb.circuit import (
+    DEFAULT_GRACE_PERIOD,
     CircuitBreaker,
     PBCircuitBreakerAdapter,
-    DEFAULT_GRACE_PERIOD,
 )
 from redis.multidb.failure_detector import (
-    CommandFailureDetector,
-    DEFAULT_MIN_NUM_FAILURES,
     DEFAULT_FAILURE_RATE_THRESHOLD,
     DEFAULT_FAILURES_DETECTION_WINDOW,
+    DEFAULT_MIN_NUM_FAILURES,
+    CommandFailureDetector,
 )
 
 DEFAULT_AUTO_FALLBACK_INTERVAL = 120

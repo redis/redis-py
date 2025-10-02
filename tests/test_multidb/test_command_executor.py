@@ -1,5 +1,4 @@
 from time import sleep
-from unittest.mock import PropertyMock
 
 import pytest
 

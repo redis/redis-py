@@ -2,13 +2,11 @@ import asyncio
 import json
 import logging
 import os
-from time import sleep
 
 import pytest
 
 from redis.asyncio import RedisCluster
 from redis.asyncio.client import Pipeline, Redis
-from redis.asyncio.multidb.client import MultiDBClient
 from redis.asyncio.multidb.failover import (
     DEFAULT_FAILOVER_ATTEMPTS,
     DEFAULT_FAILOVER_DELAY,

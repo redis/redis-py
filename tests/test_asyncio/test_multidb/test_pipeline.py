@@ -8,7 +8,6 @@ from redis.asyncio.client import Pipeline
 from redis.asyncio.multidb.client import MultiDBClient
 from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy
 from redis.asyncio.multidb.healthcheck import EchoHealthCheck
-from redis.asyncio.retry import Retry
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from tests.test_asyncio.test_multidb.conftest import create_weighted_list
 

@@ -4,38 +4,37 @@ from typing import List, Type, Union
 import pybreaker
 from typing_extensions import Optional
 
-from redis import Redis, ConnectionPool
-from redis import RedisCluster
+from redis import ConnectionPool, Redis, RedisCluster
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.data_structure import WeightedList
 from redis.event import EventDispatcher, EventDispatcherInterface
 from redis.multidb.circuit import (
-    PBCircuitBreakerAdapter,
-    CircuitBreaker,
     DEFAULT_GRACE_PERIOD,
+    CircuitBreaker,
+    PBCircuitBreakerAdapter,
 )
 from redis.multidb.database import Database, Databases
-from redis.multidb.failure_detector import (
-    FailureDetector,
-    CommandFailureDetector,
-    DEFAULT_MIN_NUM_FAILURES,
-    DEFAULT_FAILURES_DETECTION_WINDOW,
-    DEFAULT_FAILURE_RATE_THRESHOLD,
-)
-from redis.multidb.healthcheck import (
-    HealthCheck,
-    EchoHealthCheck,
-    DEFAULT_HEALTH_CHECK_PROBES,
-    DEFAULT_HEALTH_CHECK_INTERVAL,
-    DEFAULT_HEALTH_CHECK_DELAY,
-    HealthCheckPolicies,
-    DEFAULT_HEALTH_CHECK_POLICY,
-)
 from redis.multidb.failover import (
-    FailoverStrategy,
-    WeightBasedFailoverStrategy,
     DEFAULT_FAILOVER_ATTEMPTS,
     DEFAULT_FAILOVER_DELAY,
+    FailoverStrategy,
+    WeightBasedFailoverStrategy,
+)
+from redis.multidb.failure_detector import (
+    DEFAULT_FAILURE_RATE_THRESHOLD,
+    DEFAULT_FAILURES_DETECTION_WINDOW,
+    DEFAULT_MIN_NUM_FAILURES,
+    CommandFailureDetector,
+    FailureDetector,
+)
+from redis.multidb.healthcheck import (
+    DEFAULT_HEALTH_CHECK_DELAY,
+    DEFAULT_HEALTH_CHECK_INTERVAL,
+    DEFAULT_HEALTH_CHECK_POLICY,
+    DEFAULT_HEALTH_CHECK_PROBES,
+    EchoHealthCheck,
+    HealthCheck,
+    HealthCheckPolicies,
 )
 from redis.retry import Retry
 

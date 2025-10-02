@@ -79,8 +79,8 @@ class TestWeightedList:
                 try:
                     length = len(wl)
                     if length > 0:
-                        top_items = wl.get_top_n(min(5, length))
-                        items_in_range = wl.get_by_weight_range(20, 80)
+                        wl.get_top_n(min(5, length))
+                        wl.get_by_weight_range(20, 80)
                 except Exception as e:
                     print(f"Error in worker {worker_id}: {e}")
 

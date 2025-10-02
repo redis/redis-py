@@ -1,8 +1,9 @@
 import asyncio
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Mapping, Union, Any
-from redis.http.http_client import HttpResponse, HttpClient
+from typing import Any, Mapping, Optional, Union
+
+from redis.http.http_client import HttpClient, HttpResponse
 
 DEFAULT_USER_AGENT = "HttpClient/1.0 (+https://example.invalid)"
 DEFAULT_TIMEOUT = 30.0

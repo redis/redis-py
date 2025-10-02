@@ -1,8 +1,7 @@
-import redis
 from abc import ABC, abstractmethod
-from enum import Enum
-from typing import Union, Optional
+from typing import Optional, Union
 
+import redis
 from redis import RedisCluster
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import CircuitBreaker

@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from typing import Callable, Coroutine, Any
+from typing import Any, Callable, Coroutine
 
 
 class BackgroundScheduler:

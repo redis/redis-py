@@ -9,8 +9,6 @@ from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.client import MultiDBClient
 from redis.multidb.failover import (
     WeightBasedFailoverStrategy,
-    DEFAULT_FAILOVER_ATTEMPTS,
-    DEFAULT_FAILOVER_DELAY,
 )
 from redis.multidb.healthcheck import EchoHealthCheck
 from tests.test_multidb.conftest import create_weighted_list

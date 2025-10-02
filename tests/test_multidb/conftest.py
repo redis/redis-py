@@ -19,7 +19,6 @@ from redis.multidb.healthcheck import (
     DEFAULT_HEALTH_CHECK_PROBES,
     DEFAULT_HEALTH_CHECK_POLICY,
 )
-from tests.conftest import mock_ed
 
 
 @pytest.fixture()

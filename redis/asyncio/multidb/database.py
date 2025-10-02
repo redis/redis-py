@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Union, Optional
+from typing import Optional, Union
 
 from redis.asyncio import Redis, RedisCluster
 from redis.data_structure import WeightedList

@@ -7,10 +7,10 @@ from typing import (
     Callable,
     Generic,
     Iterable,
+    Optional,
     Tuple,
     Type,
     TypeVar,
-    Optional,
 )
 
 from redis.exceptions import ConnectionError, TimeoutError

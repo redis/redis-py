@@ -2,15 +2,14 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Optional, Tuple, Union, List
-
+from typing import List, Optional, Tuple, Union
 
 from redis.asyncio import Redis
-from redis.asyncio.http.http_client import AsyncHTTPClientWrapper, DEFAULT_TIMEOUT
-from redis.retry import Retry
+from redis.asyncio.http.http_client import DEFAULT_TIMEOUT, AsyncHTTPClientWrapper
 from redis.backoff import NoBackoff
 from redis.http.http_client import HttpClient
 from redis.multidb.exception import UnhealthyDatabaseException
+from redis.retry import Retry
 
 DEFAULT_HEALTH_CHECK_PROBES = 3
 DEFAULT_HEALTH_CHECK_INTERVAL = 5
@@ -85,7 +84,7 @@ class HealthyAllPolicy(AbstractHealthCheckPolicy):
                     if not await health_check.check_health(database):
                         return False
                 except Exception as e:
-                    raise UnhealthyDatabaseException(f"Unhealthy database", database, e)
+                    raise UnhealthyDatabaseException("Unhealthy database", database, e)
 
                 if attempt < self.health_check_probes - 1:
                     await asyncio.sleep(self._health_check_delay)
@@ -117,7 +116,7 @@ class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
                     allowed_unsuccessful_probes -= 1
                     if allowed_unsuccessful_probes <= 0:
                         raise UnhealthyDatabaseException(
-                            f"Unhealthy database", database, e
+                            "Unhealthy database", database, e
                         )
 
                 if attempt < self.health_check_probes - 1:
@@ -148,7 +147,7 @@ class HealthyAnyPolicy(AbstractHealthCheckPolicy):
                         is_healthy = False
                 except Exception as e:
                     exception = UnhealthyDatabaseException(
-                        f"Unhealthy database", database, e
+                        "Unhealthy database", database, e
                     )
 
                 if attempt < self.health_check_probes - 1:

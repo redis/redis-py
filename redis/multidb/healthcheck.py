@@ -1,8 +1,8 @@
 import logging
-from abc import abstractmethod, ABC
+from abc import ABC, abstractmethod
 from enum import Enum
 from time import sleep
-from typing import Optional, Tuple, Union, List
+from typing import List, Optional, Tuple, Union
 
 from redis import Redis
 from redis.backoff import NoBackoff
@@ -83,7 +83,7 @@ class HealthyAllPolicy(AbstractHealthCheckPolicy):
                     if not health_check.check_health(database):
                         return False
                 except Exception as e:
-                    raise UnhealthyDatabaseException(f"Unhealthy database", database, e)
+                    raise UnhealthyDatabaseException("Unhealthy database", database, e)
 
                 if attempt < self.health_check_probes - 1:
                     sleep(self._health_check_delay)
@@ -115,7 +115,7 @@ class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
                     allowed_unsuccessful_probes -= 1
                     if allowed_unsuccessful_probes <= 0:
                         raise UnhealthyDatabaseException(
-                            f"Unhealthy database", database, e
+                            "Unhealthy database", database, e
                         )
 
                 if attempt < self.health_check_probes - 1:
@@ -146,7 +146,7 @@ class HealthyAnyPolicy(AbstractHealthCheckPolicy):
                         is_healthy = False
                 except Exception as e:
                     exception = UnhealthyDatabaseException(
-                        f"Unhealthy database", database, e
+                        "Unhealthy database", database, e
                     )
 
                 if attempt < self.health_check_probes - 1:

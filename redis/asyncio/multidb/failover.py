@@ -1,9 +1,9 @@
 import time
-from abc import abstractmethod, ABC
+from abc import ABC, abstractmethod
 
 from redis.asyncio.multidb.database import AsyncDatabase, Databases
-from redis.multidb.circuit import State as CBState
 from redis.data_structure import WeightedList
+from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import (
     NoValidDatabaseException,
     TemporaryUnavailableException,

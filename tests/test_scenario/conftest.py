@@ -7,7 +7,6 @@ from urllib.parse import urlparse
 
 import pytest
 
-from redis import Redis
 from redis.backoff import NoBackoff, ExponentialBackoff
 from redis.event import EventDispatcher, EventListenerInterface
 from redis.multidb.client import MultiDBClient
@@ -18,8 +17,8 @@ from redis.multidb.config import (
 )
 from redis.multidb.event import ActiveDatabaseChanged
 from redis.multidb.failure_detector import DEFAULT_MIN_NUM_FAILURES
-from redis.multidb.healthcheck import EchoHealthCheck, DEFAULT_HEALTH_CHECK_DELAY
-from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
+from redis.multidb.healthcheck import DEFAULT_HEALTH_CHECK_DELAY
+from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import Redis
 from redis.maint_notifications import EndpointType, MaintNotificationsConfig
 from redis.retry import Retry
@@ -156,7 +155,6 @@ def extract_cluster_fqdn(url):
 
     # Extract hostname and port
     hostname = parsed.hostname
-    port = parsed.port
 
     # Remove the 'redis-XXXX.' prefix using regex
     # This pattern matches 'redis-' followed by digits and a dot

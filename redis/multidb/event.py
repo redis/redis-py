@@ -1,7 +1,6 @@
 from typing import List
 
 from redis.client import Redis
-
 from redis.event import EventListenerInterface, OnCommandsFailEvent
 from redis.multidb.database import SyncDatabase
 from redis.multidb.failure_detector import FailureDetector

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import json
 import ssl
-import gzip
 import zlib
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple, Union
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
-
 
 __all__ = ["HttpClient", "HttpResponse", "HttpError", "DEFAULT_TIMEOUT"]
 

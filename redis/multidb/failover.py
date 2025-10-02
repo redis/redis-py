@@ -2,8 +2,8 @@ import time
 from abc import ABC, abstractmethod
 
 from redis.data_structure import WeightedList
-from redis.multidb.database import Databases, SyncDatabase
 from redis.multidb.circuit import State as CBState
+from redis.multidb.database import Databases, SyncDatabase
 from redis.multidb.exception import (
     NoValidDatabaseException,
     TemporaryUnavailableException,

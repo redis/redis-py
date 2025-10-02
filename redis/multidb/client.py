@@ -2,13 +2,15 @@ import logging
 import threading
 from concurrent.futures import as_completed
 from concurrent.futures.thread import ThreadPoolExecutor
-from typing import List, Any, Callable, Optional
+from typing import Any, Callable, List, Optional
 
 from redis.background import BackgroundScheduler
-from redis.commands import RedisModuleCommands, CoreCommands
+from redis.client import PubSubWorkerThread
+from redis.commands import CoreCommands, RedisModuleCommands
+from redis.multidb.circuit import CircuitBreaker
+from redis.multidb.circuit import State as CBState
 from redis.multidb.command_executor import DefaultCommandExecutor
-from redis.multidb.config import MultiDbConfig, DEFAULT_GRACE_PERIOD
-from redis.multidb.circuit import State as CBState, CircuitBreaker
+from redis.multidb.config import DEFAULT_GRACE_PERIOD, MultiDbConfig
 from redis.multidb.database import Database, Databases, SyncDatabase
 from redis.multidb.exception import NoValidDatabaseException, UnhealthyDatabaseException
 from redis.multidb.failure_detector import FailureDetector
