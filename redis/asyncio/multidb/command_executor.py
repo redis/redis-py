@@ -266,9 +266,15 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
 
         return await self._execute_with_failure_detection(callback, *args)
 
-    async def execute_pubsub_run(self, sleep_time: float, **kwargs) -> Any:
+    async def execute_pubsub_run(
+        self, sleep_time: float, exception_handler=None, pubsub=None
+    ) -> Any:
         async def callback():
-            return await self._active_pubsub.run(poll_timeout=sleep_time, **kwargs)
+            return await self._active_pubsub.run(
+                poll_timeout=sleep_time,
+                exception_handler=exception_handler,
+                pubsub=pubsub,
+            )
 
         return await self._execute_with_failure_detection(callback)
 

@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Union
 
-from redis.asyncio.client import PSWorkerThreadExcHandlerT, PubSubHandler
+from redis.asyncio.client import PubSubHandler
 from redis.asyncio.multidb.command_executor import DefaultCommandExecutor
 from redis.asyncio.multidb.config import DEFAULT_GRACE_PERIOD, MultiDbConfig
 from redis.asyncio.multidb.database import AsyncDatabase, Databases
@@ -507,7 +507,7 @@ class PubSub:
     async def run(
         self,
         *,
-        exception_handler: Optional["PSWorkerThreadExcHandlerT"] = None,
+        exception_handler=None,
         poll_timeout: float = 1.0,
     ) -> None:
         """Process pub/sub messages using registered callbacks.
@@ -524,5 +524,5 @@ class PubSub:
             >>> await task
         """
         return await self._client.command_executor.execute_pubsub_run(
-            exception_handler=exception_handler, sleep_time=poll_timeout, pubsub=self
+            sleep_time=poll_timeout, exception_handler=exception_handler, pubsub=self
         )

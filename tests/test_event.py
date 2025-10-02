@@ -31,7 +31,7 @@ class TestEventDispatcher:
         mock_another_event_listener = Mock(spec=EventListenerInterface)
         mock_another_event_listener.listen = callback
         dispatcher.register_listeners(
-            event_listeners={type(mock_event): [mock_another_event_listener]}
+            mappings={type(mock_event): [mock_another_event_listener]}
         )
         dispatcher.dispatch(mock_event)
 
@@ -60,7 +60,7 @@ class TestEventDispatcher:
         mock_another_event_listener = Mock(spec=AsyncEventListenerInterface)
         mock_another_event_listener.listen = callback
         dispatcher.register_listeners(
-            event_listeners={type(mock_event): [mock_another_event_listener]}
+            mappings={type(mock_event): [mock_another_event_listener]}
         )
         await dispatcher.dispatch_async(mock_event)
 

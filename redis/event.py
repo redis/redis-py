@@ -117,24 +117,22 @@ class EventDispatcher(EventDispatcherInterface):
 
     def register_listeners(
         self,
-        event_listeners: Dict[
+        mappings: Dict[
             Type[object],
             List[Union[EventListenerInterface, AsyncEventListenerInterface]],
         ],
     ):
         with self._lock:
-            for event_type in event_listeners:
+            for event_type in mappings:
                 if event_type in self._event_listeners_mapping:
                     self._event_listeners_mapping[event_type] = list(
                         set(
                             self._event_listeners_mapping[event_type]
-                            + event_listeners[event_type]
+                            + mappings[event_type]
                         )
                     )
                 else:
-                    self._event_listeners_mapping[event_type] = event_listeners[
-                        event_type
-                    ]
+                    self._event_listeners_mapping[event_type] = mappings[event_type]
 
 
 class AfterConnectionReleasedEvent:
