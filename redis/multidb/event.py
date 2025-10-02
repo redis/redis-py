@@ -6,16 +6,18 @@ from redis.event import EventListenerInterface, OnCommandsFailEvent
 from redis.multidb.database import SyncDatabase
 from redis.multidb.failure_detector import FailureDetector
 
+
 class ActiveDatabaseChanged:
     """
     Event fired when an active database has been changed.
     """
+
     def __init__(
-            self,
-            old_database: SyncDatabase,
-            new_database: SyncDatabase,
-            command_executor,
-            **kwargs
+        self,
+        old_database: SyncDatabase,
+        new_database: SyncDatabase,
+        command_executor,
+        **kwargs,
     ):
         self._old_database = old_database
         self._new_database = new_database
@@ -38,10 +40,12 @@ class ActiveDatabaseChanged:
     def kwargs(self):
         return self._kwargs
 
+
 class ResubscribeOnActiveDatabaseChanged(EventListenerInterface):
     """
     Re-subscribe the currently active pub / sub to a new active database.
     """
+
     def listen(self, event: ActiveDatabaseChanged):
         old_pubsub = event.command_executor.active_pubsub
 
@@ -55,10 +59,12 @@ class ResubscribeOnActiveDatabaseChanged(EventListenerInterface):
             event.command_executor.active_pubsub = new_pubsub
             old_pubsub.close()
 
+
 class CloseConnectionOnActiveDatabaseChanged(EventListenerInterface):
     """
     Close connection to the old active database.
     """
+
     def listen(self, event: ActiveDatabaseChanged):
         event.old_database.client.close()
 
@@ -70,10 +76,12 @@ class CloseConnectionOnActiveDatabaseChanged(EventListenerInterface):
                 node.redis_connection.connection_pool.update_active_connections_for_reconnect()
                 node.redis_connection.connection_pool.disconnect()
 
+
 class RegisterCommandFailure(EventListenerInterface):
     """
     Event listener that registers command failures and passing it to the failure detectors.
     """
+
     def __init__(self, failure_detectors: List[FailureDetector]):
         self._failure_detectors = failure_detectors
 

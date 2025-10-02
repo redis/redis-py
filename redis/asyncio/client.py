@@ -1239,7 +1239,7 @@ class PubSub:
         *,
         exception_handler: Optional["PSWorkerThreadExcHandlerT"] = None,
         poll_timeout: float = 1.0,
-        pubsub = None
+        pubsub=None,
     ) -> None:
         """Process pub/sub messages using registered callbacks.
 

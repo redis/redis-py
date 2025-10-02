@@ -582,6 +582,7 @@ def mock_connection() -> ConnectionInterface:
     mock_connection = Mock(spec=ConnectionInterface)
     return mock_connection
 
+
 @pytest.fixture()
 def mock_ed() -> EventDispatcherInterface:
     mock_ed = Mock(spec=EventDispatcherInterface)

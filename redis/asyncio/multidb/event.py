@@ -10,12 +10,13 @@ class AsyncActiveDatabaseChanged:
     """
     Event fired when an async active database has been changed.
     """
+
     def __init__(
-            self,
-            old_database: AsyncDatabase,
-            new_database: AsyncDatabase,
-            command_executor,
-            **kwargs
+        self,
+        old_database: AsyncDatabase,
+        new_database: AsyncDatabase,
+        command_executor,
+        **kwargs,
     ):
         self._old_database = old_database
         self._new_database = new_database
@@ -38,10 +39,12 @@ class AsyncActiveDatabaseChanged:
     def kwargs(self):
         return self._kwargs
 
+
 class ResubscribeOnActiveDatabaseChanged(AsyncEventListenerInterface):
     """
     Re-subscribe the currently active pub / sub to a new active database.
     """
+
     async def listen(self, event: AsyncActiveDatabaseChanged):
         old_pubsub = event.command_executor.active_pubsub
 
@@ -54,10 +57,12 @@ class ResubscribeOnActiveDatabaseChanged(AsyncEventListenerInterface):
             event.command_executor.active_pubsub = new_pubsub
             await old_pubsub.aclose()
 
+
 class CloseConnectionOnActiveDatabaseChanged(AsyncEventListenerInterface):
     """
     Close connection to the old active database.
     """
+
     async def listen(self, event: AsyncActiveDatabaseChanged):
         await event.old_database.client.aclose()
 
@@ -65,10 +70,12 @@ class CloseConnectionOnActiveDatabaseChanged(AsyncEventListenerInterface):
             await event.old_database.client.connection_pool.update_active_connections_for_reconnect()
             await event.old_database.client.connection_pool.disconnect()
 
+
 class RegisterCommandFailure(AsyncEventListenerInterface):
     """
     Event listener that registers command failures and passing it to the failure detectors.
     """
+
     def __init__(self, failure_detectors: List[AsyncFailureDetector]):
         self._failure_detectors = failure_detectors
 

@@ -5,10 +5,11 @@ import pytest
 
 from redis.background import BackgroundScheduler
 
+
 class TestBackgroundScheduler:
     def test_run_once(self):
         execute_counter = 0
-        one = 'arg1'
+        one = "arg1"
         two = 9999
 
         def callback(arg1: str, arg2: int):
@@ -35,11 +36,11 @@ class TestBackgroundScheduler:
             (0.012, 0.04, 3),
             (0.035, 0.04, 1),
             (0.045, 0.04, 0),
-        ]
+        ],
     )
     def test_run_recurring(self, interval, timeout, call_count):
         execute_counter = 0
-        one = 'arg1'
+        one = "arg1"
         two = 9999
 
         def callback(arg1: str, arg2: int):
@@ -67,11 +68,11 @@ class TestBackgroundScheduler:
             (0.012, 0.04, 3),
             (0.035, 0.04, 1),
             (0.045, 0.04, 0),
-        ]
+        ],
     )
     async def test_run_recurring_async(self, interval, timeout, call_count):
         execute_counter = 0
-        one = 'arg1'
+        one = "arg1"
         two = 9999
 
         async def callback(arg1: str, arg2: int):

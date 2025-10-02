@@ -7,16 +7,24 @@ from redis.event import EventDispatcherInterface, OnCommandsFailEvent
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
 from redis.multidb.database import Database, Databases, SyncDatabase
 from redis.multidb.circuit import State as CBState
-from redis.multidb.event import RegisterCommandFailure, ActiveDatabaseChanged, ResubscribeOnActiveDatabaseChanged, \
-    CloseConnectionOnActiveDatabaseChanged
-from redis.multidb.failover import FailoverStrategy, FailoverStrategyExecutor, DEFAULT_FAILOVER_ATTEMPTS, \
-    DEFAULT_FAILOVER_DELAY, DefaultFailoverStrategyExecutor
+from redis.multidb.event import (
+    RegisterCommandFailure,
+    ActiveDatabaseChanged,
+    ResubscribeOnActiveDatabaseChanged,
+    CloseConnectionOnActiveDatabaseChanged,
+)
+from redis.multidb.failover import (
+    FailoverStrategy,
+    FailoverStrategyExecutor,
+    DEFAULT_FAILOVER_ATTEMPTS,
+    DEFAULT_FAILOVER_DELAY,
+    DefaultFailoverStrategyExecutor,
+)
 from redis.multidb.failure_detector import FailureDetector
 from redis.retry import Retry
 
 
 class CommandExecutor(ABC):
-
     @property
     @abstractmethod
     def auto_fallback_interval(self) -> float:
@@ -29,10 +37,11 @@ class CommandExecutor(ABC):
         """Sets auto-fallback interval."""
         pass
 
+
 class BaseCommandExecutor(CommandExecutor):
     def __init__(
-            self,
-            auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
+        self,
+        auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
     ):
         self._auto_fallback_interval = auto_fallback_interval
         self._next_fallback_attempt: datetime
@@ -49,10 +58,12 @@ class BaseCommandExecutor(CommandExecutor):
         if self._auto_fallback_interval == DEFAULT_AUTO_FALLBACK_INTERVAL:
             return
 
-        self._next_fallback_attempt = datetime.now() + timedelta(seconds=self._auto_fallback_interval)
+        self._next_fallback_attempt = datetime.now() + timedelta(
+            seconds=self._auto_fallback_interval
+        )
+
 
 class SyncCommandExecutor(CommandExecutor):
-
     @property
     @abstractmethod
     def databases(self) -> Databases:
@@ -122,7 +133,9 @@ class SyncCommandExecutor(CommandExecutor):
         pass
 
     @abstractmethod
-    def execute_transaction(self, transaction: Callable[[Pipeline], None], *watches, **options):
+    def execute_transaction(
+        self, transaction: Callable[[Pipeline], None], *watches, **options
+    ):
         """Executes a transaction block wrapped in callback."""
         pass
 
@@ -136,17 +149,18 @@ class SyncCommandExecutor(CommandExecutor):
         """Executes pub/sub run in a thread."""
         pass
 
+
 class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
     def __init__(
-            self,
-            failure_detectors: List[FailureDetector],
-            databases: Databases,
-            command_retry: Retry,
-            failover_strategy: FailoverStrategy,
-            event_dispatcher: EventDispatcherInterface,
-            failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS,
-            failover_delay: float = DEFAULT_FAILOVER_DELAY,
-            auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
+        self,
+        failure_detectors: List[FailureDetector],
+        databases: Databases,
+        command_retry: Retry,
+        failover_strategy: FailoverStrategy,
+        event_dispatcher: EventDispatcherInterface,
+        failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS,
+        failover_delay: float = DEFAULT_FAILOVER_DELAY,
+        auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
     ):
         """
         Initialize the DefaultCommandExecutor instance.
@@ -170,9 +184,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         self._failure_detectors = failure_detectors
         self._command_retry = command_retry
         self._failover_strategy_executor = DefaultFailoverStrategyExecutor(
-            failover_strategy,
-            failover_attempts,
-            failover_delay
+            failover_strategy, failover_attempts, failover_delay
         )
         self._event_dispatcher = event_dispatcher
         self._active_database: Optional[Database] = None
@@ -207,7 +219,12 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
 
         if old_active is not None and old_active is not database:
             self._event_dispatcher.dispatch(
-                ActiveDatabaseChanged(old_active, self._active_database, self, **self._active_pubsub_kwargs)
+                ActiveDatabaseChanged(
+                    old_active,
+                    self._active_database,
+                    self,
+                    **self._active_pubsub_kwargs,
+                )
             )
 
     @property
@@ -242,9 +259,13 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
 
         return self._execute_with_failure_detection(callback, command_stack)
 
-    def execute_transaction(self, transaction: Callable[[Pipeline], None], *watches, **options):
+    def execute_transaction(
+        self, transaction: Callable[[Pipeline], None], *watches, **options
+    ):
         def callback():
-            response = self._active_database.client.transaction(transaction, *watches, **options)
+            response = self._active_database.client.transaction(
+                transaction, *watches, **options
+            )
             self._register_command_execution(())
             return response
 
@@ -278,6 +299,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         """
         Execute a commands execution callback with failure detection.
         """
+
         def wrapper():
             # On each retry we need to check active database as it might change.
             self._check_active_database()
@@ -296,12 +318,12 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         Checks if active a database needs to be updated.
         """
         if (
-                self._active_database is None
-                or self._active_database.circuit.state != CBState.CLOSED
-                or (
-                    self._auto_fallback_interval != DEFAULT_AUTO_FALLBACK_INTERVAL
-                    and self._next_fallback_attempt <= datetime.now()
-                )
+            self._active_database is None
+            or self._active_database.circuit.state != CBState.CLOSED
+            or (
+                self._auto_fallback_interval != DEFAULT_AUTO_FALLBACK_INTERVAL
+                and self._next_fallback_attempt <= datetime.now()
+            )
         ):
             self.active_database = self._failover_strategy_executor.execute()
             self._schedule_next_fallback()
@@ -317,7 +339,12 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         failure_listener = RegisterCommandFailure(self._failure_detectors)
         resubscribe_listener = ResubscribeOnActiveDatabaseChanged()
         close_connection_listener = CloseConnectionOnActiveDatabaseChanged()
-        self._event_dispatcher.register_listeners({
-            OnCommandsFailEvent: [failure_listener],
-            ActiveDatabaseChanged: [close_connection_listener, resubscribe_listener],
-        })
+        self._event_dispatcher.register_listeners(
+            {
+                OnCommandsFailEvent: [failure_listener],
+                ActiveDatabaseChanged: [
+                    close_connection_listener,
+                    resubscribe_listener,
+                ],
+            }
+        )

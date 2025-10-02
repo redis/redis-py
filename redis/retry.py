@@ -1,7 +1,17 @@
 import abc
 import socket
 from time import sleep
-from typing import TYPE_CHECKING, Any, Callable, Generic, Iterable, Tuple, Type, TypeVar, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Generic,
+    Iterable,
+    Tuple,
+    Type,
+    TypeVar,
+    Optional,
+)
 
 from redis.exceptions import ConnectionError, TimeoutError
 
@@ -91,7 +101,7 @@ class Retry(AbstractRetry[Exception]):
         self,
         do: Callable[[], T],
         fail: Callable[[Exception], Any],
-        is_retryable: Optional[Callable[[Exception], bool]] = None
+        is_retryable: Optional[Callable[[Exception], bool]] = None,
     ) -> T:
         """
         Execute an operation that might fail and returns its result, or

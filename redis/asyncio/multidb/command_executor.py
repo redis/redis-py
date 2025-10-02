@@ -6,10 +6,19 @@ from typing import List, Optional, Callable, Any, Union, Awaitable
 from redis.asyncio import RedisCluster
 from redis.asyncio.client import PubSub, Pipeline
 from redis.asyncio.multidb.database import Databases, AsyncDatabase, Database
-from redis.asyncio.multidb.event import AsyncActiveDatabaseChanged, RegisterCommandFailure, \
-    ResubscribeOnActiveDatabaseChanged, CloseConnectionOnActiveDatabaseChanged
-from redis.asyncio.multidb.failover import AsyncFailoverStrategy, FailoverStrategyExecutor, DefaultFailoverStrategyExecutor, \
-    DEFAULT_FAILOVER_ATTEMPTS, DEFAULT_FAILOVER_DELAY
+from redis.asyncio.multidb.event import (
+    AsyncActiveDatabaseChanged,
+    RegisterCommandFailure,
+    ResubscribeOnActiveDatabaseChanged,
+    CloseConnectionOnActiveDatabaseChanged,
+)
+from redis.asyncio.multidb.failover import (
+    AsyncFailoverStrategy,
+    FailoverStrategyExecutor,
+    DefaultFailoverStrategyExecutor,
+    DEFAULT_FAILOVER_ATTEMPTS,
+    DEFAULT_FAILOVER_DELAY,
+)
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
 from redis.multidb.circuit import State as CBState
 from redis.asyncio.retry import Retry
@@ -20,7 +29,6 @@ from redis.typing import KeyT
 
 
 class AsyncCommandExecutor(CommandExecutor):
-
     @property
     @abstractmethod
     def databases(self) -> Databases:
@@ -89,7 +97,9 @@ class AsyncCommandExecutor(CommandExecutor):
         pass
 
     @abstractmethod
-    async def execute_transaction(self, transaction: Callable[[Pipeline], None], *watches, **options):
+    async def execute_transaction(
+        self, transaction: Callable[[Pipeline], None], *watches, **options
+    ):
         """Executes a transaction block wrapped in callback."""
         pass
 
@@ -106,15 +116,15 @@ class AsyncCommandExecutor(CommandExecutor):
 
 class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
     def __init__(
-            self,
-            failure_detectors: List[AsyncFailureDetector],
-            databases: Databases,
-            command_retry: Retry,
-            failover_strategy: AsyncFailoverStrategy,
-            event_dispatcher: EventDispatcherInterface,
-            failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS,
-            failover_delay: float = DEFAULT_FAILOVER_DELAY,
-            auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
+        self,
+        failure_detectors: List[AsyncFailureDetector],
+        databases: Databases,
+        command_retry: Retry,
+        failover_strategy: AsyncFailoverStrategy,
+        event_dispatcher: EventDispatcherInterface,
+        failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS,
+        failover_delay: float = DEFAULT_FAILOVER_DELAY,
+        auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL,
     ):
         """
         Initialize the DefaultCommandExecutor instance.
@@ -138,9 +148,7 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
         self._failure_detectors = failure_detectors
         self._command_retry = command_retry
         self._failover_strategy_executor = DefaultFailoverStrategyExecutor(
-            failover_strategy,
-            failover_attempts,
-            failover_delay
+            failover_strategy, failover_attempts, failover_delay
         )
         self._event_dispatcher = event_dispatcher
         self._active_database: Optional[Database] = None
@@ -170,7 +178,12 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
 
         if old_active is not None and old_active is not database:
             await self._event_dispatcher.dispatch_async(
-                AsyncActiveDatabaseChanged(old_active, self._active_database, self, **self._active_pubsub_kwargs)
+                AsyncActiveDatabaseChanged(
+                    old_active,
+                    self._active_database,
+                    self,
+                    **self._active_pubsub_kwargs,
+                )
             )
 
     @property
@@ -199,7 +212,9 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
 
     async def execute_command(self, *args, **options):
         async def callback():
-            response = await self._active_database.client.execute_command(*args, **options)
+            response = await self._active_database.client.execute_command(
+                *args, **options
+            )
             await self._register_command_execution(args)
             return response
 
@@ -218,12 +233,12 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
         return await self._execute_with_failure_detection(callback, command_stack)
 
     async def execute_transaction(
-            self,
-            func: Callable[["Pipeline"], Union[Any, Awaitable[Any]]],
-            *watches: KeyT,
-            shard_hint: Optional[str] = None,
-            value_from_callable: bool = False,
-            watch_delay: Optional[float] = None,
+        self,
+        func: Callable[["Pipeline"], Union[Any, Awaitable[Any]]],
+        *watches: KeyT,
+        shard_hint: Optional[str] = None,
+        value_from_callable: bool = False,
+        watch_delay: Optional[float] = None,
     ):
         async def callback():
             response = await self._active_database.client.transaction(
@@ -231,7 +246,7 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
                 *watches,
                 shard_hint=shard_hint,
                 value_from_callable=value_from_callable,
-                watch_delay=watch_delay
+                watch_delay=watch_delay,
             )
             await self._register_command_execution(())
             return response
@@ -257,10 +272,13 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
 
         return await self._execute_with_failure_detection(callback)
 
-    async def _execute_with_failure_detection(self, callback: Callable, cmds: tuple = ()):
+    async def _execute_with_failure_detection(
+        self, callback: Callable, cmds: tuple = ()
+    ):
         """
         Execute a commands execution callback with failure detection.
         """
+
         async def wrapper():
             # On each retry we need to check active database as it might change.
             await self._check_active_database()
@@ -276,18 +294,22 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
         Checks if active a database needs to be updated.
         """
         if (
-                self._active_database is None
-                or self._active_database.circuit.state != CBState.CLOSED
-                or (
-                    self._auto_fallback_interval != DEFAULT_AUTO_FALLBACK_INTERVAL
-                    and self._next_fallback_attempt <= datetime.now()
-                )
+            self._active_database is None
+            or self._active_database.circuit.state != CBState.CLOSED
+            or (
+                self._auto_fallback_interval != DEFAULT_AUTO_FALLBACK_INTERVAL
+                and self._next_fallback_attempt <= datetime.now()
+            )
         ):
-            await self.set_active_database(await self._failover_strategy_executor.execute())
+            await self.set_active_database(
+                await self._failover_strategy_executor.execute()
+            )
             self._schedule_next_fallback()
 
     async def _on_command_fail(self, error, *args):
-        await self._event_dispatcher.dispatch_async(AsyncOnCommandsFailEvent(args, error))
+        await self._event_dispatcher.dispatch_async(
+            AsyncOnCommandsFailEvent(args, error)
+        )
 
     async def _register_command_execution(self, cmd: tuple):
         for detector in self._failure_detectors:
@@ -300,7 +322,12 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
         failure_listener = RegisterCommandFailure(self._failure_detectors)
         resubscribe_listener = ResubscribeOnActiveDatabaseChanged()
         close_connection_listener = CloseConnectionOnActiveDatabaseChanged()
-        self._event_dispatcher.register_listeners({
-            AsyncOnCommandsFailEvent: [failure_listener],
-            AsyncActiveDatabaseChanged: [close_connection_listener, resubscribe_listener],
-        })
+        self._event_dispatcher.register_listeners(
+            {
+                AsyncOnCommandsFailEvent: [failure_listener],
+                AsyncActiveDatabaseChanged: [
+                    close_connection_listener,
+                    resubscribe_listener,
+                ],
+            }
+        )

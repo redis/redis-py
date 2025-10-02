@@ -13,7 +13,9 @@ from redis.retry import Retry
 
 
 class FakeResponse:
-    def __init__(self, *, status: int, headers: Dict[str, str], url: str, content: bytes):
+    def __init__(
+        self, *, status: int, headers: Dict[str, str], url: str, content: bytes
+    ):
         self.status = status
         self.headers = headers
         self._url = url
@@ -32,8 +34,11 @@ class FakeResponse:
     def __exit__(self, exc_type, exc, tb) -> None:
         return None
 
+
 class TestHttpClient:
-    def test_get_returns_parsed_json_and_uses_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_get_returns_parsed_json_and_uses_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Arrange
         base_url = "https://api.example.com/"
         path = "v1/items"
@@ -65,7 +70,9 @@ class TestHttpClient:
         client = HttpClient(base_url=base_url)
 
         # Act
-        result = client.get(path, params=params, timeout=12.34)  # default expect_json=True
+        result = client.get(
+            path, params=params, timeout=12.34
+        )  # default expect_json=True
 
         # Assert
         assert result == payload
@@ -104,10 +111,13 @@ class TestHttpClient:
         # Assert
         assert result == payload
 
-    def test_get_retries_on_retryable_http_errors_and_succeeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_get_retries_on_retryable_http_errors_and_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Arrange: configure limited retries so we can assert attempts
-        retry_policy = Retry(backoff=ExponentialWithJitterBackoff(base=0, cap=0),
-                             retries=2)  # 2 retries -> up to 3 attempts
+        retry_policy = Retry(
+            backoff=ExponentialWithJitterBackoff(base=0, cap=0), retries=2
+        )  # 2 retries -> up to 3 attempts
         base_url = "https://api.example.com/"
         path = "sometimes-busy"
         expected_url = f"{base_url}{path}"
@@ -119,7 +129,13 @@ class TestHttpClient:
         def make_http_error(url: str, code: int, body: bytes = b"busy"):
             # Provide a file-like object for .read() when HttpClient tries to read error content
             fp = BytesIO(body)
-            return HTTPError(url=url, code=code, msg="Service Unavailable", hdrs={"Content-Type": "text/plain"}, fp=fp)
+            return HTTPError(
+                url=url,
+                code=code,
+                msg="Service Unavailable",
+                hdrs={"Content-Type": "text/plain"},
+                fp=fp,
+            )
 
         def flaky_urlopen(request, *, timeout=None, context=None):
             call_count["n"] += 1
@@ -144,7 +160,9 @@ class TestHttpClient:
         assert result == payload
         assert call_count["n"] == retry_policy.get_retries() + 1
 
-    def test_post_sends_json_body_and_parses_response(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_post_sends_json_body_and_parses_response(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Arrange
         base_url = "https://api.example.com/"
         path = "v1/create"
@@ -158,9 +176,13 @@ class TestHttpClient:
             assert getattr(request, "method", "").upper() == "POST"
             assert request.full_url == expected_url
             # Content-Type should be auto-set for string JSON body
-            assert request.headers.get("Content-type") == "application/json; charset=utf-8"
+            assert (
+                request.headers.get("Content-type") == "application/json; charset=utf-8"
+            )
             # Body should be already UTF-8 encoded JSON with no spaces
-            assert request.data == json.dumps(send_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            assert request.data == json.dumps(
+                send_payload, ensure_ascii=False, separators=(",", ":")
+            ).encode("utf-8")
             return FakeResponse(
                 status=200,
                 headers={"Content-Type": "application/json; charset=utf-8"},
@@ -178,7 +200,9 @@ class TestHttpClient:
         # Assert
         assert result == recv_payload
 
-    def test_post_with_raw_data_and_custom_headers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_post_with_raw_data_and_custom_headers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Arrange
         base_url = "https://api.example.com/"
         path = "upload"
@@ -210,7 +234,9 @@ class TestHttpClient:
         # Assert
         assert result == recv_payload
 
-    def test_delete_returns_http_response_when_expect_json_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_delete_returns_http_response_when_expect_json_false(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Arrange
         base_url = "https://api.example.com/"
         path = "v1/resource/42"
@@ -238,7 +264,9 @@ class TestHttpClient:
         assert resp.url == expected_url
         assert resp.content == body
 
-    def test_put_raises_http_error_on_non_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_put_raises_http_error_on_non_success(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Arrange
         base_url = "https://api.example.com/"
         path = "v1/update/1"
@@ -246,7 +274,13 @@ class TestHttpClient:
 
         def make_http_error(url: str, code: int, body: bytes = b"not found"):
             fp = BytesIO(body)
-            return HTTPError(url=url, code=code, msg="Not Found", hdrs={"Content-Type": "text/plain"}, fp=fp)
+            return HTTPError(
+                url=url,
+                code=code,
+                msg="Not Found",
+                hdrs={"Content-Type": "text/plain"},
+                fp=fp,
+            )
 
         def fake_urlopen(request, *, timeout=None, context=None):
             raise make_http_error(expected_url, 404)
@@ -260,7 +294,9 @@ class TestHttpClient:
         assert exc.value.status == 404
         assert exc.value.url == expected_url
 
-    def test_patch_with_params_encodes_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_patch_with_params_encodes_query(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Arrange
         base_url = "https://api.example.com/"
         path = "v1/edit"
@@ -288,11 +324,18 @@ class TestHttpClient:
         assert qs["q"] == ["hello world"]
         assert qs["tag"] == ["a", "b"]
 
-    def test_request_low_level_headers_auth_and_timeout_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_request_low_level_headers_auth_and_timeout_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Arrange: use plain HTTP to verify no TLS context, and check default timeout used
         base_url = "http://example.com/"
         path = "ping"
-        captured = {"timeout": None, "context": "unset", "headers": None, "method": None}
+        captured = {
+            "timeout": None,
+            "context": "unset",
+            "headers": None,
+            "method": None,
+        }
 
         def fake_urlopen(request, *, timeout=None, context=None):
             captured["timeout"] = timeout
@@ -315,10 +358,14 @@ class TestHttpClient:
         assert resp.status == 200
         assert captured["method"] == "GET"
         assert captured["context"] is None  # no TLS for http
-        assert pytest.approx(captured["timeout"], rel=1e-6) == client.timeout  # default used
+        assert (
+            pytest.approx(captured["timeout"], rel=1e-6) == client.timeout
+        )  # default used
         # Check some default headers and Authorization presence
         headers = {k.lower(): v for k, v in captured["headers"].items()}
-        assert "authorization" in headers and headers["authorization"].startswith("Basic ")
+        assert "authorization" in headers and headers["authorization"].startswith(
+            "Basic "
+        )
         assert headers.get("accept") == "application/json"
         assert "gzip" in headers.get("accept-encoding", "").lower()
         assert "user-agent" in headers

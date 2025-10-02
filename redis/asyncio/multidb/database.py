@@ -10,6 +10,7 @@ from redis.typing import Number
 
 class AsyncDatabase(AbstractDatabase):
     """Database with an underlying asynchronous redis client."""
+
     @property
     @abstractmethod
     def client(self) -> Union[Redis, RedisCluster]:
@@ -34,15 +35,17 @@ class AsyncDatabase(AbstractDatabase):
         """Set the circuit breaker for the current database."""
         pass
 
+
 Databases = WeightedList[tuple[AsyncDatabase, Number]]
+
 
 class Database(BaseDatabase, AsyncDatabase):
     def __init__(
-            self,
-            client: Union[Redis, RedisCluster],
-            circuit: CircuitBreaker,
-            weight: float,
-            health_check_url: Optional[str] = None,
+        self,
+        client: Union[Redis, RedisCluster],
+        circuit: CircuitBreaker,
+        weight: float,
+        health_check_url: Optional[str] = None,
     ):
         self._client = client
         self._cb = circuit
@@ -64,4 +67,3 @@ class Database(BaseDatabase, AsyncDatabase):
     @circuit.setter
     def circuit(self, circuit: CircuitBreaker):
         self._cb = circuit
-

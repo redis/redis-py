@@ -8,6 +8,7 @@ from redis.data_structure import WeightedList
 from redis.multidb.circuit import CircuitBreaker
 from redis.typing import Number
 
+
 class AbstractDatabase(ABC):
     @property
     @abstractmethod
@@ -33,11 +34,12 @@ class AbstractDatabase(ABC):
         """Set the health check URL associated with the current database."""
         pass
 
+
 class BaseDatabase(AbstractDatabase):
     def __init__(
-            self,
-            weight: float,
-            health_check_url: Optional[str] = None,
+        self,
+        weight: float,
+        health_check_url: Optional[str] = None,
     ):
         self._weight = weight
         self._health_check_url = health_check_url
@@ -58,8 +60,10 @@ class BaseDatabase(AbstractDatabase):
     def health_check_url(self, health_check_url: Optional[str]):
         self._health_check_url = health_check_url
 
+
 class SyncDatabase(AbstractDatabase):
     """Database with an underlying synchronous redis client."""
+
     @property
     @abstractmethod
     def client(self) -> Union[redis.Redis, RedisCluster]:
@@ -84,15 +88,17 @@ class SyncDatabase(AbstractDatabase):
         """Set the circuit breaker for the current database."""
         pass
 
+
 Databases = WeightedList[tuple[SyncDatabase, Number]]
+
 
 class Database(BaseDatabase, SyncDatabase):
     def __init__(
-            self,
-            client: Union[redis.Redis, RedisCluster],
-            circuit: CircuitBreaker,
-            weight: float,
-            health_check_url: Optional[str] = None,
+        self,
+        client: Union[redis.Redis, RedisCluster],
+        circuit: CircuitBreaker,
+        weight: float,
+        health_check_url: Optional[str] = None,
     ):
         """
         Initialize a new Database instance.

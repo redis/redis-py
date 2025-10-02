@@ -1283,7 +1283,7 @@ class ConnectionPool:
         """
         async with self._lock:
             for conn in self._in_use_connections:
-                    conn.mark_for_reconnect()
+                conn.mark_for_reconnect()
 
     async def aclose(self) -> None:
         """Close the pool, disconnecting all connections"""

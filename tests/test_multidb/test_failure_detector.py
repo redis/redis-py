@@ -12,7 +12,7 @@ from redis.exceptions import ConnectionError
 
 class TestCommandFailureDetector:
     @pytest.mark.parametrize(
-        'min_num_failures,failure_rate_threshold,circuit_state',
+        "min_num_failures,failure_rate_threshold,circuit_state",
         [
             (2, 0.4, CBState.OPEN),
             (2, 0, CBState.OPEN),
@@ -29,10 +29,7 @@ class TestCommandFailureDetector:
         ],
     )
     def test_failure_detector_correctly_reacts_to_failures(
-            self,
-            min_num_failures,
-            failure_rate_threshold,
-            circuit_state
+        self, min_num_failures, failure_rate_threshold, circuit_state
     ):
         fd = CommandFailureDetector(min_num_failures, failure_rate_threshold)
         mock_db = Mock(spec=Database)
@@ -41,19 +38,19 @@ class TestCommandFailureDetector:
         mock_ce.active_database = mock_db
         fd.set_command_executor(mock_ce)
 
-        fd.register_command_execution(('GET', 'key'))
-        fd.register_command_execution(('GET','key'))
-        fd.register_failure(Exception(), ('GET', 'key'))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_failure(Exception(), ("GET", "key"))
 
-        fd.register_command_execution(('GET', 'key'))
-        fd.register_command_execution(('GET','key'))
-        fd.register_command_execution(('GET','key'))
-        fd.register_failure(Exception(), ('GET', 'key'))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_failure(Exception(), ("GET", "key"))
 
         assert mock_db.circuit.state == circuit_state
 
     @pytest.mark.parametrize(
-        'min_num_failures,failure_rate_threshold',
+        "min_num_failures,failure_rate_threshold",
         [
             (3, 0.0),
             (3, 0.6),
@@ -63,7 +60,9 @@ class TestCommandFailureDetector:
             "do not exceeds min num failures AND failure rate, during interval",
         ],
     )
-    def test_failure_detector_do_not_open_circuit_on_interval_exceed(self, min_num_failures, failure_rate_threshold):
+    def test_failure_detector_do_not_open_circuit_on_interval_exceed(
+        self, min_num_failures, failure_rate_threshold
+    ):
         fd = CommandFailureDetector(min_num_failures, failure_rate_threshold, 0.3)
         mock_db = Mock(spec=Database)
         mock_db.circuit.state = CBState.CLOSED
@@ -72,24 +71,24 @@ class TestCommandFailureDetector:
         fd.set_command_executor(mock_ce)
         assert mock_db.circuit.state == CBState.CLOSED
 
-        fd.register_command_execution(('GET', 'key'))
-        fd.register_failure(Exception(), ('GET', 'key'))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_failure(Exception(), ("GET", "key"))
         sleep(0.16)
-        fd.register_command_execution(('GET', 'key'))
-        fd.register_command_execution(('GET', 'key'))
-        fd.register_command_execution(('GET', 'key'))
-        fd.register_failure(Exception(), ('GET', 'key'))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_failure(Exception(), ("GET", "key"))
         sleep(0.16)
-        fd.register_command_execution(('GET', 'key'))
-        fd.register_failure(Exception(), ('GET', 'key'))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_failure(Exception(), ("GET", "key"))
 
         assert mock_db.circuit.state == CBState.CLOSED
 
         # 2 more failure as last one already refreshed timer
-        fd.register_command_execution(('GET', 'key'))
-        fd.register_failure(Exception(), ('GET', 'key'))
-        fd.register_command_execution(('GET', 'key'))
-        fd.register_failure(Exception(), ('GET', 'key'))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_failure(Exception(), ("GET", "key"))
+        fd.register_command_execution(("GET", "key"))
+        fd.register_failure(Exception(), ("GET", "key"))
 
         assert mock_db.circuit.state == CBState.OPEN
 
@@ -102,16 +101,16 @@ class TestCommandFailureDetector:
         fd.set_command_executor(mock_ce)
         assert mock_db.circuit.state == CBState.CLOSED
 
-        fd.register_failure(Exception(), ('SET', 'key1', 'value1'))
-        fd.register_failure(ConnectionError(), ('SET', 'key1', 'value1'))
-        fd.register_failure(ConnectionError(), ('SET', 'key1', 'value1'))
-        fd.register_failure(Exception(), ('SET', 'key1', 'value1'))
-        fd.register_failure(Exception(), ('SET', 'key1', 'value1'))
+        fd.register_failure(Exception(), ("SET", "key1", "value1"))
+        fd.register_failure(ConnectionError(), ("SET", "key1", "value1"))
+        fd.register_failure(ConnectionError(), ("SET", "key1", "value1"))
+        fd.register_failure(Exception(), ("SET", "key1", "value1"))
+        fd.register_failure(Exception(), ("SET", "key1", "value1"))
 
         assert mock_db.circuit.state == CBState.CLOSED
 
-        fd.register_failure(ConnectionError(), ('SET', 'key1', 'value1'))
-        fd.register_failure(ConnectionError(), ('SET', 'key1', 'value1'))
-        fd.register_failure(ConnectionError(), ('SET', 'key1', 'value1'))
+        fd.register_failure(ConnectionError(), ("SET", "key1", "value1"))
+        fd.register_failure(ConnectionError(), ("SET", "key1", "value1"))
+        fd.register_failure(ConnectionError(), ("SET", "key1", "value1"))
 
         assert mock_db.circuit.state == CBState.OPEN

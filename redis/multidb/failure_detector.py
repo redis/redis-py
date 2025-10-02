@@ -12,8 +12,8 @@ DEFAULT_MIN_NUM_FAILURES = 1000
 DEFAULT_FAILURE_RATE_THRESHOLD = 0.1
 DEFAULT_FAILURES_DETECTION_WINDOW = 2
 
-class FailureDetector(ABC):
 
+class FailureDetector(ABC):
     @abstractmethod
     def register_failure(self, exception: Exception, cmd: tuple) -> None:
         """Register a failure that occurred during command execution."""
@@ -29,16 +29,18 @@ class FailureDetector(ABC):
         """Set the command executor for this failure."""
         pass
 
+
 class CommandFailureDetector(FailureDetector):
     """
     Detects a failure based on a threshold of failed commands during a specific period of time.
     """
+
     def __init__(
-            self,
-            min_num_failures: int = DEFAULT_MIN_NUM_FAILURES,
-            failure_rate_threshold: float = DEFAULT_FAILURE_RATE_THRESHOLD,
-            failure_detection_window: float = DEFAULT_FAILURES_DETECTION_WINDOW,
-            error_types: Optional[List[Type[Exception]]] = None,
+        self,
+        min_num_failures: int = DEFAULT_MIN_NUM_FAILURES,
+        failure_rate_threshold: float = DEFAULT_FAILURE_RATE_THRESHOLD,
+        failure_detection_window: float = DEFAULT_FAILURES_DETECTION_WINDOW,
+        error_types: Optional[List[Type[Exception]]] = None,
     ) -> None:
         """
         Initialize a new CommandFailureDetector instance.
@@ -59,7 +61,9 @@ class CommandFailureDetector(FailureDetector):
         self._error_types = error_types
         self._commands_executed: int = 0
         self._start_time: datetime = datetime.now()
-        self._end_time: datetime = self._start_time + timedelta(seconds=self._failure_detection_window)
+        self._end_time: datetime = self._start_time + timedelta(
+            seconds=self._failure_detection_window
+        )
         self._failures_count: int = 0
         self._lock = threading.RLock()
 
@@ -84,9 +88,8 @@ class CommandFailureDetector(FailureDetector):
             self._commands_executed += 1
 
     def _check_threshold(self):
-        if (
-                self._failures_count >= self._min_num_failures
-                and self._failures_count >= (math.ceil(self._commands_executed * self._failure_rate_threshold))
+        if self._failures_count >= self._min_num_failures and self._failures_count >= (
+            math.ceil(self._commands_executed * self._failure_rate_threshold)
         ):
             self._command_executor.active_database.circuit.state = CBState.OPEN
             self._reset()
@@ -94,6 +97,8 @@ class CommandFailureDetector(FailureDetector):
     def _reset(self) -> None:
         with self._lock:
             self._start_time = datetime.now()
-            self._end_time = self._start_time + timedelta(seconds=self._failure_detection_window)
+            self._end_time = self._start_time + timedelta(
+                seconds=self._failure_detection_window
+            )
             self._failures_count = 0
             self._commands_executed = 0

@@ -44,8 +44,11 @@ class EventDispatcherInterface(ABC):
 
     @abstractmethod
     def register_listeners(
-            self,
-            mappings: Dict[Type[object], List[Union[EventListenerInterface, AsyncEventListenerInterface]]]
+        self,
+        mappings: Dict[
+            Type[object],
+            List[Union[EventListenerInterface, AsyncEventListenerInterface]],
+        ],
     ):
         """Register additional listeners."""
         pass
@@ -65,13 +68,17 @@ class EventException(Exception):
 class EventDispatcher(EventDispatcherInterface):
     # TODO: Make dispatcher to accept external mappings.
     def __init__(
-            self,
-            event_listeners: Optional[Dict[Type[object], List[EventListenerInterface]]] = None,
+        self,
+        event_listeners: Optional[
+            Dict[Type[object], List[EventListenerInterface]]
+        ] = None,
     ):
         """
         Dispatcher that dispatches events to listeners associated with given event.
         """
-        self._event_listeners_mapping: Dict[Type[object], List[EventListenerInterface]]= {
+        self._event_listeners_mapping: Dict[
+            Type[object], List[EventListenerInterface]
+        ] = {
             AfterConnectionReleasedEvent: [
                 ReAuthConnectionListener(),
             ],
@@ -109,17 +116,25 @@ class EventDispatcher(EventDispatcherInterface):
                 await listener.listen(event)
 
     def register_listeners(
-            self,
-            event_listeners: Dict[Type[object], List[Union[EventListenerInterface, AsyncEventListenerInterface]]]
+        self,
+        event_listeners: Dict[
+            Type[object],
+            List[Union[EventListenerInterface, AsyncEventListenerInterface]],
+        ],
     ):
         with self._lock:
             for event_type in event_listeners:
                 if event_type in self._event_listeners_mapping:
                     self._event_listeners_mapping[event_type] = list(
-                        set(self._event_listeners_mapping[event_type] + event_listeners[event_type])
+                        set(
+                            self._event_listeners_mapping[event_type]
+                            + event_listeners[event_type]
+                        )
                     )
                 else:
-                    self._event_listeners_mapping[event_type] = event_listeners[event_type]
+                    self._event_listeners_mapping[event_type] = event_listeners[
+                        event_type
+                    ]
 
 
 class AfterConnectionReleasedEvent:
@@ -257,14 +272,16 @@ class AfterAsyncClusterInstantiationEvent:
     def credential_provider(self) -> Union[CredentialProvider, None]:
         return self._credential_provider
 
+
 class OnCommandsFailEvent:
     """
     Event fired whenever a command fails during the execution.
     """
+
     def __init__(
-            self,
-            commands: tuple,
-            exception: Exception,
+        self,
+        commands: tuple,
+        exception: Exception,
     ):
         self._commands = commands
         self._exception = exception
@@ -277,8 +294,10 @@ class OnCommandsFailEvent:
     def exception(self) -> Exception:
         return self._exception
 
+
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
+
 
 class ReAuthConnectionListener(EventListenerInterface):
     """

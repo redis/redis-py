@@ -16,11 +16,13 @@ from redis.typing import KeyT, EncodableT, ChannelT
 
 logger = logging.getLogger(__name__)
 
+
 class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
     """
     Client that operates on multiple logical Redis databases.
     Should be used in Active-Active database setups.
     """
+
     def __init__(self, config: MultiDbConfig):
         self._databases = config.databases()
         self._health_checks = config.default_health_checks()
@@ -30,16 +32,18 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
 
         self._health_check_interval = config.health_check_interval
         self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value(
-            config.health_check_probes,
-            config.health_check_delay
+            config.health_check_probes, config.health_check_delay
         )
         self._failure_detectors = config.default_failure_detectors()
 
         if config.failure_detectors is not None:
             self._failure_detectors.extend(config.failure_detectors)
 
-        self._failover_strategy = config.default_failover_strategy() \
-            if config.failover_strategy is None else config.failover_strategy
+        self._failover_strategy = (
+            config.default_failover_strategy()
+            if config.failover_strategy is None
+            else config.failover_strategy
+        )
         self._failover_strategy.set_databases(self._databases)
         self._auto_fallback_interval = config.auto_fallback_interval
         self._event_dispatcher = config.event_dispatcher
@@ -80,6 +84,7 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         """
         Perform initialization of databases to define their initial state.
         """
+
         async def raise_exception_on_failed_hc(error):
             raise error
 
@@ -87,10 +92,12 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         await self._check_databases_health(on_error=raise_exception_on_failed_hc)
 
         # Starts recurring health checks on the background.
-        self._recurring_hc_task = asyncio.create_task(self._bg_scheduler.run_recurring_async(
-            self._health_check_interval,
-            self._check_databases_health,
-        ))
+        self._recurring_hc_task = asyncio.create_task(
+            self._bg_scheduler.run_recurring_async(
+                self._health_check_interval,
+                self._check_databases_health,
+            )
+        )
 
         is_active_db_found = False
 
@@ -104,7 +111,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
                 is_active_db_found = True
 
         if not is_active_db_found:
-            raise NoValidDatabaseException('Initial connection failed - no active database found')
+            raise NoValidDatabaseException(
+                "Initial connection failed - no active database found"
+            )
 
         self.initialized = True
 
@@ -126,7 +135,7 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
                 break
 
         if not exists:
-            raise ValueError('Given database is not a member of database list')
+            raise ValueError("Given database is not a member of database list")
 
         await self._check_db_health(database)
 
@@ -135,7 +144,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             await self.command_executor.set_active_database(database)
             return
 
-        raise NoValidDatabaseException('Cannot set active database, database is unhealthy')
+        raise NoValidDatabaseException(
+            "Cannot set active database, database is unhealthy"
+        )
 
     async def add_database(self, database: AsyncDatabase):
         """
@@ -143,7 +154,7 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         """
         for existing_db, _ in self._databases:
             if existing_db == database:
-                raise ValueError('Given database already exists')
+                raise ValueError("Given database already exists")
 
         await self._check_db_health(database)
 
@@ -151,8 +162,13 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         self._databases.add(database, database.weight)
         await self._change_active_database(database, highest_weighted_db)
 
-    async def _change_active_database(self, new_database: AsyncDatabase, highest_weight_database: AsyncDatabase):
-        if new_database.weight > highest_weight_database.weight and new_database.circuit.state == CBState.CLOSED:
+    async def _change_active_database(
+        self, new_database: AsyncDatabase, highest_weight_database: AsyncDatabase
+    ):
+        if (
+            new_database.weight > highest_weight_database.weight
+            and new_database.circuit.state == CBState.CLOSED
+        ):
             await self.command_executor.set_active_database(new_database)
 
     async def remove_database(self, database: AsyncDatabase):
@@ -162,7 +178,10 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         weight = self._databases.remove(database)
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
 
-        if highest_weight <= weight and highest_weighted_db.circuit.state == CBState.CLOSED:
+        if (
+            highest_weight <= weight
+            and highest_weighted_db.circuit.state == CBState.CLOSED
+        ):
             await self.command_executor.set_active_database(highest_weighted_db)
 
     async def update_database_weight(self, database: AsyncDatabase, weight: float):
@@ -177,7 +196,7 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
                 break
 
         if not exists:
-            raise ValueError('Given database is not a member of database list')
+            raise ValueError("Given database is not a member of database list")
 
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
         self._databases.update_weight(database, weight)
@@ -213,12 +232,12 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         return Pipeline(self)
 
     async def transaction(
-            self,
-            func: Callable[["Pipeline"], Union[Any, Awaitable[Any]]],
-            *watches: KeyT,
-            shard_hint: Optional[str] = None,
-            value_from_callable: bool = False,
-            watch_delay: Optional[float] = None,
+        self,
+        func: Callable[["Pipeline"], Union[Any, Awaitable[Any]]],
+        *watches: KeyT,
+        shard_hint: Optional[str] = None,
+        value_from_callable: bool = False,
+        watch_delay: Optional[float] = None,
     ):
         """
         Executes callable as transaction.
@@ -246,15 +265,18 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         return PubSub(self, **kwargs)
 
     async def _check_databases_health(
-            self,
-            on_error: Optional[Callable[[Exception], Coroutine[Any, Any, None]]] = None,
+        self,
+        on_error: Optional[Callable[[Exception], Coroutine[Any, Any, None]]] = None,
     ):
         """
         Runs health checks as a recurring task.
         Runs health checks against all databases.
         """
         try:
-            self._hc_tasks = [asyncio.create_task(self._check_db_health(database)) for database, _ in self._databases]
+            self._hc_tasks = [
+                asyncio.create_task(self._check_db_health(database))
+                for database, _ in self._databases
+            ]
             results = await asyncio.wait_for(
                 asyncio.gather(
                     *self._hc_tasks,
@@ -273,8 +295,8 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
                 unhealthy_db.circuit.state = CBState.OPEN
 
                 logger.exception(
-                    'Health check failed, due to exception',
-                    exc_info=result.original_exception
+                    "Health check failed, due to exception",
+                    exc_info=result.original_exception,
                 )
 
                 if on_error:
@@ -285,7 +307,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         Runs health checks on the given database until first failure.
         """
         # Health check will setup circuit state
-        is_healthy = await self._health_check_policy.execute(self._health_checks, database)
+        is_healthy = await self._health_check_policy.execute(
+            self._health_checks, database
+        )
 
         if not is_healthy:
             if database.circuit.state != CBState.OPEN:
@@ -296,11 +320,15 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
 
         return is_healthy
 
-    def _on_circuit_state_change_callback(self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState):
+    def _on_circuit_state_change_callback(
+        self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState
+    ):
         loop = asyncio.get_running_loop()
 
         if new_state == CBState.HALF_OPEN:
-            self._half_open_state_task = asyncio.create_task(self._check_db_health(circuit.database))
+            self._half_open_state_task = asyncio.create_task(
+                self._check_db_health(circuit.database)
+            )
             return
 
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
@@ -310,13 +338,16 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
         if self.command_executor.active_database:
             await self.command_executor.active_database.client.aclose()
 
+
 def _half_open_circuit(circuit: CircuitBreaker):
     circuit.state = CBState.HALF_OPEN
+
 
 class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
     """
     Pipeline implementation for multiple logical Redis databases.
     """
+
     def __init__(self, client: MultiDBClient):
         self._command_stack = []
         self._client = client
@@ -370,17 +401,21 @@ class Pipeline(AsyncRedisModuleCommands, AsyncCoreCommands):
     async def execute(self) -> List[Any]:
         """Execute all the commands in the current pipeline"""
         if not self._client.initialized:
-           await self._client.initialize()
+            await self._client.initialize()
 
         try:
-            return await self._client.command_executor.execute_pipeline(tuple(self._command_stack))
+            return await self._client.command_executor.execute_pipeline(
+                tuple(self._command_stack)
+            )
         finally:
             await self.reset()
+
 
 class PubSub:
     """
     PubSub object for multi database client.
     """
+
     def __init__(self, client: MultiDBClient, **kwargs):
         """Initialize the PubSub object for a multi-database client.
 
@@ -399,14 +434,16 @@ class PubSub:
         await self.aclose()
 
     async def aclose(self):
-        return await self._client.command_executor.execute_pubsub_method('aclose')
+        return await self._client.command_executor.execute_pubsub_method("aclose")
 
     @property
     def subscribed(self) -> bool:
         return self._client.command_executor.active_pubsub.subscribed
 
     async def execute_command(self, *args: EncodableT):
-        return await self._client.command_executor.execute_pubsub_method('execute_command', *args)
+        return await self._client.command_executor.execute_pubsub_method(
+            "execute_command", *args
+        )
 
     async def psubscribe(self, *args: ChannelT, **kwargs: PubSubHandler):
         """
@@ -417,9 +454,7 @@ class PubSub:
         ``listen()``.
         """
         return await self._client.command_executor.execute_pubsub_method(
-            'psubscribe',
-            *args,
-            **kwargs
+            "psubscribe", *args, **kwargs
         )
 
     async def punsubscribe(self, *args: ChannelT):
@@ -428,8 +463,7 @@ class PubSub:
         all patterns.
         """
         return await self._client.command_executor.execute_pubsub_method(
-            'punsubscribe',
-            *args
+            "punsubscribe", *args
         )
 
     async def subscribe(self, *args: ChannelT, **kwargs: Callable):
@@ -441,9 +475,7 @@ class PubSub:
         ``get_message()``.
         """
         return await self._client.command_executor.execute_pubsub_method(
-            'subscribe',
-            *args,
-            **kwargs
+            "subscribe", *args, **kwargs
         )
 
     async def unsubscribe(self, *args):
@@ -452,8 +484,7 @@ class PubSub:
         all channels
         """
         return await self._client.command_executor.execute_pubsub_method(
-            'unsubscribe',
-            *args
+            "unsubscribe", *args
         )
 
     async def get_message(
@@ -467,8 +498,9 @@ class PubSub:
         number or None to wait indefinitely.
         """
         return await self._client.command_executor.execute_pubsub_method(
-            'get_message',
-            ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+            "get_message",
+            ignore_subscribe_messages=ignore_subscribe_messages,
+            timeout=timeout,
         )
 
     async def run(
@@ -491,7 +523,5 @@ class PubSub:
             >>> await task
         """
         return await self._client.command_executor.execute_pubsub_run(
-            exception_handler=exception_handler,
-            sleep_time=poll_timeout,
-            pubsub=self
+            exception_handler=exception_handler, sleep_time=poll_timeout, pubsub=self
         )

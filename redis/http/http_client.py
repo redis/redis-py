@@ -12,12 +12,7 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 
-__all__ = [
-    "HttpClient",
-    "HttpResponse",
-    "HttpError",
-    "DEFAULT_TIMEOUT"
-]
+__all__ = ["HttpClient", "HttpResponse", "HttpError", "DEFAULT_TIMEOUT"]
 
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.retry import Retry
@@ -65,6 +60,7 @@ class HttpClient:
     """
     A lightweight HTTP client for REST API calls.
     """
+
     def __init__(
         self,
         base_url: str = "",
@@ -108,7 +104,11 @@ class HttpClient:
         ca_file, ca_path or ca_data. For mutual TLS, additionally provide a client
         certificate and key via client_cert_file and client_key_file.
         """
-        self.base_url = base_url.rstrip() + "/" if base_url and not base_url.endswith("/") else base_url
+        self.base_url = (
+            base_url.rstrip() + "/"
+            if base_url and not base_url.endswith("/")
+            else base_url
+        )
         self._default_headers = {k.lower(): v for k, v in (headers or {}).items()}
         self.timeout = timeout
         self.retry = retry
@@ -130,10 +130,12 @@ class HttpClient:
     def get(
         self,
         path: str,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         return self._json_call(
             "GET",
@@ -142,16 +144,18 @@ class HttpClient:
             headers=headers,
             timeout=timeout,
             body=None,
-            expect_json=expect_json
+            expect_json=expect_json,
         )
 
     def delete(
         self,
         path: str,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         return self._json_call(
             "DELETE",
@@ -160,7 +164,7 @@ class HttpClient:
             headers=headers,
             timeout=timeout,
             body=None,
-            expect_json=expect_json
+            expect_json=expect_json,
         )
 
     def post(
@@ -168,10 +172,12 @@ class HttpClient:
         path: str,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         return self._json_call(
             "POST",
@@ -180,7 +186,7 @@ class HttpClient:
             headers=headers,
             timeout=timeout,
             body=self._prepare_body(json_body=json_body, data=data),
-            expect_json=expect_json
+            expect_json=expect_json,
         )
 
     def put(
@@ -188,10 +194,12 @@ class HttpClient:
         path: str,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         return self._json_call(
             "PUT",
@@ -200,7 +208,7 @@ class HttpClient:
             headers=headers,
             timeout=timeout,
             body=self._prepare_body(json_body=json_body, data=data),
-            expect_json=expect_json
+            expect_json=expect_json,
         )
 
     def patch(
@@ -208,10 +216,12 @@ class HttpClient:
         path: str,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         return self._json_call(
             "PATCH",
@@ -220,7 +230,7 @@ class HttpClient:
             headers=headers,
             timeout=timeout,
             body=self._prepare_body(json_body=json_body, data=data),
-            expect_json=expect_json
+            expect_json=expect_json,
         )
 
     # Low-level request
@@ -228,7 +238,9 @@ class HttpClient:
         self,
         method: str,
         path: str,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         body: Optional[Union[bytes, str]] = None,
         timeout: Optional[float] = None,
@@ -265,7 +277,7 @@ class HttpClient:
             return self.retry.call_with_retry(
                 lambda: self._make_request(req, context=context, timeout=timeout),
                 lambda _: dummy_fail(),
-                lambda error: self._is_retryable_http_error(error)
+                lambda error: self._is_retryable_http_error(error),
             )
         except HTTPError as e:
             # Read error body, build response, and decide on retry
@@ -286,10 +298,10 @@ class HttpClient:
             return response
 
     def _make_request(
-            self,
-            request: Request,
-            context: Optional[ssl.SSLContext] = None,
-            timeout: Optional[float] = None,
+        self,
+        request: Request,
+        context: Optional[ssl.SSLContext] = None,
+        timeout: Optional[float] = None,
     ):
         with urlopen(request, timeout=timeout or self.timeout, context=context) as resp:
             raw = resp.read()
@@ -312,7 +324,9 @@ class HttpClient:
         self,
         method: str,
         path: str,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
         body: Optional[Union[bytes, str]] = None,
@@ -332,7 +346,9 @@ class HttpClient:
             return resp.json()
         return resp
 
-    def _prepare_body(self, json_body: Optional[Any] = None, data: Optional[Union[bytes, str]] = None) -> Optional[Union[bytes, str]]:
+    def _prepare_body(
+        self, json_body: Optional[Any] = None, data: Optional[Union[bytes, str]] = None
+    ) -> Optional[Union[bytes, str]]:
         if json_body is not None and data is not None:
             raise ValueError("Provide either json_body or data, not both.")
         if json_body is not None:
@@ -342,17 +358,23 @@ class HttpClient:
     def _build_url(
         self,
         path: str,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
     ) -> str:
         url = urljoin(self.base_url or "", path)
         if params:
             # urlencode with doseq=True supports list/tuple values
-            query = urlencode({k: v for k, v in params.items() if v is not None}, doseq=True)
+            query = urlencode(
+                {k: v for k, v in params.items() if v is not None}, doseq=True
+            )
             separator = "&" if ("?" in url) else "?"
             url = f"{url}{separator}{query}" if query else url
         return url
 
-    def _prepare_headers(self, headers: Optional[Mapping[str, str]], body: Optional[Union[bytes, str]]) -> Dict[str, str]:
+    def _prepare_headers(
+        self, headers: Optional[Mapping[str, str]], body: Optional[Union[bytes, str]]
+    ) -> Dict[str, str]:
         # Start with defaults
         prepared: Dict[str, str] = {}
         prepared.update(self._default_headers)

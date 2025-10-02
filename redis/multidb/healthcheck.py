@@ -17,17 +17,19 @@ DEFAULT_LAG_AWARE_TOLERANCE = 5000
 
 logger = logging.getLogger(__name__)
 
-class HealthCheck(ABC):
 
+class HealthCheck(ABC):
     @abstractmethod
     def check_health(self, database) -> bool:
         """Function to determine the health status."""
         pass
 
+
 class HealthCheckPolicy(ABC):
     """
     Health checks execution policy.
     """
+
     @property
     @abstractmethod
     def health_check_probes(self) -> int:
@@ -44,6 +46,7 @@ class HealthCheckPolicy(ABC):
     def execute(self, health_checks: List[HealthCheck], database) -> bool:
         """Execute health checks and return database health status."""
         pass
+
 
 class AbstractHealthCheckPolicy(HealthCheckPolicy):
     def __init__(self, health_check_probes: int, health_check_delay: float):
@@ -64,10 +67,12 @@ class AbstractHealthCheckPolicy(HealthCheckPolicy):
     def execute(self, health_checks: List[HealthCheck], database) -> bool:
         pass
 
+
 class HealthyAllPolicy(AbstractHealthCheckPolicy):
     """
     Policy that returns True if all health check probes are successful.
     """
+
     def __init__(self, health_check_probes: int, health_check_delay: float):
         super().__init__(health_check_probes, health_check_delay)
 
@@ -78,18 +83,18 @@ class HealthyAllPolicy(AbstractHealthCheckPolicy):
                     if not health_check.check_health(database):
                         return False
                 except Exception as e:
-                    raise UnhealthyDatabaseException(
-                        f"Unhealthy database", database, e
-                    )
+                    raise UnhealthyDatabaseException(f"Unhealthy database", database, e)
 
                 if attempt < self.health_check_probes - 1:
                     sleep(self._health_check_delay)
         return True
 
+
 class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
     """
     Policy that returns True if a majority of health check probes are successful.
     """
+
     def __init__(self, health_check_probes: int, health_check_delay: float):
         super().__init__(health_check_probes, health_check_delay)
 
@@ -117,10 +122,12 @@ class HealthyMajorityPolicy(AbstractHealthCheckPolicy):
                     sleep(self._health_check_delay)
         return True
 
+
 class HealthyAnyPolicy(AbstractHealthCheckPolicy):
     """
     Policy that returns True if at least one health check probe is successful.
     """
+
     def __init__(self, health_check_probes: int, health_check_delay: float):
         super().__init__(health_check_probes, health_check_delay)
 
@@ -152,17 +159,21 @@ class HealthyAnyPolicy(AbstractHealthCheckPolicy):
 
         return is_healthy
 
+
 class HealthCheckPolicies(Enum):
     HEALTHY_ALL = HealthyAllPolicy
     HEALTHY_MAJORITY = HealthyMajorityPolicy
     HEALTHY_ANY = HealthyAnyPolicy
 
+
 DEFAULT_HEALTH_CHECK_POLICY: HealthCheckPolicies = HealthCheckPolicies.HEALTHY_ALL
+
 
 class EchoHealthCheck(HealthCheck):
     """
     Health check based on ECHO command.
     """
+
     def check_health(self, database) -> bool:
         expected_message = ["healthcheck", b"healthcheck"]
 
@@ -173,7 +184,9 @@ class EchoHealthCheck(HealthCheck):
             # For a cluster checks if all nodes are healthy.
             all_nodes = database.client.get_nodes()
             for node in all_nodes:
-                actual_message = node.redis_connection.execute_command("ECHO", "healthcheck")
+                actual_message = node.redis_connection.execute_command(
+                    "ECHO", "healthcheck"
+                )
 
                 if actual_message not in expected_message:
                     return False
@@ -186,6 +199,7 @@ class LagAwareHealthCheck(HealthCheck):
     Health check available for Redis Enterprise deployments.
     Verify via REST API that the database is healthy based on different lags.
     """
+
     def __init__(
         self,
         rest_api_port: int = 9443,
@@ -228,7 +242,7 @@ class LagAwareHealthCheck(HealthCheck):
             ca_data=ca_data,
             client_cert_file=client_cert_file,
             client_key_file=client_key_file,
-            client_key_password=client_key_password
+            client_key_password=client_key_password,
         )
         self._rest_api_port = rest_api_port
         self._lag_aware_tolerance = lag_aware_tolerance
@@ -251,12 +265,12 @@ class LagAwareHealthCheck(HealthCheck):
         matching_bdb = None
         for bdb in self._http_client.get("/v1/bdbs"):
             for endpoint in bdb["endpoints"]:
-                if endpoint['dns_name'] == db_host:
+                if endpoint["dns_name"] == db_host:
                     matching_bdb = bdb
                     break
 
                 # In case if the host was set as public IP
-                for addr in endpoint['addr']:
+                for addr in endpoint["addr"]:
                     if addr == db_host:
                         matching_bdb = bdb
                         break
@@ -265,8 +279,10 @@ class LagAwareHealthCheck(HealthCheck):
             logger.warning("LagAwareHealthCheck failed: Couldn't find a matching bdb")
             raise ValueError("Could not find a matching bdb")
 
-        url = (f"/v1/bdbs/{matching_bdb['uid']}/availability"
-               f"?extend_check=lag&availability_lag_tolerance_ms={self._lag_aware_tolerance}")
+        url = (
+            f"/v1/bdbs/{matching_bdb['uid']}/availability"
+            f"?extend_check=lag&availability_lag_tolerance_ms={self._lag_aware_tolerance}"
+        )
         self._http_client.get(url, expect_json=False)
 
         # Status checked in an http client, otherwise HttpError will be raised

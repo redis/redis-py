@@ -4,27 +4,33 @@ import pytest
 
 from redis.data_structure import WeightedList
 from redis.multidb.circuit import State as CBState
-from redis.multidb.exception import NoValidDatabaseException, TemporaryUnavailableException
-from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy, DefaultFailoverStrategyExecutor
+from redis.multidb.exception import (
+    NoValidDatabaseException,
+    TemporaryUnavailableException,
+)
+from redis.asyncio.multidb.failover import (
+    WeightBasedFailoverStrategy,
+    DefaultFailoverStrategyExecutor,
+)
 
 
 class TestAsyncWeightBasedFailoverStrategy:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        'mock_db,mock_db1,mock_db2',
+        "mock_db,mock_db1,mock_db2",
         [
             (
-                    {'weight': 0.2, 'circuit': {'state': CBState.CLOSED}},
-                    {'weight': 0.7, 'circuit': {'state': CBState.CLOSED}},
-                    {'weight': 0.5, 'circuit': {'state': CBState.CLOSED}},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
             ),
             (
-                    {'weight': 0.2, 'circuit': {'state': CBState.CLOSED}},
-                    {'weight': 0.5, 'circuit': {'state': CBState.CLOSED}},
-                    {'weight': 0.7, 'circuit': {'state': CBState.OPEN}},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.OPEN}},
             ),
         ],
-        ids=['all closed - highest weight', 'highest weight - open'],
+        ids=["all closed - highest weight", "highest weight - open"],
         indirect=True,
     )
     async def test_get_valid_database(self, mock_db, mock_db1, mock_db2):
@@ -40,43 +46,49 @@ class TestAsyncWeightBasedFailoverStrategy:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        'mock_db,mock_db1,mock_db2',
+        "mock_db,mock_db1,mock_db2",
         [
             (
-                    {'weight': 0.2, 'circuit': {'state': CBState.OPEN}},
-                    {'weight': 0.7, 'circuit': {'state': CBState.OPEN}},
-                    {'weight': 0.5, 'circuit': {'state': CBState.OPEN}},
+                {"weight": 0.2, "circuit": {"state": CBState.OPEN}},
+                {"weight": 0.7, "circuit": {"state": CBState.OPEN}},
+                {"weight": 0.5, "circuit": {"state": CBState.OPEN}},
             ),
         ],
         indirect=True,
     )
-    async def test_throws_exception_on_empty_databases(self, mock_db, mock_db1, mock_db2):
+    async def test_throws_exception_on_empty_databases(
+        self, mock_db, mock_db1, mock_db2
+    ):
         failover_strategy = WeightBasedFailoverStrategy()
 
-        with pytest.raises(NoValidDatabaseException, match='No valid database available for communication'):
+        with pytest.raises(
+            NoValidDatabaseException,
+            match="No valid database available for communication",
+        ):
             assert await failover_strategy.database()
+
 
 class TestDefaultStrategyExecutor:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        'mock_db',
+        "mock_db",
         [
-            {'weight': 0.2, 'circuit': {'state': CBState.CLOSED}},
+            {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
         ],
         indirect=True,
     )
-    async def test_execute_returns_valid_database_with_failover_attempts(self, mock_db, mock_fs):
+    async def test_execute_returns_valid_database_with_failover_attempts(
+        self, mock_db, mock_fs
+    ):
         failover_attempts = 3
         mock_fs.database.side_effect = [
             NoValidDatabaseException,
             NoValidDatabaseException,
             NoValidDatabaseException,
-            mock_db
+            mock_db,
         ]
         executor = DefaultFailoverStrategyExecutor(
-            mock_fs,
-            failover_attempts=failover_attempts,
-            failover_delay=0.1
+            mock_fs, failover_attempts=failover_attempts, failover_delay=0.1
         )
 
         for i in range(failover_attempts + 1):
@@ -100,12 +112,10 @@ class TestDefaultStrategyExecutor:
             NoValidDatabaseException,
             NoValidDatabaseException,
             NoValidDatabaseException,
-            NoValidDatabaseException
+            NoValidDatabaseException,
         ]
         executor = DefaultFailoverStrategyExecutor(
-            mock_fs,
-            failover_attempts=failover_attempts,
-            failover_delay=0.1
+            mock_fs, failover_attempts=failover_attempts, failover_delay=0.1
         )
 
         with pytest.raises(NoValidDatabaseException):
@@ -123,24 +133,27 @@ class TestDefaultStrategyExecutor:
             assert mock_fs.database.call_count == 4
 
     @pytest.mark.asyncio
-    async def test_execute_throws_exception_on_attempts_does_not_exceed_delay(self, mock_fs):
+    async def test_execute_throws_exception_on_attempts_does_not_exceed_delay(
+        self, mock_fs
+    ):
         failover_attempts = 3
         mock_fs.database.side_effect = [
             NoValidDatabaseException,
             NoValidDatabaseException,
             NoValidDatabaseException,
-            NoValidDatabaseException
+            NoValidDatabaseException,
         ]
         executor = DefaultFailoverStrategyExecutor(
-            mock_fs,
-            failover_attempts=failover_attempts,
-            failover_delay=0.1
+            mock_fs, failover_attempts=failover_attempts, failover_delay=0.1
         )
 
-        with pytest.raises(TemporaryUnavailableException, match=(
-                        "No database connections currently available. "
-                        "This is a temporary condition - please retry the operation."
-                    )):
+        with pytest.raises(
+            TemporaryUnavailableException,
+            match=(
+                "No database connections currently available. "
+                "This is a temporary condition - please retry the operation."
+            ),
+        ):
             for i in range(failover_attempts + 1):
                 try:
                     await executor.execute()

@@ -9,20 +9,42 @@ from redis import RedisCluster
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.data_structure import WeightedList
 from redis.event import EventDispatcher, EventDispatcherInterface
-from redis.multidb.circuit import PBCircuitBreakerAdapter, CircuitBreaker, DEFAULT_GRACE_PERIOD
+from redis.multidb.circuit import (
+    PBCircuitBreakerAdapter,
+    CircuitBreaker,
+    DEFAULT_GRACE_PERIOD,
+)
 from redis.multidb.database import Database, Databases
-from redis.multidb.failure_detector import FailureDetector, CommandFailureDetector, DEFAULT_MIN_NUM_FAILURES, \
-    DEFAULT_FAILURES_DETECTION_WINDOW, DEFAULT_FAILURE_RATE_THRESHOLD
-from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck, DEFAULT_HEALTH_CHECK_PROBES, \
-    DEFAULT_HEALTH_CHECK_INTERVAL, DEFAULT_HEALTH_CHECK_DELAY, HealthCheckPolicies, DEFAULT_HEALTH_CHECK_POLICY
-from redis.multidb.failover import FailoverStrategy, WeightBasedFailoverStrategy, DEFAULT_FAILOVER_ATTEMPTS, \
-    DEFAULT_FAILOVER_DELAY
+from redis.multidb.failure_detector import (
+    FailureDetector,
+    CommandFailureDetector,
+    DEFAULT_MIN_NUM_FAILURES,
+    DEFAULT_FAILURES_DETECTION_WINDOW,
+    DEFAULT_FAILURE_RATE_THRESHOLD,
+)
+from redis.multidb.healthcheck import (
+    HealthCheck,
+    EchoHealthCheck,
+    DEFAULT_HEALTH_CHECK_PROBES,
+    DEFAULT_HEALTH_CHECK_INTERVAL,
+    DEFAULT_HEALTH_CHECK_DELAY,
+    HealthCheckPolicies,
+    DEFAULT_HEALTH_CHECK_POLICY,
+)
+from redis.multidb.failover import (
+    FailoverStrategy,
+    WeightBasedFailoverStrategy,
+    DEFAULT_FAILOVER_ATTEMPTS,
+    DEFAULT_FAILOVER_DELAY,
+)
 from redis.retry import Retry
 
 DEFAULT_AUTO_FALLBACK_INTERVAL = 120
 
+
 def default_event_dispatcher() -> EventDispatcherInterface:
     return EventDispatcher()
+
 
 @dataclass
 class DatabaseConfig:
@@ -49,6 +71,7 @@ class DatabaseConfig:
         default_circuit_breaker:
             Generates and returns a default CircuitBreaker instance adapted for use.
     """
+
     weight: float = 1.0
     client_kwargs: dict = field(default_factory=dict)
     from_url: Optional[str] = None
@@ -60,6 +83,7 @@ class DatabaseConfig:
     def default_circuit_breaker(self) -> CircuitBreaker:
         circuit_breaker = pybreaker.CircuitBreaker(reset_timeout=self.grace_period)
         return PBCircuitBreakerAdapter(circuit_breaker)
+
 
 @dataclass
 class MultiDbConfig:
@@ -102,6 +126,7 @@ class MultiDbConfig:
             Provides the default failover strategy used for handling failover scenarios
             with defined retry and backoff configurations.
     """
+
     databases_config: List[DatabaseConfig]
     client_class: Type[Union[Redis, RedisCluster]] = Redis
     command_retry: Retry = Retry(
@@ -120,7 +145,9 @@ class MultiDbConfig:
     failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS
     failover_delay: float = DEFAULT_FAILOVER_DELAY
     auto_fallback_interval: float = DEFAULT_AUTO_FALLBACK_INTERVAL
-    event_dispatcher: EventDispatcherInterface = field(default_factory=default_event_dispatcher)
+    event_dispatcher: EventDispatcherInterface = field(
+        default_factory=default_event_dispatcher
+    )
 
     def databases(self) -> Databases:
         databases = WeightedList()
@@ -128,26 +155,37 @@ class MultiDbConfig:
         for database_config in self.databases_config:
             # The retry object is not used in the lower level clients, so we can safely remove it.
             # We rely on command_retry in terms of global retries.
-            database_config.client_kwargs.update({"retry": Retry(retries=0, backoff=NoBackoff())})
+            database_config.client_kwargs.update(
+                {"retry": Retry(retries=0, backoff=NoBackoff())}
+            )
 
             if database_config.from_url:
-                client = self.client_class.from_url(database_config.from_url, **database_config.client_kwargs)
+                client = self.client_class.from_url(
+                    database_config.from_url, **database_config.client_kwargs
+                )
             elif database_config.from_pool:
-                database_config.from_pool.set_retry(Retry(retries=0, backoff=NoBackoff()))
-                client = self.client_class.from_pool(connection_pool=database_config.from_pool)
+                database_config.from_pool.set_retry(
+                    Retry(retries=0, backoff=NoBackoff())
+                )
+                client = self.client_class.from_pool(
+                    connection_pool=database_config.from_pool
+                )
             else:
                 client = self.client_class(**database_config.client_kwargs)
 
-            circuit = database_config.default_circuit_breaker() \
-                if database_config.circuit is None else database_config.circuit
+            circuit = (
+                database_config.default_circuit_breaker()
+                if database_config.circuit is None
+                else database_config.circuit
+            )
             databases.add(
                 Database(
                     client=client,
                     circuit=circuit,
                     weight=database_config.weight,
-                    health_check_url=database_config.health_check_url
+                    health_check_url=database_config.health_check_url,
                 ),
-                database_config.weight
+                database_config.weight,
             )
 
         return databases
@@ -157,7 +195,7 @@ class MultiDbConfig:
             CommandFailureDetector(
                 min_num_failures=self.min_num_failures,
                 failure_rate_threshold=self.failure_rate_threshold,
-                failure_detection_window=self.failures_detection_window
+                failure_detection_window=self.failures_detection_window,
             ),
         ]
 

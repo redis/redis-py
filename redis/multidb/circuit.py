@@ -6,10 +6,12 @@ import pybreaker
 
 DEFAULT_GRACE_PERIOD = 60
 
+
 class State(Enum):
-    CLOSED = 'closed'
-    OPEN = 'open'
-    HALF_OPEN = 'half-open'
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half-open"
+
 
 class CircuitBreaker(ABC):
     @property
@@ -52,10 +54,12 @@ class CircuitBreaker(ABC):
         """Callback called when the state of the circuit changes."""
         pass
 
+
 class BaseCircuitBreaker(CircuitBreaker):
     """
     Base implementation of Circuit Breaker interface.
     """
+
     def __init__(self, cb: pybreaker.CircuitBreaker):
         self._cb = cb
         self._state_pb_mapper = {
@@ -94,12 +98,14 @@ class BaseCircuitBreaker(CircuitBreaker):
         """Callback called when the state of the circuit changes."""
         pass
 
+
 class PBListener(pybreaker.CircuitBreakerListener):
     """Wrapper for callback to be compatible with pybreaker implementation."""
+
     def __init__(
-            self,
-            cb: Callable[[CircuitBreaker, State, State], None],
-            database,
+        self,
+        cb: Callable[[CircuitBreaker, State, State], None],
+        database,
     ):
         """
         Initialize a PBListener instance.
@@ -118,6 +124,7 @@ class PBListener(pybreaker.CircuitBreakerListener):
         old_state = State(value=old_state.name)
         new_state = State(value=new_state.name)
         self._cb(cb, old_state, new_state)
+
 
 class PBCircuitBreakerAdapter(BaseCircuitBreaker):
     def __init__(self, cb: pybreaker.CircuitBreaker):

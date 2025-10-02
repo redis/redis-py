@@ -13,7 +13,7 @@ from redis.multidb.failure_detector import CommandFailureDetector
 class TestFailureDetectorAsyncWrapper:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        'min_num_failures,failure_rate_threshold,circuit_state',
+        "min_num_failures,failure_rate_threshold,circuit_state",
         [
             (2, 0.4, CBState.OPEN),
             (2, 0, CBState.OPEN),
@@ -30,32 +30,31 @@ class TestFailureDetectorAsyncWrapper:
         ],
     )
     async def test_failure_detector_correctly_reacts_to_failures(
-            self,
-            min_num_failures,
-            failure_rate_threshold,
-            circuit_state
+        self, min_num_failures, failure_rate_threshold, circuit_state
     ):
-        fd = FailureDetectorAsyncWrapper(CommandFailureDetector(min_num_failures, failure_rate_threshold))
+        fd = FailureDetectorAsyncWrapper(
+            CommandFailureDetector(min_num_failures, failure_rate_threshold)
+        )
         mock_db = Mock(spec=Database)
         mock_db.circuit.state = CBState.CLOSED
         mock_ce = Mock(spec=AsyncCommandExecutor)
         mock_ce.active_database = mock_db
         fd.set_command_executor(mock_ce)
 
-        await fd.register_command_execution(('GET', 'key'))
-        await fd.register_command_execution(('GET','key'))
-        await fd.register_failure(Exception(), ('GET', 'key'))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_failure(Exception(), ("GET", "key"))
 
-        await fd.register_command_execution(('GET', 'key'))
-        await fd.register_command_execution(('GET','key'))
-        await fd.register_command_execution(('GET','key'))
-        await fd.register_failure(Exception(), ('GET', 'key'))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_failure(Exception(), ("GET", "key"))
 
         assert mock_db.circuit.state == circuit_state
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        'min_num_failures,failure_rate_threshold',
+        "min_num_failures,failure_rate_threshold",
         [
             (3, 0.0),
             (3, 0.6),
@@ -65,7 +64,9 @@ class TestFailureDetectorAsyncWrapper:
             "do not exceeds min num failures AND failure rate, during interval",
         ],
     )
-    async def test_failure_detector_do_not_open_circuit_on_interval_exceed(self, min_num_failures, failure_rate_threshold):
+    async def test_failure_detector_do_not_open_circuit_on_interval_exceed(
+        self, min_num_failures, failure_rate_threshold
+    ):
         fd = FailureDetectorAsyncWrapper(
             CommandFailureDetector(min_num_failures, failure_rate_threshold, 0.3)
         )
@@ -76,30 +77,34 @@ class TestFailureDetectorAsyncWrapper:
         fd.set_command_executor(mock_ce)
         assert mock_db.circuit.state == CBState.CLOSED
 
-        await fd.register_command_execution(('GET', 'key'))
-        await fd.register_failure(Exception(), ('GET', 'key'))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_failure(Exception(), ("GET", "key"))
         await asyncio.sleep(0.16)
-        await fd.register_command_execution(('GET', 'key'))
-        await fd.register_command_execution(('GET', 'key'))
-        await fd.register_command_execution(('GET', 'key'))
-        await fd.register_failure(Exception(), ('GET', 'key'))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_failure(Exception(), ("GET", "key"))
         await asyncio.sleep(0.16)
-        await fd.register_command_execution(('GET', 'key'))
-        await fd.register_failure(Exception(), ('GET', 'key'))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_failure(Exception(), ("GET", "key"))
 
         assert mock_db.circuit.state == CBState.CLOSED
 
         # 2 more failure as last one already refreshed timer
-        await fd.register_command_execution(('GET', 'key'))
-        await fd.register_failure(Exception(), ('GET', 'key'))
-        await fd.register_command_execution(('GET', 'key'))
-        await fd.register_failure(Exception(), ('GET', 'key'))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_failure(Exception(), ("GET", "key"))
+        await fd.register_command_execution(("GET", "key"))
+        await fd.register_failure(Exception(), ("GET", "key"))
 
         assert mock_db.circuit.state == CBState.OPEN
 
     @pytest.mark.asyncio
-    async def test_failure_detector_open_circuit_on_specific_exception_threshold_exceed(self):
-        fd = FailureDetectorAsyncWrapper(CommandFailureDetector(5, 1, error_types=[ConnectionError]))
+    async def test_failure_detector_open_circuit_on_specific_exception_threshold_exceed(
+        self,
+    ):
+        fd = FailureDetectorAsyncWrapper(
+            CommandFailureDetector(5, 1, error_types=[ConnectionError])
+        )
         mock_db = Mock(spec=Database)
         mock_db.circuit.state = CBState.CLOSED
         mock_ce = Mock(spec=AsyncCommandExecutor)
@@ -107,16 +112,16 @@ class TestFailureDetectorAsyncWrapper:
         fd.set_command_executor(mock_ce)
         assert mock_db.circuit.state == CBState.CLOSED
 
-        await fd.register_failure(Exception(), ('SET', 'key1', 'value1'))
-        await fd.register_failure(ConnectionError(), ('SET', 'key1', 'value1'))
-        await fd.register_failure(ConnectionError(), ('SET', 'key1', 'value1'))
-        await fd.register_failure(Exception(), ('SET', 'key1', 'value1'))
-        await fd.register_failure(Exception(), ('SET', 'key1', 'value1'))
+        await fd.register_failure(Exception(), ("SET", "key1", "value1"))
+        await fd.register_failure(ConnectionError(), ("SET", "key1", "value1"))
+        await fd.register_failure(ConnectionError(), ("SET", "key1", "value1"))
+        await fd.register_failure(Exception(), ("SET", "key1", "value1"))
+        await fd.register_failure(Exception(), ("SET", "key1", "value1"))
 
         assert mock_db.circuit.state == CBState.CLOSED
 
-        await fd.register_failure(ConnectionError(), ('SET', 'key1', 'value1'))
-        await fd.register_failure(ConnectionError(), ('SET', 'key1', 'value1'))
-        await fd.register_failure(ConnectionError(), ('SET', 'key1', 'value1'))
+        await fd.register_failure(ConnectionError(), ("SET", "key1", "value1"))
+        await fd.register_failure(ConnectionError(), ("SET", "key1", "value1"))
+        await fd.register_failure(ConnectionError(), ("SET", "key1", "value1"))
 
         assert mock_db.circuit.state == CBState.OPEN

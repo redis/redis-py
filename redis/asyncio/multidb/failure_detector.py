@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 
 from redis.multidb.failure_detector import FailureDetector
 
-class AsyncFailureDetector(ABC):
 
+class AsyncFailureDetector(ABC):
     @abstractmethod
     async def register_failure(self, exception: Exception, cmd: tuple) -> None:
         """Register a failure that occurred during command execution."""
@@ -19,10 +19,12 @@ class AsyncFailureDetector(ABC):
         """Set the command executor for this failure."""
         pass
 
+
 class FailureDetectorAsyncWrapper(AsyncFailureDetector):
     """
     Async wrapper for the failure detector.
     """
+
     def __init__(self, failure_detector: FailureDetector) -> None:
         self._failure_detector = failure_detector
 

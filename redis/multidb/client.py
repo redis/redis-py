@@ -16,11 +16,13 @@ from redis.multidb.healthcheck import HealthCheck, HealthCheckPolicy
 
 logger = logging.getLogger(__name__)
 
+
 class MultiDBClient(RedisModuleCommands, CoreCommands):
     """
     Client that operates on multiple logical Redis databases.
     Should be used in Active-Active database setups.
     """
+
     def __init__(self, config: MultiDbConfig):
         self._databases = config.databases()
         self._health_checks = config.default_health_checks()
@@ -30,16 +32,18 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         self._health_check_interval = config.health_check_interval
         self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value(
-            config.health_check_probes,
-            config.health_check_delay
+            config.health_check_probes, config.health_check_delay
         )
         self._failure_detectors = config.default_failure_detectors()
 
         if config.failure_detectors is not None:
             self._failure_detectors.extend(config.failure_detectors)
 
-        self._failover_strategy = config.default_failover_strategy() \
-            if config.failover_strategy is None else config.failover_strategy
+        self._failover_strategy = (
+            config.default_failover_strategy()
+            if config.failover_strategy is None
+            else config.failover_strategy
+        )
         self._failover_strategy.set_databases(self._databases)
         self._auto_fallback_interval = config.auto_fallback_interval
         self._event_dispatcher = config.event_dispatcher
@@ -89,7 +93,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                 is_active_db_found = True
 
         if not is_active_db_found:
-            raise NoValidDatabaseException('Initial connection failed - no active database found')
+            raise NoValidDatabaseException(
+                "Initial connection failed - no active database found"
+            )
 
         self.initialized = True
 
@@ -111,7 +117,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                 break
 
         if not exists:
-            raise ValueError('Given database is not a member of database list')
+            raise ValueError("Given database is not a member of database list")
 
         self._check_db_health(database)
 
@@ -120,7 +126,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             self.command_executor.active_database = database
             return
 
-        raise NoValidDatabaseException('Cannot set active database, database is unhealthy')
+        raise NoValidDatabaseException(
+            "Cannot set active database, database is unhealthy"
+        )
 
     def add_database(self, database: SyncDatabase):
         """
@@ -128,7 +136,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         """
         for existing_db, _ in self._databases:
             if existing_db == database:
-                raise ValueError('Given database already exists')
+                raise ValueError("Given database already exists")
 
         self._check_db_health(database)
 
@@ -136,8 +144,13 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         self._databases.add(database, database.weight)
         self._change_active_database(database, highest_weighted_db)
 
-    def _change_active_database(self, new_database: SyncDatabase, highest_weight_database: SyncDatabase):
-        if new_database.weight > highest_weight_database.weight and new_database.circuit.state == CBState.CLOSED:
+    def _change_active_database(
+        self, new_database: SyncDatabase, highest_weight_database: SyncDatabase
+    ):
+        if (
+            new_database.weight > highest_weight_database.weight
+            and new_database.circuit.state == CBState.CLOSED
+        ):
             self.command_executor.active_database = new_database
 
     def remove_database(self, database: Database):
@@ -147,7 +160,10 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         weight = self._databases.remove(database)
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
 
-        if highest_weight <= weight and highest_weighted_db.circuit.state == CBState.CLOSED:
+        if (
+            highest_weight <= weight
+            and highest_weighted_db.circuit.state == CBState.CLOSED
+        ):
             self.command_executor.active_database = highest_weighted_db
 
     def update_database_weight(self, database: SyncDatabase, weight: float):
@@ -162,7 +178,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                 break
 
         if not exists:
-            raise ValueError('Given database is not a member of database list')
+            raise ValueError("Given database is not a member of database list")
 
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
         self._databases.update_weight(database, weight)
@@ -246,7 +262,9 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             }
 
             try:
-                for future in as_completed(futures, timeout=self._health_check_interval):
+                for future in as_completed(
+                    futures, timeout=self._health_check_interval
+                ):
                     try:
                         future.result()
                     except UnhealthyDatabaseException as e:
@@ -254,25 +272,32 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                         unhealthy_db.circuit.state = CBState.OPEN
 
                         logger.exception(
-                            'Health check failed, due to exception',
-                            exc_info=e.original_exception
+                            "Health check failed, due to exception",
+                            exc_info=e.original_exception,
                         )
 
                         if on_error:
                             on_error(e.original_exception)
             except TimeoutError:
-                raise TimeoutError("Health check execution exceeds health_check_interval")
+                raise TimeoutError(
+                    "Health check execution exceeds health_check_interval"
+                )
 
-    def _on_circuit_state_change_callback(self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState):
+    def _on_circuit_state_change_callback(
+        self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState
+    ):
         if new_state == CBState.HALF_OPEN:
             self._check_db_health(circuit.database)
             return
 
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
-            self._bg_scheduler.run_once(DEFAULT_GRACE_PERIOD, _half_open_circuit, circuit)
+            self._bg_scheduler.run_once(
+                DEFAULT_GRACE_PERIOD, _half_open_circuit, circuit
+            )
 
     def close(self):
         self.command_executor.active_database.client.close()
+
 
 def _half_open_circuit(circuit: CircuitBreaker):
     circuit.state = CBState.HALF_OPEN
@@ -282,6 +307,7 @@ class Pipeline(RedisModuleCommands, CoreCommands):
     """
     Pipeline implementation for multiple logical Redis databases.
     """
+
     def __init__(self, client: MultiDBClient):
         self._command_stack = []
         self._client = client
@@ -337,14 +363,18 @@ class Pipeline(RedisModuleCommands, CoreCommands):
             self._client.initialize()
 
         try:
-            return self._client.command_executor.execute_pipeline(tuple(self._command_stack))
+            return self._client.command_executor.execute_pipeline(
+                tuple(self._command_stack)
+            )
         finally:
             self.reset()
+
 
 class PubSub:
     """
     PubSub object for multi database client.
     """
+
     def __init__(self, client: MultiDBClient, **kwargs):
         """Initialize the PubSub object for a multi-database client.
 
@@ -369,7 +399,7 @@ class PubSub:
             pass
 
     def reset(self) -> None:
-        return self._client.command_executor.execute_pubsub_method('reset')
+        return self._client.command_executor.execute_pubsub_method("reset")
 
     def close(self) -> None:
         self.reset()
@@ -379,7 +409,9 @@ class PubSub:
         return self._client.command_executor.active_pubsub.subscribed
 
     def execute_command(self, *args):
-        return self._client.command_executor.execute_pubsub_method('execute_command', *args)
+        return self._client.command_executor.execute_pubsub_method(
+            "execute_command", *args
+        )
 
     def psubscribe(self, *args, **kwargs):
         """
@@ -389,14 +421,18 @@ class PubSub:
         received on that pattern rather than producing a message via
         ``listen()``.
         """
-        return self._client.command_executor.execute_pubsub_method('psubscribe', *args, **kwargs)
+        return self._client.command_executor.execute_pubsub_method(
+            "psubscribe", *args, **kwargs
+        )
 
     def punsubscribe(self, *args):
         """
         Unsubscribe from the supplied patterns. If empty, unsubscribe from
         all patterns.
         """
-        return self._client.command_executor.execute_pubsub_method('punsubscribe', *args)
+        return self._client.command_executor.execute_pubsub_method(
+            "punsubscribe", *args
+        )
 
     def subscribe(self, *args, **kwargs):
         """
@@ -406,14 +442,16 @@ class PubSub:
         that channel rather than producing a message via ``listen()`` or
         ``get_message()``.
         """
-        return self._client.command_executor.execute_pubsub_method('subscribe', *args, **kwargs)
+        return self._client.command_executor.execute_pubsub_method(
+            "subscribe", *args, **kwargs
+        )
 
     def unsubscribe(self, *args):
         """
         Unsubscribe from the supplied channels. If empty, unsubscribe from
         all channels
         """
-        return self._client.command_executor.execute_pubsub_method('unsubscribe', *args)
+        return self._client.command_executor.execute_pubsub_method("unsubscribe", *args)
 
     def ssubscribe(self, *args, **kwargs):
         """
@@ -423,14 +461,18 @@ class PubSub:
         when a message is received on that channel rather than producing a message via
         ``listen()`` or ``get_sharded_message()``.
         """
-        return self._client.command_executor.execute_pubsub_method('ssubscribe', *args, **kwargs)
+        return self._client.command_executor.execute_pubsub_method(
+            "ssubscribe", *args, **kwargs
+        )
 
     def sunsubscribe(self, *args):
         """
         Unsubscribe from the supplied shard_channels. If empty, unsubscribe from
         all shard_channels
         """
-        return self._client.command_executor.execute_pubsub_method('sunsubscribe', *args)
+        return self._client.command_executor.execute_pubsub_method(
+            "sunsubscribe", *args
+        )
 
     def get_message(
         self, ignore_subscribe_messages: bool = False, timeout: float = 0.0
@@ -443,8 +485,9 @@ class PubSub:
         number, or None, to wait indefinitely.
         """
         return self._client.command_executor.execute_pubsub_method(
-            'get_message',
-            ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+            "get_message",
+            ignore_subscribe_messages=ignore_subscribe_messages,
+            timeout=timeout,
         )
 
     def get_sharded_message(
@@ -458,8 +501,9 @@ class PubSub:
         number, or None, to wait indefinitely.
         """
         return self._client.command_executor.execute_pubsub_method(
-            'get_sharded_message',
-            ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
+            "get_sharded_message",
+            ignore_subscribe_messages=ignore_subscribe_messages,
+            timeout=timeout,
         )
 
     def run_in_thread(
@@ -476,4 +520,3 @@ class PubSub:
             pubsub=self,
             sharded_pubsub=sharded_pubsub,
         )
-

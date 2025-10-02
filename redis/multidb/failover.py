@@ -4,13 +4,16 @@ from abc import ABC, abstractmethod
 from redis.data_structure import WeightedList
 from redis.multidb.database import Databases, SyncDatabase
 from redis.multidb.circuit import State as CBState
-from redis.multidb.exception import NoValidDatabaseException, TemporaryUnavailableException
+from redis.multidb.exception import (
+    NoValidDatabaseException,
+    TemporaryUnavailableException,
+)
 
 DEFAULT_FAILOVER_ATTEMPTS = 10
 DEFAULT_FAILOVER_DELAY = 12
 
-class FailoverStrategy(ABC):
 
+class FailoverStrategy(ABC):
     @abstractmethod
     def database(self) -> SyncDatabase:
         """Select the database according to the strategy."""
@@ -21,8 +24,8 @@ class FailoverStrategy(ABC):
         """Set the database strategy operates on."""
         pass
 
-class FailoverStrategyExecutor(ABC):
 
+class FailoverStrategyExecutor(ABC):
     @property
     @abstractmethod
     def failover_attempts(self) -> int:
@@ -46,10 +49,12 @@ class FailoverStrategyExecutor(ABC):
         """Execute the failover strategy."""
         pass
 
+
 class WeightBasedFailoverStrategy(FailoverStrategy):
     """
     Failover strategy based on database weights.
     """
+
     def __init__(self) -> None:
         self._databases = WeightedList()
 
@@ -58,20 +63,22 @@ class WeightBasedFailoverStrategy(FailoverStrategy):
             if database.circuit.state == CBState.CLOSED:
                 return database
 
-        raise NoValidDatabaseException('No valid database available for communication')
+        raise NoValidDatabaseException("No valid database available for communication")
 
     def set_databases(self, databases: Databases) -> None:
         self._databases = databases
+
 
 class DefaultFailoverStrategyExecutor(FailoverStrategyExecutor):
     """
     Executes given failover strategy.
     """
+
     def __init__(
-            self,
-            strategy: FailoverStrategy,
-            failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS,
-            failover_delay: float = DEFAULT_FAILOVER_DELAY,
+        self,
+        strategy: FailoverStrategy,
+        failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS,
+        failover_delay: float = DEFAULT_FAILOVER_DELAY,
     ):
         self._strategy = strategy
         self._failover_attempts = failover_attempts
@@ -116,4 +123,3 @@ class DefaultFailoverStrategyExecutor(FailoverStrategyExecutor):
     def _reset(self) -> None:
         self._next_attempt_ts = 0
         self._failover_counter = 0
-

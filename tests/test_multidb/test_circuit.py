@@ -1,14 +1,18 @@
 import pybreaker
 import pytest
 
-from redis.multidb.circuit import PBCircuitBreakerAdapter, State as CbState, CircuitBreaker
+from redis.multidb.circuit import (
+    PBCircuitBreakerAdapter,
+    State as CbState,
+    CircuitBreaker,
+)
 
 
 class TestPBCircuitBreaker:
     @pytest.mark.parametrize(
-        'mock_db',
+        "mock_db",
         [
-            {'weight': 0.7, 'circuit': {'state': CbState.CLOSED}},
+            {"weight": 0.7, "circuit": {"state": CbState.CLOSED}},
         ],
         indirect=True,
     )

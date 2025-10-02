@@ -4,13 +4,16 @@ from abc import abstractmethod, ABC
 from redis.asyncio.multidb.database import AsyncDatabase, Databases
 from redis.multidb.circuit import State as CBState
 from redis.data_structure import WeightedList
-from redis.multidb.exception import NoValidDatabaseException, TemporaryUnavailableException
+from redis.multidb.exception import (
+    NoValidDatabaseException,
+    TemporaryUnavailableException,
+)
 
 DEFAULT_FAILOVER_ATTEMPTS = 10
 DEFAULT_FAILOVER_DELAY = 12
 
-class AsyncFailoverStrategy(ABC):
 
+class AsyncFailoverStrategy(ABC):
     @abstractmethod
     async def database(self) -> AsyncDatabase:
         """Select the database according to the strategy."""
@@ -21,8 +24,8 @@ class AsyncFailoverStrategy(ABC):
         """Set the database strategy operates on."""
         pass
 
-class FailoverStrategyExecutor(ABC):
 
+class FailoverStrategyExecutor(ABC):
     @property
     @abstractmethod
     def failover_attempts(self) -> int:
@@ -46,10 +49,12 @@ class FailoverStrategyExecutor(ABC):
         """Execute the failover strategy."""
         pass
 
+
 class WeightBasedFailoverStrategy(AsyncFailoverStrategy):
     """
     Failover strategy based on database weights.
     """
+
     def __init__(self):
         self._databases = WeightedList()
 
@@ -58,20 +63,22 @@ class WeightBasedFailoverStrategy(AsyncFailoverStrategy):
             if database.circuit.state == CBState.CLOSED:
                 return database
 
-        raise NoValidDatabaseException('No valid database available for communication')
+        raise NoValidDatabaseException("No valid database available for communication")
 
     def set_databases(self, databases: Databases) -> None:
         self._databases = databases
+
 
 class DefaultFailoverStrategyExecutor(FailoverStrategyExecutor):
     """
     Executes given failover strategy.
     """
+
     def __init__(
-            self,
-            strategy: AsyncFailoverStrategy,
-            failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS,
-            failover_delay: float = DEFAULT_FAILOVER_DELAY,
+        self,
+        strategy: AsyncFailoverStrategy,
+        failover_attempts: int = DEFAULT_FAILOVER_ATTEMPTS,
+        failover_delay: float = DEFAULT_FAILOVER_DELAY,
     ):
         self._strategy = strategy
         self._failover_attempts = failover_attempts
@@ -93,7 +100,7 @@ class DefaultFailoverStrategyExecutor(FailoverStrategyExecutor):
 
     async def execute(self) -> AsyncDatabase:
         try:
-            database =  await self._strategy.database()
+            database = await self._strategy.database()
             self._reset()
             return database
         except NoValidDatabaseException as e:

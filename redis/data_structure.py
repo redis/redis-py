@@ -3,12 +3,14 @@ from typing import List, Any, TypeVar, Generic, Union
 
 from redis.typing import Number
 
-T = TypeVar('T')
+T = TypeVar("T")
+
 
 class WeightedList(Generic[T]):
     """
     Thread-safe weighted list.
     """
+
     def __init__(self):
         self._items: List[tuple[Any, Number]] = []
         self._lock = threading.RLock()
@@ -36,7 +38,9 @@ class WeightedList(Generic[T]):
                     return weight
             raise ValueError("Item not found")
 
-    def get_by_weight_range(self, min_weight: float, max_weight: float) -> List[tuple[Any, Number]]:
+    def get_by_weight_range(
+        self, min_weight: float, max_weight: float
+    ) -> List[tuple[Any, Number]]:
         """Get all items within weight range"""
         with self._lock:
             result = []
@@ -60,7 +64,9 @@ class WeightedList(Generic[T]):
     def __iter__(self):
         """Iterate in descending weight order"""
         with self._lock:
-            items_copy = self._items.copy()  # Create snapshot as lock released after each 'yield'
+            items_copy = (
+                self._items.copy()
+            )  # Create snapshot as lock released after each 'yield'
 
         for item, weight in items_copy:
             yield item, weight

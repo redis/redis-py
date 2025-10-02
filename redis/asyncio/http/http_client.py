@@ -8,15 +8,18 @@ DEFAULT_USER_AGENT = "HttpClient/1.0 (+https://example.invalid)"
 DEFAULT_TIMEOUT = 30.0
 RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
+
 class AsyncHTTPClient(ABC):
     @abstractmethod
     async def get(
         self,
         path: str,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         """
         Invoke HTTP GET request."""
@@ -26,10 +29,12 @@ class AsyncHTTPClient(ABC):
     async def delete(
         self,
         path: str,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         """
         Invoke HTTP DELETE request."""
@@ -41,10 +46,12 @@ class AsyncHTTPClient(ABC):
         path: str,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         """
         Invoke HTTP POST request."""
@@ -56,10 +63,12 @@ class AsyncHTTPClient(ABC):
         path: str,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         """
         Invoke HTTP PUT request."""
@@ -71,10 +80,12 @@ class AsyncHTTPClient(ABC):
         path: str,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         """
         Invoke HTTP PATCH request."""
@@ -85,7 +96,9 @@ class AsyncHTTPClient(ABC):
         self,
         method: str,
         path: str,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         body: Optional[Union[bytes, str]] = None,
         timeout: Optional[float] = None,
@@ -94,15 +107,13 @@ class AsyncHTTPClient(ABC):
         Invoke HTTP request with given method."""
         pass
 
+
 class AsyncHTTPClientWrapper(AsyncHTTPClient):
     """
     An async wrapper around sync HTTP client with thread pool execution.
     """
-    def __init__(
-        self,
-        client: HttpClient,
-        max_workers: int = 10
-    ) -> None:
+
+    def __init__(self, client: HttpClient, max_workers: int = 10) -> None:
         """
         Initialize a new HTTP client instance.
 
@@ -121,31 +132,37 @@ class AsyncHTTPClientWrapper(AsyncHTTPClient):
     async def get(
         self,
         path: str,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            self._executor,
-            self.client.get,
-            path, params, headers, timeout, expect_json
+            self._executor, self.client.get, path, params, headers, timeout, expect_json
         )
 
     async def delete(
         self,
         path: str,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             self._executor,
             self.client.delete,
-            path, params, headers, timeout, expect_json
+            path,
+            params,
+            headers,
+            timeout,
+            expect_json,
         )
 
     async def post(
@@ -153,16 +170,24 @@ class AsyncHTTPClientWrapper(AsyncHTTPClient):
         path: str,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             self._executor,
             self.client.post,
-            path, json_body, data, params, headers, timeout, expect_json
+            path,
+            json_body,
+            data,
+            params,
+            headers,
+            timeout,
+            expect_json,
         )
 
     async def put(
@@ -170,16 +195,24 @@ class AsyncHTTPClientWrapper(AsyncHTTPClient):
         path: str,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             self._executor,
             self.client.put,
-            path, json_body, data, params, headers, timeout, expect_json
+            path,
+            json_body,
+            data,
+            params,
+            headers,
+            timeout,
+            expect_json,
         )
 
     async def patch(
@@ -187,23 +220,33 @@ class AsyncHTTPClientWrapper(AsyncHTTPClient):
         path: str,
         json_body: Optional[Any] = None,
         data: Optional[Union[bytes, str]] = None,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
-        expect_json: bool = True
+        expect_json: bool = True,
     ) -> Union[HttpResponse, Any]:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             self._executor,
             self.client.patch,
-            path, json_body, data, params, headers, timeout, expect_json
+            path,
+            json_body,
+            data,
+            params,
+            headers,
+            timeout,
+            expect_json,
         )
 
     async def request(
         self,
         method: str,
         path: str,
-        params: Optional[Mapping[str, Union[None, str, int, float, bool, list, tuple]]] = None,
+        params: Optional[
+            Mapping[str, Union[None, str, int, float, bool, list, tuple]]
+        ] = None,
         headers: Optional[Mapping[str, str]] = None,
         body: Optional[Union[bytes, str]] = None,
         timeout: Optional[float] = None,
@@ -212,5 +255,10 @@ class AsyncHTTPClientWrapper(AsyncHTTPClient):
         return await loop.run_in_executor(
             self._executor,
             self.client.request,
-            method, path, params, headers, body, timeout
+            method,
+            path,
+            params,
+            headers,
+            body,
+            timeout,
         )

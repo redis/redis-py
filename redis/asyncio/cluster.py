@@ -2255,7 +2255,9 @@ class TransactionStrategy(AbstractStrategy):
                 self.reinitialize_counter = 0
             else:
                 if type(error) == MovedError:
-                    self._pipe.cluster_client.nodes_manager.update_moved_exception(error)
+                    self._pipe.cluster_client.nodes_manager.update_moved_exception(
+                        error
+                    )
 
         self._executing = False
 

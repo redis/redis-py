@@ -1,6 +1,10 @@
 from unittest.mock import Mock, AsyncMock
 
-from redis.event import EventListenerInterface, EventDispatcher, AsyncEventListenerInterface
+from redis.event import (
+    EventListenerInterface,
+    EventDispatcher,
+    AsyncEventListenerInterface,
+)
 
 
 class TestEventDispatcher:
@@ -16,7 +20,9 @@ class TestEventDispatcher:
         mock_event_listener.listen = callback
 
         # Register via constructor
-        dispatcher = EventDispatcher(event_listeners={type(mock_event): [mock_event_listener]})
+        dispatcher = EventDispatcher(
+            event_listeners={type(mock_event): [mock_event_listener]}
+        )
         dispatcher.dispatch(mock_event)
 
         assert listener_called == 1
@@ -24,7 +30,9 @@ class TestEventDispatcher:
         # Register additional listener for the same event
         mock_another_event_listener = Mock(spec=EventListenerInterface)
         mock_another_event_listener.listen = callback
-        dispatcher.register_listeners(event_listeners={type(mock_event): [mock_another_event_listener]})
+        dispatcher.register_listeners(
+            event_listeners={type(mock_event): [mock_another_event_listener]}
+        )
         dispatcher.dispatch(mock_event)
 
         assert listener_called == 3
@@ -41,7 +49,9 @@ class TestEventDispatcher:
         mock_event_listener.listen = callback
 
         # Register via constructor
-        dispatcher = EventDispatcher(event_listeners={type(mock_event): [mock_event_listener]})
+        dispatcher = EventDispatcher(
+            event_listeners={type(mock_event): [mock_event_listener]}
+        )
         await dispatcher.dispatch_async(mock_event)
 
         assert listener_called == 1
@@ -49,7 +59,9 @@ class TestEventDispatcher:
         # Register additional listener for the same event
         mock_another_event_listener = Mock(spec=AsyncEventListenerInterface)
         mock_another_event_listener.listen = callback
-        dispatcher.register_listeners(event_listeners={type(mock_event): [mock_another_event_listener]})
+        dispatcher.register_listeners(
+            event_listeners={type(mock_event): [mock_another_event_listener]}
+        )
         await dispatcher.dispatch_async(mock_event)
 
         assert listener_called == 3
