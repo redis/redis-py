@@ -202,7 +202,7 @@ class TestMultiDbClient:
             True,
             True,
             True,
-            True
+            True,
         ]
 
         with (
@@ -213,9 +213,9 @@ class TestMultiDbClient:
                 return_value=[mock_hc],
             ),
         ):
-            mock_db.client.execute_command.return_value = 'OK'
-            mock_db1.client.execute_command.return_value = 'OK1'
-            mock_db2.client.execute_command.return_value = 'OK2'
+            mock_db.client.execute_command.return_value = "OK"
+            mock_db1.client.execute_command.return_value = "OK1"
+            mock_db2.client.execute_command.return_value = "OK2"
             mock_multi_db_config.health_check_interval = 0.1
             mock_multi_db_config.auto_fallback_interval = 0.2
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
