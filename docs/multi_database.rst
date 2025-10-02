@@ -147,10 +147,7 @@ The asyncio API mirrors the synchronous one and provides async/await semantics.
 MultiDBClient
 ^^^^^^^^^^^^^
 
-The client provides the same API as `Redis` or `RedisCluster` client, so it's
-interchangeable to provide a seamless upgrade for your application. As well
-client provides an option to reconfigure it in runtime (add health checks,
-failure detectors or even new databases).
+The client exposes the same API as the `Redis` or `RedisCluster` client, making it fully interchangeable and ensuring a seamless upgrade for your application. Additionally, it supports runtime reconfiguration, allowing you to add features such as health checks, failure detectors, or even new databases without restarting.
 
 Configuration
 -------------
