@@ -8,7 +8,7 @@ from typing import Any
 from typing import Optional
 from typing import Self
 from typing import Type
-from uuid import uuid1
+from uuid import uuid4
 
 from typing_extensions import override
 
@@ -283,7 +283,7 @@ class RwLock:
         return f'{self.prefix}:write_semaphore'
 
     def _make_token(self) -> Any:
-        token = self.redis.get_encoder().encode(uuid1().hex)
+        token = self.redis.get_encoder().encode(uuid4().hex)
         return token
 
     def read(
