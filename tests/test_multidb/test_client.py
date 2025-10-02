@@ -219,7 +219,7 @@ class TestMultiDbClient:
 
             client = MultiDBClient(mock_multi_db_config)
             assert client.set("key", "value") == "OK1"
-            sleep(0.12)
+            sleep(0.13)
             assert client.set("key", "value") == "OK2"
             sleep(0.22)
             assert client.set("key", "value") == "OK1"
