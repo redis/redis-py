@@ -277,7 +277,7 @@ define one of the health check policies to evaluate probes result.
 EchoHealthCheck (default)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The default health check sends the [ECHO](https://redis.io/docs/latest/commands/echo/)
+The default health check sends the [ECHO](https://redis.io/docs/latest/commands/echo/) command
 to the database (and to all nodes for clusters).
 
 Lag-Aware Healthcheck (Redis Enterprise Only)
