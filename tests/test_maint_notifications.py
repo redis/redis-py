@@ -1,8 +1,9 @@
+from socket import socket
 import threading
 from unittest.mock import Mock, call, patch, MagicMock
 import pytest
 
-from redis.connection import ConnectionInterface
+from redis.connection import ConnectionInterface, MaintNotificationsAbstractConnection
 
 from redis.maint_notifications import (
     MaintenanceNotification,
@@ -758,12 +759,15 @@ class TestMaintNotificationsConfigEndpointType:
             def getpeername(self):
                 return (self.resolved_ip, 6379)
 
-        class MockConnection(ConnectionInterface):
+        class MockConnection(MaintNotificationsAbstractConnection, ConnectionInterface):
             def __init__(self, host, resolved_ip=None, is_ssl=False):
                 self.host = host
                 self.port = 6379
                 self._sock = MockSocket(resolved_ip) if resolved_ip else None
                 self.__class__.__name__ = "SSLConnection" if is_ssl else "Connection"
+
+            def _get_socket(self):
+                return self._sock
 
             def get_resolved_ip(self):
                 # Call the actual method from AbstractConnection
