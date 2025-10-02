@@ -14,6 +14,7 @@ from redis.multidb.failure_detector import CommandFailureDetector
 from tests.test_asyncio.test_multidb.conftest import create_weighted_list
 
 
+@pytest.mark.onlynoncluster
 class TestDefaultCommandExecutor:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

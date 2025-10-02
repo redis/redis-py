@@ -14,6 +14,7 @@ from redis.multidb.failover import (
 )
 
 
+@pytest.mark.onlynoncluster
 class TestWeightBasedFailoverStrategy:
     @pytest.mark.parametrize(
         "mock_db,mock_db1,mock_db2",
@@ -64,6 +65,7 @@ class TestWeightBasedFailoverStrategy:
             assert failover_strategy.database()
 
 
+@pytest.mark.onlynoncluster
 class TestDefaultStrategyExecutor:
     @pytest.mark.parametrize(
         "mock_db",

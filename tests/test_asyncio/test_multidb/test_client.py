@@ -15,6 +15,7 @@ from redis.multidb.exception import NoValidDatabaseException
 from tests.test_asyncio.test_multidb.conftest import create_weighted_list
 
 
+@pytest.mark.onlynoncluster
 class TestMultiDbClient:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

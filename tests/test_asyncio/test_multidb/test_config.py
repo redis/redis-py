@@ -1,5 +1,7 @@
 from unittest.mock import Mock
 
+import pytest
+
 from redis.asyncio import ConnectionPool
 from redis.asyncio.multidb.config import (
     DatabaseConfig,
@@ -22,6 +24,7 @@ from redis.asyncio.retry import Retry
 from redis.multidb.circuit import CircuitBreaker
 
 
+@pytest.mark.onlynoncluster
 class TestMultiDbConfig:
     def test_default_config(self):
         db_configs = [
@@ -137,6 +140,7 @@ class TestMultiDbConfig:
         assert config.auto_fallback_interval == auto_fallback_interval
 
 
+@pytest.mark.onlynoncluster
 class TestDatabaseConfig:
     def test_default_config(self):
         config = DatabaseConfig(

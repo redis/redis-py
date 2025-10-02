@@ -10,6 +10,7 @@ from redis.multidb.circuit import State as CBState
 from redis.multidb.failure_detector import CommandFailureDetector
 
 
+@pytest.mark.onlynoncluster
 class TestFailureDetectorAsyncWrapper:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

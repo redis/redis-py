@@ -15,6 +15,7 @@ from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
 from tests.test_multidb.conftest import create_weighted_list
 
 
+@pytest.mark.onlynoncluster
 class TestMultiDbClient:
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",

@@ -16,6 +16,7 @@ from redis.exceptions import ConnectionError
 from redis.multidb.exception import UnhealthyDatabaseException
 
 
+@pytest.mark.onlynoncluster
 class TestHealthyAllPolicy:
     @pytest.mark.asyncio
     async def test_policy_returns_true_for_all_successful_probes(self):
@@ -58,6 +59,7 @@ class TestHealthyAllPolicy:
             assert mock_hc2.check_health.call_count == 0
 
 
+@pytest.mark.onlynoncluster
 class TestHealthyMajorityPolicy:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -151,6 +153,7 @@ class TestHealthyMajorityPolicy:
             assert mock_hc2.check_health.call_count == hc2_call_count
 
 
+@pytest.mark.onlynoncluster
 class TestHealthyAnyPolicy:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -204,6 +207,7 @@ class TestHealthyAnyPolicy:
             assert mock_hc2.check_health.call_count == 0
 
 
+@pytest.mark.onlynoncluster
 class TestEchoHealthCheck:
     @pytest.mark.asyncio
     async def test_database_is_healthy_on_echo_response(self, mock_client, mock_cb):
@@ -246,6 +250,7 @@ class TestEchoHealthCheck:
         assert mock_client.execute_command.call_count == 1
 
 
+@pytest.mark.onlynoncluster
 class TestLagAwareHealthCheck:
     @pytest.mark.asyncio
     async def test_database_is_healthy_when_bdb_matches_by_dns_name(

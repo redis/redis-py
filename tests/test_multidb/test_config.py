@@ -1,4 +1,7 @@
 from unittest.mock import Mock
+
+import pytest
+
 from redis.connection import ConnectionPool
 from redis.multidb.circuit import (
     PBCircuitBreakerAdapter,
@@ -18,6 +21,7 @@ from redis.multidb.failover import WeightBasedFailoverStrategy, FailoverStrategy
 from redis.retry import Retry
 
 
+@pytest.mark.onlynoncluster
 class TestMultiDbConfig:
     def test_default_config(self):
         db_configs = [

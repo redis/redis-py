@@ -21,6 +21,7 @@ def mock_pipe() -> Pipeline:
     return mock_pipe
 
 
+@pytest.mark.onlynoncluster
 class TestPipeline:
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",

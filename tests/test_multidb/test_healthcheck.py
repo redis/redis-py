@@ -16,6 +16,7 @@ from redis.multidb.healthcheck import (
 from redis.multidb.circuit import State as CBState
 
 
+@pytest.mark.onlynoncluster
 class TestHealthyAllPolicy:
     def test_policy_returns_true_for_all_successful_probes(self):
         mock_hc1 = Mock(spec=HealthCheck)
@@ -55,6 +56,7 @@ class TestHealthyAllPolicy:
             assert mock_hc2.check_health.call_count == 0
 
 
+@pytest.mark.onlynoncluster
 class TestHealthyMajorityPolicy:
     @pytest.mark.parametrize(
         "probes,hc1_side_effect,hc2_side_effect,hc1_call_count,hc2_call_count,expected_result",
@@ -146,6 +148,7 @@ class TestHealthyMajorityPolicy:
             assert mock_hc2.check_health.call_count == hc2_call_count
 
 
+@pytest.mark.onlynoncluster
 class TestHealthyAnyPolicy:
     @pytest.mark.parametrize(
         "hc1_side_effect,hc2_side_effect,hc1_call_count,hc2_call_count,expected_result",
@@ -197,6 +200,7 @@ class TestHealthyAnyPolicy:
             assert mock_hc2.check_health.call_count == 0
 
 
+@pytest.mark.onlynoncluster
 class TestEchoHealthCheck:
     def test_database_is_healthy_on_echo_response(self, mock_client, mock_cb):
         """
@@ -236,6 +240,7 @@ class TestEchoHealthCheck:
         assert mock_client.execute_command.call_count == 1
 
 
+@pytest.mark.onlynoncluster
 class TestLagAwareHealthCheck:
     def test_database_is_healthy_when_bdb_matches_by_dns_name(
         self, mock_client, mock_cb
