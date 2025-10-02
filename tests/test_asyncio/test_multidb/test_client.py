@@ -204,6 +204,12 @@ class TestMultiDbClient:
             True,
             True,
             True,
+            True,
+            True,
+            True,
+            True,
+            True,
+            True,
         ]
 
         with (
@@ -218,14 +224,14 @@ class TestMultiDbClient:
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
             mock_multi_db_config.health_check_interval = 0.1
-            mock_multi_db_config.auto_fallback_interval = 0.2
+            mock_multi_db_config.auto_fallback_interval = 0.5
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
             assert await client.set("key", "value") == "OK1"
-            await asyncio.sleep(0.13)
+            await asyncio.sleep(0.15)
             assert await client.set("key", "value") == "OK2"
-            await asyncio.sleep(0.22)
+            await asyncio.sleep(0.5)
             assert await client.set("key", "value") == "OK1"
 
     @pytest.mark.asyncio
