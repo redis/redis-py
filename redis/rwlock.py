@@ -21,6 +21,30 @@ if TYPE_CHECKING:
     from redis import Redis
 
 
+# RwLock implementation
+# =====================
+#
+# The lock owns three keys:
+# - `<prefix>:write`: If this exists, holds the token of the user that
+#   owns the exclusive write lock.
+# - `<prefix>:write_semaphore`: Semaphore tracking writers that are
+#   waiting to acquire the lock. If any writers are waiting, readers
+#   block.
+# - `<prefix>:read`: Another semaphore, tracks readers.
+#
+# Semaphores are implemented as ordered sets, where score is the
+# expiration time of the semaphore lease (Redis instance time). Expired
+# leases are pruned before attempting to acquire the lock.
+#
+# We can't use built-in key expiration because individual set members
+# cannot have an expiration. We can't create keys dynamically because
+# this may break multi-node compatibility.
+#
+# The write-acquire script is careful to ensure that the writer waiting
+# semaphore is only held if the caller is actually blocking; otherwise
+# the caller adds contention for no reason.
+
+
 class RwLock:
     """A shared reader-writer lock.
 
@@ -30,7 +54,7 @@ class RwLock:
     priority when waiting on the lock so that readers do not starve
     waiting writers. Writers are allowed to starve readers, however.
 
-    This type of lock is effective for scenarios where reads are
+    This type of unfair lock is effective for scenarios where reads are
     frequent and writes are infrequent. Because this lock relies on busy
     waiting, it can be wasteful to use if your critical sections are
     long and frequent.
@@ -38,6 +62,9 @@ class RwLock:
     This lock is not fault-tolerant in a multi-node Redis setup. When a
     master fails and data is lost, writer exclusivity may be violated.
     In a single-node setup, the lock is sound.
+
+    This lock is not re-entrant; attempting to acquire it twice in the
+    same thread may cause a deadlock until the blocking timeout ends.
     """
 
     lua_acquire_reader = None
@@ -78,7 +105,7 @@ class RwLock:
     # KEYS[3] - reader lock name
     # ARGV[1] - token
     # ARGV[2] - expiration
-    # ARGV[3] - sempahore expiration
+    # ARGV[3] - sempahore expiration (or 0 to release the sempahore)
     # ARGV[4] - max writers
     #
     # NOTE: return codes:
