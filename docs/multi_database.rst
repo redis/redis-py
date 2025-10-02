@@ -260,6 +260,9 @@ handles all retries at the top level through the `command_retry` configuration.
 Health Monitoring
 -----------------
 The `MultiDBClient` uses two complementary mechanisms to ensure database availability:
+- Health Checks (Proactive Monitoring)
+- Failure Detection (Reactive Monitoring)
+
 
 Health Checks (Proactive Monitoring)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
