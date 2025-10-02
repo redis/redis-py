@@ -223,6 +223,26 @@ def write_time_series(
     ts_df.to_csv(csv_file, mode='a', header=False, index=False)
 
 
+def plot_series(path: str):
+    """Import and run this inside a notebook to visualize time series."""
+    import matplotlib.pyplot as plt
+
+    df = pd.read_csv(path)
+    df['timestamp'] = pd.to_datetime(df['timestamp'], format='ISO8601')
+
+    for (workers, ttl), group in df.groupby(['num_workers', 'ttl'], sort=True):
+        group = group.sort_values('timestamp')
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(group['timestamp'], group['num_readers'], label='num_readers')
+        ax.plot(group['timestamp'], group['num_waiting_writers'], label='num_waiting_writers')
+        ax.set_title(f'num_workers={workers}, ttl={ttl}')
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Count')
+        ax.legend()
+        ax.grid(alpha=0.3)
+        plt.show()
+
+
 def display_metrics(
     n: int,
     ttl: Number,
