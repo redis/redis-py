@@ -222,7 +222,7 @@ class TestMultiDbClient:
 
             client = MultiDBClient(mock_multi_db_config)
             assert await client.set("key", "value") == "OK1"
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.12)
             assert await client.set("key", "value") == "OK2"
             await asyncio.sleep(0.22)
             assert await client.set("key", "value") == "OK1"
