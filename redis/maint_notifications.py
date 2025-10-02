@@ -33,8 +33,8 @@ class EndpointType(enum.Enum):
 if TYPE_CHECKING:
     from redis.connection import (
         BlockingConnectionPool,
-        ConnectionInterface,
         ConnectionPool,
+        MaintNotificationsAbstractConnection,
     )
 
 
@@ -501,7 +501,7 @@ class MaintNotificationsConfig:
         return self.relaxed_timeout != -1
 
     def get_endpoint_type(
-        self, host: str, connection: "ConnectionInterface"
+        self, host: str, connection: "MaintNotificationsAbstractConnection"
     ) -> EndpointType:
         """
         Determine the appropriate endpoint type for CLIENT MAINT_NOTIFICATIONS command.
@@ -567,7 +567,7 @@ class MaintNotificationsPoolHandler:
         self._lock = threading.RLock()
         self.connection = None
 
-    def set_connection(self, connection: "ConnectionInterface"):
+    def set_connection(self, connection: "MaintNotificationsAbstractConnection"):
         self.connection = connection
 
     def remove_expired_notifications(self):
@@ -751,7 +751,9 @@ class MaintNotificationsConnectionHandler:
     }
 
     def __init__(
-        self, connection: "ConnectionInterface", config: MaintNotificationsConfig
+        self,
+        connection: "MaintNotificationsAbstractConnection",
+        config: MaintNotificationsConfig,
     ) -> None:
         self.connection = connection
         self.config = config
