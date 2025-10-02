@@ -164,22 +164,22 @@ class ClusterOperations:
                 shards_section_started = False
 
         # Find empty node (node with no shards from ANY database)
-        empty_nodes = all_nodes - nodes_with_any_shards
+        nodes_with_no_shards_target_bdb = all_nodes - nodes_with_target_db_shards
 
         logging.debug(f"All nodes: {all_nodes}")
         logging.debug(f"Nodes with shards from any database: {nodes_with_any_shards}")
         logging.debug(f"Nodes with target database shards: {nodes_with_target_db_shards}")
         logging.debug(f"Master nodes (target database only): {master_nodes}")
-        logging.debug(f"Empty nodes: {empty_nodes}")
+        logging.debug(f"Nodes with no shards from target database: {nodes_with_no_shards_target_bdb}")
 
-        if not empty_nodes:
-            raise ValueError("No empty nodes (nodes without shards) found")
+        if not nodes_with_no_shards_target_bdb:
+            raise ValueError("All nodes have shards from target database")
 
         if not master_nodes:
-            raise ValueError("No nodes with master shards found")
+            raise ValueError("No nodes with master shards from target database found")
 
         # Return the first available empty node and master node (numeric part only)
-        empty_node = next(iter(empty_nodes)).split(":")[1]  # node:1 -> 1
+        empty_node = next(iter(nodes_with_no_shards_target_bdb)).split(":")[1]  # node:1 -> 1
         target_node = next(iter(master_nodes)).split(":")[1]  # node:2 -> 2
 
         return target_node, empty_node
