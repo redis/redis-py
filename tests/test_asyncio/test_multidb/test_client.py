@@ -184,41 +184,38 @@ class TestMultiDbClient:
         indirect=True,
     )
     async def test_execute_command_auto_fallback_to_highest_weight_db(
-        self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_hc.check_health.side_effect = [
+            True,
+            True,
+            True,
+            False,
+            True,
+            True,
+            True,
+            True,
+            True,
+            True,
+            True,
+            True,
+            True,
+            True,
+            True
+        ]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
             patch.object(
                 mock_multi_db_config,
                 "default_health_checks",
-                return_value=[EchoHealthCheck()],
+                return_value=[mock_hc],
             ),
         ):
-            mock_db.client.execute_command.side_effect = [
-                "healthcheck",
-                "healthcheck",
-                "healthcheck",
-                "healthcheck",
-                "healthcheck",
-            ]
-            mock_db1.client.execute_command.side_effect = [
-                "healthcheck",
-                "OK1",
-                "error",
-                "healthcheck",
-                "healthcheck",
-                "OK1",
-            ]
-            mock_db2.client.execute_command.side_effect = [
-                "healthcheck",
-                "healthcheck",
-                "OK2",
-                "healthcheck",
-                "healthcheck",
-                "healthcheck",
-            ]
+            mock_db.client.execute_command.return_value = 'OK'
+            mock_db1.client.execute_command.return_value = 'OK1'
+            mock_db2.client.execute_command.return_value = 'OK2'
             mock_multi_db_config.health_check_interval = 0.1
             mock_multi_db_config.auto_fallback_interval = 0.2
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()

@@ -3165,7 +3165,7 @@ class TransactionStrategy(AbstractStrategy):
                 self._nodes_manager.initialize()
                 self.reinitialize_counter = 0
             else:
-                if type(error) is MovedError:
+                if isinstance(error, AskError):
                     self._nodes_manager.update_moved_exception(error)
 
         self._executing = False
