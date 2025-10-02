@@ -1,5 +1,12 @@
 """Simulation of a pool of workers reading a cached value which
 occasionally must be replaced when it expires.
+
+The workers coordinate so that only a single writer takes responsibility
+for updating the cached value when it expires. This minimizes contention
+and latency when the cache expires.
+
+The simulation also attempts to detect if any workers read a stale value
+by rotating out read counters when the cache key is updated.
 """
 
 import random
