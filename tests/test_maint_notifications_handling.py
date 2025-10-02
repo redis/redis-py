@@ -330,6 +330,9 @@ class MockSocket:
         """Simulate setting socket options."""
         pass
 
+    def setblocking(self, blocking):
+        pass
+
     def getpeername(self):
         """Simulate getting peer name."""
         return self.address

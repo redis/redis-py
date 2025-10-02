@@ -96,7 +96,7 @@ class EventDispatcher(EventDispatcherInterface):
         }
 
         self._lock = threading.Lock()
-        self._async_lock = asyncio.Lock()
+        self._async_lock = None
 
         if event_listeners:
             self.register_listeners(event_listeners)
@@ -109,6 +109,9 @@ class EventDispatcher(EventDispatcherInterface):
                 listener.listen(event)
 
     async def dispatch_async(self, event: object):
+        if self._async_lock is None:
+            self._async_lock = asyncio.Lock()
+
         async with self._async_lock:
             listeners = self._event_listeners_mapping.get(type(event), [])
 
