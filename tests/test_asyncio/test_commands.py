@@ -3158,7 +3158,7 @@ class TestRedisCommands:
         assert await r.xgroup_destroy(stream, group)
 
     @skip_if_server_version_lt("7.0.0")
-    @skip_if_server_version_gte("8.2.1")
+    @skip_if_server_version_gte("8.2.2")
     async def test_xgroup_setid(self, r: redis.Redis):
         stream = "stream"
         group = "group"
@@ -3179,7 +3179,7 @@ class TestRedisCommands:
         ]
         assert await r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("8.2.1")
+    @skip_if_server_version_lt("8.2.2")
     async def test_xgroup_setid_fixed_max_entries_read(self, r):
         stream = "stream"
         group = "group"
