@@ -260,6 +260,9 @@ def wait_for_cluster_creation(redis_url, cluster_nodes, timeout=60):
 
 
 def skip_if_server_version_lt(min_version: str) -> _TestDecorator:
+    print(
+        f"Current version {REDIS_INFO.get('version', '0')}, skip_if_server_version_lt: {min_version}"
+    )
     redis_version = REDIS_INFO.get("version", "0")
     check = Version(redis_version) < Version(min_version)
     return pytest.mark.skipif(check, reason=f"Redis version required >= {min_version}")
