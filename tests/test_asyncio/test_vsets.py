@@ -502,8 +502,8 @@ async def test_vsim_epsilon(d_client):
     await d_client.vset().vadd("myset", [2, 1, 1], "a")
     await d_client.vset().vadd("myset", [2, 0, 1], "b")
     await d_client.vset().vadd("myset", [2, 0, 0], "c")
-    await d_client.vset().vadd("myset", [2, 0, -1], "d")
-    await d_client.vset().vadd("myset", [2, -1, -1], "e")
+    await d_client.vset().vadd("myset", [2, 0, 2], "d")
+    await d_client.vset().vadd("myset", [-2, -1, -1], "e")
 
     res1 = await d_client.vset().vsim("myset", [2, 1, 1])
     assert 5 == len(res1)
