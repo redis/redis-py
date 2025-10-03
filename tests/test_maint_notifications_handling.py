@@ -10,7 +10,6 @@ from redis import Redis
 from redis.cache import CacheConfig
 from redis.connection import (
     AbstractConnection,
-    CacheProxyConnection,
     Connection,
     ConnectionPool,
     BlockingConnectionPool,
