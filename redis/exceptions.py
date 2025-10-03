@@ -94,6 +94,12 @@ class LockNotOwnedError(LockError):
     pass
 
 
+class LockMaxWritersError(LockError):
+    "Error trying to acquire a lock that has reached the max number of writers."
+
+    pass
+
+
 class ChildDeadlockedError(Exception):
     "Error indicating that a child process is deadlocked after a fork()"
 
