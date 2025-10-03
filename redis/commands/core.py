@@ -2,6 +2,7 @@
 
 import datetime
 import hashlib
+import uuid
 import warnings
 from enum import Enum
 from typing import (
@@ -2963,6 +2964,13 @@ class ScanCommands(CommandsProtocol):
     see: https://redis.io/commands/scan
     """
 
+    def _cleanup_iter_req_id(self, iter_req_id: str) -> None:
+        """Clean up iter_req_id from the connection pool if it supports it."""
+        if hasattr(self, "connection_pool") and hasattr(
+            self.connection_pool, "cleanup"
+        ):
+            self.connection_pool.cleanup(iter_req_id)
+
     def scan(
         self,
         cursor: int = 0,
@@ -3017,12 +3025,21 @@ class ScanCommands(CommandsProtocol):
             HASH, LIST, SET, STREAM, STRING, ZSET
             Additionally, Redis modules can expose other types as well.
         """
+        iter_req_id = str(uuid.uuid4())
         cursor = "0"
-        while cursor != 0:
-            cursor, data = self.scan(
-                cursor=cursor, match=match, count=count, _type=_type, **kwargs
-            )
-            yield from data
+        try:
+            while cursor != 0:
+                cursor, data = self.scan(
+                    cursor=cursor,
+                    match=match,
+                    count=count,
+                    _type=_type,
+                    iter_req_id=iter_req_id,
+                    **kwargs,
+                )
+                yield from data
+        finally:
+            self._cleanup_iter_req_id(iter_req_id)
 
     def sscan(
         self,
@@ -3030,6 +3047,7 @@ class ScanCommands(CommandsProtocol):
         cursor: int = 0,
         match: Union[PatternT, None] = None,
         count: Optional[int] = None,
+        **kwargs,
     ) -> ResponseT:
         """
         Incrementally return lists of elements in a set. Also return a cursor
@@ -3046,13 +3064,14 @@ class ScanCommands(CommandsProtocol):
             pieces.extend([b"MATCH", match])
         if count is not None:
             pieces.extend([b"COUNT", count])
-        return self.execute_command("SSCAN", *pieces)
+        return self.execute_command("SSCAN", *pieces, **kwargs)
 
     def sscan_iter(
         self,
         name: KeyT,
         match: Union[PatternT, None] = None,
         count: Optional[int] = None,
+        **kwargs,
     ) -> Iterator:
         """
         Make an iterator using the SSCAN command so that the client doesn't
@@ -3062,10 +3081,21 @@ class ScanCommands(CommandsProtocol):
 
         ``count`` allows for hint the minimum number of returns
         """
+        iter_req_id = str(uuid.uuid4())
         cursor = "0"
-        while cursor != 0:
-            cursor, data = self.sscan(name, cursor=cursor, match=match, count=count)
-            yield from data
+        try:
+            while cursor != 0:
+                cursor, data = self.sscan(
+                    name,
+                    cursor=cursor,
+                    match=match,
+                    count=count,
+                    iter_req_id=iter_req_id,
+                    **kwargs,
+                )
+                yield from data
+        finally:
+            self._cleanup_iter_req_id(iter_req_id)
 
     def hscan(
         self,
@@ -3074,6 +3104,7 @@ class ScanCommands(CommandsProtocol):
         match: Union[PatternT, None] = None,
         count: Optional[int] = None,
         no_values: Union[bool, None] = None,
+        **kwargs,
     ) -> ResponseT:
         """
         Incrementally return key/value slices in a hash. Also return a cursor
@@ -3094,7 +3125,7 @@ class ScanCommands(CommandsProtocol):
             pieces.extend([b"COUNT", count])
         if no_values is not None:
             pieces.extend([b"NOVALUES"])
-        return self.execute_command("HSCAN", *pieces, no_values=no_values)
+        return self.execute_command("HSCAN", *pieces, no_values=no_values, **kwargs)
 
     def hscan_iter(
         self,
@@ -3102,6 +3133,7 @@ class ScanCommands(CommandsProtocol):
         match: Union[PatternT, None] = None,
         count: Optional[int] = None,
         no_values: Union[bool, None] = None,
+        **kwargs,
     ) -> Iterator:
         """
         Make an iterator using the HSCAN command so that the client doesn't
@@ -3113,15 +3145,25 @@ class ScanCommands(CommandsProtocol):
 
         ``no_values`` indicates to return only the keys, without values
         """
+        iter_req_id = str(uuid.uuid4())
         cursor = "0"
-        while cursor != 0:
-            cursor, data = self.hscan(
-                name, cursor=cursor, match=match, count=count, no_values=no_values
-            )
-            if no_values:
-                yield from data
-            else:
-                yield from data.items()
+        try:
+            while cursor != 0:
+                cursor, data = self.hscan(
+                    name,
+                    cursor=cursor,
+                    match=match,
+                    count=count,
+                    no_values=no_values,
+                    iter_req_id=iter_req_id,
+                    **kwargs,
+                )
+                if no_values:
+                    yield from data
+                else:
+                    yield from data.items()
+        finally:
+            self._cleanup_iter_req_id(iter_req_id)
 
     def zscan(
         self,
@@ -3130,6 +3172,7 @@ class ScanCommands(CommandsProtocol):
         match: Union[PatternT, None] = None,
         count: Optional[int] = None,
         score_cast_func: Union[type, Callable] = float,
+        **kwargs,
     ) -> ResponseT:
         """
         Incrementally return lists of elements in a sorted set. Also return a
@@ -3148,7 +3191,7 @@ class ScanCommands(CommandsProtocol):
             pieces.extend([b"MATCH", match])
         if count is not None:
             pieces.extend([b"COUNT", count])
-        options = {"score_cast_func": score_cast_func}
+        options = {"score_cast_func": score_cast_func, **kwargs}
         return self.execute_command("ZSCAN", *pieces, **options)
 
     def zscan_iter(
@@ -3157,6 +3200,7 @@ class ScanCommands(CommandsProtocol):
         match: Union[PatternT, None] = None,
         count: Optional[int] = None,
         score_cast_func: Union[type, Callable] = float,
+        **kwargs,
     ) -> Iterator:
         """
         Make an iterator using the ZSCAN command so that the client doesn't
@@ -3168,19 +3212,32 @@ class ScanCommands(CommandsProtocol):
 
         ``score_cast_func`` a callable used to cast the score return value
         """
+        iter_req_id = str(uuid.uuid4())
         cursor = "0"
-        while cursor != 0:
-            cursor, data = self.zscan(
-                name,
-                cursor=cursor,
-                match=match,
-                count=count,
-                score_cast_func=score_cast_func,
-            )
-            yield from data
+        try:
+            while cursor != 0:
+                cursor, data = self.zscan(
+                    name,
+                    cursor=cursor,
+                    match=match,
+                    count=count,
+                    score_cast_func=score_cast_func,
+                    iter_req_id=iter_req_id,
+                    **kwargs,
+                )
+                yield from data
+        finally:
+            self._cleanup_iter_req_id(iter_req_id)
 
 
 class AsyncScanCommands(ScanCommands):
+    async def _cleanup_iter_req_id(self, iter_req_id: str) -> None:
+        """Clean up iter_req_id from the connection pool if it supports it."""
+        if hasattr(self, "connection_pool") and hasattr(
+            self.connection_pool, "cleanup"
+        ):
+            await self.connection_pool.cleanup(iter_req_id)
+
     async def scan_iter(
         self,
         match: Union[PatternT, None] = None,
@@ -3202,19 +3259,29 @@ class AsyncScanCommands(ScanCommands):
             HASH, LIST, SET, STREAM, STRING, ZSET
             Additionally, Redis modules can expose other types as well.
         """
+        iter_req_id = str(uuid.uuid4())
         cursor = "0"
-        while cursor != 0:
-            cursor, data = await self.scan(
-                cursor=cursor, match=match, count=count, _type=_type, **kwargs
-            )
-            for d in data:
-                yield d
+        try:
+            while cursor != 0:
+                cursor, data = await self.scan(
+                    cursor=cursor,
+                    match=match,
+                    count=count,
+                    _type=_type,
+                    iter_req_id=iter_req_id,
+                    **kwargs,
+                )
+                for d in data:
+                    yield d
+        finally:
+            await self._cleanup_iter_req_id(iter_req_id)
 
     async def sscan_iter(
         self,
         name: KeyT,
         match: Union[PatternT, None] = None,
         count: Optional[int] = None,
+        **kwargs,
     ) -> AsyncIterator:
         """
         Make an iterator using the SSCAN command so that the client doesn't
@@ -3224,13 +3291,22 @@ class AsyncScanCommands(ScanCommands):
 
         ``count`` allows for hint the minimum number of returns
         """
+        iter_req_id = str(uuid.uuid4())
         cursor = "0"
-        while cursor != 0:
-            cursor, data = await self.sscan(
-                name, cursor=cursor, match=match, count=count
-            )
-            for d in data:
-                yield d
+        try:
+            while cursor != 0:
+                cursor, data = await self.sscan(
+                    name,
+                    cursor=cursor,
+                    match=match,
+                    count=count,
+                    iter_req_id=iter_req_id,
+                    **kwargs,
+                )
+                for d in data:
+                    yield d
+        finally:
+            await self._cleanup_iter_req_id(iter_req_id)
 
     async def hscan_iter(
         self,
@@ -3238,6 +3314,7 @@ class AsyncScanCommands(ScanCommands):
         match: Union[PatternT, None] = None,
         count: Optional[int] = None,
         no_values: Union[bool, None] = None,
+        **kwargs,
     ) -> AsyncIterator:
         """
         Make an iterator using the HSCAN command so that the client doesn't
@@ -3249,17 +3326,27 @@ class AsyncScanCommands(ScanCommands):
 
         ``no_values`` indicates to return only the keys, without values
         """
+        iter_req_id = str(uuid.uuid4())
         cursor = "0"
-        while cursor != 0:
-            cursor, data = await self.hscan(
-                name, cursor=cursor, match=match, count=count, no_values=no_values
-            )
-            if no_values:
-                for it in data:
-                    yield it
-            else:
-                for it in data.items():
-                    yield it
+        try:
+            while cursor != 0:
+                cursor, data = await self.hscan(
+                    name,
+                    cursor=cursor,
+                    match=match,
+                    count=count,
+                    no_values=no_values,
+                    iter_req_id=iter_req_id,
+                    **kwargs,
+                )
+                if no_values:
+                    for it in data:
+                        yield it
+                else:
+                    for it in data.items():
+                        yield it
+        finally:
+            await self._cleanup_iter_req_id(iter_req_id)
 
     async def zscan_iter(
         self,
@@ -3267,6 +3354,7 @@ class AsyncScanCommands(ScanCommands):
         match: Union[PatternT, None] = None,
         count: Optional[int] = None,
         score_cast_func: Union[type, Callable] = float,
+        **kwargs,
     ) -> AsyncIterator:
         """
         Make an iterator using the ZSCAN command so that the client doesn't
@@ -3278,17 +3366,23 @@ class AsyncScanCommands(ScanCommands):
 
         ``score_cast_func`` a callable used to cast the score return value
         """
+        iter_req_id = str(uuid.uuid4())
         cursor = "0"
-        while cursor != 0:
-            cursor, data = await self.zscan(
-                name,
-                cursor=cursor,
-                match=match,
-                count=count,
-                score_cast_func=score_cast_func,
-            )
-            for d in data:
-                yield d
+        try:
+            while cursor != 0:
+                cursor, data = await self.zscan(
+                    name,
+                    cursor=cursor,
+                    match=match,
+                    count=count,
+                    score_cast_func=score_cast_func,
+                    iter_req_id=iter_req_id,
+                    **kwargs,
+                )
+                for d in data:
+                    yield d
+        finally:
+            await self._cleanup_iter_req_id(iter_req_id)
 
 
 class SetCommands(CommandsProtocol):
