@@ -1,4 +1,3 @@
-from socket import socket
 import threading
 from unittest.mock import Mock, call, patch, MagicMock
 import pytest
