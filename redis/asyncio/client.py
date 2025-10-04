@@ -1242,6 +1242,7 @@ class PubSub:
         *,
         exception_handler: Optional["PSWorkerThreadExcHandlerT"] = None,
         poll_timeout: float = 1.0,
+        pubsub=None,
     ) -> None:
         """Process pub/sub messages using registered callbacks.
 
@@ -1266,9 +1267,14 @@ class PubSub:
         await self.connect()
         while True:
             try:
-                await self.get_message(
-                    ignore_subscribe_messages=True, timeout=poll_timeout
-                )
+                if pubsub is None:
+                    await self.get_message(
+                        ignore_subscribe_messages=True, timeout=poll_timeout
+                    )
+                else:
+                    await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=poll_timeout
+                    )
             except asyncio.CancelledError:
                 raise
             except BaseException as e:

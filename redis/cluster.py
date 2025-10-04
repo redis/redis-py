@@ -695,6 +695,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             self._event_dispatcher = EventDispatcher()
         else:
             self._event_dispatcher = event_dispatcher
+        self.startup_nodes = startup_nodes
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
             from_url=from_url,
@@ -3164,7 +3165,8 @@ class TransactionStrategy(AbstractStrategy):
                 self._nodes_manager.initialize()
                 self.reinitialize_counter = 0
             else:
-                self._nodes_manager.update_moved_exception(error)
+                if isinstance(error, AskError):
+                    self._nodes_manager.update_moved_exception(error)
 
         self._executing = False
 
