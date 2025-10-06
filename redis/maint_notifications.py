@@ -32,9 +32,8 @@ class EndpointType(enum.Enum):
 
 if TYPE_CHECKING:
     from redis.connection import (
-        BlockingConnectionPool,
-        ConnectionPool,
         MaintNotificationsAbstractConnection,
+        MaintNotificationsAbstractConnectionPool,
     )
 
 
@@ -558,7 +557,7 @@ class MaintNotificationsConfig:
 class MaintNotificationsPoolHandler:
     def __init__(
         self,
-        pool: Union["ConnectionPool", "BlockingConnectionPool"],
+        pool: "MaintNotificationsAbstractConnectionPool",
         config: MaintNotificationsConfig,
     ) -> None:
         self.pool = pool
@@ -569,6 +568,16 @@ class MaintNotificationsPoolHandler:
 
     def set_connection(self, connection: "MaintNotificationsAbstractConnection"):
         self.connection = connection
+
+    def get_handler_for_connection(self):
+        # Deep all data that should be shared between connections
+        # but each connection should have its own pool handler
+        # since each connection can be in a different state
+        copy = MaintNotificationsPoolHandler(self.pool, self.config)
+        copy._processed_notifications = self._processed_notifications
+        copy._lock = self._lock
+        copy.connection = None
+        return copy
 
     def remove_expired_notifications(self):
         with self._lock:

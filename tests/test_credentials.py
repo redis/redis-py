@@ -431,7 +431,6 @@ class TestStreamingCredentialProvider:
     def test_re_auth_pub_sub_in_resp3(self, credential_provider):
         mock_pubsub_connection = Mock(spec=ConnectionInterface)
         mock_pubsub_connection.get_protocol.return_value = 3
-
         mock_pubsub_connection.should_reconnect = Mock(return_value=False)
         mock_pubsub_connection.credential_provider = credential_provider
         mock_pubsub_connection.retry = Retry(NoBackoff(), 3)

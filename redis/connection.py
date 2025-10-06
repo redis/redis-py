@@ -281,11 +281,10 @@ class MaintNotificationsAbstractConnection:
                     This is useful when the parser is created after this object.
         """
         self.maint_notifications_config = maint_notifications_config
-        self.maint_notifications_pool_handler = maint_notifications_pool_handler
         self.maintenance_state = maintenance_state
         self.maintenance_notification_hash = maintenance_notification_hash
         self._configure_maintenance_notifications(
-            self.maint_notifications_pool_handler,
+            maint_notifications_pool_handler,
             orig_host_address,
             orig_socket_timeout,
             orig_socket_connect_timeout,
@@ -360,7 +359,9 @@ class MaintNotificationsAbstractConnection:
 
     def _configure_maintenance_notifications(
         self,
-        maint_notifications_pool_handler=None,
+        maint_notifications_pool_handler: Optional[
+            MaintNotificationsPoolHandler
+        ] = None,
         orig_host_address=None,
         orig_socket_timeout=None,
         orig_socket_connect_timeout=None,
@@ -370,30 +371,45 @@ class MaintNotificationsAbstractConnection:
         Enable maintenance notifications by setting up
         handlers and storing original connection parameters.
 
-        Should be used ONLY parsers that support push notifications.
+        Should be used ONLY with parsers that support push notifications.
         """
         if (
             not self.maint_notifications_config
             or not self.maint_notifications_config.enabled
         ):
+            self._maint_notifications_pool_handler = None
             self._maint_notifications_connection_handler = None
             return
 
         if not parser:
             raise RedisError(
-                "To configure maintenance notifications, a parser must be provided."
+                "To configure maintenance notifications, a parser must be provided!"
             )
 
-        # Set up pool handler if available
         if maint_notifications_pool_handler:
-            parser.set_node_moving_push_handler(
-                maint_notifications_pool_handler.handle_notification
+            # Extract a reference to a new pool handler that copies all properties
+            # of the original one and has a different connection reference
+            # This is needed because when we attach the handler to the parser
+            # we need to make sure that the handler has a reference to the
+            # connection that the parser is attached to.
+            self._maint_notifications_pool_handler = (
+                maint_notifications_pool_handler.get_handler_for_connection()
             )
+            self._maint_notifications_pool_handler.set_connection(self)
+        else:
+            self._maint_notifications_pool_handler = None
 
-        # Set up connection handler
         self._maint_notifications_connection_handler = (
             MaintNotificationsConnectionHandler(self, self.maint_notifications_config)
         )
+
+        # Set up pool handler if available
+        if self._maint_notifications_pool_handler:
+            parser.set_node_moving_push_handler(
+                self._maint_notifications_pool_handler.handle_notification
+            )
+
+        # Set up connection handler
         parser.set_maintenance_push_handler(
             self._maint_notifications_connection_handler.handle_notification
         )
@@ -409,13 +425,23 @@ class MaintNotificationsAbstractConnection:
             else self.socket_connect_timeout
         )
 
-    def set_maint_notifications_pool_handler(
+    def set_maint_notifications_pool_handler_for_connection(
         self, maint_notifications_pool_handler: MaintNotificationsPoolHandler
     ):
-        maint_notifications_pool_handler.set_connection(self)
-        self._get_parser().set_node_moving_push_handler(
-            maint_notifications_pool_handler.handle_notification
+        # Deep copy the pool handler to avoid sharing the same pool handler
+        # between multiple connections, because otherwise each connection will override
+        # the connection reference and the pool handler will only hold a reference
+        # to the last connection that was set.
+        maint_notifications_pool_handler_copy = (
+            maint_notifications_pool_handler.get_handler_for_connection()
         )
+
+        maint_notifications_pool_handler_copy.set_connection(self)
+        self._get_parser().set_node_moving_push_handler(
+            maint_notifications_pool_handler_copy.handle_notification
+        )
+
+        self._maint_notifications_pool_handler = maint_notifications_pool_handler_copy
 
         # Update maintenance notification connection handler if it doesn't exist
         if not self._maint_notifications_connection_handler:
@@ -1286,7 +1312,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             MaintNotificationsAbstractConnection.__init__(
                 self,
                 self._conn.maint_notifications_config,
-                self._conn.maint_notifications_pool_handler,
+                self._conn._maint_notifications_pool_handler,
                 self._conn.maintenance_state,
                 self._conn.maintenance_notification_hash,
                 self._conn.host,
@@ -1307,9 +1333,11 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def set_parser(self, parser_class):
         self._conn.set_parser(parser_class)
 
-    def set_maint_notifications_pool_handler(self, maint_notifications_pool_handler):
+    def set_maint_notifications_pool_handler_for_connection(
+        self, maint_notifications_pool_handler
+    ):
         if isinstance(self._conn, MaintNotificationsAbstractConnection):
-            self._conn.set_maint_notifications_pool_handler(
+            self._conn.set_maint_notifications_pool_handler_for_connection(
                 maint_notifications_pool_handler
             )
 
@@ -1978,9 +2006,9 @@ class ConnectionPoolInterface(ABC):
         pass
 
 
-class MaintNotificationsConnectionPoolBase:
+class MaintNotificationsAbstractConnectionPool:
     """
-    Mixin class for handling maintenance notifications logic.
+    Abstract class for handling maintenance notifications logic.
     This class is mixed into the ConnectionPool classes.
 
     This class is not intended to be used directly!
@@ -1989,23 +2017,31 @@ class MaintNotificationsConnectionPoolBase:
     connection pool handling is encapsulated in this class.
     """
 
-    def __init__(self, **kwargs):
-        # Initialize maintenance notifications if enabled
-        if kwargs.get("maint_notifications_pool_handler") or kwargs.get(
-            "maint_notifications_config"
-        ):
-            if kwargs.get("protocol") not in [3, "3"]:
+    def __init__(
+        self,
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        **kwargs,
+    ):
+        # Initialize maintenance notifications
+        is_protocol_supported = kwargs.get("protocol") in [3, "3"]
+        if maint_notifications_config is None and is_protocol_supported:
+            maint_notifications_config = MaintNotificationsConfig()
+
+        if maint_notifications_config and maint_notifications_config.enabled:
+            if not is_protocol_supported:
                 raise RedisError(
-                    "Push handlers on connection are only supported with RESP version 3"
+                    "Maintenance notifications handlers on connection are only supported with RESP version 3"
                 )
 
-            config = kwargs.get("maint_notifications_config", None)
-            handler = kwargs.get("maint_notifications_pool_handler", None)
+            self._maint_notifications_pool_handler = MaintNotificationsPoolHandler(
+                self, maint_notifications_config
+            )
 
-            config = config or (handler.config if handler else None)
-
-            if config and config.enabled:
-                self._update_connection_kwargs_for_maint_notifications()
+            self._update_connection_kwargs_for_maint_notifications(
+                self._maint_notifications_pool_handler
+            )
+        else:
+            self._maint_notifications_pool_handler = None
 
     @property
     @abstractmethod
@@ -2031,54 +2067,71 @@ class MaintNotificationsConnectionPoolBase:
     ) -> Iterable["MaintNotificationsAbstractConnection"]:
         pass
 
-    def maint_notifications_pool_handler_enabled(self):
+    def maint_notifications_enabled(self):
         """
         Returns:
-            True if the maintenance notifications pool handler is enabled, False otherwise.
+            True if the maintenance notifications are enabled, False otherwise.
+            The maintenance notifications config is stored in the pool handler.
+            If the pool handler is not set, the maintenance notifications are not enabled.
         """
-        maint_notifications_config = self.connection_kwargs.get(
-            "maint_notifications_config", None
+        maint_notifications_config = (
+            self._maint_notifications_pool_handler.config
+            if self._maint_notifications_pool_handler
+            else None
         )
 
         return maint_notifications_config and maint_notifications_config.enabled
 
-    def set_maint_notifications_pool_handler(
+    def update_maint_notifications_config(
+        self, maint_notifications_config: MaintNotificationsConfig
+    ):
+        """
+        Updates the maintenance notifications configuration.
+        This method should be called only if the pool was created
+        without enabling the maintenance notifications and
+        in a later point in time maintenance notifications
+        are requested to be enabled.
+        """
+        if (
+            self.maint_notifications_enabled()
+            and not maint_notifications_config.enabled
+        ):
+            raise ValueError(
+                "Cannot disable maintenance notifications after enabling them"
+            )
+        # first update pool settings
+        if not self._maint_notifications_pool_handler:
+            self._maint_notifications_pool_handler = MaintNotificationsPoolHandler(
+                self, maint_notifications_config
+            )
+        else:
+            self._maint_notifications_pool_handler.config = maint_notifications_config
+
+        # then update connection kwargs and existing connections
+        self._update_connection_kwargs_for_maint_notifications(
+            self._maint_notifications_pool_handler
+        )
+        self._update_maint_notifications_configs_for_connections(
+            self._maint_notifications_pool_handler
+        )
+
+    def _update_connection_kwargs_for_maint_notifications(
         self, maint_notifications_pool_handler: MaintNotificationsPoolHandler
     ):
+        """
+        Update the connection kwargs for all future connections.
+        """
+        if not self.maint_notifications_enabled():
+            return
+
         self.connection_kwargs.update(
             {
                 "maint_notifications_pool_handler": maint_notifications_pool_handler,
                 "maint_notifications_config": maint_notifications_pool_handler.config,
             }
         )
-        self._update_connection_kwargs_for_maint_notifications()
 
-        self._update_maint_notifications_configs_for_connections(
-            maint_notifications_pool_handler
-        )
-
-    def _update_maint_notifications_configs_for_connections(
-        self, maint_notifications_pool_handler
-    ):
-        """Update the maintenance notifications config for all connections in the pool."""
-        with self._get_pool_lock():
-            for conn in self._get_free_connections():
-                conn.set_maint_notifications_pool_handler(
-                    maint_notifications_pool_handler
-                )
-                conn.maint_notifications_config = (
-                    maint_notifications_pool_handler.config
-                )
-            for conn in self._get_in_use_connections():
-                conn.set_maint_notifications_pool_handler(
-                    maint_notifications_pool_handler
-                )
-                conn.maint_notifications_config = (
-                    maint_notifications_pool_handler.config
-                )
-
-    def _update_connection_kwargs_for_maint_notifications(self):
-        """Store original connection parameters for maintenance notifications."""
+        # Store original connection parameters for maintenance notifications.
         if self.connection_kwargs.get("orig_host_address", None) is None:
             # If orig_host_address is None it means we haven't
             # configured the original values yet
@@ -2093,6 +2146,28 @@ class MaintNotificationsConnectionPoolBase:
                     ),
                 }
             )
+
+    def _update_maint_notifications_configs_for_connections(
+        self, maint_notifications_pool_handler: MaintNotificationsPoolHandler
+    ):
+        """Update the maintenance notifications config for all connections in the pool."""
+        with self._get_pool_lock():
+            for conn in self._get_free_connections():
+                conn.set_maint_notifications_pool_handler_for_connection(
+                    maint_notifications_pool_handler
+                )
+                conn.maint_notifications_config = (
+                    maint_notifications_pool_handler.config
+                )
+                conn.disconnect()
+            for conn in self._get_in_use_connections():
+                conn.set_maint_notifications_pool_handler_for_connection(
+                    maint_notifications_pool_handler
+                )
+                conn.maint_notifications_config = (
+                    maint_notifications_pool_handler.config
+                )
+                conn.mark_for_reconnect()
 
     def _should_update_connection(
         self,
@@ -2275,7 +2350,7 @@ class MaintNotificationsConnectionPoolBase:
                     conn.disconnect()
 
 
-class ConnectionPool(MaintNotificationsConnectionPoolBase, ConnectionPoolInterface):
+class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInterface):
     """
     Create a connection pool. ``If max_connections`` is set, then this
     object raises :py:class:`~redis.exceptions.ConnectionError` when the pool's
@@ -2285,6 +2360,12 @@ class ConnectionPool(MaintNotificationsConnectionPoolBase, ConnectionPoolInterfa
     is specified. Use class:`.UnixDomainSocketConnection` for
     unix sockets.
     :py:class:`~redis.SSLConnection` can be used for SSL enabled connections.
+
+    If ``maint_notifications_config`` is provided, the connection pool will support
+    maintenance notifications.
+    Maintenance notifications are supported only with RESP3.
+    If the ``maint_notifications_config`` is not provided but the ``protocol`` is 3,
+    the maintenance notifications will be enabled by default.
 
     Any additional keyword arguments are passed to the constructor of
     ``connection_class``.
@@ -2344,6 +2425,7 @@ class ConnectionPool(MaintNotificationsConnectionPoolBase, ConnectionPoolInterfa
         connection_class=Connection,
         max_connections: Optional[int] = None,
         cache_factory: Optional[CacheFactoryInterface] = None,
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         **connection_kwargs,
     ):
         max_connections = max_connections or 2**31
@@ -2394,7 +2476,11 @@ class ConnectionPool(MaintNotificationsConnectionPoolBase, ConnectionPoolInterfa
         self._fork_lock = threading.RLock()
         self._lock = threading.RLock()
 
-        MaintNotificationsConnectionPoolBase.__init__(self, **connection_kwargs)
+        MaintNotificationsAbstractConnectionPool.__init__(
+            self,
+            maint_notifications_config=maint_notifications_config,
+            **connection_kwargs,
+        )
 
         self.reset()
 
@@ -2512,7 +2598,7 @@ class ConnectionPool(MaintNotificationsConnectionPoolBase, ConnectionPoolInterfa
                 if (
                     connection.can_read()
                     and self.cache is None
-                    and not self.maint_notifications_pool_handler_enabled()
+                    and not self.maint_notifications_enabled()
                 ):
                     raise ConnectionError("Connection has data")
             except (ConnectionError, TimeoutError, OSError):

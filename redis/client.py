@@ -278,6 +278,17 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         single_connection_client:
             if `True`, connection pool is not used. In that case `Redis`
             instance use is not thread safe.
+        decode_responses:
+            if `True`, the response will be decoded to utf-8.
+            Argument is ignored when connection_pool is provided.
+        maint_notifications_config:
+            configuration the pool to support maintenance notifications - see
+            `redis.maint_notifications.MaintNotificationsConfig` for details.
+            Only supported with RESP3
+            If not provided and protocol is RESP3, the maintenance notifications
+            will be enabled by default (logic is included in the connection pool
+            initialization).
+            Argument is ignored when connection_pool is provided.
         """
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -354,6 +365,22 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "cache_config": cache_config,
                         }
                     )
+                maint_notifications_enabled = (
+                    maint_notifications_config and maint_notifications_config.enabled
+                )
+                if maint_notifications_enabled and protocol not in [
+                    3,
+                    "3",
+                ]:
+                    raise RedisError(
+                        "Maintenance notifications handlers on connection are only supported with RESP version 3"
+                    )
+                if maint_notifications_config:
+                    kwargs.update(
+                        {
+                            "maint_notifications_config": maint_notifications_config,
+                        }
+                    )
             connection_pool = ConnectionPool(**kwargs)
             self._event_dispatcher.dispatch(
                 AfterPooledConnectionsInstantiationEvent(
@@ -376,23 +403,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             "3",
         ]:
             raise RedisError("Client caching is only supported with RESP version 3")
-
-        if maint_notifications_config and self.connection_pool.get_protocol() not in [
-            3,
-            "3",
-        ]:
-            raise RedisError(
-                "Push handlers on connection are only supported with RESP version 3"
-            )
-        if maint_notifications_config and maint_notifications_config.enabled:
-            self.maint_notifications_pool_handler = MaintNotificationsPoolHandler(
-                self.connection_pool, maint_notifications_config
-            )
-            self.connection_pool.set_maint_notifications_pool_handler(
-                self.maint_notifications_pool_handler
-            )
-        else:
-            self.maint_notifications_pool_handler = None
 
         self.single_connection_lock = threading.RLock()
         self.connection = None
@@ -591,15 +601,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         return Monitor(self.connection_pool)
 
     def client(self):
-        maint_notifications_config = (
-            None
-            if self.maint_notifications_pool_handler is None
-            else self.maint_notifications_pool_handler.config
-        )
         return self.__class__(
             connection_pool=self.connection_pool,
             single_connection_client=True,
-            maint_notifications_config=maint_notifications_config,
         )
 
     def __enter__(self):
