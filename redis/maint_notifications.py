@@ -570,7 +570,7 @@ class MaintNotificationsPoolHandler:
         self.connection = connection
 
     def get_handler_for_connection(self):
-        # Deep all data that should be shared between connections
+        # Copy all data that should be shared between connections
         # but each connection should have its own pool handler
         # since each connection can be in a different state
         copy = MaintNotificationsPoolHandler(self.pool, self.config)
