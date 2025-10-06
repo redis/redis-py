@@ -274,10 +274,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         provided pool will be used.
 
         Args:
-
-        single_connection_client:
-            if `True`, connection pool is not used. In that case `Redis`
-            instance use is not thread safe.
+            single_connection_client:
+                if `True`, connection pool is not used. In that case `Redis`
+                instance use is not thread safe.
         """
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
