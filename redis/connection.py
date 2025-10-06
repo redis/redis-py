@@ -1625,6 +1625,8 @@ def parse_url(url):
     if not (
         url.startswith("redis://")
         or url.startswith("rediss://")
+        or url.startswith("rediscluster://")
+        or url.startswith("redisclusters://")
         or url.startswith("unix://")
     ):
         raise ValueError(
@@ -1672,7 +1674,7 @@ def parse_url(url):
             except (AttributeError, ValueError):
                 pass
 
-        if url.scheme == "rediss":
+        if url.scheme in ["rediss", "redisclusters"]:
             kwargs["connection_class"] = SSLConnection
 
     return kwargs
