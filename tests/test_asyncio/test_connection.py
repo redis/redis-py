@@ -30,6 +30,7 @@ from .mocks import MockStream
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.asyncio
 async def test_invalid_response(create_redis):
     r = await create_redis(single_connection_client=True)
 
@@ -51,6 +52,7 @@ async def test_invalid_response(create_redis):
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.asyncio
 async def test_single_connection():
     """Test that concurrent requests on a single client are synchronised."""
     r = Redis(single_connection_client=True)
@@ -99,6 +101,7 @@ async def test_single_connection():
 @skip_if_server_version_lt("4.0.0")
 @pytest.mark.redismod
 @pytest.mark.onlynoncluster
+@pytest.mark.asyncio
 async def test_loading_external_modules(r):
     def inner():
         pass
@@ -119,12 +122,14 @@ async def test_loading_external_modules(r):
     # assert mod.get('fookey') == d
 
 
+@pytest.mark.asyncio
 async def test_socket_param_regression(r):
     """A regression test for issue #1060"""
     conn = UnixDomainSocketConnection()
     _ = await conn.disconnect() is True
 
 
+@pytest.mark.asyncio
 async def test_can_run_concurrent_commands(r):
     if getattr(r, "connection", None) is not None:
         # Concurrent commands are only supported on pooled or cluster connections
@@ -134,6 +139,7 @@ async def test_can_run_concurrent_commands(r):
     assert all(await asyncio.gather(*(r.ping() for _ in range(10))))
 
 
+@pytest.mark.asyncio
 async def test_connect_retry_on_timeout_error(connect_args):
     """Test that the _connect function is retried in case of a timeout"""
     conn = Connection(
@@ -155,6 +161,7 @@ async def test_connect_retry_on_timeout_error(connect_args):
     await conn.disconnect()
 
 
+@pytest.mark.asyncio
 async def test_connect_without_retry_on_os_error():
     """Test that the _connect function is not being retried in case of a OSError"""
     with patch.object(Connection, "_connect") as _connect:
@@ -165,6 +172,7 @@ async def test_connect_without_retry_on_os_error():
         assert _connect.call_count == 1
 
 
+@pytest.mark.asyncio
 async def test_connect_timeout_error_without_retry():
     """Test that the _connect function is not being retried if retry_on_timeout is
     set to False"""
@@ -178,6 +186,7 @@ async def test_connect_timeout_error_without_retry():
 
 
 @pytest.mark.onlynoncluster
+@pytest.mark.asyncio
 async def test_connection_parse_response_resume(r: redis.Redis):
     """
     This test verifies that the Connection parser,
@@ -212,6 +221,7 @@ async def test_connection_parse_response_resume(r: redis.Redis):
     [_AsyncRESP2Parser, _AsyncRESP3Parser, _AsyncHiredisParser],
     ids=["AsyncRESP2Parser", "AsyncRESP3Parser", "AsyncHiredisParser"],
 )
+@pytest.mark.asyncio
 async def test_connection_disconect_race(parser_class, connect_args):
     """
     This test reproduces the case in issue #2349
@@ -293,12 +303,14 @@ async def test_connection_disconect_race(parser_class, connect_args):
 
 
 @pytest.mark.onlynoncluster
-def test_create_single_connection_client_from_url():
+@pytest.mark.asyncio
+async def test_create_single_connection_client_from_url():
     client = Redis.from_url("redis://localhost:6379/0?", single_connection_client=True)
     assert client.single_connection_client is True
 
 
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
+@pytest.mark.asyncio
 async def test_pool_auto_close(request, from_url):
     """Verify that basic Redis instances have auto_close_connection_pool set to True"""
 
@@ -315,6 +327,7 @@ async def test_pool_auto_close(request, from_url):
     await r1.aclose()
 
 
+@pytest.mark.asyncio
 async def test_close_is_aclose(request):
     """Verify close() calls aclose()"""
     calls = 0
@@ -334,6 +347,7 @@ async def test_close_is_aclose(request):
         await r1.close()
 
 
+@pytest.mark.asyncio
 async def test_pool_from_url_deprecation(request):
     url: str = request.config.getoption("--redis-url")
 
@@ -341,6 +355,7 @@ async def test_pool_from_url_deprecation(request):
         return Redis.from_url(url, auto_close_connection_pool=False)
 
 
+@pytest.mark.asyncio
 async def test_pool_auto_close_disable(request):
     """Verify that auto_close_connection_pool can be disabled (deprecated)"""
 
@@ -359,6 +374,7 @@ async def test_pool_auto_close_disable(request):
 
 
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
+@pytest.mark.asyncio
 async def test_redis_connection_pool(request, from_url):
     """Verify that basic Redis instances using `connection_pool`
     have auto_close_connection_pool set to False"""
@@ -391,6 +407,7 @@ async def test_redis_connection_pool(request, from_url):
 
 
 @pytest.mark.parametrize("from_url", (True, False), ids=("from_url", "from_args"))
+@pytest.mark.asyncio
 async def test_redis_from_pool(request, from_url):
     """Verify that basic Redis instances created using `from_pool()`
     have auto_close_connection_pool set to True"""
@@ -423,6 +440,7 @@ async def test_redis_from_pool(request, from_url):
 
 
 @pytest.mark.parametrize("auto_close", (True, False))
+@pytest.mark.asyncio
 async def test_redis_pool_auto_close_arg(request, auto_close):
     """test that redis instance where pool is provided have
     auto_close_connection_pool set to False, regardless of arg"""
@@ -449,6 +467,7 @@ async def test_redis_pool_auto_close_arg(request, auto_close):
     await pool.disconnect()
 
 
+@pytest.mark.asyncio
 async def test_client_garbage_collection(request):
     """
     Test that a Redis client will call _close() on any
@@ -472,6 +491,7 @@ async def test_client_garbage_collection(request):
     await pool.aclose()
 
 
+@pytest.mark.asyncio
 async def test_connection_garbage_collection(request):
     """
     Test that a Connection object will call close() on the
@@ -525,12 +545,14 @@ async def test_connection_garbage_collection(request):
         ),
     ],
 )
+@pytest.mark.asyncio
 async def test_format_error_message(conn, error, expected_message):
     """Test that the _error_message function formats errors correctly"""
     error_message = conn._error_message(error)
     assert error_message == expected_message
 
 
+@pytest.mark.asyncio
 async def test_network_connection_failure():
     exp_err = rf"^Error {ECONNREFUSED} connecting to 127.0.0.1:9999.(.+)$"
     with pytest.raises(ConnectionError, match=exp_err):
@@ -538,6 +560,7 @@ async def test_network_connection_failure():
         await redis.set("a", "b")
 
 
+@pytest.mark.asyncio
 async def test_unix_socket_connection_failure():
     exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     with pytest.raises(ConnectionError, match=exp_err):

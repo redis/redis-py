@@ -119,6 +119,7 @@ class TestRetry:
 class TestRedisClientRetry:
     "Test the Redis client behavior with retries"
 
+    @pytest.mark.asyncio
     async def test_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
         url = request.config.getoption("--redis-url")

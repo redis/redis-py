@@ -7,6 +7,8 @@ from tests.conftest import skip_if_server_version_lt
 from .compat import aclosing
 from .conftest import wait_for_command
 
+pytestmark = pytest.mark.asyncio
+
 
 class TestPipeline:
     async def test_pipeline_is_true(self, r):

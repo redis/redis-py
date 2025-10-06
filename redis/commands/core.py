@@ -53,6 +53,7 @@ from redis.utils import (
 from .helpers import list_or_args
 
 if TYPE_CHECKING:
+    import redis.anyio.client
     import redis.asyncio.client
     import redis.client
 
@@ -1456,7 +1457,11 @@ class BitFieldOperation:
 
     def __init__(
         self,
-        client: Union["redis.client.Redis", "redis.asyncio.client.Redis"],
+        client: Union[
+            "redis.client.Redis",
+            "redis.asyncio.client.Redis",
+            "redis.anyio.client.Redis",
+        ],
         key: str,
         default_overflow: Optional[str] = None,
     ):
@@ -1600,7 +1605,11 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("BITCOUNT", *params, keys=[key])
 
     def bitfield(
-        self: Union["redis.client.Redis", "redis.asyncio.client.Redis"],
+        self: Union[
+            "redis.client.Redis",
+            "redis.asyncio.client.Redis",
+            "redis.anyio.client.Redis",
+        ],
         key: KeyT,
         default_overflow: Optional[str] = None,
     ) -> BitFieldOperation:
@@ -1613,7 +1622,11 @@ class BasicKeyCommands(CommandsProtocol):
         return BitFieldOperation(self, key, default_overflow=default_overflow)
 
     def bitfield_ro(
-        self: Union["redis.client.Redis", "redis.asyncio.client.Redis"],
+        self: Union[
+            "redis.client.Redis",
+            "redis.asyncio.client.Redis",
+            "redis.anyio.client.Redis",
+        ],
         key: KeyT,
         encoding: str,
         offset: BitfieldOffsetT,
@@ -5740,7 +5753,7 @@ class AsyncScript:
 
     def __init__(
         self,
-        registered_client: "redis.asyncio.client.Redis",
+        registered_client: "redis.asyncio.client.Redis | redis.anyio.client.Redis",
         script: ScriptTextT,
     ):
         self.registered_client = registered_client
@@ -5762,7 +5775,9 @@ class AsyncScript:
         self,
         keys: Union[Sequence[KeyT], None] = None,
         args: Union[Iterable[EncodableT], None] = None,
-        client: Union["redis.asyncio.client.Redis", None] = None,
+        client: Union[
+            "redis.asyncio.client.Redis", "redis.anyio.client.Redis", None
+        ] = None,
     ):
         """Execute the script, passing any required ``args``"""
         keys = keys or []
@@ -5771,9 +5786,10 @@ class AsyncScript:
             client = self.registered_client
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
-        from redis.asyncio.client import Pipeline
+        from redis.anyio.client import Pipeline as AnyioPipeline
+        from redis.asyncio.client import Pipeline as AsyncioPipeline
 
-        if isinstance(client, Pipeline):
+        if isinstance(client, (AsyncioPipeline, AnyioPipeline)):
             # Make sure the pipeline can register the script before executing.
             client.scripts.add(self)
         try:
@@ -6002,7 +6018,7 @@ class AsyncScriptCommands(ScriptCommands):
         return super().script_debug()
 
     def register_script(
-        self: "redis.asyncio.client.Redis",
+        self: "redis.asyncio.client.Redis | redis.anyio.client.Redis",
         script: ScriptTextT,
     ) -> AsyncScript:
         """

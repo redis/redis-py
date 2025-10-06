@@ -3,6 +3,8 @@ import pytest_asyncio
 from redis import exceptions
 from tests.conftest import skip_if_server_version_lt
 
+pytestmark = pytest.mark.asyncio
+
 multiply_script = """
 local value = redis.call('GET', KEYS[1])
 value = tonumber(value)

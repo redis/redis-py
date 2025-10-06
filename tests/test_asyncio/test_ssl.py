@@ -30,10 +30,12 @@ class TestSSL:
         yield client
         await client.aclose()
 
+    @pytest.mark.asyncio
     async def test_ssl_with_invalid_cert(self, _get_client):
         """Test SSL connection with invalid certificate."""
         pass
 
+    @pytest.mark.asyncio
     async def test_cert_reqs_none_with_check_hostname(self, request):
         """Test that when ssl_cert_reqs=none is used with ssl_check_hostname=True,
         the connection is created successfully with check_hostname internally set to False"""

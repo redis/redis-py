@@ -1565,7 +1565,7 @@ def test_aggregations_add_scores(client):
 
 @pytest.mark.redismod
 @skip_ifmodversion_lt("2.10.05", "search")
-async def test_aggregations_hybrid_scoring(client):
+def test_aggregations_hybrid_scoring(client):
     client.ft().create_index(
         (
             TextField("name", sortable=True, weight=5.0),

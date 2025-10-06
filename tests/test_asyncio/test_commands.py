@@ -38,6 +38,8 @@ if sys.version_info >= (3, 11, 3):
 else:
     from async_timeout import timeout as async_timeout
 
+pytestmark = pytest.mark.asyncio
+
 REDIS_6_VERSION = "5.9.0"
 
 
