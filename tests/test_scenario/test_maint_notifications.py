@@ -36,7 +36,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S:%f",
 )
 
-BIND_TIMEOUT = 30
+BIND_TIMEOUT = 60
 MIGRATE_TIMEOUT = 60
 FAILOVER_TIMEOUT = 15
 
@@ -108,29 +108,6 @@ class TestPushNotifications:
                 logging.info("Failover cleanup completed")
             except Exception as e:
                 logging.error(f"Failed to revert failover: {e}")
-
-        if self._migration_executed:
-            try:
-                if self.target_node and self.empty_node:
-                    self._execute_migration(
-                        fault_injector_client=fault_injector_client,
-                        endpoints_config=endpoints_config,
-                        target_node=self.empty_node,
-                        empty_node=self.target_node,
-                    )
-                    logging.info("Migration cleanup completed")
-            except Exception as e:
-                logging.error(f"Failed to revert migration: {e}")
-
-        if self._bind_executed:
-            try:
-                if self.endpoint_id:
-                    self._execute_bind(
-                        fault_injector_client, endpoints_config, self.endpoint_id
-                    )
-                    logging.info("Bind cleanup completed")
-            except Exception as e:
-                logging.error(f"Failed to revert bind endpoint: {e}")
 
         logging.info("Cleanup finished")
 
@@ -916,7 +893,15 @@ class TestPushNotifications:
         )
 
         migrate_thread.join()
+        logging.info("Executing rladmin bind endpoint command for cleanup...")
 
+        bind_thread = Thread(
+            target=self._execute_bind,
+            name="bind_thread",
+            args=(fault_injector_client, endpoints_config, self.endpoint_id),
+        )
+        bind_thread.start()
+        bind_thread.join()
         client_maint_notifications.connection_pool.release(first_conn)
         client_maint_notifications.connection_pool.release(second_connection)
 

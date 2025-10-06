@@ -80,6 +80,12 @@ filterwarnings = [
     # Ignore a coverage warning when COVERAGE_CORE=sysmon for Pythons < 3.12.
     "ignore:sys.monitoring isn't available:coverage.exceptions.CoverageWarning",
 ]
+log_cli_level = "INFO"
+log_cli_date_format = "%H:%M:%S:%f"
+log_cli = false
+log_cli_format = "%(asctime)s %(levelname)s %(threadName)s: %(message)s"
+log_level = "INFO"
+capture = "yes"
 
 [tool.ruff]
 target-version = "py39"
