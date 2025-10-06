@@ -4724,7 +4724,7 @@ class TestRedisCommands:
         ]
         assert r.xinfo_groups(stream) == expected
 
-    @skip_if_server_version_lt("2")
+    @skip_if_server_version_lt("8.2.2")
     def test_xgroup_setid_fixed_max_entries_read(self, r):
         stream = "stream"
         group = "group"
