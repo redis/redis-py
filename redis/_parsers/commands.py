@@ -254,6 +254,10 @@ class CommandsParser(AbstractCommandsParser):
             tips = details.get('tips')
             subcommands = details.get('subcommands')
 
+            # Process tips for the main command
+            if tips:
+                extract_policies(tips, command)
+
             # Process subcommands
             if subcommands:
                 for subcommand_details in subcommands:
@@ -279,10 +283,6 @@ class CommandsParser(AbstractCommandsParser):
                         # Recursively extract policies from the rest of the subcommand details
                         for subcommand_detail in subcommand_details[1:]:
                             extract_policies(subcommand_detail, subcmd_name)
-
-            # Process tips for the main command
-            if tips:
-                extract_policies(tips, command)
 
         return command_with_policies
 
