@@ -1,5 +1,6 @@
 import pytest
 from redis._parsers import CommandsParser
+from redis._parsers.commands import RequestPolicy, ResponsePolicy
 
 from .conftest import (
     assert_resp_response,
@@ -106,3 +107,30 @@ class TestCommandsParser:
         assert commands_parser.get_keys(r, *args2) == ["foo1", "foo2", "foo3"]
         assert commands_parser.get_keys(r, *args3) == ["*"]
         assert commands_parser.get_keys(r, *args4) == ["foo1", "foo2", "foo3"]
+
+    @skip_if_server_version_lt("7.0.0")
+    def test_get_command_policies(self, r):
+        commands_parser = CommandsParser(r)
+        expected_command_policies = {
+            'keys': [RequestPolicy.ALL_SHARDS, ResponsePolicy.DEFAULT_KEYED],
+            'acl setuser': [RequestPolicy.ALL_NODES, ResponsePolicy.ALL_SUCCEEDED],
+            'exists': [RequestPolicy.MULTI_SHARD, ResponsePolicy.AGG_SUM],
+            'config resetstat': [RequestPolicy.ALL_NODES, ResponsePolicy.ALL_SUCCEEDED],
+            'slowlog len': [RequestPolicy.ALL_NODES, ResponsePolicy.AGG_SUM],
+            'scan': [RequestPolicy.SPECIAL, ResponsePolicy.SPECIAL],
+            'latency history': [RequestPolicy.ALL_NODES, ResponsePolicy.SPECIAL],
+            'memory doctor': [RequestPolicy.ALL_SHARDS, ResponsePolicy.SPECIAL],
+            'randomkey': [RequestPolicy.ALL_SHARDS, ResponsePolicy.SPECIAL],
+            'mget': [RequestPolicy.MULTI_SHARD, ResponsePolicy.DEFAULT_KEYED],
+            'function restore': [RequestPolicy.ALL_SHARDS, ResponsePolicy.ALL_SUCCEEDED],
+        }
+
+        actual_policies = commands_parser.get_command_policies()
+        assert len(actual_policies) > 0
+
+        for command, command_policies in expected_command_policies.items():
+            assert command in actual_policies
+            assert command_policies == [
+                actual_policies[command].request_policy,
+                actual_policies[command].response_policy
+            ]

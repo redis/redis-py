@@ -1,11 +1,37 @@
+from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
-from redis.exceptions import RedisError, ResponseError
+from redis.exceptions import RedisError, ResponseError, IncorrectPolicyType
 from redis.utils import str_if_bytes
 
 if TYPE_CHECKING:
     from redis.asyncio.cluster import ClusterNode
 
+class RequestPolicy(Enum):
+    ALL_NODES = 'all_nodes'
+    ALL_SHARDS = 'all_shards'
+    MULTI_SHARD = 'multi_shard'
+    SPECIAL = 'special'
+    DEFAULT_KEYLESS = 'default_keyless'
+    DEFAULT_KEYED = 'default_keyed'
+
+class ResponsePolicy(Enum):
+    ONE_SUCCEEDED = 'one_succeeded'
+    ALL_SUCCEEDED = 'all_succeeded'
+    AGG_LOGICAL_AND = 'agg_logical_and'
+    AGG_LOGICAL_OR = 'agg_logical_or'
+    AGG_MIN = 'agg_min'
+    AGG_MAX = 'agg_max'
+    AGG_SUM = 'agg_sum'
+    SPECIAL = 'special'
+    DEFAULT_KEYLESS = 'default_keyless'
+    DEFAULT_KEYED = 'default_keyed'
+
+class CommandPolicies:
+    def __init__(self, is_keyless: bool):
+        self.request_policy = RequestPolicy.DEFAULT_KEYLESS if is_keyless else RequestPolicy.DEFAULT_KEYED
+        self.response_policy = ResponsePolicy.DEFAULT_KEYLESS if is_keyless else ResponsePolicy.DEFAULT_KEYED
 
 class AbstractCommandsParser:
     def _get_pubsub_keys(self, *args):
@@ -64,7 +90,8 @@ class CommandsParser(AbstractCommandsParser):
 
     def __init__(self, redis_connection):
         self.commands = {}
-        self.initialize(redis_connection)
+        self.redis_connection = redis_connection
+        self.initialize(self.redis_connection)
 
     def initialize(self, r):
         commands = r.command()
@@ -169,6 +196,95 @@ class CommandsParser(AbstractCommandsParser):
                 raise e
         return keys
 
+    def get_command_policies(self) -> dict[str, CommandPolicies]:
+        command_with_policies = {}
+
+        def extract_policies(data, command_name):
+            """
+            Recursively extract policies from nested data structures.
+            
+            Args:
+                data: The data structure to search (can be list, dict, str, bytes, etc.)
+                command_name: The command name to associate with found policies
+            """
+            if isinstance(data, (str, bytes)):
+                # Decode bytes to string if needed
+                policy = data.decode() if isinstance(data, bytes) else data
+
+                # Check if this is a policy string
+                if policy.startswith('request_policy') or policy.startswith('response_policy'):
+                    if policy.startswith('request_policy'):
+                        policy_type = policy.split(':')[1]
+
+                        try:
+                            command_with_policies[command_name].request_policy = RequestPolicy(policy_type)
+                        except ValueError:
+                            raise IncorrectPolicyType(f"Incorrect request policy type: {policy_type}")
+
+                    if policy.startswith('response_policy'):
+                        policy_type = policy.split(':')[1]
+
+                        try:
+                            command_with_policies[command_name].response_policy = ResponsePolicy(policy_type)
+                        except ValueError:
+                            raise IncorrectPolicyType(f"Incorrect response policy type: {policy_type}")
+            
+            elif isinstance(data, list):
+                # For lists, recursively process each element
+                for item in data:
+                    extract_policies(item, command_name)
+            
+            elif isinstance(data, dict):
+                # For dictionaries, recursively process each value
+                for value in data.values():
+                    extract_policies(value, command_name)
+
+        for command, details in self.commands.items():
+            # Check whether the command has keys
+            keys = self.get_keys(self.redis_connection, command)
+
+            if not keys:
+                is_keyless = False
+            else:
+                is_keyless = True
+
+            # Create a CommandPolicies object with default policies on the new command.
+            command_with_policies[command] = CommandPolicies(is_keyless)
+
+            tips = details.get('tips')
+            subcommands = details.get('subcommands')
+
+            # Process subcommands
+            if subcommands:
+                for subcommand_details in subcommands:
+                    # Get the subcommand name (first element)
+                    if subcommand_details:
+                        subcmd_name = subcommand_details[0]
+                        if isinstance(subcmd_name, bytes):
+                            subcmd_name = subcmd_name.decode()
+
+                        subcmd_name = subcmd_name.replace('|', ' ')
+
+                        # Check whether the command has keys
+                        keys = self.get_keys(self.redis_connection, subcmd_name)
+
+                        if not keys:
+                            is_keyless = False
+                        else:
+                            is_keyless = True
+
+                        # Create a CommandPolicies object with default policies on the new command.
+                        command_with_policies[subcmd_name] = CommandPolicies(is_keyless)
+                        
+                        # Recursively extract policies from the rest of the subcommand details
+                        for subcommand_detail in subcommand_details[1:]:
+                            extract_policies(subcommand_detail, subcmd_name)
+
+            # Process tips for the main command
+            if tips:
+                extract_policies(tips, command)
+
+        return command_with_policies
 
 class AsyncCommandsParser(AbstractCommandsParser):
     """
