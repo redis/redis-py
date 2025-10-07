@@ -3158,6 +3158,7 @@ class TestRedisCommands:
         assert await r.xgroup_destroy(stream, group)
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_server_version_gte("8.2.2")
     async def test_xgroup_setid(self, r: redis.Redis):
         stream = "stream"
         group = "group"
@@ -3174,6 +3175,28 @@ class TestRedisCommands:
                 "last-delivered-id": message_id,
                 "entries-read": 2,
                 "lag": -1,
+            }
+        ]
+        assert await r.xinfo_groups(stream) == expected
+
+    @skip_if_server_version_lt("8.2.2")
+    async def test_xgroup_setid_fixed_max_entries_read(self, r):
+        stream = "stream"
+        group = "group"
+        message_id = await r.xadd(stream, {"foo": "bar"})
+        await r.xadd(stream, {"foo1": "bar1"})
+
+        await r.xgroup_create(stream, group, 0)
+        # advance the last_delivered_id to the message_id
+        await r.xgroup_setid(stream, group, message_id, entries_read=2)
+        expected = [
+            {
+                "name": group.encode(),
+                "consumers": 0,
+                "pending": 0,
+                "last-delivered-id": message_id,
+                "entries-read": 2,
+                "lag": 0,
             }
         ]
         assert await r.xinfo_groups(stream) == expected

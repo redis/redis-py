@@ -114,6 +114,9 @@ class DummyConnection(Connection):
     async def re_auth(self):
         pass
 
+    def should_reconnect(self):
+        return False
+
 
 class TestConnectionPool:
     @asynccontextmanager
