@@ -111,7 +111,7 @@ class TestMultiDbClient:
         indirect=True,
     )
     def test_execute_command_against_correct_db_on_background_health_check_determine_active_db_unhealthy(
-        self, mock_multi_db_config, mock_db, mock_db1, mock_db2
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         cb = PBCircuitBreakerAdapter(pybreaker.CircuitBreaker(reset_timeout=5))
         cb.database = mock_db
@@ -127,46 +127,98 @@ class TestMultiDbClient:
 
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
+        # Track health check runs across all databases
+        health_check_run = 0
+
+        # Create events for each failover scenario
+        db1_became_unhealthy = threading.Event()
+        db2_became_unhealthy = threading.Event()
+        db_became_unhealthy = threading.Event()
+        counter_lock = threading.Lock()
+
+        def mock_check_health(database):
+            nonlocal health_check_run
+
+            # Increment run counter for each health check call
+            with counter_lock:
+                health_check_run += 1
+                current_run = health_check_run
+
+            # Run 1 (health_check_run 1-3): All databases healthy
+            if current_run <= 3:
+                return True
+
+            # Run 2 (health_check_run 4-6): mock_db1 unhealthy, others healthy
+            elif current_run <= 6:
+                if database == mock_db1:
+                    if current_run == 6:
+                        db1_became_unhealthy.set()
+                    return False
+
+                # Signal that db1 has become unhealthy after all 3 checks
+                if current_run == 6:
+                    db1_became_unhealthy.set()
+                return True
+
+            # Run 3 (health_check_run 7-9): mock_db1 and mock_db2 unhealthy, mock_db healthy
+            elif current_run <= 9:
+                if database == mock_db1 or database == mock_db2:
+                    if current_run == 9:
+                        db2_became_unhealthy.set()
+                    return False
+
+                # Signal that db2 has become unhealthy after all 3 checks
+                if current_run == 9:
+                    db2_became_unhealthy.set()
+                return True
+
+            # Run 4 (health_check_run 10-12): mock_db unhealthy, others healthy
+            else:
+                if database == mock_db:
+                    if current_run >= 12:
+                        db_became_unhealthy.set()
+                    return False
+
+                # Signal that db has become unhealthy after all 3 checks
+                if current_run >= 12:
+                    db_became_unhealthy.set()
+                return True
+
+        mock_hc.check_health.side_effect = mock_check_health
+
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
             patch.object(
                 mock_multi_db_config,
                 "default_health_checks",
-                return_value=[EchoHealthCheck()],
+                return_value=[mock_hc],
             ),
         ):
-            mock_db.client.execute_command.side_effect = [
-                "healthcheck",
-                "healthcheck",
-                "healthcheck",
-                "OK",
-                "error",
-            ]
-            mock_db1.client.execute_command.side_effect = [
-                "healthcheck",
-                "OK1",
-                "error",
-                "error",
-                "healthcheck",
-                "OK1",
-            ]
-            mock_db2.client.execute_command.side_effect = [
-                "healthcheck",
-                "healthcheck",
-                "OK2",
-                "error",
-                "error",
-            ]
-            mock_multi_db_config.health_check_interval = 0.2
+            mock_multi_db_config.health_check_interval = 0.1
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
+            mock_db.client.execute_command.return_value = "OK"
+            mock_db1.client.execute_command.return_value = "OK1"
+            mock_db2.client.execute_command.return_value = "OK2"
 
             client = MultiDBClient(mock_multi_db_config)
             assert client.set("key", "value") == "OK1"
-            sleep(0.3)
+
+            # Wait for mock_db1 to become unhealthy
+            assert db1_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db1 to become unhealthy"
+            sleep(0.01)
+
             assert client.set("key", "value") == "OK2"
-            sleep(0.2)
+
+            # Wait for mock_db2 to become unhealthy
+            assert db2_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db2 to become unhealthy"
+            sleep(0.01)
+
             assert client.set("key", "value") == "OK"
-            sleep(0.2)
+
+            # Wait for mock_db to become unhealthy
+            assert db_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db to become unhealthy"
+            sleep(0.01)
+
             assert client.set("key", "value") == "OK1"
 
     @pytest.mark.parametrize(
