@@ -386,6 +386,13 @@ class MaintNotificationsAbstractConnection:
                 "To configure maintenance notifications, a parser must be provided!"
             )
 
+        if not isinstance(parser, _HiredisParser) and not isinstance(
+            parser, _RESP3Parser
+        ):
+            raise RedisError(
+                "Maintenance notifications are only supported with hiredis and RESP3 parsers!"
+            )
+
         if maint_notifications_pool_handler:
             # Extract a reference to a new pool handler that copies all properties
             # of the original one and has a different connection reference
@@ -741,7 +748,12 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 raise ConnectionError("protocol must be either 2 or 3")
                 # p = DEFAULT_RESP_VERSION
             self.protocol = p
-        if self.protocol == 3 and parser_class == DefaultParser:
+        if self.protocol == 3 and parser_class == _RESP2Parser:
+            # If the protocol is 3 but the parser is RESP2, change it to RESP3
+            # This is needed because the parser might be set before the protocol
+            # or might be provided as a kwarg to the constructor
+            # We need to react on discrepancy only for RESP2 and RESP3
+            # as hiredis supports both
             parser_class = _RESP3Parser
         self.set_parser(parser_class)
 

@@ -304,6 +304,38 @@ class MockSocket:
 
             raise BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
 
+    def recv_into(self, buffer, nbytes=0):
+        """
+        Receive data from Redis and write it into the provided buffer.
+        Returns the number of bytes written.
+
+        This method is used by the hiredis parser for efficient data reading.
+        """
+        if self.closed:
+            raise ConnectionError("Socket is closed")
+
+        # Use pending responses that were prepared when commands were sent
+        if self.pending_responses:
+            response = self.pending_responses.pop(0)
+            if b"MOVING" in response:
+                self.moving_sent = True
+
+            # Determine how many bytes to write
+            if nbytes == 0:
+                nbytes = len(buffer)
+
+            # Write data into the buffer (up to nbytes or response length)
+            bytes_to_write = min(len(response), nbytes, len(buffer))
+            buffer[:bytes_to_write] = response[:bytes_to_write]
+
+            return bytes_to_write
+        else:
+            # No data available - this should block or raise an exception
+            # For can_read checks, we should indicate no data is available
+            import errno
+
+            raise BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
+
     def fileno(self):
         """Return a fake file descriptor for select/poll operations."""
         return 1  # Fake file descriptor
