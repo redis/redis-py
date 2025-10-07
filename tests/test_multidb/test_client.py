@@ -5,9 +5,7 @@ from unittest.mock import patch, Mock
 import pybreaker
 import pytest
 
-from redis.backoff import NoBackoff
 from redis.event import EventDispatcher, OnCommandsFailEvent
-from redis.exceptions import ConnectionError
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.database import SyncDatabase
 from redis.multidb.client import MultiDBClient
@@ -15,7 +13,6 @@ from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failover import WeightBasedFailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
-from redis.retry import Retry
 from tests.test_multidb.conftest import create_weighted_list
 
 
