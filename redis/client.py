@@ -1186,7 +1186,10 @@ class PubSub:
 
     def ping(self, message: Union[str, None] = None) -> bool:
         """
-        Ping the Redis server
+        Ping the Redis server to test connectivity.
+
+        Sends a PING command to the Redis server and returns True if the server
+        responds with "PONG".
         """
         args = ["PING", message] if message is not None else ["PING"]
         return self.execute_command(*args)

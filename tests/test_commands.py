@@ -4607,6 +4607,7 @@ class TestRedisCommands:
         assert r.xinfo_groups(stream) == expected
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_server_version_gte("8.2.2")
     def test_xgroup_create_entriesread(self, r: redis.Redis):
         stream = "stream"
         group = "group"
@@ -4624,6 +4625,33 @@ class TestRedisCommands:
                 "last-delivered-id": b"0-0",
                 "entries-read": 7,
                 "lag": 1,
+            }
+        ]
+        assert r.xinfo_groups(stream) == expected
+
+    @skip_if_server_version_lt("8.2.2")
+    def test_xgroup_create_entriesread_fixed_max_entries_read(self, r: redis.Redis):
+        stream = "stream"
+        group = "group"
+        r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo1": "bar1"})
+        r.xadd(stream, {"foo2": "bar2"})
+
+        # no group is setup yet, no info to obtain
+        assert r.xinfo_groups(stream) == []
+
+        assert r.xgroup_create(stream, group, 0, entries_read=7)
+        # validate the entries-read is max the number of entries
+        # in the stream and lag shows the entries between
+        # last_delivered_id and entries_added
+        expected = [
+            {
+                "name": group.encode(),
+                "consumers": 0,
+                "pending": 0,
+                "last-delivered-id": b"0-0",
+                "entries-read": 3,
+                "lag": 3,
             }
         ]
         assert r.xinfo_groups(stream) == expected
@@ -4675,6 +4703,7 @@ class TestRedisCommands:
         assert r.xgroup_destroy(stream, group)
 
     @skip_if_server_version_lt("7.0.0")
+    @skip_if_server_version_gte("8.2.2")
     def test_xgroup_setid(self, r):
         stream = "stream"
         group = "group"
@@ -4691,6 +4720,28 @@ class TestRedisCommands:
                 "last-delivered-id": message_id,
                 "entries-read": 2,
                 "lag": -1,
+            }
+        ]
+        assert r.xinfo_groups(stream) == expected
+
+    @skip_if_server_version_lt("8.2.2")
+    def test_xgroup_setid_fixed_max_entries_read(self, r):
+        stream = "stream"
+        group = "group"
+        message_id = r.xadd(stream, {"foo": "bar"})
+        r.xadd(stream, {"foo1": "bar1"})
+
+        r.xgroup_create(stream, group, 0)
+        # advance the last_delivered_id to the message_id
+        r.xgroup_setid(stream, group, message_id, entries_read=5)
+        expected = [
+            {
+                "name": group.encode(),
+                "consumers": 0,
+                "pending": 0,
+                "last-delivered-id": message_id,
+                "entries-read": 2,
+                "lag": 0,
             }
         ]
         assert r.xinfo_groups(stream) == expected

@@ -1161,9 +1161,12 @@ class PubSub:
             return await self.handle_message(response, ignore_subscribe_messages)
         return None
 
-    def ping(self, message=None) -> Awaitable:
+    def ping(self, message=None) -> Awaitable[bool]:
         """
-        Ping the Redis server
+        Ping the Redis server to test connectivity.
+
+        Sends a PING command to the Redis server and returns True if the server
+        responds with "PONG".
         """
         args = ["PING", message] if message is not None else ["PING"]
         return self.execute_command(*args)
