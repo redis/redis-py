@@ -255,7 +255,7 @@ class TestPipeline:
                 # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)
                 assert pipe.execute() == ["OK1", "value"]
 
-
+@pytest.mark.onlynoncluster
 class TestTransaction:
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",

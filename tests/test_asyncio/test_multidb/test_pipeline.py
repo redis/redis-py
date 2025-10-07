@@ -18,7 +18,7 @@ def mock_pipe() -> Pipeline:
     mock_pipe.__aexit__ = AsyncMock(return_value=None)
     return mock_pipe
 
-
+@pytest.mark.onlynoncluster
 class TestPipeline:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -255,7 +255,7 @@ class TestPipeline:
             # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)
             assert await pipe.execute() == ["OK1", "value"]
 
-
+@pytest.mark.onlynoncluster
 class TestTransaction:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
