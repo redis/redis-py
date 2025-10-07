@@ -140,7 +140,7 @@ def r_multi_db(
         health_check_probes=3,
         health_check_interval=health_check_interval,
         event_dispatcher=event_dispatcher,
-        health_check_delay=health_check_delay,
+        health_check_probes_delay=health_check_delay,
     )
 
     return MultiDBClient(config), listener, endpoint_config

@@ -111,7 +111,7 @@ def mock_multi_db_config(request, mock_fd, mock_fs, mock_hc, mock_ed) -> MultiDb
         databases_config=[Mock(spec=DatabaseConfig)],
         failure_detectors=[mock_fd],
         health_check_interval=hc_interval,
-        health_check_delay=0.05,
+        health_check_probes_delay=0.05,
         health_check_policy=health_check_policy,
         health_check_probes=health_check_probes,
         failover_strategy=mock_fs,

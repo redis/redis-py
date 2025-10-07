@@ -1,10 +1,13 @@
+import threading
 from time import sleep
 from unittest.mock import patch, Mock
 
 import pybreaker
 import pytest
 
+from redis.backoff import NoBackoff
 from redis.event import EventDispatcher, OnCommandsFailEvent
+from redis.exceptions import ConnectionError
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.database import SyncDatabase
 from redis.multidb.client import MultiDBClient
@@ -12,6 +15,7 @@ from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failover import WeightBasedFailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
+from redis.retry import Retry
 from tests.test_multidb.conftest import create_weighted_list
 
 
@@ -184,29 +188,24 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
-        mock_hc.check_health.side_effect = [
-            True,
-            True,
-            True,
-            False,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-        ]
+        db1_counter = 0
+        error_event = threading.Event()
+        check = False
+
+        def mock_check_health(database):
+            nonlocal db1_counter, check
+
+            if database == mock_db1 and not check:
+                db1_counter += 1
+
+                if db1_counter > 1:
+                    error_event.set()
+                    check = True
+                    return False
+
+            return True
+
+        mock_hc.check_health.side_effect = mock_check_health
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
@@ -220,14 +219,14 @@ class TestMultiDbClient:
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
             mock_multi_db_config.health_check_interval = 0.1
-            mock_multi_db_config.auto_fallback_interval = 0.5
+            mock_multi_db_config.auto_fallback_interval = 0.2
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
             assert client.set("key", "value") == "OK1"
-            sleep(0.18)
+            error_event.wait(timeout=0.5)
             assert client.set("key", "value") == "OK2"
-            sleep(0.5)
+            sleep(0.2)
             assert client.set("key", "value") == "OK1"
 
     @pytest.mark.parametrize(
