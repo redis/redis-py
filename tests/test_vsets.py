@@ -504,8 +504,8 @@ def test_vsim_epsilon(d_client):
     d_client.vset().vadd("myset", [2, 1, 1], "a")
     d_client.vset().vadd("myset", [2, 0, 1], "b")
     d_client.vset().vadd("myset", [2, 0, 0], "c")
-    d_client.vset().vadd("myset", [2, 0, -1], "d")
-    d_client.vset().vadd("myset", [2, -1, -1], "e")
+    d_client.vset().vadd("myset", [2, 0, 2], "d")
+    d_client.vset().vadd("myset", [-2, -1, -1], "e")
 
     res1 = d_client.vset().vsim("myset", [2, 1, 1])
     assert 5 == len(res1)

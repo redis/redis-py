@@ -1210,11 +1210,18 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("LATENCY RESET", *events)
 
-    def ping(self, **kwargs) -> ResponseT:
+    def ping(self, **kwargs) -> Union[Awaitable[bool], bool]:
         """
-        Ping the Redis server
+        Ping the Redis server to test connectivity.
 
-        For more information, see https://redis.io/commands/ping
+        Sends a PING command to the Redis server and returns True if the server
+        responds with "PONG".
+
+        This command is useful for:
+        - Testing whether a connection is still alive
+        - Verifying the server's ability to serve data
+
+        For more information on the underlying ping command see https://redis.io/commands/ping
         """
         return self.execute_command("PING", **kwargs)
 
