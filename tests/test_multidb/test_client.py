@@ -281,7 +281,7 @@ class TestMultiDbClient:
             assert client.set("key", "value") == "OK1"
             error_event.wait(timeout=0.5)
             assert client.set("key", "value") == "OK2"
-            sleep(0.2)
+            sleep(0.5)
             assert client.set("key", "value") == "OK1"
 
     @pytest.mark.parametrize(

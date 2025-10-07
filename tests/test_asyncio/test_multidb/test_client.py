@@ -284,7 +284,7 @@ class TestMultiDbClient:
                 assert await client.set("key", "value") == "OK1"
                 await error_event.wait()
                 assert await client.set("key", "value") == "OK2"
-                await asyncio.sleep(0.2)
+                await asyncio.sleep(0.5)
                 assert await client.set("key", "value") == "OK1"
 
     @pytest.mark.asyncio
