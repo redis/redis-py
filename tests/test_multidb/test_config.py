@@ -134,6 +134,7 @@ class TestMultiDbConfig:
         assert config.failover_strategy == mock_failover_strategy
         assert config.auto_fallback_interval == auto_fallback_interval
 
+
 @pytest.mark.onlynoncluster
 class TestDatabaseConfig:
     def test_default_config(self):

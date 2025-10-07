@@ -11,7 +11,6 @@ from redis.multidb.client import MultiDBClient
 from redis.multidb.failover import (
     WeightBasedFailoverStrategy,
 )
-from redis.multidb.healthcheck import EchoHealthCheck
 from tests.test_multidb.conftest import create_weighted_list
 
 
@@ -235,25 +234,32 @@ class TestPipeline:
                 assert pipe.execute() == ["OK1", "value"]
 
                 # Wait for mock_db1 to become unhealthy
-                assert db1_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db1 to become unhealthy"
+                assert db1_became_unhealthy.wait(timeout=1.0), (
+                    "Timeout waiting for mock_db1 to become unhealthy"
+                )
                 sleep(0.01)
 
                 # Run 2: mock_db1 unhealthy - should failover to mock_db2 (weight 0.5)
                 assert pipe.execute() == ["OK2", "value"]
 
                 # Wait for mock_db2 to become unhealthy
-                assert db2_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db2 to become unhealthy"
+                assert db2_became_unhealthy.wait(timeout=1.0), (
+                    "Timeout waiting for mock_db2 to become unhealthy"
+                )
                 sleep(0.01)
 
                 # Run 3: mock_db1 and mock_db2 unhealthy - should use mock_db (weight 0.2)
                 assert pipe.execute() == ["OK", "value"]
 
                 # Wait for mock_db to become unhealthy
-                assert db_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db to become unhealthy"
+                assert db_became_unhealthy.wait(timeout=1.0), (
+                    "Timeout waiting for mock_db to become unhealthy"
+                )
                 sleep(0.01)
 
                 # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)
                 assert pipe.execute() == ["OK1", "value"]
+
 
 @pytest.mark.onlynoncluster
 class TestTransaction:
@@ -374,7 +380,7 @@ class TestTransaction:
 
         # Track health check runs across all databases
         health_check_run = 0
-        
+
         # Create events for each failover scenario
         db1_became_unhealthy = threading.Event()
         db2_became_unhealthy = threading.Event()
@@ -383,16 +389,16 @@ class TestTransaction:
 
         def mock_check_health(database):
             nonlocal health_check_run
-            
+
             # Increment run counter for each health check call
             with counter_lock:
                 health_check_run += 1
                 current_run = health_check_run
-            
+
             # Run 1 (health_check_run 1-3): All databases healthy
             if current_run <= 3:
                 return True
-            
+
             # Run 2 (health_check_run 4-6): mock_db1 unhealthy, others healthy
             elif current_run <= 6:
                 if database == mock_db1:
@@ -404,7 +410,7 @@ class TestTransaction:
                 if current_run == 6:
                     db1_became_unhealthy.set()
                 return True
-            
+
             # Run 3 (health_check_run 7-9): mock_db1 and mock_db2 unhealthy, mock_db healthy
             elif current_run <= 9:
                 if database == mock_db1 or database == mock_db2:
@@ -416,7 +422,7 @@ class TestTransaction:
                 if current_run == 9:
                     db2_became_unhealthy.set()
                 return True
-            
+
             # Run 4 (health_check_run 10-12): mock_db unhealthy, others healthy
             else:
                 if database == mock_db:
@@ -454,24 +460,30 @@ class TestTransaction:
 
             # Run 1: All databases healthy - should use mock_db1 (highest weight 0.7)
             assert client.transaction(callback) == ["OK1", "value"]
-            
+
             # Wait for mock_db1 to become unhealthy
-            assert db1_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db1 to become unhealthy"
+            assert db1_became_unhealthy.wait(timeout=1.0), (
+                "Timeout waiting for mock_db1 to become unhealthy"
+            )
             sleep(0.01)
-            
+
             # Run 2: mock_db1 unhealthy - should failover to mock_db2 (weight 0.5)
             assert client.transaction(callback) == ["OK2", "value"]
-            
+
             # Wait for mock_db2 to become unhealthy
-            assert db2_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db2 to become unhealthy"
+            assert db2_became_unhealthy.wait(timeout=1.0), (
+                "Timeout waiting for mock_db2 to become unhealthy"
+            )
             sleep(0.01)
 
             # Run 3: mock_db1 and mock_db2 unhealthy - should use mock_db (weight 0.2)
             assert client.transaction(callback) == ["OK", "value"]
-            
+
             # Wait for mock_db to become unhealthy
-            assert db_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db to become unhealthy"
+            assert db_became_unhealthy.wait(timeout=1.0), (
+                "Timeout waiting for mock_db to become unhealthy"
+            )
             sleep(0.01)
-            
+
             # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)
             assert client.transaction(callback) == ["OK1", "value"]

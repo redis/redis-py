@@ -7,7 +7,6 @@ import pytest
 from redis.asyncio.client import Pipeline
 from redis.asyncio.multidb.client import MultiDBClient
 from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy
-from redis.asyncio.multidb.healthcheck import EchoHealthCheck
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from tests.test_asyncio.test_multidb.conftest import create_weighted_list
 
@@ -17,6 +16,7 @@ def mock_pipe() -> Pipeline:
     mock_pipe.__aenter__ = AsyncMock(return_value=mock_pipe)
     mock_pipe.__aexit__ = AsyncMock(return_value=None)
     return mock_pipe
+
 
 @pytest.mark.onlynoncluster
 class TestPipeline:
@@ -142,7 +142,6 @@ class TestPipeline:
 
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
 
-
         # Track health check runs across all databases
         health_check_run = 0
 
@@ -235,25 +234,32 @@ class TestPipeline:
             assert await pipe.execute() == ["OK1", "value"]
 
             # Wait for mock_db1 to become unhealthy
-            assert await db1_became_unhealthy.wait(), "Timeout waiting for mock_db1 to become unhealthy"
+            assert await db1_became_unhealthy.wait(), (
+                "Timeout waiting for mock_db1 to become unhealthy"
+            )
             await asyncio.sleep(0.01)
 
             # Run 2: mock_db1 unhealthy - should failover to mock_db2 (weight 0.5)
             assert await pipe.execute() == ["OK2", "value"]
 
             # Wait for mock_db2 to become unhealthy
-            assert await db2_became_unhealthy.wait(), "Timeout waiting for mock_db2 to become unhealthy"
+            assert await db2_became_unhealthy.wait(), (
+                "Timeout waiting for mock_db2 to become unhealthy"
+            )
             await asyncio.sleep(0.01)
 
             # Run 3: mock_db1 and mock_db2 unhealthy - should use mock_db (weight 0.2)
             assert await pipe.execute() == ["OK", "value"]
 
             # Wait for mock_db to become unhealthy
-            assert await db_became_unhealthy.wait(), "Timeout waiting for mock_db to become unhealthy"
+            assert await db_became_unhealthy.wait(), (
+                "Timeout waiting for mock_db to become unhealthy"
+            )
             await asyncio.sleep(0.01)
 
             # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)
             assert await pipe.execute() == ["OK1", "value"]
+
 
 @pytest.mark.onlynoncluster
 class TestTransaction:
@@ -458,19 +464,25 @@ class TestTransaction:
             assert await client.transaction(callback) == ["OK1", "value"]
 
             # Wait for mock_db1 to become unhealthy
-            assert await db1_became_unhealthy.wait(), "Timeout waiting for mock_db1 to become unhealthy"
+            assert await db1_became_unhealthy.wait(), (
+                "Timeout waiting for mock_db1 to become unhealthy"
+            )
             await asyncio.sleep(0.01)
 
             assert await client.transaction(callback) == ["OK2", "value"]
 
             # Wait for mock_db2 to become unhealthy
-            assert await db2_became_unhealthy.wait(), "Timeout waiting for mock_db1 to become unhealthy"
+            assert await db2_became_unhealthy.wait(), (
+                "Timeout waiting for mock_db1 to become unhealthy"
+            )
             await asyncio.sleep(0.01)
 
             assert await client.transaction(callback) == ["OK", "value"]
 
             # Wait for mock_db to become unhealthy
-            assert await db_became_unhealthy.wait(), "Timeout waiting for mock_db1 to become unhealthy"
+            assert await db_became_unhealthy.wait(), (
+                "Timeout waiting for mock_db1 to become unhealthy"
+            )
             await asyncio.sleep(0.01)
 
             assert await client.transaction(callback) == ["OK1", "value"]

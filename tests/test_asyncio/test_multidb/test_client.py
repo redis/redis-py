@@ -8,7 +8,7 @@ from redis.asyncio.multidb.client import MultiDBClient
 from redis.asyncio.multidb.database import AsyncDatabase
 from redis.asyncio.multidb.failover import WeightBasedFailoverStrategy
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
-from redis.asyncio.multidb.healthcheck import EchoHealthCheck, HealthCheck
+from redis.asyncio.multidb.healthcheck import HealthCheck
 from redis.event import EventDispatcher, AsyncOnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.exception import NoValidDatabaseException
@@ -206,19 +206,25 @@ class TestMultiDbClient:
             assert await client.set("key", "value") == "OK1"
 
             # Wait for mock_db1 to become unhealthy
-            assert await db1_became_unhealthy.wait(), "Timeout waiting for mock_db1 to become unhealthy"
+            assert await db1_became_unhealthy.wait(), (
+                "Timeout waiting for mock_db1 to become unhealthy"
+            )
             await asyncio.sleep(0.01)
 
             assert await client.set("key", "value") == "OK2"
 
             # Wait for mock_db2 to become unhealthy
-            assert await db2_became_unhealthy.wait(), "Timeout waiting for mock_db2 to become unhealthy"
+            assert await db2_became_unhealthy.wait(), (
+                "Timeout waiting for mock_db2 to become unhealthy"
+            )
             await asyncio.sleep(0.01)
 
             assert await client.set("key", "value") == "OK"
 
             # Wait for mock_db to become unhealthy
-            assert await db_became_unhealthy.wait(), "Timeout waiting for mock_db to become unhealthy"
+            assert await db_became_unhealthy.wait(), (
+                "Timeout waiting for mock_db to become unhealthy"
+            )
             await asyncio.sleep(0.01)
 
             assert await client.set("key", "value") == "OK1"

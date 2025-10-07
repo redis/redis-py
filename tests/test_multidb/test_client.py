@@ -12,7 +12,7 @@ from redis.multidb.client import MultiDBClient
 from redis.multidb.exception import NoValidDatabaseException
 from redis.multidb.failover import WeightBasedFailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
-from redis.multidb.healthcheck import HealthCheck, EchoHealthCheck
+from redis.multidb.healthcheck import HealthCheck
 from tests.test_multidb.conftest import create_weighted_list
 
 
@@ -204,19 +204,25 @@ class TestMultiDbClient:
             assert client.set("key", "value") == "OK1"
 
             # Wait for mock_db1 to become unhealthy
-            assert db1_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db1 to become unhealthy"
+            assert db1_became_unhealthy.wait(timeout=1.0), (
+                "Timeout waiting for mock_db1 to become unhealthy"
+            )
             sleep(0.01)
 
             assert client.set("key", "value") == "OK2"
 
             # Wait for mock_db2 to become unhealthy
-            assert db2_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db2 to become unhealthy"
+            assert db2_became_unhealthy.wait(timeout=1.0), (
+                "Timeout waiting for mock_db2 to become unhealthy"
+            )
             sleep(0.01)
 
             assert client.set("key", "value") == "OK"
 
             # Wait for mock_db to become unhealthy
-            assert db_became_unhealthy.wait(timeout=1.0), "Timeout waiting for mock_db to become unhealthy"
+            assert db_became_unhealthy.wait(timeout=1.0), (
+                "Timeout waiting for mock_db to become unhealthy"
+            )
             sleep(0.01)
 
             assert client.set("key", "value") == "OK1"
