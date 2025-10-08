@@ -32,9 +32,8 @@ class EndpointType(enum.Enum):
 
 if TYPE_CHECKING:
     from redis.connection import (
-        BlockingConnectionPool,
-        ConnectionInterface,
-        ConnectionPool,
+        MaintNotificationsAbstractConnection,
+        MaintNotificationsAbstractConnectionPool,
     )
 
 
@@ -501,7 +500,7 @@ class MaintNotificationsConfig:
         return self.relaxed_timeout != -1
 
     def get_endpoint_type(
-        self, host: str, connection: "ConnectionInterface"
+        self, host: str, connection: "MaintNotificationsAbstractConnection"
     ) -> EndpointType:
         """
         Determine the appropriate endpoint type for CLIENT MAINT_NOTIFICATIONS command.
@@ -558,7 +557,7 @@ class MaintNotificationsConfig:
 class MaintNotificationsPoolHandler:
     def __init__(
         self,
-        pool: Union["ConnectionPool", "BlockingConnectionPool"],
+        pool: "MaintNotificationsAbstractConnectionPool",
         config: MaintNotificationsConfig,
     ) -> None:
         self.pool = pool
@@ -567,8 +566,18 @@ class MaintNotificationsPoolHandler:
         self._lock = threading.RLock()
         self.connection = None
 
-    def set_connection(self, connection: "ConnectionInterface"):
+    def set_connection(self, connection: "MaintNotificationsAbstractConnection"):
         self.connection = connection
+
+    def get_handler_for_connection(self):
+        # Copy all data that should be shared between connections
+        # but each connection should have its own pool handler
+        # since each connection can be in a different state
+        copy = MaintNotificationsPoolHandler(self.pool, self.config)
+        copy._processed_notifications = self._processed_notifications
+        copy._lock = self._lock
+        copy.connection = None
+        return copy
 
     def remove_expired_notifications(self):
         with self._lock:
@@ -751,7 +760,9 @@ class MaintNotificationsConnectionHandler:
     }
 
     def __init__(
-        self, connection: "ConnectionInterface", config: MaintNotificationsConfig
+        self,
+        connection: "MaintNotificationsAbstractConnection",
+        config: MaintNotificationsConfig,
     ) -> None:
         self.connection = connection
         self.config = config
