@@ -3566,6 +3566,10 @@ class PipelineStrategy(AbstractStrategy):
             # read the response from _this_ request, not its own request.
             # disconnecting discards the dirty state & forces the next
             # caller to reconnect.
+            # NOTE: dicts have a consistent ordering; we're iterating
+            # through nodes.values() in the same order as we are when
+            # reading / writing to the connections above, which is critical
+            # for how we're using the nodes_written/nodes_read offsets.
             for i, n in enumerate(nodes.values()):
                 if i < nodes_written and i >= nodes_read:
                     n.connection.disconnect()
