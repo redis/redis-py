@@ -33,6 +33,8 @@ class CommandPolicies:
         self.request_policy = RequestPolicy.DEFAULT_KEYLESS if is_keyless else RequestPolicy.DEFAULT_KEYED
         self.response_policy = ResponsePolicy.DEFAULT_KEYLESS if is_keyless else ResponsePolicy.DEFAULT_KEYED
 
+PolicyRecords = dict[str, dict[str, CommandPolicies]]
+
 class AbstractCommandsParser:
     def _get_pubsub_keys(self, *args):
         """
@@ -196,10 +198,63 @@ class CommandsParser(AbstractCommandsParser):
                 raise e
         return keys
 
-    def get_command_policies(self) -> dict[str, CommandPolicies]:
+    def _is_keyless_command(self, command_name: str, subcommand_name: Optional[str]=None) -> bool:
+        """
+        Determines whether a given command or subcommand is considered "keyless".
+
+        A keyless command does not operate on specific keys, which is determined based
+        on the first key position in the command or subcommand details. If the command
+        or subcommand's first key position is zero or negative, it is treated as keyless.
+
+        Parameters:
+            command_name: str
+                The name of the command to check.
+            subcommand_name: Optional[str], default=None
+                The name of the subcommand to check, if applicable. If not provided,
+                the check is performed only on the command.
+
+        Returns:
+            bool
+                True if the specified command or subcommand is considered keyless,
+                False otherwise.
+
+        Raises:
+            ValueError
+                If the specified subcommand is not found within the command or the
+                specified command does not exist in the available commands.
+        """
+        if subcommand_name:
+            for subcommand in self.commands.get(command_name)['subcommands']:
+                if str_if_bytes(subcommand[0]) == subcommand_name:
+                    parsed_subcmd = self.parse_subcommand(subcommand)
+                    return parsed_subcmd['first_key_pos'] <= 0
+            raise ValueError(f"Subcommand {subcommand_name} not found in command {command_name}")
+        else:
+            command_details = self.commands.get(command_name, None)
+            if command_details is not None:
+                return command_details['first_key_pos'] <= 0
+
+            raise ValueError(f"Command {command_name} not found in commands")
+
+    def get_command_policies(self) -> PolicyRecords:
+        """
+        Retrieve and process the command policies for all commands and subcommands.
+
+        This method traverses through commands and subcommands, extracting policy details
+        from associated data structures and constructing a dictionary of commands with their
+        associated policies. It supports nested data structures and handles both main commands
+        and their subcommands.
+
+        Returns:
+            PolicyRecords: A collection of commands and subcommands associated with their
+            respective policies.
+
+        Raises:
+            IncorrectPolicyType: If an invalid policy type is encountered during policy extraction.
+        """
         command_with_policies = {}
 
-        def extract_policies(data, command_name):
+        def extract_policies(data, command_name, module_name):
             """
             Recursively extract policies from nested data structures.
             
@@ -217,7 +272,7 @@ class CommandsParser(AbstractCommandsParser):
                         policy_type = policy.split(':')[1]
 
                         try:
-                            command_with_policies[command_name].request_policy = RequestPolicy(policy_type)
+                            command_with_policies[module_name][command_name].request_policy = RequestPolicy(policy_type)
                         except ValueError:
                             raise IncorrectPolicyType(f"Incorrect request policy type: {policy_type}")
 
@@ -225,64 +280,66 @@ class CommandsParser(AbstractCommandsParser):
                         policy_type = policy.split(':')[1]
 
                         try:
-                            command_with_policies[command_name].response_policy = ResponsePolicy(policy_type)
+                            command_with_policies[module_name][command_name].response_policy = ResponsePolicy(policy_type)
                         except ValueError:
                             raise IncorrectPolicyType(f"Incorrect response policy type: {policy_type}")
             
             elif isinstance(data, list):
                 # For lists, recursively process each element
                 for item in data:
-                    extract_policies(item, command_name)
+                    extract_policies(item, command_name, module_name)
             
             elif isinstance(data, dict):
                 # For dictionaries, recursively process each value
                 for value in data.values():
-                    extract_policies(value, command_name)
+                    extract_policies(value, command_name, module_name)
 
         for command, details in self.commands.items():
             # Check whether the command has keys
-            keys = self.get_keys(self.redis_connection, command)
+            is_keyless = self._is_keyless_command(command)
 
-            if not keys:
-                is_keyless = False
+            # Check if it's a core or module command
+            split_name = command.split('.')
+
+            if len(split_name) > 1:
+                module_name = split_name[0]
+                command_name = split_name[1]
             else:
-                is_keyless = True
+                module_name = 'core'
+                command_name = split_name[0]
 
             # Create a CommandPolicies object with default policies on the new command.
-            command_with_policies[command] = CommandPolicies(is_keyless)
+            if command_with_policies.get(module_name, None) is None:
+                command_with_policies[module_name] = {command_name: CommandPolicies(is_keyless)}
+            else:
+                command_with_policies[module_name][command_name] = CommandPolicies(is_keyless)
 
             tips = details.get('tips')
             subcommands = details.get('subcommands')
 
             # Process tips for the main command
             if tips:
-                extract_policies(tips, command)
+                extract_policies(tips, command_name, module_name)
 
             # Process subcommands
             if subcommands:
                 for subcommand_details in subcommands:
                     # Get the subcommand name (first element)
-                    if subcommand_details:
-                        subcmd_name = subcommand_details[0]
-                        if isinstance(subcmd_name, bytes):
-                            subcmd_name = subcmd_name.decode()
+                    subcmd_name = subcommand_details[0]
+                    if isinstance(subcmd_name, bytes):
+                        subcmd_name = subcmd_name.decode()
 
-                        subcmd_name = subcmd_name.replace('|', ' ')
+                    # Check whether the subcommand has keys
+                    is_keyless = self._is_keyless_command(command, subcmd_name)
 
-                        # Check whether the command has keys
-                        keys = self.get_keys(self.redis_connection, subcmd_name)
+                    subcmd_name = subcmd_name.replace('|', ' ')
 
-                        if not keys:
-                            is_keyless = False
-                        else:
-                            is_keyless = True
+                    # Create a CommandPolicies object with default policies on the new command.
+                    command_with_policies[module_name][subcmd_name] = CommandPolicies(is_keyless)
 
-                        # Create a CommandPolicies object with default policies on the new command.
-                        command_with_policies[subcmd_name] = CommandPolicies(is_keyless)
-                        
-                        # Recursively extract policies from the rest of the subcommand details
-                        for subcommand_detail in subcommand_details[1:]:
-                            extract_policies(subcommand_detail, subcmd_name)
+                    # Recursively extract policies from the rest of the subcommand details
+                    for subcommand_detail in subcommand_details[1:]:
+                        extract_policies(subcommand_detail, subcmd_name, module_name)
 
         return command_with_policies
 
