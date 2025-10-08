@@ -241,6 +241,18 @@ class ConnectionInterface:
     def re_auth(self):
         pass
 
+    @abstractmethod
+    def mark_for_reconnect(self):
+        pass
+
+    @abstractmethod
+    def should_reconnect(self):
+        pass
+
+    @abstractmethod
+    def reset_should_reconnect(self):
+        pass
+
 
 class MaintNotificationsAbstractConnection:
     """
@@ -290,7 +302,6 @@ class MaintNotificationsAbstractConnection:
             orig_socket_connect_timeout,
             parser,
         )
-        self._should_reconnect = False
 
     @abstractmethod
     def _get_parser(self) -> Union[_HiredisParser, _RESP3Parser]:
@@ -590,15 +601,6 @@ class MaintNotificationsAbstractConnection:
             return conn_socket.getpeername()[0]
         return None
 
-    def mark_for_reconnect(self):
-        self._should_reconnect = True
-
-    def should_reconnect(self):
-        return self._should_reconnect
-
-    def reset_should_reconnect(self):
-        self._should_reconnect = False
-
     def update_current_socket_timeout(self, relaxed_timeout: Optional[float] = None):
         conn_socket = self._get_socket()
         if conn_socket:
@@ -758,6 +760,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self.set_parser(parser_class)
 
         self._command_packer = self._construct_command_packer(command_packer)
+        self._should_reconnect = False
 
         # Set up maintenance notifications
         MaintNotificationsAbstractConnection.__init__(
@@ -1022,6 +1025,15 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             conn_sock.close()
         except OSError:
             pass
+
+    def mark_for_reconnect(self):
+        self._should_reconnect = True
+
+    def should_reconnect(self):
+        return self._should_reconnect
+
+    def reset_should_reconnect(self):
+        self._should_reconnect = False
 
     def _send_ping(self):
         """Send PING, expect PONG in return"""
@@ -1507,6 +1519,15 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def re_auth(self):
         self._conn.re_auth()
 
+    def mark_for_reconnect(self):
+        self._conn.mark_for_reconnect()
+
+    def should_reconnect(self):
+        return self._conn.should_reconnect()
+
+    def reset_should_reconnect(self):
+        self._conn.reset_should_reconnect()
+
     @property
     def host(self) -> str:
         return self._conn.host
@@ -1560,30 +1581,6 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def getpeername(self):
         if isinstance(self._conn, MaintNotificationsAbstractConnection):
             return self._conn.getpeername()
-        else:
-            raise NotImplementedError(
-                "Maintenance notifications are not supported by this connection type"
-            )
-
-    def mark_for_reconnect(self):
-        if isinstance(self._conn, MaintNotificationsAbstractConnection):
-            self._conn.mark_for_reconnect()
-        else:
-            raise NotImplementedError(
-                "Maintenance notifications are not supported by this connection type"
-            )
-
-    def should_reconnect(self):
-        if isinstance(self._conn, MaintNotificationsAbstractConnection):
-            return self._conn.should_reconnect()
-        else:
-            raise NotImplementedError(
-                "Maintenance notifications are not supported by this connection type"
-            )
-
-    def reset_should_reconnect(self):
-        if isinstance(self._conn, MaintNotificationsAbstractConnection):
-            self._conn.reset_should_reconnect()
         else:
             raise NotImplementedError(
                 "Maintenance notifications are not supported by this connection type"
