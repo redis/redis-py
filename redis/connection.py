@@ -1228,7 +1228,9 @@ class CacheProxyConnection(ConnectionInterface):
         with self._cache_lock:
             # Command is write command or not allowed
             # to be cached.
-            if not self._cache.is_cachable(CacheKey(command=args[0], redis_keys=())):
+            if not self._cache.is_cachable(
+                CacheKey(command=args[0], redis_keys=(), redis_args=())
+            ):
                 self._current_command_cache_key = None
                 self._conn.send_command(*args, **kwargs)
                 return
@@ -1238,7 +1240,7 @@ class CacheProxyConnection(ConnectionInterface):
 
         # Creates cache key.
         self._current_command_cache_key = CacheKey(
-            command=args[0], redis_keys=tuple(kwargs.get("keys"))
+            command=args[0], redis_keys=tuple(kwargs.get("keys")), redis_args=args
         )
 
         with self._cache_lock:

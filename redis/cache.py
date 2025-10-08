@@ -17,8 +17,21 @@ class EvictionPolicyType(Enum):
 
 @dataclass(frozen=True)
 class CacheKey:
+    """
+    Represents a unique key for a cache entry.
+
+    Attributes:
+        command (str): The Redis command being cached.
+        redis_keys (tuple): The Redis keys involved in the command.
+        redis_args (tuple): Additional arguments for the Redis command.
+            This field is included in the cache key to ensure uniqueness
+            when commands have the same keys but different arguments.
+            Changing this field will affect cache key uniqueness.
+    """
+
     command: str
     redis_keys: tuple
+    redis_args: tuple = ()  # Additional arguments for the Redis command; affects cache key uniqueness.
 
 
 class CacheEntry:
