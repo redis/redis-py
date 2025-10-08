@@ -830,7 +830,7 @@ class ManagementCommands(CommandsProtocol):
 
         return self.execute_command("COMMAND LIST", *pieces)
 
-    def command_getkeysandflags(self, *args: List[str]) -> List[Union[str, List[str]]]:
+    def command_getkeysandflags(self, *args: str) -> List[Union[str, List[str]]]:
         """
         Returns array of keys from a full Redis command and their usage flags.
 
@@ -848,7 +848,7 @@ class ManagementCommands(CommandsProtocol):
         )
 
     def config_get(
-        self, pattern: PatternT = "*", *args: List[PatternT], **kwargs
+        self, pattern: PatternT = "*", *args: PatternT, **kwargs
     ) -> ResponseT:
         """
         Return a dictionary of configuration based on the ``pattern``
@@ -861,7 +861,7 @@ class ManagementCommands(CommandsProtocol):
         self,
         name: KeyT,
         value: EncodableT,
-        *args: List[Union[KeyT, EncodableT]],
+        *args: Union[KeyT, EncodableT],
         **kwargs,
     ) -> ResponseT:
         """Set config item ``name`` with ``value``
@@ -987,9 +987,7 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SELECT", index, **kwargs)
 
-    def info(
-        self, section: Optional[str] = None, *args: List[str], **kwargs
-    ) -> ResponseT:
+    def info(self, section: Optional[str] = None, *args: str, **kwargs) -> ResponseT:
         """
         Returns a dictionary containing information about the Redis server
 
@@ -2606,7 +2604,7 @@ class ListCommands(CommandsProtocol):
         self,
         timeout: float,
         numkeys: int,
-        *args: List[str],
+        *args: str,
         direction: str,
         count: Optional[int] = 1,
     ) -> Optional[list]:
@@ -2619,14 +2617,14 @@ class ListCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/blmpop
         """
-        args = [timeout, numkeys, *args, direction, "COUNT", count]
+        cmd_args = [timeout, numkeys, *args, direction, "COUNT", count]
 
-        return self.execute_command("BLMPOP", *args)
+        return self.execute_command("BLMPOP", *cmd_args)
 
     def lmpop(
         self,
         num_keys: int,
-        *args: List[str],
+        *args: str,
         direction: str,
         count: Optional[int] = 1,
     ) -> Union[Awaitable[list], list]:
@@ -2636,11 +2634,11 @@ class ListCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/lmpop
         """
-        args = [num_keys] + list(args) + [direction]
+        cmd_args = [num_keys] + list(args) + [direction]
         if count != 1:
-            args.extend(["COUNT", count])
+            cmd_args.extend(["COUNT", count])
 
-        return self.execute_command("LMPOP", *args)
+        return self.execute_command("LMPOP", *cmd_args)
 
     def lindex(
         self, name: str, index: int

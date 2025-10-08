@@ -14,7 +14,7 @@ class JSONCommands:
     """json commands."""
 
     def arrappend(
-        self, name: str, path: Optional[str] = Path.root_path(), *args: List[JsonType]
+        self, name: str, path: Optional[str] = Path.root_path(), *args: JsonType
     ) -> List[Optional[int]]:
         """Append the objects ``args`` to the array under the
         ``path` in key ``name``.
@@ -52,7 +52,7 @@ class JSONCommands:
         return self.execute_command("JSON.ARRINDEX", *pieces, keys=[name])
 
     def arrinsert(
-        self, name: str, path: str, index: int, *args: List[JsonType]
+        self, name: str, path: str, index: int, *args: JsonType
     ) -> List[Optional[int]]:
         """Insert the objects ``args`` to the array at index ``index``
         under the ``path` in key ``name``.
