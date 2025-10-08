@@ -1,3 +1,5 @@
+from pprint import pprint
+
 import pytest
 from redis._parsers import CommandsParser
 from redis._parsers.commands import RequestPolicy, ResponsePolicy

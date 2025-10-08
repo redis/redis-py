@@ -29,9 +29,13 @@ class ResponsePolicy(Enum):
     DEFAULT_KEYED = 'default_keyed'
 
 class CommandPolicies:
-    def __init__(self, is_keyless: bool):
-        self.request_policy = RequestPolicy.DEFAULT_KEYLESS if is_keyless else RequestPolicy.DEFAULT_KEYED
-        self.response_policy = ResponsePolicy.DEFAULT_KEYLESS if is_keyless else ResponsePolicy.DEFAULT_KEYED
+    def __init__(
+            self,
+            request_policy: RequestPolicy = RequestPolicy.DEFAULT_KEYLESS,
+            response_policy: ResponsePolicy = ResponsePolicy.DEFAULT_KEYLESS
+    ):
+        self.request_policy = request_policy
+        self.response_policy = response_policy
 
 PolicyRecords = dict[str, dict[str, CommandPolicies]]
 
@@ -298,6 +302,13 @@ class CommandsParser(AbstractCommandsParser):
             # Check whether the command has keys
             is_keyless = self._is_keyless_command(command)
 
+            if is_keyless:
+                default_request_policy = RequestPolicy.DEFAULT_KEYLESS
+                default_response_policy = ResponsePolicy.DEFAULT_KEYLESS
+            else:
+                default_request_policy = RequestPolicy.DEFAULT_KEYED
+                default_response_policy = ResponsePolicy.DEFAULT_KEYED
+
             # Check if it's a core or module command
             split_name = command.split('.')
 
@@ -310,9 +321,15 @@ class CommandsParser(AbstractCommandsParser):
 
             # Create a CommandPolicies object with default policies on the new command.
             if command_with_policies.get(module_name, None) is None:
-                command_with_policies[module_name] = {command_name: CommandPolicies(is_keyless)}
+                command_with_policies[module_name] = {command_name: CommandPolicies(
+                    request_policy=default_request_policy,
+                    response_policy=default_response_policy
+                )}
             else:
-                command_with_policies[module_name][command_name] = CommandPolicies(is_keyless)
+                command_with_policies[module_name][command_name] = CommandPolicies(
+                    request_policy=default_request_policy,
+                    response_policy=default_response_policy
+                )
 
             tips = details.get('tips')
             subcommands = details.get('subcommands')
@@ -332,10 +349,20 @@ class CommandsParser(AbstractCommandsParser):
                     # Check whether the subcommand has keys
                     is_keyless = self._is_keyless_command(command, subcmd_name)
 
+                    if is_keyless:
+                        default_request_policy = RequestPolicy.DEFAULT_KEYLESS
+                        default_response_policy = ResponsePolicy.DEFAULT_KEYLESS
+                    else:
+                        default_request_policy = RequestPolicy.DEFAULT_KEYED
+                        default_response_policy = ResponsePolicy.DEFAULT_KEYED
+
                     subcmd_name = subcmd_name.replace('|', ' ')
 
                     # Create a CommandPolicies object with default policies on the new command.
-                    command_with_policies[module_name][subcmd_name] = CommandPolicies(is_keyless)
+                    command_with_policies[module_name][subcmd_name] = CommandPolicies(
+                        request_policy=default_request_policy,
+                        response_policy=default_response_policy
+                    )
 
                     # Recursively extract policies from the rest of the subcommand details
                     for subcommand_detail in subcommand_details[1:]:
