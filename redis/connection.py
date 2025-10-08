@@ -243,14 +243,24 @@ class ConnectionInterface:
 
     @abstractmethod
     def mark_for_reconnect(self):
+        """
+        Mark the connection to be reconnected on the next command.
+        This is useful when a connection is moved to a different node.
+        """
         pass
 
     @abstractmethod
     def should_reconnect(self):
+        """
+        Returns True if the connection should be reconnected.
+        """
         pass
 
     @abstractmethod
     def reset_should_reconnect(self):
+        """
+        Reset the internal flag to False.
+        """
         pass
 
 
@@ -1560,71 +1570,61 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 "Maintenance notifications are not supported by this connection type"
             )
 
-    @property
-    def maintenance_state(self) -> MaintenanceState:
-        if isinstance(self._conn, MaintNotificationsAbstractConnection):
-            return self._conn.maintenance_state
-        else:
+    def _get_maint_notifications_connection_instance(
+        self, connection
+    ) -> MaintNotificationsAbstractConnection:
+        """
+        Validate that connection instance supports maintenance notifications.
+        With this helper method we ensure that we are working
+        with the correct connection type.
+        After twe validate that connection instance supports maintenance notifications
+        we can safely return the connection instance
+        as MaintNotificationsAbstractConnection.
+        """
+        if not isinstance(connection, MaintNotificationsAbstractConnection):
             raise NotImplementedError(
                 "Maintenance notifications are not supported by this connection type"
             )
+        else:
+            return connection
+
+    @property
+    def maintenance_state(self) -> MaintenanceState:
+        con = self._get_maint_notifications_connection_instance(self._conn)
+        return con.maintenance_state
 
     @maintenance_state.setter
     def maintenance_state(self, state: MaintenanceState):
-        if isinstance(self._conn, MaintNotificationsAbstractConnection):
-            self._conn.maintenance_state = state
-        else:
-            raise NotImplementedError(
-                "Maintenance notifications are not supported by this connection type"
-            )
+        con = self._get_maint_notifications_connection_instance(self._conn)
+        con.maintenance_state = state
 
     def getpeername(self):
-        if isinstance(self._conn, MaintNotificationsAbstractConnection):
-            return self._conn.getpeername()
-        else:
-            raise NotImplementedError(
-                "Maintenance notifications are not supported by this connection type"
-            )
+        con = self._get_maint_notifications_connection_instance(self._conn)
+        return con.getpeername()
 
     def get_resolved_ip(self):
-        if isinstance(self._conn, MaintNotificationsAbstractConnection):
-            return self._conn.get_resolved_ip()
-        else:
-            raise NotImplementedError(
-                "Maintenance notifications are not supported by this connection type"
-            )
+        con = self._get_maint_notifications_connection_instance(self._conn)
+        return con.get_resolved_ip()
 
     def update_current_socket_timeout(self, relaxed_timeout: Optional[float] = None):
-        if isinstance(self._conn, MaintNotificationsAbstractConnection):
-            self._conn.update_current_socket_timeout(relaxed_timeout)
-        else:
-            raise NotImplementedError(
-                "Maintenance notifications are not supported by this connection type"
-            )
+        con = self._get_maint_notifications_connection_instance(self._conn)
+        con.update_current_socket_timeout(relaxed_timeout)
 
     def set_tmp_settings(
         self,
         tmp_host_address: Optional[str] = None,
         tmp_relaxed_timeout: Optional[float] = None,
     ):
-        if isinstance(self._conn, MaintNotificationsAbstractConnection):
-            self._conn.set_tmp_settings(tmp_host_address, tmp_relaxed_timeout)
-        else:
-            raise NotImplementedError(
-                "Maintenance notifications are not supported by this connection type"
-            )
+        con = self._get_maint_notifications_connection_instance(self._conn)
+        con.set_tmp_settings(tmp_host_address, tmp_relaxed_timeout)
 
     def reset_tmp_settings(
         self,
         reset_host_address: bool = False,
         reset_relaxed_timeout: bool = False,
     ):
-        if isinstance(self._conn, MaintNotificationsAbstractConnection):
-            self._conn.reset_tmp_settings(reset_host_address, reset_relaxed_timeout)
-        else:
-            raise NotImplementedError(
-                "Maintenance notifications are not supported by this connection type"
-            )
+        con = self._get_maint_notifications_connection_instance(self._conn)
+        con.reset_tmp_settings(reset_host_address, reset_relaxed_timeout)
 
     def _connect(self):
         self._conn._connect()
