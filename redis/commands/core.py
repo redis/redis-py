@@ -4776,6 +4776,7 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         value: EncodableT,
         withscore: bool = False,
+        score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
@@ -4785,9 +4786,14 @@ class SortedSetCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/zrank
         """
+        pieces = ["ZRANK", name, value]
         if withscore:
-            return self.execute_command("ZRANK", name, value, "WITHSCORE", keys=[name])
-        return self.execute_command("ZRANK", name, value, keys=[name])
+            pieces.append("WITHSCORE")
+
+        options = {"withscore": withscore, "score_cast_func": score_cast_func}
+        options["keys"] = [name]
+
+        return self.execute_command(*pieces, **options)
 
     def zrem(self, name: KeyT, *values: FieldT) -> ResponseT:
         """
@@ -4835,6 +4841,7 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         value: EncodableT,
         withscore: bool = False,
+        score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
         """
         Returns a 0-based value indicating the descending rank of
@@ -4844,11 +4851,14 @@ class SortedSetCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/zrevrank
         """
+        pieces = ["ZREVRANK", name, value]
         if withscore:
-            return self.execute_command(
-                "ZREVRANK", name, value, "WITHSCORE", keys=[name]
-            )
-        return self.execute_command("ZREVRANK", name, value, keys=[name])
+            pieces.append("WITHSCORE")
+
+        options = {"withscore": withscore, "score_cast_func": score_cast_func}
+        options["keys"] = name
+
+        return self.execute_command(*pieces, **options)
 
     def zscore(self, name: KeyT, value: EncodableT) -> ResponseT:
         """
@@ -4863,6 +4873,7 @@ class SortedSetCommands(CommandsProtocol):
         keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
         aggregate: Optional[str] = None,
         withscores: bool = False,
+        score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
         """
         Return the union of multiple sorted sets specified by ``keys``.
@@ -4872,7 +4883,14 @@ class SortedSetCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/zunion
         """
-        return self._zaggregate("ZUNION", None, keys, aggregate, withscores=withscores)
+        return self._zaggregate(
+            "ZUNION",
+            None,
+            keys,
+            aggregate,
+            withscores=withscores,
+            score_cast_func=score_cast_func,
+        )
 
     def zunionstore(
         self,
