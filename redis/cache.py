@@ -50,6 +50,7 @@ class EvictionPolicyInterface(ABC):
         pass
 
     @cache.setter
+    @abstractmethod
     def cache(self, value):
         pass
 

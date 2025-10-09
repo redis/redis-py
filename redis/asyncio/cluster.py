@@ -86,10 +86,11 @@ from redis.utils import (
 )
 
 if SSL_AVAILABLE:
-    from ssl import TLSVersion, VerifyMode
+    from ssl import TLSVersion, VerifyFlags, VerifyMode
 else:
     TLSVersion = None
     VerifyMode = None
+    VerifyFlags = None
 
 TargetNodesT = TypeVar(
     "TargetNodesT", str, "ClusterNode", List["ClusterNode"], Dict[Any, "ClusterNode"]
@@ -299,6 +300,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_cert_reqs: Union[str, VerifyMode] = "required",
+        ssl_include_verify_flags: Optional[List[VerifyFlags]] = None,
+        ssl_exclude_verify_flags: Optional[List[VerifyFlags]] = None,
         ssl_certfile: Optional[str] = None,
         ssl_check_hostname: bool = True,
         ssl_keyfile: Optional[str] = None,
@@ -358,6 +361,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     "ssl_ca_certs": ssl_ca_certs,
                     "ssl_ca_data": ssl_ca_data,
                     "ssl_cert_reqs": ssl_cert_reqs,
+                    "ssl_include_verify_flags": ssl_include_verify_flags,
+                    "ssl_exclude_verify_flags": ssl_exclude_verify_flags,
                     "ssl_certfile": ssl_certfile,
                     "ssl_check_hostname": ssl_check_hostname,
                     "ssl_keyfile": ssl_keyfile,
@@ -404,6 +409,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         else:
             self._event_dispatcher = event_dispatcher
 
+        self.startup_nodes = startup_nodes
         self.nodes_manager = NodesManager(
             startup_nodes,
             require_full_coverage,
@@ -430,6 +436,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         self._initialize = True
         self._lock: Optional[asyncio.Lock] = None
+
+        # When used as an async context manager, we need to increment and decrement
+        # a usage counter so that we can close the connection pool when no one is
+        # using the client.
+        self._usage_counter = 0
+        self._usage_lock = asyncio.Lock()
 
     async def initialize(self) -> "RedisCluster":
         """Get all nodes from startup nodes & creates connections if not initialized."""
@@ -467,10 +479,47 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         await self.aclose()
 
     async def __aenter__(self) -> "RedisCluster":
-        return await self.initialize()
+        """
+        Async context manager entry. Increments a usage counter so that the
+        connection pool is only closed (via aclose()) when no context is using
+        the client.
+        """
+        await self._increment_usage()
+        try:
+            # Initialize the client (i.e. establish connection, etc.)
+            return await self.initialize()
+        except Exception:
+            # If initialization fails, decrement the counter to keep it in sync
+            await self._decrement_usage()
+            raise
 
-    async def __aexit__(self, exc_type: None, exc_value: None, traceback: None) -> None:
-        await self.aclose()
+    async def _increment_usage(self) -> int:
+        """
+        Helper coroutine to increment the usage counter while holding the lock.
+        Returns the new value of the usage counter.
+        """
+        async with self._usage_lock:
+            self._usage_counter += 1
+            return self._usage_counter
+
+    async def _decrement_usage(self) -> int:
+        """
+        Helper coroutine to decrement the usage counter while holding the lock.
+        Returns the new value of the usage counter.
+        """
+        async with self._usage_lock:
+            self._usage_counter -= 1
+            return self._usage_counter
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        """
+        Async context manager exit. Decrements a usage counter. If this is the
+        last exit (counter becomes zero), the client closes its connection pool.
+        """
+        current_usage = await asyncio.shield(self._decrement_usage())
+        if current_usage == 0:
+            # This was the last active context, so disconnect the pool.
+            await asyncio.shield(self.aclose())
 
     def __await__(self) -> Generator[Any, None, "RedisCluster"]:
         return self.initialize().__await__()
@@ -2205,7 +2254,10 @@ class TransactionStrategy(AbstractStrategy):
                 await self._pipe.cluster_client.nodes_manager.initialize()
                 self.reinitialize_counter = 0
             else:
-                self._pipe.cluster_client.nodes_manager.update_moved_exception(error)
+                if isinstance(error, AskError):
+                    self._pipe.cluster_client.nodes_manager.update_moved_exception(
+                        error
+                    )
 
         self._executing = False
 

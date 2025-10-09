@@ -56,6 +56,10 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
+from redis.maint_notifications import (
+    MaintNotificationsConfig,
+    MaintNotificationsPoolHandler,
+)
 from redis.retry import Retry
 from redis.utils import (
     _set_info_logger,
@@ -220,6 +224,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
         ssl_cert_reqs: Union[str, "ssl.VerifyMode"] = "required",
+        ssl_include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_path: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
@@ -244,6 +250,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -325,6 +332,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_keyfile": ssl_keyfile,
                             "ssl_certfile": ssl_certfile,
                             "ssl_cert_reqs": ssl_cert_reqs,
+                            "ssl_include_verify_flags": ssl_include_verify_flags,
+                            "ssl_exclude_verify_flags": ssl_exclude_verify_flags,
                             "ssl_ca_certs": ssl_ca_certs,
                             "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,
@@ -367,6 +376,23 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             "3",
         ]:
             raise RedisError("Client caching is only supported with RESP version 3")
+
+        if maint_notifications_config and self.connection_pool.get_protocol() not in [
+            3,
+            "3",
+        ]:
+            raise RedisError(
+                "Push handlers on connection are only supported with RESP version 3"
+            )
+        if maint_notifications_config and maint_notifications_config.enabled:
+            self.maint_notifications_pool_handler = MaintNotificationsPoolHandler(
+                self.connection_pool, maint_notifications_config
+            )
+            self.connection_pool.set_maint_notifications_pool_handler(
+                self.maint_notifications_pool_handler
+            )
+        else:
+            self.maint_notifications_pool_handler = None
 
         self.single_connection_lock = threading.RLock()
         self.connection = None
@@ -565,8 +591,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         return Monitor(self.connection_pool)
 
     def client(self):
+        maint_notifications_config = (
+            None
+            if self.maint_notifications_pool_handler is None
+            else self.maint_notifications_pool_handler.config
+        )
         return self.__class__(
-            connection_pool=self.connection_pool, single_connection_client=True
+            connection_pool=self.connection_pool,
+            single_connection_client=True,
+            maint_notifications_config=maint_notifications_config,
         )
 
     def __enter__(self):
@@ -635,7 +668,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 ),
                 lambda _: self._close_connection(conn),
             )
+
         finally:
+            if conn and conn.should_reconnect():
+                self._close_connection(conn)
+                conn.connect()
             if self._single_connection_client:
                 self.single_connection_lock.release()
             if not self.connection:
@@ -686,11 +723,7 @@ class Monitor:
         self.connection = self.connection_pool.get_connection()
 
     def __enter__(self):
-        self.connection.send_command("MONITOR")
-        # check that monitor returns 'OK', but don't return it to user
-        response = self.connection.read_response()
-        if not bool_ok(response):
-            raise RedisError(f"MONITOR failed: {response}")
+        self._start_monitor()
         return self
 
     def __exit__(self, *args):
@@ -700,8 +733,13 @@ class Monitor:
     def next_command(self):
         """Parse the response from a monitor command"""
         response = self.connection.read_response()
+
+        if response is None:
+            return None
+
         if isinstance(response, bytes):
             response = self.connection.encoder.decode(response, force=True)
+
         command_time, command_data = response.split(" ", 1)
         m = self.monitor_re.match(command_data)
         db_id, client_info, command = m.groups()
@@ -736,6 +774,14 @@ class Monitor:
         """Listen for commands coming to the server."""
         while True:
             yield self.next_command()
+
+    def _start_monitor(self):
+        self.connection.send_command("MONITOR")
+        # check that monitor returns 'OK', but don't return it to user
+        response = self.connection.read_response()
+
+        if not bool_ok(response):
+            raise RedisError(f"MONITOR failed: {response}")
 
 
 class PubSub:
@@ -881,7 +927,7 @@ class PubSub:
         """
         ttl = 10
         conn = self.connection
-        while self.health_check_response_counter > 0 and ttl > 0:
+        while conn and self.health_check_response_counter > 0 and ttl > 0:
             if self._execute(conn, conn.can_read, timeout=conn.socket_timeout):
                 response = self._execute(conn, conn.read_response)
                 if self.is_health_check_response(response):
@@ -911,10 +957,16 @@ class PubSub:
         called by the # connection to resubscribe us to any channels and
         patterns we were previously listening to
         """
-        return conn.retry.call_with_retry(
+
+        if conn.should_reconnect():
+            self._reconnect(conn)
+
+        response = conn.retry.call_with_retry(
             lambda: command(*args, **kwargs),
             lambda _: self._reconnect(conn),
         )
+
+        return response
 
     def parse_response(self, block=True, timeout=0):
         """Parse the response from a publish/subscribe command"""
@@ -1125,6 +1177,7 @@ class PubSub:
                 return None
 
         response = self.parse_response(block=(timeout is None), timeout=timeout)
+
         if response:
             return self.handle_message(response, ignore_subscribe_messages)
         return None
@@ -1133,7 +1186,10 @@ class PubSub:
 
     def ping(self, message: Union[str, None] = None) -> bool:
         """
-        Ping the Redis server
+        Ping the Redis server to test connectivity.
+
+        Sends a PING command to the Redis server and returns True if the server
+        responds with "PONG".
         """
         args = ["PING", message] if message is not None else ["PING"]
         return self.execute_command(*args)
@@ -1148,6 +1204,7 @@ class PubSub:
             return None
         if isinstance(response, bytes):
             response = [b"pong", response] if response != b"PONG" else [b"pong", b""]
+
         message_type = str_if_bytes(response[0])
         if message_type == "pmessage":
             message = {
@@ -1217,6 +1274,8 @@ class PubSub:
         sleep_time: float = 0.0,
         daemon: bool = False,
         exception_handler: Optional[Callable] = None,
+        pubsub=None,
+        sharded_pubsub: bool = False,
     ) -> "PubSubWorkerThread":
         for channel, handler in self.channels.items():
             if handler is None:
@@ -1230,8 +1289,13 @@ class PubSub:
                     f"Shard Channel: '{s_channel}' has no handler registered"
                 )
 
+        pubsub = self if pubsub is None else pubsub
         thread = PubSubWorkerThread(
-            self, sleep_time, daemon=daemon, exception_handler=exception_handler
+            pubsub,
+            sleep_time,
+            daemon=daemon,
+            exception_handler=exception_handler,
+            sharded_pubsub=sharded_pubsub,
         )
         thread.start()
         return thread
@@ -1246,12 +1310,14 @@ class PubSubWorkerThread(threading.Thread):
         exception_handler: Union[
             Callable[[Exception, "PubSub", "PubSubWorkerThread"], None], None
         ] = None,
+        sharded_pubsub: bool = False,
     ):
         super().__init__()
         self.daemon = daemon
         self.pubsub = pubsub
         self.sleep_time = sleep_time
         self.exception_handler = exception_handler
+        self.sharded_pubsub = sharded_pubsub
         self._running = threading.Event()
 
     def run(self) -> None:
@@ -1262,7 +1328,14 @@ class PubSubWorkerThread(threading.Thread):
         sleep_time = self.sleep_time
         while self._running.is_set():
             try:
-                pubsub.get_message(ignore_subscribe_messages=True, timeout=sleep_time)
+                if not self.sharded_pubsub:
+                    pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=sleep_time
+                    )
+                else:
+                    pubsub.get_sharded_message(
+                        ignore_subscribe_messages=True, timeout=sleep_time
+                    )
             except BaseException as e:
                 if self.exception_handler is None:
                     raise
@@ -1351,6 +1424,7 @@ class Pipeline(Redis):
         # clean up the other instance attributes
         self.watching = False
         self.explicit_transaction = False
+
         # we can safely return the connection to the pool here since we're
         # sure we're no longer WATCHing anything
         if self.connection:
@@ -1510,6 +1584,7 @@ class Pipeline(Redis):
                 if command_name in self.response_callbacks:
                     r = self.response_callbacks[command_name](r, **options)
             data.append(r)
+
         return data
 
     def _execute_pipeline(self, connection, commands, raise_on_error):
@@ -1517,16 +1592,17 @@ class Pipeline(Redis):
         all_cmds = connection.pack_commands([args for args, _ in commands])
         connection.send_packed_command(all_cmds)
 
-        response = []
+        responses = []
         for args, options in commands:
             try:
-                response.append(self.parse_response(connection, args[0], **options))
+                responses.append(self.parse_response(connection, args[0], **options))
             except ResponseError as e:
-                response.append(e)
+                responses.append(e)
 
         if raise_on_error:
-            self.raise_first_error(commands, response)
-        return response
+            self.raise_first_error(commands, responses)
+
+        return responses
 
     def raise_first_error(self, commands, response):
         for i, r in enumerate(response):
@@ -1611,6 +1687,8 @@ class Pipeline(Redis):
                 lambda error: self._disconnect_raise_on_watching(conn, error),
             )
         finally:
+            # in reset() the connection is disconnected before returned to the pool if
+            # it is marked for reconnect.
             self.reset()
 
     def discard(self):

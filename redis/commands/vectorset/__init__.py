@@ -24,12 +24,12 @@ class VectorSet(VectorSetCommands):
         # Set the module commands' callbacks
         self._MODULE_CALLBACKS = {
             VEMB_CMD: parse_vemb_result,
+            VSIM_CMD: parse_vsim_result,
             VGETATTR_CMD: lambda r: r and json.loads(r) or None,
         }
 
         self._RESP2_MODULE_CALLBACKS = {
             VINFO_CMD: lambda r: r and pairs_to_dict(r) or None,
-            VSIM_CMD: parse_vsim_result,
             VLINKS_CMD: parse_vlinks_result,
         }
         self._RESP3_MODULE_CALLBACKS = {}

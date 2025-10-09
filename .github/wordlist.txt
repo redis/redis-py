@@ -1,7 +1,9 @@
 APM
 ARGV
 BFCommands
+balancer
 CacheImpl
+cancelling
 CAS
 CFCommands
 CMSCommands
@@ -10,10 +12,20 @@ ClusterNodes
 ClusterPipeline
 ClusterPubSub
 ConnectionPool
+config
 CoreCommands
+DatabaseConfig
+DNS
+EchoHealthCheck
 EVAL
 EVALSHA
+failover
+FQDN
 Grokzen's
+Healthcheck
+HealthCheckPolicies
+healthcheck
+healthchecks
 INCR
 IOError
 Instrumentations
@@ -21,8 +33,11 @@ JSONCommands
 Jaeger
 Ludovico
 Magnocavallo
+MultiDbConfig
+MultiDBClient
 McCurdy
 NOSCRIPT
+NoValidDatabaseException
 NUMPAT
 NUMPT
 NUMSUB
@@ -43,6 +58,7 @@ RedisInstrumentor
 RedisJSON
 RedisTimeSeries
 SHA
+SLA
 SearchCommands
 SentinelCommands
 SentinelConnectionPool
@@ -52,6 +68,8 @@ SpanKind
 Specfiying
 StatusCode
 TCP
+TemporaryUnavailableException
+TLS
 TOPKCommands
 TimeSeriesCommands
 Uptrace
@@ -91,6 +109,7 @@ json
 keyslot
 keyspace
 kwarg
+kwargs
 linters
 localhost
 lua
