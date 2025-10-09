@@ -31,7 +31,7 @@ class Query:
         self._with_scores: bool = False
         self._scorer: Optional[str] = None
         self._filters: List = list()
-        self._ids: Optional[Tuple[str]] = None
+        self._ids: Optional[Tuple[str, ...]] = None
         self._slop: int = -1
         self._timeout: Optional[float] = None
         self._in_order: bool = False
