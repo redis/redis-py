@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 from redis.commands.search.dialect import DEFAULT_DIALECT
 
@@ -27,7 +27,7 @@ class Reducer:
     NAME = None
 
     def __init__(self, *args: str) -> None:
-        self._args: tuple[str, ...] = args
+        self._args: Tuple[str, ...] = args
         self._field: Optional[str] = None
         self._alias: Optional[str] = None
 
@@ -56,7 +56,7 @@ class Reducer:
         return self
 
     @property
-    def args(self) -> tuple[str, ...]:
+    def args(self) -> Tuple[str, ...]:
         return self._args
 
 
