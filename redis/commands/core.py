@@ -4784,6 +4784,8 @@ class SortedSetCommands(CommandsProtocol):
         The optional WITHSCORE argument supplements the command's
         reply with the score of the element returned.
 
+        ``score_cast_func`` a callable used to cast the score return value
+
         For more information, see https://redis.io/commands/zrank
         """
         pieces = ["ZRANK", name, value]
@@ -4791,7 +4793,6 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append("WITHSCORE")
 
         options = {"withscore": withscore, "score_cast_func": score_cast_func}
-        options["keys"] = [name]
 
         return self.execute_command(*pieces, **options)
 
@@ -4849,6 +4850,8 @@ class SortedSetCommands(CommandsProtocol):
         The optional ``withscore`` argument supplements the command's
         reply with the score of the element returned.
 
+        ``score_cast_func`` a callable used to cast the score return value
+
         For more information, see https://redis.io/commands/zrevrank
         """
         pieces = ["ZREVRANK", name, value]
@@ -4856,7 +4859,6 @@ class SortedSetCommands(CommandsProtocol):
             pieces.append("WITHSCORE")
 
         options = {"withscore": withscore, "score_cast_func": score_cast_func}
-        options["keys"] = name
 
         return self.execute_command(*pieces, **options)
 
@@ -4880,6 +4882,8 @@ class SortedSetCommands(CommandsProtocol):
         ``keys`` can be provided as dictionary of keys and their weights.
         Scores will be aggregated based on the ``aggregate``, or SUM if
         none is provided.
+
+        ``score_cast_func`` a callable used to cast the score return value
 
         For more information, see https://redis.io/commands/zunion
         """
