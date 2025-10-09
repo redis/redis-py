@@ -224,6 +224,39 @@ def zset_score_pairs(response, **options):
     return list(zip(it, map(score_cast_func, it)))
 
 
+def zset_score_for_rank(response, **options):
+    """
+    If ``withscores`` is specified in the options, return the response as
+    a list of (value, score) pairs
+    """
+    if not response or not options.get("withscore"):
+        return response
+    score_cast_func = options.get("score_cast_func", float)
+    return [response[0], score_cast_func(response[1])]
+
+
+def zset_score_pairs_resp3(response, **options):
+    """
+    If ``withscores`` is specified in the options, return the response as
+    a list of (value, score) pairs
+    """
+    if not response or not options.get("withscores"):
+        return response
+    score_cast_func = options.get("score_cast_func", float)
+    return [[name, score_cast_func(val)] for name, val in response]
+
+
+def zset_score_for_rank_resp3(response, **options):
+    """
+    If ``withscores`` is specified in the options, return the response as
+    a list of (value, score) pairs
+    """
+    if not response or not options.get("withscore"):
+        return response
+    score_cast_func = options.get("score_cast_func", float)
+    return [response[0], score_cast_func(response[1])]
+
+
 def sort_return_tuples(response, **options):
     """
     If ``groups`` is specified, return the response as a list of
@@ -797,9 +830,13 @@ _RedisCallbacksRESP2 = {
         "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
     ),
     **string_keys_to_dict(
-        "ZDIFF ZINTER ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZRANK ZREVRANGE "
-        "ZREVRANGEBYSCORE ZREVRANK ZUNION",
+        "ZDIFF ZINTER ZPOPMAX ZPOPMIN ZRANGE ZRANGEBYSCORE ZREVRANGE "
+        "ZREVRANGEBYSCORE ZUNION",
         zset_score_pairs,
+    ),
+    **string_keys_to_dict(
+        "ZREVRANK ZRANK",
+        zset_score_for_rank,
     ),
     **string_keys_to_dict("ZINCRBY ZSCORE", float_or_none),
     **string_keys_to_dict("BGREWRITEAOF BGSAVE", lambda r: True),
@@ -844,9 +881,16 @@ _RedisCallbacksRESP3 = {
         "SDIFF SINTER SMEMBERS SUNION", lambda r: r and set(r) or set()
     ),
     **string_keys_to_dict(
-        "ZRANGE ZINTER ZPOPMAX ZPOPMIN ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE "
-        "ZUNION HGETALL XREADGROUP",
+        "ZRANGE ZINTER ZPOPMAX ZPOPMIN HGETALL XREADGROUP",
         lambda r, **kwargs: r,
+    ),
+    **string_keys_to_dict(
+        "ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZUNION",
+        zset_score_pairs_resp3,
+    ),
+    **string_keys_to_dict(
+        "ZREVRANK ZRANK",
+        zset_score_for_rank_resp3,
     ),
     **string_keys_to_dict("XREAD XREADGROUP", parse_xread_resp3),
     "ACL LOG": lambda r: (
