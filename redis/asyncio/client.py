@@ -126,12 +126,12 @@ class Redis(
 
     @classmethod
     def from_url(
-        cls,
+        cls: type[_RedisT],
         url: str,
         single_connection_client: bool = False,
         auto_close_connection_pool: Optional[bool] = None,
         **kwargs,
-    ):
+    ) -> _RedisT:
         """
         Return a Redis client object configured from the given URL
 
