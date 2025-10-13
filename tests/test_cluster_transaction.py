@@ -182,15 +182,7 @@ class TestClusterTransaction:
                 else:
                     assert False, f"unexpected node {conn.host}:{conn.port} was called"
 
-            def update_moved_slot():  # simulate slot table update
-                ask_error = r.nodes_manager._moved_exception
-                assert ask_error is not None, "No AskError was previously triggered"
-                assert f"{ask_error.host}:{ask_error.port}" == node_importing.name
-                r.nodes_manager._moved_exception = None
-                r.nodes_manager.slots_cache[slot] = [node_importing]
-
             parse_response.side_effect = ask_redirect_effect
-            # manager_update_moved_slots.side_effect = update_moved_slot
 
             result = None
             with r.pipeline(transaction=True) as pipe:
