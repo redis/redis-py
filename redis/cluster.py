@@ -8,7 +8,18 @@ from collections import OrderedDict
 from copy import copy
 from enum import Enum
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+    final,
+)
 
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
@@ -1440,7 +1451,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     # Reset the counter
                     self.reinitialize_counter = 0
                 else:
-                    self.nodes_manager.update_moved_exception(e)
+                    self.nodes_manager.move_slot(e)
                 moved = True
             except TryAgainError:
                 if ttl < self.RedisClusterRequestTTL / 2:
@@ -1579,8 +1590,9 @@ class LoadBalancer:
     """
 
     def __init__(self, start_index: int = 0) -> None:
-        self.primary_to_idx = {}
-        self.start_index = start_index
+        self.primary_to_idx: dict[str, int] = {}
+        self.start_index: int = start_index
+        self._lock: threading.Lock = threading.Lock()
 
     def get_server_index(
         self,
@@ -1598,7 +1610,8 @@ class LoadBalancer:
             )
 
     def reset(self) -> None:
-        self.primary_to_idx.clear()
+        with self._lock:
+            self.primary_to_idx.clear()
 
     def _get_random_replica_index(self, list_size: int) -> int:
         return random.randint(1, list_size - 1)
@@ -1606,22 +1619,22 @@ class LoadBalancer:
     def _get_round_robin_index(
         self, primary: str, list_size: int, replicas_only: bool
     ) -> int:
-        server_index = self.primary_to_idx.setdefault(primary, self.start_index)
-        if replicas_only and server_index == 0:
-            # skip the primary node index
-            server_index = 1
-        # Update the index for the next round
-        self.primary_to_idx[primary] = (server_index + 1) % list_size
-        return server_index
+        with self._lock:
+            server_index = self.primary_to_idx.setdefault(primary, self.start_index)
+            if replicas_only and server_index == 0:
+                # skip the primary node index
+                server_index = 1
+            # Update the index for the next round
+            self.primary_to_idx[primary] = (server_index + 1) % list_size
+            return server_index
 
 
 class NodesManager:
     def __init__(
         self,
-        startup_nodes,
+        startup_nodes: list[ClusterNode],
         from_url=False,
         require_full_coverage=False,
-        lock=None,
         dynamic_startup_nodes=True,
         connection_pool_class=ConnectionPool,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
@@ -1631,25 +1644,33 @@ class NodesManager:
         event_dispatcher: Optional[EventDispatcher] = None,
         **kwargs,
     ):
-        self.nodes_cache: Dict[str, Redis] = {}
-        self.slots_cache = {}
-        self.startup_nodes = {}
-        self.default_node = None
-        self.populate_startup_nodes(startup_nodes)
+        self.nodes_cache: dict[str, ClusterNode] = {}
+        self.slots_cache: dict[int, list[ClusterNode]] = {}
+        self.startup_nodes: dict[str, ClusterNode] = {n.name: n for n in startup_nodes}
+        self.default_node: ClusterNode | None = None
+        self._epoch: int = 0
         self.from_url = from_url
         self._require_full_coverage = require_full_coverage
         self._dynamic_startup_nodes = dynamic_startup_nodes
         self.connection_pool_class = connection_pool_class
         self.address_remap = address_remap
-        self._cache = cache
-        self._cache_config = cache_config
-        self._cache_factory = cache_factory
-        self._moved_exception = None
+        self._cache: CacheInterface | None = None
+        if cache:
+            self._cache = cache
+        elif cache_factory is not None:
+            self._cache = cache_factory.get_cache()
+        elif cache_config is not None:
+            self._cache = CacheFactory(cache_config).get_cache()
         self.connection_kwargs = kwargs
         self.read_load_balancer = LoadBalancer()
-        if lock is None:
-            lock = threading.RLock()
-        self._lock = lock
+
+        # nodes_cache / slots_cache / startup_nodes / default_node are protected by _lock
+        self._lock: threading.RLock = threading.RLock()
+        # initialize holds _initialization_lock to dedup multiple calls to reinitialize;
+        # note that if we hold both _lock and _initialization_lock, we _must_ acquire
+        # _initialization_lock first (ie: to have a consistent order) to avoid deadlock.
+        self._initialization_lock: threading.Lock = threading.Lock()
+
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
         else:
@@ -1659,7 +1680,12 @@ class NodesManager:
         )
         self.initialize()
 
-    def get_node(self, host=None, port=None, node_name=None):
+    def get_node(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        node_name: str | None = None,
+    ) -> ClusterNode | None:
         """
         Get the requested node from the cluster's nodes.
         nodes.
@@ -1669,56 +1695,49 @@ class NodesManager:
             # the user passed host and port
             if host == "localhost":
                 host = socket.gethostbyname(host)
-            return self.nodes_cache.get(get_node_name(host=host, port=port))
+            with self._lock:
+                return self.nodes_cache.get(get_node_name(host=host, port=port))
         elif node_name:
-            return self.nodes_cache.get(node_name)
+            with self._lock:
+                return self.nodes_cache.get(node_name)
         else:
             return None
 
-    def update_moved_exception(self, exception):
-        self._moved_exception = exception
-
-    def _update_moved_slots(self):
+    def move_slot(self, e: AskError | MovedError):
         """
         Update the slot's node with the redirected one
         """
-        e = self._moved_exception
-        redirected_node = self.get_node(host=e.host, port=e.port)
-        if redirected_node is not None:
-            # The node already exists
-            if redirected_node.server_type is not PRIMARY:
-                # Update the node's server type
-                redirected_node.server_type = PRIMARY
-        else:
-            # This is a new node, we will add it to the nodes cache
-            redirected_node = ClusterNode(e.host, e.port, PRIMARY)
-            self.nodes_cache[redirected_node.name] = redirected_node
-        slot_nodes = self.slots_cache[e.slot_id]
-        if redirected_node not in slot_nodes:
-            # The new slot owner is a new server, or a server from a different
-            # shard. We need to remove all current nodes from the slot's list
-            # (including replications) and add just the new node.
-            self.slots_cache[e.slot_id] = [redirected_node]
-        elif redirected_node is not slot_nodes[0]:
-            # The MOVED error resulted from a failover, and the new slot owner
-            # had previously been a replica.
-            old_primary = slot_nodes[0]
-            # Update the old primary to be a replica and add it to the end of
-            # the slot's node list
-            old_primary.server_type = REPLICA
-            slot_nodes.append(old_primary)
-            # Remove the old replica, which is now a primary, from the slot's
-            # node list
-            slot_nodes.remove(redirected_node)
-            # Override the old primary with the new one
-            slot_nodes[0] = redirected_node
-            if self.default_node == old_primary:
-                # Update the default node with the new primary
-                self.default_node = redirected_node
-        # else: circular MOVED to current primary -> no-op
-
-        # Reset moved_exception
-        self._moved_exception = None
+        with self._lock:
+            redirected_node = self.get_node(host=e.host, port=e.port)
+            if redirected_node is not None:
+                # The node already exists
+                if redirected_node.server_type is not PRIMARY:
+                    # Update the node's server type
+                    redirected_node.server_type = PRIMARY
+            else:
+                # This is a new node, we will add it to the nodes cache
+                redirected_node = ClusterNode(e.host, e.port, PRIMARY)
+                self.nodes_cache[redirected_node.name] = redirected_node
+            slot_nodes = self.slots_cache[e.slot_id]
+            if redirected_node not in slot_nodes:
+                # The new slot owner is a new server, or a server from a different
+                # shard. We need to remove all current nodes from the slot's list
+                # (including replications) and add just the new node.
+                self.slots_cache[e.slot_id] = [redirected_node]
+            elif redirected_node is not slot_nodes[0]:
+                # The MOVED error resulted from a failover, and the new slot owner
+                # had previously been a replica.
+                old_primary = slot_nodes[0]
+                slot_nodes.append(old_primary)
+                # Remove the old replica, which is now a primary, from the slot's
+                # node list
+                slot_nodes.remove(redirected_node)
+                # Override the old primary with the new one
+                slot_nodes[0] = redirected_node
+                if self.default_node == old_primary:
+                    # Update the default node with the new primary
+                    self.default_node = redirected_node
+            # else: circular MOVED to current primary -> no-op
 
     @deprecated_args(
         args_to_warn=["server_type"],
@@ -1730,66 +1749,56 @@ class NodesManager:
     )
     def get_node_from_slot(
         self,
-        slot,
-        read_from_replicas=False,
-        load_balancing_strategy=None,
-        server_type=None,
+        slot: int,
+        read_from_replicas: bool = False,
+        load_balancing_strategy: LoadBalancingStrategy | None = None,
+        server_type: Literal["primary", "replica"] | None = None,
     ) -> ClusterNode:
         """
         Gets a node that servers this hash slot
         """
-        if self._moved_exception:
-            with self._lock:
-                if self._moved_exception:
-                    self._update_moved_slots()
-
-        if self.slots_cache.get(slot) is None or len(self.slots_cache[slot]) == 0:
-            raise SlotNotCoveredError(
-                f'Slot "{slot}" not covered by the cluster. '
-                f'"require_full_coverage={self._require_full_coverage}"'
-            )
 
         if read_from_replicas is True and load_balancing_strategy is None:
             load_balancing_strategy = LoadBalancingStrategy.ROUND_ROBIN
 
-        if len(self.slots_cache[slot]) > 1 and load_balancing_strategy:
-            # get the server index using the strategy defined in load_balancing_strategy
-            primary_name = self.slots_cache[slot][0].name
-            node_idx = self.read_load_balancer.get_server_index(
-                primary_name, len(self.slots_cache[slot]), load_balancing_strategy
-            )
-        elif (
-            server_type is None
-            or server_type == PRIMARY
-            or len(self.slots_cache[slot]) == 1
-        ):
-            # return a primary
-            node_idx = 0
-        else:
-            # return a replica
-            # randomly choose one of the replicas
-            node_idx = random.randint(1, len(self.slots_cache[slot]) - 1)
+        with self._lock:
+            if self.slots_cache.get(slot) is None or len(self.slots_cache[slot]) == 0:
+                raise SlotNotCoveredError(
+                    f'Slot "{slot}" not covered by the cluster. '
+                    + f'"require_full_coverage={self._require_full_coverage}"'
+                )
+            if len(self.slots_cache[slot]) > 1 and load_balancing_strategy:
+                # get the server index using the strategy defined in load_balancing_strategy
+                primary_name = self.slots_cache[slot][0].name
+                node_idx = self.read_load_balancer.get_server_index(
+                    primary_name, len(self.slots_cache[slot]), load_balancing_strategy
+                )
+            elif (
+                server_type is None
+                or server_type == PRIMARY
+                or len(self.slots_cache[slot]) == 1
+            ):
+                # return a primary
+                node_idx = 0
+            else:
+                # return a replica
+                # randomly choose one of the replicas
+                node_idx = random.randint(1, len(self.slots_cache[slot]) - 1)
 
-        return self.slots_cache[slot][node_idx]
+            return self.slots_cache[slot][node_idx]
 
-    def get_nodes_by_server_type(self, server_type):
+    def get_nodes_by_server_type(self, server_type: Literal["primary", "replica"]):
         """
         Get all nodes with the specified server type
         :param server_type: 'primary' or 'replica'
         :return: list of ClusterNode
         """
-        return [
-            node
-            for node in self.nodes_cache.values()
-            if node.server_type == server_type
-        ]
-
-    def populate_startup_nodes(self, nodes):
-        """
-        Populate all startup nodes and filters out any duplicates
-        """
-        for n in nodes:
-            self.startup_nodes[n.name] = n
+        with self._lock:
+            return [
+                node
+                for node in self.nodes_cache.values()
+                if node.server_type == server_type
+            ]
 
     def check_slots_coverage(self, slots_cache):
         # Validate if all slots are covered or if we should try next
@@ -1861,7 +1870,8 @@ class NodesManager:
             # before creating a new cluster node, check if the cluster node already
             # exists in the current nodes cache and has a valid connection so we can
             # reuse it
-            target_node = self.nodes_cache.get(node_name)
+            with self._lock:
+                target_node = self.nodes_cache.get(node_name)
             if target_node is None or target_node.redis_connection is None:
                 # create new cluster node for this cluster
                 target_node = ClusterNode(host, port, role)
@@ -1886,135 +1896,143 @@ class NodesManager:
         fully_covered = False
         kwargs = self.connection_kwargs
         exception = None
-        # Convert to tuple to prevent RuntimeError if self.startup_nodes
-        # is modified during iteration
-        for startup_node in tuple(self.startup_nodes.values()):
-            try:
-                if startup_node.redis_connection:
-                    r = startup_node.redis_connection
-                else:
-                    # Create a new Redis connection
-                    r = self.create_redis_node(
-                        startup_node.host, startup_node.port, **kwargs
-                    )
-                    self.startup_nodes[startup_node.name].redis_connection = r
-                # Make sure cluster mode is enabled on this node
-                try:
-                    cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
-                    r.connection_pool.disconnect()
-                except ResponseError:
-                    raise RedisClusterException(
-                        "Cluster mode is not enabled on this node"
-                    )
-                startup_nodes_reachable = True
-            except Exception as e:
-                # Try the next startup node.
-                # The exception is saved and raised only if we have no more nodes.
-                exception = e
-                continue
+        with self._lock:
+            epoch = self._epoch
 
-            # CLUSTER SLOTS command results in the following output:
-            # [[slot_section[from_slot,to_slot,master,replica1,...,replicaN]]]
-            # where each node contains the following list: [IP, port, node_id]
-            # Therefore, cluster_slots[0][2][0] will be the IP address of the
-            # primary node of the first slot section.
-            # If there's only one server in the cluster, its ``host`` is ''
-            # Fix it to the host in startup_nodes
-            if (
-                len(cluster_slots) == 1
-                and len(cluster_slots[0][2][0]) == 0
-                and len(self.startup_nodes) == 1
-            ):
-                cluster_slots[0][2][0] = startup_node.host
+        with self._initialization_lock:
+            # randomly order the startup nodes to ensure multiple clients evenly
+            # distribute topology discovery requests across the cluster.
+            with self._lock:
+                if epoch != self._epoch:
+                    # another thread has already re-initialized the nodes; don't
+                    # bother running again
+                    return
 
-            for slot in cluster_slots:
-                primary_node = slot[2]
-                host = str_if_bytes(primary_node[0])
-                if host == "":
-                    host = startup_node.host
-                port = int(primary_node[1])
-                host, port = self.remap_host_port(host, port)
-
-                nodes_for_slot = []
-
-                target_node = self._get_or_create_cluster_node(
-                    host, port, PRIMARY, tmp_nodes_cache
+                startup_nodes = random.sample(
+                    list(self.startup_nodes.values()), k=len(self.startup_nodes)
                 )
-                nodes_for_slot.append(target_node)
 
-                replica_nodes = slot[3:]
-                for replica_node in replica_nodes:
-                    host = str_if_bytes(replica_node[0])
-                    port = int(replica_node[1])
-                    host, port = self.remap_host_port(host, port)
-                    target_replica_node = self._get_or_create_cluster_node(
-                        host, port, REPLICA, tmp_nodes_cache
-                    )
-                    nodes_for_slot.append(target_replica_node)
-
-                for i in range(int(slot[0]), int(slot[1]) + 1):
-                    if i not in tmp_slots:
-                        tmp_slots[i] = nodes_for_slot
+            for startup_node in startup_nodes:
+                try:
+                    if startup_node.redis_connection:
+                        r = startup_node.redis_connection
                     else:
-                        # Validate that 2 nodes want to use the same slot cache
-                        # setup
-                        tmp_slot = tmp_slots[i][0]
-                        if tmp_slot.name != target_node.name:
-                            disagreements.append(
-                                f"{tmp_slot.name} vs {target_node.name} on slot: {i}"
-                            )
+                        # Create a new Redis connection
+                        r = self.create_redis_node(
+                            startup_node.host, startup_node.port, **kwargs
+                        )
+                        self.startup_nodes[startup_node.name].redis_connection = r
+                    # Make sure cluster mode is enabled on this node
+                    try:
+                        cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
+                    except ResponseError:
+                        raise RedisClusterException(
+                            "Cluster mode is not enabled on this node"
+                        )
+                    startup_nodes_reachable = True
+                except Exception as e:
+                    # Try the next startup node.
+                    # The exception is saved and raised only if we have no more nodes.
+                    exception = e
+                    continue
 
-                            if len(disagreements) > 5:
-                                raise RedisClusterException(
-                                    f"startup_nodes could not agree on a valid "
-                                    f"slots cache: {', '.join(disagreements)}"
+                # CLUSTER SLOTS command results in the following output:
+                # [[slot_section[from_slot,to_slot,master,replica1,...,replicaN]]]
+                # where each node contains the following list: [IP, port, node_id]
+                # Therefore, cluster_slots[0][2][0] will be the IP address of the
+                # primary node of the first slot section.
+                # If there's only one server in the cluster, its ``host`` is ''
+                # Fix it to the host in startup_nodes
+                if (
+                    len(cluster_slots) == 1
+                    and len(cluster_slots[0][2][0]) == 0
+                    and len(self.startup_nodes) == 1
+                ):
+                    cluster_slots[0][2][0] = startup_node.host
+
+                for slot in cluster_slots:
+                    primary_node = slot[2]
+                    host = str_if_bytes(primary_node[0])
+                    if host == "":
+                        host = startup_node.host
+                    port = int(primary_node[1])
+                    host, port = self.remap_host_port(host, port)
+
+                    nodes_for_slot = []
+
+                    target_node = self._get_or_create_cluster_node(
+                        host, port, PRIMARY, tmp_nodes_cache
+                    )
+                    nodes_for_slot.append(target_node)
+
+                    replica_nodes = slot[3:]
+                    for replica_node in replica_nodes:
+                        host = str_if_bytes(replica_node[0])
+                        port = int(replica_node[1])
+                        host, port = self.remap_host_port(host, port)
+                        target_replica_node = self._get_or_create_cluster_node(
+                            host, port, REPLICA, tmp_nodes_cache
+                        )
+                        nodes_for_slot.append(target_replica_node)
+
+                    for i in range(int(slot[0]), int(slot[1]) + 1):
+                        if i not in tmp_slots:
+                            tmp_slots[i] = nodes_for_slot
+                        else:
+                            # Validate that 2 nodes want to use the same slot cache
+                            # setup
+                            tmp_slot = tmp_slots[i][0]
+                            if tmp_slot.name != target_node.name:
+                                disagreements.append(
+                                    f"{tmp_slot.name} vs {target_node.name} on slot: {i}"
                                 )
 
-            fully_covered = self.check_slots_coverage(tmp_slots)
-            if fully_covered:
-                # Don't need to continue to the next startup node if all
-                # slots are covered
-                break
+                                if len(disagreements) > 5:
+                                    raise RedisClusterException(
+                                        f"startup_nodes could not agree on a valid "
+                                        f"slots cache: {', '.join(disagreements)}"
+                                    )
 
-        if not startup_nodes_reachable:
-            raise RedisClusterException(
-                f"Redis Cluster cannot be connected. Please provide at least "
-                f"one reachable node: {str(exception)}"
-            ) from exception
+                fully_covered = self.check_slots_coverage(tmp_slots)
+                if fully_covered:
+                    # Don't need to continue to the next startup node if all
+                    # slots are covered
+                    break
 
-        if self._cache is None and self._cache_config is not None:
-            if self._cache_factory is None:
-                self._cache = CacheFactory(self._cache_config).get_cache()
-            else:
-                self._cache = self._cache_factory.get_cache()
+            if not startup_nodes_reachable:
+                raise RedisClusterException(
+                    f"Redis Cluster cannot be connected. Please provide at least "
+                    f"one reachable node: {str(exception)}"
+                ) from exception
 
-        # Create Redis connections to all nodes
-        self.create_redis_connections(list(tmp_nodes_cache.values()))
+            # Create Redis connections to all nodes
+            self.create_redis_connections(list(tmp_nodes_cache.values()))
 
-        # Check if the slots are not fully covered
-        if not fully_covered and self._require_full_coverage:
-            # Despite the requirement that the slots be covered, there
-            # isn't a full coverage
-            raise RedisClusterException(
-                f"All slots are not covered after query all startup_nodes. "
-                f"{len(tmp_slots)} of {REDIS_CLUSTER_HASH_SLOTS} "
-                f"covered..."
-            )
+            # Check if the slots are not fully covered
+            if not fully_covered and self._require_full_coverage:
+                # Despite the requirement that the slots be covered, there
+                # isn't a full coverage
+                raise RedisClusterException(
+                    f"All slots are not covered after query all startup_nodes. "
+                    f"{len(tmp_slots)} of {REDIS_CLUSTER_HASH_SLOTS} "
+                    f"covered..."
+                )
 
-        # Set the tmp variables to the real variables
-        self.nodes_cache = tmp_nodes_cache
-        self.slots_cache = tmp_slots
-        # Set the default node
-        self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
-        if self._dynamic_startup_nodes:
-            # Populate the startup nodes with all discovered nodes
-            self.startup_nodes = tmp_nodes_cache
-        # If initialize was called after a MovedError, clear it
-        self._moved_exception = None
+            # Set the tmp variables to the real variables
+            with self._lock:
+                self.nodes_cache = tmp_nodes_cache
+                self.slots_cache = tmp_slots
+                # Set the default node
+                self.default_node = self.get_nodes_by_server_type(PRIMARY)[0]
+                if self._dynamic_startup_nodes:
+                    # Populate the startup nodes with all discovered nodes
+                    self.startup_nodes = tmp_nodes_cache
 
     def close(self) -> None:
-        self.default_node = None
-        for node in self.nodes_cache.values():
+        with self._lock:
+            self.default_node = None
+            nodes = tuple(self.nodes_cache.values())
+        for node in nodes:
             if node.redis_connection:
                 node.redis_connection.close()
 
@@ -2035,15 +2053,17 @@ class NodesManager:
             return self.address_remap((host, port))
         return host, port
 
-    def find_connection_owner(self, connection: Connection) -> Optional[Redis]:
+    def find_connection_owner(self, connection: Connection) -> ClusterNode | None:
         node_name = get_node_name(connection.host, connection.port)
-        for node in tuple(self.nodes_cache.values()):
-            if node.redis_connection:
-                conn_args = node.redis_connection.connection_pool.connection_kwargs
-                if node_name == get_node_name(
-                    conn_args.get("host"), conn_args.get("port")
-                ):
-                    return node
+        with self._lock:
+            for node in tuple(self.nodes_cache.values()):
+                if node.redis_connection:
+                    conn_args = node.redis_connection.connection_pool.connection_kwargs
+                    if node_name == get_node_name(
+                        conn_args.get("host"), conn_args.get("port")
+                    ):
+                        return node
+        return None
 
 
 class ClusterPubSub(PubSub):
@@ -3414,7 +3434,7 @@ class TransactionStrategy(AbstractStrategy):
                 self.reinitialize_counter = 0
             else:
                 if isinstance(error, AskError):
-                    self._nodes_manager.update_moved_exception(error)
+                    self._nodes_manager.move_slot(error)
 
         self._executing = False
 
