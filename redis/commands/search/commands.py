@@ -64,44 +64,6 @@ WITHPAYLOADS = "WITHPAYLOADS"
 class SearchCommands:
     """Search commands."""
 
-    @property
-    def index_name(self) -> str:
-        """The name of the search index. Must be implemented by inheriting classes."""
-        if not hasattr(self, "_index_name"):
-            raise AttributeError("index_name must be set by the inheriting class")
-        return self._index_name
-
-    @index_name.setter
-    def index_name(self, value: str) -> None:
-        """Set the name of the search index."""
-        self._index_name = value
-
-    @property
-    def client(self):
-        """The Redis client. Must be provided by inheriting classes."""
-        if not hasattr(self, "_client"):
-            raise AttributeError("client must be set by the inheriting class")
-        return self._client
-
-    @client.setter
-    def client(self, value) -> None:
-        """Set the Redis client."""
-        self._client = value
-
-    @property
-    def _RESP2_MODULE_CALLBACKS(self):
-        """Response callbacks for RESP2. Must be provided by inheriting classes."""
-        if not hasattr(self, "_resp2_module_callbacks"):
-            raise AttributeError(
-                "_RESP2_MODULE_CALLBACKS must be set by the inheriting class"
-            )
-        return self._resp2_module_callbacks
-
-    @_RESP2_MODULE_CALLBACKS.setter
-    def _RESP2_MODULE_CALLBACKS(self, value) -> None:
-        """Set the RESP2 module callbacks."""
-        self._resp2_module_callbacks = value
-
     def _parse_results(self, cmd, res, **kwargs):
         if get_protocol_version(self.client) in ["3", 3]:
             return ProfileInformation(res) if cmd == "FT.PROFILE" else res

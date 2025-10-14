@@ -184,14 +184,6 @@ class AsyncSearch(Search, AsyncSearchCommands):
 class Pipeline(SearchCommands, RedisPipeline):
     """Pipeline for the module."""
 
-    def __init__(self, connection_pool, response_callbacks, transaction, shard_hint):
-        super().__init__(connection_pool, response_callbacks, transaction, shard_hint)
-        self.index_name: str = ""
 
-
-class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline):
+class AsyncPipeline(AsyncSearchCommands, AsyncioPipeline, Pipeline):
     """AsyncPipeline for the module."""
-
-    def __init__(self, connection_pool, response_callbacks, transaction, shard_hint):
-        super().__init__(connection_pool, response_callbacks, transaction, shard_hint)
-        self.index_name: str = ""
