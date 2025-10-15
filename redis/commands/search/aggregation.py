@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import List, Optional, Tuple, Union
 
 from redis.commands.search.dialect import DEFAULT_DIALECT
 
@@ -27,9 +27,9 @@ class Reducer:
     NAME = None
 
     def __init__(self, *args: str) -> None:
-        self._args = args
-        self._field = None
-        self._alias = None
+        self._args: Tuple[str, ...] = args
+        self._field: Optional[str] = None
+        self._alias: Optional[str] = None
 
     def alias(self, alias: str) -> "Reducer":
         """
@@ -49,13 +49,14 @@ class Reducer:
         if alias is FIELDNAME:
             if not self._field:
                 raise ValueError("Cannot use FIELDNAME alias with no field")
-            # Chop off initial '@'
-            alias = self._field[1:]
+            else:
+                # Chop off initial '@'
+                alias = self._field[1:]
         self._alias = alias
         return self
 
     @property
-    def args(self) -> List[str]:
+    def args(self) -> Tuple[str, ...]:
         return self._args
 
 
@@ -64,7 +65,7 @@ class SortDirection:
     This special class is used to indicate sort direction.
     """
 
-    DIRSTRING = None
+    DIRSTRING: Optional[str] = None
 
     def __init__(self, field: str) -> None:
         self.field = field
@@ -104,17 +105,17 @@ class AggregateRequest:
         All member methods (except `build_args()`)
         return the object itself, making them useful for chaining.
         """
-        self._query = query
-        self._aggregateplan = []
-        self._loadfields = []
-        self._loadall = False
-        self._max = 0
-        self._with_schema = False
-        self._verbatim = False
-        self._cursor = []
-        self._dialect = DEFAULT_DIALECT
-        self._add_scores = False
-        self._scorer = "TFIDF"
+        self._query: str = query
+        self._aggregateplan: List[str] = []
+        self._loadfields: List[str] = []
+        self._loadall: bool = False
+        self._max: int = 0
+        self._with_schema: bool = False
+        self._verbatim: bool = False
+        self._cursor: List[str] = []
+        self._dialect: int = DEFAULT_DIALECT
+        self._add_scores: bool = False
+        self._scorer: str = "TFIDF"
 
     def load(self, *fields: str) -> "AggregateRequest":
         """
@@ -133,7 +134,7 @@ class AggregateRequest:
         return self
 
     def group_by(
-        self, fields: List[str], *reducers: Union[Reducer, List[Reducer]]
+        self, fields: Union[str, List[str]], *reducers: Reducer
     ) -> "AggregateRequest":
         """
         Specify by which fields to group the aggregation.
@@ -147,7 +148,6 @@ class AggregateRequest:
             `aggregation` module.
         """
         fields = [fields] if isinstance(fields, str) else fields
-        reducers = [reducers] if isinstance(reducers, Reducer) else reducers
 
         ret = ["GROUPBY", str(len(fields)), *fields]
         for reducer in reducers:
@@ -251,12 +251,10 @@ class AggregateRequest:
             .sort_by(Desc("@paid"), max=10)
         ```
         """
-        if isinstance(fields, (str, SortDirection)):
-            fields = [fields]
 
         fields_args = []
         for f in fields:
-            if isinstance(f, SortDirection):
+            if isinstance(f, (Asc, Desc)):
                 fields_args += [f.field, f.DIRSTRING]
             else:
                 fields_args += [f]
@@ -356,7 +354,7 @@ class AggregateRequest:
             ret.extend(self._loadfields)
 
         if self._dialect:
-            ret.extend(["DIALECT", self._dialect])
+            ret.extend(["DIALECT", str(self._dialect)])
 
         ret.extend(self._aggregateplan)
 
@@ -393,7 +391,7 @@ class AggregateResult:
         self.cursor = cursor
         self.schema = schema
 
-    def __repr__(self) -> (str, str):
+    def __repr__(self) -> str:
         cid = self.cursor.cid if self.cursor else -1
         return (
             f"<{self.__class__.__name__} at 0x{id(self):x} "
