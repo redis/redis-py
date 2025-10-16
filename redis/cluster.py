@@ -50,6 +50,7 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.retry import Retry
 from redis.utils import (
     deprecated_args,
@@ -1663,6 +1664,11 @@ class NodesManager:
             backoff=NoBackoff(), retries=0, supported_errors=(ConnectionError,)
         )
 
+        protocol = kwargs.get("protocol", None)
+        if protocol in [3, "3"]:
+            kwargs.update(
+                {"maint_notifications_config": MaintNotificationsConfig(enabled=False)}
+            )
         if self.from_url:
             # Create a redis node with a costumed connection pool
             kwargs.update({"host": host})
