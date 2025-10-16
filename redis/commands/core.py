@@ -5861,12 +5861,16 @@ class ScriptCommands(CommandsProtocol):
     """
 
     def _eval(
-        self, command: str, script: str, numkeys: int, *keys_and_args: str
+        self,
+        command: str,
+        script: str,
+        numkeys: int,
+        *keys_and_args: Union[KeyT, EncodableT],
     ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, script, numkeys, *keys_and_args)
 
     def eval(
-        self, script: str, numkeys: int, *keys_and_args: str
+        self, script: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
     ) -> Union[Awaitable[str], str]:
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
@@ -5881,7 +5885,7 @@ class ScriptCommands(CommandsProtocol):
         return self._eval("EVAL", script, numkeys, *keys_and_args)
 
     def eval_ro(
-        self, script: str, numkeys: int, *keys_and_args: str
+        self, script: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
     ) -> Union[Awaitable[str], str]:
         """
         The read-only variant of the EVAL command
@@ -5895,12 +5899,16 @@ class ScriptCommands(CommandsProtocol):
         return self._eval("EVAL_RO", script, numkeys, *keys_and_args)
 
     def _evalsha(
-        self, command: str, sha: str, numkeys: int, *keys_and_args: list
+        self,
+        command: str,
+        sha: str,
+        numkeys: int,
+        *keys_and_args: Union[KeyT, EncodableT],
     ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, sha, numkeys, *keys_and_args)
 
     def evalsha(
-        self, sha: str, numkeys: int, *keys_and_args: str
+        self, sha: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
     ) -> Union[Awaitable[str], str]:
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
@@ -5916,7 +5924,7 @@ class ScriptCommands(CommandsProtocol):
         return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
 
     def evalsha_ro(
-        self, sha: str, numkeys: int, *keys_and_args: str
+        self, sha: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
     ) -> Union[Awaitable[str], str]:
         """
         The read-only variant of the EVALSHA command
