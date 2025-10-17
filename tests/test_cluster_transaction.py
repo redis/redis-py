@@ -8,7 +8,7 @@ import redis
 from redis import CrossSlotTransactionError, ConnectionPool, RedisClusterException
 from redis.backoff import NoBackoff
 from redis.client import Redis
-from redis.cluster import PRIMARY, ClusterNode, NodesManager, RedisCluster
+from redis.cluster import PRIMARY, ClusterNode, RedisCluster
 from redis.retry import Retry
 
 from .conftest import skip_if_server_version_lt

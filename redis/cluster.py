@@ -18,7 +18,6 @@ from typing import (
     Set,
     Tuple,
     Union,
-    final,
 )
 
 from redis._parsers import CommandsParser, Encoder
