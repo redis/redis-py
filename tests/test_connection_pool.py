@@ -29,9 +29,13 @@ class DummyConnection:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.pid = os.getpid()
+        self._sock = None
 
     def connect(self):
-        pass
+        self._sock = mock.Mock()
+
+    def disconnect(self):
+        self._sock = None
 
     def can_read(self):
         return False
@@ -140,6 +144,21 @@ class TestConnectionPool:
         expected = "path=/abc,db=1,client_name=test-client"
         assert expected in repr(pool)
 
+    def test_pool_disconnect(self, master_host):
+        connection_kwargs = {
+            "host": master_host[0],
+            "port": master_host[1],
+        }
+        pool = self.get_pool(connection_kwargs=connection_kwargs)
+
+        conn = pool.get_connection()
+        pool.disconnect()
+        assert not conn._sock
+
+        conn.connect()
+        pool.disconnect(inuse_connections=False)
+        assert conn._sock
+
 
 class TestBlockingConnectionPool:
     def get_pool(self, connection_kwargs=None, max_connections=10, timeout=20):
@@ -244,6 +263,22 @@ class TestBlockingConnectionPool:
         )
         assert isinstance(pool.get_connection(), CacheProxyConnection)
 
+    def test_pool_disconnect(self, master_host):
+        connection_kwargs = {
+            "foo": "bar",
+            "biz": "baz",
+            "host": master_host[0],
+            "port": master_host[1],
+        }
+        pool = self.get_pool(connection_kwargs=connection_kwargs)
+
+        conn = pool.get_connection()
+        pool.disconnect()
+        assert not conn._sock
+
+        conn.connect()
+        pool.disconnect(inuse_connections=False)
+        assert conn._sock
 
 class TestConnectionPoolURLParsing:
     def test_hostname(self):
