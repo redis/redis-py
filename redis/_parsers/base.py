@@ -27,6 +27,7 @@ from ..exceptions import (
     ClusterDownError,
     ConnectionError,
     ExecAbortError,
+    ExternalAuthProviderError,
     MasterDownError,
     ModuleError,
     MovedError,
@@ -60,6 +61,10 @@ NO_AUTH_SET_ERROR = {
     "Client sent AUTH, but no password is set": AuthenticationError,
 }
 
+EXTERNAL_AUTH_PROVIDER_ERROR = {
+    "problem with LDAP service": ExternalAuthProviderError,
+}
+
 logger = logging.getLogger(__name__)
 
 
@@ -81,6 +86,7 @@ class BaseParser(ABC):
             NO_SUCH_MODULE_ERROR: ModuleError,
             MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError,
             **NO_AUTH_SET_ERROR,
+            **EXTERNAL_AUTH_PROVIDER_ERROR,
         },
         "OOM": OutOfMemoryError,
         "WRONGPASS": AuthenticationError,

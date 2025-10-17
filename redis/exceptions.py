@@ -245,3 +245,11 @@ class InvalidPipelineStack(RedisClusterException):
     """
 
     pass
+
+
+class ExternalAuthProviderError(Exception):
+    """
+    Raised when an external authentication provider returns an error.
+    """
+
+    pass

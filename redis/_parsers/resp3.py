@@ -1,7 +1,12 @@
 from logging import getLogger
 from typing import Any, Union
 
-from ..exceptions import ConnectionError, InvalidResponse, ResponseError
+from ..exceptions import (
+    ConnectionError,
+    ExternalAuthProviderError,
+    InvalidResponse,
+    ResponseError,
+)
 from ..typing import EncodableT
 from .base import (
     AsyncPushNotificationsParser,
@@ -56,7 +61,9 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
             error = self.parse_error(response)
             # if the error is a ConnectionError, raise immediately so the user
             # is notified
-            if isinstance(error, ConnectionError):
+            if isinstance(error, ConnectionError) or isinstance(
+                error, ExternalAuthProviderError
+            ):
                 raise error
             # otherwise, we're dealing with a ResponseError that might belong
             # inside a pipeline response. the connection's read_response()

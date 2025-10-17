@@ -334,6 +334,15 @@ def skip_if_resp_version(resp_version) -> _TestDecorator:
     return pytest.mark.skipif(check, reason=f"RESP version required != {resp_version}")
 
 
+def skip_if_hiredis_parser() -> _TestDecorator:
+    try:
+        import hiredis  # noqa
+
+        return pytest.mark.skipif(True, reason="hiredis dependency found")
+    except ImportError:
+        return pytest.mark.skipif(False, reason="No hiredis dependency")
+
+
 def _get_client(
     cls, request, single_connection_client=True, flushdb=True, from_url=None, **kwargs
 ):
