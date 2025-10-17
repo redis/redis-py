@@ -227,7 +227,7 @@ def zset_score_pairs(response, **options):
 def zset_score_for_rank(response, **options):
     """
     If ``withscores`` is specified in the options, return the response as
-    a list of (value, score) pairs
+    a [value, score] pair
     """
     if not response or not options.get("withscore"):
         return response
@@ -238,7 +238,7 @@ def zset_score_for_rank(response, **options):
 def zset_score_pairs_resp3(response, **options):
     """
     If ``withscores`` is specified in the options, return the response as
-    a list of (value, score) pairs
+    a list of [value, score] pairs
     """
     if not response or not options.get("withscores"):
         return response
@@ -249,7 +249,7 @@ def zset_score_pairs_resp3(response, **options):
 def zset_score_for_rank_resp3(response, **options):
     """
     If ``withscores`` is specified in the options, return the response as
-    a list of (value, score) pairs
+    a [value, score] pair
     """
     if not response or not options.get("withscore"):
         return response
