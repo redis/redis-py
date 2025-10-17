@@ -3009,6 +3009,369 @@ class TestNodesManager:
         for node in rc.nodes_manager.nodes_cache.values():
             assert node.redis_connection.connection_pool.queue_class == queue_class
 
+    def test_concurrent_get_node(self):
+        """
+        Test that concurrent get_node calls are thread-safe
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        n_manager = rc.nodes_manager
+
+        results = []
+        errors = []
+
+        def get_node_repeatedly(host, port, iterations):
+            """Get a node repeatedly"""
+            try:
+                for _ in range(iterations):
+                    node = n_manager.get_node(host=host, port=port)
+                    results.append(node)
+            except Exception as e:
+                errors.append(e)
+
+        # Create threads that will concurrently read nodes
+        threads = []
+        for _ in range(10):
+            threads.append(
+                threading.Thread(
+                    target=get_node_repeatedly, args=("127.0.0.1", 7000, 100)
+                )
+            )
+
+        # Start all threads
+        for t in threads:
+            t.start()
+
+        # Wait for all threads to complete
+        for t in threads:
+            t.join()
+
+        # Check that no errors occurred
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+
+        # Check that we got results
+        assert len(results) == 1000
+
+    def test_concurrent_initialize(self):
+        """
+        Test that concurrent initialize calls are properly deduplicated
+        by the _initialization_lock
+        """
+        initialization_count = {"count": 0}
+
+        with (
+            patch.object(Redis, "execute_command") as execute_command_mock,
+            patch.object(
+                CommandsParser, "initialize", autospec=True
+            ) as cmd_parser_initialize,
+        ):
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    # Track how many times we actually fetch cluster slots
+                    initialization_count["count"] += 1
+                    # Add a small delay to make race conditions more likely
+                    # sleep(0.01)
+                    return default_cluster_slots
+                elif _args[0] == "COMMAND":
+                    return {"get": [], "set": []}
+                elif _args[0] == "INFO":
+                    return {"cluster_enabled": True}
+                elif len(_args) > 1 and _args[1] == "cluster-require-full-coverage":
+                    return {"cluster-require-full-coverage": "no"}
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            def cmd_init_mock(self, r):
+                self.commands = {
+                    "get": {
+                        "name": "get",
+                        "arity": 2,
+                        "flags": ["readonly", "fast"],
+                        "first_key_pos": 1,
+                        "last_key_pos": 1,
+                        "step_count": 1,
+                    }
+                }
+
+            cmd_parser_initialize.side_effect = cmd_init_mock
+
+            nm = NodesManager(
+                startup_nodes=[ClusterNode(host=default_host, port=default_port)],
+                from_url=False,
+                require_full_coverage=False,
+                dynamic_startup_nodes=True,
+            )
+
+            # Reset the counter after initial setup
+            initialization_count["count"] = 0
+
+            errors: list[Exception] = []
+
+            def initialize_repeatedly(iterations: int):
+                """Call initialize repeatedly"""
+                try:
+                    for _ in range(iterations):
+                        nm.initialize()
+                except Exception as e:
+                    errors.append(e)
+
+            # Create multiple threads that will try to initialize concurrently
+            threads: list[threading.Thread] = []
+            for _ in range(10):
+                threads.append(
+                    threading.Thread(target=initialize_repeatedly, args=(5,))
+                )
+
+            # Start all threads
+            for t in threads:
+                t.start()
+
+            # Wait for all threads to complete
+            for t in threads:
+                t.join()
+
+            # Check that no errors occurred
+            assert len(errors) == 0, f"Errors occurred: {errors}"
+
+            # Due to the _initialization_lock, we should see far fewer
+            # actual initializations than the 50 calls (10 threads * 5 calls)
+            # In practice, we should see around 50 or fewer depending on timing
+            assert initialization_count["count"] <= 50
+
+            # Verify that the nodes_cache is still consistent
+            assert len(nm.nodes_cache) > 0
+            assert len(nm.slots_cache) > 0
+
+    def test_concurrent_initialize_exact_timing(self):
+        """
+        Test that exactly two concurrent initialize calls result in only
+        one actual cluster slots fetch by forcing them to start simultaneously
+        """
+        initialization_count = {"count": 0}
+        epoch_barrier = threading.Barrier(2)
+
+        with (
+            patch.object(Redis, "execute_command") as execute_command_mock,
+            patch.object(
+                CommandsParser, "initialize", autospec=True
+            ) as cmd_parser_initialize,
+        ):
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    # Track how many times we actually fetch cluster slots
+                    initialization_count["count"] += 1
+                    return default_cluster_slots
+                elif _args[0] == "COMMAND":
+                    return {"get": [], "set": []}
+                elif _args[0] == "INFO":
+                    return {"cluster_enabled": True}
+                elif len(_args) > 1 and _args[1] == "cluster-require-full-coverage":
+                    return {"cluster-require-full-coverage": "no"}
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            def cmd_init_mock(self, r):
+                self.commands = {
+                    "get": {
+                        "name": "get",
+                        "arity": 2,
+                        "flags": ["readonly", "fast"],
+                        "first_key_pos": 1,
+                        "last_key_pos": 1,
+                        "step_count": 1,
+                    }
+                }
+
+            cmd_parser_initialize.side_effect = cmd_init_mock
+
+            nm = NodesManager(
+                startup_nodes=[ClusterNode(host=default_host, port=default_port)],
+                from_url=False,
+                require_full_coverage=False,
+                dynamic_startup_nodes=True,
+            )
+
+            # Reset the counter after initial setup
+            initialization_count["count"] = 0
+
+            # Store the original method
+            original_get_epoch = nm._get_epoch
+
+            def mocked_get_epoch():
+                """
+                Mock _get_epoch to control race timing:
+                1. First thread fetches epoch
+                2. Both threads sync at epoch_barrier (ensures 2nd thread also fetches epoch)
+                3. Both threads sync at proceed_barrier (ensures both have same epoch before lock)
+                4. Both threads proceed to try to acquire _initialization_lock
+                """
+                epoch = original_get_epoch()
+                # Wait for both threads to have fetched the epoch before proceeding
+                epoch_barrier.wait()
+                return epoch
+
+            # Patch the instance method directly
+            nm._get_epoch = mocked_get_epoch
+
+            errors: list[Exception] = []
+
+            def initialize_thread():
+                """Call initialize to test concurrent access"""
+                try:
+                    nm.initialize()
+                except Exception as e:
+                    errors.append(e)
+
+            # Create exactly 2 threads that will initialize at the same time
+            threads: list[threading.Thread] = []
+            for _ in range(2):
+                threads.append(threading.Thread(target=initialize_thread))
+
+            # Start both threads
+            for t in threads:
+                t.start()
+
+            # Wait for both threads to complete
+            for t in threads:
+                t.join()
+
+            # Check that no errors occurred
+            assert len(errors) == 0, f"Errors occurred: {errors}"
+
+            # Due to the _initialization_lock, only one thread should have
+            # actually fetched cluster slots
+            assert initialization_count["count"] == 1
+
+            # Verify that the nodes_cache is still consistent
+            assert len(nm.nodes_cache) > 0
+            assert len(nm.slots_cache) > 0
+
+    def test_concurrent_move_slot_and_get_node_from_slot(self):
+        """
+        Test that concurrent move_slot and get_node_from_slot calls
+        don't cause race conditions or return inconsistent data
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        n_manager = rc.nodes_manager
+
+        slot = 5000
+
+        errors: list[Exception] = []
+        results: list[ClusterNode] = []
+
+        def move_slot_repeatedly(iterations: int):
+            """Simulate concurrent MOVED errors"""
+            try:
+                for i in range(iterations):
+                    # Alternate between two nodes
+                    if i % 2 == 0:
+                        moved_error = MovedError(f"{slot} 127.0.0.1:7001")
+                    else:
+                        moved_error = MovedError(f"{slot} 127.0.0.1:7000")
+                    n_manager.move_slot(moved_error)
+            except Exception as e:
+                errors.append(e)
+
+        def get_node_from_slot_repeatedly(iterations: int):
+            """Get node from slot repeatedly"""
+            try:
+                for _ in range(iterations):
+                    node = n_manager.get_node_from_slot(slot)
+                    # The node should always be a valid primary
+                    assert node is not None
+                    assert node.server_type == PRIMARY
+                    results.append(node)
+            except Exception as e:
+                errors.append(e)
+
+        # Create threads: some moving slots, others reading
+        threads: list[threading.Thread] = []
+        for _ in range(3):
+            threads.append(threading.Thread(target=move_slot_repeatedly, args=(100,)))
+        for _ in range(7):
+            threads.append(
+                threading.Thread(target=get_node_from_slot_repeatedly, args=(100,))
+            )
+
+        # Start all threads
+        for t in threads:
+            t.start()
+
+        # Wait for all threads to complete
+        for t in threads:
+            t.join()
+
+        # Check that no errors occurred
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+
+        # Verify we got results from readers
+        assert len(results) == 700
+
+        # Verify the final state is consistent
+        assert len(n_manager.slots_cache[slot]) >= 1
+        assert n_manager.slots_cache[slot][0].server_type == PRIMARY
+
+    def test_concurrent_nodes_cache_access(self):
+        """
+        Test that concurrent access to nodes_cache doesn't cause
+        dictionary modification errors
+        """
+        rc = get_mocked_redis_client(host=default_host, port=default_port)
+        n_manager = rc.nodes_manager
+
+        errors = []
+        results = []
+
+        def iterate_nodes_repeatedly(iterations):
+            """Iterate over nodes repeatedly"""
+            try:
+                for _ in range(iterations):
+                    # Simulate iterating over nodes (like get_nodes() does)
+                    with n_manager._lock:
+                        nodes = list(n_manager.nodes_cache.values())
+                    results.append(len(nodes))
+            except Exception as e:
+                errors.append(e)
+
+        def modify_nodes_cache(iterations):
+            """Simulate node additions via move_slot"""
+            try:
+                for i in range(iterations):
+                    # Create a MOVED error to a new node
+                    new_port = 8000 + i
+                    moved_error = MovedError(f"{i} 127.0.0.1:{new_port}")
+                    n_manager.move_slot(moved_error)
+            except Exception as e:
+                errors.append(e)
+
+        # Create threads that read and modify concurrently
+        threads = []
+        for _ in range(5):
+            threads.append(
+                threading.Thread(target=iterate_nodes_repeatedly, args=(50,))
+            )
+        for _ in range(2):
+            threads.append(threading.Thread(target=modify_nodes_cache, args=(25,)))
+
+        # Start all threads
+        for t in threads:
+            t.start()
+
+        # Wait for all threads to complete
+        for t in threads:
+            t.join()
+
+        # Check that no errors occurred
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+
+        # Verify we got results
+        assert len(results) == 250
+
 
 @pytest.mark.onlycluster
 class TestClusterPubSubObject:

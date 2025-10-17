@@ -1882,6 +1882,14 @@ class NodesManager:
 
         return target_node
 
+    def _get_epoch(self) -> int:
+        """
+        Get the current epoch value. This method exists primarily to allow
+        tests to mock the epoch fetch and control race condition timing.
+        """
+        with self._lock:
+            return self._epoch
+
     def initialize(self):
         """
         Initializes the nodes cache, slots cache and redis connections.
@@ -1896,8 +1904,7 @@ class NodesManager:
         fully_covered = False
         kwargs = self.connection_kwargs
         exception = None
-        with self._lock:
-            epoch = self._epoch
+        epoch = self._get_epoch()
 
         with self._initialization_lock:
             # randomly order the startup nodes to ensure multiple clients evenly
@@ -2027,6 +2034,8 @@ class NodesManager:
                 if self._dynamic_startup_nodes:
                     # Populate the startup nodes with all discovered nodes
                     self.startup_nodes = tmp_nodes_cache
+                # Increment the epoch to signal that initialization has completed
+                self._epoch += 1
 
     def close(self) -> None:
         with self._lock:
