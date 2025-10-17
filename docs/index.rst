@@ -69,6 +69,7 @@ Module Documentation
    exceptions
    backoff
    lock
+   rwlock
    retry
    lua_scripting
    opentelemetry

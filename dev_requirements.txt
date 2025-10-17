@@ -1,8 +1,10 @@
 build
 click==8.0.4
 invoke==2.2.0
+matplotlib
 mock
 packaging>=20.4
+pandas
 pytest
 pytest-asyncio>=0.23.0
 pytest-cov
