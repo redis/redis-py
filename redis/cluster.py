@@ -1900,14 +1900,14 @@ class NodesManager:
         epoch = self._get_epoch()
 
         with self._initialization_lock:
-            # randomly order the startup nodes to ensure multiple clients evenly
-            # distribute topology discovery requests across the cluster.
             with self._lock:
                 if epoch != self._epoch:
                     # another thread has already re-initialized the nodes; don't
                     # bother running again
                     return
 
+                # randomly order the startup nodes to ensure multiple clients evenly
+                # distribute topology discovery requests across the cluster.
                 startup_nodes = random.sample(
                     list(self.startup_nodes.values()), k=len(self.startup_nodes)
                 )
