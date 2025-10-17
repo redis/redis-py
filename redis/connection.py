@@ -2954,14 +2954,18 @@ class BlockingConnectionPool(ConnectionPool):
                     pass
                 self._locked = False
 
-    def disconnect(self):
-        "Disconnects all connections in the pool."
+    def disconnect(self, inuse_connections: bool = True):
+        "Disconnects either all connections in the pool or just the free connections."
         self._checkpid()
         try:
             if self._in_maintenance:
                 self._lock.acquire()
                 self._locked = True
-            for connection in self._connections:
+            if inuse_connections:
+                connections = self._connections
+            else:
+                connections = self._get_free_connections()
+            for connection in connections:
                 connection.disconnect()
         finally:
             if self._locked:
