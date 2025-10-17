@@ -1569,14 +1569,6 @@ class ClusterNode:
     def __eq__(self, obj):
         return isinstance(obj, ClusterNode) and obj.name == self.name
 
-    def __del__(self):
-        try:
-            if self.redis_connection is not None:
-                self.redis_connection.close()
-        except Exception:
-            # Ignore errors when closing the connection
-            pass
-
 
 class LoadBalancingStrategy(Enum):
     ROUND_ROBIN = "round_robin"
@@ -1870,13 +1862,14 @@ class NodesManager:
             # before creating a new cluster node, check if the cluster node already
             # exists in the current nodes cache and has a valid connection so we can
             # reuse it
+            redis_connection: Redis | None = None
             with self._lock:
-                target_node = self.nodes_cache.get(node_name)
-            if target_node is None or target_node.redis_connection is None:
-                # create new cluster node for this cluster
-                target_node = ClusterNode(host, port, role)
-            if target_node.server_type != role:
-                target_node.server_type = role
+                previous_node = self.nodes_cache.get(node_name)
+                if previous_node:
+                    redis_connection = previous_node.redis_connection
+            # don't update the old ClusterNode, so we don't update its role
+            # outside of the lock
+            target_node = ClusterNode(host, port, role, redis_connection)
             # add this node to the nodes cache
             tmp_nodes_cache[target_node.name] = target_node
 
