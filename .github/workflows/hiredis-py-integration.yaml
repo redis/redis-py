@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
-        python-version: [ '3.9', '3.13']
+        python-version: [ '3.9', '3.14']
         parser-backend: [ 'hiredis' ]
         hiredis-version: [ 'unstable' ]
         event-loop: [ 'asyncio' ]
