@@ -10,8 +10,9 @@ pytest-profiling==1.8.1
 pytest-timeout
 ruff==0.9.6
 ujson>=4.2.0
-uvloop
+uvloop<=0.21.0; platform_python_implementation == "CPython"
 vulture>=2.3.0
-numpy>=1.24.0
+numpy>=1.24.0 ; platform_python_implementation == "CPython"
+numpy>=1.24.0,<2.0 ; platform_python_implementation == "PyPy"
 redis-entraid==1.0.0
 pybreaker>=1.4.0
