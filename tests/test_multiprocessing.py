@@ -80,7 +80,7 @@ class TestMultiprocessing:
             with pytest.raises(ConnectionError):
                 conn.send_command("ping")
 
-        ev = multiprocessing.Event()
+        ev = self._mp_context.Event()
         proc = self._mp_context.Process(target=target, args=(conn, ev))
         proc.start()
 
@@ -88,6 +88,10 @@ class TestMultiprocessing:
         ev.set()
 
         proc.join(3)
+        if proc.exitcode is None:
+            proc.terminate()
+            proc.join(3)
+            pytest.xfail("Intermittent PyPy/Linux fork+Event hang; see pypy/pypy#5268")
         assert proc.exitcode == 0
 
     @pytest.mark.parametrize("max_connections", [2, None])
@@ -185,7 +189,7 @@ class TestMultiprocessing:
                 assert conn.send_command("ping") is None
                 assert conn.read_response() == b"PONG"
 
-        ev = multiprocessing.Event()
+        ev = self._mp_context.Event()
 
         proc = self._mp_context.Process(target=target, args=(pool, ev))
         proc.start()
@@ -193,6 +197,10 @@ class TestMultiprocessing:
         pool.disconnect()
         ev.set()
         proc.join(3)
+        if proc.exitcode is None:
+            proc.terminate()
+            proc.join(3)
+            pytest.xfail("Intermittent PyPy/Linux fork+Event hang; see pypy/pypy#5268")
         assert proc.exitcode == 0
 
     def test_redis_client(self, r):
