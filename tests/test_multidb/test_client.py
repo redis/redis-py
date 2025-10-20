@@ -54,6 +54,7 @@ class TestMultiDbClient:
             assert mock_db1.circuit.state == CBState.CLOSED
             assert mock_db2.circuit.state == CBState.CLOSED
 
+    # @pytest.mark.repeat(600)
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
@@ -91,7 +92,8 @@ class TestMultiDbClient:
 
             client = MultiDBClient(mock_multi_db_config)
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
-            assert client.set("key", "value") == "OK1"
+            result = client.set("key", "value")
+            assert result == "OK1"
             assert mock_hc.check_health.call_count == 7
 
             assert mock_db.circuit.state == CBState.CLOSED
