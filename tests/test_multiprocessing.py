@@ -54,6 +54,10 @@ class TestMultiprocessing:
         proc = self._mp_context.Process(target=target, args=(conn,))
         proc.start()
         proc.join(3)
+        if proc.exitcode is None:
+            proc.terminate()
+            proc.join(3)
+            pytest.xfail("Intermittent PyPy/Linux fork+Event hang; see pypy/pypy#5268")
         assert proc.exitcode == 0
 
         # The connection was created in the parent but disconnected in the
@@ -126,6 +130,10 @@ class TestMultiprocessing:
         proc = self._mp_context.Process(target=target, args=(pool, parent_conn))
         proc.start()
         proc.join(3)
+        if proc.exitcode is None:
+            proc.terminate()
+            proc.join(3)
+            pytest.xfail("Intermittent PyPy/Linux fork+Event hang; see pypy/pypy#5268")
         assert proc.exitcode == 0
 
     @pytest.mark.parametrize("max_connections", [1, 2, None])
@@ -156,6 +164,10 @@ class TestMultiprocessing:
         proc = self._mp_context.Process(target=target, args=(pool,))
         proc.start()
         proc.join(3)
+        if proc.exitcode is None:
+            proc.terminate()
+            proc.join(3)
+            pytest.xfail("Intermittent PyPy/Linux fork+Event hang; see pypy/pypy#5268")
         assert proc.exitcode == 0
 
         # Check that connection is still alive after fork process has exited
