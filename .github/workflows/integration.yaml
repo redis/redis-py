@@ -170,7 +170,7 @@ jobs:
   build-and-test-package:
     name: Validate building and installing the package
     runs-on: ubuntu-latest
-    needs: [tests]
+    needs: [redis_version]
     strategy:
       fail-fast: false
       matrix:

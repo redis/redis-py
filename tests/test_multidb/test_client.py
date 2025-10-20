@@ -1,4 +1,5 @@
 import threading
+import time
 from time import sleep
 from unittest.mock import patch, Mock
 
@@ -14,6 +15,16 @@ from redis.multidb.failover import WeightBasedFailoverStrategy
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck
 from tests.test_multidb.conftest import create_weighted_list
+
+
+# tiny helper to poll until a condition is true
+def validate_condition(condition, timeout=2.0, interval=0.02, msg="condition not met"):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return
+        time.sleep(interval)
+    pytest.fail(msg)
 
 
 @pytest.mark.onlynoncluster
@@ -280,11 +291,28 @@ class TestMultiDbClient:
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
+
+            # 1) Initially should pick highest weight (db1)
             assert client.set("key", "value") == "OK1"
+
+            # 2) Wait until the SECOND db1 check actually ran (db1 becomes unhealthy)
             error_event.wait(timeout=0.5)
-            assert client.set("key", "value") == "OK2"
+
+            # 3) Eventually, fallback should route to db2 (next highest weight)
+            validate_condition(
+                lambda: client.set("key", "value") == "OK2",
+                timeout=1.0,
+                msg="Timeout waiting for fallback to db2",
+            )
+
             sleep(0.5)
-            assert client.set("key", "value") == "OK1"
+            # 4) After auto-fallback interval + another health cycle, db1 returns healthy.
+            #    Eventually we should route back to db1.
+            validate_condition(
+                lambda: client.set("key", "value") == "OK1",
+                timeout=1.0,
+                msg="Timeout waiting for fallback back to db1 after successful health check",
+            )
 
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
