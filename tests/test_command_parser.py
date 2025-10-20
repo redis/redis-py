@@ -111,6 +111,7 @@ class TestCommandsParser:
         assert commands_parser.get_keys(r, *args4) == ["foo1", "foo2", "foo3"]
 
     @skip_if_server_version_lt("7.0.0")
+    @pytest.mark.onlycluster
     def test_get_command_policies(self, r):
         commands_parser = CommandsParser(r)
         expected_command_policies = {

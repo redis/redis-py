@@ -594,21 +594,21 @@ class BasePolicyResolver(PolicyResolver):
         if len(parts) > 2:
             raise ValueError(f"Wrong command or module name: {command_name}")
 
-        module_name, command_name = parts if len(parts) == 2 else ("core", parts[0])
+        module, command = parts if len(parts) == 2 else ("core", parts[0])
 
-        if self._policies.get(module_name, None) is None:
+        if self._policies.get(module, None) is None:
             if self._fallback is not None:
                 return self._fallback.resolve(command_name)
             else:
-                raise ValueError(f"Module {module_name} not found")
+                raise ValueError(f"Module {module} not found")
 
-        if self._policies.get(module_name).get(command_name, None) is None:
+        if self._policies.get(module).get(command, None) is None:
             if self._fallback is not None:
                 return self._fallback.resolve(command_name)
             else:
-                raise ValueError(f"Command {command_name} not found in module {module_name}")
+                raise ValueError(f"Command {command} not found in module {module}")
 
-        return self._policies.get(module_name).get(command_name)
+        return self._policies.get(module).get(command)
 
     @abstractmethod
     def with_fallback(self, fallback: "PolicyResolver") -> "PolicyResolver":
