@@ -280,6 +280,7 @@ class TestBlockingConnectionPool:
         pool.disconnect(inuse_connections=False)
         assert conn._sock
 
+
 class TestConnectionPoolURLParsing:
     def test_hostname(self):
         pool = redis.ConnectionPool.from_url("redis://my.host")

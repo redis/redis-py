@@ -223,8 +223,6 @@ class TestConnectionPool:
             assert conn.is_connected
 
 
-
-
 class TestBlockingConnectionPool:
     @asynccontextmanager
     async def get_pool(self, connection_kwargs=None, max_connections=10, timeout=20):
