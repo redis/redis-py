@@ -1356,7 +1356,7 @@ class BlockingConnectionPool(ConnectionPool):
     def __init__(
         self,
         max_connections: int = 50,
-        timeout: Optional[int] = 20,
+        timeout: Optional[float] = 20,
         connection_class: Type[AbstractConnection] = Connection,
         queue_class: Type[asyncio.Queue] = asyncio.LifoQueue,  # deprecated
         **connection_kwargs,
