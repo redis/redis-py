@@ -672,6 +672,23 @@ async def test_no_index(decoded_r: redis.Redis):
 
 
 @pytest.mark.redismod
+@skip_if_server_version_lt("7.4.0")
+@skip_ifmodversion_lt("2.10.0", "search")
+async def test_create_index_empty_or_missing_fields_with_sortable(
+    decoded_r: redis.Redis,
+):
+    definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
+
+    fields = [
+        TextField("title", sortable=True, index_empty=True),
+        TagField("features", index_missing=True, sortable=True),
+        TextField("description", no_index=True, sortable=True),
+    ]
+
+    await decoded_r.ft().create_index(fields, definition=definition)
+
+
+@pytest.mark.redismod
 async def test_explain(decoded_r: redis.Redis):
     await decoded_r.ft().create_index(
         (TextField("f1"), TextField("f2"), TextField("f3"))
