@@ -221,7 +221,7 @@ class SearchCommands:
 
         return self.execute_command(*args)
 
-    def alter_schema_add(self, fields: List[str]):
+    def alter_schema_add(self, fields: Union[Field, List[Field]]):
         """
         Alter the existing search index by adding new fields. The index
         must already exist.
@@ -336,11 +336,11 @@ class SearchCommands:
         doc_id: str,
         nosave: bool = False,
         score: float = 1.0,
-        payload: bool = None,
+        payload: Optional[bool] = None,
         replace: bool = False,
         partial: bool = False,
         language: Optional[str] = None,
-        no_create: str = False,
+        no_create: bool = False,
         **fields: List[str],
     ):
         """
@@ -464,7 +464,7 @@ class SearchCommands:
         return self._parse_results(INFO_CMD, res)
 
     def get_params_args(
-        self, query_params: Union[Dict[str, Union[str, int, float, bytes]], None]
+        self, query_params: Optional[Dict[str, Union[str, int, float, bytes]]]
     ):
         if query_params is None:
             return []
@@ -478,7 +478,7 @@ class SearchCommands:
         return args
 
     def _mk_query_args(
-        self, query, query_params: Union[Dict[str, Union[str, int, float, bytes]], None]
+        self, query, query_params: Optional[Dict[str, Union[str, int, float, bytes]]]
     ):
         args = [self.index_name]
 
@@ -528,7 +528,7 @@ class SearchCommands:
     def explain(
         self,
         query: Union[str, Query],
-        query_params: Dict[str, Union[str, int, float]] = None,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
     ):
         """Returns the execution plan for a complex query.
 
@@ -543,7 +543,7 @@ class SearchCommands:
     def aggregate(
         self,
         query: Union[AggregateRequest, Cursor],
-        query_params: Dict[str, Union[str, int, float]] = None,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
     ):
         """
         Issue an aggregation query.
@@ -598,7 +598,7 @@ class SearchCommands:
         self,
         query: Union[Query, AggregateRequest],
         limited: bool = False,
-        query_params: Optional[Dict[str, Union[str, int, float]]] = None,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
     ):
         """
         Performs a search or aggregate command and collects performance
@@ -936,7 +936,7 @@ class AsyncSearchCommands(SearchCommands):
     async def search(
         self,
         query: Union[str, Query],
-        query_params: Dict[str, Union[str, int, float]] = None,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
     ):
         """
         Search the index for a given query, and return a result of documents
@@ -968,7 +968,7 @@ class AsyncSearchCommands(SearchCommands):
     async def aggregate(
         self,
         query: Union[AggregateResult, Cursor],
-        query_params: Dict[str, Union[str, int, float]] = None,
+        query_params: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
     ):
         """
         Issue an aggregation query.
