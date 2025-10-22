@@ -15,10 +15,12 @@ from redis.multidb.database import Database, Databases, SyncDatabase
 from redis.multidb.exception import NoValidDatabaseException, UnhealthyDatabaseException
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck, HealthCheckPolicy
+from redis.utils import experimental
 
 logger = logging.getLogger(__name__)
 
 
+@experimental
 class MultiDBClient(RedisModuleCommands, CoreCommands):
     """
     Client that operates on multiple logical Redis databases.

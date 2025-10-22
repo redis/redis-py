@@ -1,6 +1,7 @@
 import datetime
 import logging
 import textwrap
+import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
@@ -326,3 +327,22 @@ async def dummy_fail_async():
     Async fake function for a Retry object if you don't need to handle each failure.
     """
     pass
+
+
+def experimental(cls):
+    """
+    Decorator to mark a class as experimental.
+    """
+    original_init = cls.__init__
+
+    @wraps(original_init)
+    def new_init(self, *args, **kwargs):
+        warnings.warn(
+            f"{cls.__name__} is an experimental and may change or be removed in future versions.",
+            category=UserWarning,
+            stacklevel=2,
+        )
+        original_init(self, *args, **kwargs)
+
+    cls.__init__ = new_init
+    return cls

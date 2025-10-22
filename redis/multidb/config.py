@@ -32,9 +32,9 @@ from redis.multidb.healthcheck import (
     DEFAULT_HEALTH_CHECK_INTERVAL,
     DEFAULT_HEALTH_CHECK_POLICY,
     DEFAULT_HEALTH_CHECK_PROBES,
-    EchoHealthCheck,
     HealthCheck,
     HealthCheckPolicies,
+    PingHealthCheck,
 )
 from redis.retry import Retry
 
@@ -200,7 +200,7 @@ class MultiDbConfig:
 
     def default_health_checks(self) -> List[HealthCheck]:
         return [
-            EchoHealthCheck(),
+            PingHealthCheck(),
         ]
 
     def default_failover_strategy(self) -> FailoverStrategy:
