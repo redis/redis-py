@@ -14,10 +14,12 @@ from redis.multidb.circuit import CircuitBreaker
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import NoValidDatabaseException, UnhealthyDatabaseException
 from redis.typing import ChannelT, EncodableT, KeyT
+from redis.utils import experimental
 
 logger = logging.getLogger(__name__)
 
 
+@experimental
 class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
     """
     Client that operates on multiple logical Redis databases.
