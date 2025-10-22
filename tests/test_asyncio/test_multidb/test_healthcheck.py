@@ -3,7 +3,7 @@ from mock.mock import AsyncMock, Mock
 
 from redis.asyncio.multidb.database import Database
 from redis.asyncio.multidb.healthcheck import (
-    EchoHealthCheck,
+    PingHealthCheck,
     LagAwareHealthCheck,
     HealthCheck,
     HealthyAllPolicy,
@@ -208,15 +208,15 @@ class TestHealthyAnyPolicy:
 
 
 @pytest.mark.onlynoncluster
-class TestEchoHealthCheck:
+class TestPingHealthCheck:
     @pytest.mark.asyncio
     async def test_database_is_healthy_on_echo_response(self, mock_client, mock_cb):
         """
         Mocking responses to mix error and actual responses to ensure that health check retry
         according to given configuration.
         """
-        mock_client.execute_command = AsyncMock(side_effect=["healthcheck"])
-        hc = EchoHealthCheck()
+        mock_client.execute_command = AsyncMock(side_effect=["PONG"])
+        hc = PingHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
         assert await hc.check_health(db)
@@ -230,8 +230,8 @@ class TestEchoHealthCheck:
         Mocking responses to mix error and actual responses to ensure that health check retry
         according to given configuration.
         """
-        mock_client.execute_command = AsyncMock(side_effect=["wrong"])
-        hc = EchoHealthCheck()
+        mock_client.execute_command = AsyncMock(side_effect=[False])
+        hc = PingHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
         assert not await hc.check_health(db)
@@ -241,9 +241,9 @@ class TestEchoHealthCheck:
     async def test_database_close_circuit_on_successful_healthcheck(
         self, mock_client, mock_cb
     ):
-        mock_client.execute_command = AsyncMock(side_effect=["healthcheck"])
+        mock_client.execute_command = AsyncMock(side_effect=["PONG"])
         mock_cb.state = CBState.HALF_OPEN
-        hc = EchoHealthCheck()
+        hc = PingHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
         assert await hc.check_health(db)
