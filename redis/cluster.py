@@ -8,15 +8,17 @@ from collections import OrderedDict
 from copy import copy
 from enum import Enum
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, Mapping
 
 from redis._parsers import CommandsParser, Encoder
+from redis._parsers.commands import RequestPolicy, CommandPolicies, ResponsePolicy
 from redis._parsers.helpers import parse_scan
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface
 from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
+from redis.commands.policies import PolicyResolver, StaticPolicyResolver, DynamicPolicyResolver
 from redis.connection import (
     Connection,
     ConnectionPool,
@@ -531,6 +533,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
+        policy_resolver: Optional[PolicyResolver] = StaticPolicyResolver(),
         **kwargs,
     ):
         """
@@ -712,7 +715,26 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         )
         self.result_callbacks = CaseInsensitiveDict(self.__class__.RESULT_CALLBACKS)
 
+        self._policies_callback_mapping: dict[Union[RequestPolicy, ResponsePolicy], Callable] = {
+            RequestPolicy.DEFAULT_KEYLESS: lambda: [self.get_random_node()],
+            RequestPolicy.DEFAULT_KEYED: lambda *args: self.get_node_from_slot(*args),
+            RequestPolicy.ALL_SHARDS: self.get_primaries,
+            RequestPolicy.ALL_NODES: self.get_nodes,
+            RequestPolicy.ANY_MASTER_SHARD: lambda: [self.get_random_primary_node()],
+            RequestPolicy.MULTI_SHARD: lambda *args, **kwargs: self._split_multi_shard_command(*args, **kwargs),
+            RequestPolicy.SPECIAL: self.get_special_nodes,
+            ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
+            ResponsePolicy.DEFAULT_KEYED: lambda res: res,
+            ResponsePolicy.ONE_SUCCEEDED: lambda res: res,
+            ResponsePolicy.ALL_SUCCEEDED: lambda res: self._evaluate_all_succeeded(res)
+        }
+
+        # Needs for a commands parser to successfully execute COMMAND
+        self._policy_resolver = policy_resolver
         self.commands_parser = CommandsParser(self)
+
+        # Node where FT.AGGREGATE command is executed.
+        self._aggregate_nodes = None
         self._lock = threading.RLock()
 
     def __enter__(self):
@@ -803,6 +825,74 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         Get the cluster's default node
         """
         return self.nodes_manager.default_node
+
+    def get_node_from_slot(self, *args):
+        """
+        Returns a list of nodes that hold the specified keys' slots.
+        """
+        # get the node that holds the key's slot
+        slot = self.determine_slot(*args)
+        node = self.nodes_manager.get_node_from_slot(
+            slot,
+            self.read_from_replicas and command in READ_COMMANDS,
+            self.load_balancing_strategy if command in READ_COMMANDS else None,
+        )
+        return [node]
+
+    def _split_multi_shard_command(self, *args, **kwargs) -> list[dict]:
+        """
+        Splits the command with Multi-Shard policy, to the multiple commands
+        """
+        keys = self._get_command_keys(*args)
+        commands = []
+
+        for key in keys:
+            commands.append({
+                'args': (args[0], key),
+                'kwargs': kwargs,
+            })
+
+        return commands
+
+    def get_special_nodes(self) -> Optional[list["ClusterNode"]]:
+        """
+        Returns a list of nodes for commands with a special policy.
+        """
+        if not self._aggregate_nodes:
+            raise RedisClusterException('Cannot execute FT.CURSOR commands without FT.AGGREGATE')
+
+        return self._aggregate_nodes
+
+    def get_random_primary_node(self) -> "ClusterNode":
+        """
+        Returns a random primary node
+        """
+        return random.choice(self.get_primaries())
+
+    def _evaluate_all_succeeded(self, res):
+        """
+        Evaluate the result of a command with ResponsePolicy.ALL_SUCCEEDED
+        """
+        first_successful_response = None
+
+        if isinstance(res, dict):
+            for key, value in res.items():
+                if value:
+                    if first_successful_response is None:
+                        first_successful_response = {key: value}
+                else:
+                    return {key: False}
+        else:
+            for response in res:
+                if response:
+                    if first_successful_response is None:
+                        # Dynamically resolve type
+                        first_successful_response = type(response)(response)
+                else:
+                    return type(response)(False)
+
+        return first_successful_response
+
 
     def set_default_node(self, node):
         """
@@ -953,46 +1043,21 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """Set a custom Response Callback"""
         self.cluster_response_callbacks[command] = callback
 
-    def _determine_nodes(self, *args, **kwargs) -> List["ClusterNode"]:
-        # Determine which nodes should be executed the command on.
-        # Returns a list of target nodes.
-        command = args[0].upper()
-        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
-            command = f"{args[0]} {args[1]}".upper()
+    def _determine_nodes(self, *args, request_policy: RequestPolicy) -> List["ClusterNode"]:
+        """
+        Determines a nodes the command should be executed on.
+        """
+        policy_callback = self._policies_callback_mapping[request_policy]
 
-        nodes_flag = kwargs.pop("nodes_flag", None)
-        if nodes_flag is not None:
-            # nodes flag passed by the user
-            command_flag = nodes_flag
+        if request_policy == RequestPolicy.DEFAULT_KEYED:
+            target_nodes = policy_callback(*args)
         else:
-            # get the nodes group for this command if it was predefined
-            command_flag = self.command_flags.get(command)
-        if command_flag == self.__class__.RANDOM:
-            # return a random node
-            return [self.get_random_node()]
-        elif command_flag == self.__class__.PRIMARIES:
-            # return all primaries
-            return self.get_primaries()
-        elif command_flag == self.__class__.REPLICAS:
-            # return all replicas
-            return self.get_replicas()
-        elif command_flag == self.__class__.ALL_NODES:
-            # return all nodes
-            return self.get_nodes()
-        elif command_flag == self.__class__.DEFAULT_NODE:
-            # return the cluster's default node
-            return [self.nodes_manager.default_node]
-        elif command in self.__class__.SEARCH_COMMANDS[0]:
-            return [self.nodes_manager.default_node]
-        else:
-            # get the node that holds the key's slot
-            slot = self.determine_slot(*args)
-            node = self.nodes_manager.get_node_from_slot(
-                slot,
-                self.read_from_replicas and command in READ_COMMANDS,
-                self.load_balancing_strategy if command in READ_COMMANDS else None,
-            )
-            return [node]
+            target_nodes = policy_callback()
+
+        if args[0].lower() == "ft.aggregate":
+            self._aggregate_nodes = target_nodes
+
+        return target_nodes
 
     def _should_reinitialized(self):
         # To reinitialize the cluster on every MOVED error,
@@ -1142,6 +1207,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         is_default_node = False
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
+        command_policies = self._policy_resolver.resolve(args[0].lower())
         if passed_targets is not None and not self._is_nodes_flag(passed_targets):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
@@ -1160,9 +1226,24 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             try:
                 res = {}
                 if not target_nodes_specified:
+                    if command_policies.request_policy == RequestPolicy.MULTI_SHARD:
+                        commands = self._policies_callback_mapping[command_policies.request_policy](*args, **kwargs)
+
+                        for command in commands:
+                            target_nodes = self.get_node_from_slot(*command['args'])
+
+                            if not target_nodes:
+                                raise RedisClusterException(
+                                    f"No targets were found to execute {args} command on"
+                                )
+
+                            res[target_nodes[0].name] = self._execute_command(target_nodes[0], *command['args'], **command['kwargs'])
+
+                        return self._process_result(args[0], res, response_policy=command_policies.response_policy)
+
                     # Determine the nodes to execute the command on
                     target_nodes = self._determine_nodes(
-                        *args, **kwargs, nodes_flag=passed_targets
+                        *args, request_policy=command_policies.request_policy
                     )
                     if not target_nodes:
                         raise RedisClusterException(
@@ -1175,8 +1256,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                         is_default_node = True
                 for node in target_nodes:
                     res[node.name] = self._execute_command(node, *args, **kwargs)
+
+                    if command_policies.response_policy == ResponsePolicy.ONE_SUCCEEDED:
+                        break
+
                 # Return the processed result
-                return self._process_result(args[0], res, **kwargs)
+                return self._process_result(args[0], res, response_policy=command_policies.response_policy, **kwargs)
             except Exception as e:
                 if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     if is_default_node:
@@ -1316,7 +1401,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             # RedisCluster's __init__ can fail before nodes_manager is set
             pass
 
-    def _process_result(self, command, res, **kwargs):
+    def _process_result(self, command, res, response_policy: ResponsePolicy, **kwargs):
         """
         Process the result of the executed command.
         The function would return a dict or a single value.
@@ -1328,13 +1413,13 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             Dict<node_name, command_result>
         """
         if command in self.result_callbacks:
-            return self.result_callbacks[command](command, res, **kwargs)
+            res = self.result_callbacks[command](command, res, **kwargs)
         elif len(res) == 1:
             # When we execute the command on a single node, we can
             # remove the dictionary and return a single response
-            return list(res.values())[0]
-        else:
-            return res
+            res = list(res.values())[0]
+
+        return self._policies_callback_mapping[response_policy](res)
 
     def load_external_module(self, funcname, func):
         """

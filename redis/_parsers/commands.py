@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 class RequestPolicy(Enum):
     ALL_NODES = 'all_nodes'
     ALL_SHARDS = 'all_shards'
+    ANY_MASTER_SHARD = 'any_master_shard'
     MULTI_SHARD = 'multi_shard'
     SPECIAL = 'special'
     DEFAULT_KEYLESS = 'default_keyless'
