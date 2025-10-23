@@ -9,19 +9,12 @@ STATIC_POLICIES: PolicyRecords = {
         'suglen': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED),
         'profile': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'dropindex': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'synadd': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'aliasupdate': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'alter': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'aggregate': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'syndump': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        '_dropindexifx': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'add': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'create': CommandPolicies(request_policy=RequestPolicy.ANY_MASTER_SHARD, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
+        'create': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'explain': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        '_aliasaddifnx': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        '_dropifx': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'get': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        '_createifnx': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'sugget': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED),
         'dictdel': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'aliasadd': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
@@ -30,14 +23,9 @@ STATIC_POLICIES: PolicyRecords = {
         'drop': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'info': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'sugadd': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED),
-        '_aliasdelifx': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'dictdump': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'cursor': CommandPolicies(request_policy=RequestPolicy.SPECIAL, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        '_alterifnx': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'mget': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'del': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
+        'cursor': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'search': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        '_list': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'tagvals': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'aliasdel': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'sugdel': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED),
@@ -106,6 +94,24 @@ class BasePolicyResolver(PolicyResolver):
     @abstractmethod
     def with_fallback(self, fallback: "PolicyResolver") -> "PolicyResolver":
         pass
+
+
+class DynamicPolicyResolver(BasePolicyResolver):
+    """
+    Resolves policy dynamically based on the COMMAND output.
+    """
+    def __init__(self, commands_parser: CommandsParser, fallback: Optional[PolicyResolver] = None) -> None:
+        """
+        Parameters:
+            commands_parser (CommandsParser): COMMAND output parser.
+            fallback (Optional[PolicyResolver]): An optional resolver to be used when the
+                primary policies cannot handle a specific request.
+        """
+        self._commands_parser = commands_parser
+        super().__init__(commands_parser.get_command_policies(), fallback)
+
+    def with_fallback(self, fallback: "PolicyResolver") -> "PolicyResolver":
+        return DynamicPolicyResolver(self._commands_parser, fallback)
 
 
 class StaticPolicyResolver(BasePolicyResolver):
