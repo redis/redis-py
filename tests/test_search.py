@@ -1,6 +1,7 @@
 import bz2
 import csv
 import os
+import random
 import time
 from io import TextIOWrapper
 
@@ -8,8 +9,17 @@ import numpy as np
 import pytest
 from redis import ResponseError
 import redis
-import redis.commands.search
+
 import redis.commands.search.aggregation as aggregations
+from redis.commands.search.hybrid_query import (
+    HybridCursorQuery,
+    HybridFilter,
+    HybridPostProcessingConfig,
+    HybridQuery,
+    HybridSearchQuery,
+    HybridVsimQuery,
+)
+from redis.commands.search.hybrid_result import HybridCursorResult
 import redis.commands.search.reducers as reducers
 from redis.commands.json.path import Path
 from redis.commands.search import Search
@@ -22,9 +32,15 @@ from redis.commands.search.field import (
     VectorField,
 )
 from redis.commands.search.index_definition import IndexDefinition, IndexType
-from redis.commands.search.query import GeoFilter, NumericFilter, Query
+from redis.commands.search.query import (
+    GeoFilter,
+    NumericFilter,
+    Query,
+    SortbyField,
+)
 from redis.commands.search.result import Result
 from redis.commands.search.suggestion import Suggestion
+from redis.utils import safe_str
 
 from .conftest import (
     _get_client,
@@ -3866,3 +3882,1072 @@ def test_svs_vamana_vector_search_with_parameters_leanvec(client):
     else:
         assert res["total_results"] == 3
         assert "doc0" == res["results"][0]["id"]
+
+
+def _create_hybrid_search_index(client):
+    client.ft().create_index(
+        (
+            TextField("description"),
+            NumericField("price"),
+            TagField("color"),
+            TagField("item_type"),
+            NumericField("size"),
+            VectorField(
+                "embedding",
+                "FLAT",
+                {
+                    "TYPE": "FLOAT32",
+                    "DIM": 4,
+                    "DISTANCE_METRIC": "L2",
+                },
+            ),
+            VectorField(
+                "embedding-hnsw",
+                "HNSW",
+                {
+                    "TYPE": "FLOAT32",
+                    "DIM": 4,
+                    "DISTANCE_METRIC": "L2",
+                },
+            ),
+        ),
+        definition=IndexDefinition(prefix=["item:"]),
+    )
+    waitForIndex(client, "idx")
+
+
+def _generate_random_vector(dim):
+    return [random.random() for _ in range(dim)]
+
+
+def _add_data_for_hybrid_search(client, items_sets=1, randomize_data=False):
+    # Create test vectors (4-dimensional to match DIM)
+    if randomize_data:
+        items = [
+            (_generate_random_vector(4), "red shoes"),
+            (_generate_random_vector(4), "green shoes with red laces"),
+            (_generate_random_vector(4), "red dress"),
+            (_generate_random_vector(4), "orange dress"),
+            (_generate_random_vector(4), "black shoes"),
+        ]
+    else:
+        items = [
+            ([1.0, 2.0, 7.0, 8.0], "red shoes"),
+            ([1.0, 4.0, 7.0, 8.0], "green shoes with red laces"),
+            ([1.0, 2.0, 6.0, 5.0], "red dress"),
+            ([2.0, 3.0, 6.0, 5.0], "orange dress"),
+            ([5.0, 6.0, 7.0, 8.0], "black shoes"),
+        ]
+    items = items * items_sets
+
+    for i, vec in enumerate(items):
+        vec, description = vec
+        mapping = {
+            "description": description,
+            "embedding": np.array(vec, dtype=np.float32).tobytes(),
+            "embedding-hnsw": np.array(vec, dtype=np.float32).tobytes(),
+            "price": 15 + i % 4,
+            "color": description.split(" ")[0],
+            "item_type": description.split(" ")[1],
+            "size": 10 + i % 3,
+        }
+
+        client.hset(
+            f"item:{i}",
+            mapping=mapping,
+        )
+
+
+def _convert_dict_values_to_str(list_of_dicts):
+    res = []
+    for d in list_of_dicts:
+        res_dict = {}
+        for k, v in d.items():
+            if isinstance(v, list):
+                res_dict[k] = [safe_str(x) for x in v]
+            else:
+                res_dict[k] = safe_str(v)
+        res.append(res_dict)
+    return res
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_basic_hybrid_search(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=5)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{red} @color:{green}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([-100, -200, -200, -300], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    res = client.ft().hybrid_search(query=hybrid_query)
+
+    # the default results count limit is 10
+    if is_resp2_connection(client):
+        assert res.total_results == 10
+        assert len(res.results) == 10
+        assert res.warnings == []
+        assert res.execution_time > 0
+        assert all(isinstance(res.results[i]["__score"], bytes) for i in range(10))
+        assert all(isinstance(res.results[i]["__key"], bytes) for i in range(10))
+    else:
+        assert res["total_results"] == 10
+        assert len(res["results"]) == 10
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+        assert all(isinstance(res["results"][i]["__score"], str) for i in range(10))
+        assert all(isinstance(res["results"][i]["__key"], str) for i in range(10))
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_scorer(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{red}")
+    search_query.scorer("TFIDF")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 2, 3], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.load(
+        "description", "color", "price", "size", "__score", "__item"
+    )
+    posprocessing_config.limit(0, 3)
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+
+    expected_results_tfidf = [
+        {
+            "description": b"red dress",
+            "color": b"red",
+            "price": b"17",
+            "size": b"12",
+            "__score": b"0.032522474881",
+        },
+        {
+            "description": b"red shoes",
+            "color": b"red",
+            "price": b"15",
+            "size": b"10",
+            "__score": b"0.016393442623",
+        },
+        {
+            "description": b"red dress",
+            "color": b"red",
+            "price": b"18",
+            "size": b"11",
+            "__score": b"0.0161290322581",
+        },
+    ]
+
+    if is_resp2_connection(client):
+        assert res.total_results == 5
+        assert len(res.results) == 3
+        assert res.results == expected_results_tfidf
+        assert res.warnings == []
+    else:
+        assert res["total_results"] == 5
+        assert len(res["results"]) == 3
+        assert res["results"] == _convert_dict_values_to_str(expected_results_tfidf)
+        assert res["warnings"] == []
+
+    search_query.scorer("BM25")
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+    if is_resp2_connection(client):
+        assert res.total_results == 5
+        assert len(res.results) == 3
+        assert res.results == expected_results_tfidf
+        assert res.warnings == []
+    else:
+        assert res["total_results"] == 5
+        assert len(res["results"]) == 3
+        assert res["results"] == _convert_dict_values_to_str(expected_results_tfidf)
+        assert res["warnings"] == []
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_vsim_filter(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    # this query won't have results, so we will be able to validate the filter
+    search_query = HybridSearchQuery("@color:{none}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 2, 3], dtype=np.float32).tobytes(),
+    )
+    vsim_query.filter(HybridFilter("@price:[15 16] @size:[10 11]"))
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.load(
+        "description", "color", "price", "size", "__score", "__item"
+    )
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+    if is_resp2_connection(client):
+        assert res.total_results == 10
+        assert len(res.results) == 10
+        assert res.warnings == []
+        assert res.execution_time > 0
+        for item in res.results:
+            assert item["price"] in [b"15", b"16"]
+            assert item["size"] in [b"10", b"11"]
+    else:
+        assert res["total_results"] == 10
+        assert len(res["results"]) == 10
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+        for item in res["results"]:
+            assert item["price"] in ["15", "16"]
+            assert item["size"] in ["10", "11"]
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_vsim_knn(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=10)
+
+    # set search query
+    # this query won't have results, so we will be able to validate vsim results
+    search_query = HybridSearchQuery("@color:{none}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 2, 3], dtype=np.float32).tobytes(),
+    )
+
+    vsim_query.vsim_method_params("KNN", K=3)
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+    expected_results = [
+        {"__key": b"item:2", "__score": b"0.016393442623"},
+        {"__key": b"item:7", "__score": b"0.0161290322581"},
+        {"__key": b"item:12", "__score": b"0.015873015873"},
+    ]
+    if is_resp2_connection(client):
+        assert res.total_results == 3  # KNN top-k value
+        assert len(res.results) == 3
+        assert res.results == expected_results
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert res["total_results"] == 3  # KNN top-k value
+        assert len(res["results"]) == 3
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+    vsim_query_with_hnsw = HybridVsimQuery(
+        vector_field_name="@embedding-hnsw",
+        vector_data=np.array([1, 2, 2, 3], dtype=np.float32).tobytes(),
+    )
+    vsim_query_with_hnsw.vsim_method_params("KNN", K=3, EF_RUNTIME=1)
+    hybrid_query_with_hnsw = HybridQuery(search_query, vsim_query_with_hnsw)
+
+    res2 = client.ft().hybrid_search(query=hybrid_query_with_hnsw, timeout=10)
+
+    expected_results2 = [
+        {"__key": b"item:12", "__score": b"0.016393442623"},
+        {"__key": b"item:22", "__score": b"0.0161290322581"},
+        {"__key": b"item:27", "__score": b"0.015873015873"},
+    ]
+    if is_resp2_connection(client):
+        assert res2.total_results == 3  # KNN top-k value
+        assert len(res2.results) == 3
+        assert res2.results == expected_results2
+        assert res2.warnings == []
+        assert res2.execution_time > 0
+    else:
+        assert res2["total_results"] == 3  # KNN top-k value
+        assert len(res2["results"]) == 3
+        assert res2["results"] == _convert_dict_values_to_str(expected_results2)
+        assert res2["warnings"] == []
+        assert res2["execution_time"] > 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_vsim_range(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=10)
+
+    # set search query
+    # this query won't have results, so we will be able to validate vsim results
+    search_query = HybridSearchQuery("@color:{none}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    vsim_query.vsim_method_params("RANGE", RADIUS=2)
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.limit(0, 3)
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+
+    expected_results = [
+        {"__key": b"item:2", "__score": b"0.016393442623"},
+        {"__key": b"item:7", "__score": b"0.0161290322581"},
+        {"__key": b"item:12", "__score": b"0.015873015873"},
+    ]
+    if is_resp2_connection(client):
+        assert res.total_results == 3
+        assert len(res.results) == 3
+        assert res.results == expected_results
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert res["total_results"] == 3
+        assert len(res["results"]) == 3
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+    vsim_query_with_hnsw = HybridVsimQuery(
+        vector_field_name="@embedding-hnsw",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    vsim_query_with_hnsw.vsim_method_params("RANGE", RADIUS=2, EPSILON=0.5)
+
+    hybrid_query_with_hnsw = HybridQuery(search_query, vsim_query_with_hnsw)
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query_with_hnsw, post_processing=posprocessing_config, timeout=10
+    )
+
+    expected_results_hnsw = [
+        {"__key": b"item:27", "__score": b"0.016393442623"},
+        {"__key": b"item:12", "__score": b"0.0161290322581"},
+        {"__key": b"item:22", "__score": b"0.015873015873"},
+    ]
+
+    if is_resp2_connection(client):
+        assert res.total_results == 3
+        assert len(res.results) == 3
+        assert res.results == expected_results_hnsw
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert res["total_results"] == 3
+        assert len(res["results"]) == 3
+        assert res["results"] == _convert_dict_values_to_str(expected_results_hnsw)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_combine(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{red}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.combine("LINEAR", ALPHA=0.5, BETA=0.5)
+    posprocessing_config.limit(0, 3)
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+
+    expected_results = [
+        {"__key": b"item:2", "__score": b"0.166666666667"},
+        {"__key": b"item:7", "__score": b"0.166666666667"},
+        {"__key": b"item:12", "__score": b"0.166666666667"},
+    ]
+    if is_resp2_connection(client):
+        assert res.total_results == 10
+        assert len(res.results) == 3
+        assert res.results == expected_results
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert res["total_results"] == 10
+        assert len(res["results"]) == 3
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+    # LINEAR combine with no params
+    # TODO uncomment for RC1
+    # posprocessing_config.combine("LINEAR")
+    # res = client.ft().hybrid_search(
+    #     query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    # )
+
+    # expected_results = [
+    #     {"__key": b"item:2", "__score": b"0.166666666667"},
+    #     {"__key": b"item:7", "__score": b"0.166666666667"},
+    #     {"__key": b"item:12", "__score": b"0.166666666667"},
+    # ]
+    # if is_resp2_connection(client):
+    #     assert res.total_results == 10
+    #     assert len(res.results) == 3
+    #     assert res.results == expected_results
+    #     assert res.warnings == []
+    #     assert res.execution_time > 0
+    # else:
+    #     assert res["total_results"] == 10
+    #     assert len(res["results"]) == 3
+    #     assert res["results"] == _convert_dict_values_to_str(expected_results)
+    #     assert res["warnings"] == []
+    #     assert res["execution_time"] > 0
+
+    # combine with RRF
+    posprocessing_config.combine("RRF")
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+
+    expected_results = [
+        {"__key": b"item:2", "__score": b"0.032522474881"},
+        {"__key": b"item:0", "__score": b"0.016393442623"},
+        {"__key": b"item:7", "__score": b"0.0161290322581"},
+    ]
+    if is_resp2_connection(client):
+        assert res.total_results == 5
+        assert len(res.results) == 3
+        assert res.results == expected_results
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert res["total_results"] == 5
+        assert len(res["results"]) == 3
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+    # combine with RRF and WINDOW + CONSTANT
+    posprocessing_config.combine("RRF", WINDOW=3, CONSTANT=0.5)
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+
+    expected_results = [
+        {"__key": b"item:2", "__score": b"1.06666666667"},
+        {"__key": b"item:0", "__score": b"0.666666666667"},
+        {"__key": b"item:7", "__score": b"0.4"},
+    ]
+    if is_resp2_connection(client):
+        assert res.total_results == 5
+        assert len(res.results) == 3
+        assert res.results == expected_results
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert res["total_results"] == 5
+        assert len(res["results"]) == 3
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_load(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{red}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.combine("LINEAR", ALPHA=0.5, BETA=0.5)
+    # TODO current build doesn't return the "__score AS score", should be supported in RC1
+    posprocessing_config.load(
+        "description", "color", "price", "size", "__score AS score"
+    )
+    posprocessing_config.limit(0, 3)
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+
+    expected_results = [
+        {
+            "description": b"red dress",
+            "color": b"red",
+            "price": b"17",
+            "size": b"12",
+            "score": b"0.166666666667",
+        },
+        {
+            "description": b"red dress",
+            "color": b"red",
+            "price": b"18",
+            "size": b"11",
+            "score": b"0.166666666667",
+        },
+        {
+            "description": b"red dress",
+            "color": b"red",
+            "price": b"15",
+            "size": b"10",
+            "score": b"0.166666666667",
+        },
+    ]
+    if is_resp2_connection(client):
+        assert res.total_results == 10
+        assert len(res.results) == 3
+        assert res.results == expected_results
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert res["total_results"] == 10
+        assert len(res["results"]) == 3
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_load_and_apply(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{red}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.load("description", "color", "price", "size", "__score")
+    posprocessing_config.apply(
+        price_discount="@price - (@price * 0.1)", tax_discount="@price_discount * 0.2"
+    )
+    posprocessing_config.limit(0, 3)
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+
+    expected_results = [
+        {
+            "description": b"red dress",
+            "color": b"red",
+            "price": b"17",
+            "size": b"12",
+            "__score": b"0.032522474881",
+            "price_discount": b"15.3",
+            "tax_discount": b"3.06",
+        },
+        {
+            "description": b"red shoes",
+            "color": b"red",
+            "price": b"15",
+            "size": b"10",
+            "__score": b"0.016393442623",
+            "price_discount": b"13.5",
+            "tax_discount": b"2.7",
+        },
+        {
+            "description": b"red dress",
+            "color": b"red",
+            "price": b"18",
+            "size": b"11",
+            "__score": b"0.0161290322581",
+            "price_discount": b"16.2",
+            "tax_discount": b"3.24",
+        },
+    ]
+    if is_resp2_connection(client):
+        assert len(res.results) == 3
+        assert res.results == expected_results
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert len(res["results"]) == 3
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_load_and_filter(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{missing}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.load("description", "color", "price", "size")
+    posprocessing_config.filter(HybridFilter("@price:[15 16]"))
+    posprocessing_config.limit(0, 3)
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+
+    expected_results = [
+        {"description": b"red dress", "color": b"red", "price": b"17", "size": b"12"},
+    ]
+    if is_resp2_connection(client):
+        assert len(res.results) == 1
+        assert res.results == expected_results
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert len(res["results"]) == 1
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_load_apply_and_params(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{red}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data="$vector",
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.load("description", "color", "price")
+    posprocessing_config.apply(price_discount="@price - (@price * $discount)")
+    posprocessing_config.limit(0, 3)
+
+    params_substitution = {
+        "$vector": np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+        "$discount": 0.1,
+    }
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query,
+        post_processing=posprocessing_config,
+        params_substitution=params_substitution,
+        timeout=10,
+    )
+
+    expected_results = [
+        {
+            "description": b"red dress",
+            "color": b"red",
+            "price": b"17",
+            "price_discount": b"15.3",
+        },
+        {
+            "description": b"red shoes",
+            "color": b"red",
+            "price": b"15",
+            "price_discount": b"13.5",
+        },
+        {
+            "description": b"red dress",
+            "color": b"red",
+            "price": b"18",
+            "price_discount": b"16.2",
+        },
+    ]
+    if is_resp2_connection(client):
+        assert len(res.results) == 3
+        assert res.results == expected_results
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert len(res["results"]) == 3
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_limit(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{red}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.limit(0, 3)
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+
+    if is_resp2_connection(client):
+        assert res.total_results == 5
+        assert len(res.results) == 3
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert res["total_results"] == 5
+        assert len(res["results"]) == 3
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_load_apply_and_sortby(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{red|green}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.load("color", "price")
+    posprocessing_config.apply(price_discount="@price - (@price * 0.1)")
+    posprocessing_config.sort_by(
+        SortbyField("price_discount", asc=False), SortbyField("color", asc=True)
+    )
+    posprocessing_config.limit(0, 5)
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+
+    expected_results = [
+        {"color": b"red", "price": b"18", "price_discount": b"16.2"},
+        {"color": b"green", "price": b"17", "price_discount": b"15.3"},
+        {"color": b"red", "price": b"17", "price_discount": b"15.3"},
+        {"color": b"red", "price": b"17", "price_discount": b"15.3"},
+        {"color": b"green", "price": b"16", "price_discount": b"14.4"},
+    ]
+    if is_resp2_connection(client):
+        assert res.total_results == 9
+        assert len(res.results) == 5
+        assert res.results == expected_results
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert res["total_results"] == 9
+        assert len(res["results"]) == 5
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_explainscore(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{red|green}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, explain_score=False, timeout=10, dialect=3
+    )
+
+    expected_results = [
+        {
+            "__key": b"item:2",
+            "__score": b"0.032266458496",
+            "__explanation": b"sth not returned currently",
+        },
+        {"__key": b"item:7", "__score": b"0.0312805474096"},
+        {"__key": b"item:12", "__score": b"0.0303657694962"},
+        {"__key": b"item:0", "__score": b"0.016393442623"},
+        {"__key": b"item:1", "__score": b"0.0161290322581"},
+        {"__key": b"item:5", "__score": b"0.015625"},
+        {"__key": b"item:17", "__score": b"0.015625"},
+        {"__key": b"item:6", "__score": b"0.0153846153846"},
+        {"__key": b"item:22", "__score": b"0.0153846153846"},
+        {"__key": b"item:27", "__score": b"0.0151515151515"},
+    ]
+
+    if is_resp2_connection(client):
+        assert len(res.results) == 10
+        assert res.results == expected_results
+        assert res.warnings == []
+        assert res.execution_time > 0
+    else:
+        assert len(res["results"]) == 10
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+        assert res["execution_time"] > 0
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+@pytest.mark.skip(reason="timeout not working as expected")
+def test_hybrid_search_query_with_timeout(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15, randomize_data=True)
+
+    # set search query
+    search_query = HybridSearchQuery("*red*")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.limit(0, 1000)
+    posprocessing_config.load("description", "color", "price", "size", "__score")
+    posprocessing_config.apply(price_discount="@price - (@price * 0.1)")
+    posprocessing_config.sort_by(
+        SortbyField("price_discount", asc=False), SortbyField("color", asc=True)
+    )
+    # 10 second timeout
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10000
+    )
+
+    if is_resp2_connection(client):
+        assert len(res.results) == 10
+        # assert res.warnings == []
+        assert res.execution_time > 0 and res.execution_time < 1000
+    else:
+        assert len(res["results"]) == 10
+        # assert res["warnings"] == []
+        assert res["execution_time"] > 0 and res["execution_time"] < 1000
+
+    with pytest.raises(TimeoutError):
+        res = client.ft().hybrid_search(query=hybrid_query, timeout=1)  # 1 ms timeout
+        print(res)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_load_and_groupby(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{red|green}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.load("color", "price", "size", "item_type")
+    posprocessing_config.limit(0, 5)
+
+    posprocessing_config.group_by(
+        ["@price"],
+        reducers.count_distinct("@color").alias("colors_count"),
+    )
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=10
+    )
+
+    expected_results = [
+        {"price": b"15", "colors_count": b"1"},
+        {"price": b"17", "colors_count": b"2"},
+        {"price": b"18", "colors_count": b"1"},
+        {"price": b"16", "colors_count": b"2"},
+    ]
+
+    if is_resp2_connection(client):
+        assert len(res.results) == 4
+        assert res.results == expected_results
+        assert res.warnings == []
+    else:
+        assert len(res["results"]) == 4
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+
+    posprocessing_config = HybridPostProcessingConfig()
+    posprocessing_config.load("color", "price", "size", "item_type")
+    posprocessing_config.limit(0, 15)
+    posprocessing_config.sort_by(
+        SortbyField("price", asc=True),
+        SortbyField("item_type", asc=True),
+    )
+
+    posprocessing_config.group_by(
+        ["@price", "@item_type"],
+        reducers.tolist("@color").alias("colors_list"),
+    )
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, post_processing=posprocessing_config, timeout=1000
+    )
+
+    expected_results = [
+        {"price": b"15", "item_type": b"dress", "colors_list": [b"red"]},
+        {"price": b"15", "item_type": b"shoes", "colors_list": [b"red"]},
+        {"price": b"16", "item_type": b"dress", "colors_list": [b"red"]},
+        {"price": b"16", "item_type": b"shoes", "colors_list": [b"red", b"green"]},
+        {"price": b"17", "item_type": b"dress", "colors_list": [b"red"]},
+        {"price": b"17", "item_type": b"shoes", "colors_list": [b"red", b"green"]},
+        {"price": b"18", "item_type": b"dress", "colors_list": [b"red"]},
+        {"price": b"18", "item_type": b"shoes", "colors_list": [b"red", b"green"]},
+    ]
+    if is_resp2_connection(client):
+        assert len(res.results) == 8
+        assert res.results == expected_results
+        assert res.warnings == []
+    else:
+        assert len(res["results"]) == 8
+        assert res["results"] == _convert_dict_values_to_str(expected_results)
+        assert res["warnings"] == []
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_cursor(client):
+    # Create index and add data
+    _create_hybrid_search_index(client)
+    _add_data_for_hybrid_search(client, items_sets=15)
+
+    # set search query
+    search_query = HybridSearchQuery("@color:{red|green}")
+
+    vsim_query = HybridVsimQuery(
+        vector_field_name="@embedding",
+        vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+    )
+
+    hybrid_query = HybridQuery(search_query, vsim_query)
+
+    res = client.ft().hybrid_search(
+        query=hybrid_query, cursor=HybridCursorQuery(count=5, max_idle=100), timeout=10
+    )
+    if is_resp2_connection(client):
+        assert isinstance(res, HybridCursorResult)
+        assert res.search_cursor_id > 0
+        assert res.vsim_cursor_id > 0
+        search_cursor = aggregations.Cursor(res.search_cursor_id)
+        vsim_cursor = aggregations.Cursor(res.vsim_cursor_id)
+    else:
+        assert res["SEARCH"] > 0
+        assert res["VSIM"] > 0
+        search_cursor = aggregations.Cursor(res["SEARCH"])
+        vsim_cursor = aggregations.Cursor(res["VSIM"])
+
+    search_res_from_cursor = client.ft().aggregate(query=search_cursor)
+    if is_resp2_connection(client):
+        assert len(search_res_from_cursor.rows) == 5
+    else:
+        assert len(search_res_from_cursor[0]["results"]) == 5
+
+    vsim_res_from_cursor = client.ft().aggregate(query=vsim_cursor)
+    if is_resp2_connection(client):
+        assert len(vsim_res_from_cursor.rows) == 5
+    else:
+        assert len(vsim_res_from_cursor[0]["results"]) == 5
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.3.224")
+def test_hybrid_search_query_with_pipeline(client):
+    pass

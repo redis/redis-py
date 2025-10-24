@@ -106,7 +106,6 @@ class HiredisRespSerializer:
         except TypeError:
             _, value, traceback = sys.exc_info()
             raise DataError(value).with_traceback(traceback)
-
         return output
 
 
