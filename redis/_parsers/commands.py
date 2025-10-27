@@ -11,11 +11,12 @@ if TYPE_CHECKING:
 class RequestPolicy(Enum):
     ALL_NODES = 'all_nodes'
     ALL_SHARDS = 'all_shards'
-    ANY_MASTER_SHARD = 'any_master_shard'
+    ALL_REPLICAS = 'all_replicas'
     MULTI_SHARD = 'multi_shard'
     SPECIAL = 'special'
     DEFAULT_KEYLESS = 'default_keyless'
     DEFAULT_KEYED = 'default_keyed'
+    DEFAULT_NODE = 'default_node'
 
 class ResponsePolicy(Enum):
     ONE_SUCCEEDED = 'one_succeeded'
@@ -163,7 +164,9 @@ class CommandsParser(AbstractCommandsParser):
                     for subcmd in command["subcommands"]:
                         if str_if_bytes(subcmd[0]) == subcmd_name:
                             command = self.parse_subcommand(subcmd)
-                            is_subcmd = True
+
+                            if command['first_key_pos'] > 0:
+                                is_subcmd = True
 
                 # The command doesn't have keys in it
                 if not is_subcmd:

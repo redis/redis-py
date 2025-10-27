@@ -8,7 +8,7 @@ from collections import OrderedDict
 from copy import copy
 from enum import Enum
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, Mapping
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from redis._parsers import CommandsParser, Encoder
 from redis._parsers.commands import RequestPolicy, CommandPolicies, ResponsePolicy
@@ -18,7 +18,7 @@ from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheI
 from redis.client import EMPTY_RESPONSE, CaseInsensitiveDict, PubSub, Redis
 from redis.commands import READ_COMMANDS, RedisClusterCommands
 from redis.commands.helpers import list_or_args
-from redis.commands.policies import PolicyResolver, StaticPolicyResolver, DynamicPolicyResolver
+from redis.commands.policies import PolicyResolver, StaticPolicyResolver
 from redis.connection import (
     Connection,
     ConnectionPool,
@@ -533,7 +533,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
-        policy_resolver: Optional[PolicyResolver] = StaticPolicyResolver(),
+        policy_resolver: PolicyResolver = StaticPolicyResolver(),
         **kwargs,
     ):
         """
@@ -715,21 +715,29 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         )
         self.result_callbacks = CaseInsensitiveDict(self.__class__.RESULT_CALLBACKS)
 
+        # For backward compatibility, mapping from existing policies to new one
+        self._command_flags_mapping: dict[str, Union[RequestPolicy, ResponsePolicy]] = {
+            self.__class__.RANDOM: RequestPolicy.DEFAULT_KEYLESS,
+            self.__class__.PRIMARIES: RequestPolicy.ALL_SHARDS,
+            self.__class__.ALL_NODES: RequestPolicy.ALL_NODES,
+            self.__class__.REPLICAS: RequestPolicy.ALL_REPLICAS,
+            self.__class__.DEFAULT_NODE: RequestPolicy.DEFAULT_NODE,
+            SLOT_ID: RequestPolicy.DEFAULT_KEYED,
+        }
+
         self._policies_callback_mapping: dict[Union[RequestPolicy, ResponsePolicy], Callable] = {
-            RequestPolicy.DEFAULT_KEYLESS: lambda: [self.get_random_node()],
-            RequestPolicy.DEFAULT_KEYED: lambda *args: self.get_node_from_slot(*args),
+            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [self.get_random_primary_or_all_nodes(command_name)],
+            RequestPolicy.DEFAULT_KEYED: lambda command, *args: self.get_node_from_slot(command, *args),
+            RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
             RequestPolicy.ALL_NODES: self.get_nodes,
-            RequestPolicy.ANY_MASTER_SHARD: lambda: [self.get_random_primary_node()],
+            RequestPolicy.ALL_REPLICAS: self.get_replicas,
             RequestPolicy.MULTI_SHARD: lambda *args, **kwargs: self._split_multi_shard_command(*args, **kwargs),
             RequestPolicy.SPECIAL: self.get_special_nodes,
             ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
-            ResponsePolicy.ONE_SUCCEEDED: lambda res: res,
-            ResponsePolicy.ALL_SUCCEEDED: lambda res: self._evaluate_all_succeeded(res)
         }
 
-        # Needs for a commands parser to successfully execute COMMAND
         self._policy_resolver = policy_resolver
         self.commands_parser = CommandsParser(self)
 
@@ -797,6 +805,15 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
     def get_random_node(self):
         return random.choice(list(self.nodes_manager.nodes_cache.values()))
 
+    def get_random_primary_or_all_nodes(self, command_name):
+        """
+        Returns random primary or all nodes depends on READONLY mode.
+        """
+        if self.read_from_replicas and command_name in READ_COMMANDS:
+            return self.get_random_node()
+
+        return self.get_random_primary_node()
+
     def get_nodes(self):
         return list(self.nodes_manager.nodes_cache.values())
 
@@ -826,7 +843,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """
         return self.nodes_manager.default_node
 
-    def get_node_from_slot(self, *args):
+    def get_node_from_slot(self, command: str, *args):
         """
         Returns a list of nodes that hold the specified keys' slots.
         """
@@ -1043,21 +1060,40 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """Set a custom Response Callback"""
         self.cluster_response_callbacks[command] = callback
 
-    def _determine_nodes(self, *args, request_policy: RequestPolicy) -> List["ClusterNode"]:
+    def _determine_nodes(self, *args, request_policy: RequestPolicy, **kwargs) -> List["ClusterNode"]:
         """
         Determines a nodes the command should be executed on.
         """
+        command = args[0].upper()
+        if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+            command = f"{args[0]} {args[1]}".upper()
+
+        nodes_flag = kwargs.pop("nodes_flag", None)
+        if nodes_flag is not None:
+            # nodes flag passed by the user
+            command_flag = nodes_flag
+        else:
+            # get the nodes group for this command if it was predefined
+            command_flag = self.command_flags.get(command)
+
+        if command_flag in self._command_flags_mapping:
+            request_policy = self._command_flags_mapping[command_flag]
+
         policy_callback = self._policies_callback_mapping[request_policy]
 
         if request_policy == RequestPolicy.DEFAULT_KEYED:
-            target_nodes = policy_callback(*args)
+            nodes = policy_callback(command, *args)
+        elif request_policy == RequestPolicy.MULTI_SHARD:
+            nodes = policy_callback(*args, **kwargs)
+        elif request_policy == RequestPolicy.DEFAULT_KEYLESS:
+            nodes = policy_callback(args[0])
         else:
-            target_nodes = policy_callback()
+            nodes = policy_callback()
 
         if args[0].lower() == "ft.aggregate":
-            self._aggregate_nodes = target_nodes
+            self._aggregate_nodes = nodes
 
-        return target_nodes
+        return nodes
 
     def _should_reinitialized(self):
         # To reinitialize the cluster on every MOVED error,
@@ -1208,6 +1244,34 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         target_nodes = None
         passed_targets = kwargs.pop("target_nodes", None)
         command_policies = self._policy_resolver.resolve(args[0].lower())
+
+        if not command_policies:
+            command = args[0].upper()
+            if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
+                command = f"{args[0]} {args[1]}".upper()
+
+            # We only could resolve key properties if command is not
+            # in a list of pre-defined request policies
+            command_flag = self.command_flags.get(command)
+            if not command_flag:
+                # Fallback to default policy
+                if not self.get_default_node():
+                    keys = None
+                else:
+                    keys = self._get_command_keys(*args)
+                if not keys or len(keys) == 0:
+                    command_policies = CommandPolicies()
+                else:
+                    command_policies = CommandPolicies(
+                        request_policy=RequestPolicy.DEFAULT_KEYED,
+                        response_policy=ResponsePolicy.DEFAULT_KEYED,
+                    )
+            else:
+                if command_flag in self._command_flags_mapping:
+                    command_policies = CommandPolicies(request_policy=self._command_flags_mapping[command_flag])
+                else:
+                    command_policies = CommandPolicies()
+
         if passed_targets is not None and not self._is_nodes_flag(passed_targets):
             target_nodes = self._parse_target_nodes(passed_targets)
             target_nodes_specified = True
@@ -1226,24 +1290,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             try:
                 res = {}
                 if not target_nodes_specified:
-                    if command_policies.request_policy == RequestPolicy.MULTI_SHARD:
-                        commands = self._policies_callback_mapping[command_policies.request_policy](*args, **kwargs)
-
-                        for command in commands:
-                            target_nodes = self.get_node_from_slot(*command['args'])
-
-                            if not target_nodes:
-                                raise RedisClusterException(
-                                    f"No targets were found to execute {args} command on"
-                                )
-
-                            res[target_nodes[0].name] = self._execute_command(target_nodes[0], *command['args'], **command['kwargs'])
-
-                        return self._process_result(args[0], res, response_policy=command_policies.response_policy)
-
                     # Determine the nodes to execute the command on
                     target_nodes = self._determine_nodes(
-                        *args, request_policy=command_policies.request_policy
+                        *args, request_policy=command_policies.request_policy, nodes_flag=passed_targets
                     )
                     if not target_nodes:
                         raise RedisClusterException(
@@ -2240,6 +2289,7 @@ class ClusterPipeline(RedisCluster):
         retry: Optional[Retry] = None,
         lock=None,
         transaction=False,
+        policy_resolver: PolicyResolver = StaticPolicyResolver(),
         **kwargs,
     ):
         """ """
@@ -2277,6 +2327,31 @@ class ClusterPipeline(RedisCluster):
         self._execution_strategy: ExecutionStrategy = (
             PipelineStrategy(self) if not transaction else TransactionStrategy(self)
         )
+
+        # For backward compatibility, mapping from existing policies to new one
+        self._command_flags_mapping: dict[str, Union[RequestPolicy, ResponsePolicy]] = {
+            self.__class__.RANDOM: RequestPolicy.DEFAULT_KEYLESS,
+            self.__class__.PRIMARIES: RequestPolicy.ALL_SHARDS,
+            self.__class__.ALL_NODES: RequestPolicy.ALL_NODES,
+            self.__class__.REPLICAS: RequestPolicy.ALL_REPLICAS,
+            self.__class__.DEFAULT_NODE: RequestPolicy.DEFAULT_NODE,
+            SLOT_ID: RequestPolicy.DEFAULT_KEYED,
+        }
+
+        self._policies_callback_mapping: dict[Union[RequestPolicy, ResponsePolicy], Callable] = {
+            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [self.get_random_primary_or_all_nodes(command_name)],
+            RequestPolicy.DEFAULT_KEYED: lambda command, *args: self.get_node_from_slot(command, *args),
+            RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
+            RequestPolicy.ALL_SHARDS: self.get_primaries,
+            RequestPolicy.ALL_NODES: self.get_nodes,
+            RequestPolicy.ALL_REPLICAS: self.get_replicas,
+            RequestPolicy.MULTI_SHARD: lambda *args, **kwargs: self._split_multi_shard_command(*args, **kwargs),
+            RequestPolicy.SPECIAL: self.get_special_nodes,
+            ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
+            ResponsePolicy.DEFAULT_KEYED: lambda res: res,
+        }
+
+        self._policy_resolver = policy_resolver
 
     def __repr__(self):
         """ """
@@ -2856,6 +2931,35 @@ class PipelineStrategy(AbstractStrategy):
         # we figure out the slot number that command maps to, then from
         # the slot determine the node.
         for c in attempt:
+            command_policies = self._pipe._policy_resolver.resolve(c.args[0].lower())
+
+            if not command_policies:
+                command = c.args[0].upper()
+                if len(c.args) >= 2 and f"{c.args[0]} {c.args[1]}".upper() in self._pipe.command_flags:
+                    command = f"{c.args[0]} {c.args[1]}".upper()
+
+                # We only could resolve key properties if command is not
+                # in a list of pre-defined request policies
+                command_flag = self.command_flags.get(command)
+                if not command_flag:
+                    # Fallback to default policy
+                    if not self._pipe.get_default_node():
+                        keys = None
+                    else:
+                        keys = self._pipe._get_command_keys(*c.args)
+                    if not keys or len(keys) == 0:
+                        command_policies = CommandPolicies()
+                    else:
+                        command_policies = CommandPolicies(
+                            request_policy=RequestPolicy.DEFAULT_KEYED,
+                            response_policy=ResponsePolicy.DEFAULT_KEYED,
+                        )
+                else:
+                    if command_flag in self._pipe._command_flags_mapping:
+                        command_policies = CommandPolicies(request_policy=self._pipe._command_flags_mapping[command_flag])
+                    else:
+                        command_policies = CommandPolicies()
+
             while True:
                 # refer to our internal node -> slot table that
                 # tells us where a given command should route to.
@@ -2866,7 +2970,7 @@ class PipelineStrategy(AbstractStrategy):
                     target_nodes = self._parse_target_nodes(passed_targets)
                 else:
                     target_nodes = self._determine_nodes(
-                        *c.args, node_flag=passed_targets
+                        *c.args, request_policy=command_policies.request_policy, node_flag=passed_targets
                     )
                     if not target_nodes:
                         raise RedisClusterException(
@@ -3029,7 +3133,7 @@ class PipelineStrategy(AbstractStrategy):
             )
         return nodes
 
-    def _determine_nodes(self, *args, **kwargs) -> List["ClusterNode"]:
+    def _determine_nodes(self, *args, request_policy: RequestPolicy, **kwargs) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
         command = args[0].upper()
@@ -3046,34 +3150,25 @@ class PipelineStrategy(AbstractStrategy):
         else:
             # get the nodes group for this command if it was predefined
             command_flag = self._pipe.command_flags.get(command)
-        if command_flag == self._pipe.RANDOM:
-            # return a random node
-            return [self._pipe.get_random_node()]
-        elif command_flag == self._pipe.PRIMARIES:
-            # return all primaries
-            return self._pipe.get_primaries()
-        elif command_flag == self._pipe.REPLICAS:
-            # return all replicas
-            return self._pipe.get_replicas()
-        elif command_flag == self._pipe.ALL_NODES:
-            # return all nodes
-            return self._pipe.get_nodes()
-        elif command_flag == self._pipe.DEFAULT_NODE:
-            # return the cluster's default node
-            return [self._nodes_manager.default_node]
-        elif command in self._pipe.SEARCH_COMMANDS[0]:
-            return [self._nodes_manager.default_node]
+
+        if command_flag in self._pipe._command_flags_mapping:
+            request_policy = self._pipe._command_flags_mapping[command_flag]
+
+        policy_callback = self._pipe._policies_callback_mapping[request_policy]
+
+        if request_policy == RequestPolicy.DEFAULT_KEYED:
+            nodes = policy_callback(command, *args)
+        elif request_policy == RequestPolicy.MULTI_SHARD:
+            nodes = policy_callback(*args, **kwargs)
+        elif request_policy == RequestPolicy.DEFAULT_KEYLESS:
+            nodes = policy_callback(args[0])
         else:
-            # get the node that holds the key's slot
-            slot = self._pipe.determine_slot(*args)
-            node = self._nodes_manager.get_node_from_slot(
-                slot,
-                self._pipe.read_from_replicas and command in READ_COMMANDS,
-                self._pipe.load_balancing_strategy
-                if command in READ_COMMANDS
-                else None,
-            )
-            return [node]
+            nodes = policy_callback()
+
+        if args[0].lower() == "ft.aggregate":
+            self._aggregate_nodes = nodes
+
+        return nodes
 
     def multi(self):
         raise RedisClusterException(
