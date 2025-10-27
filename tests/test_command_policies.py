@@ -140,3 +140,9 @@ class TestClusterWithPolicies:
             # Error propagates to a user
             with pytest.raises(ResponseError, match="Cursor not found, id: 0"):
                 r.ft().aggregate(cursor)
+
+            assert determined_nodes[0] == primary_nodes[2]
+
+            # Core commands also randomly distributed across masters
+            r.randomkey()
+            assert determined_nodes[0] == primary_nodes[0]
