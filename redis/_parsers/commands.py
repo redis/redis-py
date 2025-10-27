@@ -258,7 +258,7 @@ class CommandsParser(AbstractCommandsParser):
         """
         command_with_policies = {}
 
-        def extract_policies(data, command_name, module_name):
+        def extract_policies(data, module_name, command_name):
             """
             Recursively extract policies from nested data structures.
             
@@ -268,7 +268,7 @@ class CommandsParser(AbstractCommandsParser):
             """
             if isinstance(data, (str, bytes)):
                 # Decode bytes to string if needed
-                policy = data.decode() if isinstance(data, bytes) else data
+                policy = str_if_bytes(data.decode())
 
                 # Check if this is a policy string
                 if policy.startswith('request_policy') or policy.startswith('response_policy'):
@@ -291,12 +291,12 @@ class CommandsParser(AbstractCommandsParser):
             elif isinstance(data, list):
                 # For lists, recursively process each element
                 for item in data:
-                    extract_policies(item, command_name, module_name)
+                    extract_policies(item, module_name, command_name)
             
             elif isinstance(data, dict):
                 # For dictionaries, recursively process each value
                 for value in data.values():
-                    extract_policies(value, command_name, module_name)
+                    extract_policies(value, module_name, command_name)
 
         for command, details in self.commands.items():
             # Check whether the command has keys
@@ -336,7 +336,7 @@ class CommandsParser(AbstractCommandsParser):
 
             # Process tips for the main command
             if tips:
-                extract_policies(tips, command_name, module_name)
+                extract_policies(tips, module_name, command_name)
 
             # Process subcommands
             if subcommands:
@@ -366,7 +366,7 @@ class CommandsParser(AbstractCommandsParser):
 
                     # Recursively extract policies from the rest of the subcommand details
                     for subcommand_detail in subcommand_details[1:]:
-                        extract_policies(subcommand_detail, subcmd_name, module_name)
+                        extract_policies(subcommand_detail, module_name, subcmd_name)
 
         return command_with_policies
 

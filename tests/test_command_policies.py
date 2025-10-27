@@ -38,8 +38,8 @@ class TestBasePolicyResolver:
         static_resolver = StaticPolicyResolver()
         with_fallback_dynamic_resolver = dynamic_resolver.with_fallback(static_resolver)
 
-        assert with_fallback_dynamic_resolver.resolve('tdigest.min').request_policy == RequestPolicy.DEFAULT_KEYED
-        assert with_fallback_dynamic_resolver.resolve('tdigest.min').response_policy == ResponsePolicy.DEFAULT_KEYED
+        assert with_fallback_dynamic_resolver.resolve('ft.aggregate').request_policy == RequestPolicy.DEFAULT_KEYLESS
+        assert with_fallback_dynamic_resolver.resolve('ft.aggregate').response_policy == ResponsePolicy.DEFAULT_KEYLESS
 
         # Extended chain with one more resolver
         mock_command_parser = Mock(spec=CommandsParser)
