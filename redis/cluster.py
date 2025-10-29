@@ -1245,7 +1245,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         passed_targets = kwargs.pop("target_nodes", None)
         command_policies = self._policy_resolver.resolve(args[0].lower())
 
-        if not command_policies:
+        if passed_targets is not None and not self._is_nodes_flag(passed_targets):
+            target_nodes = self._parse_target_nodes(passed_targets)
+            target_nodes_specified = True
+
+        if not command_policies and not target_nodes_specified:
             command = args[0].upper()
             if len(args) >= 2 and f"{args[0]} {args[1]}".upper() in self.command_flags:
                 command = f"{args[0]} {args[1]}".upper()
@@ -1256,10 +1260,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             if not command_flag:
                 # Fallback to default policy
                 if not self.get_default_node():
-                    keys = None
+                    slot = None
                 else:
-                    keys = self._get_command_keys(*args)
-                if not keys or len(keys) == 0:
+                    slot = self.determine_slot(*args)
+                if not slot:
                     command_policies = CommandPolicies()
                 else:
                     command_policies = CommandPolicies(
@@ -1271,10 +1275,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     command_policies = CommandPolicies(request_policy=self._command_flags_mapping[command_flag])
                 else:
                     command_policies = CommandPolicies()
+        elif not command_policies and target_nodes_specified:
+            command_policies = CommandPolicies()
 
-        if passed_targets is not None and not self._is_nodes_flag(passed_targets):
-            target_nodes = self._parse_target_nodes(passed_targets)
-            target_nodes_specified = True
         # If an error that allows retrying was thrown, the nodes and slots
         # cache were reinitialized. We will retry executing the command with
         # the updated cluster setup only when the target nodes can be
@@ -2573,6 +2576,7 @@ class PipelineCommand:
         self.result = None
         self.node = None
         self.asking = False
+        self.command_policies: Optional[CommandPolicies] = None
 
 
 class NodeCommands:
@@ -2933,33 +2937,6 @@ class PipelineStrategy(AbstractStrategy):
         for c in attempt:
             command_policies = self._pipe._policy_resolver.resolve(c.args[0].lower())
 
-            if not command_policies:
-                command = c.args[0].upper()
-                if len(c.args) >= 2 and f"{c.args[0]} {c.args[1]}".upper() in self._pipe.command_flags:
-                    command = f"{c.args[0]} {c.args[1]}".upper()
-
-                # We only could resolve key properties if command is not
-                # in a list of pre-defined request policies
-                command_flag = self.command_flags.get(command)
-                if not command_flag:
-                    # Fallback to default policy
-                    if not self._pipe.get_default_node():
-                        keys = None
-                    else:
-                        keys = self._pipe._get_command_keys(*c.args)
-                    if not keys or len(keys) == 0:
-                        command_policies = CommandPolicies()
-                    else:
-                        command_policies = CommandPolicies(
-                            request_policy=RequestPolicy.DEFAULT_KEYED,
-                            response_policy=ResponsePolicy.DEFAULT_KEYED,
-                        )
-                else:
-                    if command_flag in self._pipe._command_flags_mapping:
-                        command_policies = CommandPolicies(request_policy=self._pipe._command_flags_mapping[command_flag])
-                    else:
-                        command_policies = CommandPolicies()
-
             while True:
                 # refer to our internal node -> slot table that
                 # tells us where a given command should route to.
@@ -2968,7 +2945,38 @@ class PipelineStrategy(AbstractStrategy):
                 passed_targets = c.options.pop("target_nodes", None)
                 if passed_targets and not self._is_nodes_flag(passed_targets):
                     target_nodes = self._parse_target_nodes(passed_targets)
+
+                    if not command_policies:
+                        command_policies = CommandPolicies()
                 else:
+                    if not command_policies:
+                        command = c.args[0].upper()
+                        if len(c.args) >= 2 and f"{c.args[0]} {c.args[1]}".upper() in self._pipe.command_flags:
+                            command = f"{c.args[0]} {c.args[1]}".upper()
+
+                        # We only could resolve key properties if command is not
+                        # in a list of pre-defined request policies
+                        command_flag = self.command_flags.get(command)
+                        if not command_flag:
+                            # Fallback to default policy
+                            if not self._pipe.get_default_node():
+                                keys = None
+                            else:
+                                keys = self._pipe._get_command_keys(*c.args)
+                            if not keys or len(keys) == 0:
+                                command_policies = CommandPolicies()
+                            else:
+                                command_policies = CommandPolicies(
+                                    request_policy=RequestPolicy.DEFAULT_KEYED,
+                                    response_policy=ResponsePolicy.DEFAULT_KEYED,
+                                )
+                        else:
+                            if command_flag in self._pipe._command_flags_mapping:
+                                command_policies = CommandPolicies(
+                                    request_policy=self._pipe._command_flags_mapping[command_flag])
+                            else:
+                                command_policies = CommandPolicies()
+
                     target_nodes = self._determine_nodes(
                         *c.args, request_policy=command_policies.request_policy, node_flag=passed_targets
                     )
@@ -2976,6 +2984,7 @@ class PipelineStrategy(AbstractStrategy):
                         raise RedisClusterException(
                             f"No targets were found to execute {c.args} command on"
                         )
+                c.command_policies = command_policies
                 if len(target_nodes) > 1:
                     raise RedisClusterException(
                         f"Too many targets for command {c.args}"
@@ -3100,8 +3109,10 @@ class PipelineStrategy(AbstractStrategy):
             if c.args[0] in self._pipe.cluster_response_callbacks:
                 # Remove keys entry, it needs only for cache.
                 c.options.pop("keys", None)
-                c.result = self._pipe.cluster_response_callbacks[c.args[0]](
-                    c.result, **c.options
+                c.result = self._pipe._policies_callback_mapping[c.command_policies.response_policy](
+                    self._pipe.cluster_response_callbacks[c.args[0]](
+                        c.result, **c.options
+                    )
                 )
             response.append(c.result)
 
