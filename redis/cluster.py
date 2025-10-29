@@ -727,7 +727,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
 
         self._policies_callback_mapping: dict[Union[RequestPolicy, ResponsePolicy], Callable] = {
             RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [self.get_random_primary_or_all_nodes(command_name)],
-            RequestPolicy.DEFAULT_KEYED: lambda command, *args: self.get_node_from_slot(command, *args),
+            RequestPolicy.DEFAULT_KEYED: lambda command, *args: self.get_nodes_from_slot(command, *args),
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
             RequestPolicy.ALL_NODES: self.get_nodes,
@@ -843,7 +843,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """
         return self.nodes_manager.default_node
 
-    def get_node_from_slot(self, command: str, *args):
+    def get_nodes_from_slot(self, command: str, *args):
         """
         Returns a list of nodes that hold the specified keys' slots.
         """
@@ -2340,7 +2340,7 @@ class ClusterPipeline(RedisCluster):
 
         self._policies_callback_mapping: dict[Union[RequestPolicy, ResponsePolicy], Callable] = {
             RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [self.get_random_primary_or_all_nodes(command_name)],
-            RequestPolicy.DEFAULT_KEYED: lambda command, *args: self.get_node_from_slot(command, *args),
+            RequestPolicy.DEFAULT_KEYED: lambda command, *args: self.get_nodes_from_slot(command, *args),
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
             RequestPolicy.ALL_NODES: self.get_nodes,
