@@ -1,9 +1,9 @@
 Multi-database client (Active-Active)
 =====================================
 
-The multi-database client allows your application to connect to multiple Redis databases, which are typically replicas of each other. 
-It is designed to work with Redis Software and Redis Cloud Active-Active setups. 
-The client continuously monitors database health, detects failures, and automatically fails over to the next healthy database using a configurable strategy. 
+The multi-database client allows your application to connect to multiple Redis databases, which are typically replicas of each other.
+It is designed to work with Redis Software and Redis Cloud Active-Active setups.
+The client continuously monitors database health, detects failures, and automatically fails over to the next healthy database using a configurable strategy.
 When the original database becomes healthy again, the client can automatically switch back to it.
 
 Key concepts
@@ -29,7 +29,7 @@ Key concepts
   fine-grain tuned configuration of triggering fail over based on organic traffic.
 
 - Failover strategy:
-  The default strategy is based on staticly configured weights. It prefers the highest weighted healthy database.
+  The default strategy is based on statically configured weights. It prefers the highest weighted healthy database.
 
 - Command retry:
   Command execution supports retry with backoff. Low-level client retries are disabled and a global retry
@@ -269,9 +269,9 @@ configuration defined in the `MultiDBConfig` class.
 To avoid false positives, you can configure amount of health check probes and also
 define one of the health check policies to evaluate probes result.
 
-**HealthCheckPolicies.HEALTHY_ALL** - (default) All probes should be successful. 
-**HealthCheckPolicies.HEALTHY_MAJORITY** - Majority of probes should be successful. 
-**HealthCheckPolicies.HEALTHY_ANY** - Any of probes should be successful. 
+**HealthCheckPolicies.HEALTHY_ALL** - (default) All probes should be successful.
+**HealthCheckPolicies.HEALTHY_MAJORITY** - Majority of probes should be successful.
+**HealthCheckPolicies.HEALTHY_ANY** - Any of probes should be successful.
 
 PingHealthCheck (default)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -357,8 +357,8 @@ You can add custom health checks for specific requirements:
 Failure Detection (Reactive Monitoring)
 -----------------
 
-The failure detector monitors command failures and marks a database as unhealthy when its failure rate exceeds a defined threshold within a sliding time window. 
-Under real traffic conditions, this reactive detection mechanism likely triggers earlier than proactive health checks. 
+The failure detector monitors command failures and marks a database as unhealthy when its failure rate exceeds a defined threshold within a sliding time window.
+Under real traffic conditions, this reactive detection mechanism likely triggers earlier than proactive health checks.
 You can extend the set of failure detectors by implementing your own and configuring it through the `MultiDBConfig` class.
 
 By default the failure detector is configured for 1000 failures and a 10% failure rate
