@@ -18,6 +18,7 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis.commands.core import DataPersistOptions
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -1797,6 +1798,161 @@ class TestRedisCommands:
         assert r.mset(d)
         for k, v in d.items():
             assert r[k] == v
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_no_expiration(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        # # set items from mapping without expiration
+        assert r.msetex(mapping={"1": 1, "2": b"four"}) == 1
+        assert r.mget("1", "2") == [b"1", b"four"]
+        assert r.ttl("1") == -1
+        assert r.ttl("2") == -1
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_ex_and_keepttl(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        # set items from mapping with expiration - testing ex field
+        assert (
+            r.msetex(
+                mapping={"1": 1, "2": "2"},
+                ex=10,
+            )
+            == 1
+        )
+        ttls = [r.ttl(key) for key in all_test_keys]
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 10
+
+        assert r.mget(*all_test_keys) == [b"1", b"2"]
+        time.sleep(1.1)
+        # validate keepttl
+        assert r.msetex(mapping={"1": 11}, keepttl=True) == 1
+        assert r.ttl("1") < 10
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_px(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        mapping = {"1": 1, "2": "2"}
+        # set key/value pairs provided in mapping
+        # with expiration - testing px field
+        assert r.msetex(mapping=mapping, px=60000) == 1
+
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 60
+        assert r.mget(*mapping.keys()) == [b"1", b"2"]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_pxat_and_nx(self, r):
+        all_test_keys = ["1", "2", "3", "new", "new_2"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        assert r.msetex(mapping=mapping, ex=30) == 1
+
+        # NX is set with existing keys - nothing should be saved or updated
+        expire_at = redis_server_time(r) + datetime.timedelta(seconds=10)
+        assert (
+            r.msetex(
+                mapping={"1": "new_value", "new": "ok"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 0
+        )
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
+
+        # NX is set with non existing keys - values should be set
+        assert (
+            r.msetex(
+                mapping={"new": "ok", "new_2": "ok_2"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 1
+        )
+        old_ttls = [r.ttl(key) for key in mapping.keys()]
+        new_ttls = [r.ttl(key) for key in ["new", "new_2"]]
+        for ttl in old_ttls:
+            assert 10 < ttl <= 30
+        for ttl in new_ttls:
+            assert ttl <= 10
+        assert r.mget(*mapping.keys(), "new", "new_2") == [
+            b"1",
+            b"2",
+            b"three",
+            b"ok",
+            b"ok_2",
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_expiration_exat_and_xx(self, r):
+        all_test_keys = ["1", "2", "3", "new"]
+        for key in all_test_keys:
+            r.delete(key)
+
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        assert r.msetex(mapping, ex=30) == 1
+
+        expire_at = redis_server_time(r) + datetime.timedelta(seconds=10)
+        ## XX is set with unexisting key - nothing should be saved or updated
+        assert (
+            r.msetex(
+                mapping={"1": "new_value", "new": "ok"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 0
+        )
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
+
+        # XX is set with existing keys - values should be updated
+        assert (
+            r.msetex(
+                mapping={"1": "new_value", "2": "new_value_2"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 1
+        )
+        ttls = [r.ttl(key) for key in mapping.keys()]
+        assert ttls[0] <= 10
+        assert ttls[1] <= 10
+        assert 10 < ttls[2] <= 30
+        assert r.mget("1", "2", "3", "new") == [
+            b"new_value",
+            b"new_value_2",
+            b"three",
+            None,
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_msetex_invalid_inputs(self, r):
+        mapping = {"1": 1, "2": "2"}
+        with pytest.raises(exceptions.DataError):
+            r.msetex(mapping, ex=10, keepttl=True)
 
     @pytest.mark.onlynoncluster
     def test_msetnx(self, r):

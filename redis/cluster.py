@@ -2359,6 +2359,7 @@ PIPELINE_BLOCKED_COMMANDS = (
     "MOVE",
     "MSET",
     "MSET NONATOMIC",
+    "MSETEX",
     "MSETNX",
     "PFCOUNT",
     "PFMERGE",
