@@ -20,13 +20,16 @@ Key concepts
 - Health checks:
   A set of checks determines whether a database is healthy in proactive manner.
   By default, an "PING" check runs against the database (all cluster nodes must
-  pass for a cluster). You can add custom checks. A Redis Enterprise specific
+  pass for a cluster). You can provide your own set of health checks or add an
+  additional health check on top of the default one. A Redis Enterprise specific
   "lag-aware" health check is also available.
 
 - Failure detector:
   A detector observes command failures over a moving window (reactive monitoring).
   You can specify an exact number of failures and failures rate to have more
   fine-grain tuned configuration of triggering fail over based on organic traffic.
+  You can provide your own set of custom failure detectors or add an additional
+  detector on top of the default one.
 
 - Failover strategy:
   The default strategy is based on statically configured weights. It prefers the highest weighted healthy database.

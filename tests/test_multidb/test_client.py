@@ -34,12 +34,10 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
         ):
             mock_db1.client.execute_command.return_value = "OK1"
 
@@ -70,12 +68,10 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
         ):
             mock_db1.client.execute_command.return_value = "OK1"
 
@@ -185,14 +181,10 @@ class TestMultiDbClient:
                 return True
 
         mock_hc.check_health.side_effect = mock_check_health
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config,
-                "default_health_checks",
-                return_value=[mock_hc],
-            ),
         ):
             mock_multi_db_config.health_check_interval = 0.1
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
@@ -261,14 +253,10 @@ class TestMultiDbClient:
             return True
 
         mock_hc.check_health.side_effect = mock_check_health
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config,
-                "default_health_checks",
-                return_value=[mock_hc],
-            ),
         ):
             mock_db.client.execute_command.return_value = "OK"
             mock_db1.client.execute_command.return_value = "OK1"
@@ -300,12 +288,10 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
         ):
             mock_hc.check_health.return_value = False
 
@@ -336,12 +322,10 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
         ):
             mock_hc.check_health.return_value = False
 
@@ -368,12 +352,10 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
         ):
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
@@ -407,12 +389,10 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
         ):
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
@@ -445,12 +425,10 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
         ):
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
@@ -484,12 +462,10 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
         ):
             mock_db1.client.execute_command.return_value = "OK1"
             mock_multi_db_config.event_dispatcher = EventDispatcher()
@@ -540,12 +516,10 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
         ):
             mock_db1.client.execute_command.return_value = "OK1"
 
@@ -581,12 +555,10 @@ class TestMultiDbClient:
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
 
         with (
             patch.object(mock_multi_db_config, "databases", return_value=databases),
-            patch.object(
-                mock_multi_db_config, "default_health_checks", return_value=[mock_hc]
-            ),
         ):
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db.client.execute_command.return_value = "OK"
