@@ -13,8 +13,9 @@ The Python interface to the Redis key-value store.
 
 ---------------------------------------------
 
-**Note:** redis-py 5.0 will be the last version of redis-py to support Python 3.7, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 5.1 will support Python 3.8+.
-**Note:** redis-py 6.1.0 will be the last version of redis-py to support Python 3.8, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 6.2.0 will support Python 3.9+.
+**Note:** redis-py 5.0 is the last version of redis-py that supports Python 3.7, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 5.1 supports Python 3.8+.<br>
+**Note:** redis-py 6.1.0 is the last version of redis-py that supports Python 3.8, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 6.2.0 supports Python 3.9+.
+
 ---------------------------------------------
 
 ## How do I Redis?
@@ -59,7 +60,7 @@ Looking for a high-level library to handle object mapping? See [redis-om-python]
 
 ## Supported Redis Versions
 
-The most recent version of this library supports Redis version [7.2](https://github.com/redis/redis/blob/7.2/00-RELEASENOTES), [7.4](https://github.com/redis/redis/blob/7.4/00-RELEASENOTES) and [8.0](https://github.com/redis/redis/blob/8.0/00-RELEASENOTES).
+The most recent version of this library supports Redis version [7.2](https://github.com/redis/redis/blob/7.2/00-RELEASENOTES), [7.4](https://github.com/redis/redis/blob/7.4/00-RELEASENOTES), [8.0](https://github.com/redis/redis/blob/8.0/00-RELEASENOTES) and [8.2](https://github.com/redis/redis/blob/8.2/00-RELEASENOTES).
 
 The table below highlights version compatibility of the most-recent library versions and redis versions.
 
@@ -192,6 +193,16 @@ By default, the client now overrides the server-side dialect with version 2, aut
 ```
 
 You can find further details in the [query dialect documentation](https://redis.io/docs/latest/develop/interact/search-and-query/advanced-concepts/dialects/).
+
+### Multi-database client (Active-Active)
+
+The multi-database client allows your application to connect to multiple Redis databases, which are typically replicas of each other. It is designed to work with Redis Software and Redis Cloud Active-Active setups. The client continuously monitors database health, detects failures, and automatically fails over to the next healthy database using a configurable strategy. When the original database becomes healthy again, the client can automatically switch back to it.<br>
+This is useful when:
+
+1. You have more than one Redis deployment. This might include two independent Redis servers or two or more Redis databases replicated across multiple [active-active Redis Enterprise](https://redis.io/docs/latest/operate/rs/databases/active-active/) clusters.
+2. You want your application to connect to one deployment at a time and to fail over to the next available deployment if the first deployment becomes unavailable.
+
+For the complete failover configuration options and examples, see the [Multi-database client docs](https://redis.readthedocs.io/en/latest/multi_database.html).
 
 ---------------------------------------------
 
