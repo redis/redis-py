@@ -280,6 +280,60 @@ class TestMultiDbClient:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
+                {"health_check_probes": 1},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    async def test_execute_command_do_not_auto_fallback_to_highest_weight_db(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        db1_counter = 0
+        error_event = asyncio.Event()
+        check = False
+
+        async def mock_check_health(database):
+            nonlocal db1_counter, check
+
+            if database == mock_db1 and not check:
+                db1_counter += 1
+
+                if db1_counter > 1:
+                    error_event.set()
+                    check = True
+                    return False
+
+            return True
+
+        mock_hc.check_health.side_effect = mock_check_health
+        mock_multi_db_config.health_checks = [mock_hc]
+
+        with (
+            patch.object(mock_multi_db_config, "databases", return_value=databases),
+        ):
+            mock_db.client.execute_command.return_value = "OK"
+            mock_db1.client.execute_command.return_value = "OK1"
+            mock_db2.client.execute_command.return_value = "OK2"
+            mock_multi_db_config.health_check_interval = 0.1
+            mock_multi_db_config.auto_fallback_interval = -1
+            mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
+
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert await client.set("key", "value") == "OK1"
+                await error_event.wait()
+                assert await client.set("key", "value") == "OK2"
+                await asyncio.sleep(0.5)
+                assert await client.set("key", "value") == "OK2"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
                 {},
                 {"weight": 0.2, "circuit": {"state": CBState.OPEN}},
                 {"weight": 0.7, "circuit": {"state": CBState.OPEN}},
