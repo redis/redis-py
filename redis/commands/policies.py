@@ -24,12 +24,15 @@ STATIC_POLICIES: PolicyRecords = {
         'info': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'sugadd': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED),
         'dictdump': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'cursor': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
+        'cursor': CommandPolicies(request_policy=RequestPolicy.SPECIAL, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'search': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'tagvals': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'aliasdel': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
         'sugdel': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED),
         'spellcheck': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
+    },
+    'core': {
+        'command': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
     }
 }
 
@@ -69,7 +72,7 @@ class BasePolicyResolver(PolicyResolver):
         self._policies = policies
         self._fallback = fallback
 
-    def resolve(self, command_name: str) -> CommandPolicies:
+    def resolve(self, command_name: str) -> Optional[CommandPolicies]:
         parts = command_name.split(".")
 
         if len(parts) > 2:
@@ -81,13 +84,13 @@ class BasePolicyResolver(PolicyResolver):
             if self._fallback is not None:
                 return self._fallback.resolve(command_name)
             else:
-                raise ValueError(f"Module {module} not found")
+                return None
 
         if self._policies.get(module).get(command, None) is None:
             if self._fallback is not None:
                 return self._fallback.resolve(command_name)
             else:
-                raise ValueError(f"Command {command} not found in module {module}")
+                return None
 
         return self._policies.get(module).get(command)
 
