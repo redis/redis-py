@@ -89,7 +89,7 @@ class TestClusterWithPolicies:
             assert info['index_name'] == 'idx'
             assert determined_nodes[0] == primary_nodes[1]
 
-            expected_node = await r.get_node_from_slot('FT.SUGLEN', *['foo'])
+            expected_node = await r.get_nodes_from_slot('FT.SUGLEN', *['foo'])
             await r.ft().suglen('foo')
             assert determined_nodes[0] == expected_node[0]
 

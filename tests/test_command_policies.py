@@ -91,7 +91,7 @@ class TestClusterWithPolicies:
             assert info['index_name'] == 'idx'
             assert determined_nodes[0] == primary_nodes[1]
 
-            expected_node = r.get_node_from_slot('ft.suglen', *['FT.SUGLEN', 'foo'])
+            expected_node = r.get_nodes_from_slot('ft.suglen', *['FT.SUGLEN', 'foo'])
             r.ft().suglen('foo')
             assert determined_nodes[0] == expected_node[0]
 

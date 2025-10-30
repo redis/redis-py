@@ -438,7 +438,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         self._policies_callback_mapping: dict[Union[RequestPolicy, ResponsePolicy], Callable] = {
             RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [self.get_random_primary_or_all_nodes(command_name)],
-            RequestPolicy.DEFAULT_KEYED: self.get_node_from_slot,
+            RequestPolicy.DEFAULT_KEYED: self.get_nodes_from_slot,
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
             RequestPolicy.ALL_NODES: self.get_nodes,
@@ -661,7 +661,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         """
         return random.choice(self.get_primaries())
 
-    async def get_node_from_slot(self, command: str, *args):
+    async def get_nodes_from_slot(self, command: str, *args):
         """
         Returns a list of nodes that hold the specified keys' slots.
         """
