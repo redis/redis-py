@@ -1997,6 +1997,10 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Returns a list of values ordered identically to ``keys``
 
+        ** Important ** When this method is used with Cluster clients, all keys
+                must be in the same hash slot, otherwise a RedisClusterException
+                will be raised.
+
         For more information, see https://redis.io/commands/mget
         """
         from redis.client import EMPTY_RESPONSE
@@ -2013,6 +2017,10 @@ class BasicKeyCommands(CommandsProtocol):
         Sets key/values based on a mapping. Mapping is a dictionary of
         key/value pairs. Both keys and values should be strings or types that
         can be cast to a string via str().
+
+        ** Important ** When this method is used with Cluster clients, all keys
+                must be in the same hash slot, otherwise a RedisClusterException
+                will be raised.
 
         For more information, see https://redis.io/commands/mset
         """
@@ -2033,6 +2041,10 @@ class BasicKeyCommands(CommandsProtocol):
     ) -> Union[Awaitable[int], int]:
         """
         Sets key/values based on the provided ``mapping`` items.
+
+        ** Important ** When this method is used with Cluster clients, all keys
+                        must be in the same hash slot, otherwise a RedisClusterException
+                        will be raised.
 
         ``mapping`` accepts a dict of key/value pairs that will be added to the database.
 
@@ -2089,6 +2101,10 @@ class BasicKeyCommands(CommandsProtocol):
         Mapping is a dictionary of key/value pairs. Both keys and values
         should be strings or types that can be cast to a string via str().
         Returns a boolean indicating if the operation was successful.
+
+        ** Important ** When this method is used with Cluster clients, all keys
+                        must be in the same hash slot, otherwise a RedisClusterException
+                        will be raised.
 
         For more information, see https://redis.io/commands/msetnx
         """
