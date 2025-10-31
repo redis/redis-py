@@ -3688,7 +3688,7 @@ class TestRedisCommands:
         await r.xadd(stream_2, {"key_m6": "val_m6"})
 
         # read all the messages - this will save the msgs in PEL
-        r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
 
         # add 2 more messages
         m7 = await r.xadd(stream_1, {"key_m7": "val_m7"})
