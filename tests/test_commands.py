@@ -5289,7 +5289,7 @@ class TestRedisCommands:
             r, res, expected_entries
         )
 
-        # validate PEL still holds the messages until they are acknoledged
+        # validate PEL still holds the messages until they are acknowledged
         response = r.xpending_range(stream_1, group, min="-", max="+", count=5)
         assert len(response) == 3
         response = r.xpending_range(stream_2, group, min="-", max="+", count=5)
