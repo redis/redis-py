@@ -4013,6 +4013,7 @@ class StreamCommands(CommandsProtocol):
         count: Optional[int] = None,
         block: Optional[int] = None,
         noack: bool = False,
+        claim_min_idle_time: Optional[int] = None,
     ) -> ResponseT:
         """
         Read from a stream via a consumer group.
@@ -4030,8 +4031,12 @@ class StreamCommands(CommandsProtocol):
         block: number of milliseconds to wait, if nothing already present.
         noack: do not add messages to the PEL
 
+        claim_min_idle_time: accepts an integer type and represents a
+                             time interval in milliseconds
+
         For more information, see https://redis.io/commands/xreadgroup
         """
+        options = {}
         pieces: list[EncodableT] = [b"GROUP", groupname, consumername]
         if count is not None:
             if not isinstance(count, int) or count < 1:
@@ -4045,12 +4050,20 @@ class StreamCommands(CommandsProtocol):
             pieces.append(str(block))
         if noack:
             pieces.append(b"NOACK")
+        if claim_min_idle_time is not None:
+            if not isinstance(claim_min_idle_time, int) or claim_min_idle_time < 0:
+                raise DataError(
+                    "XREADGROUP claim_min_idle_time must be a non-negative integer"
+                )
+            pieces.append(b"CLAIM")
+            pieces.append(claim_min_idle_time)
+            options["claim_min_idle_time"] = claim_min_idle_time
         if not isinstance(streams, dict) or len(streams) == 0:
             raise DataError("XREADGROUP streams must be a non empty dict")
         pieces.append(b"STREAMS")
         pieces.extend(streams.keys())
         pieces.extend(streams.values())
-        return self.execute_command("XREADGROUP", *pieces)
+        return self.execute_command("XREADGROUP", *pieces, **options)
 
     def xrevrange(
         self,
