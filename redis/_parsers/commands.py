@@ -542,7 +542,7 @@ class AsyncCommandsParser(AbstractCommandsParser):
         """
         command_with_policies = {}
 
-        async def extract_policies(data, module_name, command_name):
+        def extract_policies(data, module_name, command_name):
             """
             Recursively extract policies from nested data structures.
 
@@ -576,12 +576,12 @@ class AsyncCommandsParser(AbstractCommandsParser):
             elif isinstance(data, list):
                 # For lists, recursively process each element
                 for item in data:
-                    await extract_policies(item, module_name, command_name)
+                    extract_policies(item, module_name, command_name)
 
             elif isinstance(data, dict):
                 # For dictionaries, recursively process each value
                 for value in data.values():
-                    await extract_policies(value, module_name, command_name)
+                    extract_policies(value, module_name, command_name)
 
         for command, details in self.commands.items():
             # Check whether the command has keys
@@ -621,7 +621,7 @@ class AsyncCommandsParser(AbstractCommandsParser):
 
             # Process tips for the main command
             if tips:
-                await extract_policies(tips, module_name, command_name)
+                extract_policies(tips, module_name, command_name)
 
             # Process subcommands
             if subcommands:
@@ -651,6 +651,6 @@ class AsyncCommandsParser(AbstractCommandsParser):
 
                     # Recursively extract policies from the rest of the subcommand details
                     for subcommand_detail in subcommand_details[1:]:
-                        await extract_policies(subcommand_detail, module_name, subcmd_name)
+                        extract_policies(subcommand_detail, module_name, subcmd_name)
 
         return command_with_policies
