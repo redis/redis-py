@@ -3627,7 +3627,7 @@ class TestRedisCommands:
         await r.xgroup_create(stream_2, group, 0)
 
         # read all the messages - this will save the msgs in PEL
-        res = await r.xreadgroup(
+        await r.xreadgroup(
             group, consumer_1, streams={stream_1: ">", stream_2: ">"}
         )
 
