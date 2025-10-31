@@ -3531,7 +3531,7 @@ class TestRedisCommands:
         await r.xgroup_create(stream, group, 0)
 
         # read all the messages - this will save the msgs in PEL
-        res = await r.xreadgroup(group, consumer_1, streams={stream: ">"})
+        await r.xreadgroup(group, consumer_1, streams={stream: ">"})
 
         # wait for 100ms - so that the messages would have been in the PEL for long enough
         await asyncio.sleep(0.1)
