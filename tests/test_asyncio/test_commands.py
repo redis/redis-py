@@ -3627,9 +3627,7 @@ class TestRedisCommands:
         await r.xgroup_create(stream_2, group, 0)
 
         # read all the messages - this will save the msgs in PEL
-        await r.xreadgroup(
-            group, consumer_1, streams={stream_1: ">", stream_2: ">"}
-        )
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
 
         # wait for 100ms - so that the messages would have been in the PEL for long enough
         await asyncio.sleep(0.1)
@@ -3690,6 +3688,7 @@ class TestRedisCommands:
         await r.xadd(stream_2, {"key_m6": "val_m6"})
 
         # read all the messages - this will save the msgs in PEL
+        r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
 
         # add 2 more messages
         m7 = await r.xadd(stream_1, {"key_m7": "val_m7"})
@@ -3745,9 +3744,7 @@ class TestRedisCommands:
         await r.xgroup_create(stream_2, group, 0)
 
         # read all the messages - this will save the msgs in PEL
-        await r.xreadgroup(
-            group, consumer_1, streams={stream_1: ">", stream_2: ">"}
-        )
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
 
         # wait for 100ms - so that the messages would have been in the PEL for long enough
         await asyncio.sleep(0.1)
@@ -3808,9 +3805,7 @@ class TestRedisCommands:
         await r.xadd(stream_2, {"key_m6": "val_m6"})
 
         # read all the messages - this will save the msgs in PEL
-        res = await r.xreadgroup(
-            group, consumer_1, streams={stream_1: ">", stream_2: ">"}
-        )
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
 
         # add 2 more messages
         m7 = await r.xadd(stream_1, {"key_m7": "val_m7"})
