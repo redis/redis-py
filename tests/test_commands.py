@@ -5163,7 +5163,7 @@ class TestRedisCommands:
         r.xgroup_create(stream, group, 0)
 
         # read all the messages - this will save the msgs in PEL
-        res = r.xreadgroup(group, consumer_1, streams={stream: ">"})
+        r.xreadgroup(group, consumer_1, streams={stream: ">"})
 
         # wait for 100ms - so that the messages would have been in the PEL for long enough
         time.sleep(0.1)
