@@ -55,7 +55,7 @@ class BaseCommandExecutor(CommandExecutor):
         self._auto_fallback_interval = auto_fallback_interval
 
     def _schedule_next_fallback(self) -> None:
-        if self._auto_fallback_interval == DEFAULT_AUTO_FALLBACK_INTERVAL:
+        if self._auto_fallback_interval < 0:
             return
 
         self._next_fallback_attempt = datetime.now() + timedelta(
@@ -321,7 +321,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
             self._active_database is None
             or self._active_database.circuit.state != CBState.CLOSED
             or (
-                self._auto_fallback_interval != DEFAULT_AUTO_FALLBACK_INTERVAL
+                self._auto_fallback_interval > 0
                 and self._next_fallback_attempt <= datetime.now()
             )
         ):

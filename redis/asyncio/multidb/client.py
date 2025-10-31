@@ -28,19 +28,21 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
 
     def __init__(self, config: MultiDbConfig):
         self._databases = config.databases()
-        self._health_checks = config.default_health_checks()
-
-        if config.health_checks is not None:
-            self._health_checks.extend(config.health_checks)
+        self._health_checks = (
+            config.default_health_checks()
+            if not config.health_checks
+            else config.health_checks
+        )
 
         self._health_check_interval = config.health_check_interval
         self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value(
             config.health_check_probes, config.health_check_delay
         )
-        self._failure_detectors = config.default_failure_detectors()
-
-        if config.failure_detectors is not None:
-            self._failure_detectors.extend(config.failure_detectors)
+        self._failure_detectors = (
+            config.default_failure_detectors()
+            if not config.failure_detectors
+            else config.failure_detectors
+        )
 
         self._failover_strategy = (
             config.default_failover_strategy()
