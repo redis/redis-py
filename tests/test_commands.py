@@ -1851,7 +1851,7 @@ class TestRedisCommands:
         time.sleep(1.1)
         # validate keepttl
         assert r.msetex(mapping={"1:{test:1}": 11}, keepttl=True) == 1
-        assert r.ttl("1") < 10
+        assert r.ttl("1:{test:1}") < 10
 
     @pytest.mark.onlycluster
     @skip_if_server_version_lt("8.3.224")
@@ -2017,7 +2017,7 @@ class TestRedisCommands:
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("8.3.224")
     def test_msetex_expiration_px(self, r):
-        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        all_test_keys = ["1", "2"]
         for key in all_test_keys:
             r.delete(key)
 

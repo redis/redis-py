@@ -1244,7 +1244,7 @@ class TestRedisCommands:
             )
             == 1
         )
-        ttls = [await r.ttl(key) for key in all_test_keys]
+        ttls = await asyncio.gather(*[r.ttl(key) for key in all_test_keys])
         for ttl in ttls:
             assert pytest.approx(ttl) == 10
 
@@ -1252,7 +1252,7 @@ class TestRedisCommands:
         await asyncio.sleep(1.1)
         # validate keepttl
         assert await r.msetex(mapping={"1:{test:1}": 11}, keepttl=True) == 1
-        assert await r.ttl("1") < 10
+        assert await r.ttl("1:{test:1}") < 10
 
     @pytest.mark.onlycluster
     @skip_if_server_version_lt("8.3.224")
@@ -1266,7 +1266,7 @@ class TestRedisCommands:
         # with expiration - testing px field
         assert await r.msetex(mapping=mapping, px=60000) == 1
 
-        ttls = [await r.ttl(key) for key in mapping.keys()]
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
         for ttl in ttls:
             assert pytest.approx(ttl) == 60
         assert await r.mget(*mapping.keys()) == [b"1", b"2"]
@@ -1297,7 +1297,7 @@ class TestRedisCommands:
             )
             == 0
         )
-        ttls = [await r.ttl(key) for key in mapping.keys()]
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
         for ttl in ttls:
             assert 10 < ttl <= 30
         assert await r.mget(*mapping.keys(), "new:{test:1}") == [
@@ -1316,8 +1316,8 @@ class TestRedisCommands:
             )
             == 1
         )
-        old_ttls = [await r.ttl(key) for key in mapping.keys()]
-        new_ttls = [await r.ttl(key) for key in ["new:{test:1}", "new_2:{test:1}"]]
+        old_ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        new_ttls = await asyncio.gather(*(r.ttl(key) for key in ["new", "new_2"]))
         for ttl in old_ttls:
             assert 10 < ttl <= 30
         for ttl in new_ttls:
@@ -1350,7 +1350,7 @@ class TestRedisCommands:
             )
             == 0
         )
-        ttls = [await r.ttl(key) for key in mapping.keys()]
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
         for ttl in ttls:
             assert 10 < ttl <= 30
         assert await r.mget(*mapping.keys(), "new:{test:1}") == [
@@ -1369,7 +1369,7 @@ class TestRedisCommands:
             )
             == 1
         )
-        ttls = [await r.ttl(key) for key in mapping.keys()]
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
         assert ttls[0] <= 10
         assert ttls[1] <= 10
         assert 10 < ttls[2] <= 30
@@ -1417,7 +1417,7 @@ class TestRedisCommands:
             )
             == 1
         )
-        ttls = [await r.ttl(key) for key in all_test_keys]
+        ttls = await asyncio.gather(*[r.ttl(key) for key in all_test_keys])
         for ttl in ttls:
             assert pytest.approx(ttl) == 10
 
@@ -1439,7 +1439,7 @@ class TestRedisCommands:
         # with expiration - testing px field
         assert await r.msetex(mapping=mapping, px=60000) == 1
 
-        ttls = [await r.ttl(key) for key in mapping.keys()]
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
         for ttl in ttls:
             assert pytest.approx(ttl) == 60
         assert await r.mget(*mapping.keys()) == [b"1", b"2"]
@@ -1464,7 +1464,7 @@ class TestRedisCommands:
             )
             == 0
         )
-        ttls = [await r.ttl(key) for key in mapping.keys()]
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
         for ttl in ttls:
             assert 10 < ttl <= 30
         assert await r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
@@ -1478,8 +1478,8 @@ class TestRedisCommands:
             )
             == 1
         )
-        old_ttls = [await r.ttl(key) for key in mapping.keys()]
-        new_ttls = [await r.ttl(key) for key in ["new", "new_2"]]
+        old_ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        new_ttls = await asyncio.gather(*(r.ttl(key) for key in ["new", "new_2"]))
         for ttl in old_ttls:
             assert 10 < ttl <= 30
         for ttl in new_ttls:
@@ -1512,7 +1512,7 @@ class TestRedisCommands:
             )
             == 0
         )
-        ttls = [await r.ttl(key) for key in mapping.keys()]
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
         for ttl in ttls:
             assert 10 < ttl <= 30
         assert await r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
@@ -1526,7 +1526,7 @@ class TestRedisCommands:
             )
             == 1
         )
-        ttls = [await r.ttl(key) for key in mapping.keys()]
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
         assert ttls[0] <= 10
         assert ttls[1] <= 10
         assert 10 < ttls[2] <= 30

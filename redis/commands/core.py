@@ -2059,10 +2059,10 @@ class BasicKeyCommands(CommandsProtocol):
 
         ``px`` sets an expire flag on the keys in ``mapping`` for ``px`` milliseconds.
 
-        ``exat`` sets an expire flag on the keys in ``mapping`` for ``ex`` seconds,
+        ``exat`` sets an expire flag on the keys in ``mapping`` for ``exat`` seconds,
             specified in unix time.
 
-        ``pxat`` sets an expire flag on the keys in ``mapping`` for ``ex`` milliseconds,
+        ``pxat`` sets an expire flag on the keys in ``mapping`` for ``pxat`` milliseconds,
             specified in unix time.
 
         ``keepttl`` if True, retain the time to live associated with the keys.
