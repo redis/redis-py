@@ -2,6 +2,7 @@ from contextlib import closing
 from unittest import mock
 
 import pytest
+from redis import RedisClusterException
 import redis
 
 from .conftest import skip_if_server_version_lt, wait_for_command
@@ -438,3 +439,18 @@ class TestPipeline:
         pipe.hgetall("hash:1")
         resp = pipe.execute()
         assert resp == [1, 1, 1, {b"bar": b"foo", b"baz": b"bar", b"foo": b"bar"}]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_pipeline_with_msetex(self, r):
+        r.delete("key1", "key2", "key1_transaction", "key2_transaction")
+
+        p = r.pipeline()
+        with pytest.raises(RedisClusterException):
+            p.msetex({"key1": "value1", "key2": "value2"}, ex=1000)
+
+        p_transaction = r.pipeline(transaction=True)
+        with pytest.raises(RedisClusterException):
+            p_transaction.msetex(
+                {"key1_transaction": "value1", "key2_transaction": "value2"}, ex=10
+            )

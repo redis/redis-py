@@ -4,7 +4,6 @@ from unittest.mock import patch
 import pytest
 from redis.client import Redis
 from redis.exceptions import ExternalAuthProviderError
-from tests.conftest import skip_if_hiredis_parser
 
 
 class MockSocket:
@@ -155,7 +154,6 @@ class TestErrorParsing:
         self.socket_patcher.stop()
         self.select_patcher.stop()
 
-    @skip_if_hiredis_parser()
     @pytest.mark.parametrize("protocol_version", [2, 3])
     def test_external_auth_provider_error(self, protocol_version):
         client = Redis(
