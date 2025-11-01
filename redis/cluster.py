@@ -460,7 +460,7 @@ class AbstractRedisCluster:
 
 class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
     @classmethod
-    def from_url(cls, url, **kwargs):
+    def from_url(cls, url: str, **kwargs: Any) -> "RedisCluster":
         """
         Return a Redis client object configured from the given URL
 
