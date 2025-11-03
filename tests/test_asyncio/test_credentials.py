@@ -4,11 +4,11 @@ import string
 from asyncio import Lock as AsyncLock
 from asyncio import sleep as async_sleep
 from typing import Optional, Tuple, Union
+from unittest.mock import AsyncMock, call
 
 import pytest
 import pytest_asyncio
 import redis
-from mock.mock import Mock, call
 from redis import AuthenticationError, DataError, RedisError, ResponseError
 from redis.asyncio import Connection, ConnectionPool, Redis
 from redis.asyncio.retry import Retry
@@ -340,10 +340,10 @@ class TestStreamingCredentialProvider:
         indirect=True,
     )
     async def test_async_re_auth_all_connections(self, credential_provider):
-        mock_connection = Mock(spec=Connection)
+        mock_connection = AsyncMock(spec=Connection)
         mock_connection.retry = Retry(NoBackoff(), 0)
-        mock_another_connection = Mock(spec=Connection)
-        mock_pool = Mock(spec=ConnectionPool)
+        mock_another_connection = AsyncMock(spec=Connection)
+        mock_pool = AsyncMock(spec=ConnectionPool)
         mock_pool.connection_kwargs = {
             "credential_provider": credential_provider,
         }
@@ -391,16 +391,16 @@ class TestStreamingCredentialProvider:
         indirect=True,
     )
     async def test_async_re_auth_partial_connections(self, credential_provider):
-        mock_connection = Mock(spec=Connection)
+        mock_connection = AsyncMock(spec=Connection)
         mock_connection.retry = Retry(NoBackoff(), 3)
-        mock_another_connection = Mock(spec=Connection)
+        mock_another_connection = AsyncMock(spec=Connection)
         mock_another_connection.retry = Retry(NoBackoff(), 3)
-        mock_failed_connection = Mock(spec=Connection)
+        mock_failed_connection = AsyncMock(spec=Connection)
         mock_failed_connection.read_response.side_effect = ConnectionError(
             "Failed auth"
         )
         mock_failed_connection.retry = Retry(NoBackoff(), 3)
-        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool = AsyncMock(spec=ConnectionPool)
         mock_pool.connection_kwargs = {
             "credential_provider": credential_provider,
         }
@@ -454,14 +454,14 @@ class TestStreamingCredentialProvider:
         indirect=True,
     )
     async def test_re_auth_pub_sub_in_resp3(self, credential_provider):
-        mock_pubsub_connection = Mock(spec=Connection)
+        mock_pubsub_connection = AsyncMock(spec=Connection)
         mock_pubsub_connection.get_protocol.return_value = 3
         mock_pubsub_connection.credential_provider = credential_provider
         mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
-        mock_another_connection = Mock(spec=Connection)
+        mock_another_connection = AsyncMock(spec=Connection)
         mock_another_connection.retry = Retry(NoBackoff(), 3)
 
-        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool = AsyncMock(spec=ConnectionPool)
         mock_pool.connection_kwargs = {
             "credential_provider": credential_provider,
         }
@@ -516,14 +516,14 @@ class TestStreamingCredentialProvider:
         indirect=True,
     )
     async def test_do_not_re_auth_pub_sub_in_resp2(self, credential_provider):
-        mock_pubsub_connection = Mock(spec=Connection)
+        mock_pubsub_connection = AsyncMock(spec=Connection)
         mock_pubsub_connection.get_protocol.return_value = 2
         mock_pubsub_connection.credential_provider = credential_provider
         mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
-        mock_another_connection = Mock(spec=Connection)
+        mock_another_connection = AsyncMock(spec=Connection)
         mock_another_connection.retry = Retry(NoBackoff(), 3)
 
-        mock_pool = Mock(spec=ConnectionPool)
+        mock_pool = AsyncMock(spec=ConnectionPool)
         mock_pool.connection_kwargs = {
             "credential_provider": credential_provider,
         }
@@ -583,10 +583,10 @@ class TestStreamingCredentialProvider:
             RequestTokenErr,
             RequestTokenErr,
         ]
-        mock_connection = Mock(spec=Connection)
+        mock_connection = AsyncMock(spec=Connection)
         mock_connection.retry = Retry(NoBackoff(), 0)
-        mock_another_connection = Mock(spec=Connection)
-        mock_pool = Mock(spec=ConnectionPool)
+        mock_another_connection = AsyncMock(spec=Connection)
+        mock_pool = AsyncMock(spec=ConnectionPool)
         mock_pool.connection_kwargs = {
             "credential_provider": credential_provider,
         }
