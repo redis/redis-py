@@ -279,6 +279,14 @@ class TestMultiDbClient:
             async with MultiDBClient(mock_multi_db_config) as client:
                 assert await client.set("key", "value") == "OK1"
                 await error_event.wait()
+                # Wait for circuit breaker to actually open (not just the event)
+                max_retries = 10
+                for _ in range(max_retries):
+                    if mock_db1.circuit.state == CBState.OPEN:  # Circuit is open
+                        break
+                    await asyncio.sleep(0.01)
+
+                # Now the failover strategy will select mock_db2
                 assert await client.set("key", "value") == "OK2"
                 await asyncio.sleep(0.5)
                 assert await client.set("key", "value") == "OK1"

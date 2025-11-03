@@ -268,6 +268,15 @@ class TestMultiDbClient:
             client = MultiDBClient(mock_multi_db_config)
             assert client.set("key", "value") == "OK1"
             error_event.wait(timeout=0.5)
+
+            # Wait for circuit breaker to actually open (not just the event)
+            max_retries = 10
+            for _ in range(max_retries):
+                if mock_db1.circuit.state == CBState.OPEN:  # Circuit is open
+                    break
+                sleep(0.01)
+
+            # Now the failover strategy will select mock_db2
             assert client.set("key", "value") == "OK2"
             sleep(0.5)
             assert client.set("key", "value") == "OK1"
