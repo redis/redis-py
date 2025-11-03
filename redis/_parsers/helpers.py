@@ -163,7 +163,7 @@ def parse_sentinel_masters(response, **options):
 
 
 def parse_sentinel_masters_resp3(response, **options):
-    return [parse_sentinel_state(master) for master in response]
+    return [parse_sentinel_state_resp3(master) for master in response]
 
 
 def parse_sentinel_slaves_and_sentinels(response, **options):
