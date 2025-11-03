@@ -1,7 +1,9 @@
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from redis._parsers.commands import CommandPolicies, PolicyRecords, RequestPolicy, ResponsePolicy, CommandsParser
+from redis._parsers.commands import CommandPolicies, PolicyRecords, RequestPolicy, ResponsePolicy, CommandsParser, \
+    AsyncCommandsParser
 
 STATIC_POLICIES: PolicyRecords = {
     'ft': {
@@ -39,7 +41,7 @@ STATIC_POLICIES: PolicyRecords = {
 class PolicyResolver(ABC):
 
     @abstractmethod
-    def resolve(self, command_name: str) -> CommandPolicies:
+    def resolve(self, command_name: str) -> Optional[CommandPolicies]:
         """
         Resolves the command name and determines the associated command policies.
 
@@ -61,6 +63,34 @@ class PolicyResolver(ABC):
 
         Returns:
             PolicyResolver: Returns a new policy resolver with the specified fallback resolver.
+        """
+        pass
+
+class AsyncPolicyResolver(ABC):
+
+    @abstractmethod
+    async def resolve(self, command_name: str) -> Optional[CommandPolicies]:
+        """
+        Resolves the command name and determines the associated command policies.
+
+        Args:
+            command_name: The name of the command to resolve.
+
+        Returns:
+            CommandPolicies: The policies associated with the specified command.
+        """
+        pass
+
+    @abstractmethod
+    def with_fallback(self, fallback: "AsyncPolicyResolver") -> "AsyncPolicyResolver":
+        """
+        Factory method to instantiate an async policy resolver with a fallback resolver.
+
+        Args:
+            fallback: Fallback resolver
+
+        Returns:
+            AsyncPolicyResolver: Returns a new policy resolver with the specified fallback resolver.
         """
         pass
 
@@ -98,6 +128,40 @@ class BasePolicyResolver(PolicyResolver):
     def with_fallback(self, fallback: "PolicyResolver") -> "PolicyResolver":
         pass
 
+class AsyncBasePolicyResolver(AsyncPolicyResolver):
+    """
+    Async base class for policy resolvers.
+    """
+    def __init__(self, policies: PolicyRecords, fallback: Optional[AsyncPolicyResolver] = None) -> None:
+        self._policies = policies
+        self._fallback = fallback
+
+    async def resolve(self, command_name: str) -> Optional[CommandPolicies]:
+        parts = command_name.split(".")
+
+        if len(parts) > 2:
+            raise ValueError(f"Wrong command or module name: {command_name}")
+
+        module, command = parts if len(parts) == 2 else ("core", parts[0])
+
+        if self._policies.get(module, None) is None:
+            if self._fallback is not None:
+                return await self._fallback.resolve(command_name)
+            else:
+                return None
+
+        if self._policies.get(module).get(command, None) is None:
+            if self._fallback is not None:
+                return await self._fallback.resolve(command_name)
+            else:
+                return None
+
+        return self._policies.get(module).get(command)
+
+    @abstractmethod
+    def with_fallback(self, fallback: "AsyncPolicyResolver") -> "AsyncPolicyResolver":
+        pass
+
 
 class DynamicPolicyResolver(BasePolicyResolver):
     """
@@ -131,3 +195,34 @@ class StaticPolicyResolver(BasePolicyResolver):
 
     def with_fallback(self, fallback: "PolicyResolver") -> "PolicyResolver":
         return StaticPolicyResolver(fallback)
+
+class AsyncDynamicPolicyResolver(AsyncBasePolicyResolver):
+    """
+    Async version of DynamicPolicyResolver.
+    """
+    def __init__(self, policy_records: PolicyRecords, fallback: Optional[AsyncPolicyResolver] = None) -> None:
+        """
+        Parameters:
+            policy_records (PolicyRecords): Policy records.
+            fallback (Optional[AsyncPolicyResolver]): An optional resolver to be used when the
+                primary policies cannot handle a specific request.
+        """
+        super().__init__(policy_records, fallback)
+
+    def with_fallback(self, fallback: "AsyncPolicyResolver") -> "AsyncPolicyResolver":
+        return AsyncDynamicPolicyResolver(self._policies, fallback)
+
+class AsyncStaticPolicyResolver(AsyncBasePolicyResolver):
+    """
+    Async version of StaticPolicyResolver.
+    """
+    def __init__(self, fallback: Optional[AsyncPolicyResolver] = None) -> None:
+        """
+        Parameters:
+            fallback (Optional[AsyncPolicyResolver]): An optional fallback policy resolver
+            used for resolving policies if static policies are inadequate.
+        """
+        super().__init__(STATIC_POLICIES, fallback)
+
+    def with_fallback(self, fallback: "AsyncPolicyResolver") -> "AsyncPolicyResolver":
+        return AsyncStaticPolicyResolver(fallback)
