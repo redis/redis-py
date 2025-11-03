@@ -201,6 +201,7 @@ class TestMultiDbClient:
             assert await db1_became_unhealthy.wait(), (
                 "Timeout waiting for mock_db1 to become unhealthy"
             )
+
             await asyncio.sleep(0.01)
 
             assert await client.set("key", "value") == "OK2"
@@ -209,7 +210,14 @@ class TestMultiDbClient:
             assert await db2_became_unhealthy.wait(), (
                 "Timeout waiting for mock_db2 to become unhealthy"
             )
-            await asyncio.sleep(0.01)
+
+            # Wait for circuit breaker state to actually reflect the unhealthy status
+            # (instead of just sleeping)
+            max_retries = 10
+            for _ in range(max_retries):
+                if cb2.state == CBState.OPEN:  # Circuit is open (unhealthy)
+                    break
+                await asyncio.sleep(0.01)
 
             assert await client.set("key", "value") == "OK"
 
