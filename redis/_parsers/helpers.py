@@ -275,7 +275,7 @@ def parse_stream_list(response, **options):
     for r in response:
         if r is not None:
             if "claim_min_idle_time" in options:
-                data.append((r[0], pairs_to_dict(r[1]), r[2], r[3]))
+                data.append((r[0], pairs_to_dict(r[1]), *r[2:]))
             else:
                 data.append((r[0], pairs_to_dict(r[1])))
         else:
