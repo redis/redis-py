@@ -11,7 +11,7 @@ from string import ascii_letters
 
 import pytest
 import pytest_asyncio
-from redis import ResponseError
+from redis import RedisClusterException, ResponseError
 import redis
 from redis import exceptions
 from redis._parsers.helpers import (
@@ -21,6 +21,7 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis.commands.core import DataPersistOptions
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -1199,6 +1200,349 @@ class TestRedisCommands:
         assert await r.mset(d)
         for k, v in d.items():
             assert await r.get(k) == v
+
+    @pytest.mark.onlycluster
+    async def test_mset_on_cluster(self, r):
+        # validate that mset command works in cluster client
+        # when the keys are in the same slot
+        d = {"a:{test:1}": b"1", "b:{test:1}": b"2", "c:{test:1}": b"3"}
+        assert await r.mset(d)
+        for k, v in d.items():
+            assert await r.get(k) == v
+
+    @pytest.mark.onlycluster
+    async def test_mset_on_cluster_multiple_slots(self, r):
+        d = {"a": b"1", "b": b"2", "c": b"3"}
+        with pytest.raises(RedisClusterException):
+            assert await r.mset(d)
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_no_expiration_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # set items from mapping without expiration
+        assert await r.msetex(mapping={"1:{test:1}": 1, "2:{test:1}": b"four"}) == 1
+        assert await r.mget("1:{test:1}", "2:{test:1}") == [b"1", b"four"]
+        assert await r.ttl("1:{test:1}") == -1
+        assert await r.ttl("2:{test:1}") == -1
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_ex_and_keepttl_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # set items from mapping with expiration - testing ex field
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": 1, "2:{test:1}": "2"},
+                ex=10,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in all_test_keys])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 10
+
+        assert await r.mget(*all_test_keys) == [b"1", b"2"]
+        await asyncio.sleep(1.1)
+        # validate keepttl
+        assert await r.msetex(mapping={"1:{test:1}": 11}, keepttl=True) == 1
+        assert await r.ttl("1:{test:1}") < 10
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_px_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2"}
+        # set key/value pairs provided in mapping
+        # with expiration - testing px field
+        assert await r.msetex(mapping=mapping, px=60000) == 1
+
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 60
+        assert await r.mget(*mapping.keys()) == [b"1", b"2"]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_pxat_and_nx_with_cluster_client(self, r):
+        all_test_keys = [
+            "1:{test:1}",
+            "2:{test:1}",
+            "3:{test:1}",
+            "new:{test:1}",
+            "new_2:{test:1}",
+        ]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2", "3:{test:1}": "three"}
+        assert await r.msetex(mapping=mapping, ex=30) == 1
+
+        # NX is set with existing keys - nothing should be saved or updated
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": "new_value", "new:{test:1}": "ok"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new:{test:1}") == [
+            b"1",
+            b"2",
+            b"three",
+            None,
+        ]
+
+        # NX is set with non existing keys - values should be set
+        assert (
+            await r.msetex(
+                mapping={"new:{test:1}": "ok", "new_2:{test:1}": "ok_2"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 1
+        )
+        old_ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        new_ttls = await asyncio.gather(*(r.ttl(key) for key in ["new", "new_2"]))
+        for ttl in old_ttls:
+            assert 10 < ttl <= 30
+        for ttl in new_ttls:
+            assert ttl <= 10
+        assert await r.mget(*mapping.keys(), "new:{test:1}", "new_2:{test:1}") == [
+            b"1",
+            b"2",
+            b"three",
+            b"ok",
+            b"ok_2",
+        ]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_exat_and_xx_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}", "3:{test:1}", "new:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2", "3:{test:1}": "three"}
+        assert await r.msetex(mapping, ex=30) == 1
+
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        ## XX is set with unexisting key - nothing should be saved or updated
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": "new_value", "new:{test:1}": "ok"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new:{test:1}") == [
+            b"1",
+            b"2",
+            b"three",
+            None,
+        ]
+
+        # XX is set with existing keys - values should be updated
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": "new_value", "2:{test:1}": "new_value_2"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        assert ttls[0] <= 10
+        assert ttls[1] <= 10
+        assert 10 < ttls[2] <= 30
+        assert await r.mget(
+            "1:{test:1}", "2:{test:1}", "3:{test:1}", "new:{test:1}"
+        ) == [
+            b"new_value",
+            b"new_value_2",
+            b"three",
+            None,
+        ]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_invalid_inputs_with_cluster_client(self, r):
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        with pytest.raises(exceptions.RedisClusterException):
+            await r.msetex(mapping)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_no_expiration(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # # set items from mapping without expiration
+        assert await r.msetex(mapping={"1": 1, "2": b"four"}) == 1
+        assert await r.mget("1", "2") == [b"1", b"four"]
+        assert await r.ttl("1") == -1
+        assert await r.ttl("2") == -1
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_ex_and_keepttl(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # set items from mapping with expiration - testing ex field
+        assert (
+            await r.msetex(
+                mapping={"1": 1, "2": "2"},
+                ex=10,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in all_test_keys])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 10
+
+        assert await r.mget(*all_test_keys) == [b"1", b"2"]
+        await asyncio.sleep(1.1)
+        # validate keepttl
+        assert await r.msetex(mapping={"1": 11}, keepttl=True) == 1
+        assert await r.ttl("1") < 10
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_px(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1": 1, "2": "2"}
+        # set key/value pairs provided in mapping
+        # with expiration - testing px field
+        assert await r.msetex(mapping=mapping, px=60000) == 1
+
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 60
+        assert await r.mget(*mapping.keys()) == [b"1", b"2"]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_pxat_and_nx(self, r):
+        all_test_keys = ["1", "2", "3", "new", "new_2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        assert await r.msetex(mapping=mapping, ex=30) == 1
+
+        # NX is set with existing keys - nothing should be saved or updated
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        assert (
+            await r.msetex(
+                mapping={"1": "new_value", "new": "ok"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
+
+        # NX is set with non existing keys - values should be set
+        assert (
+            await r.msetex(
+                mapping={"new": "ok", "new_2": "ok_2"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 1
+        )
+        old_ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        new_ttls = await asyncio.gather(*(r.ttl(key) for key in ["new", "new_2"]))
+        for ttl in old_ttls:
+            assert 10 < ttl <= 30
+        for ttl in new_ttls:
+            assert ttl <= 10
+        assert await r.mget(*mapping.keys(), "new", "new_2") == [
+            b"1",
+            b"2",
+            b"three",
+            b"ok",
+            b"ok_2",
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_exat_and_xx(self, r):
+        all_test_keys = ["1", "2", "3", "new"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        assert await r.msetex(mapping, ex=30) == 1
+
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        ## XX is set with unexisting key - nothing should be saved or updated
+        assert (
+            await r.msetex(
+                mapping={"1": "new_value", "new": "ok"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
+
+        # XX is set with existing keys - values should be updated
+        assert (
+            await r.msetex(
+                mapping={"1": "new_value", "2": "new_value_2"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        assert ttls[0] <= 10
+        assert ttls[1] <= 10
+        assert 10 < ttls[2] <= 30
+        assert await r.mget("1", "2", "3", "new") == [
+            b"new_value",
+            b"new_value_2",
+            b"three",
+            None,
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_invalid_inputs(self, r):
+        mapping = {"1": 1, "2": "2"}
+        with pytest.raises(exceptions.DataError):
+            await r.msetex(mapping, ex=10, keepttl=True)
 
     @pytest.mark.onlynoncluster
     async def test_msetnx(self, r: redis.Redis):
