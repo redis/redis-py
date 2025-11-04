@@ -1,8 +1,7 @@
-from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union, Awaitable
+from typing import TYPE_CHECKING, Any, Awaitable, Dict, Optional, Tuple, Union
 
-from redis.exceptions import RedisError, ResponseError, IncorrectPolicyType
+from redis.exceptions import IncorrectPolicyType, RedisError, ResponseError
 from redis.utils import str_if_bytes
 
 if TYPE_CHECKING:

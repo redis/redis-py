@@ -26,7 +26,7 @@ from typing import (
 )
 
 from redis._parsers import AsyncCommandsParser, Encoder
-from redis._parsers.commands import RequestPolicy, ResponsePolicy, CommandPolicies
+from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,

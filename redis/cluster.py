@@ -11,7 +11,7 @@ from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from redis._parsers import CommandsParser, Encoder
-from redis._parsers.commands import RequestPolicy, CommandPolicies, ResponsePolicy
+from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis._parsers.helpers import parse_scan
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
 from redis.cache import CacheConfig, CacheFactory, CacheFactoryInterface, CacheInterface

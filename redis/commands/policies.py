@@ -1,14 +1,12 @@
-import asyncio
 from abc import ABC, abstractmethod
 from typing import Optional
 
 from redis._parsers.commands import (
     CommandPolicies,
+    CommandsParser,
     PolicyRecords,
     RequestPolicy,
     ResponsePolicy,
-    CommandsParser,
-    AsyncCommandsParser,
 )
 
 STATIC_POLICIES: PolicyRecords = {

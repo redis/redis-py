@@ -1,4 +1,3 @@
-from pprint import pprint
 
 import pytest
 from redis._parsers import CommandsParser
