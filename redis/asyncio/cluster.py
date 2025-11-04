@@ -412,6 +412,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         else:
             self._event_dispatcher = event_dispatcher
 
+        self.startup_nodes = startup_nodes
         self.nodes_manager = NodesManager(
             startup_nodes,
             require_full_coverage,
@@ -2365,7 +2366,10 @@ class TransactionStrategy(AbstractStrategy):
                 await self._pipe.cluster_client.nodes_manager.initialize()
                 self.reinitialize_counter = 0
             else:
-                self._pipe.cluster_client.nodes_manager.update_moved_exception(error)
+                if isinstance(error, AskError):
+                    self._pipe.cluster_client.nodes_manager.update_moved_exception(
+                        error
+                    )
 
         self._executing = False
 

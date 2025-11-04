@@ -25,6 +25,7 @@ from redis.cache import (
 )
 from redis.connection import Connection, ConnectionInterface, SSLConnection, parse_url
 from redis.credentials import CredentialProvider
+from redis.event import EventDispatcherInterface
 from redis.exceptions import RedisClusterException
 from redis.retry import Retry
 from tests.ssl_utils import get_tls_certificates
@@ -333,6 +334,15 @@ def skip_if_resp_version(resp_version) -> _TestDecorator:
     return pytest.mark.skipif(check, reason=f"RESP version required != {resp_version}")
 
 
+def skip_if_hiredis_parser() -> _TestDecorator:
+    try:
+        import hiredis  # noqa
+
+        return pytest.mark.skipif(True, reason="hiredis dependency found")
+    except ImportError:
+        return pytest.mark.skipif(False, reason="No hiredis dependency")
+
+
 def _get_client(
     cls, request, single_connection_client=True, flushdb=True, from_url=None, **kwargs
 ):
@@ -580,6 +590,12 @@ def mock_cache() -> CacheInterface:
 def mock_connection() -> ConnectionInterface:
     mock_connection = Mock(spec=ConnectionInterface)
     return mock_connection
+
+
+@pytest.fixture()
+def mock_ed() -> EventDispatcherInterface:
+    mock_ed = Mock(spec=EventDispatcherInterface)
+    return mock_ed
 
 
 @pytest.fixture()

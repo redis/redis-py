@@ -2713,6 +2713,21 @@ def test_search_missing_fields(client):
 @pytest.mark.redismod
 @skip_if_server_version_lt("7.4.0")
 @skip_ifmodversion_lt("2.10.0", "search")
+def test_create_index_empty_or_missing_fields_with_sortable(client):
+    definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
+
+    fields = [
+        TextField("title", sortable=True, index_empty=True),
+        TagField("features", index_missing=True, sortable=True),
+        TextField("description", no_index=True, sortable=True),
+    ]
+
+    client.ft().create_index(fields, definition=definition)
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("7.4.0")
+@skip_ifmodversion_lt("2.10.0", "search")
 def test_search_empty_fields(client):
     definition = IndexDefinition(prefix=["property:"], index_type=IndexType.HASH)
 

@@ -830,7 +830,7 @@ class ManagementCommands(CommandsProtocol):
 
         return self.execute_command("COMMAND LIST", *pieces)
 
-    def command_getkeysandflags(self, *args: List[str]) -> List[Union[str, List[str]]]:
+    def command_getkeysandflags(self, *args: str) -> List[Union[str, List[str]]]:
         """
         Returns array of keys from a full Redis command and their usage flags.
 
@@ -848,7 +848,7 @@ class ManagementCommands(CommandsProtocol):
         )
 
     def config_get(
-        self, pattern: PatternT = "*", *args: List[PatternT], **kwargs
+        self, pattern: PatternT = "*", *args: PatternT, **kwargs
     ) -> ResponseT:
         """
         Return a dictionary of configuration based on the ``pattern``
@@ -861,7 +861,7 @@ class ManagementCommands(CommandsProtocol):
         self,
         name: KeyT,
         value: EncodableT,
-        *args: List[Union[KeyT, EncodableT]],
+        *args: Union[KeyT, EncodableT],
         **kwargs,
     ) -> ResponseT:
         """Set config item ``name`` with ``value``
@@ -987,9 +987,7 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("SELECT", index, **kwargs)
 
-    def info(
-        self, section: Optional[str] = None, *args: List[str], **kwargs
-    ) -> ResponseT:
+    def info(self, section: Optional[str] = None, *args: str, **kwargs) -> ResponseT:
         """
         Returns a dictionary containing information about the Redis server
 
@@ -1561,6 +1559,16 @@ class BitFieldOperation:
         return self.client.execute_command(*command)
 
 
+class DataPersistOptions(Enum):
+    # set the value for each provided key to each
+    # provided value only if all do not already exist.
+    NX = "NX"
+
+    # set the value for each provided key to each
+    # provided value only if all already exist.
+    XX = "XX"
+
+
 class BasicKeyCommands(CommandsProtocol):
     """
     Redis basic key-based commands
@@ -1989,6 +1997,10 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Returns a list of values ordered identically to ``keys``
 
+        ** Important ** When this method is used with Cluster clients, all keys
+                must be in the same hash slot, otherwise a RedisClusterException
+                will be raised.
+
         For more information, see https://redis.io/commands/mget
         """
         from redis.client import EMPTY_RESPONSE
@@ -2006,6 +2018,10 @@ class BasicKeyCommands(CommandsProtocol):
         key/value pairs. Both keys and values should be strings or types that
         can be cast to a string via str().
 
+        ** Important ** When this method is used with Cluster clients, all keys
+                must be in the same hash slot, otherwise a RedisClusterException
+                will be raised.
+
         For more information, see https://redis.io/commands/mset
         """
         items = []
@@ -2013,12 +2029,82 @@ class BasicKeyCommands(CommandsProtocol):
             items.extend(pair)
         return self.execute_command("MSET", *items)
 
+    def msetex(
+        self,
+        mapping: Mapping[AnyKeyT, EncodableT],
+        data_persist_option: Optional[DataPersistOptions] = None,
+        ex: Optional[ExpiryT] = None,
+        px: Optional[ExpiryT] = None,
+        exat: Optional[AbsExpiryT] = None,
+        pxat: Optional[AbsExpiryT] = None,
+        keepttl: bool = False,
+    ) -> Union[Awaitable[int], int]:
+        """
+        Sets key/values based on the provided ``mapping`` items.
+
+        ** Important ** When this method is used with Cluster clients, all keys
+                        must be in the same hash slot, otherwise a RedisClusterException
+                        will be raised.
+
+        ``mapping`` accepts a dict of key/value pairs that will be added to the database.
+
+        ``data_persist_option`` can be set to ``NX`` or ``XX`` to control the
+            behavior of the command.
+            ``NX`` will set the value for each provided key to each
+                provided value only if all do not already exist.
+            ``XX`` will set the value for each provided key to each
+                provided value only if all already exist.
+
+        ``ex`` sets an expire flag on the keys in ``mapping`` for ``ex`` seconds.
+
+        ``px`` sets an expire flag on the keys in ``mapping`` for ``px`` milliseconds.
+
+        ``exat`` sets an expire flag on the keys in ``mapping`` for ``exat`` seconds,
+            specified in unix time.
+
+        ``pxat`` sets an expire flag on the keys in ``mapping`` for ``pxat`` milliseconds,
+            specified in unix time.
+
+        ``keepttl`` if True, retain the time to live associated with the keys.
+
+        Returns the number of fields that were added.
+
+        Available since Redis 8.4
+        For more information, see https://redis.io/commands/msetex
+        """
+        opset = {ex, px, exat, pxat}
+        if len(opset) > 2 or len(opset) > 1 and keepttl:
+            raise DataError(
+                "``ex``, ``px``, ``exat``, ``pxat``, "
+                "and ``keepttl`` are mutually exclusive."
+            )
+
+        exp_options: list[EncodableT] = []
+        if data_persist_option:
+            exp_options.append(data_persist_option.value)
+
+        exp_options.extend(extract_expire_flags(ex, px, exat, pxat))
+
+        if keepttl:
+            exp_options.append("KEEPTTL")
+
+        pieces = ["MSETEX", len(mapping)]
+
+        for pair in mapping.items():
+            pieces.extend(pair)
+
+        return self.execute_command(*pieces, *exp_options)
+
     def msetnx(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
         """
         Sets key/values based on a mapping if none of the keys are already set.
         Mapping is a dictionary of key/value pairs. Both keys and values
         should be strings or types that can be cast to a string via str().
         Returns a boolean indicating if the operation was successful.
+
+        ** Important ** When this method is used with Cluster clients, all keys
+                        must be in the same hash slot, otherwise a RedisClusterException
+                        will be raised.
 
         For more information, see https://redis.io/commands/msetnx
         """
@@ -2606,7 +2692,7 @@ class ListCommands(CommandsProtocol):
         self,
         timeout: float,
         numkeys: int,
-        *args: List[str],
+        *args: str,
         direction: str,
         count: Optional[int] = 1,
     ) -> Optional[list]:
@@ -2619,14 +2705,14 @@ class ListCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/blmpop
         """
-        args = [timeout, numkeys, *args, direction, "COUNT", count]
+        cmd_args = [timeout, numkeys, *args, direction, "COUNT", count]
 
-        return self.execute_command("BLMPOP", *args)
+        return self.execute_command("BLMPOP", *cmd_args)
 
     def lmpop(
         self,
         num_keys: int,
-        *args: List[str],
+        *args: str,
         direction: str,
         count: Optional[int] = 1,
     ) -> Union[Awaitable[list], list]:
@@ -2636,11 +2722,11 @@ class ListCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/lmpop
         """
-        args = [num_keys] + list(args) + [direction]
+        cmd_args = [num_keys] + list(args) + [direction]
         if count != 1:
-            args.extend(["COUNT", count])
+            cmd_args.extend(["COUNT", count])
 
-        return self.execute_command("LMPOP", *args)
+        return self.execute_command("LMPOP", *cmd_args)
 
     def lindex(
         self, name: str, index: int
@@ -4778,6 +4864,7 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         value: EncodableT,
         withscore: bool = False,
+        score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
         """
         Returns a 0-based value indicating the rank of ``value`` in sorted set
@@ -4785,11 +4872,17 @@ class SortedSetCommands(CommandsProtocol):
         The optional WITHSCORE argument supplements the command's
         reply with the score of the element returned.
 
+        ``score_cast_func`` a callable used to cast the score return value
+
         For more information, see https://redis.io/commands/zrank
         """
+        pieces = ["ZRANK", name, value]
         if withscore:
-            return self.execute_command("ZRANK", name, value, "WITHSCORE", keys=[name])
-        return self.execute_command("ZRANK", name, value, keys=[name])
+            pieces.append("WITHSCORE")
+
+        options = {"withscore": withscore, "score_cast_func": score_cast_func}
+
+        return self.execute_command(*pieces, **options)
 
     def zrem(self, name: KeyT, *values: FieldT) -> ResponseT:
         """
@@ -4837,6 +4930,7 @@ class SortedSetCommands(CommandsProtocol):
         name: KeyT,
         value: EncodableT,
         withscore: bool = False,
+        score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
         """
         Returns a 0-based value indicating the descending rank of
@@ -4844,13 +4938,17 @@ class SortedSetCommands(CommandsProtocol):
         The optional ``withscore`` argument supplements the command's
         reply with the score of the element returned.
 
+        ``score_cast_func`` a callable used to cast the score return value
+
         For more information, see https://redis.io/commands/zrevrank
         """
+        pieces = ["ZREVRANK", name, value]
         if withscore:
-            return self.execute_command(
-                "ZREVRANK", name, value, "WITHSCORE", keys=[name]
-            )
-        return self.execute_command("ZREVRANK", name, value, keys=[name])
+            pieces.append("WITHSCORE")
+
+        options = {"withscore": withscore, "score_cast_func": score_cast_func}
+
+        return self.execute_command(*pieces, **options)
 
     def zscore(self, name: KeyT, value: EncodableT) -> ResponseT:
         """
@@ -4865,6 +4963,7 @@ class SortedSetCommands(CommandsProtocol):
         keys: Union[Sequence[KeyT], Mapping[AnyKeyT, float]],
         aggregate: Optional[str] = None,
         withscores: bool = False,
+        score_cast_func: Union[type, Callable] = float,
     ) -> ResponseT:
         """
         Return the union of multiple sorted sets specified by ``keys``.
@@ -4872,9 +4971,18 @@ class SortedSetCommands(CommandsProtocol):
         Scores will be aggregated based on the ``aggregate``, or SUM if
         none is provided.
 
+        ``score_cast_func`` a callable used to cast the score return value
+
         For more information, see https://redis.io/commands/zunion
         """
-        return self._zaggregate("ZUNION", None, keys, aggregate, withscores=withscores)
+        return self._zaggregate(
+            "ZUNION",
+            None,
+            keys,
+            aggregate,
+            withscores=withscores,
+            score_cast_func=score_cast_func,
+        )
 
     def zunionstore(
         self,
@@ -5863,12 +5971,16 @@ class ScriptCommands(CommandsProtocol):
     """
 
     def _eval(
-        self, command: str, script: str, numkeys: int, *keys_and_args: str
+        self,
+        command: str,
+        script: str,
+        numkeys: int,
+        *keys_and_args: Union[KeyT, EncodableT],
     ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, script, numkeys, *keys_and_args)
 
     def eval(
-        self, script: str, numkeys: int, *keys_and_args: str
+        self, script: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
     ) -> Union[Awaitable[str], str]:
         """
         Execute the Lua ``script``, specifying the ``numkeys`` the script
@@ -5883,7 +5995,7 @@ class ScriptCommands(CommandsProtocol):
         return self._eval("EVAL", script, numkeys, *keys_and_args)
 
     def eval_ro(
-        self, script: str, numkeys: int, *keys_and_args: str
+        self, script: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
     ) -> Union[Awaitable[str], str]:
         """
         The read-only variant of the EVAL command
@@ -5897,12 +6009,16 @@ class ScriptCommands(CommandsProtocol):
         return self._eval("EVAL_RO", script, numkeys, *keys_and_args)
 
     def _evalsha(
-        self, command: str, sha: str, numkeys: int, *keys_and_args: list
+        self,
+        command: str,
+        sha: str,
+        numkeys: int,
+        *keys_and_args: Union[KeyT, EncodableT],
     ) -> Union[Awaitable[str], str]:
         return self.execute_command(command, sha, numkeys, *keys_and_args)
 
     def evalsha(
-        self, sha: str, numkeys: int, *keys_and_args: str
+        self, sha: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
     ) -> Union[Awaitable[str], str]:
         """
         Use the ``sha`` to execute a Lua script already registered via EVAL
@@ -5918,7 +6034,7 @@ class ScriptCommands(CommandsProtocol):
         return self._evalsha("EVALSHA", sha, numkeys, *keys_and_args)
 
     def evalsha_ro(
-        self, sha: str, numkeys: int, *keys_and_args: str
+        self, sha: str, numkeys: int, *keys_and_args: Union[KeyT, EncodableT]
     ) -> Union[Awaitable[str], str]:
         """
         The read-only variant of the EVALSHA command

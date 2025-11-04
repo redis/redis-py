@@ -52,6 +52,7 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.retry import Retry
 from redis.utils import (
     deprecated_args,
@@ -698,6 +699,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             self._event_dispatcher = EventDispatcher()
         else:
             self._event_dispatcher = event_dispatcher
+        self.startup_nodes = startup_nodes
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
             from_url=from_url,
@@ -1799,6 +1801,11 @@ class NodesManager:
             backoff=NoBackoff(), retries=0, supported_errors=(ConnectionError,)
         )
 
+        protocol = kwargs.get("protocol", None)
+        if protocol in [3, "3"]:
+            kwargs.update(
+                {"maint_notifications_config": MaintNotificationsConfig(enabled=False)}
+            )
         if self.from_url:
             # Create a redis node with a costumed connection pool
             kwargs.update({"host": host})
@@ -2514,6 +2521,7 @@ PIPELINE_BLOCKED_COMMANDS = (
     "MGET NONATOMIC",
     "MOVE",
     "MSET",
+    "MSETEX",
     "MSET NONATOMIC",
     "MSETNX",
     "PFCOUNT",
@@ -3355,7 +3363,8 @@ class TransactionStrategy(AbstractStrategy):
                 self._nodes_manager.initialize()
                 self.reinitialize_counter = 0
             else:
-                self._nodes_manager.update_moved_exception(error)
+                if isinstance(error, AskError):
+                    self._nodes_manager.update_moved_exception(error)
 
         self._executing = False
 
