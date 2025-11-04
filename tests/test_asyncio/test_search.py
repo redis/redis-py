@@ -12,12 +12,15 @@ from redis import ResponseError
 import redis.asyncio as redis
 import redis.commands.search.aggregation as aggregations
 from redis.commands.search.hybrid_query import (
+    CombinationMethods,
+    CombineResultsMethod,
     HybridCursorQuery,
     HybridFilter,
     HybridPostProcessingConfig,
     HybridQuery,
     HybridSearchQuery,
     HybridVsimQuery,
+    VectorSearchMethods,
 )
 from redis.commands.search.hybrid_result import HybridCursorResult
 import redis.commands.search.reducers as reducers
@@ -2320,7 +2323,6 @@ class TestHybridSearch(AsyncSearchTestsBase):
             assert all(isinstance(res["results"][i]["__key"], str) for i in range(10))
 
     @pytest.mark.redismod
-    # @pytest.mark.timeout(900)
     @skip_if_server_version_lt("8.3.224")
     async def test_hybrid_search_query_with_scorer(self, decoded_r):
         # Create index and add data
@@ -2338,15 +2340,21 @@ class TestHybridSearch(AsyncSearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
+        combine_method = CombineResultsMethod(
+            CombinationMethods.LINEAR, ALPHA=1, BETA=0
+        )
+
         posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.combine("LINEAR", ALPHA=1, BETA=0)
         posprocessing_config.load(
             "@description", "@color", "@price", "@size", "@__score", "@__item"
         )
         posprocessing_config.limit(0, 2)
 
         res = await decoded_r.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query,
+            combine_method=combine_method,
+            post_processing=posprocessing_config,
+            timeout=10,
         )
 
         expected_results_tfidf = [
@@ -2381,7 +2389,10 @@ class TestHybridSearch(AsyncSearchTestsBase):
 
         search_query.scorer("BM25")
         res = await decoded_r.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query,
+            combine_method=combine_method,
+            post_processing=posprocessing_config,
+            timeout=10,
         )
         expected_results_bm25 = [
             {
@@ -2466,7 +2477,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             vector_data=np.array([1, 2, 2, 3], dtype=np.float32).tobytes(),
         )
 
-        vsim_query.vsim_method_params("KNN", K=3)
+        vsim_query.vsim_method_params(VectorSearchMethods.KNN, K=3)
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
@@ -2497,7 +2508,9 @@ class TestHybridSearch(AsyncSearchTestsBase):
             vector_field_name="@embedding-hnsw",
             vector_data=np.array([1, 2, 2, 3], dtype=np.float32).tobytes(),
         )
-        vsim_query_with_hnsw.vsim_method_params("KNN", K=3, EF_RUNTIME=1)
+        vsim_query_with_hnsw.vsim_method_params(
+            VectorSearchMethods.KNN, K=3, EF_RUNTIME=1
+        )
         hybrid_query_with_hnsw = HybridQuery(search_query, vsim_query_with_hnsw)
 
         res2 = await decoded_r.ft().hybrid_search(
@@ -2540,7 +2553,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
         )
 
-        vsim_query.vsim_method_params("RANGE", RADIUS=2)
+        vsim_query.vsim_method_params(VectorSearchMethods.RANGE, RADIUS=2)
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
@@ -2574,7 +2587,9 @@ class TestHybridSearch(AsyncSearchTestsBase):
             vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
         )
 
-        vsim_query_with_hnsw.vsim_method_params("RANGE", RADIUS=2, EPSILON=0.5)
+        vsim_query_with_hnsw.vsim_method_params(
+            VectorSearchMethods.RANGE, RADIUS=2, EPSILON=0.5
+        )
 
         hybrid_query_with_hnsw = HybridQuery(search_query, vsim_query_with_hnsw)
 
@@ -2620,7 +2635,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding-hnsw",
             vector_data="abcd1234efgh5678",
-            vsim_search_method="KNN",
+            vsim_search_method=VectorSearchMethods.KNN,
             vsim_search_method_params={
                 "K": 3,
                 "EF_RUNTIME": 1,
@@ -2630,13 +2645,15 @@ class TestHybridSearch(AsyncSearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.combine(
-            "LINEAR", ALPHA=0.5, BETA=0.5, YIELD_SCORE_AS="combined_score"
+        combine_method = CombineResultsMethod(
+            CombinationMethods.LINEAR,
+            ALPHA=0.5,
+            BETA=0.5,
+            YIELD_SCORE_AS="combined_score",
         )
 
         res = await decoded_r.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query, combine_method=combine_method, timeout=10
         )
 
         if is_resp2_connection(decoded_r):
@@ -2686,12 +2703,18 @@ class TestHybridSearch(AsyncSearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
+        combine_method_linear = CombineResultsMethod(
+            CombinationMethods.LINEAR, ALPHA=0.5, BETA=0.5
+        )
+
         posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.combine("LINEAR", ALPHA=0.5, BETA=0.5)
         posprocessing_config.limit(0, 3)
 
         res = await decoded_r.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query,
+            combine_method=combine_method_linear,
+            post_processing=posprocessing_config,
+            timeout=10,
         )
 
         expected_results = [
@@ -2713,9 +2736,14 @@ class TestHybridSearch(AsyncSearchTestsBase):
             assert res["execution_time"] > 0
 
         # combine with RRF and WINDOW + CONSTANT
-        posprocessing_config.combine("RRF", WINDOW=3, CONSTANT=0.5)
+        combine_method_rrf = CombineResultsMethod(
+            CombinationMethods.RRF, WINDOW=3, CONSTANT=0.5
+        )
         res = await decoded_r.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query,
+            combine_method=combine_method_rrf,
+            post_processing=posprocessing_config,
+            timeout=10,
         )
 
         expected_results = [
@@ -2737,9 +2765,12 @@ class TestHybridSearch(AsyncSearchTestsBase):
             assert res["execution_time"] > 0
 
         # combine with RRF, not all possible params provided
-        posprocessing_config.combine("RRF", WINDOW=3)
+        combine_method_rrf_2 = CombineResultsMethod(CombinationMethods.RRF, WINDOW=3)
         res = await decoded_r.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query,
+            combine_method=combine_method_rrf_2,
+            post_processing=posprocessing_config,
+            timeout=10,
         )
 
         expected_results = [
@@ -2777,15 +2808,21 @@ class TestHybridSearch(AsyncSearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
+        combine_method = CombineResultsMethod(
+            CombinationMethods.LINEAR, ALPHA=0.5, BETA=0.5
+        )
+
         posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.combine("LINEAR", ALPHA=0.5, BETA=0.5)
         posprocessing_config.load(
             "@description", "@color", "@price", "@size", "@__key AS item_key"
         )
         posprocessing_config.limit(0, 1)
 
         res = await decoded_r.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query,
+            combine_method=combine_method,
+            post_processing=posprocessing_config,
+            timeout=10,
         )
 
         expected_results = [
@@ -3088,7 +3125,7 @@ class TestHybridSearch(AsyncSearchTestsBase):
             vector_field_name="@embedding-hnsw",
             vector_data="abcd" * dim,
         )
-        vsim_query.vsim_method_params("KNN", K=1000)
+        vsim_query.vsim_method_params(VectorSearchMethods.KNN, K=1000)
         vsim_query.filter(
             HybridFilter(
                 "((@price:[15 16] @size:[10 11]) | (@price:[13 15] @size:[11 12])) @description:(shoes) -@description:(green)"
@@ -3097,12 +3134,11 @@ class TestHybridSearch(AsyncSearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.combine("RRF", WINDOW=1000)
+        combine_method = CombineResultsMethod(CombinationMethods.RRF, WINDOW=1000)
 
         timeout = 5000  # 5 second timeout
         res = await decoded_r.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=timeout
+            query=hybrid_query, combine_method=combine_method, timeout=timeout
         )
 
         if is_resp2_connection(decoded_r):

@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 
 try:
@@ -35,7 +36,7 @@ class HybridSearchQuery:
     def scorer(self, scorer: str) -> "HybridSearchQuery":
         """
         Scoring algorithm for text search query.
-        Allowed values are "TFIDF" or  "BM25"
+        Allowed values are "TFIDF", "DISMAX", "DOCSCORE", "BM25", etc.
         """
         self._scorer = scorer
         return self
@@ -56,12 +57,17 @@ class HybridSearchQuery:
         return args
 
 
+class VectorSearchMethods(Enum):
+    KNN = "KNN"
+    RANGE = "RANGE"
+
+
 class HybridVsimQuery:
     def __init__(
         self,
         vector_field_name: str,
         vector_data: Union[bytes, str],
-        vsim_search_method: Optional[str] = None,
+        vsim_search_method: Optional[VectorSearchMethods] = None,
         vsim_search_method_params: Optional[Dict[str, Any]] = None,
         filter: Optional["Filter"] = None,
     ) -> None:
@@ -70,11 +76,22 @@ class HybridVsimQuery:
 
         Args:
             vector_field_name: Vector field name.
+
             vector_data: Vector data for the search.
+
             vsim_search_method: Search method that will be used for the vsim search.
-                Allowed values are "KNN" or "RANGE".
+
             vsim_search_method_params: Search method parameters. Use the param names
-                for keys and the values for the values. Example: {"K": 10, "EF_RUNTIME": 100}.
+                for keys and the values for the values.
+                Example for KNN: {"K": 10, "EF_RUNTIME": 100}
+                                    where K is mandatory and defines the number of results
+                                    and EF_RUNTIME is optional and definesthe exploration factor.
+                Example for RANGE: {"RADIUS": 10, "EPSILON": 0.1}
+                                    where RADIUS is mandatory and defines the radius of the search
+                                    and EPSILON is optional and defines the accuracy of the search.
+                For both KNN and RANGE, the following parameter is optional:
+                    YIELD_SCORE_AS: The name of the field to yield the calculated score as.
+
             filter: If defined, a filter will be applied on the vsim query results.
         """
         self._vector_field = vector_field_name
@@ -95,7 +112,7 @@ class HybridVsimQuery:
 
     def vsim_method_params(
         self,
-        method: str,
+        method: VectorSearchMethods,
         **kwargs,
     ) -> "HybridVsimQuery":
         """
@@ -106,7 +123,7 @@ class HybridVsimQuery:
             kwargs: Search method parameters. Use the param names for keys and the
                 values for the values. Example: {"K": 10, "EF_RUNTIME": 100}.
         """
-        vsim_method_params: List[Union[str, int]] = [method]
+        vsim_method_params: List[Union[str, int]] = [method.value]
         if kwargs:
             vsim_method_params.append(len(kwargs.items()) * 2)
             for key, value in kwargs.items():
@@ -158,39 +175,43 @@ class HybridQuery:
         return args
 
 
+class CombinationMethods(Enum):
+    RRF = "RRF"
+    LINEAR = "LINEAR"
+
+
+class CombineResultsMethod:
+    def __init__(self, method: CombinationMethods, **kwargs) -> None:
+        """
+        Create a new combine results method object.
+
+        Args:
+            method: The combine method to use - RRF or LINEAR.
+            kwargs: Additional combine parameters.
+        """
+        self._method = method
+        self._kwargs = kwargs
+
+    def get_args(self) -> List[Union[str, int]]:
+        args: List[Union[str, int]] = ["COMBINE", self._method.value]
+        if self._kwargs:
+            args.append(len(self._kwargs.items()) * 2)
+            for key, value in self._kwargs.items():
+                args.extend((key, value))
+        return args
+
+
 class HybridPostProcessingConfig:
     def __init__(self) -> None:
         """
         Create a new hybrid post processing configuration object.
         """
-        self._combine = []
         self._load_fields = []
         self._groupby = []
         self._apply = []
         self._sortby_fields = []
         self._filter = None
         self._limit = None
-
-    def combine(
-        self,
-        method: Literal["RRF", "LINEAR"],
-        **kwargs,
-    ) -> Self:
-        """
-        Add combine parameters to the query.
-
-        Args:
-            method: The combine method to use - RRF or LINEAR.
-            kwargs: Additional combine parameters.
-        """
-        self._combine: List[Union[str, int]] = [method]
-
-        self._combine.append(len(kwargs) * 2)
-
-        for key, value in kwargs.items():
-            self._combine.extend([key, value])
-
-        return self
 
     def load(self, *fields: str) -> Self:
         """
@@ -267,8 +288,6 @@ class HybridPostProcessingConfig:
 
     def build_args(self) -> List[str]:
         args = []
-        if self._combine:
-            args.extend(("COMBINE", *self._combine))
         if self._load_fields:
             fields_str = " ".join(self._load_fields)
             fields = fields_str.split(" ")

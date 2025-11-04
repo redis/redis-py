@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Union
 from redis._parsers.helpers import pairs_to_dict
 from redis.client import NEVER_DECODE, Pipeline
 from redis.commands.search.hybrid_query import (
+    CombineResultsMethod,
     HybridCursorQuery,
     HybridPostProcessingConfig,
     HybridQuery,
@@ -562,6 +563,7 @@ class SearchCommands:
     def hybrid_search(
         self,
         query: HybridQuery,
+        combine_method: Optional[CombineResultsMethod] = None,
         post_processing: Optional[HybridPostProcessingConfig] = None,
         params_substitution: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
         timeout: Optional[int] = None,
@@ -573,6 +575,8 @@ class SearchCommands:
         Args:
             - **query**: HybridQuery object
                         Contains the text and vector queries
+            - **combine_method**: CombineResultsMethod object
+                        Contains the combine method and parameters
             - **post_processing**: HybridPostProcessingConfig object
                         Contains the post processing configuration
             - **params_substitution**: Dict[str, Union[str, int, float, bytes]]
@@ -587,6 +591,8 @@ class SearchCommands:
         options = {}
         pieces = [HYBRID_CMD, index]
         pieces.extend(query.get_args())
+        if combine_method:
+            pieces.extend(combine_method.get_args())
         if post_processing:
             pieces.extend(post_processing.build_args())
         if params_substitution:
@@ -1050,6 +1056,7 @@ class AsyncSearchCommands(SearchCommands):
     async def hybrid_search(
         self,
         query: HybridQuery,
+        combine_method: Optional[CombineResultsMethod] = None,
         post_processing: Optional[HybridPostProcessingConfig] = None,
         params_substitution: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
         timeout: Optional[int] = None,
@@ -1061,6 +1068,8 @@ class AsyncSearchCommands(SearchCommands):
         Args:
             - **query**: HybridQuery object
                         Contains the text and vector queries
+            - **combine_method**: CombineResultsMethod object
+                        Contains the combine method and parameters
             - **post_processing**: HybridPostProcessingConfig object
                         Contains the post processing configuration
             - **params_substitution**: Dict[str, Union[str, int, float, bytes]]
@@ -1075,6 +1084,8 @@ class AsyncSearchCommands(SearchCommands):
         options = {}
         pieces = [HYBRID_CMD, index]
         pieces.extend(query.get_args())
+        if combine_method:
+            pieces.extend(combine_method.get_args())
         if post_processing:
             pieces.extend(post_processing.build_args())
         if params_substitution:
