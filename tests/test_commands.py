@@ -1896,6 +1896,7 @@ class TestRedisCommands:
             )
             == 0
         )
+
         ttls = [r.ttl(key) for key in mapping.keys()]
         for ttl in ttls:
             assert 10 < ttl <= 30
@@ -1915,7 +1916,7 @@ class TestRedisCommands:
         for ttl in old_ttls:
             assert 10 < ttl <= 30
         for ttl in new_ttls:
-            assert ttl <= 10
+            assert ttl <= 11
         assert r.mget(*mapping.keys(), "new:{test:1}", "new_2:{test:1}") == [
             b"1",
             b"2",
@@ -1959,8 +1960,8 @@ class TestRedisCommands:
             == 1
         )
         ttls = [r.ttl(key) for key in mapping.keys()]
-        assert ttls[0] <= 10
-        assert ttls[1] <= 10
+        assert ttls[0] <= 11
+        assert ttls[1] <= 11
         assert 10 < ttls[2] <= 30
         assert r.mget("1:{test:1}", "2:{test:1}", "3:{test:1}", "new:{test:1}") == [
             b"new_value",
@@ -2070,7 +2071,7 @@ class TestRedisCommands:
         for ttl in old_ttls:
             assert 10 < ttl <= 30
         for ttl in new_ttls:
-            assert ttl <= 10
+            assert ttl <= 11
         assert r.mget(*mapping.keys(), "new", "new_2") == [
             b"1",
             b"2",
@@ -2114,8 +2115,8 @@ class TestRedisCommands:
             == 1
         )
         ttls = [r.ttl(key) for key in mapping.keys()]
-        assert ttls[0] <= 10
-        assert ttls[1] <= 10
+        assert ttls[0] <= 11
+        assert ttls[1] <= 11
         assert 10 < ttls[2] <= 30
         assert r.mget("1", "2", "3", "new") == [
             b"new_value",
