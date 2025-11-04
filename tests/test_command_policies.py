@@ -12,7 +12,6 @@ from redis.commands.policies import DynamicPolicyResolver, StaticPolicyResolver
 from redis.commands.search.aggregation import AggregateRequest
 from redis.commands.search.field import TextField, NumericField
 from tests.conftest import skip_if_server_version_lt
-from tests.test_search import waitForIndex
 
 
 @pytest.mark.onlycluster
