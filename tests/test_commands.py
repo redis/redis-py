@@ -9,7 +9,7 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-from redis import RedisClusterException
+from redis import RedisClusterException, ResponseError
 import redis
 from redis import exceptions
 from redis._parsers.helpers import (
@@ -5439,6 +5439,322 @@ class TestRedisCommands:
             r.xreadgroup(group, consumer, streams={stream: "0"}),
             [[stream_name, expected_entries]],
             {stream_name: [expected_entries]},
+        )
+
+    def _validate_xreadgroup_with_claim_min_idle_time_response(
+        self, r, response, expected_entries
+    ):
+        # validate the number of streams
+        assert len(response) == len(expected_entries)
+
+        expected_streams = expected_entries.keys()
+        for str_index, expected_stream in enumerate(expected_streams):
+            expected_entries_per_stream = expected_entries[expected_stream]
+
+            if is_resp2_connection(r):
+                actual_entries_per_stream = response[str_index][1]
+                actual_stream = response[str_index][0]
+                assert actual_stream == expected_stream
+            else:
+                actual_entries_per_stream = response[expected_stream][0]
+
+            # validate the number of entries
+            assert len(actual_entries_per_stream) == len(expected_entries_per_stream)
+
+            for i, entry in enumerate(actual_entries_per_stream):
+                message = (entry[0], entry[1])
+                message_idle = int(entry[2])
+                message_delivered_count = int(entry[3])
+
+                expected_idle = expected_entries_per_stream[i]["min_idle_time"]
+
+                assert message == expected_entries_per_stream[i]["msg"]
+                if expected_idle == 0:
+                    assert message_idle == 0
+                    assert message_delivered_count == 0
+                else:
+                    assert message_idle >= expected_idle
+                    assert message_delivered_count > 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_xreadgroup_with_claim_min_idle_time(self, r):
+        stream = "stream"
+        group = "group"
+        consumer_1 = "c1"
+        stream_name = stream.encode()
+
+        try:
+            # before test cleanup
+            r.xgroup_destroy(stream, group)
+        except ResponseError:
+            pass
+
+        m1 = r.xadd(stream, {"key_m1": "val_m1"})
+        m2 = r.xadd(stream, {"key_m2": "val_m2"})
+
+        r.xgroup_create(stream, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        r.xreadgroup(group, consumer_1, streams={stream: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        time.sleep(0.1)
+
+        m3 = r.xadd(stream, {"key_m3": "val_m3"})
+        m4 = r.xadd(stream, {"key_m4": "val_m4"})
+
+        expected_entries = {
+            stream_name: [
+                {"msg": get_stream_message(r, stream, m1), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream, m2), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream, m3), "min_idle_time": 0},
+                {"msg": get_stream_message(r, stream, m4), "min_idle_time": 0},
+            ]
+        }
+
+        res = r.xreadgroup(
+            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=100
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = r.xpending_range(stream, group, min="-", max="+", count=5)
+        assert len(response) == 4
+
+        # add 2 more messages
+        m5 = r.xadd(stream, {"key_m5": "val_m5"})
+        m6 = r.xadd(stream, {"key_m6": "val_m6"})
+
+        expected_entries = [
+            get_stream_message(r, stream, m5),
+            get_stream_message(r, stream, m6),
+        ]
+        # read all the messages - this will save the msgs in PEL
+        res = r.xreadgroup(group, consumer_1, streams={stream: ">"})
+        assert_resp_response(
+            r,
+            res,
+            [[stream_name, expected_entries]],
+            {stream_name: [expected_entries]},
+        )
+
+        # add 2 more messages
+        m7 = r.xadd(stream, {"key_m7": "val_m7"})
+        m8 = r.xadd(stream, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_name: [
+                {"msg": get_stream_message(r, stream, m7), "min_idle_time": 0},
+                {"msg": get_stream_message(r, stream, m8), "min_idle_time": 0},
+            ]
+        }
+        res = r.xreadgroup(
+            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=100
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_xreadgroup_with_claim_min_idle_time_multiple_streams_same_slots(self, r):
+        stream_1 = "stream1:{same_slot:42}"
+        stream_2 = "stream2:{same_slot:42}"
+        group = "group"
+        consumer_1 = "c1"
+
+        stream_1_name = stream_1.encode()
+        stream_2_name = stream_2.encode()
+
+        # before test cleanup
+        try:
+            r.xgroup_destroy(stream_1, group)
+        except ResponseError:
+            pass
+        try:
+            r.xgroup_destroy(stream_2, group)
+        except ResponseError:
+            pass
+
+        m1_s1 = r.xadd(stream_1, {"key_m1_s1": "val_m1"})
+        m2_s1 = r.xadd(stream_1, {"key_m2_s1": "val_m2"})
+        r.xgroup_create(stream_1, group, 0)
+
+        m1_s2 = r.xadd(stream_2, {"key_m1_s2": "val_m1"})
+        m2_s2 = r.xadd(stream_2, {"key_m2_s2": "val_m2"})
+        r.xgroup_create(stream_2, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        time.sleep(0.1)
+
+        m3_s1 = r.xadd(stream_1, {"key_m3_s1": "val_m3"})
+        m4_s2 = r.xadd(stream_2, {"key_m4_s2": "val_m4"})
+
+        expected_entries = {
+            stream_1_name: [
+                {"msg": get_stream_message(r, stream_1, m1_s1), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_1, m2_s1), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_1, m3_s1), "min_idle_time": 0},
+            ],
+            stream_2_name: [
+                {"msg": get_stream_message(r, stream_2, m1_s2), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_2, m2_s2), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_2, m4_s2), "min_idle_time": 0},
+            ],
+        }
+
+        res = r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = r.xpending_range(stream_1, group, min="-", max="+", count=5)
+        assert len(response) == 3
+        response = r.xpending_range(stream_2, group, min="-", max="+", count=5)
+        assert len(response) == 3
+
+        # add 2 more messages
+        r.xadd(stream_1, {"key_m5": "val_m5"})
+        r.xadd(stream_2, {"key_m6": "val_m6"})
+
+        # read all the messages - this will save the msgs in PEL
+        r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # add 2 more messages
+        m7 = r.xadd(stream_1, {"key_m7": "val_m7"})
+        m8 = r.xadd(stream_2, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_1_name: [
+                {"msg": get_stream_message(r, stream_1, m7), "min_idle_time": 0}
+            ],
+            stream_2_name: [
+                {"msg": get_stream_message(r, stream_2, m8), "min_idle_time": 0}
+            ],
+        }
+        res = r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    def test_xreadgroup_with_claim_min_idle_time_multiple_streams(self, r):
+        stream_1 = "stream1"
+        stream_2 = "stream2"
+        group = "group"
+        consumer_1 = "c1"
+
+        stream_1_name = stream_1.encode()
+        stream_2_name = stream_2.encode()
+
+        # before test cleanup
+        try:
+            r.xgroup_destroy(stream_1, group)
+        except ResponseError:
+            pass
+        try:
+            r.xgroup_destroy(stream_2, group)
+        except ResponseError:
+            pass
+
+        m1_s1 = r.xadd(stream_1, {"key_m1_s1": "val_m1"})
+        m2_s1 = r.xadd(stream_1, {"key_m2_s1": "val_m2"})
+        r.xgroup_create(stream_1, group, 0)
+
+        m1_s2 = r.xadd(stream_2, {"key_m1_s2": "val_m1"})
+        m2_s2 = r.xadd(stream_2, {"key_m2_s2": "val_m2"})
+        r.xgroup_create(stream_2, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        time.sleep(0.1)
+
+        m3_s1 = r.xadd(stream_1, {"key_m3_s1": "val_m3"})
+        m4_s2 = r.xadd(stream_2, {"key_m4_s2": "val_m4"})
+
+        expected_entries = {
+            stream_1_name: [
+                {"msg": get_stream_message(r, stream_1, m1_s1), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_1, m2_s1), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_1, m3_s1), "min_idle_time": 0},
+            ],
+            stream_2_name: [
+                {"msg": get_stream_message(r, stream_2, m1_s2), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_2, m2_s2), "min_idle_time": 100},
+                {"msg": get_stream_message(r, stream_2, m4_s2), "min_idle_time": 0},
+            ],
+        }
+
+        res = r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = r.xpending_range(stream_1, group, min="-", max="+", count=5)
+        assert len(response) == 3
+        response = r.xpending_range(stream_2, group, min="-", max="+", count=5)
+        assert len(response) == 3
+
+        # add 2 more messages
+        r.xadd(stream_1, {"key_m5": "val_m5"})
+        r.xadd(stream_2, {"key_m6": "val_m6"})
+
+        # read all the messages - this will save the msgs in PEL
+        r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # add 2 more messages
+        m7 = r.xadd(stream_1, {"key_m7": "val_m7"})
+        m8 = r.xadd(stream_2, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_1_name: [
+                {"msg": get_stream_message(r, stream_1, m7), "min_idle_time": 0}
+            ],
+            stream_2_name: [
+                {"msg": get_stream_message(r, stream_2, m8), "min_idle_time": 0}
+            ],
+        }
+        res = r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
         )
 
     @skip_if_server_version_lt("5.0.0")
