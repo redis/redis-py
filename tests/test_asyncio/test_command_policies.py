@@ -11,9 +11,9 @@ from redis.commands.policies import (
     AsyncDynamicPolicyResolver,
     AsyncStaticPolicyResolver,
 )
-from redis.commands.search.aggregation import AggregateRequest
+from redis.commands.search.aggregation import AggregateRequest, Cursor
 from redis.commands.search.field import NumericField, TextField
-from tests.conftest import skip_if_server_version_lt
+from tests.conftest import skip_if_server_version_lt, is_resp2_connection
 
 
 @pytest.mark.asyncio
@@ -115,12 +115,14 @@ class TestClusterWithPolicies:
             )
             assert determined_nodes[0] == primary_nodes[0]
 
-            # Wait for index creation
-            await asyncio.sleep(1)
-
             # Routed to another random primary node
             info = await r.ft().info()
-            assert info["index_name"] == "idx"
+
+            if is_resp2_connection(r):
+                assert info["index_name"] == "idx"
+            else:
+                assert info[b"index_name"] == b"idx"
+
             assert determined_nodes[0] == primary_nodes[1]
 
             expected_node = await r.get_nodes_from_slot("FT.SUGLEN", *["foo"])
@@ -158,7 +160,11 @@ class TestClusterWithPolicies:
 
             req = AggregateRequest("redis").group_by("@parent").cursor(1)
             res = await r.ft().aggregate(req)
-            cursor = res.cursor
+
+            if is_resp2_connection(r):
+                cursor = res.cursor
+            else:
+                cursor = Cursor(res[1])
 
             # Ensure that aggregate node was cached.
             assert determined_nodes[0] == r._aggregate_nodes[0]
@@ -169,7 +175,7 @@ class TestClusterWithPolicies:
             assert determined_nodes[0] == r._aggregate_nodes[0]
 
             # Error propagates to a user
-            with pytest.raises(ResponseError, match="Cursor not found, id: 0"):
+            with pytest.raises(ResponseError, match="Cursor not found, id:"):
                 await r.ft().aggregate(cursor)
 
             assert determined_nodes[0] == primary_nodes[2]
