@@ -454,7 +454,7 @@ async def test_vsim_truth_no_thread_enabled(d_client):
     elements_count = 5000
     vector_dim = 50
     for i in range(1, elements_count + 1):
-        float_array = [random.uniform(10 * i, 1000 * i) for x in range(vector_dim)]
+        float_array = [i for _ in range(vector_dim)]
         await d_client.vset().vadd("myset", float_array, f"elem_{i}")
 
     await d_client.vset().vadd("myset", [-22 for _ in range(vector_dim)], "elem_man_2")
