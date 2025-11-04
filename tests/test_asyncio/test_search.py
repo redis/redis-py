@@ -2736,30 +2736,6 @@ class TestHybridSearch(AsyncSearchTestsBase):
             assert res["warnings"] == []
             assert res["execution_time"] > 0
 
-        # # LINEAR combine with no params
-        # posprocessing_config.combine("LINEAR", ALPHA=0.5)
-        # res = client.ft().hybrid_search(
-        #     query=hybrid_query, post_processing=posprocessing_config, timeout=10
-        # )
-
-        # expected_results = [
-        #     {"__key": b"item:2", "__score": b"0.166666666667"},
-        #     {"__key": b"item:7", "__score": b"0.166666666667"},
-        #     {"__key": b"item:12", "__score": b"0.166666666667"},
-        # ]
-        # if is_resp2_connection(client):
-        #     assert res.total_results >= 3
-        #     assert len(res.results) == 3
-        #     assert res.results == expected_results
-        #     assert res.warnings == []
-        #     assert res.execution_time > 0
-        # else:
-        #     assert res["total_results"] >= 3
-        #     assert len(res["results"]) == 3
-        #     assert res["results"] == self._convert_dict_values_to_str(expected_results)
-        #     assert res["warnings"] == []
-        #     assert res["execution_time"] > 0
-
         # combine with RRF, not all possible params provided
         posprocessing_config.combine("RRF", WINDOW=3)
         res = await decoded_r.ft().hybrid_search(
