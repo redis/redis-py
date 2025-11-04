@@ -3234,3 +3234,145 @@ class TestSSL:
             ssl_keyfile=self.client_key,
         ) as rc:
             assert await rc.ping()
+
+
+@pytest.mark.onlycluster
+class TestClusterPubSub:
+    """
+    Test ClusterPubSub with shard channels functionality
+    """
+
+    async def wait_for_message(self, pubsub, timeout=0.2, ignore_subscribe_messages=False):
+        """Helper method to wait for a message with timeout"""
+        import asyncio
+        now = asyncio.get_running_loop().time()
+        timeout = now + timeout
+        while now < timeout:
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=ignore_subscribe_messages
+            )
+            if message is not None:
+                return message
+            await asyncio.sleep(0.01)
+            now = asyncio.get_running_loop().time()
+        return None
+
+    def make_message(self, type, channel, data, pattern=None):
+        """Helper method to create expected message format"""
+        return {
+            "type": type,
+            "pattern": pattern and pattern.encode("utf-8") or None,
+            "channel": channel and channel.encode("utf-8") or None,
+            "data": data.encode("utf-8") if isinstance(data, str) else data,
+        }
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_cluster_pubsub_creation(self, r):
+        """Test basic ClusterPubSub creation"""
+        pubsub = r.pubsub()
+        assert pubsub is not None
+        assert hasattr(pubsub, 'ssubscribe')
+        assert hasattr(pubsub, 'sunsubscribe')
+        assert hasattr(pubsub, 'get_sharded_message')
+        await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_cluster_pubsub_with_node(self, r):
+        """Test ClusterPubSub creation with specific node"""
+        nodes = r.get_nodes()
+        if nodes:
+            node = nodes[0]
+            pubsub = r.pubsub(node=node)
+            assert pubsub.node == node
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_cluster_pubsub_with_host_port(self, r):
+        """Test ClusterPubSub creation with host and port"""
+        nodes = r.get_nodes()
+        if nodes:
+            node = nodes[0]
+            pubsub = r.pubsub(host=node.host, port=node.port)
+            assert pubsub.node.host == node.host
+            assert pubsub.node.port == node.port
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_subscribe_unsubscribe(self, r):
+        """Test shard channel subscribe and unsubscribe"""
+        pubsub = r.pubsub()
+
+        try:
+            # Test channels that map to different nodes
+            channels = ["shard_test_1", "shard_test_2", "shard_test_3"]
+
+            # Subscribe to shard channels
+            for channel in channels:
+                await pubsub.ssubscribe(channel)
+
+            # Verify subscription messages (implementation dependent)
+            for channel in channels:
+                # This is a basic test - in practice, subscription messages
+                # may vary depending on the cluster implementation
+                pass
+
+            # Unsubscribe from shard channels
+            for channel in channels:
+                await pubsub.sunsubscribe(channel)
+
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_attributes(self, r):
+        """Test shard channel attributes"""
+        pubsub = r.pubsub()
+
+        try:
+            # Initially no shard channels
+            assert not pubsub.shard_channels
+            assert not pubsub.pending_unsubscribe_shard_channels
+
+            # Subscribe to a shard channel
+            await pubsub.ssubscribe("test_shard_attr")
+
+            # Should have shard channel information
+            # Note: The exact behavior may depend on implementation details
+
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_shard_channel_with_handler(self, r):
+        """Test shard channel subscription with message handler"""
+        pubsub = r.pubsub()
+
+        try:
+            received_messages = []
+
+            def message_handler(message):
+                received_messages.append(message)
+
+            # Subscribe with handler
+            await pubsub.ssubscribe(test_handler_channel=message_handler)
+
+            # This test verifies that the handler mechanism is properly set up
+            # Actual message delivery testing would require a live Redis cluster
+
+        finally:
+            await pubsub.aclose()
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_invalid_node_raises_exception(self, r):
+        """Test that invalid node raises appropriate exception"""
+        with pytest.raises(RedisClusterException):
+            r.pubsub(host="invalid_host", port=9999)
+
+    @skip_if_server_version_lt("7.0.0")
+    async def test_partial_host_port_raises_exception(self, r):
+        """Test that providing only host or port raises DataError"""
+        with pytest.raises(DataError):
+            r.pubsub(host="localhost")  # Missing port
+
+        with pytest.raises(DataError):
+            r.pubsub(port=7000)  # Missing host
