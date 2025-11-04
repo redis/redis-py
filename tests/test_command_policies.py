@@ -10,6 +10,7 @@ from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePoli
 from redis.commands.policies import DynamicPolicyResolver, StaticPolicyResolver
 from redis.commands.search.aggregation import AggregateRequest
 from redis.commands.search.field import TextField, NumericField
+from tests.conftest import skip_if_server_version_lt
 
 
 @pytest.mark.onlycluster
@@ -83,6 +84,7 @@ class TestBasePolicyResolver:
 
 
 @pytest.mark.onlycluster
+@skip_if_server_version_lt("8.0.0")
 class TestClusterWithPolicies:
     def test_resolves_correctly_policies(self, r, monkeypatch):
         # original nodes selection method

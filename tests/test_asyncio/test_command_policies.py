@@ -12,6 +12,7 @@ from redis.commands.policies import (
 )
 from redis.commands.search.aggregation import AggregateRequest
 from redis.commands.search.field import NumericField, TextField
+from tests.conftest import skip_if_server_version_lt
 
 
 @pytest.mark.asyncio
@@ -82,6 +83,7 @@ class TestBasePolicyResolver:
 
 @pytest.mark.onlycluster
 @pytest.mark.asyncio
+@skip_if_server_version_lt("8.0.0")
 class TestClusterWithPolicies:
     async def test_resolves_correctly_policies(self, r: RedisCluster, monkeypatch):
         # original nodes selection method

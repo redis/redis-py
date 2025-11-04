@@ -5,9 +5,9 @@ from redis._parsers.commands import RequestPolicy, ResponsePolicy
 from tests.conftest import skip_if_server_version_lt
 
 
+@pytest.mark.onlycluster
+@skip_if_server_version_lt("8.0.0")
 class TestAsyncCommandParser:
-    @skip_if_server_version_lt("7.0.0")
-    @pytest.mark.onlycluster
     @pytest.mark.asyncio
     async def test_get_command_policies(self, r):
         commands_parser = AsyncCommandsParser()
