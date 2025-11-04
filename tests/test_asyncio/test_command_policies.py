@@ -6,7 +6,10 @@ from mock import patch
 from redis import ResponseError
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy
 from redis.asyncio import RedisCluster
-from redis.commands.policies import AsyncDynamicPolicyResolver, AsyncStaticPolicyResolver
+from redis.commands.policies import (
+    AsyncDynamicPolicyResolver,
+    AsyncStaticPolicyResolver,
+)
 from redis.commands.search.aggregation import AggregateRequest
 from redis.commands.search.field import NumericField, TextField
 
@@ -15,44 +18,67 @@ from redis.commands.search.field import NumericField, TextField
 @pytest.mark.onlycluster
 class TestBasePolicyResolver:
     async def test_resolve(self):
-        zcount_policy = CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED)
-        rpoplpush_policy = CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED)
+        zcount_policy = CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYED,
+            response_policy=ResponsePolicy.DEFAULT_KEYED,
+        )
+        rpoplpush_policy = CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYED,
+            response_policy=ResponsePolicy.DEFAULT_KEYED,
+        )
 
-        dynamic_resolver = AsyncDynamicPolicyResolver({
-            'core': {
-                'zcount': zcount_policy,
-                'rpoplpush': rpoplpush_policy,
+        dynamic_resolver = AsyncDynamicPolicyResolver(
+            {
+                "core": {
+                    "zcount": zcount_policy,
+                    "rpoplpush": rpoplpush_policy,
+                }
             }
-        })
-        assert await dynamic_resolver.resolve('zcount') == zcount_policy
-        assert await dynamic_resolver.resolve('rpoplpush') == rpoplpush_policy
+        )
+        assert await dynamic_resolver.resolve("zcount") == zcount_policy
+        assert await dynamic_resolver.resolve("rpoplpush") == rpoplpush_policy
 
-        with pytest.raises(ValueError, match="Wrong command or module name: foo.bar.baz"):
-            await dynamic_resolver.resolve('foo.bar.baz')
+        with pytest.raises(
+            ValueError, match="Wrong command or module name: foo.bar.baz"
+        ):
+            await dynamic_resolver.resolve("foo.bar.baz")
 
-        assert await dynamic_resolver.resolve('foo.bar') is None
-        assert await dynamic_resolver.resolve('core.foo') is None
+        assert await dynamic_resolver.resolve("foo.bar") is None
+        assert await dynamic_resolver.resolve("core.foo") is None
 
         # Test that policy fallback correctly
         static_resolver = AsyncStaticPolicyResolver()
         with_fallback_dynamic_resolver = dynamic_resolver.with_fallback(static_resolver)
-        resolved_policies = await with_fallback_dynamic_resolver.resolve('ft.aggregate')
+        resolved_policies = await with_fallback_dynamic_resolver.resolve("ft.aggregate")
 
         assert resolved_policies.request_policy == RequestPolicy.DEFAULT_KEYLESS
         assert resolved_policies.response_policy == ResponsePolicy.DEFAULT_KEYLESS
 
         # Extended chain with one more resolver
-        foo_bar_policy = CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS)
+        foo_bar_policy = CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        )
 
-        another_dynamic_resolver = AsyncDynamicPolicyResolver({
-            'foo': {
-                'bar': foo_bar_policy,
+        another_dynamic_resolver = AsyncDynamicPolicyResolver(
+            {
+                "foo": {
+                    "bar": foo_bar_policy,
+                }
             }
-        })
-        with_fallback_static_resolver = static_resolver.with_fallback(another_dynamic_resolver)
-        with_double_fallback_dynamic_resolver = dynamic_resolver.with_fallback(with_fallback_static_resolver)
+        )
+        with_fallback_static_resolver = static_resolver.with_fallback(
+            another_dynamic_resolver
+        )
+        with_double_fallback_dynamic_resolver = dynamic_resolver.with_fallback(
+            with_fallback_static_resolver
+        )
 
-        assert await with_double_fallback_dynamic_resolver.resolve('foo.bar') == foo_bar_policy
+        assert (
+            await with_double_fallback_dynamic_resolver.resolve("foo.bar")
+            == foo_bar_policy
+        )
+
 
 @pytest.mark.onlycluster
 @pytest.mark.asyncio
@@ -66,13 +92,15 @@ class TestClusterWithPolicies:
 
         async def wrapper(*args, request_policy: RequestPolicy, **kwargs):
             nonlocal determined_nodes
-            determined_nodes = await determine_nodes(*args, request_policy=request_policy, **kwargs)
+            determined_nodes = await determine_nodes(
+                *args, request_policy=request_policy, **kwargs
+            )
             return determined_nodes
 
         # Mock random.choice to always return a pre-defined sequence of nodes
         monkeypatch.setattr(random, "choice", lambda seq: seq[next(calls)])
 
-        with patch.object(r, '_determine_nodes', side_effect=wrapper, autospec=True):
+        with patch.object(r, "_determine_nodes", side_effect=wrapper, autospec=True):
             # Routed to a random primary node
             await r.ft().create_index(
                 [
@@ -86,11 +114,11 @@ class TestClusterWithPolicies:
 
             # Routed to another random primary node
             info = await r.ft().info()
-            assert info['index_name'] == 'idx'
+            assert info["index_name"] == "idx"
             assert determined_nodes[0] == primary_nodes[1]
 
-            expected_node = await r.get_nodes_from_slot('FT.SUGLEN', *['foo'])
-            await r.ft().suglen('foo')
+            expected_node = await r.get_nodes_from_slot("FT.SUGLEN", *["foo"])
+            await r.ft().suglen("foo")
             assert determined_nodes[0] == expected_node[0]
 
             # Indexing a document
@@ -122,9 +150,7 @@ class TestClusterWithPolicies:
                 },
             )
 
-            req = AggregateRequest("redis").group_by(
-                "@parent"
-            ).cursor(1)
+            req = AggregateRequest("redis").group_by("@parent").cursor(1)
             res = await r.ft().aggregate(req)
             cursor = res.cursor
 

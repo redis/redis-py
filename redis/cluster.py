@@ -727,14 +727,20 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             SLOT_ID: RequestPolicy.DEFAULT_KEYED,
         }
 
-        self._policies_callback_mapping: dict[Union[RequestPolicy, ResponsePolicy], Callable] = {
-            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [self.get_random_primary_or_all_nodes(command_name)],
-            RequestPolicy.DEFAULT_KEYED: lambda command, *args: self.get_nodes_from_slot(command, *args),
+        self._policies_callback_mapping: dict[
+            Union[RequestPolicy, ResponsePolicy], Callable
+        ] = {
+            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
+                self.get_random_primary_or_all_nodes(command_name)
+            ],
+            RequestPolicy.DEFAULT_KEYED: lambda command,
+            *args: self.get_nodes_from_slot(command, *args),
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
             RequestPolicy.ALL_NODES: self.get_nodes,
             RequestPolicy.ALL_REPLICAS: self.get_replicas,
-            RequestPolicy.MULTI_SHARD: lambda *args, **kwargs: self._split_multi_shard_command(*args, **kwargs),
+            RequestPolicy.MULTI_SHARD: lambda *args,
+            **kwargs: self._split_multi_shard_command(*args, **kwargs),
             RequestPolicy.SPECIAL: self.get_special_nodes,
             ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
@@ -866,10 +872,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         commands = []
 
         for key in keys:
-            commands.append({
-                'args': (args[0], key),
-                'kwargs': kwargs,
-            })
+            commands.append(
+                {
+                    "args": (args[0], key),
+                    "kwargs": kwargs,
+                }
+            )
 
         return commands
 
@@ -878,7 +886,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         Returns a list of nodes for commands with a special policy.
         """
         if not self._aggregate_nodes:
-            raise RedisClusterException('Cannot execute FT.CURSOR commands without FT.AGGREGATE')
+            raise RedisClusterException(
+                "Cannot execute FT.CURSOR commands without FT.AGGREGATE"
+            )
 
         return self._aggregate_nodes
 
@@ -911,7 +921,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     return type(response)(False)
 
         return first_successful_response
-
 
     def set_default_node(self, node):
         """
@@ -1062,7 +1071,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         """Set a custom Response Callback"""
         self.cluster_response_callbacks[command] = callback
 
-    def _determine_nodes(self, *args, request_policy: RequestPolicy, **kwargs) -> List["ClusterNode"]:
+    def _determine_nodes(
+        self, *args, request_policy: RequestPolicy, **kwargs
+    ) -> List["ClusterNode"]:
         """
         Determines a nodes the command should be executed on.
         """
@@ -1274,7 +1285,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     )
             else:
                 if command_flag in self._command_flags_mapping:
-                    command_policies = CommandPolicies(request_policy=self._command_flags_mapping[command_flag])
+                    command_policies = CommandPolicies(
+                        request_policy=self._command_flags_mapping[command_flag]
+                    )
                 else:
                     command_policies = CommandPolicies()
         elif not command_policies and target_nodes_specified:
@@ -1297,7 +1310,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 if not target_nodes_specified:
                     # Determine the nodes to execute the command on
                     target_nodes = self._determine_nodes(
-                        *args, request_policy=command_policies.request_policy, nodes_flag=passed_targets
+                        *args,
+                        request_policy=command_policies.request_policy,
+                        nodes_flag=passed_targets,
                     )
                     if not target_nodes:
                         raise RedisClusterException(
@@ -1315,7 +1330,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                         break
 
                 # Return the processed result
-                return self._process_result(args[0], res, response_policy=command_policies.response_policy, **kwargs)
+                return self._process_result(
+                    args[0],
+                    res,
+                    response_policy=command_policies.response_policy,
+                    **kwargs,
+                )
             except Exception as e:
                 if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     if is_default_node:
@@ -2348,14 +2368,20 @@ class ClusterPipeline(RedisCluster):
             SLOT_ID: RequestPolicy.DEFAULT_KEYED,
         }
 
-        self._policies_callback_mapping: dict[Union[RequestPolicy, ResponsePolicy], Callable] = {
-            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [self.get_random_primary_or_all_nodes(command_name)],
-            RequestPolicy.DEFAULT_KEYED: lambda command, *args: self.get_nodes_from_slot(command, *args),
+        self._policies_callback_mapping: dict[
+            Union[RequestPolicy, ResponsePolicy], Callable
+        ] = {
+            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
+                self.get_random_primary_or_all_nodes(command_name)
+            ],
+            RequestPolicy.DEFAULT_KEYED: lambda command,
+            *args: self.get_nodes_from_slot(command, *args),
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
             RequestPolicy.ALL_NODES: self.get_nodes,
             RequestPolicy.ALL_REPLICAS: self.get_replicas,
-            RequestPolicy.MULTI_SHARD: lambda *args, **kwargs: self._split_multi_shard_command(*args, **kwargs),
+            RequestPolicy.MULTI_SHARD: lambda *args,
+            **kwargs: self._split_multi_shard_command(*args, **kwargs),
             RequestPolicy.SPECIAL: self.get_special_nodes,
             ResponsePolicy.DEFAULT_KEYLESS: lambda res: res,
             ResponsePolicy.DEFAULT_KEYED: lambda res: res,
@@ -2959,7 +2985,11 @@ class PipelineStrategy(AbstractStrategy):
                 else:
                     if not command_policies:
                         command = c.args[0].upper()
-                        if len(c.args) >= 2 and f"{c.args[0]} {c.args[1]}".upper() in self._pipe.command_flags:
+                        if (
+                            len(c.args) >= 2
+                            and f"{c.args[0]} {c.args[1]}".upper()
+                            in self._pipe.command_flags
+                        ):
                             command = f"{c.args[0]} {c.args[1]}".upper()
 
                         # We only could resolve key properties if command is not
@@ -2981,12 +3011,17 @@ class PipelineStrategy(AbstractStrategy):
                         else:
                             if command_flag in self._pipe._command_flags_mapping:
                                 command_policies = CommandPolicies(
-                                    request_policy=self._pipe._command_flags_mapping[command_flag])
+                                    request_policy=self._pipe._command_flags_mapping[
+                                        command_flag
+                                    ]
+                                )
                             else:
                                 command_policies = CommandPolicies()
 
                     target_nodes = self._determine_nodes(
-                        *c.args, request_policy=command_policies.request_policy, node_flag=passed_targets
+                        *c.args,
+                        request_policy=command_policies.request_policy,
+                        node_flag=passed_targets,
                     )
                     if not target_nodes:
                         raise RedisClusterException(
@@ -3117,7 +3152,9 @@ class PipelineStrategy(AbstractStrategy):
             if c.args[0] in self._pipe.cluster_response_callbacks:
                 # Remove keys entry, it needs only for cache.
                 c.options.pop("keys", None)
-                c.result = self._pipe._policies_callback_mapping[c.command_policies.response_policy](
+                c.result = self._pipe._policies_callback_mapping[
+                    c.command_policies.response_policy
+                ](
                     self._pipe.cluster_response_callbacks[c.args[0]](
                         c.result, **c.options
                     )
@@ -3152,7 +3189,9 @@ class PipelineStrategy(AbstractStrategy):
             )
         return nodes
 
-    def _determine_nodes(self, *args, request_policy: RequestPolicy, **kwargs) -> List["ClusterNode"]:
+    def _determine_nodes(
+        self, *args, request_policy: RequestPolicy, **kwargs
+    ) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
         command = args[0].upper()

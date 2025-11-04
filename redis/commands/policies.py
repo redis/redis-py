@@ -2,44 +2,128 @@ import asyncio
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from redis._parsers.commands import CommandPolicies, PolicyRecords, RequestPolicy, ResponsePolicy, CommandsParser, \
-    AsyncCommandsParser
+from redis._parsers.commands import (
+    CommandPolicies,
+    PolicyRecords,
+    RequestPolicy,
+    ResponsePolicy,
+    CommandsParser,
+    AsyncCommandsParser,
+)
 
 STATIC_POLICIES: PolicyRecords = {
-    'ft': {
-        'explaincli': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'suglen': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED),
-        'profile': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'dropindex': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'aliasupdate': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'alter': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'aggregate': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'syndump': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'create': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'explain': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'sugget': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED),
-        'dictdel': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'aliasadd': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'dictadd': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'synupdate': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'drop': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'info': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'sugadd': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED),
-        'dictdump': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'cursor': CommandPolicies(request_policy=RequestPolicy.SPECIAL, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'search': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'tagvals': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'aliasdel': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-        'sugdel': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYED, response_policy=ResponsePolicy.DEFAULT_KEYED),
-        'spellcheck': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
+    "ft": {
+        "explaincli": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "suglen": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYED,
+            response_policy=ResponsePolicy.DEFAULT_KEYED,
+        ),
+        "profile": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "dropindex": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "aliasupdate": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "alter": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "aggregate": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "syndump": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "create": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "explain": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "sugget": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYED,
+            response_policy=ResponsePolicy.DEFAULT_KEYED,
+        ),
+        "dictdel": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "aliasadd": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "dictadd": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "synupdate": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "drop": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "info": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "sugadd": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYED,
+            response_policy=ResponsePolicy.DEFAULT_KEYED,
+        ),
+        "dictdump": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "cursor": CommandPolicies(
+            request_policy=RequestPolicy.SPECIAL,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "search": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "tagvals": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "aliasdel": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+        "sugdel": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYED,
+            response_policy=ResponsePolicy.DEFAULT_KEYED,
+        ),
+        "spellcheck": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
     },
-    'core': {
-        'command': CommandPolicies(request_policy=RequestPolicy.DEFAULT_KEYLESS, response_policy=ResponsePolicy.DEFAULT_KEYLESS),
-    }
+    "core": {
+        "command": CommandPolicies(
+            request_policy=RequestPolicy.DEFAULT_KEYLESS,
+            response_policy=ResponsePolicy.DEFAULT_KEYLESS,
+        ),
+    },
 }
 
-class PolicyResolver(ABC):
 
+class PolicyResolver(ABC):
     @abstractmethod
     def resolve(self, command_name: str) -> Optional[CommandPolicies]:
         """
@@ -66,8 +150,8 @@ class PolicyResolver(ABC):
         """
         pass
 
-class AsyncPolicyResolver(ABC):
 
+class AsyncPolicyResolver(ABC):
     @abstractmethod
     async def resolve(self, command_name: str) -> Optional[CommandPolicies]:
         """
@@ -94,11 +178,15 @@ class AsyncPolicyResolver(ABC):
         """
         pass
 
+
 class BasePolicyResolver(PolicyResolver):
     """
     Base class for policy resolvers.
     """
-    def __init__(self, policies: PolicyRecords, fallback: Optional[PolicyResolver] = None) -> None:
+
+    def __init__(
+        self, policies: PolicyRecords, fallback: Optional[PolicyResolver] = None
+    ) -> None:
         self._policies = policies
         self._fallback = fallback
 
@@ -128,11 +216,15 @@ class BasePolicyResolver(PolicyResolver):
     def with_fallback(self, fallback: "PolicyResolver") -> "PolicyResolver":
         pass
 
+
 class AsyncBasePolicyResolver(AsyncPolicyResolver):
     """
     Async base class for policy resolvers.
     """
-    def __init__(self, policies: PolicyRecords, fallback: Optional[AsyncPolicyResolver] = None) -> None:
+
+    def __init__(
+        self, policies: PolicyRecords, fallback: Optional[AsyncPolicyResolver] = None
+    ) -> None:
         self._policies = policies
         self._fallback = fallback
 
@@ -167,7 +259,10 @@ class DynamicPolicyResolver(BasePolicyResolver):
     """
     Resolves policy dynamically based on the COMMAND output.
     """
-    def __init__(self, commands_parser: CommandsParser, fallback: Optional[PolicyResolver] = None) -> None:
+
+    def __init__(
+        self, commands_parser: CommandsParser, fallback: Optional[PolicyResolver] = None
+    ) -> None:
         """
         Parameters:
             commands_parser (CommandsParser): COMMAND output parser.
@@ -185,6 +280,7 @@ class StaticPolicyResolver(BasePolicyResolver):
     """
     Resolves policy from a static list of policy records.
     """
+
     def __init__(self, fallback: Optional[PolicyResolver] = None) -> None:
         """
         Parameters:
@@ -196,11 +292,17 @@ class StaticPolicyResolver(BasePolicyResolver):
     def with_fallback(self, fallback: "PolicyResolver") -> "PolicyResolver":
         return StaticPolicyResolver(fallback)
 
+
 class AsyncDynamicPolicyResolver(AsyncBasePolicyResolver):
     """
     Async version of DynamicPolicyResolver.
     """
-    def __init__(self, policy_records: PolicyRecords, fallback: Optional[AsyncPolicyResolver] = None) -> None:
+
+    def __init__(
+        self,
+        policy_records: PolicyRecords,
+        fallback: Optional[AsyncPolicyResolver] = None,
+    ) -> None:
         """
         Parameters:
             policy_records (PolicyRecords): Policy records.
@@ -212,10 +314,12 @@ class AsyncDynamicPolicyResolver(AsyncBasePolicyResolver):
     def with_fallback(self, fallback: "AsyncPolicyResolver") -> "AsyncPolicyResolver":
         return AsyncDynamicPolicyResolver(self._policies, fallback)
 
+
 class AsyncStaticPolicyResolver(AsyncBasePolicyResolver):
     """
     Async version of StaticPolicyResolver.
     """
+
     def __init__(self, fallback: Optional[AsyncPolicyResolver] = None) -> None:
         """
         Parameters:

@@ -8,38 +8,43 @@ from redis.utils import str_if_bytes
 if TYPE_CHECKING:
     from redis.asyncio.cluster import ClusterNode
 
+
 class RequestPolicy(Enum):
-    ALL_NODES = 'all_nodes'
-    ALL_SHARDS = 'all_shards'
-    ALL_REPLICAS = 'all_replicas'
-    MULTI_SHARD = 'multi_shard'
-    SPECIAL = 'special'
-    DEFAULT_KEYLESS = 'default_keyless'
-    DEFAULT_KEYED = 'default_keyed'
-    DEFAULT_NODE = 'default_node'
+    ALL_NODES = "all_nodes"
+    ALL_SHARDS = "all_shards"
+    ALL_REPLICAS = "all_replicas"
+    MULTI_SHARD = "multi_shard"
+    SPECIAL = "special"
+    DEFAULT_KEYLESS = "default_keyless"
+    DEFAULT_KEYED = "default_keyed"
+    DEFAULT_NODE = "default_node"
+
 
 class ResponsePolicy(Enum):
-    ONE_SUCCEEDED = 'one_succeeded'
-    ALL_SUCCEEDED = 'all_succeeded'
-    AGG_LOGICAL_AND = 'agg_logical_and'
-    AGG_LOGICAL_OR = 'agg_logical_or'
-    AGG_MIN = 'agg_min'
-    AGG_MAX = 'agg_max'
-    AGG_SUM = 'agg_sum'
-    SPECIAL = 'special'
-    DEFAULT_KEYLESS = 'default_keyless'
-    DEFAULT_KEYED = 'default_keyed'
+    ONE_SUCCEEDED = "one_succeeded"
+    ALL_SUCCEEDED = "all_succeeded"
+    AGG_LOGICAL_AND = "agg_logical_and"
+    AGG_LOGICAL_OR = "agg_logical_or"
+    AGG_MIN = "agg_min"
+    AGG_MAX = "agg_max"
+    AGG_SUM = "agg_sum"
+    SPECIAL = "special"
+    DEFAULT_KEYLESS = "default_keyless"
+    DEFAULT_KEYED = "default_keyed"
+
 
 class CommandPolicies:
     def __init__(
-            self,
-            request_policy: RequestPolicy = RequestPolicy.DEFAULT_KEYLESS,
-            response_policy: ResponsePolicy = ResponsePolicy.DEFAULT_KEYLESS
+        self,
+        request_policy: RequestPolicy = RequestPolicy.DEFAULT_KEYLESS,
+        response_policy: ResponsePolicy = ResponsePolicy.DEFAULT_KEYLESS,
     ):
         self.request_policy = request_policy
         self.response_policy = response_policy
 
+
 PolicyRecords = dict[str, dict[str, CommandPolicies]]
+
 
 class AbstractCommandsParser:
     def _get_pubsub_keys(self, *args):
@@ -165,7 +170,7 @@ class CommandsParser(AbstractCommandsParser):
                         if str_if_bytes(subcmd[0]) == subcmd_name:
                             command = self.parse_subcommand(subcmd)
 
-                            if command['first_key_pos'] > 0:
+                            if command["first_key_pos"] > 0:
                                 is_subcmd = True
 
                 # The command doesn't have keys in it
@@ -206,7 +211,9 @@ class CommandsParser(AbstractCommandsParser):
                 raise e
         return keys
 
-    def _is_keyless_command(self, command_name: str, subcommand_name: Optional[str]=None) -> bool:
+    def _is_keyless_command(
+        self, command_name: str, subcommand_name: Optional[str] = None
+    ) -> bool:
         """
         Determines whether a given command or subcommand is considered "keyless".
 
@@ -232,15 +239,17 @@ class CommandsParser(AbstractCommandsParser):
                 specified command does not exist in the available commands.
         """
         if subcommand_name:
-            for subcommand in self.commands.get(command_name)['subcommands']:
+            for subcommand in self.commands.get(command_name)["subcommands"]:
                 if str_if_bytes(subcommand[0]) == subcommand_name:
                     parsed_subcmd = self.parse_subcommand(subcommand)
-                    return parsed_subcmd['first_key_pos'] <= 0
-            raise ValueError(f"Subcommand {subcommand_name} not found in command {command_name}")
+                    return parsed_subcmd["first_key_pos"] <= 0
+            raise ValueError(
+                f"Subcommand {subcommand_name} not found in command {command_name}"
+            )
         else:
             command_details = self.commands.get(command_name, None)
             if command_details is not None:
-                return command_details['first_key_pos'] <= 0
+                return command_details["first_key_pos"] <= 0
 
             raise ValueError(f"Command {command_name} not found in commands")
 
@@ -265,7 +274,7 @@ class CommandsParser(AbstractCommandsParser):
         def extract_policies(data, module_name, command_name):
             """
             Recursively extract policies from nested data structures.
-            
+
             Args:
                 data: The data structure to search (can be list, dict, str, bytes, etc.)
                 command_name: The command name to associate with found policies
@@ -275,28 +284,38 @@ class CommandsParser(AbstractCommandsParser):
                 policy = str_if_bytes(data.decode())
 
                 # Check if this is a policy string
-                if policy.startswith('request_policy') or policy.startswith('response_policy'):
-                    if policy.startswith('request_policy'):
-                        policy_type = policy.split(':')[1]
+                if policy.startswith("request_policy") or policy.startswith(
+                    "response_policy"
+                ):
+                    if policy.startswith("request_policy"):
+                        policy_type = policy.split(":")[1]
 
                         try:
-                            command_with_policies[module_name][command_name].request_policy = RequestPolicy(policy_type)
+                            command_with_policies[module_name][
+                                command_name
+                            ].request_policy = RequestPolicy(policy_type)
                         except ValueError:
-                            raise IncorrectPolicyType(f"Incorrect request policy type: {policy_type}")
+                            raise IncorrectPolicyType(
+                                f"Incorrect request policy type: {policy_type}"
+                            )
 
-                    if policy.startswith('response_policy'):
-                        policy_type = policy.split(':')[1]
+                    if policy.startswith("response_policy"):
+                        policy_type = policy.split(":")[1]
 
                         try:
-                            command_with_policies[module_name][command_name].response_policy = ResponsePolicy(policy_type)
+                            command_with_policies[module_name][
+                                command_name
+                            ].response_policy = ResponsePolicy(policy_type)
                         except ValueError:
-                            raise IncorrectPolicyType(f"Incorrect response policy type: {policy_type}")
-            
+                            raise IncorrectPolicyType(
+                                f"Incorrect response policy type: {policy_type}"
+                            )
+
             elif isinstance(data, list):
                 # For lists, recursively process each element
                 for item in data:
                     extract_policies(item, module_name, command_name)
-            
+
             elif isinstance(data, dict):
                 # For dictionaries, recursively process each value
                 for value in data.values():
@@ -314,29 +333,31 @@ class CommandsParser(AbstractCommandsParser):
                 default_response_policy = ResponsePolicy.DEFAULT_KEYED
 
             # Check if it's a core or module command
-            split_name = command.split('.')
+            split_name = command.split(".")
 
             if len(split_name) > 1:
                 module_name = split_name[0]
                 command_name = split_name[1]
             else:
-                module_name = 'core'
+                module_name = "core"
                 command_name = split_name[0]
 
             # Create a CommandPolicies object with default policies on the new command.
             if command_with_policies.get(module_name, None) is None:
-                command_with_policies[module_name] = {command_name: CommandPolicies(
-                    request_policy=default_request_policy,
-                    response_policy=default_response_policy
-                )}
+                command_with_policies[module_name] = {
+                    command_name: CommandPolicies(
+                        request_policy=default_request_policy,
+                        response_policy=default_response_policy,
+                    )
+                }
             else:
                 command_with_policies[module_name][command_name] = CommandPolicies(
                     request_policy=default_request_policy,
-                    response_policy=default_response_policy
+                    response_policy=default_response_policy,
                 )
 
-            tips = details.get('tips')
-            subcommands = details.get('subcommands')
+            tips = details.get("tips")
+            subcommands = details.get("subcommands")
 
             # Process tips for the main command
             if tips:
@@ -360,12 +381,12 @@ class CommandsParser(AbstractCommandsParser):
                         default_request_policy = RequestPolicy.DEFAULT_KEYED
                         default_response_policy = ResponsePolicy.DEFAULT_KEYED
 
-                    subcmd_name = subcmd_name.replace('|', ' ')
+                    subcmd_name = subcmd_name.replace("|", " ")
 
                     # Create a CommandPolicies object with default policies on the new command.
                     command_with_policies[module_name][subcmd_name] = CommandPolicies(
                         request_policy=default_request_policy,
-                        response_policy=default_response_policy
+                        response_policy=default_response_policy,
                     )
 
                     # Recursively extract policies from the rest of the subcommand details
@@ -373,6 +394,7 @@ class CommandsParser(AbstractCommandsParser):
                         extract_policies(subcommand_detail, module_name, subcmd_name)
 
         return command_with_policies
+
 
 class AsyncCommandsParser(AbstractCommandsParser):
     """
@@ -456,7 +478,7 @@ class AsyncCommandsParser(AbstractCommandsParser):
                         if str_if_bytes(subcmd[0]) == subcmd_name:
                             command = self.parse_subcommand(subcmd)
 
-                            if command['first_key_pos'] > 0:
+                            if command["first_key_pos"] > 0:
                                 is_subcmd = True
 
                 # The command doesn't have keys in it
@@ -486,7 +508,9 @@ class AsyncCommandsParser(AbstractCommandsParser):
                 raise e
         return keys
 
-    async def _is_keyless_command(self, command_name: str, subcommand_name: Optional[str]=None) -> bool:
+    async def _is_keyless_command(
+        self, command_name: str, subcommand_name: Optional[str] = None
+    ) -> bool:
         """
         Determines whether a given command or subcommand is considered "keyless".
 
@@ -512,15 +536,17 @@ class AsyncCommandsParser(AbstractCommandsParser):
                 specified command does not exist in the available commands.
         """
         if subcommand_name:
-            for subcommand in self.commands.get(command_name)['subcommands']:
+            for subcommand in self.commands.get(command_name)["subcommands"]:
                 if str_if_bytes(subcommand[0]) == subcommand_name:
                     parsed_subcmd = self.parse_subcommand(subcommand)
-                    return parsed_subcmd['first_key_pos'] <= 0
-            raise ValueError(f"Subcommand {subcommand_name} not found in command {command_name}")
+                    return parsed_subcmd["first_key_pos"] <= 0
+            raise ValueError(
+                f"Subcommand {subcommand_name} not found in command {command_name}"
+            )
         else:
             command_details = self.commands.get(command_name, None)
             if command_details is not None:
-                return command_details['first_key_pos'] <= 0
+                return command_details["first_key_pos"] <= 0
 
             raise ValueError(f"Command {command_name} not found in commands")
 
@@ -555,23 +581,32 @@ class AsyncCommandsParser(AbstractCommandsParser):
                 policy = str_if_bytes(data.decode())
 
                 # Check if this is a policy string
-                if policy.startswith('request_policy') or policy.startswith('response_policy'):
-                    if policy.startswith('request_policy'):
-                        policy_type = policy.split(':')[1]
+                if policy.startswith("request_policy") or policy.startswith(
+                    "response_policy"
+                ):
+                    if policy.startswith("request_policy"):
+                        policy_type = policy.split(":")[1]
 
                         try:
-                            command_with_policies[module_name][command_name].request_policy = RequestPolicy(policy_type)
+                            command_with_policies[module_name][
+                                command_name
+                            ].request_policy = RequestPolicy(policy_type)
                         except ValueError:
-                            raise IncorrectPolicyType(f"Incorrect request policy type: {policy_type}")
+                            raise IncorrectPolicyType(
+                                f"Incorrect request policy type: {policy_type}"
+                            )
 
-                    if policy.startswith('response_policy'):
-                        policy_type = policy.split(':')[1]
+                    if policy.startswith("response_policy"):
+                        policy_type = policy.split(":")[1]
 
                         try:
-                            command_with_policies[module_name][command_name].response_policy = ResponsePolicy(
-                                policy_type)
+                            command_with_policies[module_name][
+                                command_name
+                            ].response_policy = ResponsePolicy(policy_type)
                         except ValueError:
-                            raise IncorrectPolicyType(f"Incorrect response policy type: {policy_type}")
+                            raise IncorrectPolicyType(
+                                f"Incorrect response policy type: {policy_type}"
+                            )
 
             elif isinstance(data, list):
                 # For lists, recursively process each element
@@ -595,29 +630,31 @@ class AsyncCommandsParser(AbstractCommandsParser):
                 default_response_policy = ResponsePolicy.DEFAULT_KEYED
 
             # Check if it's a core or module command
-            split_name = command.split('.')
+            split_name = command.split(".")
 
             if len(split_name) > 1:
                 module_name = split_name[0]
                 command_name = split_name[1]
             else:
-                module_name = 'core'
+                module_name = "core"
                 command_name = split_name[0]
 
             # Create a CommandPolicies object with default policies on the new command.
             if command_with_policies.get(module_name, None) is None:
-                command_with_policies[module_name] = {command_name: CommandPolicies(
-                    request_policy=default_request_policy,
-                    response_policy=default_response_policy
-                )}
+                command_with_policies[module_name] = {
+                    command_name: CommandPolicies(
+                        request_policy=default_request_policy,
+                        response_policy=default_response_policy,
+                    )
+                }
             else:
                 command_with_policies[module_name][command_name] = CommandPolicies(
                     request_policy=default_request_policy,
-                    response_policy=default_response_policy
+                    response_policy=default_response_policy,
                 )
 
-            tips = details.get('tips')
-            subcommands = details.get('subcommands')
+            tips = details.get("tips")
+            subcommands = details.get("subcommands")
 
             # Process tips for the main command
             if tips:
@@ -641,12 +678,12 @@ class AsyncCommandsParser(AbstractCommandsParser):
                         default_request_policy = RequestPolicy.DEFAULT_KEYED
                         default_response_policy = ResponsePolicy.DEFAULT_KEYED
 
-                    subcmd_name = subcmd_name.replace('|', ' ')
+                    subcmd_name = subcmd_name.replace("|", " ")
 
                     # Create a CommandPolicies object with default policies on the new command.
                     command_with_policies[module_name][subcmd_name] = CommandPolicies(
                         request_policy=default_request_policy,
-                        response_policy=default_response_policy
+                        response_policy=default_response_policy,
                     )
 
                     # Recursively extract policies from the rest of the subcommand details

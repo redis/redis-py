@@ -437,8 +437,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             SLOT_ID: RequestPolicy.DEFAULT_KEYED,
         }
 
-        self._policies_callback_mapping: dict[Union[RequestPolicy, ResponsePolicy], Callable] = {
-            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [self.get_random_primary_or_all_nodes(command_name)],
+        self._policies_callback_mapping: dict[
+            Union[RequestPolicy, ResponsePolicy], Callable
+        ] = {
+            RequestPolicy.DEFAULT_KEYLESS: lambda command_name: [
+                self.get_random_primary_or_all_nodes(command_name)
+            ],
             RequestPolicy.DEFAULT_KEYED: self.get_nodes_from_slot,
             RequestPolicy.DEFAULT_NODE: lambda: [self.get_default_node()],
             RequestPolicy.ALL_SHARDS: self.get_primaries,
@@ -680,7 +684,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         Returns a list of nodes for commands with a special policy.
         """
         if not self._aggregate_nodes:
-            raise RedisClusterException('Cannot execute FT.CURSOR commands without FT.AGGREGATE')
+            raise RedisClusterException(
+                "Cannot execute FT.CURSOR commands without FT.AGGREGATE"
+            )
 
         return self._aggregate_nodes
 
@@ -708,7 +714,11 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         self.response_callbacks[command] = callback
 
     async def _determine_nodes(
-        self, command: str, *args: Any, request_policy: RequestPolicy, node_flag: Optional[str] = None
+        self,
+        command: str,
+        *args: Any,
+        request_policy: RequestPolicy,
+        node_flag: Optional[str] = None,
     ) -> List["ClusterNode"]:
         # Determine which nodes should be executed the command on.
         # Returns a list of target nodes.
@@ -855,7 +865,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     )
             else:
                 if command_flag in self._command_flags_mapping:
-                    command_policies = CommandPolicies(request_policy=self._command_flags_mapping[command_flag])
+                    command_policies = CommandPolicies(
+                        request_policy=self._command_flags_mapping[command_flag]
+                    )
                 else:
                     command_policies = CommandPolicies()
         elif not command_policies and target_nodes_specified:
@@ -876,7 +888,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 if not target_nodes_specified:
                     # Determine the nodes to execute the command on
                     target_nodes = await self._determine_nodes(
-                        *args, request_policy=command_policies.request_policy, node_flag=passed_targets
+                        *args,
+                        request_policy=command_policies.request_policy,
+                        node_flag=passed_targets,
                     )
                     if not target_nodes:
                         raise RedisClusterException(
@@ -890,7 +904,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                         ret = self.result_callbacks[command](
                             command, {target_nodes[0].name: ret}, **kwargs
                         )
-                    return self._policies_callback_mapping[command_policies.response_policy](ret)
+                    return self._policies_callback_mapping[
+                        command_policies.response_policy
+                    ](ret)
                 else:
                     keys = [node.name for node in target_nodes]
                     values = await asyncio.gather(
@@ -905,7 +921,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                         return self.result_callbacks[command](
                             command, dict(zip(keys, values)), **kwargs
                         )
-                    return self._policies_callback_mapping[command_policies.response_policy](dict(zip(keys, values)))
+                    return self._policies_callback_mapping[
+                        command_policies.response_policy
+                    ](dict(zip(keys, values)))
             except Exception as e:
                 if retry_attempts > 0 and type(e) in self.__class__.ERRORS_ALLOW_RETRY:
                     # The nodes and slots cache were should be reinitialized.
@@ -2062,7 +2080,9 @@ class PipelineStrategy(AbstractStrategy):
         nodes = {}
         for cmd in todo:
             passed_targets = cmd.kwargs.pop("target_nodes", None)
-            command_policies = await client._policy_resolver.resolve(cmd.args[0].lower())
+            command_policies = await client._policy_resolver.resolve(
+                cmd.args[0].lower()
+            )
 
             if passed_targets and not client._is_node_flag(passed_targets):
                 target_nodes = client._parse_target_nodes(passed_targets)
@@ -2088,12 +2108,17 @@ class PipelineStrategy(AbstractStrategy):
                     else:
                         if command_flag in client._command_flags_mapping:
                             command_policies = CommandPolicies(
-                                request_policy=client._command_flags_mapping[command_flag])
+                                request_policy=client._command_flags_mapping[
+                                    command_flag
+                                ]
+                            )
                         else:
                             command_policies = CommandPolicies()
 
                 target_nodes = await client._determine_nodes(
-                    *cmd.args, request_policy=command_policies.request_policy, node_flag=passed_targets
+                    *cmd.args,
+                    request_policy=command_policies.request_policy,
+                    node_flag=passed_targets,
                 )
                 if not target_nodes:
                     raise RedisClusterException(
@@ -2120,11 +2145,9 @@ class PipelineStrategy(AbstractStrategy):
                 for cmd in todo:
                     if isinstance(cmd.result, (TryAgainError, MovedError, AskError)):
                         try:
-                            cmd.result = client._policies_callback_mapping[cmd.command_policies.response_policy](
-                                await client.execute_command(
-                                    *cmd.args, **cmd.kwargs
-                                )
-                            )
+                            cmd.result = client._policies_callback_mapping[
+                                cmd.command_policies.response_policy
+                            ](await client.execute_command(*cmd.args, **cmd.kwargs))
                         except Exception as e:
                             cmd.result = e
 
