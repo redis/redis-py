@@ -11,6 +11,7 @@ from string import ascii_letters
 
 import pytest
 import pytest_asyncio
+from redis import RedisClusterException, ResponseError
 import redis
 from redis import exceptions
 from redis._parsers.helpers import (
@@ -20,6 +21,7 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
+from redis.commands.core import DataPersistOptions
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -1198,6 +1200,349 @@ class TestRedisCommands:
         assert await r.mset(d)
         for k, v in d.items():
             assert await r.get(k) == v
+
+    @pytest.mark.onlycluster
+    async def test_mset_on_cluster(self, r):
+        # validate that mset command works in cluster client
+        # when the keys are in the same slot
+        d = {"a:{test:1}": b"1", "b:{test:1}": b"2", "c:{test:1}": b"3"}
+        assert await r.mset(d)
+        for k, v in d.items():
+            assert await r.get(k) == v
+
+    @pytest.mark.onlycluster
+    async def test_mset_on_cluster_multiple_slots(self, r):
+        d = {"a": b"1", "b": b"2", "c": b"3"}
+        with pytest.raises(RedisClusterException):
+            assert await r.mset(d)
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_no_expiration_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # set items from mapping without expiration
+        assert await r.msetex(mapping={"1:{test:1}": 1, "2:{test:1}": b"four"}) == 1
+        assert await r.mget("1:{test:1}", "2:{test:1}") == [b"1", b"four"]
+        assert await r.ttl("1:{test:1}") == -1
+        assert await r.ttl("2:{test:1}") == -1
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_ex_and_keepttl_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # set items from mapping with expiration - testing ex field
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": 1, "2:{test:1}": "2"},
+                ex=10,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in all_test_keys])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 10
+
+        assert await r.mget(*all_test_keys) == [b"1", b"2"]
+        await asyncio.sleep(1.1)
+        # validate keepttl
+        assert await r.msetex(mapping={"1:{test:1}": 11}, keepttl=True) == 1
+        assert await r.ttl("1:{test:1}") < 10
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_px_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2"}
+        # set key/value pairs provided in mapping
+        # with expiration - testing px field
+        assert await r.msetex(mapping=mapping, px=60000) == 1
+
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 60
+        assert await r.mget(*mapping.keys()) == [b"1", b"2"]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_pxat_and_nx_with_cluster_client(self, r):
+        all_test_keys = [
+            "1:{test:1}",
+            "2:{test:1}",
+            "3:{test:1}",
+            "new:{test:1}",
+            "new_2:{test:1}",
+        ]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2", "3:{test:1}": "three"}
+        assert await r.msetex(mapping=mapping, ex=30) == 1
+
+        # NX is set with existing keys - nothing should be saved or updated
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": "new_value", "new:{test:1}": "ok"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new:{test:1}") == [
+            b"1",
+            b"2",
+            b"three",
+            None,
+        ]
+
+        # NX is set with non existing keys - values should be set
+        assert (
+            await r.msetex(
+                mapping={"new:{test:1}": "ok", "new_2:{test:1}": "ok_2"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 1
+        )
+        old_ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        new_ttls = await asyncio.gather(*(r.ttl(key) for key in ["new", "new_2"]))
+        for ttl in old_ttls:
+            assert 10 < ttl <= 30
+        for ttl in new_ttls:
+            assert ttl <= 10
+        assert await r.mget(*mapping.keys(), "new:{test:1}", "new_2:{test:1}") == [
+            b"1",
+            b"2",
+            b"three",
+            b"ok",
+            b"ok_2",
+        ]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_exat_and_xx_with_cluster_client(self, r):
+        all_test_keys = ["1:{test:1}", "2:{test:1}", "3:{test:1}", "new:{test:1}"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1:{test:1}": 1, "2:{test:1}": "2", "3:{test:1}": "three"}
+        assert await r.msetex(mapping, ex=30) == 1
+
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        ## XX is set with unexisting key - nothing should be saved or updated
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": "new_value", "new:{test:1}": "ok"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new:{test:1}") == [
+            b"1",
+            b"2",
+            b"three",
+            None,
+        ]
+
+        # XX is set with existing keys - values should be updated
+        assert (
+            await r.msetex(
+                mapping={"1:{test:1}": "new_value", "2:{test:1}": "new_value_2"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        assert ttls[0] <= 10
+        assert ttls[1] <= 10
+        assert 10 < ttls[2] <= 30
+        assert await r.mget(
+            "1:{test:1}", "2:{test:1}", "3:{test:1}", "new:{test:1}"
+        ) == [
+            b"new_value",
+            b"new_value_2",
+            b"three",
+            None,
+        ]
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_invalid_inputs_with_cluster_client(self, r):
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        with pytest.raises(exceptions.RedisClusterException):
+            await r.msetex(mapping)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_no_expiration(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # # set items from mapping without expiration
+        assert await r.msetex(mapping={"1": 1, "2": b"four"}) == 1
+        assert await r.mget("1", "2") == [b"1", b"four"]
+        assert await r.ttl("1") == -1
+        assert await r.ttl("2") == -1
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_ex_and_keepttl(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        # set items from mapping with expiration - testing ex field
+        assert (
+            await r.msetex(
+                mapping={"1": 1, "2": "2"},
+                ex=10,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in all_test_keys])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 10
+
+        assert await r.mget(*all_test_keys) == [b"1", b"2"]
+        await asyncio.sleep(1.1)
+        # validate keepttl
+        assert await r.msetex(mapping={"1": 11}, keepttl=True) == 1
+        assert await r.ttl("1") < 10
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_px(self, r):
+        all_test_keys = ["1", "2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1": 1, "2": "2"}
+        # set key/value pairs provided in mapping
+        # with expiration - testing px field
+        assert await r.msetex(mapping=mapping, px=60000) == 1
+
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert pytest.approx(ttl) == 60
+        assert await r.mget(*mapping.keys()) == [b"1", b"2"]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_pxat_and_nx(self, r):
+        all_test_keys = ["1", "2", "3", "new", "new_2"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        assert await r.msetex(mapping=mapping, ex=30) == 1
+
+        # NX is set with existing keys - nothing should be saved or updated
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        assert (
+            await r.msetex(
+                mapping={"1": "new_value", "new": "ok"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
+
+        # NX is set with non existing keys - values should be set
+        assert (
+            await r.msetex(
+                mapping={"new": "ok", "new_2": "ok_2"},
+                pxat=expire_at,
+                data_persist_option=DataPersistOptions.NX,
+            )
+            == 1
+        )
+        old_ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        new_ttls = await asyncio.gather(*(r.ttl(key) for key in ["new", "new_2"]))
+        for ttl in old_ttls:
+            assert 10 < ttl <= 30
+        for ttl in new_ttls:
+            assert ttl <= 10
+        assert await r.mget(*mapping.keys(), "new", "new_2") == [
+            b"1",
+            b"2",
+            b"three",
+            b"ok",
+            b"ok_2",
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_expiration_exat_and_xx(self, r):
+        all_test_keys = ["1", "2", "3", "new"]
+        for key in all_test_keys:
+            await r.delete(key)
+
+        mapping = {"1": 1, "2": "2", "3": "three"}
+        assert await r.msetex(mapping, ex=30) == 1
+
+        expire_at = await redis_server_time(r) + datetime.timedelta(seconds=10)
+        ## XX is set with unexisting key - nothing should be saved or updated
+        assert (
+            await r.msetex(
+                mapping={"1": "new_value", "new": "ok"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 0
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        for ttl in ttls:
+            assert 10 < ttl <= 30
+        assert await r.mget(*mapping.keys(), "new") == [b"1", b"2", b"three", None]
+
+        # XX is set with existing keys - values should be updated
+        assert (
+            await r.msetex(
+                mapping={"1": "new_value", "2": "new_value_2"},
+                exat=expire_at,
+                data_persist_option=DataPersistOptions.XX,
+            )
+            == 1
+        )
+        ttls = await asyncio.gather(*[r.ttl(key) for key in mapping.keys()])
+        assert ttls[0] <= 10
+        assert ttls[1] <= 10
+        assert 10 < ttls[2] <= 30
+        assert await r.mget("1", "2", "3", "new") == [
+            b"new_value",
+            b"new_value_2",
+            b"three",
+            None,
+        ]
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_msetex_invalid_inputs(self, r):
+        mapping = {"1": 1, "2": "2"}
+        with pytest.raises(exceptions.DataError):
+            await r.msetex(mapping, ex=10, keepttl=True)
 
     @pytest.mark.onlynoncluster
     async def test_msetnx(self, r: redis.Redis):
@@ -3474,6 +3819,360 @@ class TestRedisCommands:
         res = await r.xreadgroup(group, consumer, streams={stream: "0"})
         assert_resp_response(
             r, res, [[strem_name, expected_entries]], {strem_name: [expected_entries]}
+        )
+
+    def _validate_xreadgroup_with_claim_min_idle_time_response(
+        self, r, response, expected_entries
+    ):
+        # validate the number of streams
+        assert len(response) == len(expected_entries)
+
+        expected_streams = expected_entries.keys()
+        for str_index, expected_stream in enumerate(expected_streams):
+            expected_entries_per_stream = expected_entries[expected_stream]
+
+            if is_resp2_connection(r):
+                actual_entries_per_stream = response[str_index][1]
+                actual_stream = response[str_index][0]
+                assert actual_stream == expected_stream
+            else:
+                actual_entries_per_stream = response[expected_stream][0]
+
+            # validate the number of entries
+            assert len(actual_entries_per_stream) == len(expected_entries_per_stream)
+
+            for i, entry in enumerate(actual_entries_per_stream):
+                message = (entry[0], entry[1])
+                message_idle = int(entry[2])
+                message_delivered_count = int(entry[3])
+
+                expected_idle = expected_entries_per_stream[i]["min_idle_time"]
+
+                assert message == expected_entries_per_stream[i]["msg"]
+                if expected_idle == 0:
+                    assert message_idle == 0
+                    assert message_delivered_count == 0
+                else:
+                    assert message_idle >= expected_idle
+                    assert message_delivered_count > 0
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_xreadgroup_with_claim_min_idle_time(self, r):
+        stream = "stream"
+        group = "group"
+        consumer_1 = "c1"
+        stream_name = stream.encode()
+
+        try:
+            # before test cleanup
+            await r.xgroup_destroy(stream, group)
+        except ResponseError:
+            pass
+
+        m1 = await r.xadd(stream, {"key_m1": "val_m1"})
+        m2 = await r.xadd(stream, {"key_m2": "val_m2"})
+
+        await r.xgroup_create(stream, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        await r.xreadgroup(group, consumer_1, streams={stream: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        await asyncio.sleep(0.1)
+
+        m3 = await r.xadd(stream, {"key_m3": "val_m3"})
+        m4 = await r.xadd(stream, {"key_m4": "val_m4"})
+
+        expected_entries = {
+            stream_name: [
+                {"msg": await get_stream_message(r, stream, m1), "min_idle_time": 100},
+                {"msg": await get_stream_message(r, stream, m2), "min_idle_time": 100},
+                {"msg": await get_stream_message(r, stream, m3), "min_idle_time": 0},
+                {"msg": await get_stream_message(r, stream, m4), "min_idle_time": 0},
+            ]
+        }
+
+        res = await r.xreadgroup(
+            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=100
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = await r.xpending_range(stream, group, min="-", max="+", count=5)
+        assert len(response) == 4
+
+        # add 2 more messages
+        m5 = await r.xadd(stream, {"key_m5": "val_m5"})
+        m6 = await r.xadd(stream, {"key_m6": "val_m6"})
+
+        expected_entries = [
+            await get_stream_message(r, stream, m5),
+            await get_stream_message(r, stream, m6),
+        ]
+        # read all the messages - this will save the msgs in PEL
+        res = await r.xreadgroup(group, consumer_1, streams={stream: ">"})
+        assert_resp_response(
+            r,
+            res,
+            [[stream_name, expected_entries]],
+            {stream_name: [expected_entries]},
+        )
+
+        # add 2 more messages
+        m7 = await r.xadd(stream, {"key_m7": "val_m7"})
+        m8 = await r.xadd(stream, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_name: [
+                {"msg": await get_stream_message(r, stream, m7), "min_idle_time": 0},
+                {"msg": await get_stream_message(r, stream, m8), "min_idle_time": 0},
+            ]
+        }
+        res = await r.xreadgroup(
+            group, consumer_1, streams={stream: ">"}, claim_min_idle_time=100
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_xreadgroup_with_claim_min_idle_time_multiple_streams_same_slots(
+        self, r
+    ):
+        stream_1 = "stream1:{same_slot:42}"
+        stream_2 = "stream2:{same_slot:42}"
+        group = "group"
+        consumer_1 = "c1"
+
+        stream_1_name = stream_1.encode()
+        stream_2_name = stream_2.encode()
+
+        # before test cleanup
+        try:
+            await r.xgroup_destroy(stream_1, group)
+        except ResponseError:
+            pass
+        try:
+            await r.xgroup_destroy(stream_2, group)
+        except ResponseError:
+            pass
+
+        m1_s1 = await r.xadd(stream_1, {"key_m1_s1": "val_m1"})
+        m2_s1 = await r.xadd(stream_1, {"key_m2_s1": "val_m2"})
+        await r.xgroup_create(stream_1, group, 0)
+
+        m1_s2 = await r.xadd(stream_2, {"key_m1_s2": "val_m1"})
+        m2_s2 = await r.xadd(stream_2, {"key_m2_s2": "val_m2"})
+        await r.xgroup_create(stream_2, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        await asyncio.sleep(0.1)
+
+        m3_s1 = await r.xadd(stream_1, {"key_m3_s1": "val_m3"})
+        m4_s2 = await r.xadd(stream_2, {"key_m4_s2": "val_m4"})
+
+        expected_entries = {
+            stream_1_name: [
+                {
+                    "msg": await get_stream_message(r, stream_1, m1_s1),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_1, m2_s1),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_1, m3_s1),
+                    "min_idle_time": 0,
+                },
+            ],
+            stream_2_name: [
+                {
+                    "msg": await get_stream_message(r, stream_2, m1_s2),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_2, m2_s2),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_2, m4_s2),
+                    "min_idle_time": 0,
+                },
+            ],
+        }
+
+        res = await r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = await r.xpending_range(stream_1, group, min="-", max="+", count=5)
+        assert len(response) == 3
+        response = await r.xpending_range(stream_2, group, min="-", max="+", count=5)
+        assert len(response) == 3
+
+        # add 2 more messages
+        await r.xadd(stream_1, {"key_m5": "val_m5"})
+        await r.xadd(stream_2, {"key_m6": "val_m6"})
+
+        # read all the messages - this will save the msgs in PEL
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # add 2 more messages
+        m7 = await r.xadd(stream_1, {"key_m7": "val_m7"})
+        m8 = await r.xadd(stream_2, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_1_name: [
+                {"msg": await get_stream_message(r, stream_1, m7), "min_idle_time": 0}
+            ],
+            stream_2_name: [
+                {"msg": await get_stream_message(r, stream_2, m8), "min_idle_time": 0}
+            ],
+        }
+        res = await r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.3.224")
+    async def test_xreadgroup_with_claim_min_idle_time_multiple_streams(self, r):
+        stream_1 = "stream1"
+        stream_2 = "stream2"
+        group = "group"
+        consumer_1 = "c1"
+
+        stream_1_name = stream_1.encode()
+        stream_2_name = stream_2.encode()
+
+        # before test cleanup
+        try:
+            await r.xgroup_destroy(stream_1, group)
+        except ResponseError:
+            pass
+        try:
+            await r.xgroup_destroy(stream_2, group)
+        except ResponseError:
+            pass
+
+        m1_s1 = await r.xadd(stream_1, {"key_m1_s1": "val_m1"})
+        m2_s1 = await r.xadd(stream_1, {"key_m2_s1": "val_m2"})
+        await r.xgroup_create(stream_1, group, 0)
+
+        m1_s2 = await r.xadd(stream_2, {"key_m1_s2": "val_m1"})
+        m2_s2 = await r.xadd(stream_2, {"key_m2_s2": "val_m2"})
+        await r.xgroup_create(stream_2, group, 0)
+
+        # read all the messages - this will save the msgs in PEL
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # wait for 100ms - so that the messages would have been in the PEL for long enough
+        await asyncio.sleep(0.1)
+
+        m3_s1 = await r.xadd(stream_1, {"key_m3_s1": "val_m3"})
+        m4_s2 = await r.xadd(stream_2, {"key_m4_s2": "val_m4"})
+
+        expected_entries = {
+            stream_1_name: [
+                {
+                    "msg": await get_stream_message(r, stream_1, m1_s1),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_1, m2_s1),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_1, m3_s1),
+                    "min_idle_time": 0,
+                },
+            ],
+            stream_2_name: [
+                {
+                    "msg": await get_stream_message(r, stream_2, m1_s2),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_2, m2_s2),
+                    "min_idle_time": 100,
+                },
+                {
+                    "msg": await get_stream_message(r, stream_2, m4_s2),
+                    "min_idle_time": 0,
+                },
+            ],
+        }
+
+        res = await r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
+        )
+
+        # validate PEL still holds the messages until they are acknowledged
+        response = await r.xpending_range(stream_1, group, min="-", max="+", count=5)
+        assert len(response) == 3
+        response = await r.xpending_range(stream_2, group, min="-", max="+", count=5)
+        assert len(response) == 3
+
+        # add 2 more messages
+        await r.xadd(stream_1, {"key_m5": "val_m5"})
+        await r.xadd(stream_2, {"key_m6": "val_m6"})
+
+        # read all the messages - this will save the msgs in PEL
+        await r.xreadgroup(group, consumer_1, streams={stream_1: ">", stream_2: ">"})
+
+        # add 2 more messages
+        m7 = await r.xadd(stream_1, {"key_m7": "val_m7"})
+        m8 = await r.xadd(stream_2, {"key_m8": "val_m8"})
+        # read the messages with claim_min_idle_time=1000
+        # only m7 and m8 should be returned
+        # because the other messages have not been in the PEL for long enough
+        expected_entries = {
+            stream_1_name: [
+                {"msg": await get_stream_message(r, stream_1, m7), "min_idle_time": 0}
+            ],
+            stream_2_name: [
+                {"msg": await get_stream_message(r, stream_2, m8), "min_idle_time": 0}
+            ],
+        }
+        res = await r.xreadgroup(
+            group,
+            consumer_1,
+            streams={stream_1: ">", stream_2: ">"},
+            claim_min_idle_time=100,
+        )
+        self._validate_xreadgroup_with_claim_min_idle_time_response(
+            r, res, expected_entries
         )
 
     @skip_if_server_version_lt("5.0.0")
