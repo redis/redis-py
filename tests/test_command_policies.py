@@ -1,4 +1,5 @@
 import random
+from time import sleep
 from unittest.mock import Mock, patch
 
 import pytest
@@ -11,6 +12,7 @@ from redis.commands.policies import DynamicPolicyResolver, StaticPolicyResolver
 from redis.commands.search.aggregation import AggregateRequest
 from redis.commands.search.field import TextField, NumericField
 from tests.conftest import skip_if_server_version_lt
+from tests.test_search import waitForIndex
 
 
 @pytest.mark.onlycluster
@@ -114,6 +116,9 @@ class TestClusterWithPolicies:
                 )
             )
             assert determined_nodes[0] == primary_nodes[0]
+
+            # Wait for index creation
+            sleep(1)
 
             # Routed to another random primary node
             info = r.ft().info()

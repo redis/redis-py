@@ -1,3 +1,4 @@
+import asyncio
 import random
 
 import pytest
@@ -113,6 +114,9 @@ class TestClusterWithPolicies:
                 ]
             )
             assert determined_nodes[0] == primary_nodes[0]
+
+            # Wait for index creation
+            await asyncio.sleep(1)
 
             # Routed to another random primary node
             info = await r.ft().info()
