@@ -14,9 +14,7 @@ class HybridSearchQuery:
         self,
         query_string: str,
         scorer: Optional[str] = None,
-        yield_score_as: Optional[
-            str
-        ] = None,  ## TODO check if this will be supported or it should be removed!
+        yield_score_as: Optional[str] = None,
     ) -> None:
         """
         Create a new hybrid search query object.
@@ -42,13 +40,18 @@ class HybridSearchQuery:
         self._scorer = scorer
         return self
 
+    def yield_score_as(self, alias: str) -> "HybridSearchQuery":
+        """
+        Yield the score as a field.
+        """
+        self._yield_score_as = alias
+        return self
+
     def get_args(self) -> List[str]:
         args = ["SEARCH", self._query_string]
         if self._scorer:
             args.extend(("SCORER", self._scorer))
-        if (
-            self._yield_score_as
-        ):  # TODO check if this will be supported or it should be removed!
+        if self._yield_score_as:
             args.extend(("YIELD_SCORE_AS", self._yield_score_as))
         return args
 
@@ -109,7 +112,7 @@ class HybridVsimQuery:
             for key, value in kwargs.items():
                 vsim_method_params.extend((key, value))
         self._vsim_method_params = vsim_method_params
-        print(self._vsim_method_params)
+
         return self
 
     def filter(self, flt: "HybridFilter") -> "HybridVsimQuery":
@@ -171,9 +174,6 @@ class HybridPostProcessingConfig:
     def combine(
         self,
         method: Literal["RRF", "LINEAR"],
-        yield_score_as: Optional[
-            str
-        ] = None,  # TODO check if this will be supported or it should be removed!
         **kwargs,
     ) -> Self:
         """
@@ -181,7 +181,6 @@ class HybridPostProcessingConfig:
 
         Args:
             method: The combine method to use - RRF or LINEAR.
-            yield_score_as: Optional field name to yield the score as.
             kwargs: Additional combine parameters.
         """
         self._combine: List[Union[str, int]] = [method]
@@ -191,10 +190,6 @@ class HybridPostProcessingConfig:
         for key, value in kwargs.items():
             self._combine.extend([key, value])
 
-        if (
-            yield_score_as
-        ):  # TODO check if this will be supported or it should be removed!
-            self._combine.extend(["YIELD_SCORE_AS", yield_score_as])
         return self
 
     def load(self, *fields: str) -> Self:

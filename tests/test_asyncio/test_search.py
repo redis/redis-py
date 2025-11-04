@@ -2607,6 +2607,70 @@ class TestHybridSearch(AsyncSearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
+    async def test_hybrid_search_query_with_combine_all_score_aliases(self, decoded_r):
+        # Create index and add data
+        await self._create_hybrid_search_index(decoded_r)
+        await self._add_data_for_hybrid_search(
+            decoded_r, items_sets=1, use_random_str_data=True
+        )
+
+        search_query = HybridSearchQuery("shoes")
+        search_query.yield_score_as("search_score")
+
+        vsim_query = HybridVsimQuery(
+            vector_field_name="@embedding-hnsw",
+            vector_data="abcd1234efgh5678",
+            vsim_search_method="KNN",
+            vsim_search_method_params={
+                "K": 3,
+                "EF_RUNTIME": 1,
+                "YIELD_SCORE_AS": "vsim_score",
+            },
+        )
+
+        hybrid_query = HybridQuery(search_query, vsim_query)
+
+        posprocessing_config = HybridPostProcessingConfig()
+        posprocessing_config.combine(
+            "LINEAR", ALPHA=0.5, BETA=0.5, YIELD_SCORE_AS="combined_score"
+        )
+
+        res = await decoded_r.ft().hybrid_search(
+            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+        )
+
+        if is_resp2_connection(decoded_r):
+            assert len(res.results) > 0
+            assert res.warnings == []
+            for item in res.results:
+                assert item["combined_score"] is not None
+                assert "__score" not in item
+                if item["__key"] in [b"item:0", b"item:1", b"item:4"]:
+                    assert item["search_score"] is not None
+                else:
+                    assert "search_score" not in item
+                if item["__key"] in [b"item:0", b"item:1", b"item:2"]:
+                    assert item["vsim_score"] is not None
+                else:
+                    assert "vsim_score" not in item
+
+        else:
+            assert len(res["results"]) > 0
+            assert res["warnings"] == []
+            for item in res["results"]:
+                assert item["combined_score"] is not None
+                assert "__score" not in item
+                if item["__key"] in ["item:0", "item:1", "item:4"]:
+                    assert item["search_score"] is not None
+                else:
+                    assert "search_score" not in item
+                if item["__key"] in ["item:0", "item:1", "item:2"]:
+                    assert item["vsim_score"] is not None
+                else:
+                    assert "vsim_score" not in item
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.3.224")
     async def test_hybrid_search_query_with_combine(self, decoded_r):
         # Create index and add data
         await self._create_hybrid_search_index(decoded_r)
