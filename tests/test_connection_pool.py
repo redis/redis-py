@@ -988,8 +988,8 @@ class MockDateTime:
         mock_time = self._time_patcher.__enter__()
 
         mock_datetime.datetime.now = lambda: self.current_time
-        mock_datetime.datetime.side_effect = (
-            lambda *args, **kwargs: datetime.datetime(*args, **kwargs)
+        mock_datetime.datetime.side_effect = lambda *args, **kwargs: datetime.datetime(
+            *args, **kwargs
         )
         mock_time.time = lambda: self.current_time.timestamp()
 
@@ -1067,6 +1067,14 @@ class TestIdleConnectionTimeout:
             idle_check_interval=1.0,
         )
         manager = redis.connection.IdleConnectionCleanupManager.get_instance()
+
+        # Pool is not registered until a connection is released
+        assert id(pool) not in manager._registered_pools
+
+        # Get and release a connection to trigger registration
+        conn = pool.get_connection()
+        pool.release(conn)
+
         assert id(pool) in manager._registered_pools
         assert manager._worker_thread is not None
         assert manager._worker_thread.is_alive()
@@ -1081,6 +1089,12 @@ class TestIdleConnectionTimeout:
         )
         manager = redis.connection.IdleConnectionCleanupManager.get_instance()
         pool_id = id(pool)
+
+        # Get and release a connection to trigger registration
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        # Pool should now be registered
         assert pool_id in manager._registered_pools
         pool.close()
         # After close, pool should be unregistered
@@ -1237,6 +1251,10 @@ class TestIdleConnectionTimeout:
             idle_check_interval=0.5,
         )
 
+        # Get and release a connection to trigger registration
+        conn = pool.get_connection()
+        pool.release(conn)
+
         pool_id = id(pool)
         # Pool should be registered with manager
         assert pool_id in manager._registered_pools
@@ -1268,10 +1286,15 @@ class TestIdleConnectionTimeout:
             connection_class=DummyConnection,
             idle_connection_timeout=10.0,
         )
+        conn = pool1.get_connection()
+        pool1.release(conn)
+
         pool2 = redis.ConnectionPool(
             connection_class=DummyConnection,
             idle_connection_timeout=5.0,
         )
+        conn = pool2.get_connection()
+        pool2.release(conn)
 
         manager = redis.connection.IdleConnectionCleanupManager.get_instance()
 
@@ -1305,9 +1328,10 @@ class TestIdleConnectionTimeout:
 
             # Manager should have metadata for this pool
             assert pool_id in manager._registered_pools
-            metadata = manager._registered_pools[pool_id]
+            metadata = manager._schedule[0]
 
             # Check that idle_timeout and check_interval are stored correctly
+            assert metadata.pool_id == pool_id
             assert metadata.idle_timeout == 10.0
             assert metadata.check_interval == 5.0
 
@@ -1322,11 +1346,13 @@ class TestIdleConnectionTimeout:
                 idle_connection_timeout=5.0,
                 idle_check_interval=1.0,
             )
+            pool1.release(pool1.get_connection())
             pool2 = redis.ConnectionPool(
                 connection_class=DummyConnection,
                 idle_connection_timeout=10.0,
                 idle_check_interval=2.0,
             )
+            pool2.release(pool2.get_connection())
 
             manager = redis.connection.IdleConnectionCleanupManager.get_instance()
 
@@ -1348,20 +1374,6 @@ class TestIdleConnectionTimeout:
 
         manager = redis.connection.IdleConnectionCleanupManager.get_instance()
         pool_id = id(pool)
-
-        # Pool should initially be registered and scheduled
-        assert pool_id in manager._registered_pools
-        initial_schedule = [
-            entry for entry in manager._schedule if entry.pool_id == pool_id
-        ]
-        assert len(initial_schedule) == 1
-
-        # Manually remove from both dict and schedule to simulate empty pool
-        with manager._condition:
-            manager._registered_pools.pop(pool_id, None)
-            manager._schedule = [
-                entry for entry in manager._schedule if entry.pool_id != pool_id
-            ]
 
         # Now pool should not be tracked
         assert pool_id not in manager._registered_pools

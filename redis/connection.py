@@ -2407,7 +2407,7 @@ class IdleConnectionCleanupManager:
         self._schedule_lock = threading.RLock()
         self._condition = threading.Condition(self._schedule_lock)
         self._schedule: List[_PoolMetadata] = []  # heapq-based priority queue
-        self._registered_pools: Dict[int, _PoolMetadata] = {}
+        self._registered_pools: set[int] = set()  # set of pool ids in the _schedule
         self._worker_thread: Optional[threading.Thread] = None
         self._shutdown_event = threading.Event()
         # WAL-style tracking: if we pop a pool from schedule but crash before re-adding,
@@ -2432,9 +2432,7 @@ class IdleConnectionCleanupManager:
         )
         self._worker_thread.start()
 
-    def register_pool(
-        self, pool: "ConnectionPool", next_check_time: Optional[float] = None
-    ) -> None:
+    def register_pool(self, pool: "ConnectionPool", next_check_time: float) -> None:
         """Register or re-register a pool for idle connection cleanup.
 
         This is called both on pool initialization and when releasing a connection
@@ -2446,36 +2444,28 @@ class IdleConnectionCleanupManager:
                             now + idle_connection_timeout
         """
         if pool.idle_connection_timeout is None:
-            # Pool doesn't have idle timeout enabled
+            # no need to register, because this pool doesn't close idle connections
             return
 
         pool_id = id(pool)
 
         with self._condition:
-            # If already registered, nothing to do
             if pool_id in self._registered_pools:
+                # no-op if already registered
                 return
 
-            # Calculate next check time if not provided
-            if next_check_time is None:
-                # Schedule first check: idle_timeout from now
-                # (can't have idle connections before idle_timeout has passed)
-                next_check_time = time.time() + pool.idle_connection_timeout
-
-            # Create metadata and add to both dict and heapq
-            pool_ref = weakref.ref(pool)
             metadata = _PoolMetadata(
                 next_check_time=next_check_time,
                 pool_id=pool_id,
-                pool_ref=pool_ref,
+                pool_ref=weakref.ref(pool),
                 idle_timeout=pool.idle_connection_timeout,
                 check_interval=pool.idle_check_interval,
             )
 
-            self._registered_pools[pool_id] = metadata
+            self._registered_pools.add(pool_id)
             heapq.heappush(self._schedule, metadata)
 
-            # Wake up worker to potentially adjust sleep time
+            # wake up worker to potentially adjust sleep time
             self._condition.notify()
 
     def unregister_pool(self, pool: "ConnectionPool") -> None:
@@ -2486,7 +2476,7 @@ class IdleConnectionCleanupManager:
         """
         pool_id = id(pool)
         with self._condition:
-            self._registered_pools.pop(pool_id, None)
+            self._registered_pools.discard(pool_id)
             # Note: We don't remove from schedule immediately, because the heapq
             # doesn't have a fast way to do this. The worker will skip it when it
             # processes the entry.
@@ -2564,7 +2554,7 @@ class IdleConnectionCleanupManager:
         pool = metadata.pool_ref()
         if pool is None:
             # pool was GC'd
-            del self._registered_pools[metadata.pool_id]
+            self._registered_pools.discard(metadata.pool_id)
             return None
 
         return metadata, pool
@@ -2587,7 +2577,7 @@ class IdleConnectionCleanupManager:
             heapq.heappush(self._schedule, metadata)
         else:
             # Pool is empty, remove from tracking entirely
-            del self._registered_pools[metadata.pool_id]
+            self._registered_pools.discard(metadata.pool_id)
 
 
 class PooledConnection:
@@ -2772,10 +2762,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self._created_connections = 0
         self._available_connections = []
         self._in_use_connections = set()
-
-        # Register with global cleanup manager if idle timeout is enabled
-        if self.idle_connection_timeout is not None:
-            IdleConnectionCleanupManager.get_instance().register_pool(self)
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
@@ -3116,10 +3102,6 @@ class BlockingConnectionPool(ConnectionPool):
             # Keep a list of actual connection instances so that we can
             # disconnect them later.
             self._connections = []
-
-        # Register with global cleanup manager if idle timeout is enabled
-        if self.idle_connection_timeout is not None:
-            IdleConnectionCleanupManager.get_instance().register_pool(self)
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
