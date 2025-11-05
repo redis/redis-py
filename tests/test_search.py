@@ -4178,16 +4178,16 @@ class TestHybridSearch(SearchTestsBase):
             CombinationMethods.LINEAR, ALPHA=1, BETA=0
         )
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.load(
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.load(
             "@description", "@color", "@price", "@size", "@__score", "@__item"
         )
-        posprocessing_config.limit(0, 2)
+        postprocessing_config.limit(0, 2)
 
         res = client.ft().hybrid_search(
             query=hybrid_query,
             combine_method=combine_config,
-            post_processing=posprocessing_config,
+            post_processing=postprocessing_config,
             timeout=10,
         )
 
@@ -4225,7 +4225,7 @@ class TestHybridSearch(SearchTestsBase):
         res = client.ft().hybrid_search(
             query=hybrid_query,
             combine_method=combine_config,
-            post_processing=posprocessing_config,
+            post_processing=postprocessing_config,
             timeout=10,
         )
         expected_results_bm25 = [
@@ -4300,11 +4300,11 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.load("@price", "@size")
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.load("@price", "@size")
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query, post_processing=postprocessing_config, timeout=10
         )
         if is_resp2_connection(client):
             assert len(res.results) > 0
@@ -4529,10 +4529,10 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        posprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config = HybridPostProcessingConfig()
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query, post_processing=postprocessing_config, timeout=10
         )
         expected_results = [
             {"__key": b"item:2", "__score": b"0.016393442623"},
@@ -4603,11 +4603,11 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.limit(0, 3)
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.limit(0, 3)
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query, post_processing=postprocessing_config, timeout=10
         )
 
         expected_results = [
@@ -4641,7 +4641,7 @@ class TestHybridSearch(SearchTestsBase):
 
         res = client.ft().hybrid_search(
             query=hybrid_query_with_hnsw,
-            post_processing=posprocessing_config,
+            post_processing=postprocessing_config,
             timeout=10,
         )
 
@@ -4687,13 +4687,13 @@ class TestHybridSearch(SearchTestsBase):
             CombinationMethods.LINEAR, ALPHA=0.5, BETA=0.5
         )
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.limit(0, 3)
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.limit(0, 3)
 
         res = client.ft().hybrid_search(
             query=hybrid_query,
             combine_method=combine_method_linear,
-            post_processing=posprocessing_config,
+            post_processing=postprocessing_config,
             timeout=10,
         )
 
@@ -4722,7 +4722,7 @@ class TestHybridSearch(SearchTestsBase):
         res = client.ft().hybrid_search(
             query=hybrid_query,
             combine_method=combine_method_rrf,
-            post_processing=posprocessing_config,
+            post_processing=postprocessing_config,
             timeout=10,
         )
 
@@ -4749,7 +4749,7 @@ class TestHybridSearch(SearchTestsBase):
         res = client.ft().hybrid_search(
             query=hybrid_query,
             combine_method=combine_method_rrf_2,
-            post_processing=posprocessing_config,
+            post_processing=postprocessing_config,
             timeout=10,
         )
 
@@ -4792,16 +4792,16 @@ class TestHybridSearch(SearchTestsBase):
             CombinationMethods.LINEAR, ALPHA=0.5, BETA=0.5
         )
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.load(
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.load(
             "@description", "@color", "@price", "@size", "@__key AS item_key"
         )
-        posprocessing_config.limit(0, 1)
+        postprocessing_config.limit(0, 1)
 
         res = client.ft().hybrid_search(
             query=hybrid_query,
             combine_method=combine_method,
-            post_processing=posprocessing_config,
+            post_processing=postprocessing_config,
             timeout=10,
         )
 
@@ -4847,16 +4847,16 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.load("@color", "@price", "@size")
-        posprocessing_config.apply(
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.load("@color", "@price", "@size")
+        postprocessing_config.apply(
             price_discount="@price - (@price * 0.1)",
             tax_discount="@price_discount * 0.2",
         )
-        posprocessing_config.limit(0, 3)
+        postprocessing_config.limit(0, 3)
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query, post_processing=postprocessing_config, timeout=10
         )
 
         expected_results = [
@@ -4912,16 +4912,16 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.load("@description", "@color", "@price", "@size")
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.load("@description", "@color", "@price", "@size")
         # for the postprocessing filter we need to filter on the loaded fields
         # expecting all of them to be interpreted as strings - the initial filed types
         # are not preserved
-        posprocessing_config.filter(HybridFilter('@price=="15"'))
-        posprocessing_config.limit(0, 3)
+        postprocessing_config.filter(HybridFilter('@price=="15"'))
+        postprocessing_config.limit(0, 3)
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query, post_processing=postprocessing_config, timeout=10
         )
 
         if is_resp2_connection(client):
@@ -4954,10 +4954,10 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.load("@description", "@color", "@price")
-        posprocessing_config.apply(price_discount="@price - (@price * 0.1)")
-        posprocessing_config.limit(0, 3)
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.load("@description", "@color", "@price")
+        postprocessing_config.apply(price_discount="@price - (@price * 0.1)")
+        postprocessing_config.limit(0, 3)
 
         params_substitution = {
             "vector": "abcd1234abcd5678",
@@ -4966,7 +4966,7 @@ class TestHybridSearch(SearchTestsBase):
 
         res = client.ft().hybrid_search(
             query=hybrid_query,
-            post_processing=posprocessing_config,
+            post_processing=postprocessing_config,
             params_substitution=params_substitution,
             timeout=10,
         )
@@ -5019,11 +5019,11 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.limit(0, 3)
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.limit(0, 3)
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query, post_processing=postprocessing_config, timeout=10
         )
 
         if is_resp2_connection(client):
@@ -5050,16 +5050,16 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.load("@color", "@price")
-        posprocessing_config.apply(price_discount="@price - (@price * 0.1)")
-        posprocessing_config.sort_by(
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.load("@color", "@price")
+        postprocessing_config.apply(price_discount="@price - (@price * 0.1)")
+        postprocessing_config.sort_by(
             SortbyField("@price_discount", asc=False), SortbyField("@color", asc=True)
         )
-        posprocessing_config.limit(0, 5)
+        postprocessing_config.limit(0, 5)
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query, post_processing=postprocessing_config, timeout=10
         )
 
         expected_results = [
@@ -5158,26 +5158,47 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.load("@color", "@price", "@size", "@item_type")
-        posprocessing_config.limit(0, 4)
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.load("@color", "@price", "@size", "@item_type")
+        postprocessing_config.limit(0, 4)
 
-        posprocessing_config.group_by(
-            ["@price"],
+        postprocessing_config.group_by(
+            ["@item_type", "@price"],
             reducers.count_distinct("@color").alias("colors_count"),
+            reducers.min("@size"),
         )
 
-        posprocessing_config.sort_by(SortbyField("@price", asc=True))
+        postprocessing_config.sort_by(SortbyField("@price", asc=True))
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=10
+            query=hybrid_query, post_processing=postprocessing_config, timeout=10
         )
 
         expected_results = [
-            {"price": b"15", "colors_count": b"2"},
-            {"price": b"16", "colors_count": b"2"},
-            {"price": b"17", "colors_count": b"2"},
-            {"price": b"18", "colors_count": b"2"},
+            {
+                "item_type": b"dress",
+                "price": b"15",
+                "colors_count": b"1",
+                "__generated_aliasminsize": b"10",
+            },
+            {
+                "item_type": b"shoes",
+                "price": b"15",
+                "colors_count": b"2",
+                "__generated_aliasminsize": b"10",
+            },
+            {
+                "item_type": b"shoes",
+                "price": b"16",
+                "colors_count": b"2",
+                "__generated_aliasminsize": b"10",
+            },
+            {
+                "item_type": b"dress",
+                "price": b"16",
+                "colors_count": b"1",
+                "__generated_aliasminsize": b"11",
+            },
         ]
 
         if is_resp2_connection(client):
@@ -5189,21 +5210,21 @@ class TestHybridSearch(SearchTestsBase):
             assert res["results"] == self._convert_dict_values_to_str(expected_results)
             assert res["warnings"] == []
 
-        posprocessing_config = HybridPostProcessingConfig()
-        posprocessing_config.load("@color", "@price", "@size", "@item_type")
-        posprocessing_config.limit(0, 6)
-        posprocessing_config.sort_by(
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.load("@color", "@price", "@size", "@item_type")
+        postprocessing_config.limit(0, 6)
+        postprocessing_config.sort_by(
             SortbyField("@price", asc=True),
             SortbyField("@item_type", asc=True),
         )
 
-        posprocessing_config.group_by(
+        postprocessing_config.group_by(
             ["@price", "@item_type"],
             reducers.count_distinct("@color").alias("unique_colors_count"),
         )
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=posprocessing_config, timeout=1000
+            query=hybrid_query, post_processing=postprocessing_config, timeout=1000
         )
 
         expected_results = [

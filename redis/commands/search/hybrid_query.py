@@ -235,10 +235,10 @@ class HybridPostProcessingConfig:
 
         ret = ["GROUPBY", str(len(fields)), *fields]
         for reducer in reducers:
-            ret += ["REDUCE", reducer.NAME, str(len(reducer.args))]
+            ret.extend(("REDUCE", reducer.NAME, str(len(reducer.args))))
             ret.extend(reducer.args)
             if reducer._alias is not None:
-                ret += ["AS", reducer._alias]
+                ret.extend(("AS", reducer._alias))
 
         self._groupby.extend(ret)
         return self
@@ -255,7 +255,7 @@ class HybridPostProcessingConfig:
         for alias, expr in kwexpr.items():
             ret = ["APPLY", expr]
             if alias is not None:
-                ret += ["AS", alias]
+                ret.extend(("AS", alias))
             self._apply.extend(ret)
 
         return self
