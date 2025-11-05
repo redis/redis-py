@@ -2385,14 +2385,13 @@ def _cleanup_idle_connections_worker(
         check_interval: How often to check for idle connections (seconds)
     """
     while True:
-        # Wait for the check interval or stop event
         if stop_event.wait(timeout=check_interval):
-            # Stop event was set, exit thread
+            # the pool is being explicitly closed
             break
 
-        # Check again if pool still exists before cleanup
         pool = pool_ref()
         if pool is None:
+            # our weak reference points to nothing now; the pool has been GC'd.
             break
 
         try:
