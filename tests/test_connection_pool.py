@@ -653,7 +653,7 @@ class TestConnection:
             bad_connection.info()
         pool = bad_connection.connection_pool
         assert len(pool._available_connections) == 1
-        assert not pool._available_connections[0]._sock
+        assert not pool._available_connections[0].connection._sock
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.8.8")
@@ -698,7 +698,7 @@ class TestConnection:
         pool = r.connection_pool
         assert not pipe.connection
         assert len(pool._available_connections) == 1
-        assert not pool._available_connections[0]._sock
+        assert not pool._available_connections[0].connection._sock
 
     @skip_if_server_version_lt("2.8.8")
     @skip_if_redis_enterprise()
@@ -1042,39 +1042,42 @@ class TestIdleConnectionTimeout:
                 idle_check_interval=0,
             )
 
-    def test_cleanup_thread_not_started_without_timeout(self):
-        """Test that cleanup thread is not started when idle_connection_timeout is None."""
+    def test_pool_not_registered_without_timeout(self):
+        """Test that pool is not registered when idle_connection_timeout is None."""
         pool = redis.ConnectionPool(
             connection_class=DummyConnection,
             idle_connection_timeout=None,
         )
-        assert pool._cleanup_thread is None
+        manager = redis.connection.IdleConnectionCleanupManager.get_instance()
+        assert id(pool) not in manager._registered_pools
         pool.close()
 
-    def test_cleanup_thread_started_with_timeout(self):
-        """Test that cleanup thread is started when idle_connection_timeout is set."""
+    def test_pool_registered_with_timeout(self):
+        """Test that pool is registered with manager when idle_connection_timeout is set."""
         pool = redis.ConnectionPool(
             connection_class=DummyConnection,
             idle_connection_timeout=10.0,
             idle_check_interval=1.0,
         )
-        assert pool._cleanup_thread is not None
-        assert pool._cleanup_thread.is_alive()
+        manager = redis.connection.IdleConnectionCleanupManager.get_instance()
+        assert id(pool) in manager._registered_pools
+        assert manager._worker_thread is not None
+        assert manager._worker_thread.is_alive()
         pool.close()
 
-    def test_cleanup_thread_stopped_on_close(self):
-        """Test that cleanup thread is stopped when pool is closed."""
+    def test_pool_unregistered_on_close(self):
+        """Test that pool is unregistered from manager when closed."""
         pool = redis.ConnectionPool(
             connection_class=DummyConnection,
             idle_connection_timeout=10.0,
             idle_check_interval=1.0,
         )
-        cleanup_thread = pool._cleanup_thread
-        assert cleanup_thread.is_alive()
+        manager = redis.connection.IdleConnectionCleanupManager.get_instance()
+        pool_id = id(pool)
+        assert pool_id in manager._registered_pools
         pool.close()
-        # After close, thread should be stopped and reference should be None
-        assert pool._cleanup_thread is None
-        assert not cleanup_thread.is_alive()
+        # After close, pool should be unregistered
+        assert pool_id not in manager._registered_pools
 
     def test_idle_connections_cleaned_up(self):
         """Test that idle connections are actually cleaned up."""
@@ -1218,20 +1221,18 @@ class TestIdleConnectionTimeout:
             pool2.close()
 
     def test_pool_garbage_collection(self):
-        """Test that pool can be garbage collected and cleanup thread exits gracefully."""
+        """Test that pool can be garbage collected when no longer referenced."""
+        manager = redis.connection.IdleConnectionCleanupManager.get_instance()
+
         pool = redis.ConnectionPool(
             connection_class=DummyConnection,
             idle_connection_timeout=10.0,
             idle_check_interval=0.5,
         )
 
-        # Get the cleanup thread reference and save it before we delete everything
-        cleanup_thread = pool._cleanup_thread
-        assert cleanup_thread is not None
-        assert cleanup_thread.is_alive()
-
-        # Clear the pool's reference to the thread
-        pool._cleanup_thread = None
+        pool_id = id(pool)
+        # Pool should be registered with manager
+        assert pool_id in manager._registered_pools
 
         # Create a weak reference to the pool
         pool_weak_ref = weakref.ref(pool)
@@ -1239,8 +1240,160 @@ class TestIdleConnectionTimeout:
         # Drop the pool reference
         del pool
 
+        # Force garbage collection
+        gc.collect()
+
         # Pool should be garbage collected
         assert pool_weak_ref() is None
 
-        cleanup_thread.join(timeout=10)
-        assert not cleanup_thread.is_alive()
+        # Manager should eventually clean up the dead pool reference
+        # (this happens in _cleanup_dead_pools which is called in the worker loop)
+
+    def test_manager_singleton(self):
+        """Test that IdleConnectionCleanupManager is a singleton."""
+        manager1 = redis.connection.IdleConnectionCleanupManager.get_instance()
+        manager2 = redis.connection.IdleConnectionCleanupManager.get_instance()
+        assert manager1 is manager2
+
+    def test_manager_shared_across_pools(self):
+        """Test that multiple pools share the same cleanup manager."""
+        pool1 = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=10.0,
+        )
+        pool2 = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=5.0,
+        )
+
+        manager = redis.connection.IdleConnectionCleanupManager.get_instance()
+
+        # Both pools should be registered with the same manager
+        assert id(pool1) in manager._registered_pools
+        assert id(pool2) in manager._registered_pools
+
+        # Manager should have only one worker thread
+        assert manager._worker_thread is not None
+        assert manager._worker_thread.is_alive()
+
+        pool1.close()
+        pool2.close()
+
+    def test_manager_connection_release_notification(self):
+        """Test that manager is notified when connections are released."""
+        with MockDateTime() as mock_time:
+            pool = redis.ConnectionPool(
+                connection_class=DummyConnection,
+                idle_connection_timeout=10.0,
+                idle_check_interval=5.0,
+            )
+
+            manager = redis.connection.IdleConnectionCleanupManager.get_instance()
+            pool_id = id(pool)
+
+            # Get and release a connection
+            conn = pool.get_connection()
+            release_time = time.time()
+            pool.release(conn)
+
+            # Manager should have metadata for this pool
+            assert pool_id in manager._registered_pools
+            metadata = manager._registered_pools[pool_id]
+
+            # Check that idle_timeout and check_interval are stored correctly
+            assert metadata.idle_timeout == 10.0
+            assert metadata.check_interval == 5.0
+
+            pool.close()
+
+    def test_manager_schedules_multiple_pools(self):
+        """Test that manager correctly schedules cleanup for multiple pools."""
+        with MockDateTime() as mock_time:
+            # Create pools with different timeouts
+            pool1 = redis.ConnectionPool(
+                connection_class=DummyConnection,
+                idle_connection_timeout=5.0,
+                idle_check_interval=1.0,
+            )
+            pool2 = redis.ConnectionPool(
+                connection_class=DummyConnection,
+                idle_connection_timeout=10.0,
+                idle_check_interval=2.0,
+            )
+
+            manager = redis.connection.IdleConnectionCleanupManager.get_instance()
+
+            # Both pools should be in the schedule
+            pool_ids_in_schedule = {entry.pool_id for entry in manager._schedule}
+            assert id(pool1) in pool_ids_in_schedule
+            assert id(pool2) in pool_ids_in_schedule
+
+            pool1.close()
+            pool2.close()
+
+    def test_manager_schedules_empty_pool_on_release(self):
+        """Test that manager re-registers an empty pool when a connection is released."""
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=10.0,
+            idle_check_interval=5.0,
+        )
+
+        manager = redis.connection.IdleConnectionCleanupManager.get_instance()
+        pool_id = id(pool)
+
+        # Pool should initially be registered and scheduled
+        assert pool_id in manager._registered_pools
+        initial_schedule = [
+            entry for entry in manager._schedule if entry.pool_id == pool_id
+        ]
+        assert len(initial_schedule) == 1
+
+        # Manually remove from both dict and schedule to simulate empty pool
+        with manager._condition:
+            manager._registered_pools.pop(pool_id, None)
+            manager._schedule = [
+                entry for entry in manager._schedule if entry.pool_id != pool_id
+            ]
+
+        # Now pool should not be tracked
+        assert pool_id not in manager._registered_pools
+        schedule = [entry for entry in manager._schedule if entry.pool_id == pool_id]
+        assert len(schedule) == 0
+
+        # Release a connection
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        # Pool should now be re-registered and scheduled
+        assert pool_id in manager._registered_pools
+        schedule = [entry for entry in manager._schedule if entry.pool_id == pool_id]
+        assert len(schedule) == 1
+
+        pool.close()
+
+    def test_no_per_pool_threads(self):
+        """Test that creating many pools doesn't create many threads."""
+        import threading
+
+        initial_thread_count = threading.active_count()
+
+        pools = []
+        for i in range(10):
+            pool = redis.ConnectionPool(
+                connection_class=DummyConnection,
+                idle_connection_timeout=10.0,
+                idle_check_interval=1.0,
+            )
+            pools.append(pool)
+
+        # Should only have one additional thread (the manager's worker)
+        # Not 10 threads (one per pool)
+        final_thread_count = threading.active_count()
+        new_threads = final_thread_count - initial_thread_count
+
+        # Allow some tolerance for test infrastructure threads, but should be much less than 10
+        assert new_threads <= 2, f"Expected at most 2 new threads, got {new_threads}"
+
+        for pool in pools:
+            pool.close()
