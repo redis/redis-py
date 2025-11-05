@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import time
 from contextlib import closing
@@ -30,18 +31,24 @@ class DummyConnection:
         self.kwargs = kwargs
         self.pid = os.getpid()
         self._sock = None
+        self._disconnected = False
 
     def connect(self):
         self._sock = mock.Mock()
-
-    def disconnect(self):
-        self._sock = None
+        self._disconnected = False
 
     def can_read(self):
         return False
 
     def should_reconnect(self):
         return False
+
+    def disconnect(self):
+        self._sock = None
+        self._disconnected = True
+
+    def re_auth(self):
+        pass
 
 
 class TestConnectionPool:
@@ -955,3 +962,246 @@ class TestHealthCheck:
             assert wait_for_message(p) is None
             m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)
+
+
+class TestIdleConnectionTimeout:
+    """Tests for idle connection timeout functionality."""
+
+    def test_idle_timeout_parameters_validation(self):
+        """Test that idle timeout parameters are validated properly."""
+        # Valid parameters should work
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=10.0,
+            idle_check_interval=5.0,
+        )
+        assert pool.idle_connection_timeout == 10.0
+        assert pool.idle_check_interval == 5.0
+        pool.close()
+
+        # None for idle_connection_timeout should work (disables feature)
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=None,
+        )
+        assert pool.idle_connection_timeout is None
+        pool.close()
+
+        # Invalid idle_connection_timeout should raise ValueError
+        with pytest.raises(ValueError, match="idle_connection_timeout"):
+            redis.ConnectionPool(
+                connection_class=DummyConnection,
+                idle_connection_timeout=-1.0,
+            )
+
+        with pytest.raises(ValueError, match="idle_connection_timeout"):
+            redis.ConnectionPool(
+                connection_class=DummyConnection,
+                idle_connection_timeout=0,
+            )
+
+        # Invalid idle_check_interval should raise ValueError
+        with pytest.raises(ValueError, match="idle_check_interval"):
+            redis.ConnectionPool(
+                connection_class=DummyConnection,
+                idle_check_interval=-1.0,
+            )
+
+        with pytest.raises(ValueError, match="idle_check_interval"):
+            redis.ConnectionPool(
+                connection_class=DummyConnection,
+                idle_check_interval=0,
+            )
+
+    def test_cleanup_thread_not_started_without_timeout(self):
+        """Test that cleanup thread is not started when idle_connection_timeout is None."""
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=None,
+        )
+        assert pool._cleanup_thread is None
+        pool.close()
+
+    def test_cleanup_thread_started_with_timeout(self):
+        """Test that cleanup thread is started when idle_connection_timeout is set."""
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=10.0,
+            idle_check_interval=1.0,
+        )
+        # Give the thread a moment to start
+        time.sleep(0.1)
+        assert pool._cleanup_thread is not None
+        assert pool._cleanup_thread.is_alive()
+        pool.close()
+
+    def test_cleanup_thread_stopped_on_close(self):
+        """Test that cleanup thread is stopped when pool is closed."""
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=10.0,
+            idle_check_interval=1.0,
+        )
+        time.sleep(0.1)
+        cleanup_thread = pool._cleanup_thread
+        assert cleanup_thread.is_alive()
+        pool.close()
+        time.sleep(0.2)
+        # After close, thread should be stopped and reference should be None
+        assert pool._cleanup_thread is None
+        assert not cleanup_thread.is_alive()
+
+    def test_idle_connections_cleaned_up(self):
+        """Test that idle connections are actually cleaned up."""
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=1.0,  # 1 second timeout
+            idle_check_interval=0.5,  # Check every 0.5 seconds
+        )
+
+        # Get and release a connection
+        conn1 = pool.get_connection()
+        pool.release(conn1)
+
+        # Should have 1 available connection
+        assert len(pool._available_connections) == 1
+        assert pool._created_connections == 1
+
+        # Wait for the connection to become idle and be cleaned up
+        time.sleep(1.8)  # Wait longer than idle_connection_timeout + check_interval
+
+        # The idle connection should have been cleaned up
+        assert len(pool._available_connections) == 0
+        assert pool._created_connections == 0
+
+        # Pool should still work after cleanup
+        conn2 = pool.get_connection()
+        assert conn2 is not None
+        pool.release(conn2)
+
+        pool.close()
+
+    def test_fresh_connections_not_cleaned_up(self):
+        """Test that recently used connections are not cleaned up."""
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=2.0,
+            idle_check_interval=0.5,
+        )
+
+        # Get and release a connection
+        conn1 = pool.get_connection()
+        pool.release(conn1)
+
+        # Wait less than the timeout
+        time.sleep(0.8)
+
+        # Connection should still be available
+        assert len(pool._available_connections) == 1
+
+        pool.close()
+
+    def test_blocking_pool_idle_timeout(self):
+        """Test idle timeout with BlockingConnectionPool."""
+        pool = redis.BlockingConnectionPool(
+            connection_class=DummyConnection,
+            max_connections=5,
+            timeout=1,
+            idle_connection_timeout=1.0,
+            idle_check_interval=0.5,
+        )
+
+        # Get and release some connections
+        conn1 = pool.get_connection()
+        conn2 = pool.get_connection()
+        pool.release(conn1)
+        pool.release(conn2)
+
+        # Should have 2 connections
+        assert len(pool._connections) == 2
+
+        # Wait for cleanup
+        time.sleep(1.8)
+
+        # Connections should be cleaned up
+        assert len(pool._connections) == 0
+
+        # Pool should still work
+        conn3 = pool.get_connection()
+        assert conn3 is not None
+        pool.release(conn3)
+
+        pool.close()
+
+    def test_blocking_pool_parameters(self):
+        """Test that BlockingConnectionPool accepts idle timeout parameters."""
+        pool = redis.BlockingConnectionPool(
+            connection_class=DummyConnection,
+            max_connections=5,
+            timeout=1,
+            idle_connection_timeout=10.0,
+            idle_check_interval=5.0,
+        )
+        assert pool.idle_connection_timeout == 10.0
+        assert pool.idle_check_interval == 5.0
+        pool.close()
+
+    def test_multiple_pools_independent_cleanup(self):
+        """Test that multiple pools clean up independently."""
+        pool1 = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=1.0,
+            idle_check_interval=0.5,
+        )
+        pool2 = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=2.0,
+            idle_check_interval=0.5,
+        )
+
+        # Create connections in both pools
+        conn1 = pool1.get_connection()
+        conn2 = pool2.get_connection()
+        pool1.release(conn1)
+        pool2.release(conn2)
+
+        # Wait for pool1's timeout but not pool2's
+        time.sleep(1.6)
+
+        # Pool1 should be cleaned up, pool2 should not
+        assert len(pool1._available_connections) == 0
+        assert len(pool2._available_connections) == 1
+
+        pool1.close()
+        pool2.close()
+
+    def test_pool_garbage_collection(self):
+        """Test that pool can be garbage collected and cleanup thread exits gracefully."""
+        import gc
+        import weakref
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=10.0,
+            idle_check_interval=0.5,
+        )
+
+        # Get the cleanup thread reference and save it before we delete everything
+        cleanup_thread = pool._cleanup_thread
+        assert cleanup_thread is not None
+        assert cleanup_thread.is_alive()
+
+        # Clear the pool's reference to the thread
+        pool._cleanup_thread = None
+
+        # Create a weak reference to the pool
+        pool_weak_ref = weakref.ref(pool)
+
+        # Drop the pool reference
+        del pool
+
+        # Pool should be garbage collected
+        assert pool_weak_ref() is None
+
+        cleanup_thread.join(timeout=10)
+        assert not cleanup_thread.is_alive()
