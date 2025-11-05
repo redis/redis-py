@@ -1397,3 +1397,130 @@ class TestIdleConnectionTimeout:
 
         for pool in pools:
             pool.close()
+
+    def test_manager_automatically_cleans_idle_connections(self):
+        """Integration test: Manager automatically cleans up idle connections without manual trigger."""
+        import time
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=0.1,  # 100ms timeout
+            idle_check_interval=0.05,  # Check every 50ms
+        )
+
+        try:
+            # Get and release a connection
+            conn1 = pool.get_connection()
+            pool.release(conn1)
+
+            # Should have 1 available connection
+            assert len(pool._available_connections) == 1
+            assert pool._created_connections == 1
+
+            # Wait for manager to clean it up automatically (no manual call to _cleanup_idle_connections)
+            # Need to wait: idle_timeout (100ms) + check_interval (50ms) + small buffer
+            time.sleep(0.2)
+
+            # The manager should have cleaned it up automatically
+            assert len(pool._available_connections) == 0
+            assert pool._created_connections == 0
+        finally:
+            pool.close()
+
+    def test_manager_reschedules_pools_after_cleanup(self):
+        """Integration test: Manager reschedules pools that still have connections after cleanup."""
+        import time
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=0.15,  # 150ms timeout
+            idle_check_interval=0.05,  # Check every 50ms
+        )
+
+        try:
+            # Get and release two connections
+            conn1 = pool.get_connection()
+            conn2 = pool.get_connection()
+            pool.release(conn1)
+
+            # Wait 100ms, then release conn2
+            time.sleep(0.1)
+            pool.release(conn2)
+
+            # Now we have:
+            # - conn1: idle for ~100ms
+            # - conn2: idle for ~0ms
+
+            # Wait for first cleanup cycle (conn1 should be cleaned, conn2 should stay)
+            time.sleep(0.1)  # Total: conn1 at ~200ms, conn2 at ~100ms
+
+            # conn1 should be cleaned (>150ms), conn2 should remain (<150ms)
+            assert len(pool._available_connections) == 1
+            assert pool._created_connections == 1
+
+            # Verify pool was rescheduled by waiting for another cleanup cycle
+            time.sleep(0.1)  # Total: conn2 at ~200ms
+
+            # Now conn2 should also be cleaned
+            assert len(pool._available_connections) == 0
+            assert pool._created_connections == 0
+        finally:
+            pool.close()
+
+    def test_manager_removes_empty_pools_from_tracking(self):
+        """Integration test: Manager removes empty pools from its internal tracking."""
+        import time
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=0.1,  # 100ms timeout
+            idle_check_interval=0.05,  # Check every 50ms
+        )
+
+        try:
+            # Get and release a connection
+            conn = pool.get_connection()
+            pool.release(conn)
+
+            # Pool should be registered
+            manager = redis.connection.IdleConnectionCleanupManager.get_instance()
+            pool_id = id(pool)
+            assert pool_id in manager._registered_pools
+
+            # Wait for cleanup
+            time.sleep(0.2)
+
+            # Pool should be empty
+            assert len(pool._available_connections) == 0
+
+            # Pool should be removed from manager's tracking
+            assert pool_id not in manager._registered_pools
+        finally:
+            pool.close()
+
+    def test_manager_schedules_at_correct_time(self):
+        """Integration test: Manager schedules cleanups at the correct time based on idle_timeout."""
+        import time
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            idle_connection_timeout=0.2,  # 200ms timeout
+            idle_check_interval=0.05,  # Check every 50ms
+        )
+
+        try:
+            # Get and release a connection
+            conn = pool.get_connection()
+            pool.release(conn)
+
+            # Connection should NOT be cleaned up before timeout
+            time.sleep(0.1)  # 100ms - less than 200ms timeout
+            assert len(pool._available_connections) == 1
+            assert pool._created_connections == 1
+
+            # Connection SHOULD be cleaned up after timeout
+            time.sleep(0.15)  # Total 250ms - more than 200ms timeout
+            assert len(pool._available_connections) == 0
+            assert pool._created_connections == 0
+        finally:
+            pool.close()
