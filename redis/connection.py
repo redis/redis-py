@@ -2433,16 +2433,9 @@ class IdleConnectionCleanupManager:
         self._worker_thread.start()
 
     def register_pool(self, pool: "ConnectionPool", next_check_time: float) -> None:
-        """Register or re-register a pool for idle connection cleanup.
+        # Register a pool for idle connection cleanup.
+        # Called when a connection is released.
 
-        This is called both on pool initialization and when releasing a connection
-        to an empty pool that was previously removed from tracking.
-
-        Args:
-            pool: The ConnectionPool to register
-            next_check_time: When to check this pool next. If None, defaults to
-                            now + idle_connection_timeout
-        """
         if pool.idle_connection_timeout is None:
             # no need to register, because this pool doesn't close idle connections
             return
@@ -2469,11 +2462,7 @@ class IdleConnectionCleanupManager:
             self._condition.notify()
 
     def unregister_pool(self, pool: "ConnectionPool") -> None:
-        """Unregister a pool from cleanup (optional optimization).
-
-        Args:
-            pool: The ConnectionPool to unregister
-        """
+        # Unregister a pool from cleanup
         pool_id = id(pool)
         with self._condition:
             self._registered_pools.discard(pool_id)
@@ -2482,7 +2471,7 @@ class IdleConnectionCleanupManager:
             # processes the entry.
 
     def _worker_loop(self) -> None:
-        """Main worker loop. Processes pools in priority order."""
+        # processes pools in schedule order
         while not self._shutdown_event.is_set():
             try:
                 with self._condition:
