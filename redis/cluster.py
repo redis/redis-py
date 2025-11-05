@@ -196,6 +196,8 @@ REDIS_ALLOWED_KEYS = (
     "username",
     "cache",
     "cache_config",
+    "idle_connection_timeout",
+    "idle_check_interval",
 )
 KWARGS_DISABLED_KEYS = ("host", "port", "retry")
 

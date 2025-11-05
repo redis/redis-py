@@ -250,6 +250,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        idle_connection_timeout: Optional[float] = None,
+        idle_check_interval: Optional[float] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -314,6 +316,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,
+                "idle_connection_timeout": idle_connection_timeout,
+                "idle_check_interval": idle_check_interval,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
