@@ -251,7 +251,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         idle_connection_timeout: Optional[float] = None,
-        idle_check_interval: Optional[float] = None,
+        idle_check_interval: float = 60.0,
     ) -> None:
         """
         Initialize a new Redis client.
