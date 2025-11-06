@@ -253,3 +253,11 @@ class ExternalAuthProviderError(ConnectionError):
     """
 
     pass
+
+
+class IncorrectPolicyType(Exception):
+    """
+    Raised when a policy type isn't matching to any known policy types.
+    """
+
+    pass

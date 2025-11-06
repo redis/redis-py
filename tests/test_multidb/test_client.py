@@ -1,6 +1,6 @@
 import threading
 from time import sleep
-from unittest.mock import patch, Mock
+from unittest.mock import MagicMock, patch, Mock
 
 import pybreaker
 import pytest
@@ -36,9 +36,7 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
 
             mock_hc.check_health.return_value = True
@@ -70,10 +68,8 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
-            mock_db1.client.execute_command.return_value = "OK1"
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db1.client.execute_command = MagicMock(return_value="OK1")
 
             mock_hc.check_health.side_effect = [
                 False,
@@ -87,7 +83,8 @@ class TestMultiDbClient:
 
             client = MultiDBClient(mock_multi_db_config)
             assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
-            assert client.set("key", "value") == "OK1"
+            result = client.set("key", "value")
+            assert result == "OK1"
             assert mock_hc.check_health.call_count == 7
 
             assert mock_db.circuit.state == CBState.CLOSED
@@ -183,9 +180,7 @@ class TestMultiDbClient:
         mock_hc.check_health.side_effect = mock_check_health
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_multi_db_config.health_check_interval = 0.1
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
             mock_db.client.execute_command.return_value = "OK"
@@ -255,9 +250,7 @@ class TestMultiDbClient:
         mock_hc.check_health.side_effect = mock_check_health
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db.client.execute_command.return_value = "OK"
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
@@ -268,6 +261,15 @@ class TestMultiDbClient:
             client = MultiDBClient(mock_multi_db_config)
             assert client.set("key", "value") == "OK1"
             error_event.wait(timeout=0.5)
+
+            # Wait for circuit breaker to actually open (not just the event)
+            max_retries = 20
+            for _ in range(max_retries):
+                if mock_db1.circuit.state == CBState.OPEN:  # Circuit is open
+                    break
+                sleep(0.01)
+
+            # Now the failover strategy will select mock_db2
             assert client.set("key", "value") == "OK2"
             sleep(0.5)
             assert client.set("key", "value") == "OK1"
@@ -308,9 +310,7 @@ class TestMultiDbClient:
         mock_hc.check_health.side_effect = mock_check_health
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db.client.execute_command.return_value = "OK"
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
@@ -321,6 +321,15 @@ class TestMultiDbClient:
             client = MultiDBClient(mock_multi_db_config)
             assert client.set("key", "value") == "OK1"
             error_event.wait(timeout=0.5)
+            # Wait for circuit breaker state to actually reflect the unhealthy status
+            # (instead of just sleeping)
+            max_retries = 20
+            for _ in range(max_retries):
+                if (
+                    mock_db1.circuit.state == CBState.OPEN
+                ):  # Circuit is open (unhealthy)
+                    break
+                sleep(0.01)
             assert client.set("key", "value") == "OK2"
             sleep(0.5)
             assert client.set("key", "value") == "OK2"
@@ -343,9 +352,7 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_hc.check_health.return_value = False
 
             client = MultiDBClient(mock_multi_db_config)
@@ -377,9 +384,7 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_hc.check_health.return_value = False
 
             client = MultiDBClient(mock_multi_db_config)
@@ -407,9 +412,7 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
 
@@ -444,9 +447,7 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
 
@@ -480,9 +481,7 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db2.client.execute_command.return_value = "OK2"
 
@@ -517,9 +516,7 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
             mock_multi_db_config.event_dispatcher = EventDispatcher()
             mock_fd = mock_multi_db_config.failure_detectors[0]
@@ -571,9 +568,7 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
 
             mock_hc.check_health.return_value = True
@@ -610,9 +605,7 @@ class TestMultiDbClient:
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
 
-        with (
-            patch.object(mock_multi_db_config, "databases", return_value=databases),
-        ):
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
             mock_db1.client.execute_command.return_value = "OK1"
             mock_db.client.execute_command.return_value = "OK"
 

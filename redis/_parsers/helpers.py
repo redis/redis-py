@@ -137,11 +137,11 @@ def parse_sentinel_state(item):
     return result
 
 
-def parse_sentinel_master(response):
+def parse_sentinel_master(response, **options):
     return parse_sentinel_state(map(str_if_bytes, response))
 
 
-def parse_sentinel_state_resp3(response):
+def parse_sentinel_state_resp3(response, **options):
     result = {}
     for key in response:
         try:
@@ -154,7 +154,7 @@ def parse_sentinel_state_resp3(response):
     return result
 
 
-def parse_sentinel_masters(response):
+def parse_sentinel_masters(response, **options):
     result = {}
     for item in response:
         state = parse_sentinel_state(map(str_if_bytes, item))
@@ -162,19 +162,19 @@ def parse_sentinel_masters(response):
     return result
 
 
-def parse_sentinel_masters_resp3(response):
-    return [parse_sentinel_state(master) for master in response]
+def parse_sentinel_masters_resp3(response, **options):
+    return [parse_sentinel_state_resp3(master) for master in response]
 
 
-def parse_sentinel_slaves_and_sentinels(response):
+def parse_sentinel_slaves_and_sentinels(response, **options):
     return [parse_sentinel_state(map(str_if_bytes, item)) for item in response]
 
 
-def parse_sentinel_slaves_and_sentinels_resp3(response):
-    return [parse_sentinel_state_resp3(item) for item in response]
+def parse_sentinel_slaves_and_sentinels_resp3(response, **options):
+    return [parse_sentinel_state_resp3(item, **options) for item in response]
 
 
-def parse_sentinel_get_master(response):
+def parse_sentinel_get_master(response, **options):
     return response and (response[0], int(response[1])) or None
 
 
@@ -268,13 +268,16 @@ def sort_return_tuples(response, **options):
     return list(zip(*[response[i::n] for i in range(n)]))
 
 
-def parse_stream_list(response):
+def parse_stream_list(response, **options):
     if response is None:
         return None
     data = []
     for r in response:
         if r is not None:
-            data.append((r[0], pairs_to_dict(r[1])))
+            if "claim_min_idle_time" in options:
+                data.append((r[0], pairs_to_dict(r[1]), *r[2:]))
+            else:
+                data.append((r[0], pairs_to_dict(r[1])))
         else:
             data.append((None, None))
     return data
@@ -332,16 +335,18 @@ def parse_xinfo_stream(response, **options):
     return data
 
 
-def parse_xread(response):
+def parse_xread(response, **options):
     if response is None:
         return []
-    return [[r[0], parse_stream_list(r[1])] for r in response]
+    return [[r[0], parse_stream_list(r[1], **options)] for r in response]
 
 
-def parse_xread_resp3(response):
+def parse_xread_resp3(response, **options):
     if response is None:
         return {}
-    return {key: [parse_stream_list(value)] for key, value in response.items()}
+    return {
+        key: [parse_stream_list(value, **options)] for key, value in response.items()
+    }
 
 
 def parse_xpending(response, **options):

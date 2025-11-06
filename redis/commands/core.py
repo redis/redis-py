@@ -1559,6 +1559,16 @@ class BitFieldOperation:
         return self.client.execute_command(*command)
 
 
+class DataPersistOptions(Enum):
+    # set the value for each provided key to each
+    # provided value only if all do not already exist.
+    NX = "NX"
+
+    # set the value for each provided key to each
+    # provided value only if all already exist.
+    XX = "XX"
+
+
 class BasicKeyCommands(CommandsProtocol):
     """
     Redis basic key-based commands
@@ -1987,6 +1997,10 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Returns a list of values ordered identically to ``keys``
 
+        ** Important ** When this method is used with Cluster clients, all keys
+                must be in the same hash slot, otherwise a RedisClusterException
+                will be raised.
+
         For more information, see https://redis.io/commands/mget
         """
         from redis.client import EMPTY_RESPONSE
@@ -2004,6 +2018,10 @@ class BasicKeyCommands(CommandsProtocol):
         key/value pairs. Both keys and values should be strings or types that
         can be cast to a string via str().
 
+        ** Important ** When this method is used with Cluster clients, all keys
+                must be in the same hash slot, otherwise a RedisClusterException
+                will be raised.
+
         For more information, see https://redis.io/commands/mset
         """
         items = []
@@ -2011,12 +2029,82 @@ class BasicKeyCommands(CommandsProtocol):
             items.extend(pair)
         return self.execute_command("MSET", *items)
 
+    def msetex(
+        self,
+        mapping: Mapping[AnyKeyT, EncodableT],
+        data_persist_option: Optional[DataPersistOptions] = None,
+        ex: Optional[ExpiryT] = None,
+        px: Optional[ExpiryT] = None,
+        exat: Optional[AbsExpiryT] = None,
+        pxat: Optional[AbsExpiryT] = None,
+        keepttl: bool = False,
+    ) -> Union[Awaitable[int], int]:
+        """
+        Sets key/values based on the provided ``mapping`` items.
+
+        ** Important ** When this method is used with Cluster clients, all keys
+                        must be in the same hash slot, otherwise a RedisClusterException
+                        will be raised.
+
+        ``mapping`` accepts a dict of key/value pairs that will be added to the database.
+
+        ``data_persist_option`` can be set to ``NX`` or ``XX`` to control the
+            behavior of the command.
+            ``NX`` will set the value for each provided key to each
+                provided value only if all do not already exist.
+            ``XX`` will set the value for each provided key to each
+                provided value only if all already exist.
+
+        ``ex`` sets an expire flag on the keys in ``mapping`` for ``ex`` seconds.
+
+        ``px`` sets an expire flag on the keys in ``mapping`` for ``px`` milliseconds.
+
+        ``exat`` sets an expire flag on the keys in ``mapping`` for ``exat`` seconds,
+            specified in unix time.
+
+        ``pxat`` sets an expire flag on the keys in ``mapping`` for ``pxat`` milliseconds,
+            specified in unix time.
+
+        ``keepttl`` if True, retain the time to live associated with the keys.
+
+        Returns the number of fields that were added.
+
+        Available since Redis 8.4
+        For more information, see https://redis.io/commands/msetex
+        """
+        opset = {ex, px, exat, pxat}
+        if len(opset) > 2 or len(opset) > 1 and keepttl:
+            raise DataError(
+                "``ex``, ``px``, ``exat``, ``pxat``, "
+                "and ``keepttl`` are mutually exclusive."
+            )
+
+        exp_options: list[EncodableT] = []
+        if data_persist_option:
+            exp_options.append(data_persist_option.value)
+
+        exp_options.extend(extract_expire_flags(ex, px, exat, pxat))
+
+        if keepttl:
+            exp_options.append("KEEPTTL")
+
+        pieces = ["MSETEX", len(mapping)]
+
+        for pair in mapping.items():
+            pieces.extend(pair)
+
+        return self.execute_command(*pieces, *exp_options)
+
     def msetnx(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
         """
         Sets key/values based on a mapping if none of the keys are already set.
         Mapping is a dictionary of key/value pairs. Both keys and values
         should be strings or types that can be cast to a string via str().
         Returns a boolean indicating if the operation was successful.
+
+        ** Important ** When this method is used with Cluster clients, all keys
+                        must be in the same hash slot, otherwise a RedisClusterException
+                        will be raised.
 
         For more information, see https://redis.io/commands/msetnx
         """
@@ -4013,6 +4101,7 @@ class StreamCommands(CommandsProtocol):
         count: Optional[int] = None,
         block: Optional[int] = None,
         noack: bool = False,
+        claim_min_idle_time: Optional[int] = None,
     ) -> ResponseT:
         """
         Read from a stream via a consumer group.
@@ -4030,8 +4119,12 @@ class StreamCommands(CommandsProtocol):
         block: number of milliseconds to wait, if nothing already present.
         noack: do not add messages to the PEL
 
+        claim_min_idle_time: accepts an integer type and represents a
+                             time interval in milliseconds
+
         For more information, see https://redis.io/commands/xreadgroup
         """
+        options = {}
         pieces: list[EncodableT] = [b"GROUP", groupname, consumername]
         if count is not None:
             if not isinstance(count, int) or count < 1:
@@ -4045,12 +4138,20 @@ class StreamCommands(CommandsProtocol):
             pieces.append(str(block))
         if noack:
             pieces.append(b"NOACK")
+        if claim_min_idle_time is not None:
+            if not isinstance(claim_min_idle_time, int) or claim_min_idle_time < 0:
+                raise DataError(
+                    "XREADGROUP claim_min_idle_time must be a non-negative integer"
+                )
+            pieces.append(b"CLAIM")
+            pieces.append(claim_min_idle_time)
+            options["claim_min_idle_time"] = claim_min_idle_time
         if not isinstance(streams, dict) or len(streams) == 0:
             raise DataError("XREADGROUP streams must be a non empty dict")
         pieces.append(b"STREAMS")
         pieces.extend(streams.keys())
         pieces.extend(streams.values())
-        return self.execute_command("XREADGROUP", *pieces)
+        return self.execute_command("XREADGROUP", *pieces, **options)
 
     def xrevrange(
         self,
