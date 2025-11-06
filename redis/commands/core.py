@@ -50,7 +50,7 @@ from redis.utils import (
     extract_expire_flags,
 )
 
-from .helpers import list_or_args
+from .helpers import at_most_one_value_set, list_or_args
 
 if TYPE_CHECKING:
     import redis.asyncio.client
@@ -1732,8 +1732,8 @@ class BasicKeyCommands(CommandsProtocol):
     def delex(
         self,
         name: KeyT,
-        ifeq: Optional[EncodableT] = None,
-        ifne: Optional[EncodableT] = None,
+        ifeq: Optional[Union[bytes, str]] = None,
+        ifne: Optional[Union[bytes, str]] = None,
         ifdeq: Optional[str] = None,  # hex digest
         ifdne: Optional[str] = None,  # hex digest
     ) -> int:
@@ -1752,6 +1752,8 @@ class BasicKeyCommands(CommandsProtocol):
                                             and a condition is specified.
             ValueError: if more than one condition is provided.
 
+
+        Requires Redis 8.4 or greater.
         For more information, see https://redis.io/commands/delex
         """
         conds = [x is not None for x in (ifeq, ifne, ifdeq, ifdne)]
@@ -1886,6 +1888,8 @@ class BasicKeyCommands(CommandsProtocol):
         Raises:
           - ResponseError if key exists but is not a string
 
+
+        Requires Redis 8.4 or greater.
         For more information, see https://redis.io/commands/digest
         """
         # Bulk string response is already handled (bytes/str based on decode_responses)
@@ -1939,8 +1943,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/getex
         """
-        opset = {ex, px, exat, pxat}
-        if len(opset) > 2 or len(opset) > 1 and persist:
+        if not at_most_one_value_set((ex, px, exat, pxat, persist)):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``persist`` are mutually exclusive."
@@ -2128,8 +2131,7 @@ class BasicKeyCommands(CommandsProtocol):
         Available since Redis 8.4
         For more information, see https://redis.io/commands/msetex
         """
-        opset = {ex, px, exat, pxat}
-        if len(opset) > 2 or len(opset) > 1 and keepttl:
+        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."
@@ -2395,6 +2397,10 @@ class BasicKeyCommands(CommandsProtocol):
         get: bool = False,
         exat: Optional[AbsExpiryT] = None,
         pxat: Optional[AbsExpiryT] = None,
+        ifeq: Optional[Union[bytes, str]] = None,
+        ifne: Optional[Union[bytes, str]] = None,
+        ifdeq: Optional[str] = None,  # hex digest of current value
+        ifdne: Optional[str] = None,  # hex digest of current value
     ) -> ResponseT:
         """
         Set the value at key ``name`` to ``value``
@@ -2422,34 +2428,66 @@ class BasicKeyCommands(CommandsProtocol):
         ``pxat`` sets an expire flag on key ``name`` for ``ex`` milliseconds,
             specified in unix time.
 
+        ``ifeq`` set the value at key ``name`` to ``value`` only if the current
+            value exactly matches the argument.
+            If key doesn’t exist - it won’t be created.
+            (Requires Redis 8.4 or greater)
+
+        ``ifne`` set the value at key ``name`` to ``value`` only if the current
+            value does not exactly match the argument.
+            If key doesn’t exist - it will be created.
+            (Requires Redis 8.4 or greater)
+
+        ``ifdeq`` set the value at key ``name`` to ``value`` only if the current
+            value XXH3 hex digest exactly matches the argument.
+            If key doesn’t exist - it won’t be created.
+            (Requires Redis 8.4 or greater)
+
+        ``ifdne`` set the value at key ``name`` to ``value`` only if the current
+            value XXH3 hex digest does not exactly match the argument.
+            If key doesn’t exist - it will be created.
+            (Requires Redis 8.4 or greater)
+
         For more information, see https://redis.io/commands/set
         """
-        opset = {ex, px, exat, pxat}
-        if len(opset) > 2 or len(opset) > 1 and keepttl:
+
+        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."
             )
 
-        if nx and xx:
-            raise DataError("``nx`` and ``xx`` are mutually exclusive.")
+        # Enforce mutual exclusivity among all conditional switches.
+        if not at_most_one_value_set((nx, xx, ifeq, ifne, ifdeq, ifdne)):
+            raise DataError(
+                "``nx``, ``xx``, ``ifeq``, ``ifne``, ``ifdeq``, ``ifdne`` are mutually exclusive."
+            )
 
         pieces: list[EncodableT] = [name, value]
         options = {}
+
+        # Conditional modifier (exactly one at most)
+        if nx:
+            pieces.append("NX")
+        elif xx:
+            pieces.append("XX")
+        elif ifeq is not None:
+            pieces.extend(("IFEQ", ifeq))
+        elif ifne is not None:
+            pieces.extend(("IFNE", ifne))
+        elif ifdeq is not None:
+            pieces.extend(("IFDEQ", ifdeq))
+        elif ifdne is not None:
+            pieces.extend(("IFDNE", ifdne))
+
+        if get:
+            pieces.append("GET")
+            options["get"] = True
 
         pieces.extend(extract_expire_flags(ex, px, exat, pxat))
 
         if keepttl:
             pieces.append("KEEPTTL")
-
-        if nx:
-            pieces.append("NX")
-        if xx:
-            pieces.append("XX")
-
-        if get:
-            pieces.append("GET")
-            options["get"] = True
 
         return self.execute_command("SET", *pieces, **options)
 
@@ -5257,8 +5295,7 @@ class HashCommands(CommandsProtocol):
         if not keys:
             raise DataError("'hgetex' should have at least one key provided")
 
-        opset = {ex, px, exat, pxat}
-        if len(opset) > 2 or len(opset) > 1 and persist:
+        if not at_most_one_value_set((ex, px, exat, pxat, persist)):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``persist`` are mutually exclusive."
@@ -5403,8 +5440,7 @@ class HashCommands(CommandsProtocol):
                 "'items' must contain a list of key/value pairs."
             )
 
-        opset = {ex, px, exat, pxat}
-        if len(opset) > 2 or len(opset) > 1 and keepttl:
+        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."

@@ -11,7 +11,7 @@ from string import ascii_letters
 
 import pytest
 import pytest_asyncio
-from redis import RedisClusterException, ResponseError
+from redis import DataError, RedisClusterException, ResponseError
 import redis
 from redis import exceptions
 from redis._parsers.helpers import (
@@ -1125,10 +1125,10 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("8.3.224")
     async def test_delex_pipeline(self, r):
-        await r.mset({"p1": b"A", "p2": b"B"})
+        await r.mset({"p1{45}": b"A", "p2{45}": b"B"})
         p = r.pipeline()
-        p.delex("p1", ifeq=b"A")
-        p.delex("p2", ifne=b"B")  # false → 0
+        p.delex("p1{45}", ifeq=b"A")
+        p.delex("p2{45}", ifne=b"B")  # false → 0
         p.delex("nope")  # nonexistent → 0
         out = await p.execute()
         assert out == [1, 0, 0]
@@ -1253,7 +1253,7 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("8.3.224")
     async def test_pipeline_digest(self, r):
-        k1, k2 = "k:d1", "k:d2"
+        k1, k2 = "k:d1{42}", "k:d2{42}"
         await r.mset({k1: b"A", k2: b"B"})
         p = r.pipeline()
         p.digest(k1)
@@ -1848,6 +1848,102 @@ class TestRedisCommands:
         await r.set("a", "2", keepttl=True)
         assert await r.get("a") == b"2"
         assert 0 < await r.ttl("a") <= 10
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifeq_true_sets_and_returns_true(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifeq=b"foo") is True
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifeq_false_does_not_set_returns_none(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifeq=b"nope") is None
+        assert await r.get("k") == b"foo"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifne_true_sets(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifne=b"zzz") is True
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifne_false_does_not_set(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifne=b"foo") is None
+        assert await r.get("k") == b"foo"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifeq_when_key_missing_does_not_create(self, r):
+        await r.delete("k")
+        assert await r.set("k", b"bar", ifeq=b"foo") is None
+        assert await r.exists("k") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifne_when_key_missing_creates(self, r):
+        await r.delete("k")
+        assert await r.set("k", b"bar", ifne=b"foo") is True
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize("val", [b"", b"abc", b"The quick brown fox"])
+    async def test_set_ifdeq_and_ifdne(self, r, val):
+        await r.delete("k")
+        await r.set("k", val)
+        d = await self._server_xxh3_digest(r, "k")
+        assert d is not None
+
+        # IFDEQ must match to set; if key missing => won't create
+        assert await r.set("k", b"X", ifdeq=d) is True
+        assert await r.get("k") == b"X"
+
+        await r.delete("k")
+        # key missing + IFDEQ => not created
+        assert await r.set("k", b"Y", ifdeq=d) is None
+        assert await r.exists("k") == 0
+
+        # IFDNE: create when missing, and set when digest differs
+        assert await r.set("k", b"bar", ifdne=d) is True
+        prev_d = await self._server_xxh3_digest(r, "k")
+        assert prev_d is not None
+        # If digest equal → do not set
+        assert await r.set("k", b"zzz", ifdne=prev_d) is None
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_with_get_returns_previous_value(self, r):
+        await r.delete("k")
+        # when key didn’t exist → returns None, and key is created if condition allows it
+        prev = await r.set("k", b"v1", get=True, ifne=b"any")  # IFNE on missing creates
+        assert prev is None
+        # subsequent GET returns previous value, regardless of whether set occurs
+        prev2 = await r.set(
+            "k", b"v2", get=True, ifeq=b"v1"
+        )  # matches → set; returns "v1"
+        assert prev2 == b"v1"
+        prev3 = await r.set(
+            "k", b"v3", get=True, ifeq=b"no"
+        )  # no set; returns previous "v2"
+        assert prev3 == b"v2"
+        assert await r.get("k") == b"v2"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_mutual_exclusion_client_side(self, r):
+        await r.delete("k")
+        with pytest.raises(DataError):
+            await r.set("k", b"v", nx=True, ifeq=b"x")
+        with pytest.raises(DataError):
+            await r.set("k", b"v", ifdeq="aa", ifdne="bb")
+        with pytest.raises(DataError):
+            await r.set("k", b"v", ex=1, px=1)
+        with pytest.raises(DataError):
+            await r.set("k", b"v", exat=1, pxat=1)
+        with pytest.raises(DataError):
+            await r.set("k", b"v", ex=1, exat=1)
 
     async def test_setex(self, r: redis.Redis):
         assert await r.setex("a", 60, "1")
