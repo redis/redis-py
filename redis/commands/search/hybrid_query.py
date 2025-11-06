@@ -37,6 +37,9 @@ class HybridSearchQuery:
         """
         Scoring algorithm for text search query.
         Allowed values are "TFIDF", "DISMAX", "DOCSCORE", "BM25", etc.
+
+        For more information about supported scroring algorithms,
+        see https://redis.io/docs/latest/develop/ai/search-and-query/advanced-concepts/scoring/
         """
         self._scorer = scorer
         return self
@@ -188,6 +191,19 @@ class CombineResultsMethod:
         Args:
             method: The combine method to use - RRF or LINEAR.
             kwargs: Additional combine parameters.
+                    For RRF, the following parameters are supported(at least one should be provided):
+                                WINDOW: Limits fusion scopeLimits fusion scope.
+                                CONSTANT: Controls decay of rank influence.
+                                YIELD_SCORE_AS: The name of the field to yield the calculated score as.
+                    For LINEAR, supported parameters (at least one should be provided):
+                                ALPHA: The weight of the first query.
+                                BETA: The weight of the second query.
+                                YIELD_SCORE_AS: The name of the field to yield the calculated score as.
+
+                    The additional parameters are not validated and are passed as is to the server.
+                    The supported format is to provide the parameter names and values like the following:
+                        CombineResultsMethod(CombinationMethods.RRF, WINDOW=3, CONSTANT=0.5)
+                        CombineResultsMethod(CombinationMethods.LINEAR, ALPHA=0.5, BETA=0.5)
         """
         self._method = method
         self._kwargs = kwargs
