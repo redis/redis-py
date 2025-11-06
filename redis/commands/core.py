@@ -1729,6 +1729,47 @@ class BasicKeyCommands(CommandsProtocol):
     def __delitem__(self, name: KeyT):
         self.delete(name)
 
+    def delex(
+        self,
+        name: KeyT,
+        ifeq: Optional[EncodableT] = None,
+        ifne: Optional[EncodableT] = None,
+        ifdeq: Optional[str] = None,  # hex digest
+        ifdne: Optional[str] = None,  # hex digest
+    ) -> int:
+        """
+        Conditionally removes the specified key.
+
+        ifeq match-value - Delete the key only if its value is equal to match-value
+        ifne match-value - Delete the key only if its value is not equal to match-value
+        ifdeq match-digest - Delete the key only if the digest of its value is equal to match-digest
+        ifdne match-digest - Delete the key only if the digest of its value is not equal to match-digest
+
+        Returns:
+            int: 1 if the key was deleted, 0 otherwise.
+        Raises:
+            redis.exceptions.ResponseError: if key exists but is not a string
+                                            and a condition is specified.
+            ValueError: if more than one condition is provided.
+
+        For more information, see https://redis.io/commands/delex
+        """
+        conds = [x is not None for x in (ifeq, ifne, ifdeq, ifdne)]
+        if sum(conds) > 1:
+            raise ValueError("Only one of IFEQ/IFNE/IFDEQ/IFDNE may be specified")
+
+        pieces = ["DELEX", name]
+        if ifeq is not None:
+            pieces += ["IFEQ", ifeq]
+        elif ifne is not None:
+            pieces += ["IFNE", ifne]
+        elif ifdeq is not None:
+            pieces += ["IFDEQ", ifdeq]
+        elif ifdne is not None:
+            pieces += ["IFDNE", ifdne]
+
+        return self.execute_command(*pieces)
+
     def dump(self, name: KeyT) -> ResponseT:
         """
         Return a serialized version of the value stored at the specified key.

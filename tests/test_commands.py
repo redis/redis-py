@@ -1501,6 +1501,114 @@ class TestRedisCommands:
         del r["a"]
         assert r.get("a") is None
 
+    def _ensure_str(self, x):
+        return x.decode("ascii") if isinstance(x, (bytes, bytearray)) else x
+
+    def _server_xxh3_digest(self, r, key):
+        """
+        Get the server-computed XXH3 hex digest for the key's value.
+        Requires the DIGEST command implemented on the server.
+        """
+        d = r.execute_command("DIGEST", key)
+        return None if d is None else self._ensure_str(d).lower()
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_nonexistent(self, r):
+        r.delete("nope")
+        assert r.delex("nope") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_unconditional_delete_string(self, r):
+        r.set("k", b"v")
+        assert r.exists("k") == 1
+        assert r.delex("k") == 1
+        assert r.exists("k") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_unconditional_delete_nonstring_allowed(self, r):
+        # Spec: error happens only when a condition is specified on a non-string key.
+        r.lpush("lst", "a")
+        assert r.delex("lst") == 1
+        assert r.exists("lst") == 0
+
+        r.lpush("lst", "a")
+
+        with pytest.raises(redis.ResponseError):
+            r.delex("lst", ifeq=b"a")
+        assert r.exists("lst") == 1
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_ifeq(self, r):
+        r.set("k", b"abc")
+        assert r.delex("k", ifeq=b"abc") == 1  # matches → deleted
+        assert r.exists("k") == 0
+
+        r.set("k", b"abc")
+        assert r.delex("k", ifeq=b"zzz") == 0  # not match → not deleted
+        assert r.get("k") == b"abc"  # still there
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_ifne(self, r):
+        r.set("k2", b"abc")
+        assert r.delex("k2", ifne=b"zzz") == 1  # different → deleted
+        assert r.exists("k2") == 0
+
+        r.set("k2", b"abc")
+        assert r.delex("k2", ifne=b"abc") == 0  # equal → not deleted
+        assert r.get("k2") == b"abc"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_with_conditionon_nonstring_values(self, r):
+        r.lpush("nk", "x")
+        with pytest.raises(redis.ResponseError):
+            r.delex("nk", ifeq=b"x")
+        with pytest.raises(redis.ResponseError):
+            r.delex("nk", ifne=b"x")
+        with pytest.raises(redis.ResponseError):
+            r.delex("nk", ifdeq="deadbeef")
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize("val", [b"", b"abc", b"The quick brown fox"])
+    def test_delex_ifdeq_and_ifdne(self, r, val):
+        r.set("h", val)
+        d = self._server_xxh3_digest(r, "h")
+        assert d is not None
+
+        # IFDEQ should delete with exact digest
+        r.set("h", val)
+        assert r.delex("h", ifdeq=d) == 1
+        assert r.exists("h") == 0
+
+        # IFDNE should NOT delete when digest matches
+        r.set("h", val)
+        assert r.delex("h", ifdne=d) == 0
+        assert r.get("h") == val
+
+        # IFDNE should delete when digest doesn't match
+        r.set("h", val)
+        wrong = "0" * len(d)
+        if wrong == d:
+            wrong = "f" * len(d)
+        assert r.delex("h", ifdne=wrong) == 1
+        assert r.exists("h") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_pipeline(self, r):
+        r.mset({"p1": b"A", "p2": b"B"})
+        p = r.pipeline()
+        p.delex("p1", ifeq=b"A")
+        p.delex("p2", ifne=b"B")  # false → 0
+        p.delex("nope")  # nonexistent → 0
+        out = p.execute()
+        assert out == [1, 0, 0]
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_mutual_exclusion_client_side(self, r):
+        with pytest.raises(ValueError):
+            r.delex("k", ifeq=b"A", ifne=b"B")
+        with pytest.raises(ValueError):
+            r.delex("k", ifdeq="aa", ifdne="bb")
+
     @skip_if_server_version_lt("4.0.0")
     def test_unlink(self, r):
         assert r.unlink("a") == 0
