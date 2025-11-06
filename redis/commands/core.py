@@ -1835,6 +1835,21 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("EXPIRETIME", key)
 
+    def digest(self, name: KeyT) -> Optional[str]:
+        """
+        Return the digest of the value stored at the specified key.
+
+        Returns:
+          - None if the key does not exist
+          - (bulk string) the XXH3 digest of the value as a hex string
+        Raises:
+          - ResponseError if key exists but is not a string
+
+        For more information, see https://redis.io/commands/digest
+        """
+        # Bulk string response is already handled (bytes/str based on decode_responses)
+        return self.execute_command("DIGEST", name)
+
     def get(self, name: KeyT) -> ResponseT:
         """
         Return the value at key ``name``, or None if the key doesn't exist

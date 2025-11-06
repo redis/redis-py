@@ -1115,6 +1115,48 @@ class TestRedisCommands:
         assert await r.expireat("a", expire_at_seconds)
         assert 0 < await r.ttl("a") <= 61
 
+    @skip_if_server_version_lt("8.3.224")
+    async def test_digest_nonexistent_returns_none(self, r):
+        assert await r.digest("no:such:key") is None
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_digest_wrong_type_raises(self, r):
+        await r.lpush("alist", "x")
+        with pytest.raises(Exception):  # or redis.exceptions.ResponseError
+            await r.digest("alist")
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize(
+        "value", [b"", b"abc", b"The quick brown fox jumps over the lazy dog"]
+    )
+    async def test_digest_response_when_available(self, r, value):
+        key = "k:digest"
+        await r.delete(key)
+        await r.set(key, value)
+
+        res = await r.digest(key)
+        # got is str if decode_responses=True; ensure bytes->str for comparison
+        if isinstance(res, bytes):
+            res = res.decode()
+        assert res is not None
+        assert all(c in "0123456789abcdefABCDEF" for c in res)
+
+        assert len(res) == 16
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_pipeline_digest(self, r):
+        k1, k2 = "k:d1", "k:d2"
+        await r.mset({k1: b"A", k2: b"B"})
+        p = r.pipeline()
+        p.digest(k1)
+        p.digest(k2)
+        out = await p.execute()
+        assert len(out) == 2
+        for d in out:
+            if isinstance(d, bytes):
+                d = d.decode()
+            assert d is None or len(d) == 16
+
     async def test_get_and_set(self, r: redis.Redis):
         # get and set can't be tested independently of each other
         assert await r.get("a") is None
