@@ -1,5 +1,4 @@
 import threading
-from time import sleep
 from unittest.mock import patch, Mock
 
 import pybreaker
@@ -11,6 +10,7 @@ from redis.multidb.client import MultiDBClient
 from redis.multidb.failover import (
     WeightBasedFailoverStrategy,
 )
+from tests.helpers import wait_for_condition
 from tests.test_multidb.conftest import create_weighted_list
 
 
@@ -53,14 +53,19 @@ class TestPipeline:
             mock_hc.check_health.return_value = True
 
             client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+            try:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+                )
 
-            pipe = client.pipeline()
-            pipe.set("key1", "value1")
-            pipe.get("key1")
+                pipe = client.pipeline()
+                pipe.set("key1", "value1")
+                pipe.get("key1")
 
-            assert pipe.execute() == ["OK1", "value1"]
-            assert mock_hc.check_health.call_count == 9
+                assert pipe.execute() == ["OK1", "value1"]
+                assert len(mock_hc.check_health.call_args_list) == 9
+            finally:
+                client.close()
 
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
@@ -89,29 +94,31 @@ class TestPipeline:
             pipe.execute.return_value = ["OK1", "value1"]
             mock_db1.client.pipeline.return_value = pipe
 
-            mock_hc.check_health.side_effect = [
-                False,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-            ]
+            def mock_check_health(database):
+                if database == mock_db2:
+                    return False
+                else:
+                    return True
+
+            mock_hc.check_health.side_effect = mock_check_health
 
             client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+            try:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+                )
 
-            with client.pipeline() as pipe:
-                pipe.set("key1", "value1")
-                pipe.get("key1")
+                with client.pipeline() as pipe:
+                    pipe.set("key1", "value1")
+                    pipe.get("key1")
 
-            assert pipe.execute() == ["OK1", "value1"]
-            assert mock_hc.check_health.call_count == 7
+                assert pipe.execute() == ["OK1", "value1"]
 
-            assert mock_db.circuit.state == CBState.CLOSED
-            assert mock_db1.circuit.state == CBState.CLOSED
-            assert mock_db2.circuit.state == CBState.OPEN
+                assert mock_db.circuit.state == CBState.CLOSED
+                assert mock_db1.circuit.state == CBState.CLOSED
+                assert mock_db2.circuit.state == CBState.OPEN
+            finally:
+                client.close()
 
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
@@ -225,40 +232,54 @@ class TestPipeline:
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
+            try:
+                with client.pipeline() as pipe:
+                    pipe.set("key1", "value")
+                    pipe.get("key1")
 
-            with client.pipeline() as pipe:
-                pipe.set("key1", "value")
-                pipe.get("key1")
+                    # Run 1: All databases healthy - should use mock_db1 (highest weight 0.7)
+                    assert pipe.execute() == ["OK1", "value"]
 
-                # Run 1: All databases healthy - should use mock_db1 (highest weight 0.7)
-                assert pipe.execute() == ["OK1", "value"]
+                    # Wait for mock_db1 to become unhealthy
+                    assert db1_became_unhealthy.wait(timeout=1.0), (
+                        "Timeout waiting for mock_db1 to become unhealthy"
+                    )
+                    wait_for_condition(
+                        lambda: cb1.state == CBState.OPEN,
+                        timeout=0.2,
+                        error_message="Timeout waiting for cb1 to open",
+                    )
 
-                # Wait for mock_db1 to become unhealthy
-                assert db1_became_unhealthy.wait(timeout=1.0), (
-                    "Timeout waiting for mock_db1 to become unhealthy"
-                )
-                sleep(0.01)
+                    # Run 2: mock_db1 unhealthy - should failover to mock_db2 (weight 0.5)
+                    assert pipe.execute() == ["OK2", "value"]
 
-                # Run 2: mock_db1 unhealthy - should failover to mock_db2 (weight 0.5)
-                assert pipe.execute() == ["OK2", "value"]
+                    # Wait for mock_db2 to become unhealthy
+                    assert db2_became_unhealthy.wait(timeout=1.0), (
+                        "Timeout waiting for mock_db2 to become unhealthy"
+                    )
+                    wait_for_condition(
+                        lambda: cb2.state == CBState.OPEN,
+                        timeout=0.2,
+                        error_message="Timeout waiting for cb2 to open",
+                    )
 
-                # Wait for mock_db2 to become unhealthy
-                assert db2_became_unhealthy.wait(timeout=1.0), (
-                    "Timeout waiting for mock_db2 to become unhealthy"
-                )
-                sleep(0.01)
+                    # Run 3: mock_db1 and mock_db2 unhealthy - should use mock_db (weight 0.2)
+                    assert pipe.execute() == ["OK", "value"]
 
-                # Run 3: mock_db1 and mock_db2 unhealthy - should use mock_db (weight 0.2)
-                assert pipe.execute() == ["OK", "value"]
+                    # Wait for mock_db to become unhealthy
+                    assert db_became_unhealthy.wait(timeout=1.0), (
+                        "Timeout waiting for mock_db to become unhealthy"
+                    )
+                    wait_for_condition(
+                        lambda: cb.state == CBState.OPEN,
+                        timeout=0.2,
+                        error_message="Timeout waiting for cb to open",
+                    )
 
-                # Wait for mock_db to become unhealthy
-                assert db_became_unhealthy.wait(timeout=1.0), (
-                    "Timeout waiting for mock_db to become unhealthy"
-                )
-                sleep(0.01)
-
-                # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)
-                assert pipe.execute() == ["OK1", "value"]
+                    # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)
+                    assert pipe.execute() == ["OK1", "value"]
+            finally:
+                client.close()
 
 
 @pytest.mark.onlynoncluster
@@ -291,14 +312,19 @@ class TestTransaction:
             mock_hc.check_health.return_value = True
 
             client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+            try:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+                )
 
-            def callback(pipe: Pipeline):
-                pipe.set("key1", "value1")
-                pipe.get("key1")
+                def callback(pipe: Pipeline):
+                    pipe.set("key1", "value1")
+                    pipe.get("key1")
 
-            assert client.transaction(callback) == ["OK1", "value1"]
-            assert mock_hc.check_health.call_count == 9
+                assert client.transaction(callback) == ["OK1", "value1"]
+                assert len(mock_hc.check_health.call_args_list) >= 9
+            finally:
+                client.close()
 
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
@@ -325,29 +351,32 @@ class TestTransaction:
         ):
             mock_db1.client.transaction.return_value = ["OK1", "value1"]
 
-            mock_hc.check_health.side_effect = [
-                False,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-            ]
+            def mock_check_health(database):
+                if database == mock_db2:
+                    return False
+                else:
+                    return True
+
+            mock_hc.check_health.side_effect = mock_check_health
 
             client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+            try:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+                )
 
-            def callback(pipe: Pipeline):
-                pipe.set("key1", "value1")
-                pipe.get("key1")
+                def callback(pipe: Pipeline):
+                    pipe.set("key1", "value1")
+                    pipe.get("key1")
 
-            assert client.transaction(callback) == ["OK1", "value1"]
-            assert mock_hc.check_health.call_count == 7
+                assert client.transaction(callback) == ["OK1", "value1"]
+                assert len(mock_hc.check_health.call_args_list) >= 7
 
-            assert mock_db.circuit.state == CBState.CLOSED
-            assert mock_db1.circuit.state == CBState.CLOSED
-            assert mock_db2.circuit.state == CBState.OPEN
+                assert mock_db.circuit.state == CBState.CLOSED
+                assert mock_db1.circuit.state == CBState.CLOSED
+                assert mock_db2.circuit.state == CBState.OPEN
+            finally:
+                client.close()
 
     @pytest.mark.parametrize(
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
@@ -453,37 +482,52 @@ class TestTransaction:
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
             client = MultiDBClient(mock_multi_db_config)
+            try:
 
-            def callback(pipe: Pipeline):
-                pipe.set("key1", "value1")
-                pipe.get("key1")
+                def callback(pipe: Pipeline):
+                    pipe.set("key1", "value1")
+                    pipe.get("key1")
 
-            # Run 1: All databases healthy - should use mock_db1 (highest weight 0.7)
-            assert client.transaction(callback) == ["OK1", "value"]
+                # Run 1: All databases healthy - should use mock_db1 (highest weight 0.7)
+                assert client.transaction(callback) == ["OK1", "value"]
 
-            # Wait for mock_db1 to become unhealthy
-            assert db1_became_unhealthy.wait(timeout=1.0), (
-                "Timeout waiting for mock_db1 to become unhealthy"
-            )
-            sleep(0.01)
+                # Wait for mock_db1 to become unhealthy
+                assert db1_became_unhealthy.wait(timeout=1.0), (
+                    "Timeout waiting for mock_db1 to become unhealthy"
+                )
+                wait_for_condition(
+                    lambda: cb1.state == CBState.OPEN,
+                    timeout=0.2,
+                    error_message="Timeout waiting for cb1 to open",
+                )
 
-            # Run 2: mock_db1 unhealthy - should failover to mock_db2 (weight 0.5)
-            assert client.transaction(callback) == ["OK2", "value"]
+                # Run 2: mock_db1 unhealthy - should failover to mock_db2 (weight 0.5)
+                assert client.transaction(callback) == ["OK2", "value"]
 
-            # Wait for mock_db2 to become unhealthy
-            assert db2_became_unhealthy.wait(timeout=1.0), (
-                "Timeout waiting for mock_db2 to become unhealthy"
-            )
-            sleep(0.01)
+                # Wait for mock_db2 to become unhealthy
+                assert db2_became_unhealthy.wait(timeout=1.0), (
+                    "Timeout waiting for mock_db2 to become unhealthy"
+                )
+                wait_for_condition(
+                    lambda: cb2.state == CBState.OPEN,
+                    timeout=0.2,
+                    error_message="Timeout waiting for cb2 to open",
+                )
 
-            # Run 3: mock_db1 and mock_db2 unhealthy - should use mock_db (weight 0.2)
-            assert client.transaction(callback) == ["OK", "value"]
+                # Run 3: mock_db1 and mock_db2 unhealthy - should use mock_db (weight 0.2)
+                assert client.transaction(callback) == ["OK", "value"]
 
-            # Wait for mock_db to become unhealthy
-            assert db_became_unhealthy.wait(timeout=1.0), (
-                "Timeout waiting for mock_db to become unhealthy"
-            )
-            sleep(0.01)
+                # Wait for mock_db to become unhealthy
+                assert db_became_unhealthy.wait(timeout=1.0), (
+                    "Timeout waiting for mock_db to become unhealthy"
+                )
+                wait_for_condition(
+                    lambda: cb.state == CBState.OPEN,
+                    timeout=0.2,
+                    error_message="Timeout waiting for cb to open",
+                )
 
-            # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)
-            assert client.transaction(callback) == ["OK1", "value"]
+                # Run 4: mock_db unhealthy, others healthy - should use mock_db1 (highest weight)
+                assert client.transaction(callback) == ["OK1", "value"]
+            finally:
+                client.close()

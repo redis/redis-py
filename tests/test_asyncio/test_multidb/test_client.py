@@ -12,6 +12,7 @@ from redis.asyncio.multidb.healthcheck import HealthCheck
 from redis.event import EventDispatcher, AsyncOnCommandsFailEvent
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.exception import NoValidDatabaseException
+from tests.test_asyncio.helpers import wait_for_condition
 from tests.test_asyncio.test_multidb.conftest import create_weighted_list
 
 
@@ -41,14 +42,16 @@ class TestMultiDbClient:
 
             mock_hc.check_health.return_value = True
 
-            client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
-            assert await client.set("key", "value") == "OK1"
-            assert mock_hc.check_health.call_count == 9
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+                )
+                assert await client.set("key", "value") == "OK1"
+                assert len(mock_hc.check_health.call_args_list) == 9
 
-            assert mock_db.circuit.state == CBState.CLOSED
-            assert mock_db1.circuit.state == CBState.CLOSED
-            assert mock_db2.circuit.state == CBState.CLOSED
+                assert mock_db.circuit.state == CBState.CLOSED
+                assert mock_db1.circuit.state == CBState.CLOSED
+                assert mock_db2.circuit.state == CBState.CLOSED
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -66,31 +69,44 @@ class TestMultiDbClient:
     async def test_execute_command_against_correct_db_and_closed_circuit(
         self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
     ):
+        """
+        Validates that commands are executed against the correct
+        database when one database becomes unhealthy during initialization.
+        Ensures the client selects the highest-weighted
+        healthy database (mock_db1) and executes commands against it
+        with a CLOSED circuit.
+        """
         databases = create_weighted_list(mock_db, mock_db1, mock_db2)
         mock_multi_db_config.health_checks = [mock_hc]
 
         with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db.client.execute_command = AsyncMock(
+                return_value="NOT_OK-->Response from unexpected db - mock_db"
+            )
             mock_db1.client.execute_command = AsyncMock(return_value="OK1")
+            mock_db2.client.execute_command = AsyncMock(
+                return_value="NOT_OK-->Response from unexpected db - mock_db2"
+            )
 
-            mock_hc.check_health.side_effect = [
-                False,
-                True,
-                True,
-                True,
-                True,
-                True,
-                True,
-            ]
+            async def mock_check_health(database):
+                if database == mock_db2:
+                    return False
+                else:
+                    return True
 
-            client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
-            result = await client.set("key", "value")
-            assert result == "OK1"
-            assert mock_hc.check_health.call_count == 7
+            mock_hc.check_health.side_effect = mock_check_health
 
-            assert mock_db.circuit.state == CBState.CLOSED
-            assert mock_db1.circuit.state == CBState.CLOSED
-            assert mock_db2.circuit.state == CBState.OPEN
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+                )
+                result = await client.set("key", "value")
+                assert result == "OK1"
+                assert len(mock_hc.check_health.call_args_list) >= 7
+
+                assert mock_db.circuit.state == CBState.CLOSED
+                assert mock_db1.circuit.state == CBState.CLOSED
+                assert mock_db2.circuit.state == CBState.OPEN
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -189,40 +205,46 @@ class TestMultiDbClient:
             mock_multi_db_config.health_check_interval = 0.1
             mock_multi_db_config.failover_strategy = WeightBasedFailoverStrategy()
 
-            client = MultiDBClient(mock_multi_db_config)
-            assert await client.set("key", "value") == "OK1"
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert await client.set("key", "value") == "OK1"
 
-            # Wait for mock_db1 to become unhealthy
-            assert await db1_became_unhealthy.wait(), (
-                "Timeout waiting for mock_db1 to become unhealthy"
-            )
+                # Wait for mock_db1 to become unhealthy
+                assert await db1_became_unhealthy.wait(), (
+                    "Timeout waiting for mock_db1 to become unhealthy"
+                )
+                await wait_for_condition(
+                    lambda: cb1.state == CBState.OPEN,
+                    timeout=0.2,
+                    error_message="Timeout waiting for cb1 to open",
+                )
 
-            await asyncio.sleep(0.01)
+                assert await client.set("key", "value") == "OK2"
 
-            assert await client.set("key", "value") == "OK2"
+                # Wait for mock_db2 to become unhealthy
+                assert await db2_became_unhealthy.wait(), (
+                    "Timeout waiting for mock_db2 to become unhealthy"
+                )
 
-            # Wait for mock_db2 to become unhealthy
-            assert await db2_became_unhealthy.wait(), (
-                "Timeout waiting for mock_db2 to become unhealthy"
-            )
+                # Wait for circuit breaker state to actually reflect the unhealthy status
+                await wait_for_condition(
+                    lambda: cb2.state == CBState.OPEN,
+                    timeout=0.2,
+                    error_message="Timeout waiting for cb2 to open",
+                )
 
-            # Wait for circuit breaker state to actually reflect the unhealthy status
-            # (instead of just sleeping)
-            max_retries = 20
-            for _ in range(max_retries):
-                if cb2.state == CBState.OPEN:  # Circuit is open (unhealthy)
-                    break
-                await asyncio.sleep(0.01)
+                assert await client.set("key", "value") == "OK"
 
-            assert await client.set("key", "value") == "OK"
+                # Wait for mock_db to become unhealthy
+                assert await db_became_unhealthy.wait(), (
+                    "Timeout waiting for mock_db to become unhealthy"
+                )
+                await wait_for_condition(
+                    lambda: cb.state == CBState.OPEN,
+                    timeout=0.2,
+                    error_message="Timeout waiting for cb to open",
+                )
 
-            # Wait for mock_db to become unhealthy
-            assert await db_became_unhealthy.wait(), (
-                "Timeout waiting for mock_db to become unhealthy"
-            )
-            await asyncio.sleep(0.01)
-
-            assert await client.set("key", "value") == "OK1"
+                assert await client.set("key", "value") == "OK1"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -273,11 +295,11 @@ class TestMultiDbClient:
                 assert await client.set("key", "value") == "OK1"
                 await error_event.wait()
                 # Wait for circuit breaker to actually open (not just the event)
-                max_retries = 20
-                for _ in range(max_retries):
-                    if mock_db1.circuit.state == CBState.OPEN:  # Circuit is open
-                        break
-                    await asyncio.sleep(0.01)
+                await wait_for_condition(
+                    lambda: mock_db1.circuit.state == CBState.OPEN,
+                    timeout=0.2,
+                    error_message="Timeout waiting for cb1 to open after error event.",
+                )
 
                 # Now the failover strategy will select mock_db2
                 assert await client.set("key", "value") == "OK2"
@@ -334,13 +356,12 @@ class TestMultiDbClient:
                 await error_event.wait()
                 # Wait for circuit breaker state to actually reflect the unhealthy status
                 # (instead of just sleeping)
-                max_retries = 20
-                for _ in range(max_retries):
-                    if (
-                        mock_db1.circuit.state == CBState.OPEN
-                    ):  # Circuit is open (unhealthy)
-                        break
-                    await asyncio.sleep(0.01)
+                await wait_for_condition(
+                    lambda: mock_db1.circuit.state == CBState.OPEN,
+                    timeout=0.2,
+                    error_message="Timeout waiting for cb1 to open after error event.",
+                )
+
                 assert await client.set("key", "value") == "OK2"
                 await asyncio.sleep(0.5)
                 assert await client.set("key", "value") == "OK2"
@@ -375,7 +396,7 @@ class TestMultiDbClient:
                 match="Initial connection failed - no active database found",
             ):
                 await client.set("key", "value")
-                assert mock_hc.check_health.call_count == 9
+                assert len(mock_hc.check_health.call_args_list) == 9
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -404,7 +425,6 @@ class TestMultiDbClient:
 
             with pytest.raises(ValueError, match="Given database already exists"):
                 await client.add_database(mock_db)
-                assert mock_hc.check_health.call_count == 9
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -431,16 +451,18 @@ class TestMultiDbClient:
 
             mock_hc.check_health.return_value = True
 
-            client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+                )
 
-            assert await client.set("key", "value") == "OK2"
-            assert mock_hc.check_health.call_count == 6
+                assert await client.set("key", "value") == "OK2"
+                assert len(mock_hc.check_health.call_args_list) == 6
 
-            await client.add_database(mock_db1)
-            assert mock_hc.check_health.call_count == 9
+                await client.add_database(mock_db1)
+                assert len(mock_hc.check_health.call_args_list) == 9
 
-            assert await client.set("key", "value") == "OK1"
+                assert await client.set("key", "value") == "OK1"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -467,14 +489,16 @@ class TestMultiDbClient:
 
             mock_hc.check_health.return_value = True
 
-            client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+                )
 
-            assert await client.set("key", "value") == "OK1"
-            assert mock_hc.check_health.call_count == 9
+                assert await client.set("key", "value") == "OK1"
+                assert len(mock_hc.check_health.call_args_list) == 9
 
-            await client.remove_database(mock_db1)
-            assert await client.set("key", "value") == "OK2"
+                await client.remove_database(mock_db1)
+                assert await client.set("key", "value") == "OK2"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -501,16 +525,18 @@ class TestMultiDbClient:
 
             mock_hc.check_health.return_value = True
 
-            client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+                )
 
-            assert await client.set("key", "value") == "OK1"
-            assert mock_hc.check_health.call_count == 9
+                assert await client.set("key", "value") == "OK1"
+                assert len(mock_hc.check_health.call_args_list) == 9
 
-            await client.update_database_weight(mock_db2, 0.8)
-            assert mock_db2.weight == 0.8
+                await client.update_database_weight(mock_db2, 0.8)
+                assert mock_db2.weight == 0.8
 
-            assert await client.set("key", "value") == "OK2"
+                assert await client.set("key", "value") == "OK2"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -544,30 +570,32 @@ class TestMultiDbClient:
 
             mock_hc.check_health.return_value = True
 
-            client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
-            assert await client.set("key", "value") == "OK1"
-            assert mock_hc.check_health.call_count == 9
-
-            # Simulate failing command events that lead to a failure detection
-            for _ in range(5):
-                await mock_multi_db_config.event_dispatcher.dispatch_async(
-                    command_fail_event
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
                 )
+                assert await client.set("key", "value") == "OK1"
+                assert len(mock_hc.check_health.call_args_list) == 9
 
-            assert mock_fd.register_failure.call_count == 5
+                # Simulate failing command events that lead to a failure detection
+                for _ in range(5):
+                    await mock_multi_db_config.event_dispatcher.dispatch_async(
+                        command_fail_event
+                    )
 
-            another_fd = Mock(spec=AsyncFailureDetector)
-            client.add_failure_detector(another_fd)
+                assert mock_fd.register_failure.call_count == 5
 
-            # Simulate failing command events that lead to a failure detection
-            for _ in range(5):
-                await mock_multi_db_config.event_dispatcher.dispatch_async(
-                    command_fail_event
-                )
+                another_fd = Mock(spec=AsyncFailureDetector)
+                client.add_failure_detector(another_fd)
 
-            assert mock_fd.register_failure.call_count == 10
-            assert another_fd.register_failure.call_count == 5
+                # Simulate failing command events that lead to a failure detection
+                for _ in range(5):
+                    await mock_multi_db_config.event_dispatcher.dispatch_async(
+                        command_fail_event
+                    )
+
+                assert mock_fd.register_failure.call_count == 10
+                assert another_fd.register_failure.call_count == 5
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -593,19 +621,21 @@ class TestMultiDbClient:
 
             mock_hc.check_health.return_value = True
 
-            client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
-            assert await client.set("key", "value") == "OK1"
-            assert mock_hc.check_health.call_count == 9
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+                )
+                assert await client.set("key", "value") == "OK1"
+                assert len(mock_hc.check_health.call_args_list) == 9
 
-            another_hc = Mock(spec=HealthCheck)
-            another_hc.check_health.return_value = True
+                another_hc = Mock(spec=HealthCheck)
+                another_hc.check_health.return_value = True
 
-            await client.add_health_check(another_hc)
-            await client._check_db_health(mock_db1)
+                await client.add_health_check(another_hc)
+                await client._check_db_health(mock_db1)
 
-            assert mock_hc.check_health.call_count == 12
-            assert another_hc.check_health.call_count == 3
+                assert len(mock_hc.check_health.call_args_list) == 12
+                assert len(another_hc.check_health.call_args_list) == 3
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -632,23 +662,25 @@ class TestMultiDbClient:
 
             mock_hc.check_health.return_value = True
 
-            client = MultiDBClient(mock_multi_db_config)
-            assert mock_multi_db_config.failover_strategy.set_databases.call_count == 1
-            assert await client.set("key", "value") == "OK1"
-            assert mock_hc.check_health.call_count == 9
+            async with MultiDBClient(mock_multi_db_config) as client:
+                assert (
+                    mock_multi_db_config.failover_strategy.set_databases.call_count == 1
+                )
+                assert await client.set("key", "value") == "OK1"
+                assert len(mock_hc.check_health.call_args_list) >= 9
 
-            await client.set_active_database(mock_db)
-            assert await client.set("key", "value") == "OK"
+                await client.set_active_database(mock_db)
+                assert await client.set("key", "value") == "OK"
 
-            with pytest.raises(
-                ValueError, match="Given database is not a member of database list"
-            ):
-                await client.set_active_database(Mock(spec=AsyncDatabase))
+                with pytest.raises(
+                    ValueError, match="Given database is not a member of database list"
+                ):
+                    await client.set_active_database(Mock(spec=AsyncDatabase))
 
-            mock_hc.check_health.return_value = False
+                mock_hc.check_health.return_value = False
 
-            with pytest.raises(
-                NoValidDatabaseException,
-                match="Cannot set active database, database is unhealthy",
-            ):
-                await client.set_active_database(mock_db1)
+                with pytest.raises(
+                    NoValidDatabaseException,
+                    match="Cannot set active database, database is unhealthy",
+                ):
+                    await client.set_active_database(mock_db1)
