@@ -1,6 +1,8 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
+from redis.utils import experimental
+
 try:
     from typing import Self  # Py 3.11+
 except ImportError:
@@ -10,6 +12,7 @@ from redis.commands.search.aggregation import Limit, Reducer
 from redis.commands.search.query import Filter, SortbyField
 
 
+@experimental
 class HybridSearchQuery:
     def __init__(
         self,
@@ -65,6 +68,7 @@ class VectorSearchMethods(Enum):
     RANGE = "RANGE"
 
 
+@experimental
 class HybridVsimQuery:
     def __init__(
         self,
@@ -183,6 +187,7 @@ class CombinationMethods(Enum):
     LINEAR = "LINEAR"
 
 
+@experimental
 class CombineResultsMethod:
     def __init__(self, method: CombinationMethods, **kwargs) -> None:
         """
@@ -217,6 +222,7 @@ class CombineResultsMethod:
         return args
 
 
+@experimental
 class HybridPostProcessingConfig:
     def __init__(self) -> None:
         """
@@ -325,6 +331,7 @@ class HybridPostProcessingConfig:
         return args
 
 
+@experimental
 class HybridFilter(Filter):
     def __init__(
         self,
@@ -340,6 +347,7 @@ class HybridFilter(Filter):
         Filter.__init__(self, "FILTER", *args)
 
 
+@experimental
 class HybridCursorQuery:
     def __init__(self, count: int = 0, max_idle: int = 0) -> None:
         """
