@@ -301,7 +301,13 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             )
 
     def close(self):
-        self.command_executor.active_database.client.close()
+        """
+        Closes the client and all its resources.
+        """
+        if self._bg_scheduler:
+            self._bg_scheduler.stop()
+        if self.command_executor.active_database:
+            self.command_executor.active_database.client.close()
 
 
 def _half_open_circuit(circuit: CircuitBreaker):
