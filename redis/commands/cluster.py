@@ -61,6 +61,7 @@ READ_COMMANDS = frozenset(
         "GEOPOS",
         "GEORADIUS",
         "GEORADIUSBYMEMBER",
+        "DIGEST",
         "GET",
         "GETBIT",
         "GETRANGE",
