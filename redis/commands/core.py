@@ -47,6 +47,8 @@ from redis.typing import (
 )
 from redis.utils import (
     deprecated_function,
+    experimental_args,
+    experimental_method,
     extract_expire_flags,
 )
 
@@ -1729,6 +1731,7 @@ class BasicKeyCommands(CommandsProtocol):
     def __delitem__(self, name: KeyT):
         self.delete(name)
 
+    @experimental_method()
     def delex(
         self,
         name: KeyT,
@@ -1740,10 +1743,17 @@ class BasicKeyCommands(CommandsProtocol):
         """
         Conditionally removes the specified key.
 
-        ifeq match-value - Delete the key only if its value is equal to match-value
-        ifne match-value - Delete the key only if its value is not equal to match-value
-        ifdeq match-digest - Delete the key only if the digest of its value is equal to match-digest
-        ifdne match-digest - Delete the key only if the digest of its value is not equal to match-digest
+        Warning:
+        **Experimental** since 7.1.
+        This API may change or be removed without notice.
+        The API may change based on feedback.
+
+        Arguments:
+            name: KeyT - the key to delete
+            ifeq match-valu: Optional[Union[bytes, str]] - Delete the key only if its value is equal to match-value
+            ifne match-value: Optional[Union[bytes, str]] - Delete the key only if its value is not equal to match-value
+            ifdeq match-digest: Optional[str] - Delete the key only if the digest of its value is equal to match-digest
+            ifdne match-digest: Optional[str] - Delete the key only if the digest of its value is not equal to match-digest
 
         Returns:
             int: 1 if the key was deleted, 0 otherwise.
@@ -1878,9 +1888,18 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("EXPIRETIME", key)
 
+    @experimental_method()
     def digest(self, name: KeyT) -> Optional[str]:
         """
         Return the digest of the value stored at the specified key.
+
+        Warning:
+        **Experimental** since 7.1.
+        This API may change or be removed without notice.
+        The API may change based on feedback.
+
+        Arguments:
+          - name: KeyT - the key to get the digest of
 
         Returns:
           - None if the key does not exist
@@ -2385,6 +2404,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("RESTORE", *params)
 
+    @experimental_args(["ifeq", "ifne", "ifdeq", "ifdne"])
     def set(
         self,
         name: KeyT,
@@ -2404,6 +2424,12 @@ class BasicKeyCommands(CommandsProtocol):
     ) -> ResponseT:
         """
         Set the value at key ``name`` to ``value``
+
+        Warning:
+        **Experimental** since 7.1.
+        The usage of the arguments ``ifeq``, ``ifne``, ``ifdeq``, and ``ifdne``
+        is experimental. The API or returned results when those parameters are used
+        may change based on feedback.
 
         ``ex`` sets an expire flag on key ``name`` for ``ex`` seconds.
 
