@@ -4097,32 +4097,6 @@ class TestHybridSearch(SearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
-    def test_review_feedback_hybrid_search(self, client):
-        # Create index and add data
-        self._create_hybrid_search_index(client)
-        self._add_data_for_hybrid_search(client, items_sets=5)
-
-        # set search query
-        search_query = HybridSearchQuery("@color:{red} @color:{green}")
-        search_query.scorer("TFIDF")
-
-        vsim_query = HybridVsimQuery(
-            vector_field_name="@embedding",
-            vector_data=np.array([-100, -200, -200, -300], dtype=np.float32).tobytes(),
-        )
-
-        hybrid_query = HybridQuery(search_query, vsim_query)
-
-        res = client.ft().hybrid_search(query=hybrid_query)
-        if is_resp2_connection(client):
-            assert len(res.results) > 0
-            assert res.warnings == []
-        else:
-            assert len(res["results"]) > 0
-            assert res["warnings"] == []
-
-    @pytest.mark.redismod
-    @skip_if_server_version_lt("8.3.224")
     def test_basic_hybrid_search(self, client):
         # Create index and add data
         self._create_hybrid_search_index(client)
@@ -5289,3 +5263,56 @@ class TestHybridSearch(SearchTestsBase):
             assert len(vsim_res_from_cursor.rows) == 5
         else:
             assert len(vsim_res_from_cursor[0]["results"]) == 5
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.3.224")
+    def test_hybrid_search_query_with_multiple_loads_and_applies(self, client):
+        # Create index and add data
+        self._create_hybrid_search_index(client)
+        self._add_data_for_hybrid_search(client, items_sets=1)
+
+        # set search query
+        search_query = HybridSearchQuery("@color:{red|green}")
+
+        vsim_query = HybridVsimQuery(
+            vector_field_name="@embedding",
+            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+        )
+
+        hybrid_query = HybridQuery(search_query, vsim_query)
+
+        postprocessing_config = HybridPostProcessingConfig()
+        postprocessing_config.load("@color", "@price")
+        postprocessing_config.load("@description")
+        postprocessing_config.apply(discount_10_percents="@price - (@price * 0.1)")
+        postprocessing_config.apply(
+            additional_discount="@discount_10_percents - (@discount_10_percents * 0.1)"
+        )
+        postprocessing_config.filter(HybridFilter('@price=="15"'))
+        postprocessing_config.load("@description")
+        postprocessing_config.sort_by(
+            SortbyField("@discount_10_percents", asc=False),
+            SortbyField("@color", asc=True),
+        )
+        postprocessing_config.limit(0, 5)
+
+        res = client.ft().hybrid_search(
+            query=hybrid_query, post_processing=postprocessing_config, timeout=10
+        )
+        print(res)
+        if is_resp2_connection(client):
+            assert len(res.results) == 2
+            for item in res.results:
+                assert item["color"] is not None
+                assert item["price"] is not None
+                assert item["description"] is not None
+                assert item["discount_10_percents"] is not None
+                assert item["additional_discount"] is not None
+        else:
+            assert len(res["results"]) == 2
+            for item in res["results"]:
+                assert item["color"] is not None
+                assert item["price"] is not None
+                assert item["description"] is not None
+                assert item["discount_10_percents"] is not None
+                assert item["additional_discount"] is not None

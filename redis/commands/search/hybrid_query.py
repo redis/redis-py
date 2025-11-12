@@ -228,18 +228,21 @@ class HybridPostProcessingConfig:
         """
         Create a new hybrid post processing configuration object.
         """
-        self._load_fields = []
-        self._groupby = []
-        self._apply = []
+        self._load_statements = []
+        self._apply_statements = []
+        self._groupby_statements = []
         self._sortby_fields = []
         self._filter = None
         self._limit = None
 
     def load(self, *fields: str) -> Self:
         """
-        Add load parameters to the query.
+        Add load statement parameters to the query.
         """
-        self._load_fields = fields
+        if fields:
+            fields_str = " ".join(fields)
+            fields_list = fields_str.split(" ")
+            self._load_statements.extend(("LOAD", len(fields_list), *fields_list))
         return self
 
     def group_by(self, fields: List[str], *reducers: Reducer) -> Self:
@@ -262,7 +265,7 @@ class HybridPostProcessingConfig:
             if reducer._alias is not None:
                 ret.extend(("AS", reducer._alias))
 
-        self._groupby.extend(ret)
+        self._groupby_statements.extend(ret)
         return self
 
     def apply(self, **kwexpr) -> Self:
@@ -274,11 +277,14 @@ class HybridPostProcessingConfig:
                 the alias for the projection, and the value is the projection
                 expression itself, for example `apply(square_root="sqrt(@foo)")`.
         """
+        apply_args = []
         for alias, expr in kwexpr.items():
             ret = ["APPLY", expr]
             if alias is not None:
                 ret.extend(("AS", alias))
-            self._apply.extend(ret)
+            apply_args.extend(ret)
+
+        self._apply_statements.extend(apply_args)
 
         return self
 
@@ -310,14 +316,12 @@ class HybridPostProcessingConfig:
 
     def build_args(self) -> List[str]:
         args = []
-        if self._load_fields:
-            fields_str = " ".join(self._load_fields)
-            fields = fields_str.split(" ")
-            args.extend(("LOAD", len(fields), *fields))
-        if self._groupby:
-            args.extend(self._groupby)
-        if self._apply:
-            args.extend(self._apply)
+        if self._load_statements:
+            args.extend(self._load_statements)
+        if self._groupby_statements:
+            args.extend(self._groupby_statements)
+        if self._apply_statements:
+            args.extend(self._apply_statements)
         if self._sortby_fields:
             sortby_args = []
             for f in self._sortby_fields:
