@@ -1,13 +1,25 @@
 import itertools
 import time
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
+from redis._parsers.helpers import pairs_to_dict
 from redis.client import NEVER_DECODE, Pipeline
+from redis.commands.search.hybrid_query import (
+    CombineResultsMethod,
+    HybridCursorQuery,
+    HybridPostProcessingConfig,
+    HybridQuery,
+)
+from redis.commands.search.hybrid_result import HybridCursorResult, HybridResult
 from redis.utils import deprecated_function
 
 from ..helpers import get_protocol_version
 from ._util import to_string
-from .aggregation import AggregateRequest, AggregateResult, Cursor
+from .aggregation import (
+    AggregateRequest,
+    AggregateResult,
+    Cursor,
+)
 from .document import Document
 from .field import Field
 from .index_definition import IndexDefinition
@@ -47,6 +59,7 @@ SUGLEN_COMMAND = "FT.SUGLEN"
 SUGGET_COMMAND = "FT.SUGGET"
 SYNUPDATE_CMD = "FT.SYNUPDATE"
 SYNDUMP_CMD = "FT.SYNDUMP"
+HYBRID_CMD = "FT.HYBRID"
 
 NOOFFSETS = "NOOFFSETS"
 NOFIELDS = "NOFIELDS"
@@ -82,6 +95,28 @@ class SearchCommands:
             has_payload=kwargs["query"]._with_payloads,
             with_scores=kwargs["query"]._with_scores,
             field_encodings=kwargs["query"]._return_fields_decode_as,
+        )
+
+    def _parse_hybrid_search(self, res, **kwargs):
+        res_dict = pairs_to_dict(res, decode_keys=True)
+        if "cursor" in kwargs:
+            return HybridCursorResult(
+                search_cursor_id=int(res_dict["SEARCH"]),
+                vsim_cursor_id=int(res_dict["VSIM"]),
+            )
+
+        results: List[Dict[str, Any]] = []
+        # the original results are a list of lists
+        # we convert them to a list of dicts
+        for res_item in res_dict["results"]:
+            item_dict = pairs_to_dict(res_item, decode_keys=True)
+            results.append(item_dict)
+
+        return HybridResult(
+            total_results=int(res_dict["total_results"]),
+            results=results,
+            warnings=res_dict["warnings"],
+            execution_time=float(res_dict["execution_time"]),
         )
 
     def _parse_aggregate(self, res, **kwargs):
@@ -470,7 +505,7 @@ class SearchCommands:
             return []
         args = []
         if len(query_params) > 0:
-            args.append("params")
+            args.append("PARAMS")
             args.append(len(query_params) * 2)
             for key, value in query_params.items():
                 args.append(key)
@@ -524,6 +559,59 @@ class SearchCommands:
         return self._parse_results(
             SEARCH_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
+
+    def hybrid_search(
+        self,
+        query: HybridQuery,
+        combine_method: Optional[CombineResultsMethod] = None,
+        post_processing: Optional[HybridPostProcessingConfig] = None,
+        params_substitution: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
+        timeout: Optional[int] = None,
+        cursor: Optional[HybridCursorQuery] = None,
+    ) -> Union[HybridResult, HybridCursorResult, Pipeline]:
+        """
+        Execute a hybrid search using both text and vector queries
+
+        Args:
+            - **query**: HybridQuery object
+                        Contains the text and vector queries
+            - **combine_method**: CombineResultsMethod object
+                        Contains the combine method and parameters
+            - **post_processing**: HybridPostProcessingConfig object
+                        Contains the post processing configuration
+            - **params_substitution**: Dict[str, Union[str, int, float, bytes]]
+                        Contains the parameters substitution
+            - **timeout**: int - contains the timeout in milliseconds
+            - **cursor**: HybridCursorQuery object - contains the cursor configuration
+
+
+        For more information see `FT.SEARCH <https://redis.io/commands/ft.hybrid>`.
+        """
+        index = self.index_name
+        options = {}
+        pieces = [HYBRID_CMD, index]
+        pieces.extend(query.get_args())
+        if combine_method:
+            pieces.extend(combine_method.get_args())
+        if post_processing:
+            pieces.extend(post_processing.build_args())
+        if params_substitution:
+            pieces.extend(self.get_params_args(params_substitution))
+        if timeout:
+            pieces.extend(("TIMEOUT", timeout))
+        if cursor:
+            options["cursor"] = True
+            pieces.extend(cursor.build_args())
+
+        if get_protocol_version(self.client) not in ["3", 3]:
+            options[NEVER_DECODE] = True
+
+        res = self.execute_command(*pieces, **options)
+
+        if isinstance(res, Pipeline):
+            return res
+
+        return self._parse_results(HYBRID_CMD, res, **options)
 
     def explain(
         self,
@@ -964,6 +1052,59 @@ class AsyncSearchCommands(SearchCommands):
         return self._parse_results(
             SEARCH_CMD, res, query=query, duration=(time.monotonic() - st) * 1000.0
         )
+
+    async def hybrid_search(
+        self,
+        query: HybridQuery,
+        combine_method: Optional[CombineResultsMethod] = None,
+        post_processing: Optional[HybridPostProcessingConfig] = None,
+        params_substitution: Optional[Dict[str, Union[str, int, float, bytes]]] = None,
+        timeout: Optional[int] = None,
+        cursor: Optional[HybridCursorQuery] = None,
+    ) -> Union[HybridResult, HybridCursorResult, Pipeline]:
+        """
+        Execute a hybrid search using both text and vector queries
+
+        Args:
+            - **query**: HybridQuery object
+                        Contains the text and vector queries
+            - **combine_method**: CombineResultsMethod object
+                        Contains the combine method and parameters
+            - **post_processing**: HybridPostProcessingConfig object
+                        Contains the post processing configuration
+            - **params_substitution**: Dict[str, Union[str, int, float, bytes]]
+                        Contains the parameters substitution
+            - **timeout**: int - contains the timeout in milliseconds
+            - **cursor**: HybridCursorQuery object - contains the cursor configuration
+
+
+        For more information see `FT.SEARCH <https://redis.io/commands/ft.hybrid>`.
+        """
+        index = self.index_name
+        options = {}
+        pieces = [HYBRID_CMD, index]
+        pieces.extend(query.get_args())
+        if combine_method:
+            pieces.extend(combine_method.get_args())
+        if post_processing:
+            pieces.extend(post_processing.build_args())
+        if params_substitution:
+            pieces.extend(self.get_params_args(params_substitution))
+        if timeout:
+            pieces.extend(("TIMEOUT", timeout))
+        if cursor:
+            options["cursor"] = True
+            pieces.extend(cursor.build_args())
+
+        if get_protocol_version(self.client) not in ["3", 3]:
+            options[NEVER_DECODE] = True
+
+        res = await self.execute_command(*pieces, **options)
+
+        if isinstance(res, Pipeline):
+            return res
+
+        return self._parse_results(HYBRID_CMD, res, **options)
 
     async def aggregate(
         self,
