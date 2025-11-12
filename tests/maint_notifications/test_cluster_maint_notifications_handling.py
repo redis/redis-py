@@ -1,21 +1,27 @@
 from typing import cast
 
-from redis import RedisCluster
+from redis import ConnectionPool, RedisCluster
 from redis.cluster import ClusterNode
-from redis.connection import BlockingConnectionPool
+from redis.connection import (
+    BlockingConnectionPool,
+)
 from redis.maint_notifications import MaintNotificationsConfig
-from redis.cache import CacheConfig  # noqa: F401
+from redis.cache import CacheConfig
+from tests.maint_notifications.proxy_server_helpers import (
+    ProxyInterceptorHelper,
+    RespTranslator,
+)
+
+# Initial cluster node configuration for proxy-based tests
+PROXY_CLUSTER_NODES = [
+    ClusterNode("127.0.0.1", 15379),
+    ClusterNode("127.0.0.1", 15380),
+    ClusterNode("127.0.0.1", 15381),
+]
 
 
 class TestClusterMaintNotificationsConfig:
     """Test the maint_notifications_config parameter of RedisCluster."""
-
-    # Real cluster node configuration
-    CLUSTER_NODES = [
-        ClusterNode("127.0.0.1", 15379),
-        ClusterNode("127.0.0.1", 15380),
-        ClusterNode("127.0.0.1", 15381),
-    ]
 
     # Helper methods
     def _create_cluster_client(
@@ -27,7 +33,7 @@ class TestClusterMaintNotificationsConfig:
     ):
         """Create a RedisCluster instance with real cluster nodes."""
         kwargs = {
-            "startup_nodes": self.CLUSTER_NODES,
+            "startup_nodes": PROXY_CLUSTER_NODES,
             "protocol": 3,
             "skip_full_coverage_check": skip_full_coverage_check,
         }
@@ -266,3 +272,72 @@ class TestClusterMaintNotificationsConfig:
             assert results[3] == b"value2"  # GET returns value
         finally:
             cluster.close()
+
+
+class TestClusterMaintNotificationsHandlingBase:
+    """Base class for maintenance notifications handling tests."""
+
+    def setup_method(self):
+        """Set up test fixtures with mocked sockets."""
+        self.proxy_helper = ProxyInterceptorHelper()
+
+        # Create maintenance notifications config
+        self.config = MaintNotificationsConfig(
+            enabled="auto", proactive_reconnect=True, relaxed_timeout=30
+        )
+        self.cluster = self._create_cluster_client(maint_config=self.config)
+
+    def _create_cluster_client(
+        self,
+        pool_class=ConnectionPool,
+        enable_cache=False,
+        max_connections=10,
+        maint_config=None,
+    ) -> RedisCluster:
+        """Create a RedisCluster instance with mocked sockets."""
+        config = maint_config if maint_config is not None else self.config
+        kwargs = {}
+        if enable_cache:
+            kwargs = {"cache_config": CacheConfig()}
+
+        test_redis_client = RedisCluster(
+            protocol=3,
+            startup_nodes=PROXY_CLUSTER_NODES,
+            maint_notifications_config=config,
+            connection_pool_class=pool_class,
+            max_connections=max_connections,
+            **kwargs,
+        )
+
+        return test_redis_client
+
+    def teardown_method(self):
+        """Clean up test fixtures."""
+        self.cluster.close()
+        self.proxy_helper.cleanup_interceptors()
+
+
+class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlingBase):
+    """Test maintenance notifications handling with RedisCluster."""
+
+    def test_receive_maint_notification(self):
+        """Test receiving a maintenance notification."""
+        self.cluster.set("test", "VAL")
+        pubsub = self.cluster.pubsub()
+        pubsub.subscribe("test")
+        test_msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=10)
+        print(test_msg)
+
+        # Try to send a push notification to the clients of given server node
+        # Server node is defined by its port with the local test environment
+        # The message should be in the format:
+        # >3\r\n$7\r\nmessage\r\n$3\r\nfoo\r\n$4\r\neeee\r
+        notification = RespTranslator.smigrating_to_resp(
+            "TEST_NOTIFICATION 12182 127.0.0.1:15380"
+        )
+        self.proxy_helper.send_notification(pubsub.connection.port, notification)
+        res = self.proxy_helper.get_connections()
+        print(res)
+
+        test_msg = pubsub.get_message(timeout=1)
+        print(test_msg)

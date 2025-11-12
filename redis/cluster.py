@@ -608,11 +608,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             reach them, such as when they sit behind a proxy.
 
         :param maint_notifications_config:
-            configures the nodes connections to support maintenance notifications - see
+            Configures the nodes connections to support maintenance notifications - see
             `redis.maint_notifications.MaintNotificationsConfig` for details.
-            Only supported with RESP3
+            Only supported with RESP3.
             If not provided and protocol is RESP3, the maintenance notifications
-            will be enabled by default (logic is included in the connection pool
+            will be enabled by default (logic is included in the NodesManager
             initialization).
          :**kwargs:
              Extra arguments that will be sent into Redis instance when created
@@ -1632,7 +1632,9 @@ class NodesManager:
         cache_config: Optional[CacheConfig] = None,
         cache_factory: Optional[CacheFactoryInterface] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
-        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        maint_notifications_config: Optional[
+            MaintNotificationsConfig
+        ] = MaintNotificationsConfig(),
         **kwargs,
     ):
         self.nodes_cache: Dict[str, Redis] = {}
@@ -1842,7 +1844,7 @@ class NodesManager:
         )
 
         if self.from_url:
-            # Create a redis node with a costumed connection pool
+            # Create a redis node with a custom connection pool
             kwargs.update({"host": host})
             kwargs.update({"port": port})
             kwargs.update({"cache": self._cache})
