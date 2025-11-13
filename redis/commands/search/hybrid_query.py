@@ -77,6 +77,7 @@ class HybridVsimQuery:
         vsim_search_method: Optional[VectorSearchMethods] = None,
         vsim_search_method_params: Optional[Dict[str, Any]] = None,
         filter: Optional["Filter"] = None,
+        yield_score_as: Optional[str] = None,
     ) -> None:
         """
         Create a new hybrid vsim query object.
@@ -96,8 +97,7 @@ class HybridVsimQuery:
                 Example for RANGE: {"RADIUS": 10, "EPSILON": 0.1}
                                     where RADIUS is mandatory and defines the radius of the search
                                     and EPSILON is optional and defines the accuracy of the search.
-                For both KNN and RANGE, the following parameter is optional:
-                    YIELD_SCORE_AS: The name of the field to yield the calculated score as.
+            yield_score_as: The name of the field to yield the score as.
 
             filter: If defined, a filter will be applied on the vsim query results.
         """
@@ -108,6 +108,7 @@ class HybridVsimQuery:
         else:
             self._vsim_method_params = None
         self._filter = filter
+        self._yield_score_as = yield_score_as
 
     def vector_field(self) -> str:
         """Return the vector field name of this query object."""
@@ -149,12 +150,21 @@ class HybridVsimQuery:
         self._filter = flt
         return self
 
+    def yield_score_as(self, alias: str) -> "HybridVsimQuery":
+        """
+        Return the score as a field with name `alias`.
+        """
+        self._yield_score_as = alias
+        return self
+
     def get_args(self) -> List[str]:
         args = ["VSIM", self._vector_field, self._vector_data]
         if self._vsim_method_params:
             args.extend(self._vsim_method_params)
         if self._filter:
             args.extend(self._filter.args)
+        if self._yield_score_as:
+            args.extend(("YIELD_SCORE_AS", self._yield_score_as))
 
         return args
 
