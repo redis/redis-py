@@ -441,7 +441,7 @@ class TestMaintenanceNotificationsBase:
             setup_pool_handler: Whether to set up pool handler for moving notifications (default: False)
 
         Returns:
-            tuple: (test_pool, test_redis_client)
+            test_redis_client
         """
         config = (
             maint_notifications_config

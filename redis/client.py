@@ -281,7 +281,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             if `True`, the response will be decoded to utf-8.
             Argument is ignored when connection_pool is provided.
         maint_notifications_config:
-            configuration the pool to support maintenance notifications - see
+            configures the pool to support maintenance notifications - see
             `redis.maint_notifications.MaintNotificationsConfig` for details.
             Only supported with RESP3
             If not provided and protocol is RESP3, the maintenance notifications
