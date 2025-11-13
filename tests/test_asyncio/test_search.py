@@ -2636,11 +2636,8 @@ class TestHybridSearch(AsyncSearchTestsBase):
             vector_field_name="@embedding-hnsw",
             vector_data="abcd1234efgh5678",
             vsim_search_method=VectorSearchMethods.KNN,
-            vsim_search_method_params={
-                "K": 3,
-                "EF_RUNTIME": 1,
-                "YIELD_SCORE_AS": "vsim_score",
-            },
+            vsim_search_method_params={"K": 3, "EF_RUNTIME": 1},
+            yield_score_as="vsim_score",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
