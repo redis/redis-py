@@ -1,7 +1,16 @@
 import asyncio
 import random
 import weakref
-from typing import AsyncIterator, Iterable, Mapping, Optional, Sequence, Tuple, Type
+from typing import (
+    AsyncIterator,
+    Dict,
+    Iterable,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+)
 
 from redis.asyncio.client import Redis
 from redis.asyncio.connection import (
@@ -17,6 +26,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.utils import deprecated_args
 
 
 class MasterNotFoundError(ConnectionError):
@@ -121,6 +131,7 @@ class SentinelConnectionPool(ConnectionPool):
         self.sentinel_manager = sentinel_manager
         self.master_address = None
         self.slave_rr_counter = None
+        self._iter_req_connections: Dict[str, tuple] = {}
 
     def __repr__(self):
         return (
@@ -165,6 +176,57 @@ class SentinelConnectionPool(ConnectionPool):
         except MasterNotFoundError:
             pass
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
+
+    async def cleanup(self, iter_req_id: str):
+        """Remove tracking for a completed iteration request."""
+        self._iter_req_connections.pop(iter_req_id, None)
+
+    @deprecated_args(
+        args_to_warn=["*"],
+        reason="Use get_connection() without args instead",
+        version="5.3.0",
+    )
+    async def get_connection(self, command_name=None, *keys, **options):
+        """
+        Get a connection from the pool, with special handling for scan commands.
+
+        For scan commands with iter_req_id, ensures the same replica is used
+        throughout the iteration to maintain cursor consistency.
+        """
+        iter_req_id = options.get("iter_req_id")
+
+        # For scan commands with iter_req_id, ensure we use the same replica
+        if iter_req_id and not self.is_master:
+            # Check if we've already established a connection for this iteration
+            if iter_req_id in self._iter_req_connections:
+                target_address = self._iter_req_connections[iter_req_id]
+                connection = await super().get_connection()
+                # If the connection doesn't match our target, try to get the right one
+                if (connection.host, connection.port) != target_address:
+                    # Release this connection and try to find one for the target replica
+                    await self.release(connection)
+                    # For now, use the connection we got and update tracking
+                    connection = await super().get_connection()
+                    await connection.connect_to(target_address)
+                return connection
+            else:
+                # First time for this iter_req_id, get a connection and track its replica
+                connection = await super().get_connection()
+                # Get the replica address this connection will use
+                if hasattr(connection, "connect_to"):
+                    # Let the connection establish to its target replica
+                    try:
+                        replica_address = await self.rotate_slaves().__anext__()
+                        await connection.connect_to(replica_address)
+                        # Track this replica for future requests with this iter_req_id
+                        self._iter_req_connections[iter_req_id] = replica_address
+                    except (SlaveNotFoundError, StopAsyncIteration):
+                        # Fallback to normal connection if no slaves available
+                        pass
+                return connection
+
+        # For non-scan commands or master connections, use normal behavior
+        return await super().get_connection()
 
 
 class Sentinel(AsyncSentinelCommands):
