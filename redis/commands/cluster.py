@@ -78,6 +78,7 @@ READ_COMMANDS = frozenset(
         "GETRANGE",
         "MGET",
         "STRLEN",
+        "LCS",
         # Geo Operations
         "GEODIST",
         "GEOHASH",
@@ -103,7 +104,6 @@ READ_COMMANDS = frozenset(
         "LPOS",
         "LLEN",
         "LRANGE",
-        "LCS",
         # Set Operations
         "SCARD",
         "SDIFF",
