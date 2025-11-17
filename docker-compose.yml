@@ -6,6 +6,9 @@ x-client-libs-stack-image: &client-libs-stack-image
 x-client-libs-image: &client-libs-image
   image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-8.4.0}"
 
+networks:
+  redis-net:
+    driver: bridge
 services:
 
   redis:
@@ -106,3 +109,42 @@ services:
       - standalone
       - all-stack
       - all
+
+  redis-proxied:
+    <<: *client-libs-image
+    container_name: redis-proxied
+    ports:
+      - "3000:3000"
+    networks:
+      - redis-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "3000", "PING"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  resp-proxy:
+    image: redislabs/client-resp-proxy
+    container_name: resp-proxy
+    environment:
+      LISTEN_HOST: "0.0.0.0"
+      LISTEN_PORT: "15379,15380,15381"
+      TARGET_HOST: "redis-proxied"
+      TARGET_PORT: "3000"
+      API_PORT: "4000"
+      ENABLE_LOGGING: true
+      SIMULATE_CLUSTER: true
+    ports:
+      - "15379:15379"
+      - "15380:15380"
+      - "15381:15381"
+      - "4000:4000"
+    depends_on:
+      - redis-proxied
+    networks:
+      - redis-net
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://localhost:4000/stats || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
