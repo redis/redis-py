@@ -296,7 +296,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         lib_version:
             **Deprecated.** Use driver_info instead. Library version for CLIENT SETINFO.
         maint_notifications_config:
-            configuration the pool to support maintenance notifications - see
+            configures the pool to support maintenance notifications - see
             `redis.maint_notifications.MaintNotificationsConfig` for details.
             Only supported with RESP3
             If not provided and protocol is RESP3, the maintenance notifications

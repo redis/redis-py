@@ -208,6 +208,7 @@ REDIS_ALLOWED_KEYS = (
     "username",
     "cache",
     "cache_config",
+    "maint_notifications_config",
 )
 KWARGS_DISABLED_KEYS = ("host", "port", "retry")
 
@@ -547,6 +548,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: PolicyResolver = StaticPolicyResolver(),
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         **kwargs,
     ):
         """
@@ -617,6 +619,13 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             which the nodes _think_ they are, to addresses at which a client may
             reach them, such as when they sit behind a proxy.
 
+        :param maint_notifications_config:
+            Configures the nodes connections to support maintenance notifications - see
+            `redis.maint_notifications.MaintNotificationsConfig` for details.
+            Only supported with RESP3.
+            If not provided and protocol is RESP3, the maintenance notifications
+            will be enabled by default (logic is included in the NodesManager
+            initialization).
          :**kwargs:
              Extra arguments that will be sent into Redis instance when created
              (See Official redis-py doc for supported kwargs - the only limitation
@@ -721,6 +730,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             cache=cache,
             cache_config=cache_config,
             event_dispatcher=self._event_dispatcher,
+            maint_notifications_config=maint_notifications_config,
             **kwargs,
         )
 
@@ -1647,6 +1657,9 @@ class NodesManager:
         cache_config: Optional[CacheConfig] = None,
         cache_factory: Optional[CacheFactoryInterface] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
+        maint_notifications_config: Optional[
+            MaintNotificationsConfig
+        ] = MaintNotificationsConfig(),
         **kwargs,
     ):
         self.nodes_cache: dict[str, ClusterNode] = {}
@@ -1687,6 +1700,7 @@ class NodesManager:
         self._credential_provider = self.connection_kwargs.get(
             "credential_provider", None
         )
+        self.maint_notifications_config = maint_notifications_config
         self.initialize()
 
     def get_node(
@@ -1859,7 +1873,10 @@ class NodesManager:
         for node in nodes:
             if node.redis_connection is None:
                 node.redis_connection = self.create_redis_node(
-                    host=node.host, port=node.port, **self.connection_kwargs
+                    host=node.host,
+                    port=node.port,
+                    maint_notifications_config=self.maint_notifications_config,
+                    **self.connection_kwargs,
                 )
                 connection_pools.append(node.redis_connection.connection_pool)
 
@@ -1869,7 +1886,12 @@ class NodesManager:
             )
         )
 
-    def create_redis_node(self, host, port, **kwargs):
+    def create_redis_node(
+        self,
+        host,
+        port,
+        **kwargs,
+    ):
         # We are configuring the connection pool not to retry
         # connections on lower level clients to avoid retrying
         # connections to nodes that are not reachable
@@ -1883,13 +1905,8 @@ class NodesManager:
             backoff=NoBackoff(), retries=0, supported_errors=(ConnectionError,)
         )
 
-        protocol = kwargs.get("protocol", None)
-        if protocol in [3, "3"]:
-            kwargs.update(
-                {"maint_notifications_config": MaintNotificationsConfig(enabled=False)}
-            )
         if self.from_url:
-            # Create a redis node with a costumed connection pool
+            # Create a redis node with a custom connection pool
             kwargs.update({"host": host})
             kwargs.update({"port": port})
             kwargs.update({"cache": self._cache})
@@ -1967,7 +1984,10 @@ class NodesManager:
                     else:
                         # Create a new Redis connection
                         r = self.create_redis_node(
-                            startup_node.host, startup_node.port, **kwargs
+                            startup_node.host,
+                            startup_node.port,
+                            maint_notifications_config=self.maint_notifications_config,
+                            **kwargs,
                         )
                         self.startup_nodes[startup_node.name].redis_connection = r
                     try:
