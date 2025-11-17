@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, List, Literal, Optional, Union
 
 from redis.typing import Number
 
+if TYPE_CHECKING:
+    from redis.cluster import NodesManager
+
 
 class MaintenanceState(enum.Enum):
     NONE = "none"
@@ -886,6 +889,7 @@ class MaintNotificationsConnectionHandler:
     _NOTIFICATION_TYPES: dict[type["MaintenanceNotification"], int] = {
         NodeMigratingNotification: 1,
         NodeFailingOverNotification: 1,
+        OSSNodeMigratingNotification: 1,
         NodeMigratedNotification: 0,
         NodeFailedOverNotification: 0,
     }
@@ -939,3 +943,31 @@ class MaintNotificationsConnectionHandler:
         # timeouts by providing -1 as the relaxed timeout
         self.connection.update_current_socket_timeout(-1)
         self.connection.maintenance_state = MaintenanceState.NONE
+
+
+class OSSMaintNotificationsHandler:
+    def __init__(
+        self, nodes_manager: "NodesManager", config: MaintNotificationsConfig
+    ) -> None:
+        self.nodes_manager = nodes_manager
+        self.config = config
+        self._processed_notifications = set()
+        self._lock = threading.RLock()
+
+    def remove_expired_notifications(self):
+        with self._lock:
+            for notification in tuple(self._processed_notifications):
+                if notification.is_expired():
+                    self._processed_notifications.remove(notification)
+
+    def handle_notification(self, notification: MaintenanceNotification):
+        if isinstance(notification, OSSNodeMigratedNotification):
+            self.handle_oss_maintenance_completed_notification(notification)
+        else:
+            logging.error(f"Unhandled notification type: {notification}")
+
+    def handle_oss_maintenance_completed_notification(
+        self, notification: OSSNodeMigratedNotification
+    ):
+        self.remove_expired_notifications()
+        logging.info(f"Received OSS maintenance completed notification: {notification}")

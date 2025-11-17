@@ -1,5 +1,6 @@
 import base64
 import logging
+import re
 from typing import Union
 
 from redis.http.http_client import HttpClient, HttpError
@@ -9,6 +10,19 @@ from redis.http.http_client import HttpClient, HttpError
 
 class RespTranslator:
     """Helper class to translate between RESP and other encodings."""
+
+    @staticmethod
+    def str_or_list_to_resp(txt: str) -> str:
+        """
+        Convert specific string or list to RESP format.
+        """
+        if re.match(r"^<.*>$", txt):
+            items = txt[1:-1].split(",")
+            return f"*{len(items)}\r\n" + "\r\n".join(
+                f"${len(x)}\r\n{x}" for x in items
+            )
+        else:
+            return f"${len(txt)}\r\n{txt}"
 
     @staticmethod
     def cluster_slots_to_resp(resp: str) -> str:
@@ -24,7 +38,9 @@ class RespTranslator:
         """Convert query to RESP format."""
         return (
             f">{len(resp.split())}\r\n"
-            + "\r\n".join(f"${len(x)}\r\n{x}" for x in resp.split())
+            + "\r\n".join(
+                f"{RespTranslator.str_or_list_to_resp(x)}" for x in resp.split()
+            )
             + "\r\n"
         )
 
@@ -118,6 +134,8 @@ class ProxyInterceptorHelper:
 
         try:
             response = self.http_client.get(url)
+            if isinstance(response, dict):
+                return response
             return response.json()
 
         except HttpError as e:
@@ -134,6 +152,8 @@ class ProxyInterceptorHelper:
 
         try:
             response = self.http_client.get(url)
+            if isinstance(response, dict):
+                return response
             return response.json()
         except HttpError as e:
             raise RuntimeError(f"Failed to get connections: {e}")
@@ -192,7 +212,9 @@ class ProxyInterceptorHelper:
         data = base64.b64encode(notification.encode("utf-8"))
 
         try:
-            response = self.http_client.post(url, json_body=data)
+            response = self.http_client.post(url, data=data)
+            if isinstance(response, dict):
+                return response
             results = response.json()
         except HttpError as e:
             results = {"error": str(e)}

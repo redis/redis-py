@@ -49,6 +49,7 @@ class _HiredisParser(BaseParser, PushNotificationsParser):
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
         self.node_moving_push_handler_func = None
         self.maintenance_push_handler_func = None
+        self.oss_cluster_maint_push_handler_func = None
         self.invalidation_push_handler_func = None
         self._hiredis_PushNotificationType = None
 
