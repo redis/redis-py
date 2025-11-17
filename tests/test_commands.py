@@ -2986,6 +2986,7 @@ class TestRedisCommands:
         assert r.rpushx("a", "4") == 4
         assert r.lrange("a", 0, -1) == [b"1", b"2", b"3", b"4"]
 
+    @pytest.mark.onlynoncluster
     def test_lists_with_byte_keys(self, r):
         r.rpush(b"b", b"1", b"2", b"3")
         assert r.lrange(b"b", 0, -1) == [b"1", b"2", b"3"]
@@ -3023,6 +3024,7 @@ class TestRedisCommands:
         assert r.smove(b"set_src", b"set_dest", b"member1") == 1
         assert b"member1" in r.smembers(b"set_dest")
 
+    @pytest.mark.onlynoncluster
     def test_lists_with_memoryview_keys(self, r):
         # Create memoryview objects for key names
         mv_b = memoryview(b"b")
