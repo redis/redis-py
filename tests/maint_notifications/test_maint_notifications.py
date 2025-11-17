@@ -11,6 +11,8 @@ from redis.maint_notifications import (
     NodeMigratedNotification,
     NodeFailingOverNotification,
     NodeFailedOverNotification,
+    OSSNodeMigratingNotification,
+    OSSNodeMigratedNotification,
     MaintNotificationsConfig,
     MaintNotificationsPoolHandler,
     MaintNotificationsConnectionHandler,
@@ -379,6 +381,238 @@ class TestNodeFailedOverNotification:
         assert notification1 != notification3
         assert hash(notification1) == hash(notification2)
         assert hash(notification1) != hash(notification3)
+
+
+class TestOSSNodeMigratingNotification:
+    """Test the OSSNodeMigratingNotification class."""
+
+    def test_init_with_defaults(self):
+        """Test OSSNodeMigratingNotification initialization with default values."""
+        with patch("time.monotonic", return_value=1000):
+            notification = OSSNodeMigratingNotification(id=1)
+            assert notification.id == 1
+            assert notification.ttl == OSSNodeMigratingNotification.DEFAULT_TTL
+            assert notification.creation_time == 1000
+            assert notification.src_node is None
+            assert notification.dest_node is None
+            assert notification.slots is None
+
+    def test_init_with_all_parameters(self):
+        """Test OSSNodeMigratingNotification initialization with all parameters."""
+        with patch("time.monotonic", return_value=1000):
+            slots = [1, 2, 3, 4, 5]
+            notification = OSSNodeMigratingNotification(
+                id=1,
+                src_node="127.0.0.1:6379",
+                dest_node="127.0.0.1:6380",
+                slots=slots,
+            )
+            assert notification.id == 1
+            assert notification.ttl == OSSNodeMigratingNotification.DEFAULT_TTL
+            assert notification.creation_time == 1000
+            assert notification.src_node == "127.0.0.1:6379"
+            assert notification.dest_node == "127.0.0.1:6380"
+            assert notification.slots == slots
+
+    def test_default_ttl(self):
+        """Test that DEFAULT_TTL is used correctly."""
+        assert OSSNodeMigratingNotification.DEFAULT_TTL == 30
+        notification = OSSNodeMigratingNotification(id=1)
+        assert notification.ttl == 30
+
+    def test_repr(self):
+        """Test OSSNodeMigratingNotification string representation."""
+        with patch("time.monotonic", return_value=1000):
+            notification = OSSNodeMigratingNotification(
+                id=1,
+                src_node="127.0.0.1:6379",
+                dest_node="127.0.0.1:6380",
+                slots=[1, 2, 3],
+            )
+
+        with patch("time.monotonic", return_value=1005):  # 5 seconds later
+            repr_str = repr(notification)
+            assert "OSSNodeMigratingNotification" in repr_str
+            assert "id=1" in repr_str
+            assert "ttl=30" in repr_str
+            assert "remaining=25.0s" in repr_str
+            assert "expired=False" in repr_str
+
+    def test_equality_same_id_and_type(self):
+        """Test equality for notifications with same id and type."""
+        notification1 = OSSNodeMigratingNotification(
+            id=1,
+            src_node="127.0.0.1:6379",
+            dest_node="127.0.0.1:6380",
+            slots=[1, 2, 3],
+        )
+        notification2 = OSSNodeMigratingNotification(
+            id=1,
+            src_node="127.0.0.1:6381",
+            dest_node="127.0.0.1:6382",
+            slots=[4, 5, 6],
+        )
+        # Should be equal because id and type are the same
+        assert notification1 == notification2
+
+    def test_equality_different_id(self):
+        """Test inequality for notifications with different id."""
+        notification1 = OSSNodeMigratingNotification(id=1)
+        notification2 = OSSNodeMigratingNotification(id=2)
+        assert notification1 != notification2
+
+    def test_equality_different_type(self):
+        """Test inequality for notifications of different types."""
+        notification1 = OSSNodeMigratingNotification(id=1)
+        notification2 = NodeMigratingNotification(id=1, ttl=30)
+        assert notification1 != notification2
+
+    def test_hash_same_id_and_type(self):
+        """Test hash for notifications with same id and type."""
+        notification1 = OSSNodeMigratingNotification(
+            id=1,
+            src_node="127.0.0.1:6379",
+            dest_node="127.0.0.1:6380",
+            slots=[1, 2, 3],
+        )
+        notification2 = OSSNodeMigratingNotification(
+            id=1,
+            src_node="127.0.0.1:6381",
+            dest_node="127.0.0.1:6382",
+            slots=[4, 5, 6],
+        )
+        # Should have same hash because id and type are the same
+        assert hash(notification1) == hash(notification2)
+
+    def test_hash_different_id(self):
+        """Test hash for notifications with different id."""
+        notification1 = OSSNodeMigratingNotification(id=1)
+        notification2 = OSSNodeMigratingNotification(id=2)
+        assert hash(notification1) != hash(notification2)
+
+    def test_in_set(self):
+        """Test that notifications can be used in sets."""
+        notification1 = OSSNodeMigratingNotification(id=1)
+        notification2 = OSSNodeMigratingNotification(id=1)
+        notification3 = OSSNodeMigratingNotification(id=2)
+        notification4 = OSSNodeMigratingNotification(id=2)
+
+        notification_set = {notification1, notification2, notification3, notification4}
+        assert (
+            len(notification_set) == 2
+        )  # notification1 and notification2 should be the same
+
+
+class TestOSSNodeMigratedNotification:
+    """Test the OSSNodeMigratedNotification class."""
+
+    def test_init_with_defaults(self):
+        """Test OSSNodeMigratedNotification initialization with default values."""
+        with patch("time.monotonic", return_value=1000):
+            notification = OSSNodeMigratedNotification(id=1)
+            assert notification.id == 1
+            assert notification.ttl == OSSNodeMigratedNotification.DEFAULT_TTL
+            assert notification.creation_time == 1000
+            assert notification.node_address is None
+            assert notification.slots is None
+
+    def test_init_with_all_parameters(self):
+        """Test OSSNodeMigratedNotification initialization with all parameters."""
+        with patch("time.monotonic", return_value=1000):
+            slots = [1, 2, 3, 4, 5]
+            notification = OSSNodeMigratedNotification(
+                id=1,
+                node_address="127.0.0.1:6380",
+                slots=slots,
+            )
+            assert notification.id == 1
+            assert notification.ttl == OSSNodeMigratedNotification.DEFAULT_TTL
+            assert notification.creation_time == 1000
+            assert notification.node_address == "127.0.0.1:6380"
+            assert notification.slots == slots
+
+    def test_default_ttl(self):
+        """Test that DEFAULT_TTL is used correctly."""
+        assert OSSNodeMigratedNotification.DEFAULT_TTL == 30
+        notification = OSSNodeMigratedNotification(id=1)
+        assert notification.ttl == 30
+
+    def test_repr(self):
+        """Test OSSNodeMigratedNotification string representation."""
+        with patch("time.monotonic", return_value=1000):
+            notification = OSSNodeMigratedNotification(
+                id=1,
+                node_address="127.0.0.1:6380",
+                slots=[1, 2, 3],
+            )
+
+        with patch("time.monotonic", return_value=1010):  # 10 seconds later
+            repr_str = repr(notification)
+            assert "OSSNodeMigratedNotification" in repr_str
+            assert "id=1" in repr_str
+            assert "ttl=30" in repr_str
+            assert "remaining=20.0s" in repr_str
+            assert "expired=False" in repr_str
+
+    def test_equality_same_id_and_type(self):
+        """Test equality for notifications with same id and type."""
+        notification1 = OSSNodeMigratedNotification(
+            id=1,
+            node_address="127.0.0.1:6380",
+            slots=[1, 2, 3],
+        )
+        notification2 = OSSNodeMigratedNotification(
+            id=1,
+            node_address="127.0.0.1:6381",
+            slots=[4, 5, 6],
+        )
+        # Should be equal because id and type are the same
+        assert notification1 == notification2
+
+    def test_equality_different_id(self):
+        """Test inequality for notifications with different id."""
+        notification1 = OSSNodeMigratedNotification(id=1)
+        notification2 = OSSNodeMigratedNotification(id=2)
+        assert notification1 != notification2
+
+    def test_equality_different_type(self):
+        """Test inequality for notifications of different types."""
+        notification1 = OSSNodeMigratedNotification(id=1)
+        notification2 = NodeMigratedNotification(id=1)
+        assert notification1 != notification2
+
+    def test_hash_same_id_and_type(self):
+        """Test hash for notifications with same id and type."""
+        notification1 = OSSNodeMigratedNotification(
+            id=1,
+            node_address="127.0.0.1:6380",
+            slots=[1, 2, 3],
+        )
+        notification2 = OSSNodeMigratedNotification(
+            id=1,
+            node_address="127.0.0.1:6381",
+            slots=[4, 5, 6],
+        )
+        # Should have same hash because id and type are the same
+        assert hash(notification1) == hash(notification2)
+
+    def test_hash_different_id(self):
+        """Test hash for notifications with different id."""
+        notification1 = OSSNodeMigratedNotification(id=1)
+        notification2 = OSSNodeMigratedNotification(id=2)
+        assert hash(notification1) != hash(notification2)
+
+    def test_in_set(self):
+        """Test that notifications can be used in sets."""
+        notification1 = OSSNodeMigratedNotification(id=1)
+        notification2 = OSSNodeMigratedNotification(id=1)
+        notification3 = OSSNodeMigratedNotification(id=2)
+        notification4 = OSSNodeMigratedNotification(id=2)
+
+        notification_set = {notification1, notification2, notification3, notification4}
+        assert (
+            len(notification_set) == 2
+        )  # notification1 and notification2 should be the same
 
 
 class TestMaintNotificationsConfig:
