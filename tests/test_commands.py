@@ -2892,8 +2892,8 @@ class TestRedisCommands:
         assert r.lrange("a", 0, 2) == [b"1", b"2", b"3"]
         assert r.lrange("a", 2, 10) == [b"3", b"4", b"5"]
         assert r.lrange("a", 0, -1) == [b"1", b"2", b"3", b"4", b"5"]
-        r.rpush(bytes(345), "12", "22", "32", "42", "52")
-        assert r.lrange(bytes(345), 0, 0) == [b"12"]
+        r.rpush(b"345", "12", "22", "32", "42", "52")
+        assert r.lrange(b"345", 0, 0) == [b"12"]
 
     def test_lrem(self, r):
         r.rpush("a", "Z", "b", "Z", "Z", "c", "Z", "Z")
