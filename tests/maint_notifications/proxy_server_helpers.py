@@ -1,9 +1,10 @@
 import base64
-import json
 import logging
 from typing import Union
-from urllib.request import Request, urlopen
-from urllib.error import URLError
+
+from redis.http.http_client import HttpClient, HttpError
+# from urllib.request import Request, urlopen
+# from urllib.error import URLError
 
 
 class RespTranslator:
@@ -34,6 +35,7 @@ class ProxyInterceptorHelper:
     def __init__(self, server_url: str = "http://localhost:4000"):
         self.server_url = server_url
         self._resp_translator = RespTranslator()
+        self.http_client = HttpClient()
 
     def cleanup_interceptors(self, *names: str):
         """
@@ -113,12 +115,12 @@ class ProxyInterceptorHelper:
             Statistics dictionary containing connection information
         """
         url = f"{self.server_url}/stats"
-        request = Request(url, method="GET")
 
         try:
-            with urlopen(request) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except URLError as e:
+            response = self.http_client.get(url)
+            return response.json()
+
+        except HttpError as e:
             raise RuntimeError(f"Failed to get stats from interceptor server: {e}")
 
     def get_connections(self) -> dict:
@@ -129,12 +131,11 @@ class ProxyInterceptorHelper:
             Response from the server as a dictionary
         """
         url = f"{self.server_url}/connections"
-        request = Request(url, method="GET")
 
         try:
-            with urlopen(request) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except URLError as e:
+            response = self.http_client.get(url)
+            return response.json()
+        except HttpError as e:
             raise RuntimeError(f"Failed to get connections: {e}")
 
     def send_notification(
@@ -190,12 +191,10 @@ class ProxyInterceptorHelper:
         # Encode notification to base64
         data = base64.b64encode(notification.encode("utf-8"))
 
-        request = Request(url, data=data, method="POST")
-
         try:
-            with urlopen(request) as response:
-                results = json.loads(response.read().decode("utf-8"))
-        except URLError as e:
+            response = self.http_client.post(url, json_body=data)
+            results = response.json()
+        except HttpError as e:
             results = {"error": str(e)}
 
         return {
@@ -230,15 +229,14 @@ class ProxyInterceptorHelper:
             "response": response,
             "encoding": encoding,
         }
-        data = json.dumps(payload).encode("utf-8")
-        request = Request(
-            url, data=data, method="POST", headers={"Content-Type": "application/json"}
-        )
+        headers = {"Content-Type": "application/json"}
 
         try:
-            with urlopen(request) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except URLError as e:
+            proxy_response = self.http_client.post(
+                url, json_body=payload, headers=headers
+            )
+            return proxy_response.json()
+        except HttpError as e:
             raise RuntimeError(f"Failed to add interceptor: {e}")
 
     def _reset_interceptor(self, name: str):
