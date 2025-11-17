@@ -2792,7 +2792,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("BRPOP", *keys)
 
     def brpoplpush(
-        self, src: str, dst: str, timeout: Optional[Number] = 0
+        self, src: KeyT, dst: KeyT, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
@@ -2849,7 +2849,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("LMPOP", *cmd_args)
 
     def lindex(
-        self, name: str, index: int
+        self, name: KeyT, index: int
     ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Return the item from list ``name`` at position ``index``
@@ -2862,7 +2862,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("LINDEX", name, index, keys=[name])
 
     def linsert(
-        self, name: str, where: str, refvalue: str, value: str
+        self, name: KeyT, where: str, refvalue: str, value: str
     ) -> Union[Awaitable[int], int]:
         """
         Insert ``value`` in list ``name`` either immediately before or after
@@ -2875,7 +2875,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LINSERT", name, where, refvalue, value)
 
-    def llen(self, name: str) -> Union[Awaitable[int], int]:
+    def llen(self, name: KeyT) -> Union[Awaitable[int], int]:
         """
         Return the length of the list ``name``
 
@@ -2885,7 +2885,7 @@ class ListCommands(CommandsProtocol):
 
     def lpop(
         self,
-        name: str,
+        name: KeyT,
         count: Optional[int] = None,
     ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
         """
@@ -2902,7 +2902,7 @@ class ListCommands(CommandsProtocol):
         else:
             return self.execute_command("LPOP", name)
 
-    def lpush(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
+    def lpush(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Push ``values`` onto the head of the list ``name``
 
@@ -2910,7 +2910,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LPUSH", name, *values)
 
-    def lpushx(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
+    def lpushx(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Push ``value`` onto the head of the list ``name`` if ``name`` exists
 
@@ -2918,7 +2918,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LPUSHX", name, *values)
 
-    def lrange(self, name: str, start: int, end: int) -> Union[Awaitable[list], list]:
+    def lrange(self, name: KeyT, start: int, end: int) -> Union[Awaitable[list], list]:
         """
         Return a slice of the list ``name`` between
         position ``start`` and ``end``
@@ -2930,7 +2930,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LRANGE", name, start, end, keys=[name])
 
-    def lrem(self, name: str, count: int, value: str) -> Union[Awaitable[int], int]:
+    def lrem(self, name: KeyT, count: int, value: str) -> Union[Awaitable[int], int]:
         """
         Remove the first ``count`` occurrences of elements equal to ``value``
         from the list stored at ``name``.
@@ -2944,7 +2944,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LREM", name, count, value)
 
-    def lset(self, name: str, index: int, value: str) -> Union[Awaitable[str], str]:
+    def lset(self, name: KeyT, index: int, value: str) -> Union[Awaitable[str], str]:
         """
         Set element at ``index`` of list ``name`` to ``value``
 
@@ -2952,7 +2952,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LSET", name, index, value)
 
-    def ltrim(self, name: str, start: int, end: int) -> Union[Awaitable[str], str]:
+    def ltrim(self, name: KeyT, start: int, end: int) -> Union[Awaitable[str], str]:
         """
         Trim the list ``name``, removing all values not within the slice
         between ``start`` and ``end``
@@ -2966,7 +2966,7 @@ class ListCommands(CommandsProtocol):
 
     def rpop(
         self,
-        name: str,
+        name: KeyT,
         count: Optional[int] = None,
     ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
         """
@@ -2983,7 +2983,7 @@ class ListCommands(CommandsProtocol):
         else:
             return self.execute_command("RPOP", name)
 
-    def rpoplpush(self, src: str, dst: str) -> Union[Awaitable[str], str]:
+    def rpoplpush(self, src: KeyT, dst: KeyT) -> Union[Awaitable[str], str]:
         """
         RPOP a value off of the ``src`` list and atomically LPUSH it
         on to the ``dst`` list.  Returns the value.
@@ -2992,7 +2992,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPOPLPUSH", src, dst)
 
-    def rpush(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
+    def rpush(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Push ``values`` onto the tail of the list ``name``
 
@@ -3000,7 +3000,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPUSH", name, *values)
 
-    def rpushx(self, name: str, *values: str) -> Union[Awaitable[int], int]:
+    def rpushx(self, name: KeyT, *values: str) -> Union[Awaitable[int], int]:
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
 
@@ -3010,7 +3010,7 @@ class ListCommands(CommandsProtocol):
 
     def lpos(
         self,
-        name: str,
+        name: KeyT,
         value: str,
         rank: Optional[int] = None,
         count: Optional[int] = None,
@@ -3055,7 +3055,7 @@ class ListCommands(CommandsProtocol):
 
     def sort(
         self,
-        name: str,
+        name: KeyT,
         start: Optional[int] = None,
         num: Optional[int] = None,
         by: Optional[str] = None,
