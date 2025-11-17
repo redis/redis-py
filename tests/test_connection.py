@@ -428,7 +428,9 @@ class TestUnitConnectionPool:
 class TestUnitCacheProxyConnection:
     def test_clears_cache_on_disconnect(self, mock_connection, cache_conf):
         cache = DefaultCache(CacheConfig(max_size=10))
-        cache_key = CacheKey(command="GET", redis_keys=("foo",))
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
 
         cache.set(
             CacheEntry(
@@ -577,7 +579,9 @@ class TestUnitCacheProxyConnection:
         another_conn.can_read.side_effect = [True, False]
         another_conn.read_response.return_value = None
         cache_entry = CacheEntry(
-            cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+            cache_key=CacheKey(
+                command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+            ),
             cache_value=b"bar",
             status=CacheEntryStatus.VALID,
             connection_ref=another_conn,
