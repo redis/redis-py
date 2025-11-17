@@ -1161,9 +1161,12 @@ class PubSub:
             return await self.handle_message(response, ignore_subscribe_messages)
         return None
 
-    def ping(self, message=None) -> Awaitable:
+    def ping(self, message=None) -> Awaitable[bool]:
         """
-        Ping the Redis server
+        Ping the Redis server to test connectivity.
+
+        Sends a PING command to the Redis server and returns True if the server
+        responds with "PONG".
         """
         args = ["PING", message] if message is not None else ["PING"]
         return self.execute_command(*args)
@@ -1239,6 +1242,7 @@ class PubSub:
         *,
         exception_handler: Optional["PSWorkerThreadExcHandlerT"] = None,
         poll_timeout: float = 1.0,
+        pubsub=None,
     ) -> None:
         """Process pub/sub messages using registered callbacks.
 
@@ -1263,9 +1267,14 @@ class PubSub:
         await self.connect()
         while True:
             try:
-                await self.get_message(
-                    ignore_subscribe_messages=True, timeout=poll_timeout
-                )
+                if pubsub is None:
+                    await self.get_message(
+                        ignore_subscribe_messages=True, timeout=poll_timeout
+                    )
+                else:
+                    await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=poll_timeout
+                    )
             except asyncio.CancelledError:
                 raise
             except BaseException as e:
@@ -1575,7 +1584,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         cmd = " ".join(map(safe_str, command))
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) "
-            "of pipeline caused error: {exception.args}"
+            f"of pipeline caused error: {exception.args}"
         )
         exception.args = (msg,) + exception.args[1:]
 

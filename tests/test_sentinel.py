@@ -2,6 +2,8 @@ import socket
 from unittest import mock
 
 import pytest
+from redis.client import StrictRedis
+
 import redis.sentinel
 from redis import exceptions
 from redis.sentinel import (
@@ -10,6 +12,7 @@ from redis.sentinel import (
     SentinelConnectionPool,
     SlaveNotFoundError,
 )
+from tests.conftest import is_resp2_connection
 
 
 @pytest.fixture(scope="module")
@@ -342,3 +345,31 @@ def test_redis_master_usage(deployed_sentinel):
     r = deployed_sentinel.master_for("redis-py-test", db=0)
     r.set("foo", "bar")
     assert r.get("foo") == "bar"
+
+
+@pytest.mark.onlynoncluster
+def test_sentinel_commands_with_strict_redis_client(request):
+    sentinel_ips = request.config.getoption("--sentinels")
+    sentinel_host, sentinel_port = sentinel_ips.split(",")[0].split(":")
+    protocol = request.config.getoption("--protocol", 2)
+
+    client = StrictRedis(
+        host=sentinel_host, port=sentinel_port, decode_responses=True, protocol=protocol
+    )
+    # skipping commands that change the state of the sentinel setup
+    assert isinstance(client.sentinel_get_master_addr_by_name("redis-py-test"), tuple)
+    assert isinstance(client.sentinel_master("redis-py-test"), dict)
+    if is_resp2_connection(client):
+        assert isinstance(client.sentinel_masters(), dict)
+    else:
+        masters = client.sentinel_masters()
+        assert isinstance(masters, list)
+        for master in masters:
+            assert isinstance(master, dict)
+
+    assert isinstance(client.sentinel_sentinels("redis-py-test"), list)
+    assert isinstance(client.sentinel_slaves("redis-py-test"), list)
+
+    assert isinstance(client.sentinel_ckquorum("redis-py-test"), bool)
+
+    client.close()

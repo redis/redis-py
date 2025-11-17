@@ -142,6 +142,7 @@ runs:
         sudo apt-get install -y redis-tools
         echo "Docker Containers:"
         docker ps
+        echo "Cluster nodes:"
         redis-cli -p 16379 CLUSTER NODES
       shell: bash
 

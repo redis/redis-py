@@ -1,4 +1,5 @@
 # EXAMPLE: py_home_json
+# BINDER_ID python-py_home_json
 """
 JSON examples from redis-py "home" page"
  https://redis.io/docs/latest/develop/connect/clients/python/redis-py/#example-indexing-and-querying-json-documents
@@ -15,23 +16,6 @@ from redis.commands.search.query import Query
 import redis.exceptions
 # STEP_END
 
-# STEP_START connect
-r = redis.Redis(decode_responses=True)
-# STEP_END
-
-# REMOVE_START
-try:
-    r.ft("idx:users").dropindex(True)
-except redis.exceptions.ResponseError:
-    pass
-
-try:
-    r.ft("hash-idx:users").dropindex(True)
-except redis.exceptions.ResponseError:
-    pass
-
-r.delete("user:1", "user:2", "user:3", "huser:1", "huser:2", "huser:3")
-# REMOVE_END
 # STEP_START create_data
 user1 = {
     "name": "Paul John",
@@ -55,6 +39,19 @@ user3 = {
 }
 # STEP_END
 
+# STEP_START connect
+r = redis.Redis(decode_responses=True)
+# STEP_END
+
+# STEP_START cleanup_json
+try:
+    r.ft("idx:users").dropindex(True)
+except redis.exceptions.ResponseError:
+    pass
+
+r.delete("user:1", "user:2", "user:3")
+# STEP_END
+
 # STEP_START make_index
 schema = (
     TextField("$.name", as_name="name"),
@@ -69,7 +66,6 @@ indexCreated = r.ft("idx:users").create_index(
     )
 )
 # STEP_END
-# Tests for 'make_index' step.
 # REMOVE_START
 assert indexCreated
 # REMOVE_END
@@ -79,7 +75,6 @@ user1Set = r.json().set("user:1", Path.root_path(), user1)
 user2Set = r.json().set("user:2", Path.root_path(), user2)
 user3Set = r.json().set("user:3", Path.root_path(), user3)
 # STEP_END
-# Tests for 'add_data' step.
 # REMOVE_START
 assert user1Set
 assert user2Set
@@ -94,7 +89,6 @@ findPaulResult = r.ft("idx:users").search(
 print(findPaulResult)
 # >>> Result{1 total, docs: [Document {'id': 'user:3', ...
 # STEP_END
-# Tests for 'query1' step.
 # REMOVE_START
 assert str(findPaulResult) == (
     "Result{1 total, docs: [Document {'id': 'user:3', 'payload': None, "
@@ -111,7 +105,6 @@ citiesResult = r.ft("idx:users").search(
 print(citiesResult)
 # >>> [Document {'id': 'user:1', 'payload': None, ...
 # STEP_END
-# Tests for 'query2' step.
 # REMOVE_START
 citiesResult.sort(key=lambda doc: doc['id'])
 
@@ -130,7 +123,6 @@ aggResult = r.ft("idx:users").aggregate(req).rows
 print(aggResult)
 # >>> [['city', 'London', 'count', '1'], ['city', 'Tel Aviv', 'count', '2']]
 # STEP_END
-# Tests for 'query3' step.
 # REMOVE_START
 aggResult.sort(key=lambda row: row[1])
 
@@ -138,6 +130,15 @@ assert str(aggResult) == (
     "[['city', 'London', 'count', '1'], ['city', 'Tel Aviv', 'count', '2']]"
 )
 # REMOVE_END
+
+# STEP_START cleanup_hash
+try:
+    r.ft("hash-idx:users").dropindex(True)
+except redis.exceptions.ResponseError:
+    pass
+
+r.delete("huser:1", "huser:2", "huser:3")
+# STEP_END
 
 # STEP_START make_hash_index
 hashSchema = (
