@@ -2892,6 +2892,8 @@ class TestRedisCommands:
         assert r.lrange("a", 0, 2) == [b"1", b"2", b"3"]
         assert r.lrange("a", 2, 10) == [b"3", b"4", b"5"]
         assert r.lrange("a", 0, -1) == [b"1", b"2", b"3", b"4", b"5"]
+        r.rpush(b"345", "12", "22", "32", "42", "52")
+        assert r.lrange(b"345", 0, 0) == [b"12"]
 
     def test_lrem(self, r):
         r.rpush("a", "Z", "b", "Z", "Z", "c", "Z", "Z")
@@ -2983,6 +2985,99 @@ class TestRedisCommands:
         r.rpush("a", "1", "2", "3")
         assert r.rpushx("a", "4") == 4
         assert r.lrange("a", 0, -1) == [b"1", b"2", b"3", b"4"]
+
+    @pytest.mark.onlynoncluster
+    def test_lists_with_byte_keys(self, r):
+        r.rpush(b"b", b"1", b"2", b"3")
+        assert r.lrange(b"b", 0, -1) == [b"1", b"2", b"3"]
+        # LPOS command with byte keys
+        assert r.lpos(b"b", b"2") == 1
+        assert r.lpos(b"b", b"2", rank=1) == 1
+        assert r.lpos(b"b", b"2", rank=2) is None
+        # LCS command with byte keys
+        r.set(b"key1", b"ohmytext")
+        r.set(b"key2", b"mynewtext")
+        assert r.lcs(b"key1", b"key2") == b"mytext"
+        # TYPE command with byte keys
+        assert r.type(b"b") == b"list"
+        assert r.type(b"key1") == b"string"
+        # SCAN command with byte keys
+        r.set(b"scan_key1", b"value1")
+        r.set(b"scan_key2", b"value2")
+        cursor, keys = r.scan(match=b"scan_key*")
+        assert cursor == 0
+        assert set(keys) == {b"scan_key1", b"scan_key2"}
+        # PEXPIRETIME command with byte keys
+        r.set(b"expire_key", b"value")
+        r.pexpire(b"expire_key", 10000)
+        pexpiretime = r.pexpiretime(b"expire_key")
+        assert pexpiretime > 0
+        # LMOVE command with byte keys (src and dest)
+        r.rpush(b"list_src", b"a", b"b", b"c")
+        r.rpush(b"list_dest", b"x")
+        moved = r.lmove(b"list_src", b"list_dest", src=b"LEFT", dest=b"RIGHT")
+        assert moved == b"a"
+        assert r.lrange(b"list_dest", 0, -1) == [b"x", b"a"]
+        # SMOVE command with byte keys (src and dst)
+        r.sadd(b"set_src", b"member1", b"member2")
+        r.sadd(b"set_dest", b"member3")
+        assert r.smove(b"set_src", b"set_dest", b"member1") == 1
+        assert b"member1" in r.smembers(b"set_dest")
+
+    @pytest.mark.onlynoncluster
+    def test_lists_with_memoryview_keys(self, r):
+        # Create memoryview objects for key names
+        mv_b = memoryview(b"b")
+        mv_key1 = memoryview(b"key1")
+        mv_key2 = memoryview(b"key2")
+        mv_scan_key1 = memoryview(b"scan_key1")
+        mv_scan_key2 = memoryview(b"scan_key2")
+        mv_expire_key = memoryview(b"expire_key")
+        mv_list_src = memoryview(b"list_src")
+        mv_list_dest = memoryview(b"list_dest")
+        mv_set_src = memoryview(b"set_src")
+        mv_set_dest = memoryview(b"set_dest")
+
+        r.rpush(mv_b, b"1", b"2", b"3")
+        assert r.lrange(mv_b, 0, -1) == [b"1", b"2", b"3"]
+        # LPOS command with memoryview keys
+        assert r.lpos(mv_b, b"2") == 1
+        assert r.lpos(mv_b, b"2", rank=1) == 1
+        assert r.lpos(mv_b, b"2", rank=2) is None
+        # LCS command with memoryview keys
+        r.set(mv_key1, b"ohmytext")
+        r.set(mv_key2, b"mynewtext")
+        assert r.lcs(mv_key1, mv_key2) == b"mytext"
+        # TYPE command with memoryview keys
+        assert r.type(mv_b) == b"list"
+        assert r.type(mv_key1) == b"string"
+        # SCAN command with memoryview keys
+        r.set(mv_scan_key1, b"value1")
+        r.set(mv_scan_key2, b"value2")
+        cursor, keys = r.scan(match=memoryview(b"scan_key*"))
+        assert cursor == 0
+        assert set(keys) == {b"scan_key1", b"scan_key2"}
+        # PEXPIRETIME command with memoryview keys
+        r.set(mv_expire_key, b"value")
+        r.pexpire(mv_expire_key, 10000)
+        pexpiretime = r.pexpiretime(mv_expire_key)
+        assert pexpiretime > 0
+        # LMOVE command with memoryview keys (src and dest)
+        r.rpush(mv_list_src, b"a", b"b", b"c")
+        r.rpush(mv_list_dest, b"x")
+        moved = r.lmove(
+            mv_list_src,
+            mv_list_dest,
+            src=memoryview(b"LEFT"),
+            dest=memoryview(b"RIGHT"),
+        )
+        assert moved == b"a"
+        assert r.lrange(mv_list_dest, 0, -1) == [b"x", b"a"]
+        # SMOVE command with memoryview keys (src and dst)
+        r.sadd(mv_set_src, b"member1", b"member2")
+        r.sadd(mv_set_dest, b"member3")
+        assert r.smove(mv_set_src, mv_set_dest, b"member1") == 1
+        assert b"member1" in r.smembers(mv_set_dest)
 
     # SCAN COMMANDS
     @pytest.mark.onlynoncluster
