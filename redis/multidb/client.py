@@ -15,10 +15,12 @@ from redis.multidb.database import Database, Databases, SyncDatabase
 from redis.multidb.exception import NoValidDatabaseException, UnhealthyDatabaseException
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck, HealthCheckPolicy
+from redis.utils import experimental
 
 logger = logging.getLogger(__name__)
 
 
+@experimental
 class MultiDBClient(RedisModuleCommands, CoreCommands):
     """
     Client that operates on multiple logical Redis databases.
@@ -27,19 +29,20 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
     def __init__(self, config: MultiDbConfig):
         self._databases = config.databases()
-        self._health_checks = config.default_health_checks()
-
-        if config.health_checks is not None:
-            self._health_checks.extend(config.health_checks)
-
+        self._health_checks = (
+            config.default_health_checks()
+            if not config.health_checks
+            else config.health_checks
+        )
         self._health_check_interval = config.health_check_interval
         self._health_check_policy: HealthCheckPolicy = config.health_check_policy.value(
             config.health_check_probes, config.health_check_probes_delay
         )
-        self._failure_detectors = config.default_failure_detectors()
-
-        if config.failure_detectors is not None:
-            self._failure_detectors.extend(config.failure_detectors)
+        self._failure_detectors = (
+            config.default_failure_detectors()
+            if not config.failure_detectors
+            else config.failure_detectors
+        )
 
         self._failover_strategy = (
             config.default_failover_strategy()
@@ -298,7 +301,13 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             )
 
     def close(self):
-        self.command_executor.active_database.client.close()
+        """
+        Closes the client and all its resources.
+        """
+        if self._bg_scheduler:
+            self._bg_scheduler.stop()
+        if self.command_executor.active_database:
+            self.command_executor.active_database.client.close()
 
 
 def _half_open_circuit(circuit: CircuitBreaker):

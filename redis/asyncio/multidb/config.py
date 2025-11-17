@@ -20,9 +20,9 @@ from redis.asyncio.multidb.healthcheck import (
     DEFAULT_HEALTH_CHECK_INTERVAL,
     DEFAULT_HEALTH_CHECK_POLICY,
     DEFAULT_HEALTH_CHECK_PROBES,
-    EchoHealthCheck,
     HealthCheck,
     HealthCheckPolicies,
+    PingHealthCheck,
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
@@ -203,7 +203,7 @@ class MultiDbConfig:
 
     def default_health_checks(self) -> List[HealthCheck]:
         return [
-            EchoHealthCheck(),
+            PingHealthCheck(),
         ]
 
     def default_failover_strategy(self) -> AsyncFailoverStrategy:

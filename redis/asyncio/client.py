@@ -1584,7 +1584,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         cmd = " ".join(map(safe_str, command))
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) "
-            "of pipeline caused error: {exception.args}"
+            f"of pipeline caused error: {exception.args}"
         )
         exception.args = (msg,) + exception.args[1:]
 

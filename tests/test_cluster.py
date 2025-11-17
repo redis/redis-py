@@ -207,7 +207,28 @@ def get_mocked_redis_client(
                         "first_key_pos": 1,
                         "last_key_pos": 1,
                         "step_count": 1,
-                    }
+                    },
+                    "cluster delslots": {
+                        "name": "cluster delslots",
+                        "flags": ["readonly", "fast"],
+                        "first_key_pos": 0,
+                        "last_key_pos": 0,
+                        "step_count": 0,
+                    },
+                    "cluster delslotsrange": {
+                        "name": "cluster delslotsrange",
+                        "flags": ["readonly", "fast"],
+                        "first_key_pos": 0,
+                        "last_key_pos": 0,
+                        "step_count": 0,
+                    },
+                    "cluster addslots": {
+                        "name": "cluster delslotsrange",
+                        "flags": ["readonly", "fast"],
+                        "first_key_pos": 0,
+                        "last_key_pos": 0,
+                        "step_count": 0,
+                    },
                 }
 
             cmd_parser_initialize.side_effect = cmd_init_mock

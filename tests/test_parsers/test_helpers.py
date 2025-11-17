@@ -1,4 +1,4 @@
-from redis._parsers.helpers import parse_info
+from redis._parsers.helpers import parse_info, parse_client_list
 
 
 def test_parse_info():
@@ -61,3 +61,23 @@ list_two:a b=foo,,c,d=bar,e,
 
     assert isinstance(info["list_two"], dict)
     assert info["list_two"] == {"a b": "foo", "c": True, "d": "bar", "e": True}
+
+
+def test_parse_client_list():
+    response = "id=7 addr=/tmp/redis sock/redis.sock:0 fd=9 name=test=_complex_[name] age=-1 idle=0 cmd=client|list user=default lib-name=go-redis(,go1.24.4) lib-ver="
+    expected = [
+        {
+            "id": "7",
+            "addr": "/tmp/redis sock/redis.sock:0",
+            "fd": "9",
+            "name": "test=_complex_[name]",
+            "age": "-1",
+            "idle": "0",
+            "cmd": "client|list",
+            "user": "default",
+            "lib-name": "go-redis(,go1.24.4)",
+            "lib-ver": "",
+        }
+    ]
+    clients = parse_client_list(response)
+    assert clients == expected

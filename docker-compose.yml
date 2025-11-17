@@ -1,10 +1,10 @@
 ---
 # image tag 8.0-RC2-pre is the one matching the 8.0 GA release
 x-client-libs-stack-image: &client-libs-stack-image
-  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_STACK_IMAGE_TAG:-8.2}"
+  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_STACK_IMAGE_TAG:-8.4-RC1-pre.2}"
 
 x-client-libs-image: &client-libs-image
-  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-8.2}"
+  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-8.4-RC1-pre.2}"
 
 services:
 
@@ -58,7 +58,7 @@ services:
       - TLS_ENABLED=yes
       - PORT=16379
       - TLS_PORT=27379
-    command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --tls-auth-clients optional --save ""}
+    command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --tls-auth-clients optional --save "" --tls-cluster yes}
     ports:
       - "16379-16384:16379-16384"
       - "27379-27384:27379-27384"

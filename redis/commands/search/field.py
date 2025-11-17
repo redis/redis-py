@@ -52,14 +52,14 @@ class Field:
         self.args_suffix = list()
         self.as_name = as_name
 
-        if sortable:
-            self.args_suffix.append(Field.SORTABLE)
         if no_index:
             self.args_suffix.append(Field.NOINDEX)
         if index_missing:
             self.args_suffix.append(Field.INDEX_MISSING)
         if index_empty:
             self.args_suffix.append(Field.INDEX_EMPTY)
+        if sortable:
+            self.args_suffix.append(Field.SORTABLE)
 
         if no_index and not sortable:
             raise ValueError("Non-Sortable non-Indexable fields are ignored")

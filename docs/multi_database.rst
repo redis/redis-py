@@ -1,10 +1,10 @@
 Multi-database client (Active-Active)
 =====================================
 
-The multi-database client lets you connect your application to multiple logical Redis databases at once
-and operate them as a single, resilient endpoint. It continuously monitors health, detects failures,
-and fails over to the next healthy database using a configurable strategy. When the previous primary
-becomes healthy again, the client can automatically fall back to it.
+The multi-database client allows your application to connect to multiple Redis databases, which are typically replicas of each other.
+It is designed to work with Redis Software and Redis Cloud Active-Active setups.
+The client continuously monitors database health, detects failures, and automatically fails over to the next healthy database using a configurable strategy.
+When the original database becomes healthy again, the client can automatically switch back to it.
 
 Key concepts
 ------------
@@ -19,29 +19,31 @@ Key concepts
 
 - Health checks:
   A set of checks determines whether a database is healthy in proactive manner.
-  By default, an "ECHO" check runs against the database (all cluster nodes must
-  pass for a cluster). You can add custom checks. A Redis Enterprise specific
+  By default, an "PING" check runs against the database (all cluster nodes must
+  pass for a cluster). You can provide your own set of health checks or add an
+  additional health check on top of the default one. A Redis Enterprise specific
   "lag-aware" health check is also available.
 
 - Failure detector:
   A detector observes command failures over a moving window (reactive monitoring).
   You can specify an exact number of failures and failures rate to have more
   fine-grain tuned configuration of triggering fail over based on organic traffic.
+  You can provide your own set of custom failure detectors or add an additional
+  detector on top of the default one.
 
 - Failover strategy:
-  The default strategy is weight-based. It prefers the highest-weight healthy database.
+  The default strategy is based on statically configured weights. It prefers the highest weighted healthy database.
 
 - Command retry:
   Command execution supports retry with backoff. Low-level client retries are disabled and a global retry
   setting is applied at the multi-database layer.
 
 - Auto fallback:
-  If configured with a positive interval, the client periodically attempts to fall back to a higher-priority
+  If configured with a positive interval, the client periodically attempts to fall back to a higher-weighted
   healthy database.
 
 - Events:
-  The client emits events like "active database changed" and "commands failed". Pub/Sub re-subscription
-  on database switch is handled automatically.
+  The client emits events like "active database changed" and "commands failed". In addition it resubscribes to Pub/Sub channels automatically.
 
 Synchronous usage
 -----------------
@@ -147,7 +149,7 @@ The asyncio API mirrors the synchronous one and provides async/await semantics.
 MultiDBClient
 ^^^^^^^^^^^^^
 
-The client exposes the same API as the `Redis` or `RedisCluster` client, making it fully interchangeable and ensuring a seamless upgrade for your application. Additionally, it supports runtime reconfiguration, allowing you to add features such as health checks, failure detectors, or even new databases without restarting.
+The client exposes the same API as the `Redis` or `RedisCluster` client, making it fully interchangeable and ensuring a simple migration of your application code. Additionally, it supports runtime reconfiguration, allowing you to add features such as health checks, failure detectors, or even new databases without restarting.
 
 Configuration
 -------------
@@ -270,20 +272,20 @@ configuration defined in the `MultiDBConfig` class.
 To avoid false positives, you can configure amount of health check probes and also
 define one of the health check policies to evaluate probes result.
 
-**HealthCheckPolicies.HEALTHY_ALL** - (default) All probes should be successful. 
-**HealthCheckPolicies.HEALTHY_MAJORITY** - Majority of probes should be successful. 
-**HealthCheckPolicies.HEALTHY_ANY** - Any of probes should be successful. 
+**HealthCheckPolicies.HEALTHY_ALL** - (default) All probes should be successful.
+**HealthCheckPolicies.HEALTHY_MAJORITY** - Majority of probes should be successful.
+**HealthCheckPolicies.HEALTHY_ANY** - Any of probes should be successful.
 
-EchoHealthCheck (default)
+PingHealthCheck (default)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The default health check sends the [ECHO](https://redis.io/docs/latest/commands/echo/) command
+The default health check sends the [PING](https://redis.io/docs/latest/commands/ping/) command
 to the database (and to all nodes for clusters).
 
 Lag-Aware Healthcheck (Redis Enterprise Only)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-This is a special type of healthcheck available for Redis Software and Redis Cloud
+This is a special type of healthcheck available for Redis (Enterprise) Software
 that utilizes a REST API endpoint to obtain information about the synchronization
 lag between a given database and all other databases in an Active-Active setup.
 
@@ -296,7 +298,7 @@ reverse proxy behind an actual REST API endpoint.
 
     from redis.multidb.client import MultiDBClient
     from redis.multidb.config import MultiDbConfig, DatabaseConfig
-    from redis.multidb.healthcheck import EchoHealthCheck, LagAwareHealthCheck
+    from redis.multidb.healthcheck import PingHealthCheck, LagAwareHealthCheck
     from redis.retry import Retry
     from redis.backoff import ExponentialWithJitterBackoff
 
@@ -313,7 +315,7 @@ reverse proxy behind an actual REST API endpoint.
                 health_check_url="https://cluster.example.com",
             ),
         ],
-        # Add custom checks (in addition to default EchoHealthCheck)
+        # Add custom checks (in addition to default PingHealthCheck)
         health_checks=[
             # Redis Enterprise REST-based lag-aware check
             LagAwareHealthCheck(
@@ -358,15 +360,13 @@ You can add custom health checks for specific requirements:
 Failure Detection (Reactive Monitoring)
 -----------------
 
-The failure detector monitor actual command failures and marks databases as unhealthy
-when failures count and failure rate exceed thresholds within a sliding time window
-of a few seconds. This catches issues that proactive health checks might miss during
-real traffic. You can extend the list of failure detectors by providing your own
-implementation, configuration defined in the `MultiDBConfig` class.
+The failure detector monitors command failures and marks a database as unhealthy when its failure rate exceeds a defined threshold within a sliding time window.
+Under real traffic conditions, this reactive detection mechanism likely triggers earlier than proactive health checks.
+You can extend the set of failure detectors by implementing your own and configuring it through the `MultiDBConfig` class.
 
-By default failure detector is configured for 1000 failures and 10% failure rate
-threshold within a 2 seconds sliding window, this could be adjusted regarding
-your application specifics and traffic.
+By default the failure detector is configured for 1000 failures and a 10% failure rate
+threshold within a 2 seconds sliding window. This could be adjusted regarding
+your application specifics and traffic pattern.
 
 .. code-block:: python
 
@@ -388,13 +388,13 @@ your application specifics and traffic.
         CustomFailureDetector()
     )
 
-Failover and auto fallback
+Failover and automatic fallback
 --------------------------
 
-Weight-based failover chooses the highest-weight database whose circuit is CLOSED. If no database is
-healthy it returns `TemporaryUnavailableException`. This exception indicates that application can
-still send requests for some time (depends on configuration (`failover_attempts` * `failover_delay`)
-120 seconds by default) until `NoValidDatabaseException` will be thrown.
+Weight-based failover chooses the highest-weighted database with a CLOSED circuit. If no database is
+healthy it returns `TemporaryUnavailableException`. This exception indicates that the application should
+retry sending requests for a configurable period of time (the configuration (`failover_attempts` * `failover_delay`)
+defaults to 120 seconds). If none of the databases became available, then a `NoValidDatabaseException` is thrown.
 
 To enable periodic fallback to a higher-priority healthy database, set `auto_fallback_interval` (seconds):
 
