@@ -539,7 +539,7 @@ class MaintNotificationsAbstractConnection:
                 import logging
 
                 logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to enable maintenance notifications: {e}")
+                logger.debug(f"Failed to enable maintenance notifications: {e}")
             else:
                 raise
 
