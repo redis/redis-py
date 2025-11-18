@@ -76,7 +76,7 @@ jobs:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: ['8.4-GA-pre.2', '${{ needs.redis_version.outputs.CURRENT }}', '8.0.2' ,'7.4.4', '7.2.9']
+        redis-version: ['8.4-GA-pre.3', '${{ needs.redis_version.outputs.CURRENT }}', '8.0.2' ,'7.4.4', '7.2.9']
         python-version: ['3.10', '3.14']
         parser-backend: ['plain']
         event-loop: ['asyncio']
