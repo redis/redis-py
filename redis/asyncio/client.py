@@ -81,10 +81,11 @@ from redis.utils import (
 )
 
 if TYPE_CHECKING and SSL_AVAILABLE:
-    from ssl import TLSVersion, VerifyMode
+    from ssl import TLSVersion, VerifyFlags, VerifyMode
 else:
     TLSVersion = None
     VerifyMode = None
+    VerifyFlags = None
 
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
 _KeyT = TypeVar("_KeyT", bound=KeyT)
@@ -238,6 +239,8 @@ class Redis(
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
         ssl_cert_reqs: Union[str, VerifyMode] = "required",
+        ssl_include_verify_flags: Optional[List[VerifyFlags]] = None,
+        ssl_exclude_verify_flags: Optional[List[VerifyFlags]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
         ssl_check_hostname: bool = True,
@@ -347,6 +350,8 @@ class Redis(
                             "ssl_keyfile": ssl_keyfile,
                             "ssl_certfile": ssl_certfile,
                             "ssl_cert_reqs": ssl_cert_reqs,
+                            "ssl_include_verify_flags": ssl_include_verify_flags,
+                            "ssl_exclude_verify_flags": ssl_exclude_verify_flags,
                             "ssl_ca_certs": ssl_ca_certs,
                             "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,
@@ -1156,9 +1161,12 @@ class PubSub:
             return await self.handle_message(response, ignore_subscribe_messages)
         return None
 
-    def ping(self, message=None) -> Awaitable:
+    def ping(self, message=None) -> Awaitable[bool]:
         """
-        Ping the Redis server
+        Ping the Redis server to test connectivity.
+
+        Sends a PING command to the Redis server and returns True if the server
+        responds with "PONG".
         """
         args = ["PING", message] if message is not None else ["PING"]
         return self.execute_command(*args)
@@ -1234,6 +1242,7 @@ class PubSub:
         *,
         exception_handler: Optional["PSWorkerThreadExcHandlerT"] = None,
         poll_timeout: float = 1.0,
+        pubsub=None,
     ) -> None:
         """Process pub/sub messages using registered callbacks.
 
@@ -1258,9 +1267,14 @@ class PubSub:
         await self.connect()
         while True:
             try:
-                await self.get_message(
-                    ignore_subscribe_messages=True, timeout=poll_timeout
-                )
+                if pubsub is None:
+                    await self.get_message(
+                        ignore_subscribe_messages=True, timeout=poll_timeout
+                    )
+                else:
+                    await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=poll_timeout
+                    )
             except asyncio.CancelledError:
                 raise
             except BaseException as e:
@@ -1570,7 +1584,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         cmd = " ".join(map(safe_str, command))
         msg = (
             f"Command # {number} ({truncate_text(cmd)}) "
-            "of pipeline caused error: {exception.args}"
+            f"of pipeline caused error: {exception.args}"
         )
         exception.args = (msg,) + exception.args[1:]
 

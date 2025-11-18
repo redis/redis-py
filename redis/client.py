@@ -56,9 +56,8 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
-from redis.maintenance_events import (
-    MaintenanceEventPoolHandler,
-    MaintenanceEventsConfig,
+from redis.maint_notifications import (
+    MaintNotificationsConfig,
 )
 from redis.retry import Retry
 from redis.utils import (
@@ -224,6 +223,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
         ssl_cert_reqs: Union[str, "ssl.VerifyMode"] = "required",
+        ssl_include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_path: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
@@ -248,7 +249,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         cache: Optional[CacheInterface] = None,
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
-        maintenance_events_config: Optional[MaintenanceEventsConfig] = None,
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -276,6 +277,17 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         single_connection_client:
             if `True`, connection pool is not used. In that case `Redis`
             instance use is not thread safe.
+        decode_responses:
+            if `True`, the response will be decoded to utf-8.
+            Argument is ignored when connection_pool is provided.
+        maint_notifications_config:
+            configuration the pool to support maintenance notifications - see
+            `redis.maint_notifications.MaintNotificationsConfig` for details.
+            Only supported with RESP3
+            If not provided and protocol is RESP3, the maintenance notifications
+            will be enabled by default (logic is included in the connection pool
+            initialization).
+            Argument is ignored when connection_pool is provided.
         """
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -330,6 +342,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_keyfile": ssl_keyfile,
                             "ssl_certfile": ssl_certfile,
                             "ssl_cert_reqs": ssl_cert_reqs,
+                            "ssl_include_verify_flags": ssl_include_verify_flags,
+                            "ssl_exclude_verify_flags": ssl_exclude_verify_flags,
                             "ssl_ca_certs": ssl_ca_certs,
                             "ssl_ca_data": ssl_ca_data,
                             "ssl_check_hostname": ssl_check_hostname,
@@ -348,6 +362,22 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                         {
                             "cache": cache,
                             "cache_config": cache_config,
+                        }
+                    )
+                maint_notifications_enabled = (
+                    maint_notifications_config and maint_notifications_config.enabled
+                )
+                if maint_notifications_enabled and protocol not in [
+                    3,
+                    "3",
+                ]:
+                    raise RedisError(
+                        "Maintenance notifications handlers on connection are only supported with RESP version 3"
+                    )
+                if maint_notifications_config:
+                    kwargs.update(
+                        {
+                            "maint_notifications_config": maint_notifications_config,
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)
@@ -372,23 +402,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             "3",
         ]:
             raise RedisError("Client caching is only supported with RESP version 3")
-
-        if maintenance_events_config and self.connection_pool.get_protocol() not in [
-            3,
-            "3",
-        ]:
-            raise RedisError(
-                "Push handlers on connection are only supported with RESP version 3"
-            )
-        if maintenance_events_config and maintenance_events_config.enabled:
-            self.maintenance_events_pool_handler = MaintenanceEventPoolHandler(
-                self.connection_pool, maintenance_events_config
-            )
-            self.connection_pool.set_maintenance_events_pool_handler(
-                self.maintenance_events_pool_handler
-            )
-        else:
-            self.maintenance_events_pool_handler = None
 
         self.single_connection_lock = threading.RLock()
         self.connection = None
@@ -587,15 +600,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         return Monitor(self.connection_pool)
 
     def client(self):
-        maintenance_events_config = (
-            None
-            if self.maintenance_events_pool_handler is None
-            else self.maintenance_events_pool_handler.config
-        )
         return self.__class__(
             connection_pool=self.connection_pool,
             single_connection_client=True,
-            maintenance_events_config=maintenance_events_config,
         )
 
     def __enter__(self):
@@ -754,9 +761,14 @@ class Monitor:
             client_port = client_info[5:]
             client_type = "unix"
         else:
-            # use rsplit as ipv6 addresses contain colons
-            client_address, client_port = client_info.rsplit(":", 1)
-            client_type = "tcp"
+            if client_info == "":
+                client_address = ""
+                client_port = ""
+                client_type = "unknown"
+            else:
+                # use rsplit as ipv6 addresses contain colons
+                client_address, client_port = client_info.rsplit(":", 1)
+                client_type = "tcp"
         return {
             "time": float(command_time),
             "db": int(db_id),
@@ -1182,7 +1194,10 @@ class PubSub:
 
     def ping(self, message: Union[str, None] = None) -> bool:
         """
-        Ping the Redis server
+        Ping the Redis server to test connectivity.
+
+        Sends a PING command to the Redis server and returns True if the server
+        responds with "PONG".
         """
         args = ["PING", message] if message is not None else ["PING"]
         return self.execute_command(*args)
@@ -1267,6 +1282,8 @@ class PubSub:
         sleep_time: float = 0.0,
         daemon: bool = False,
         exception_handler: Optional[Callable] = None,
+        pubsub=None,
+        sharded_pubsub: bool = False,
     ) -> "PubSubWorkerThread":
         for channel, handler in self.channels.items():
             if handler is None:
@@ -1280,8 +1297,13 @@ class PubSub:
                     f"Shard Channel: '{s_channel}' has no handler registered"
                 )
 
+        pubsub = self if pubsub is None else pubsub
         thread = PubSubWorkerThread(
-            self, sleep_time, daemon=daemon, exception_handler=exception_handler
+            pubsub,
+            sleep_time,
+            daemon=daemon,
+            exception_handler=exception_handler,
+            sharded_pubsub=sharded_pubsub,
         )
         thread.start()
         return thread
@@ -1296,12 +1318,14 @@ class PubSubWorkerThread(threading.Thread):
         exception_handler: Union[
             Callable[[Exception, "PubSub", "PubSubWorkerThread"], None], None
         ] = None,
+        sharded_pubsub: bool = False,
     ):
         super().__init__()
         self.daemon = daemon
         self.pubsub = pubsub
         self.sleep_time = sleep_time
         self.exception_handler = exception_handler
+        self.sharded_pubsub = sharded_pubsub
         self._running = threading.Event()
 
     def run(self) -> None:
@@ -1312,7 +1336,14 @@ class PubSubWorkerThread(threading.Thread):
         sleep_time = self.sleep_time
         while self._running.is_set():
             try:
-                pubsub.get_message(ignore_subscribe_messages=True, timeout=sleep_time)
+                if not self.sharded_pubsub:
+                    pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=sleep_time
+                    )
+                else:
+                    pubsub.get_sharded_message(
+                        ignore_subscribe_messages=True, timeout=sleep_time
+                    )
             except BaseException as e:
                 if self.exception_handler is None:
                     raise

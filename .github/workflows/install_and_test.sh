@@ -40,11 +40,12 @@ cd ${TESTDIR}
 # install, run tests
 pip install ${PKG}
 # Redis tests
-pytest -m 'not onlycluster' --ignore=tests/test_scenario
+pytest -m 'not onlycluster' --ignore=tests/test_scenario --ignore=tests/test_asyncio/test_scenario
 # RedisCluster tests
 CLUSTER_URL="redis://localhost:16379/0"
 CLUSTER_SSL_URL="rediss://localhost:27379/0"
 pytest -m 'not onlynoncluster and not redismod and not ssl' \
   --ignore=tests/test_scenario \
+  --ignore=tests/test_asyncio/test_scenario \
   --redis-url="${CLUSTER_URL}" \
   --redis-ssl-url="${CLUSTER_SSL_URL}"

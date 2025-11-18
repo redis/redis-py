@@ -17,6 +17,7 @@ class ClientValidations:
     def wait_push_notification(
         redis_client: Redis,
         timeout: int = 120,
+        fail_on_timeout: bool = True,
         connection: Optional[Connection] = None,
     ):
         """Wait for a push notification to be received."""
@@ -35,11 +36,15 @@ class ClientValidations:
                         logging.debug(
                             f"Push notification has been received. Response: {push_response}"
                         )
+                        if test_conn.should_reconnect():
+                            logging.debug("Connection is marked for reconnect")
                         return
                 except Exception as e:
                     logging.error(f"Error reading push notification: {e}")
                     break
                 time.sleep(check_interval)
+            if fail_on_timeout:
+                pytest.fail("Timeout waiting for push notification")
         finally:
             # Release the connection back to the pool
             try:
@@ -111,8 +116,9 @@ class ClusterOperations:
 
         # Get all node IDs from CLUSTER NODES section
         all_nodes = set()
-        nodes_with_shards = set()
-        master_nodes = set()
+        nodes_with_any_shards = set()  # Nodes with shards from ANY database
+        nodes_with_target_db_shards = set()  # Nodes with shards from target database
+        master_nodes = set()  # Master nodes for target database only
 
         for line in lines:
             line = line.strip()
@@ -141,31 +147,45 @@ class ClusterOperations:
                 # Parse shard line: db:1  m-standard  redis:1  node:2  master  0-8191  1.4MB  OK
                 parts = line.split()
                 if len(parts) >= 5:
+                    db_id = parts[0]  # db:1, db:2, etc.
                     node_id = parts[3]  # node:2
                     shard_role = parts[4]  # master/slave - this is what matters
 
-                    nodes_with_shards.add(node_id)
-                    if shard_role == "master":
-                        master_nodes.add(node_id)
+                    # Track ALL nodes with shards (for finding truly empty nodes)
+                    nodes_with_any_shards.add(node_id)
+
+                    # Only track master nodes for the specific database we're testing
+                    bdb_id = endpoint_config.get("bdb_id")
+                    if db_id == f"db:{bdb_id}":
+                        nodes_with_target_db_shards.add(node_id)
+                        if shard_role == "master":
+                            master_nodes.add(node_id)
             elif line.startswith("ENDPOINTS:") or not line:
                 shards_section_started = False
 
-        # Find empty node (node with no shards)
-        empty_nodes = all_nodes - nodes_with_shards
+        # Find empty node (node with no shards from ANY database)
+        nodes_with_no_shards_target_bdb = all_nodes - nodes_with_target_db_shards
 
         logging.debug(f"All nodes: {all_nodes}")
-        logging.debug(f"Nodes with shards: {nodes_with_shards}")
-        logging.debug(f"Master nodes: {master_nodes}")
-        logging.debug(f"Empty nodes: {empty_nodes}")
+        logging.debug(f"Nodes with shards from any database: {nodes_with_any_shards}")
+        logging.debug(
+            f"Nodes with target database shards: {nodes_with_target_db_shards}"
+        )
+        logging.debug(f"Master nodes (target database only): {master_nodes}")
+        logging.debug(
+            f"Nodes with no shards from target database: {nodes_with_no_shards_target_bdb}"
+        )
 
-        if not empty_nodes:
-            raise ValueError("No empty nodes (nodes without shards) found")
+        if not nodes_with_no_shards_target_bdb:
+            raise ValueError("All nodes have shards from target database")
 
         if not master_nodes:
-            raise ValueError("No nodes with master shards found")
+            raise ValueError("No nodes with master shards from target database found")
 
         # Return the first available empty node and master node (numeric part only)
-        empty_node = next(iter(empty_nodes)).split(":")[1]  # node:1 -> 1
+        empty_node = next(iter(nodes_with_no_shards_target_bdb)).split(":")[
+            1
+        ]  # node:1 -> 1
         target_node = next(iter(master_nodes)).split(":")[1]  # node:2 -> 2
 
         return target_node, empty_node
@@ -214,6 +234,40 @@ class ClusterOperations:
                         return endpoint_id
 
         raise ValueError(f"No endpoint ID for {endpoint_name} found in cluster status")
+
+    @staticmethod
+    def execute_failover(
+        fault_injector: FaultInjectorClient,
+        endpoint_config: Dict[str, Any],
+        timeout: int = 60,
+    ) -> Dict[str, Any]:
+        """Execute failover command and wait for completion."""
+
+        try:
+            bdb_id = endpoint_config.get("bdb_id")
+            failover_action = ActionRequest(
+                action_type=ActionType.FAILOVER,
+                parameters={
+                    "bdb_id": bdb_id,
+                },
+            )
+            trigger_action_result = fault_injector.trigger_action(failover_action)
+            action_id = trigger_action_result.get("action_id")
+            if not action_id:
+                raise ValueError(
+                    f"Failed to trigger fail over action for bdb_id {bdb_id}: {trigger_action_result}"
+                )
+
+            action_status_check_response = fault_injector.get_operation_result(
+                action_id, timeout=timeout
+            )
+            logging.info(
+                f"Completed cluster nodes info reading: {action_status_check_response}"
+            )
+            return action_status_check_response
+
+        except Exception as e:
+            pytest.fail(f"Failed to get cluster nodes info: {e}")
 
     @staticmethod
     def execute_rladmin_migrate(

@@ -942,8 +942,16 @@ class TestPubSubTimeouts:
     def test_get_message_wait_for_subscription_not_being_called(self, r):
         p = r.pubsub()
         p.subscribe("foo")
-        with patch.object(threading.Event, "wait") as mock:
-            assert p.subscribed is True
+        assert p.subscribed is True
+
+        # Ensure p has the event attribute your wait_for_message would call:
+        ev = getattr(p, "subscribed_event", None)
+
+        assert ev is not None, (
+            "PubSub event attribute not found (check redis-py version)"
+        )
+
+        with patch.object(ev, "wait") as mock:
             assert wait_for_message(p) == make_message("subscribe", "foo", 1)
             assert mock.called is False
 
