@@ -416,7 +416,7 @@ To enable periodic fallback to a higher-priority healthy database, set `auto_fal
 Custom failover callbacks
 -------------------------
 
-You may want to make a custom actions when failover happens. For example, you may want to collect some metrics,
+You may want to activate custom actions when failover happens. For example, you may want to collect some metrics,
 logs or externally persist a connection state.
 
 You can register your own event listener for `ActiveDatabaseChanged` event that was emitted when failover happened, via
