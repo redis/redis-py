@@ -322,7 +322,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
     ) -> Optional[ConnectionStateExpectation]:
         """Get the expected state for a node."""
         for expectation in expectations_list:
-            if int(expectation.node_port) == (node_port):
+            if expectation.node_port == node_port:
                 return expectation
         return None
 
@@ -397,7 +397,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
             ],
         )
 
-        # execute a commands that will receive the notification
+        # execute a command that will receive the notification
         res = self.cluster.set("anyprefix:{3}:k", "VAL")
         assert res is True
 

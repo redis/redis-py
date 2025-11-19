@@ -184,38 +184,18 @@ class MaintenanceNotificationsParser:
     @staticmethod
     def parse_oss_maintenance_start_msg(response):
         # Expected message format is:
-        # TODO Clarify which format will be the final one
         # SMIGRATING <seq_number> <slot, range1-range2,...>
-        # or
-        # (using the one below for testing until the server changes are done)
-        # SMIGRATING <transaction_id> TO <endpoint> <list of slots and slot-ranges>  ## received on source endpoint
-        # SMIGRATING <transaction_id> FROM <list of slots and slot-ranges>.      ## received on target endpoint
         id = response[1]
-
-        address_value = response[3]
-        if isinstance(address_value, bytes):
-            address_value = address_value.decode()
-        if response[2] in ("TO", b"TO"):
-            dest_node = address_value
-            src_node = None
-        else:
-            dest_node = None
-            src_node = address_value
-
-        slots = response[4]
-        return OSSNodeMigratingNotification(id, src_node, dest_node, slots)
+        slots = response[2]
+        return OSSNodeMigratingNotification(id, slots)
 
     @staticmethod
     def parse_oss_maintenance_completed_msg(response):
         # Expected message format is:
-        # TODO Clarify which format will be the final one
-        # SMIGRATED <seq_number> NodeA’<host:port> <slot, range1-range2,...>
-        # or
-        # SMIGRATED <transaction_id> <list of slots and slot-ranges>
-        # received on source and target endpoints when migration is over
+        # SMIGRATED <seq_number> <host:port> <slot, range1-range2,...>
         id = response[1]
-        node_address = None
-        slots = response[2]
+        node_address = response[2]
+        slots = response[3]
         return OSSNodeMigratedNotification(id, node_address, slots)
 
     @staticmethod
@@ -453,18 +433,16 @@ class AsyncPushNotificationsParser(Protocol):
 
                 if notification is not None:
                     return await self.maintenance_push_handler_func(notification)
-                if (
-                    msg_type == _SMIGRATED_MESSAGE
-                    and self.oss_cluster_maint_push_handler_func
-                ):
-                    parser_function = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
-                        msg_type
-                    ][1]
-                    notification = parser_function(response)
-                    if notification is not None:
-                        return await self.oss_cluster_maint_push_handler_func(
-                            notification
-                        )
+            if (
+                msg_type == _SMIGRATED_MESSAGE
+                and self.oss_cluster_maint_push_handler_func
+            ):
+                parser_function = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
+                    msg_type
+                ][1]
+                notification = parser_function(response)
+                if notification is not None:
+                    return await self.oss_cluster_maint_push_handler_func(notification)
         except Exception as e:
             logger.error(
                 "Error handling {} message ({}): {}".format(msg_type, response, e)

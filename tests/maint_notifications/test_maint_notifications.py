@@ -393,8 +393,6 @@ class TestOSSNodeMigratingNotification:
             assert notification.id == 1
             assert notification.ttl == OSSNodeMigratingNotification.DEFAULT_TTL
             assert notification.creation_time == 1000
-            assert notification.src_node is None
-            assert notification.dest_node is None
             assert notification.slots is None
 
     def test_init_with_all_parameters(self):
@@ -403,15 +401,11 @@ class TestOSSNodeMigratingNotification:
             slots = [1, 2, 3, 4, 5]
             notification = OSSNodeMigratingNotification(
                 id=1,
-                src_node="127.0.0.1:6379",
-                dest_node="127.0.0.1:6380",
                 slots=slots,
             )
             assert notification.id == 1
             assert notification.ttl == OSSNodeMigratingNotification.DEFAULT_TTL
             assert notification.creation_time == 1000
-            assert notification.src_node == "127.0.0.1:6379"
-            assert notification.dest_node == "127.0.0.1:6380"
             assert notification.slots == slots
 
     def test_default_ttl(self):
@@ -425,8 +419,6 @@ class TestOSSNodeMigratingNotification:
         with patch("time.monotonic", return_value=1000):
             notification = OSSNodeMigratingNotification(
                 id=1,
-                src_node="127.0.0.1:6379",
-                dest_node="127.0.0.1:6380",
                 slots=[1, 2, 3],
             )
 
@@ -442,14 +434,10 @@ class TestOSSNodeMigratingNotification:
         """Test equality for notifications with same id and type."""
         notification1 = OSSNodeMigratingNotification(
             id=1,
-            src_node="127.0.0.1:6379",
-            dest_node="127.0.0.1:6380",
             slots=[1, 2, 3],
         )
         notification2 = OSSNodeMigratingNotification(
             id=1,
-            src_node="127.0.0.1:6381",
-            dest_node="127.0.0.1:6382",
             slots=[4, 5, 6],
         )
         # Should be equal because id and type are the same
@@ -471,14 +459,10 @@ class TestOSSNodeMigratingNotification:
         """Test hash for notifications with same id and type."""
         notification1 = OSSNodeMigratingNotification(
             id=1,
-            src_node="127.0.0.1:6379",
-            dest_node="127.0.0.1:6380",
             slots=[1, 2, 3],
         )
         notification2 = OSSNodeMigratingNotification(
             id=1,
-            src_node="127.0.0.1:6381",
-            dest_node="127.0.0.1:6382",
             slots=[4, 5, 6],
         )
         # Should have same hash because id and type are the same

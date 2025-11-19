@@ -406,12 +406,6 @@ class OSSNodeMigratingNotification(MaintenanceNotification):
 
     Args:
         id (int): Unique identifier for this notification
-        src_node (Optional[str]): Source node address - the notifications
-                                received by the connections to the src node will
-                                receive the dest node address
-        dest_node (Optional[str]): Destination node address - the notifications
-                                received by the connections to the dst node will
-                                receive the src node address
         slots (Optional[List[int]]): List of slots being migrated
     """
 
@@ -420,14 +414,10 @@ class OSSNodeMigratingNotification(MaintenanceNotification):
     def __init__(
         self,
         id: int,
-        src_node: Optional[str] = None,
-        dest_node: Optional[str] = None,
         slots: Optional[List[int]] = None,
     ):
         super().__init__(id, OSSNodeMigratingNotification.DEFAULT_TTL)
         self.slots = slots
-        self.src_node = src_node
-        self.dest_node = dest_node
 
     def __repr__(self) -> str:
         expiry_time = self.creation_time + self.ttl
@@ -435,8 +425,6 @@ class OSSNodeMigratingNotification(MaintenanceNotification):
         return (
             f"{self.__class__.__name__}("
             f"id={self.id}, "
-            f"src_node={self.src_node}, "
-            f"dest_node={self.dest_node}, "
             f"slots={self.slots}, "
             f"ttl={self.ttl}, "
             f"creation_time={self.creation_time}, "
