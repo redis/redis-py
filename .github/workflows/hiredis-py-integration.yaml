@@ -23,8 +23,8 @@ env:
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   # this speeds up coverage with Python 3.12: https://github.com/nedbat/coveragepy/issues/1665
   COVERAGE_CORE: sysmon
-  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: '8.0.2'
-  CURRENT_REDIS_VERSION: '8.0.2'
+  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: '8.4.0'
+  CURRENT_REDIS_VERSION: '8.4.0'
 
 jobs:
   redis_version:
