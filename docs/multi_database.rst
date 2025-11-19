@@ -315,7 +315,7 @@ reverse proxy behind an actual REST API endpoint.
                 health_check_url="https://cluster.example.com",
             ),
         ],
-        # Add custom checks (in addition to default PingHealthCheck)
+        # Add custom health check to replace the default
         health_checks=[
             # Redis Enterprise REST-based lag-aware check
             LagAwareHealthCheck(
@@ -411,6 +411,51 @@ To enable periodic fallback to a higher-priority healthy database, set `auto_fal
         auto_fallback_interval=30.0,
     )
     client = MultiDBClient(cfg)
+
+
+Custom failover callbacks
+-------------------------
+
+You may want to activate custom actions when failover happens. For example, you may want to collect some metrics,
+logs or externally persist a connection state.
+
+You can register your own event listener for the `ActiveDatabaseChanged` event (which is emitted when a failover happens) using
+the `EventDispatcher`.
+
+.. code-block:: python
+
+    class LogFailoverEventListener(EventListenerInterface):
+        def __init__(self, logger: Logger):
+            self.logger = logger
+
+        def listen(self, event: ActiveDatabaseChanged):
+            self.logger.warning(
+                f"Failover happened. Active database switched from {event.old_database} to {event.new_database}"
+            )
+
+    event_dispatcher = EventDispatcher()
+    listener = LogFailoverEventListener(logging.getLogger(__name__))
+
+    # Register custom listener
+    event_dispatcher.register_listeners(
+        {
+            ActiveDatabaseChanged: [listener],
+        }
+    )
+
+    config = MultiDbConfig(
+        client_class=client_class,
+        databases_config=db_configs,
+        command_retry=command_retry,
+        min_num_failures=min_num_failures,
+        health_check_probes=3,
+        health_check_interval=health_check_interval,
+        event_dispatcher=event_dispatcher,
+        health_check_probes_delay=health_check_delay,
+    )
+
+    client = MultiDBClient(config)
+
 
 Managing databases at runtime
 -----------------------------
