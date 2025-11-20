@@ -1,50 +1,62 @@
-from typing import cast
+from dataclasses import dataclass
+from typing import List, Optional, cast
 
 from redis import ConnectionPool, RedisCluster
 from redis.cluster import ClusterNode
 from redis.connection import (
     BlockingConnectionPool,
 )
-from redis.maint_notifications import MaintNotificationsConfig
+from redis.maint_notifications import MaintNotificationsConfig, MaintenanceState
 from redis.cache import CacheConfig
 from tests.maint_notifications.proxy_server_helpers import (
     ProxyInterceptorHelper,
     RespTranslator,
 )
 
+NODE_PORT_1 = 15379
+NODE_PORT_2 = 15380
+NODE_PORT_3 = 15381
+
 # Initial cluster node configuration for proxy-based tests
 PROXY_CLUSTER_NODES = [
-    ClusterNode("127.0.0.1", 15379),
-    ClusterNode("127.0.0.1", 15380),
-    ClusterNode("127.0.0.1", 15381),
+    ClusterNode("127.0.0.1", NODE_PORT_1),
+    ClusterNode("127.0.0.1", NODE_PORT_2),
+    ClusterNode("127.0.0.1", NODE_PORT_3),
 ]
 
 
-class TestClusterMaintNotificationsConfig:
-    """Test the maint_notifications_config parameter of RedisCluster."""
+class TestClusterMaintNotificationsBase:
+    """Base class for cluster maintenance notifications handling tests."""
 
-    # Helper methods
     def _create_cluster_client(
         self,
+        pool_class=ConnectionPool,
+        enable_cache=False,
+        max_connections=10,
         maint_config=None,
-        connection_pool_class=None,
-        cache_config=None,
-        skip_full_coverage_check=True,
-    ):
-        """Create a RedisCluster instance with real cluster nodes."""
-        kwargs = {
-            "startup_nodes": PROXY_CLUSTER_NODES,
-            "protocol": 3,
-            "skip_full_coverage_check": skip_full_coverage_check,
-        }
-        if maint_config is not None:
-            kwargs["maint_notifications_config"] = maint_config
-        if connection_pool_class is not None:
-            kwargs["connection_pool_class"] = connection_pool_class
-        if cache_config is not None:
-            kwargs["cache_config"] = cache_config
+    ) -> RedisCluster:
+        """Create a RedisCluster instance with mocked sockets."""
+        if maint_config is None and hasattr(self, "config") and self.config is not None:
+            maint_config = self.config
 
-        return RedisCluster(**kwargs)
+        kwargs = {}
+        if enable_cache:
+            kwargs = {"cache_config": CacheConfig()}
+
+        test_redis_client = RedisCluster(
+            protocol=3,
+            startup_nodes=PROXY_CLUSTER_NODES,
+            maint_notifications_config=maint_config,
+            connection_pool_class=pool_class,
+            max_connections=max_connections,
+            **kwargs,
+        )
+
+        return test_redis_client
+
+
+class TestClusterMaintNotificationsConfig(TestClusterMaintNotificationsBase):
+    """Test the maint_notifications_config parameter of RedisCluster."""
 
     def _validate_maint_config_on_nodes_manager(
         self,
@@ -159,7 +171,7 @@ class TestClusterMaintNotificationsConfig:
 
         cluster = self._create_cluster_client(
             maint_config=maint_config,
-            connection_pool_class=BlockingConnectionPool,
+            pool_class=BlockingConnectionPool,
         )
 
         try:
@@ -183,11 +195,10 @@ class TestClusterMaintNotificationsConfig:
         maint_config = MaintNotificationsConfig(
             enabled=False, proactive_reconnect=True, relaxed_timeout=15
         )
-        cache_config = CacheConfig()
 
         cluster = self._create_cluster_client(
             maint_config=maint_config,
-            cache_config=cache_config,
+            enable_cache=True,
         )
 
         try:
@@ -274,7 +285,7 @@ class TestClusterMaintNotificationsConfig:
             cluster.close()
 
 
-class TestClusterMaintNotificationsHandlingBase:
+class TestClusterMaintNotificationsHandlingBase(TestClusterMaintNotificationsBase):
     """Base class for maintenance notifications handling tests."""
 
     def setup_method(self):
@@ -287,38 +298,127 @@ class TestClusterMaintNotificationsHandlingBase:
         )
         self.cluster = self._create_cluster_client(maint_config=self.config)
 
-    def _create_cluster_client(
-        self,
-        pool_class=ConnectionPool,
-        enable_cache=False,
-        max_connections=10,
-        maint_config=None,
-    ) -> RedisCluster:
-        """Create a RedisCluster instance with mocked sockets."""
-        config = maint_config if maint_config is not None else self.config
-        kwargs = {}
-        if enable_cache:
-            kwargs = {"cache_config": CacheConfig()}
-
-        test_redis_client = RedisCluster(
-            protocol=3,
-            startup_nodes=PROXY_CLUSTER_NODES,
-            maint_notifications_config=config,
-            connection_pool_class=pool_class,
-            max_connections=max_connections,
-            **kwargs,
-        )
-
-        return test_redis_client
-
     def teardown_method(self):
         """Clean up test fixtures."""
         self.cluster.close()
         self.proxy_helper.cleanup_interceptors()
 
 
+@dataclass
+class ConnectionStateExpectation:
+    """Data class to hold connection state details for validation."""
+
+    node_port: int
+    changed_connections_count: int = 0
+    state: MaintenanceState = MaintenanceState.NONE
+    relaxed_timeout: Optional[int] = None
+
+
 class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlingBase):
     """Test maintenance notifications handling with RedisCluster."""
+
+    def _get_expected_node_state(
+        self, expectations_list: List[ConnectionStateExpectation], node_port: int
+    ) -> Optional[ConnectionStateExpectation]:
+        """Get the expected state for a node."""
+        for expectation in expectations_list:
+            if expectation.node_port == node_port:
+                return expectation
+        return None
+
+    def _validate_connections_states(
+        self,
+        cluster: RedisCluster,
+        expected_states: List[ConnectionStateExpectation],
+    ):
+        """Validate connections states."""
+        default_maint_state = MaintenanceState.NONE
+        default_timeout = None
+        nodes = list(cluster.nodes_manager.nodes_cache.values())
+        for node in nodes:
+            cluster_node = cast(ClusterNode, node)
+            assert cluster_node.redis_connection is not None
+            connection_pool = cluster_node.redis_connection.connection_pool
+            assert connection_pool is not None
+            expected_state = self._get_expected_node_state(
+                expected_states, cluster_node.port
+            )
+            if expected_state is None:
+                # No expectation for this node
+                continue
+            changed_connections_count = 0
+            for conn in (
+                *connection_pool._get_in_use_connections(),
+                *connection_pool._get_free_connections(),
+            ):
+                if (
+                    conn.maintenance_state != default_maint_state
+                    and conn.maintenance_state == expected_state.state
+                ) or (
+                    conn.socket_timeout != default_timeout
+                    and conn.socket_timeout == expected_state.relaxed_timeout
+                ):
+                    changed_connections_count += 1
+            assert changed_connections_count == expected_state.changed_connections_count
+
+    def test_receive_oss_maintenance_notification(self):
+        """Test receiving an OSS maintenance notification."""
+        # get three connections from each node
+        for node in self.cluster.nodes_manager.nodes_cache.values():
+            node_connections = []
+            for _ in range(3):
+                node_connections.append(
+                    node.redis_connection.connection_pool.get_connection()
+                )
+            for conn in node_connections:
+                node.redis_connection.connection_pool.release(conn)
+
+            node_connections.clear()
+
+        # send a notification to node 1
+        notification = RespTranslator.smigrating_to_resp(
+            "SMIGRATING 12 TO 127.0.0.1:15380 <123,456,5000-7000>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, notification)
+
+        # validate no timeout is relaxed on any connection
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1, changed_connections_count=0
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_2, changed_connections_count=0
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_3, changed_connections_count=0
+                ),
+            ],
+        )
+
+        # execute a command that will receive the notification
+        res = self.cluster.set("anyprefix:{3}:k", "VAL")
+        assert res is True
+
+        # validate the timeout was relaxed on just one connection for the node
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_2, changed_connections_count=0
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_3, changed_connections_count=0
+                ),
+            ],
+        )
 
     def test_receive_maint_notification(self):
         """Test receiving a maintenance notification."""
