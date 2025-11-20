@@ -1,11 +1,10 @@
 import base64
+from dataclasses import dataclass
 import logging
 import re
-from typing import Union
+from typing import Optional, Union
 
 from redis.http.http_client import HttpClient, HttpError
-# from urllib.request import Request, urlopen
-# from urllib.error import URLError
 
 
 class RespTranslator:
@@ -34,7 +33,7 @@ class RespTranslator:
         )
 
     @staticmethod
-    def smigrating_to_resp(resp: str) -> str:
+    def oss_maint_notification_to_resp(resp: str) -> str:
         """Convert query to RESP format."""
         return (
             f">{len(resp.split())}\r\n"
@@ -45,6 +44,14 @@ class RespTranslator:
         )
 
 
+@dataclass
+class SlotsRange:
+    host: str
+    port: int
+    start_slot: int
+    end_slot: int
+
+
 class ProxyInterceptorHelper:
     """Helper class for intercepting socket calls and managing interceptor server."""
 
@@ -52,6 +59,7 @@ class ProxyInterceptorHelper:
         self.server_url = server_url
         self._resp_translator = RespTranslator()
         self.http_client = HttpClient()
+        self._interceptors = list()
 
     def cleanup_interceptors(self, *names: str):
         """
@@ -60,56 +68,67 @@ class ProxyInterceptorHelper:
         Args:
             names: Names of the interceptors to reset
         """
-        for name in names:
+        if not names:
+            names = self._interceptors
+        for name in tuple(names):
             self._reset_interceptor(name)
 
-    def set_cluster_nodes(self, name: str, nodes: list[tuple[str, int]]) -> str:
+    def set_cluster_slots(
+        self,
+        name: str,
+        slots_ranges: list[SlotsRange],
+    ) -> str:
         """
-        Set cluster nodes by intercepting CLUSTER SLOTS command.
+        Set cluster slots and nodes by intercepting CLUSTER SLOTS command.
 
         This method creates an interceptor that intercepts CLUSTER SLOTS commands
-        and returns a modified topology with the provided nodes.
+        and returns a modified topology with the provided data.
 
         Args:
             name: Name of the interceptor
-            nodes: List of (host, port) tuples representing the cluster nodes
+            slots_ranges: List of SlotsRange objects representing the cluster
+                nodes and slots coverage
 
         Returns:
             The interceptor name that was created
 
         Example:
             interceptor = ProxyInterceptorHelper(None, "http://localhost:4000")
-            interceptor_name = interceptor.set_cluster_nodes(
+            interceptor.set_cluster_slots(
                 "test_topology",
-                [("127.0.0.1", 6379), ("127.0.0.1", 6380), ("127.0.0.1", 6381)]
+                [
+                    SlotsRange("127.0.0.1", 6379, 0, 5000),
+                    SlotsRange("127.0.0.1", 6380, 5001, 10000),
+                    SlotsRange("127.0.0.1", 6381, 10001, 16383),
+                ]
             )
         """
         # Build RESP response for CLUSTER SLOTS
         # Format: *<num_slots_ranges> for each range: *3 :start :end *3 $<host_len> <host> :<port> $<id_len> <id>
-        resp_parts = [f"*{len(nodes)}"]
+        resp_parts = [f"*{len(slots_ranges)}"]
 
-        # For simplicity, distribute slots evenly across nodes
-        total_slots = 16384
-        slots_per_node = total_slots // len(nodes)
-
-        for i, (host, port) in enumerate(nodes):
-            start_slot = i * slots_per_node
-            end_slot = (
-                (i + 1) * slots_per_node - 1 if i < len(nodes) - 1 else total_slots - 1
-            )
-
+        for slots_range in slots_ranges:
             # Node info: *3 for (host, port, id)
             resp_parts.append("*3")
-            resp_parts.append(f":{start_slot}")
-            resp_parts.append(f":{end_slot}")
+            # 1st elem --> start slot
+            resp_parts.append(f":{slots_range.start_slot}")
+            # 2nd elem --> end slot
+            resp_parts.append(f":{slots_range.end_slot}")
 
-            # Node details: *3 for (host, port, id)
-            resp_parts.append("*3")
-            resp_parts.append(f"${len(host)}")
-            resp_parts.append(host)
-            resp_parts.append(f":{port}")
-            resp_parts.append("$13")
-            resp_parts.append(f"proxy-id-{port}")
+            # 3rd elem --> list with node details: *4 for (host, port, id, empty hash)
+            resp_parts.append("*4")
+            # 1st elem --> host
+            resp_parts.append(f"${len(slots_range.host)}")
+            resp_parts.append(f"{slots_range.host}")
+            # 2nd elem --> port
+            resp_parts.append(f":{slots_range.port}")
+            # 3rd elem --> node id
+            node_id = f"proxy-id-{slots_range.port}"
+            resp_parts.append(f"${len(node_id)}")
+            resp_parts.append(node_id)
+            # 4th elem --> empty hash
+            resp_parts.append("$0")
+            resp_parts.append("")
 
         response = "\r\n".join(resp_parts) + "\r\n"
 
@@ -257,7 +276,10 @@ class ProxyInterceptorHelper:
             proxy_response = self.http_client.post(
                 url, json_body=payload, headers=headers
             )
-            return proxy_response.json()
+            self._interceptors.append(name)
+            if isinstance(proxy_response, dict):
+                return proxy_response
+            return proxy_response.json() if proxy_response else {}
         except HttpError as e:
             raise RuntimeError(f"Failed to add interceptor: {e}")
 
@@ -268,4 +290,4 @@ class ProxyInterceptorHelper:
         Args:
             name: Name of the interceptor to reset
         """
-        self._add_interceptor(name, "", "")
+        self._add_interceptor(name, "no_match", "")

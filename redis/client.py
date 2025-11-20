@@ -58,6 +58,7 @@ from redis.exceptions import (
 from redis.lock import Lock
 from redis.maint_notifications import (
     MaintNotificationsConfig,
+    OSSMaintNotificationsHandler,
 )
 from redis.retry import Retry
 from redis.utils import (
@@ -250,6 +251,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        oss_cluster_maint_notifications_handler: Optional[
+            OSSMaintNotificationsHandler
+        ] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -287,6 +291,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             If not provided and protocol is RESP3, the maintenance notifications
             will be enabled by default (logic is included in the connection pool
             initialization).
+            Argument is ignored when connection_pool is provided.
+        oss_cluster_maint_notifications_handler:
+            handler for OSS cluster notifications - see
+            `redis.maint_notifications.OSSMaintNotificationsHandler` for details.
+            Only supported with RESP3
             Argument is ignored when connection_pool is provided.
         """
         if event_dispatcher is None:
@@ -378,6 +387,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     kwargs.update(
                         {
                             "maint_notifications_config": maint_notifications_config,
+                        }
+                    )
+                if oss_cluster_maint_notifications_handler:
+                    kwargs.update(
+                        {
+                            "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)
