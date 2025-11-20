@@ -5,9 +5,12 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, List, Literal, Optional, Union
 
 from redis.typing import Number
+
+if TYPE_CHECKING:
+    from redis.cluster import NodesManager
 
 
 class MaintenanceState(enum.Enum):
@@ -394,6 +397,125 @@ class NodeFailedOverNotification(MaintenanceNotification):
         return hash((self.__class__.__name__, int(self.id)))
 
 
+class OSSNodeMigratingNotification(MaintenanceNotification):
+    """
+    Notification for when a Redis OSS API client is used and a node is in the process of migrating slots.
+
+    This notification is received when a node starts migrating its slots to another node
+    during cluster rebalancing or maintenance operations.
+
+    Args:
+        id (int): Unique identifier for this notification
+        slots (Optional[List[int]]): List of slots being migrated
+    """
+
+    DEFAULT_TTL = 30
+
+    def __init__(
+        self,
+        id: int,
+        slots: Optional[List[int]] = None,
+    ):
+        super().__init__(id, OSSNodeMigratingNotification.DEFAULT_TTL)
+        self.slots = slots
+
+    def __repr__(self) -> str:
+        expiry_time = self.creation_time + self.ttl
+        remaining = max(0, expiry_time - time.monotonic())
+        return (
+            f"{self.__class__.__name__}("
+            f"id={self.id}, "
+            f"slots={self.slots}, "
+            f"ttl={self.ttl}, "
+            f"creation_time={self.creation_time}, "
+            f"expires_at={expiry_time}, "
+            f"remaining={remaining:.1f}s, "
+            f"expired={self.is_expired()}"
+            f")"
+        )
+
+    def __eq__(self, other) -> bool:
+        """
+        Two OSSNodeMigratingNotification notifications are considered equal if they have the same
+        id and are of the same type.
+        """
+        if not isinstance(other, OSSNodeMigratingNotification):
+            return False
+        return self.id == other.id and type(self) is type(other)
+
+    def __hash__(self) -> int:
+        """
+        Return a hash value for the notification to allow
+        instances to be used in sets and as dictionary keys.
+
+        Returns:
+            int: Hash value based on notification type and id
+        """
+        return hash((self.__class__.__name__, int(self.id)))
+
+
+class OSSNodeMigratedNotification(MaintenanceNotification):
+    """
+    Notification for when a Redis OSS API client is used and a node has completed migrating slots.
+
+    This notification is received when a node has finished migrating all its slots
+    to other nodes during cluster rebalancing or maintenance operations.
+
+    Args:
+        id (int): Unique identifier for this notification
+        node_address (Optional[str]): Address of the node that has
+                                      completed migration - this is the destination node.
+        slots (Optional[List[int]]): List of slots that have been migrated
+    """
+
+    DEFAULT_TTL = 30
+
+    def __init__(
+        self,
+        id: int,
+        node_address: Optional[str] = None,
+        slots: Optional[List[int]] = None,
+    ):
+        super().__init__(id, OSSNodeMigratedNotification.DEFAULT_TTL)
+        self.node_address = node_address
+        self.slots = slots
+
+    def __repr__(self) -> str:
+        expiry_time = self.creation_time + self.ttl
+        remaining = max(0, expiry_time - time.monotonic())
+        return (
+            f"{self.__class__.__name__}("
+            f"id={self.id}, "
+            f"node_address={self.node_address}, "
+            f"slots={self.slots}, "
+            f"ttl={self.ttl}, "
+            f"creation_time={self.creation_time}, "
+            f"expires_at={expiry_time}, "
+            f"remaining={remaining:.1f}s, "
+            f"expired={self.is_expired()}"
+            f")"
+        )
+
+    def __eq__(self, other) -> bool:
+        """
+        Two OSSNodeMigratedNotification notifications are considered equal if they have the same
+        id and are of the same type.
+        """
+        if not isinstance(other, OSSNodeMigratedNotification):
+            return False
+        return self.id == other.id and type(self) is type(other)
+
+    def __hash__(self) -> int:
+        """
+        Return a hash value for the notification to allow
+        instances to be used in sets and as dictionary keys.
+
+        Returns:
+            int: Hash value based on notification type and id
+        """
+        return hash((self.__class__.__name__, int(self.id)))
+
+
 def _is_private_fqdn(host: str) -> bool:
     """
     Determine if an FQDN is likely to be internal/private.
@@ -755,6 +877,7 @@ class MaintNotificationsConnectionHandler:
     _NOTIFICATION_TYPES: dict[type["MaintenanceNotification"], int] = {
         NodeMigratingNotification: 1,
         NodeFailingOverNotification: 1,
+        OSSNodeMigratingNotification: 1,
         NodeMigratedNotification: 0,
         NodeFailedOverNotification: 0,
     }
@@ -808,3 +931,31 @@ class MaintNotificationsConnectionHandler:
         # timeouts by providing -1 as the relaxed timeout
         self.connection.update_current_socket_timeout(-1)
         self.connection.maintenance_state = MaintenanceState.NONE
+
+
+class OSSMaintNotificationsHandler:
+    def __init__(
+        self, nodes_manager: "NodesManager", config: MaintNotificationsConfig
+    ) -> None:
+        self.nodes_manager = nodes_manager
+        self.config = config
+        self._processed_notifications = set()
+        self._lock = threading.RLock()
+
+    def remove_expired_notifications(self):
+        with self._lock:
+            for notification in tuple(self._processed_notifications):
+                if notification.is_expired():
+                    self._processed_notifications.remove(notification)
+
+    def handle_notification(self, notification: MaintenanceNotification):
+        if isinstance(notification, OSSNodeMigratedNotification):
+            self.handle_oss_maintenance_completed_notification(notification)
+        else:
+            logging.error(f"Unhandled notification type: {notification}")
+
+    def handle_oss_maintenance_completed_notification(
+        self, notification: OSSNodeMigratedNotification
+    ):
+        self.remove_expired_notifications()
+        logging.info(f"Received OSS maintenance completed notification: {notification}")
