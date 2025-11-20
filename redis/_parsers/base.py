@@ -11,6 +11,8 @@ from redis.maint_notifications import (
     NodeMigratedNotification,
     NodeMigratingNotification,
     NodeMovingNotification,
+    OSSNodeMigratedNotification,
+    OSSNodeMigratingNotification,
 )
 
 if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
@@ -180,8 +182,28 @@ class MaintenanceNotificationsParser:
     """Protocol defining maintenance push notification parsing functionality"""
 
     @staticmethod
+    def parse_oss_maintenance_start_msg(response):
+        # Expected message format is:
+        # SMIGRATING <seq_number> <slot, range1-range2,...>
+        id = response[1]
+        slots = response[2]
+        return OSSNodeMigratingNotification(id, slots)
+
+    @staticmethod
+    def parse_oss_maintenance_completed_msg(response):
+        # Expected message format is:
+        # SMIGRATED <seq_number> <host:port> <slot, range1-range2,...>
+        id = response[1]
+        node_address = response[2]
+        slots = response[3]
+        return OSSNodeMigratedNotification(id, node_address, slots)
+
+    @staticmethod
     def parse_maintenance_start_msg(response, notification_type):
         # Expected message format is: <notification_type> <seq_number> <time>
+        # Examples:
+        # MIGRATING 1 10
+        # FAILING_OVER 2 20
         id = response[1]
         ttl = response[2]
         return notification_type(id, ttl)
@@ -189,6 +211,9 @@ class MaintenanceNotificationsParser:
     @staticmethod
     def parse_maintenance_completed_msg(response, notification_type):
         # Expected message format is: <notification_type> <seq_number>
+        # Examples:
+        # MIGRATED 1
+        # FAILED_OVER 2
         id = response[1]
         return notification_type(id)
 
@@ -215,12 +240,15 @@ _MIGRATING_MESSAGE = "MIGRATING"
 _MIGRATED_MESSAGE = "MIGRATED"
 _FAILING_OVER_MESSAGE = "FAILING_OVER"
 _FAILED_OVER_MESSAGE = "FAILED_OVER"
+_SMIGRATING_MESSAGE = "SMIGRATING"
+_SMIGRATED_MESSAGE = "SMIGRATED"
 
 _MAINTENANCE_MESSAGES = (
     _MIGRATING_MESSAGE,
     _MIGRATED_MESSAGE,
     _FAILING_OVER_MESSAGE,
     _FAILED_OVER_MESSAGE,
+    _SMIGRATING_MESSAGE,
 )
 
 MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING: dict[
@@ -246,6 +274,14 @@ MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING: dict[
         NodeMovingNotification,
         MaintenanceNotificationsParser.parse_moving_msg,
     ),
+    _SMIGRATING_MESSAGE: (
+        OSSNodeMigratingNotification,
+        MaintenanceNotificationsParser.parse_oss_maintenance_start_msg,
+    ),
+    _SMIGRATED_MESSAGE: (
+        OSSNodeMigratedNotification,
+        MaintenanceNotificationsParser.parse_oss_maintenance_completed_msg,
+    ),
 }
 
 
@@ -256,6 +292,7 @@ class PushNotificationsParser(Protocol):
     invalidation_push_handler_func: Optional[Callable] = None
     node_moving_push_handler_func: Optional[Callable] = None
     maintenance_push_handler_func: Optional[Callable] = None
+    oss_cluster_maint_push_handler_func: Optional[Callable] = None
 
     def handle_pubsub_push_response(self, response):
         """Handle pubsub push responses"""
@@ -270,6 +307,7 @@ class PushNotificationsParser(Protocol):
             _INVALIDATION_MESSAGE,
             *_MAINTENANCE_MESSAGES,
             _MOVING_MESSAGE,
+            _SMIGRATED_MESSAGE,
         ):
             return self.pubsub_push_handler_func(response)
 
@@ -292,13 +330,27 @@ class PushNotificationsParser(Protocol):
                 parser_function = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
                     msg_type
                 ][1]
-                notification_type = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
-                    msg_type
-                ][0]
-                notification = parser_function(response, notification_type)
+                if msg_type == _SMIGRATING_MESSAGE:
+                    notification = parser_function(response)
+                else:
+                    notification_type = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
+                        msg_type
+                    ][0]
+                    notification = parser_function(response, notification_type)
 
                 if notification is not None:
                     return self.maintenance_push_handler_func(notification)
+            if (
+                msg_type == _SMIGRATED_MESSAGE
+                and self.oss_cluster_maint_push_handler_func
+            ):
+                parser_function = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
+                    msg_type
+                ][1]
+                notification = parser_function(response)
+
+                if notification is not None:
+                    return self.oss_cluster_maint_push_handler_func(notification)
         except Exception as e:
             logger.error(
                 "Error handling {} message ({}): {}".format(msg_type, response, e)
@@ -318,6 +370,9 @@ class PushNotificationsParser(Protocol):
     def set_maintenance_push_handler(self, maintenance_push_handler_func):
         self.maintenance_push_handler_func = maintenance_push_handler_func
 
+    def set_oss_cluster_maint_push_handler(self, oss_cluster_maint_push_handler_func):
+        self.oss_cluster_maint_push_handler_func = oss_cluster_maint_push_handler_func
+
 
 class AsyncPushNotificationsParser(Protocol):
     """Protocol defining async RESP3-specific parsing functionality"""
@@ -326,6 +381,7 @@ class AsyncPushNotificationsParser(Protocol):
     invalidation_push_handler_func: Optional[Callable] = None
     node_moving_push_handler_func: Optional[Callable[..., Awaitable[None]]] = None
     maintenance_push_handler_func: Optional[Callable[..., Awaitable[None]]] = None
+    oss_cluster_maint_push_handler_func: Optional[Callable[..., Awaitable[None]]] = None
 
     async def handle_pubsub_push_response(self, response):
         """Handle pubsub push responses asynchronously"""
@@ -342,6 +398,7 @@ class AsyncPushNotificationsParser(Protocol):
             _INVALIDATION_MESSAGE,
             *_MAINTENANCE_MESSAGES,
             _MOVING_MESSAGE,
+            _SMIGRATED_MESSAGE,
         ):
             return await self.pubsub_push_handler_func(response)
 
@@ -366,13 +423,26 @@ class AsyncPushNotificationsParser(Protocol):
                 parser_function = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
                     msg_type
                 ][1]
-                notification_type = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
-                    msg_type
-                ][0]
-                notification = parser_function(response, notification_type)
+                if msg_type == _SMIGRATING_MESSAGE:
+                    notification = parser_function(response)
+                else:
+                    notification_type = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
+                        msg_type
+                    ][0]
+                    notification = parser_function(response, notification_type)
 
                 if notification is not None:
                     return await self.maintenance_push_handler_func(notification)
+            if (
+                msg_type == _SMIGRATED_MESSAGE
+                and self.oss_cluster_maint_push_handler_func
+            ):
+                parser_function = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
+                    msg_type
+                ][1]
+                notification = parser_function(response)
+                if notification is not None:
+                    return await self.oss_cluster_maint_push_handler_func(notification)
         except Exception as e:
             logger.error(
                 "Error handling {} message ({}): {}".format(msg_type, response, e)
@@ -393,6 +463,9 @@ class AsyncPushNotificationsParser(Protocol):
 
     def set_maintenance_push_handler(self, maintenance_push_handler_func):
         self.maintenance_push_handler_func = maintenance_push_handler_func
+
+    def set_oss_cluster_maint_push_handler(self, oss_cluster_maint_push_handler_func):
+        self.oss_cluster_maint_push_handler_func = oss_cluster_maint_push_handler_func
 
 
 class _AsyncRESPBase(AsyncBaseParser):
