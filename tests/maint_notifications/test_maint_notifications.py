@@ -2,7 +2,6 @@ import threading
 from unittest.mock import Mock, call, patch, MagicMock
 import pytest
 
-from redis.cluster import ClusterNode
 from redis.connection import ConnectionInterface, MaintNotificationsAbstractConnection
 
 from redis.maint_notifications import (

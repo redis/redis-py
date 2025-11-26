@@ -1650,7 +1650,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
     @_maint_notifications_connection_handler.setter
     def _maint_notifications_connection_handler(
-        self, value: Optional[MaintNotificationsAbstractConnection]
+        self, value: Optional[MaintNotificationsConnectionHandler]
     ):
         self._conn._maint_notifications_connection_handler = value
 
@@ -2305,7 +2305,7 @@ class MaintNotificationsAbstractConnectionPool:
         with self._get_pool_lock():
             for conn in self._get_free_connections():
                 if oss_cluster_maint_notifications_handler:
-                    ## set cluster handler for conn
+                    # set cluster handler for conn
                     conn.set_maint_notifications_cluster_handler_for_connection(
                         oss_cluster_maint_notifications_handler
                     )

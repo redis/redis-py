@@ -2,7 +2,7 @@ import base64
 from dataclasses import dataclass
 import logging
 import re
-from typing import Optional, Union
+from typing import Union
 
 from redis.http.http_client import HttpClient, HttpError
 

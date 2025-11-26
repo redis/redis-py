@@ -1001,7 +1001,7 @@ class OSSMaintNotificationsHandler:
             # This will also update the nodes cache with the new nodes mapping
             new_node_host, new_node_port = notification.node_address.split(":")
             self.cluster_client.nodes_manager.initialize(
-                disconect_startup_nodes_pools=False,
+                disconnect_startup_nodes_pools=False,
                 additional_startup_nodes_info=[(new_node_host, int(new_node_port))],
             )
 

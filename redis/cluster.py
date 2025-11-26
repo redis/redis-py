@@ -251,7 +251,7 @@ class MaintNotificationsAbstractRedisCluster:
             self._update_connection_kwargs_for_maint_notifications(
                 self._oss_cluster_maint_notifications_handler
             )
-            # Update existing nodes connections - they are created as part of the RedsiCluster constructor
+            # Update existing nodes connections - they are created as part of the RedisCluster constructor
             for node in self.get_nodes():
                 node.redis_connection.connection_pool.update_maint_notifications_config(
                     self.maint_notifications_config,
@@ -1952,13 +1952,13 @@ class NodesManager:
     def initialize(
         self,
         additional_startup_nodes_info: List[Tuple[str, int]] = [],
-        disconect_startup_nodes_pools: bool = True,
+        disconnect_startup_nodes_pools: bool = True,
     ):
         """
         Initializes the nodes cache, slots cache and redis connections.
         :startup_nodes:
             Responsible for discovering other nodes in the cluster
-        :disconect_startup_nodes_pools:
+        :disconnect_startup_nodes_pools:
             Whether to disconnect the connection pool of the startup nodes
             after the initialization is complete. This is useful when the
             startup nodes are not part of the cluster and we want to avoid
@@ -2015,7 +2015,7 @@ class NodesManager:
                 # Make sure cluster mode is enabled on this node
                 try:
                     cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
-                    if disconect_startup_nodes_pools:
+                    if disconnect_startup_nodes_pools:
                         # Disconnect the connection pool to avoid keeping the connection open
                         # For some cases we might not want to disconnect current pool and
                         # lose in flight commands responses
