@@ -58,6 +58,7 @@ from redis.maint_notifications import (
 )
 from redis.retry import Retry
 from redis.utils import (
+    check_protocol_version,
     deprecated_args,
     dict_merge,
     list_keys_to_dict,
@@ -233,19 +234,24 @@ class MaintNotificationsAbstractRedisCluster:
         **kwargs,
     ):
         # Initialize maintenance notifications
-        is_protocol_supported = kwargs.get("protocol") in [3, "3"]
+        is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
+
+        if (
+            maint_notifications_config
+            and maint_notifications_config.enabled
+            and not is_protocol_supported
+        ):
+            raise RedisError(
+                "Maintenance notifications handlers on connection are only supported with RESP version 3"
+            )
         if maint_notifications_config is None and is_protocol_supported:
             maint_notifications_config = MaintNotificationsConfig()
 
         self.maint_notifications_config = maint_notifications_config
 
-        if maint_notifications_config and maint_notifications_config.enabled:
-            if not is_protocol_supported:
-                raise RedisError(
-                    "Maintenance notifications handlers on connection are only supported with RESP version 3"
-                )
+        if self.maint_notifications_config and self.maint_notifications_config.enabled:
             self._oss_cluster_maint_notifications_handler = (
-                OSSMaintNotificationsHandler(self, maint_notifications_config)
+                OSSMaintNotificationsHandler(self, self.maint_notifications_config)
             )
             # Update connection kwargs for all future nodes connections
             self._update_connection_kwargs_for_maint_notifications(
@@ -755,14 +761,14 @@ class RedisCluster(
             kwargs.get("decode_responses", False),
         )
         protocol = kwargs.get("protocol", None)
-        if (cache_config or cache) and protocol not in [3, "3"]:
+        if (cache_config or cache) and not check_protocol_version(protocol, 3):
             raise RedisError("Client caching is only supported with RESP version 3")
 
-        if maint_notifications_config and protocol not in [3, "3"]:
+        if maint_notifications_config and not check_protocol_version(protocol, 3):
             raise RedisError(
                 "Maintenance notifications are only supported with RESP version 3"
             )
-        if protocol in [3, "3"] and maint_notifications_config is None:
+        if check_protocol_version(protocol, 3) and maint_notifications_config is None:
             maint_notifications_config = MaintNotificationsConfig()
 
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()

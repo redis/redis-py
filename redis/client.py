@@ -63,6 +63,7 @@ from redis.maint_notifications import (
 from redis.retry import Retry
 from redis.utils import (
     _set_info_logger,
+    check_protocol_version,
     deprecated_args,
     get_lib_version,
     safe_str,
@@ -366,7 +367,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
-                if (cache_config or cache) and protocol in [3, "3"]:
+                if (cache_config or cache) and check_protocol_version(protocol, 3):
                     kwargs.update(
                         {
                             "cache": cache,

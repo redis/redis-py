@@ -59,6 +59,7 @@ from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
     HIREDIS_AVAILABLE,
     SSL_AVAILABLE,
+    check_protocol_version,
     compare_versions,
     deprecated_args,
     ensure_string,
@@ -2127,7 +2128,8 @@ class MaintNotificationsAbstractConnectionPool:
         **kwargs,
     ):
         # Initialize maintenance notifications
-        is_protocol_supported = kwargs.get("protocol") in [3, "3"]
+        is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
+
         if maint_notifications_config is None and is_protocol_supported:
             maint_notifications_config = MaintNotificationsConfig()
 
@@ -2615,7 +2617,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self._cache_factory = cache_factory
 
         if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
-            if self._connection_kwargs.get("protocol") not in [3, "3"]:
+            if not check_protocol_version(self._connection_kwargs.get("protocol"), 3):
                 raise RedisError("Client caching is only supported with RESP version 3")
 
             cache = self._connection_kwargs.get("cache")
