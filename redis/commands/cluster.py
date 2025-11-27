@@ -903,7 +903,7 @@ class AsyncClusterManagementCommands(
         optout: bool = False,
         noloop: bool = False,
         target_nodes: Optional["TargetNodesT"] = "all",
-    ) -> Awaitable[ResponseT]:
+    ) -> ResponseT:
         """
         Disables the tracking feature of the Redis server, that is used
         for server assisted client side caching.
