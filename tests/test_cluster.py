@@ -1745,7 +1745,7 @@ class TestClusterRedisCommands:
     @skip_if_server_version_lt("6.0.0")
     @skip_if_redis_enterprise()
     def test_client_tracking(self, r):
-        # simple case - will execute on all node
+        # simple case - will execute on all nodes
         assert r.client_tracking_on()
         assert r.client_tracking_off()
 
