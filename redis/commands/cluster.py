@@ -3,7 +3,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncIterator,
-    Awaitable,
     Dict,
     Iterable,
     Iterator,
