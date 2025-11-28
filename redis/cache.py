@@ -212,15 +212,25 @@ class DefaultCache(CacheInterface):
 
         return response
 
-    def delete_by_redis_keys(self, redis_keys: List[bytes]) -> List[bool]:
+    def delete_by_redis_keys(
+        self, redis_keys: Union[List[bytes], List[str]]
+    ) -> List[bool]:
         response = []
         keys_to_delete = []
 
         for redis_key in redis_keys:
-            if isinstance(redis_key, bytes):
-                redis_key = redis_key.decode()
+            # Prepare both versions for lookup
+            candidates = [redis_key]
+            if isinstance(redis_key, str):
+                candidates.append(redis_key.encode("utf-8"))
+            elif isinstance(redis_key, bytes):
+                try:
+                    candidates.append(redis_key.decode("utf-8"))
+                except UnicodeDecodeError:
+                    pass  # Non-UTF-8 bytes, skip str version
+
             for cache_key in self._cache:
-                if redis_key in cache_key.redis_keys:
+                if any(candidate in cache_key.redis_keys for candidate in candidates):
                     keys_to_delete.append(cache_key)
                     response.append(True)
 
