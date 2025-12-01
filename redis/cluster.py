@@ -62,9 +62,13 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
-from redis.maint_notifications import MaintNotificationsConfig
+from redis.maint_notifications import (
+    MaintNotificationsConfig,
+    OSSMaintNotificationsHandler,
+)
 from redis.retry import Retry
 from redis.utils import (
+    check_protocol_version,
     deprecated_args,
     deprecated_function,
     dict_merge,
@@ -224,6 +228,67 @@ def cleanup_kwargs(**kwargs):
     }
 
     return connection_kwargs
+
+
+class MaintNotificationsAbstractRedisCluster:
+    """
+    Abstract class for handling maintenance notifications logic.
+    This class is expected to be used as base class together with RedisCluster.
+
+    This class is intended to be used with multiple inheritance!
+
+    All logic related to maintenance notifications is encapsulated in this class.
+    """
+
+    def __init__(
+        self,
+        maint_notifications_config: Optional[MaintNotificationsConfig],
+        **kwargs,
+    ):
+        # Initialize maintenance notifications
+        is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
+
+        if (
+            maint_notifications_config
+            and maint_notifications_config.enabled
+            and not is_protocol_supported
+        ):
+            raise RedisError(
+                "Maintenance notifications handlers on connection are only supported with RESP version 3"
+            )
+        if maint_notifications_config is None and is_protocol_supported:
+            maint_notifications_config = MaintNotificationsConfig()
+
+        self.maint_notifications_config = maint_notifications_config
+
+        if self.maint_notifications_config and self.maint_notifications_config.enabled:
+            self._oss_cluster_maint_notifications_handler = (
+                OSSMaintNotificationsHandler(self, self.maint_notifications_config)
+            )
+            # Update connection kwargs for all future nodes connections
+            self._update_connection_kwargs_for_maint_notifications(
+                self._oss_cluster_maint_notifications_handler
+            )
+            # Update existing nodes connections - they are created as part of the RedisCluster constructor
+            for node in self.get_nodes():
+                node.redis_connection.connection_pool.update_maint_notifications_config(
+                    self.maint_notifications_config,
+                    oss_cluster_maint_notifications_handler=self._oss_cluster_maint_notifications_handler,
+                )
+        else:
+            self._oss_cluster_maint_notifications_handler = None
+
+    def _update_connection_kwargs_for_maint_notifications(
+        self, oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
+    ):
+        """
+        Update the connection kwargs for all future connections.
+        """
+        self.nodes_manager.connection_kwargs.update(
+            {
+                "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
+            }
+        )
 
 
 class AbstractRedisCluster:
@@ -473,7 +538,9 @@ class AbstractRedisCluster:
                     self.nodes_manager.default_node = random.choice(replicas)
 
 
-class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
+class RedisCluster(
+    AbstractRedisCluster, MaintNotificationsAbstractRedisCluster, RedisClusterCommands
+):
     @classmethod
     def from_url(cls, url: str, **kwargs: Any) -> "RedisCluster":
         """
@@ -624,8 +691,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             `redis.maint_notifications.MaintNotificationsConfig` for details.
             Only supported with RESP3.
             If not provided and protocol is RESP3, the maintenance notifications
-            will be enabled by default (logic is included in the NodesManager
-            initialization).
+            will be enabled by default.
          :**kwargs:
              Extra arguments that will be sent into Redis instance when created
              (See Official redis-py doc for supported kwargs - the only limitation
@@ -707,8 +773,15 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             kwargs.get("decode_responses", False),
         )
         protocol = kwargs.get("protocol", None)
-        if (cache_config or cache) and protocol not in [3, "3"]:
+        if (cache_config or cache) and not check_protocol_version(protocol, 3):
             raise RedisError("Client caching is only supported with RESP version 3")
+
+        if maint_notifications_config and not check_protocol_version(protocol, 3):
+            raise RedisError(
+                "Maintenance notifications are only supported with RESP version 3"
+            )
+        if check_protocol_version(protocol, 3) and maint_notifications_config is None:
+            maint_notifications_config = MaintNotificationsConfig()
 
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
@@ -721,6 +794,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         else:
             self._event_dispatcher = event_dispatcher
         self.startup_nodes = startup_nodes
+
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
             from_url=from_url,
@@ -774,6 +848,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         # Node where FT.AGGREGATE command is executed.
         self._aggregate_nodes = None
         self._lock = threading.RLock()
+
+        MaintNotificationsAbstractRedisCluster.__init__(
+            self, maint_notifications_config, **kwargs
+        )
 
     def __enter__(self):
         return self
@@ -1657,9 +1735,7 @@ class NodesManager:
         cache_config: Optional[CacheConfig] = None,
         cache_factory: Optional[CacheFactoryInterface] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
-        maint_notifications_config: Optional[
-            MaintNotificationsConfig
-        ] = MaintNotificationsConfig(),
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         **kwargs,
     ):
         self.nodes_cache: dict[str, ClusterNode] = {}
@@ -1951,11 +2027,29 @@ class NodesManager:
         with self._lock:
             return self._epoch
 
-    def initialize(self):
+    def initialize(
+        self,
+        additional_startup_nodes_info: List[Tuple[str, int]] = [],
+        disconnect_startup_nodes_pools: bool = True,
+    ):
         """
         Initializes the nodes cache, slots cache and redis connections.
         :startup_nodes:
             Responsible for discovering other nodes in the cluster
+        :disconnect_startup_nodes_pools:
+            Whether to disconnect the connection pool of the startup nodes
+            after the initialization is complete. This is useful when the
+            startup nodes are not part of the cluster and we want to avoid
+            keeping the connection open.
+        :additional_startup_nodes_info:
+            Additional nodes to add temporarily to the startup nodes.
+            The additional nodes will be used just in the process of extraction of the slots
+            and nodes information from the cluster.
+            This is useful when we want to add new nodes to the cluster
+            and initialize the client
+            with them.
+            The format of the list is a list of tuples, where each tuple contains
+            the host and port of the node.
         """
         self.reset()
         tmp_nodes_cache = {}
@@ -1977,7 +2071,11 @@ class NodesManager:
             with self._lock:
                 startup_nodes = tuple(self.startup_nodes.values())
 
-            for startup_node in startup_nodes:
+            additional_startup_nodes = [
+                ClusterNode(host, port) for host, port in additional_startup_nodes_info
+            ]
+
+            for startup_node in (*startup_nodes, *additional_startup_nodes):
                 try:
                     if startup_node.redis_connection:
                         r = startup_node.redis_connection
@@ -1993,13 +2091,14 @@ class NodesManager:
                     try:
                         # Make sure cluster mode is enabled on this node
                         cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
-                        with r.connection_pool._lock:
-                            # take care to clear connections before we move on
-                            # mark all active connections for reconnect - they will be
-                            # reconnected on next use, but will allow current in flight commands to complete first
-                            r.connection_pool.update_active_connections_for_reconnect()
-                            # Needed to clear READONLY state when it is no longer applicable
-                            r.connection_pool.disconnect_free_connections()
+                        if disconnect_startup_nodes_pools:
+                            with r.connection_pool._lock:
+                                # take care to clear connections before we move on
+                                # mark all active connections for reconnect - they will be
+                                # reconnected on next use, but will allow current in flight commands to complete first
+                                r.connection_pool.update_active_connections_for_reconnect()
+                                # Needed to clear READONLY state when it is no longer applicable
+                                r.connection_pool.disconnect_free_connections()
                     except ResponseError:
                         raise RedisClusterException(
                             "Cluster mode is not enabled on this node"

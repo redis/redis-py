@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, List, Literal, Optional, Union
 from redis.typing import Number
 
 if TYPE_CHECKING:
-    from redis.cluster import NodesManager
+    from redis.cluster import MaintNotificationsAbstractRedisCluster
 
 
 class MaintenanceState(enum.Enum):
@@ -463,8 +463,8 @@ class OSSNodeMigratedNotification(MaintenanceNotification):
 
     Args:
         id (int): Unique identifier for this notification
-        node_address (Optional[str]): Address of the node that has
-                                      completed migration - this is the destination node.
+        node_address (Optional[str]): Address of the node that has completed migration
+                                      in the format "host:port"
         slots (Optional[List[int]]): List of slots that have been migrated
     """
 
@@ -473,7 +473,7 @@ class OSSNodeMigratedNotification(MaintenanceNotification):
     def __init__(
         self,
         id: int,
-        node_address: Optional[str] = None,
+        node_address: str,
         slots: Optional[List[int]] = None,
     ):
         super().__init__(id, OSSNodeMigratedNotification.DEFAULT_TTL)
@@ -935,12 +935,30 @@ class MaintNotificationsConnectionHandler:
 
 class OSSMaintNotificationsHandler:
     def __init__(
-        self, nodes_manager: "NodesManager", config: MaintNotificationsConfig
+        self,
+        cluster_client: "MaintNotificationsAbstractRedisCluster",
+        config: MaintNotificationsConfig,
     ) -> None:
-        self.nodes_manager = nodes_manager
+        self.cluster_client = cluster_client
         self.config = config
         self._processed_notifications = set()
+        self._in_progress = set()
         self._lock = threading.RLock()
+        self.connection = None
+
+    def set_connection(self, connection: "MaintNotificationsAbstractConnection"):
+        self.connection = connection
+
+    def get_handler_for_connection(self):
+        # Copy all data that should be shared between connections
+        # but each connection should have its own pool handler
+        # since each connection can be in a different state
+        copy = OSSMaintNotificationsHandler(self.cluster_client, self.config)
+        copy._processed_notifications = self._processed_notifications
+        copy._in_progress = self._in_progress
+        copy._lock = self._lock
+        copy.connection = None
+        return copy
 
     def remove_expired_notifications(self):
         with self._lock:
@@ -958,4 +976,58 @@ class OSSMaintNotificationsHandler:
         self, notification: OSSNodeMigratedNotification
     ):
         self.remove_expired_notifications()
-        logging.info(f"Received OSS maintenance completed notification: {notification}")
+
+        with self._lock:
+            if (
+                notification in self._in_progress
+                or notification in self._processed_notifications
+            ):
+                # we are already handling this notification or it has already been processed
+                # we should skip in_progress notification since when we reinitialize the cluster
+                # we execute a CLUSTER SLOTS command that can use a different connection
+                # that has also has the notification and we don't want to
+                # process the same notification twice
+                return
+
+            self._in_progress.add(notification)
+
+            # get the node to which the connection is connected
+            # before refreshing the cluster topology
+            current_node = self.cluster_client.nodes_manager.get_node(
+                host=self.connection.host, port=self.connection.port
+            )
+
+            # Updates the cluster slots cache with the new slots mapping
+            # This will also update the nodes cache with the new nodes mapping
+            new_node_host, new_node_port = notification.node_address.split(":")
+            self.cluster_client.nodes_manager.initialize(
+                disconnect_startup_nodes_pools=False,
+                additional_startup_nodes_info=[(new_node_host, int(new_node_port))],
+            )
+
+            if (
+                current_node
+                not in self.cluster_client.nodes_manager.nodes_cache.values()
+            ):
+                # disconnect all free connections to the node
+                for conn in current_node.redis_connection.connection_pool._get_free_connections():
+                    conn.disconnect()
+                # mark for reconnect all in use connections to the node - this will force them to
+                # disconnect after they complete their current commands
+                for conn in current_node.redis_connection.connection_pool._get_in_use_connections():
+                    conn.mark_for_reconnect()
+            else:
+                if self.config.is_relaxed_timeouts_enabled():
+                    # reset the timeouts for the node to which the connection is connected
+                    # TODO: add check if other maintenance ops are in progress for the same node - CAE-1038
+                    # and if so, don't reset the timeouts
+                    for conn in (
+                        *current_node.redis_connection.connection_pool._get_in_use_connections(),
+                        *current_node.redis_connection.connection_pool._get_free_connections(),
+                    ):
+                        conn.update_current_socket_timeout(relaxed_timeout=-1)
+                        conn.maintenance_state = MaintenanceState.NONE
+
+            # mark the notification as processed
+            self._processed_notifications.add(notification)
+            self._in_progress.remove(notification)

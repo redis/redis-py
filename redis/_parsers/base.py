@@ -14,6 +14,7 @@ from redis.maint_notifications import (
     OSSNodeMigratedNotification,
     OSSNodeMigratingNotification,
 )
+from redis.utils import safe_str
 
 if sys.version_info.major >= 3 and sys.version_info.minor >= 11:
     from asyncio import timeout as async_timeout
@@ -193,8 +194,9 @@ class MaintenanceNotificationsParser:
         # Expected message format is:
         # SMIGRATED <seq_number> <host:port> <slot, range1-range2,...>
         id = response[1]
-        node_address = response[2]
+        node_address = safe_str(response[2])
         slots = response[3]
+
         return OSSNodeMigratedNotification(id, node_address, slots)
 
     @staticmethod
@@ -224,9 +226,7 @@ class MaintenanceNotificationsParser:
         if response[3] is None:
             host, port = None, None
         else:
-            value = response[3]
-            if isinstance(value, bytes):
-                value = value.decode()
+            value = safe_str(response[3])
             host, port = value.split(":")
             port = int(port) if port is not None else None
 
