@@ -11,11 +11,14 @@ from redis.cache import CacheConfig
 from tests.maint_notifications.proxy_server_helpers import (
     ProxyInterceptorHelper,
     RespTranslator,
+    SlotsRange,
 )
 
 NODE_PORT_1 = 15379
 NODE_PORT_2 = 15380
 NODE_PORT_3 = 15381
+
+NODE_PORT_NEW = 15382
 
 # Initial cluster node configuration for proxy-based tests
 PROXY_CLUSTER_NODES = [
@@ -34,6 +37,7 @@ class TestClusterMaintNotificationsBase:
         enable_cache=False,
         max_connections=10,
         maint_config=None,
+        protocol=3,
     ) -> RedisCluster:
         """Create a RedisCluster instance with mocked sockets."""
         if maint_config is None and hasattr(self, "config") and self.config is not None:
@@ -44,7 +48,7 @@ class TestClusterMaintNotificationsBase:
             kwargs = {"cache_config": CacheConfig()}
 
         test_redis_client = RedisCluster(
-            protocol=3,
+            protocol=protocol,
             startup_nodes=PROXY_CLUSTER_NODES,
             maint_notifications_config=maint_config,
             connection_pool_class=pool_class,
@@ -214,14 +218,37 @@ class TestClusterMaintNotificationsConfig(TestClusterMaintNotificationsBase):
 
     def test_none_config_default_behavior(self):
         """
-        Test that when maint_notifications_config=None, the system works without errors.
+        Test that when maint_notifications_config=None, it will be initialized with default values.
         """
         cluster = self._create_cluster_client(maint_config=None)
 
         try:
             # Verify cluster is created successfully
             assert cluster.nodes_manager is not None
+            # for protocol 3, maint_notifications_config should be initialized with default values
+            assert cluster.nodes_manager.maint_notifications_config is not None
+            assert cluster.nodes_manager.maint_notifications_config.enabled == "auto"
+            assert len(cluster.nodes_manager.nodes_cache) > 0
+            # Verify we can execute commands without errors
+            cluster.set("test", "VAL")
+            res = cluster.get("test")
+            assert res == b"VAL"
+        finally:
+            cluster.close()
+
+    def test_none_config_default_behavior_for_protocol_2(self):
+        """
+        Test that when maint_notifications_config=None and protocol=2,
+        it will not be initialized.
+        """
+        cluster = self._create_cluster_client(protocol=2)
+
+        try:
+            # Verify cluster is created successfully
+            assert cluster.nodes_manager is not None
+            # for protocol 2, maint_notifications_config should not be created
             assert cluster.nodes_manager.maint_notifications_config is None
+
             assert len(cluster.nodes_manager.nodes_cache) > 0
             # Verify we can execute commands without errors
             cluster.set("test", "VAL")
@@ -285,6 +312,95 @@ class TestClusterMaintNotificationsConfig(TestClusterMaintNotificationsBase):
             cluster.close()
 
 
+class TestClusterMaintNotificationsHandler(TestClusterMaintNotificationsBase):
+    """Test OSSMaintNotificationsHandler propagation with RedisCluster."""
+
+    def _validate_connection_handlers(
+        self, conn, cluster_client, config, is_cache_conn=False
+    ):
+        """Helper method to validate connection handlers are properly set."""
+        # Test that the oss cluster handler function is correctly set
+        oss_cluster_parser_handler_set_for_con = (
+            conn._parser.oss_cluster_maint_push_handler_func
+        )
+        assert oss_cluster_parser_handler_set_for_con is not None
+        assert hasattr(oss_cluster_parser_handler_set_for_con, "__self__")
+        assert hasattr(oss_cluster_parser_handler_set_for_con, "__func__")
+        assert oss_cluster_parser_handler_set_for_con.__self__.connection is conn
+        assert (
+            oss_cluster_parser_handler_set_for_con.__self__.cluster_client
+            is cluster_client
+        )
+        assert (
+            oss_cluster_parser_handler_set_for_con.__self__._lock
+            is cluster_client._oss_cluster_maint_notifications_handler._lock
+        )
+        assert (
+            oss_cluster_parser_handler_set_for_con.__self__._processed_notifications
+            is cluster_client._oss_cluster_maint_notifications_handler._processed_notifications
+        )
+        assert (
+            oss_cluster_parser_handler_set_for_con.__func__
+            is cluster_client._oss_cluster_maint_notifications_handler.handle_notification.__func__
+        )
+
+        # Test that the maintenance handler function is correctly set
+        parser_maint_handler_set_for_con = conn._parser.maintenance_push_handler_func
+        assert parser_maint_handler_set_for_con is not None
+        assert hasattr(parser_maint_handler_set_for_con, "__self__")
+        assert hasattr(parser_maint_handler_set_for_con, "__func__")
+        # The maintenance handler should be bound to the connection's
+        # maintenance notification connection handler
+        assert (
+            parser_maint_handler_set_for_con.__self__
+            is conn._maint_notifications_connection_handler
+        )
+        assert (
+            parser_maint_handler_set_for_con.__func__
+            is conn._maint_notifications_connection_handler.handle_notification.__func__
+        )
+
+        # Validate that the connection's maintenance handler has the same config object
+        assert conn._maint_notifications_connection_handler.config is config
+
+    def test_oss_maint_handler_propagation(self):
+        """Test that OSSMaintNotificationsHandler is propagated to all connections."""
+        cluster = self._create_cluster_client()
+        # Verify all nodes have the handler
+        for node in cluster.nodes_manager.nodes_cache.values():
+            assert node.redis_connection is not None
+            assert node.redis_connection.connection_pool is not None
+            for conn in (
+                *node.redis_connection.connection_pool._get_in_use_connections(),
+                *node.redis_connection.connection_pool._get_free_connections(),
+            ):
+                assert conn._oss_cluster_maint_notifications_handler is not None
+                assert conn._oss_cluster_maint_notifications_handler.connection is conn
+                self._validate_connection_handlers(
+                    conn, cluster, cluster.maint_notifications_config
+                )
+
+    def test_oss_maint_handler_propagation_cache_enabled(self):
+        """Test that OSSMaintNotificationsHandler is propagated to all connections."""
+        cluster = self._create_cluster_client(enable_cache=True)
+        # Verify all nodes have the handler
+        for node in cluster.nodes_manager.nodes_cache.values():
+            assert node.redis_connection is not None
+            assert node.redis_connection.connection_pool is not None
+            for conn in (
+                *node.redis_connection.connection_pool._get_in_use_connections(),
+                *node.redis_connection.connection_pool._get_free_connections(),
+            ):
+                assert conn._conn._oss_cluster_maint_notifications_handler is not None
+                assert (
+                    conn._conn._oss_cluster_maint_notifications_handler.connection
+                    is conn._conn
+                )
+                self._validate_connection_handlers(
+                    conn._conn, cluster, cluster.maint_notifications_config
+                )
+
+
 class TestClusterMaintNotificationsHandlingBase(TestClusterMaintNotificationsBase):
     """Base class for maintenance notifications handling tests."""
 
@@ -316,6 +432,21 @@ class ConnectionStateExpectation:
 
 class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlingBase):
     """Test maintenance notifications handling with RedisCluster."""
+
+    def _warm_up_connection_pools(
+        self, cluster: RedisCluster, created_connections_count: int = 3
+    ):
+        """Warm up connection pools by getting a connection from each pool."""
+        for node in cluster.nodes_manager.nodes_cache.values():
+            node_connections = []
+            for _ in range(created_connections_count):
+                node_connections.append(
+                    node.redis_connection.connection_pool.get_connection()
+                )
+            for conn in node_connections:
+                node.redis_connection.connection_pool.release(conn)
+
+            node_connections.clear()
 
     def _get_expected_node_state(
         self, expectations_list: List[ConnectionStateExpectation], node_port: int
@@ -361,23 +492,26 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
                     changed_connections_count += 1
             assert changed_connections_count == expected_state.changed_connections_count
 
-    def test_receive_oss_maintenance_notification(self):
-        """Test receiving an OSS maintenance notification."""
-        # get three connections from each node
-        for node in self.cluster.nodes_manager.nodes_cache.values():
-            node_connections = []
-            for _ in range(3):
-                node_connections.append(
-                    node.redis_connection.connection_pool.get_connection()
-                )
-            for conn in node_connections:
-                node.redis_connection.connection_pool.release(conn)
+    def _validate_removed_node_connections(self, node):
+        """Validate connections in a removed node."""
+        assert node.redis_connection is not None
+        connection_pool = node.redis_connection.connection_pool
+        assert connection_pool is not None
 
-            node_connections.clear()
+        # validate all connections are disconnected or marked for reconnect
+        for conn in connection_pool._get_free_connections():
+            assert conn._sock is None
+        for conn in connection_pool._get_in_use_connections():
+            assert conn.should_reconnect()
+
+    def test_receive_smigrating_notification(self):
+        """Test receiving an OSS maintenance notification."""
+        # warm up connection pools
+        self._warm_up_connection_pools(self.cluster, created_connections_count=3)
 
         # send a notification to node 1
-        notification = RespTranslator.smigrating_to_resp(
-            "SMIGRATING 12 TO 127.0.0.1:15380 <123,456,5000-7000>"
+        notification = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATING 12 <123,456,5000-7000>"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, notification)
 
@@ -420,24 +554,424 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
             ],
         )
 
-    def test_receive_maint_notification(self):
-        """Test receiving a maintenance notification."""
-        self.cluster.set("test", "VAL")
-        pubsub = self.cluster.pubsub()
-        pubsub.subscribe("test")
-        test_msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=10)
-        print(test_msg)
-
-        # Try to send a push notification to the clients of given server node
-        # Server node is defined by its port with the local test environment
-        # The message should be in the format:
-        # >3\r\n$7\r\nmessage\r\n$3\r\nfoo\r\n$4\r\neeee\r
-        notification = RespTranslator.smigrating_to_resp(
-            "TEST_NOTIFICATION 12182 127.0.0.1:15380"
+    def test_receive_smigrating_with_disabled_relaxed_timeout(self):
+        """Test receiving an OSS maintenance notification with disabled relaxed timeout."""
+        # Create config with disabled relaxed timeout
+        disabled_config = MaintNotificationsConfig(
+            enabled="auto",
+            relaxed_timeout=-1,  # This means the relaxed timeout is Disabled
         )
-        self.proxy_helper.send_notification(pubsub.connection.port, notification)
-        res = self.proxy_helper.get_connections()
-        print(res)
+        cluster = self._create_cluster_client(maint_config=disabled_config)
 
-        test_msg = pubsub.get_message(timeout=1)
-        print(test_msg)
+        # warm up connection pools
+        self._warm_up_connection_pools(cluster, created_connections_count=3)
+
+        # send a notification to node 1
+        notification = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATING 12 <123,456,5000-7000>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, notification)
+
+        # validate no timeout is relaxed on any connection
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1, changed_connections_count=0
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_2, changed_connections_count=0
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_3, changed_connections_count=0
+                ),
+            ],
+        )
+
+    def test_receive_smigrated_notification(self):
+        """Test receiving an OSS maintenance completed notification."""
+        # create three connections in each node's connection pool
+        self._warm_up_connection_pools(self.cluster, created_connections_count=3)
+
+        self.proxy_helper.set_cluster_slots(
+            "test_topology",
+            [
+                SlotsRange("0.0.0.0", NODE_PORT_NEW, 0, 5460),
+                SlotsRange("0.0.0.0", NODE_PORT_2, 5461, 10922),
+                SlotsRange("0.0.0.0", NODE_PORT_3, 10923, 16383),
+            ],
+        )
+        # send a notification to node 1
+        notification = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATED 12 127.0.0.1:15380 <123,456,5000-7000>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, notification)
+
+        # execute a command that will receive the notification
+        res = self.cluster.set("anyprefix:{3}:k", "VAL")
+        assert res is True
+
+        # validate the cluster topology was updated
+        new_node = self.cluster.nodes_manager.get_node(
+            host="0.0.0.0", port=NODE_PORT_NEW
+        )
+        assert new_node is not None
+
+    def test_smigrating_smigrated_on_two_nodes_without_node_replacement(self):
+        """Test receiving an OSS maintenance notification on two nodes without node replacement."""
+        # warm up connection pools - create several connections in each pool
+        self._warm_up_connection_pools(self.cluster, created_connections_count=3)
+
+        node_1 = self.cluster.nodes_manager.get_node(host="0.0.0.0", port=NODE_PORT_1)
+        node_2 = self.cluster.nodes_manager.get_node(host="0.0.0.0", port=NODE_PORT_2)
+
+        smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATING 12 <123,2000-3000>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, smigrating_node_1)
+        # execute command with node 1 connection
+        self.cluster.set("anyprefix:{3}:k", "VAL")
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_2, changed_connections_count=0
+                ),
+            ],
+        )
+
+        smigrating_node_2 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATING 13 <8000-9000>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_2, smigrating_node_2)
+
+        # execute command with node 2 connection
+        self.cluster.set("anyprefix:{1}:k", "VAL")
+
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_2,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+            ],
+        )
+        smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATED 14 0.0.0.0:15381 <123,2000-3000>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, smigrated_node_1)
+
+        smigrated_node_2 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATED 15 0.0.0.0:15381 <8000-9000>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_2, smigrated_node_2)
+
+        self.proxy_helper.set_cluster_slots(
+            "test_topology",
+            [
+                SlotsRange("0.0.0.0", NODE_PORT_1, 0, 122),
+                SlotsRange("0.0.0.0", NODE_PORT_3, 123, 123),
+                SlotsRange("0.0.0.0", NODE_PORT_1, 124, 2000),
+                SlotsRange("0.0.0.0", NODE_PORT_3, 2001, 3000),
+                SlotsRange("0.0.0.0", NODE_PORT_1, 3001, 5460),
+                SlotsRange("0.0.0.0", NODE_PORT_2, 5461, 10922),
+                SlotsRange("0.0.0.0", NODE_PORT_3, 10923, 16383),
+            ],
+        )
+
+        # execute command with node 1 connection
+        self.cluster.set("anyprefix:{3}:k", "VAL")
+
+        # validate the cluster topology was updated
+        # validate old nodes are there
+        assert node_1 in self.cluster.nodes_manager.nodes_cache.values()
+        assert node_2 in self.cluster.nodes_manager.nodes_cache.values()
+        # validate changed slot is assigned to node 3
+        assert self.cluster.nodes_manager.get_node_from_slot(
+            123
+        ) == self.cluster.nodes_manager.get_node(host="0.0.0.0", port=NODE_PORT_3)
+        # validate the connections are in the correct state
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=0,
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_2,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+            ],
+        )
+
+        self.proxy_helper.set_cluster_slots(
+            "test_topology",
+            [
+                SlotsRange("0.0.0.0", NODE_PORT_1, 0, 122),
+                SlotsRange("0.0.0.0", NODE_PORT_3, 123, 123),
+                SlotsRange("0.0.0.0", NODE_PORT_1, 124, 2000),
+                SlotsRange("0.0.0.0", NODE_PORT_3, 2001, 3000),
+                SlotsRange("0.0.0.0", NODE_PORT_1, 3001, 5460),
+                SlotsRange("0.0.0.0", NODE_PORT_2, 5461, 7000),
+                SlotsRange("0.0.0.0", NODE_PORT_3, 7001, 8000),
+                SlotsRange("0.0.0.0", NODE_PORT_2, 8001, 10922),
+                SlotsRange("0.0.0.0", NODE_PORT_3, 10923, 16383),
+            ],
+        )
+        # execute command with node 2 connection
+        self.cluster.set("anyprefix:{1}:k", "VAL")
+
+        # validate old nodes are there
+        assert node_1 in self.cluster.nodes_manager.nodes_cache.values()
+        assert node_2 in self.cluster.nodes_manager.nodes_cache.values()
+        # validate slot changes are reflected
+        assert self.cluster.nodes_manager.get_node_from_slot(
+            8000
+        ) == self.cluster.nodes_manager.get_node(host="0.0.0.0", port=NODE_PORT_3)
+
+        # validate the connections are in the correct state
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=0,
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_2,
+                    changed_connections_count=0,
+                ),
+            ],
+        )
+
+    def test_smigrating_smigrated_on_two_nodes_with_node_replacements(self):
+        """Test receiving an OSS maintenance notification on two nodes with node replacement."""
+        # warm up connection pools - create several connections in each pool
+        self._warm_up_connection_pools(self.cluster, created_connections_count=3)
+
+        node_1 = self.cluster.nodes_manager.get_node(host="0.0.0.0", port=NODE_PORT_1)
+        node_2 = self.cluster.nodes_manager.get_node(host="0.0.0.0", port=NODE_PORT_2)
+        node_3 = self.cluster.nodes_manager.get_node(host="0.0.0.0", port=NODE_PORT_3)
+
+        smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATING 12 <0-5460>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, smigrating_node_1)
+        # execute command with node 1 connection
+        self.cluster.set("anyprefix:{3}:k", "VAL")
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_2, changed_connections_count=0
+                ),
+            ],
+        )
+
+        smigrating_node_2 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATING 13 <5461-10922>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_2, smigrating_node_2)
+
+        # execute command with node 2 connection
+        self.cluster.set("anyprefix:{1}:k", "VAL")
+
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_2,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+            ],
+        )
+
+        smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATED 14 0.0.0.0:15382 <0-5460>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, smigrated_node_1)
+
+        smigrated_node_2 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATED 15 0.0.0.0:15382 <5461-10922>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_2, smigrated_node_2)
+        self.proxy_helper.set_cluster_slots(
+            "test_topology",
+            [
+                SlotsRange("0.0.0.0", 15382, 0, 5460),
+                SlotsRange("0.0.0.0", NODE_PORT_2, 5461, 10922),
+                SlotsRange("0.0.0.0", NODE_PORT_3, 10923, 16383),
+            ],
+        )
+
+        # execute command with node 1 connection
+        self.cluster.set("anyprefix:{3}:k", "VAL")
+
+        # validate node 1 is removed
+        assert node_1 not in self.cluster.nodes_manager.nodes_cache.values()
+        # validate node 2 is still there
+        assert node_2 in self.cluster.nodes_manager.nodes_cache.values()
+        # validate new node is added
+        new_node = self.cluster.nodes_manager.get_node(host="0.0.0.0", port=15382)
+        assert new_node is not None
+        assert new_node.redis_connection is not None
+        # validate a slot from the changed range is assigned to the new node
+        assert self.cluster.nodes_manager.get_node_from_slot(
+            123
+        ) == self.cluster.nodes_manager.get_node(host="0.0.0.0", port=15382)
+
+        # validate the connections are in the correct state
+        self._validate_removed_node_connections(node_1)
+
+        # validate the connections are in the correct state
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_2,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+            ],
+        )
+
+        self.proxy_helper.set_cluster_slots(
+            "test_topology",
+            [
+                SlotsRange("0.0.0.0", 15382, 0, 5460),
+                SlotsRange("0.0.0.0", 15383, 5461, 10922),
+                SlotsRange("0.0.0.0", NODE_PORT_3, 10923, 16383),
+            ],
+        )
+        # execute command with node 2 connection
+        self.cluster.set("anyprefix:{1}:k", "VAL")
+
+        # validate node 2 is removed
+        assert node_2 not in self.cluster.nodes_manager.nodes_cache.values()
+        # validate node 3 is still there
+        assert node_3 in self.cluster.nodes_manager.nodes_cache.values()
+        # validate new node is added
+        new_node = self.cluster.nodes_manager.get_node(host="0.0.0.0", port=15383)
+        assert new_node is not None
+        assert new_node.redis_connection is not None
+        # validate a slot from the changed range is assigned to the new node
+        assert self.cluster.nodes_manager.get_node_from_slot(
+            8000
+        ) == self.cluster.nodes_manager.get_node(host="0.0.0.0", port=15383)
+
+        # validate the connections in removed node are in the correct state
+        self._validate_removed_node_connections(node_2)
+
+    def test_smigrating_smigrated_on_the_same_node_two_slot_ranges(
+        self,
+    ):
+        """
+        Test receiving an OSS maintenance notification on the same node twice.
+        The focus here is to validate that the timeouts are not unrelaxed if a second
+        migration is in progress
+        """
+        # warm up connection pools - create several connections in each pool
+        self._warm_up_connection_pools(self.cluster, created_connections_count=1)
+
+        smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATING 12 <1000-2000>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, smigrating_node_1)
+        # execute command with node 1 connection
+        self.cluster.set("anyprefix:{3}:k", "VAL")
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+            ],
+        )
+
+        smigrating_node_1_2 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATING 13 <3000-4000>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, smigrating_node_1_2)
+        # execute command with node 1 connection
+        self.cluster.set("anyprefix:{3}:k", "VAL")
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+            ],
+        )
+        smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATED 14 0.0.0.0:15380 <1000-2000>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, smigrated_node_1)
+        # execute command with node 1 connection
+        self.cluster.set("anyprefix:{3}:k", "VAL")
+        # this functionality is part of CAE-1038 and will be added later
+        # validate the timeout is still relaxed
+        # self._validate_connections_states(
+        #     self.cluster,
+        #     [
+        #         ConnectionStateExpectation(
+        #             node_port=NODE_PORT_1,
+        #             changed_connections_count=1,
+        #             state=MaintenanceState.MAINTENANCE,
+        #             relaxed_timeout=self.config.relaxed_timeout,
+        #         ),
+        #     ],
+        # )
+        smigrated_node_1_2 = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATED 15 0.0.0.0:15381 <3000-4000>"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, smigrated_node_1_2)
+        # execute command with node 1 connection
+        self.cluster.set("anyprefix:{3}:k", "VAL")
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=0,
+                ),
+            ],
+        )
