@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Type, Union
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
+from redis.utils import check_protocol_version
 
 
 class EventListenerInterface(ABC):
@@ -427,7 +428,7 @@ class RegisterReAuthForPubSub(EventListenerInterface):
     def listen(self, event: AfterPubSubConnectionInstantiationEvent):
         if isinstance(
             event.pubsub_connection.credential_provider, StreamingCredentialProvider
-        ) and event.pubsub_connection.get_protocol() in [3, "3"]:
+        ) and check_protocol_version(event.pubsub_connection.get_protocol(), 3):
             self._event = event
             self._connection = event.pubsub_connection
             self._connection_pool = event.connection_pool

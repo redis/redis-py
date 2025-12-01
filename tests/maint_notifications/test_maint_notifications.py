@@ -493,40 +493,44 @@ class TestOSSNodeMigratedNotification:
     def test_init_with_defaults(self):
         """Test OSSNodeMigratedNotification initialization with default values."""
         with patch("time.monotonic", return_value=1000):
-            notification = OSSNodeMigratedNotification(id=1)
+            notification = OSSNodeMigratedNotification(
+                id=1, node_address="127.0.0.1:6380"
+            )
             assert notification.id == 1
             assert notification.ttl == OSSNodeMigratedNotification.DEFAULT_TTL
             assert notification.creation_time == 1000
-            assert notification.node_address is None
+            assert notification.node_address == "127.0.0.1:6380"
             assert notification.slots is None
 
     def test_init_with_all_parameters(self):
         """Test OSSNodeMigratedNotification initialization with all parameters."""
         with patch("time.monotonic", return_value=1000):
             slots = [1, 2, 3, 4, 5]
+            node_address = "127.0.0.1:6380"
             notification = OSSNodeMigratedNotification(
                 id=1,
-                node_address="127.0.0.1:6380",
+                node_address=node_address,
                 slots=slots,
             )
             assert notification.id == 1
             assert notification.ttl == OSSNodeMigratedNotification.DEFAULT_TTL
             assert notification.creation_time == 1000
-            assert notification.node_address == "127.0.0.1:6380"
+            assert notification.node_address == node_address
             assert notification.slots == slots
 
     def test_default_ttl(self):
         """Test that DEFAULT_TTL is used correctly."""
         assert OSSNodeMigratedNotification.DEFAULT_TTL == 30
-        notification = OSSNodeMigratedNotification(id=1)
+        notification = OSSNodeMigratedNotification(id=1, node_address="127.0.0.1:6380")
         assert notification.ttl == 30
 
     def test_repr(self):
         """Test OSSNodeMigratedNotification string representation."""
         with patch("time.monotonic", return_value=1000):
+            node_address = "127.0.0.1:6380"
             notification = OSSNodeMigratedNotification(
                 id=1,
-                node_address="127.0.0.1:6380",
+                node_address=node_address,
                 slots=[1, 2, 3],
             )
 
@@ -555,13 +559,13 @@ class TestOSSNodeMigratedNotification:
 
     def test_equality_different_id(self):
         """Test inequality for notifications with different id."""
-        notification1 = OSSNodeMigratedNotification(id=1)
-        notification2 = OSSNodeMigratedNotification(id=2)
+        notification1 = OSSNodeMigratedNotification(id=1, node_address="127.0.0.1:6380")
+        notification2 = OSSNodeMigratedNotification(id=2, node_address="127.0.0.1:6380")
         assert notification1 != notification2
 
     def test_equality_different_type(self):
         """Test inequality for notifications of different types."""
-        notification1 = OSSNodeMigratedNotification(id=1)
+        notification1 = OSSNodeMigratedNotification(id=1, node_address="127.0.0.1:6380")
         notification2 = NodeMigratedNotification(id=1)
         assert notification1 != notification2
 
@@ -582,16 +586,16 @@ class TestOSSNodeMigratedNotification:
 
     def test_hash_different_id(self):
         """Test hash for notifications with different id."""
-        notification1 = OSSNodeMigratedNotification(id=1)
-        notification2 = OSSNodeMigratedNotification(id=2)
+        notification1 = OSSNodeMigratedNotification(id=1, node_address="127.0.0.1:6380")
+        notification2 = OSSNodeMigratedNotification(id=2, node_address="127.0.0.1:6380")
         assert hash(notification1) != hash(notification2)
 
     def test_in_set(self):
         """Test that notifications can be used in sets."""
-        notification1 = OSSNodeMigratedNotification(id=1)
-        notification2 = OSSNodeMigratedNotification(id=1)
-        notification3 = OSSNodeMigratedNotification(id=2)
-        notification4 = OSSNodeMigratedNotification(id=2)
+        notification1 = OSSNodeMigratedNotification(id=1, node_address="127.0.0.1:6380")
+        notification2 = OSSNodeMigratedNotification(id=1, node_address="127.0.0.1:6380")
+        notification3 = OSSNodeMigratedNotification(id=2, node_address="127.0.0.1:6381")
+        notification4 = OSSNodeMigratedNotification(id=2, node_address="127.0.0.1:6381")
 
         notification_set = {notification1, notification2, notification3, notification4}
         assert (

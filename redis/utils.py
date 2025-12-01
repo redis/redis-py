@@ -213,6 +213,14 @@ def _set_info_logger():
         logger.addHandler(handler)
 
 
+def check_protocol_version(
+    protocol: Optional[Union[str, int]], expected_version: int = 3
+) -> bool:
+    if protocol is None:
+        return False
+    return int(protocol) == expected_version
+
+
 def get_lib_version():
     try:
         libver = metadata.version("redis")
