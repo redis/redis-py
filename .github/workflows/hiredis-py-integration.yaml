@@ -53,7 +53,7 @@ jobs:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.redis-py-branch }}
       - name: Run tests
