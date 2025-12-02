@@ -5,10 +5,13 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Dict, List, Mapping, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, TypeVar, Union
 
 from redis.exceptions import DataError
 from redis.typing import AbsExpiryT, EncodableT, ExpiryT
+
+if TYPE_CHECKING:
+    from redis.client import Redis
 
 try:
     import hiredis  # noqa
@@ -40,7 +43,7 @@ except ImportError:
 from importlib import metadata
 
 
-def from_url(url, **kwargs):
+def from_url(url: str, **kwargs: Any) -> "Redis":
     """
     Returns an active Redis client generated from the given database URL.
 
