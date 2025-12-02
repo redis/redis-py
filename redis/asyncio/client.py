@@ -131,7 +131,7 @@ class Redis(
         single_connection_client: bool = False,
         auto_close_connection_pool: Optional[bool] = None,
         **kwargs,
-    ):
+    ) -> "Redis":
         """
         Return a Redis client object configured from the given URL
 
