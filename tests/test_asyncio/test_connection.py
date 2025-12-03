@@ -169,8 +169,8 @@ async def test_connect_without_retry_on_non_retryable_error():
 
 async def test_connect_with_retries():
     """
-    Test that the _connect function is not being retried in case of a CancelledError -
-    error that is not in the list of retry-able errors"""
+    Test that retries occur for the entire connect+handshake flow when OSError happens during the handshake phase.
+    """
     with patch.object(asyncio.StreamWriter, "writelines") as writelines:
         writelines.side_effect = OSError(ECONNREFUSED)
         conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 2))
