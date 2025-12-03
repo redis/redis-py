@@ -1141,7 +1141,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         redis_conn = self.get_default_node().redis_connection
         return self.commands_parser.get_keys(redis_conn, *args)
 
-    def determine_slot(self, *args) -> int:
+    def determine_slot(self, *args) -> Optional[int]:
         """
         Figure out what slot to use based on args.
 
@@ -1155,6 +1155,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             return args[1]
 
         # Get the keys in the command
+
+        # CLIENT TRACKING is a special case.
+        # It doesn't have any keys, it needs to be sent to the provided nodes
+        # By default it will be sent to all nodes.
+        if command.upper() == "CLIENT TRACKING":
+            return None
 
         # EVAL and EVALSHA are common enough that it's wasteful to go to the
         # redis server to parse the keys. Besides, there is a bug in redis<7.0
