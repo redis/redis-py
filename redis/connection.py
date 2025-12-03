@@ -843,7 +843,14 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
     def connect(self):
         "Connects to the Redis server if not already connected"
-        self.connect_check_health(check_health=True)
+        # try once the socket connect with the handshake, retry the whole
+        # connect/handshake flow based on retry policy
+        self.retry.call_with_retry(
+            lambda: self.connect_check_health(
+                check_health=True, retry_socket_connect=False
+            ),
+            lambda error: self.disconnect(error),
+        )
 
     def connect_check_health(
         self, check_health: bool = True, retry_socket_connect: bool = True

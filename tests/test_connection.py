@@ -124,15 +124,30 @@ class TestConnection:
         assert conn._connect.call_count == 3
         self.clear(conn)
 
-    def test_connect_without_retry_on_os_error(self):
-        """Test that the _connect function is not being retried in case of a OSError"""
+    def test_connect_without_retry_on_non_retryable_error(self):
+        """Test that the _connect function is not being retried in case of a non-retryable error"""
         with patch.object(Connection, "_connect") as _connect:
-            _connect.side_effect = OSError("")
+            _connect.side_effect = RedisError("")
             conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 2))
-            with pytest.raises(ConnectionError):
+            with pytest.raises(RedisError):
                 conn.connect()
             assert _connect.call_count == 1
             self.clear(conn)
+
+    def test_connect_with_retries(self):
+        """
+        Test that the _connect function is not being retried in case of a CancelledError -
+        error that is not in the list of retry-able errors
+        """
+        with patch.object(socket.socket, "sendall") as sendall:
+            sendall.side_effect = OSError(ECONNREFUSED)
+            conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 2))
+            with pytest.raises(ConnectionError):
+                conn.connect()
+            # the handshake commands are the failing ones
+            # validate that we don't execute too many commands on each retry
+            # 3 retries --> 3 commands
+            assert sendall.call_count == 3
 
     def test_connect_timeout_error_without_retry(self):
         """Test that the _connect function is not being retried if retry_on_timeout is
