@@ -136,8 +136,8 @@ class TestConnection:
 
     def test_connect_with_retries(self):
         """
-        Test that the _connect function is not being retried in case of a CancelledError -
-        error that is not in the list of retry-able errors
+        Validate that retries occur for the entire connect+handshake flow when OSError
+        happens during the handshake phase.
         """
         with patch.object(socket.socket, "sendall") as sendall:
             sendall.side_effect = OSError(ECONNREFUSED)
