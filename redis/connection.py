@@ -3148,6 +3148,7 @@ class BlockingConnectionPool(ConnectionPool):
                 connection = pooled_connection.connection
             else:
                 connection = self.make_connection()
+            self._in_use_connections.add(connection)
 
         try:
             # ensure this connection is connected to Redis
@@ -3178,6 +3179,13 @@ class BlockingConnectionPool(ConnectionPool):
 
         release_time = time.time()
         with self._maintenance_lock():
+            try:
+                self._in_use_connections.remove(connection)
+            except KeyError:
+                # Gracefully fail when a connection is returned to this pool
+                # that the pool doesn't actually own
+                return
+
             if not self.owns_connection(connection):
                 # pool doesn't own this connection. do not add it back
                 # to the pool. instead add a None value which is a placeholder

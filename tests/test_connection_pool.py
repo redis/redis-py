@@ -1377,7 +1377,8 @@ class TestIdleConnectionTimeout:
 
         # Now pool should not be tracked
         assert pool_id not in manager._registered_pools
-        schedule = [entry for entry in manager._schedule if entry.pool_id == pool_id]
+        # Filter for this pool_id AND check that weakref is not dead (in case memory address was reused)
+        schedule = [entry for entry in manager._schedule if entry.pool_id == pool_id and entry.pool_ref() is not None]
         assert len(schedule) == 0
 
         # Release a connection
@@ -1386,7 +1387,8 @@ class TestIdleConnectionTimeout:
 
         # Pool should now be re-registered and scheduled
         assert pool_id in manager._registered_pools
-        schedule = [entry for entry in manager._schedule if entry.pool_id == pool_id]
+        # Filter for this pool_id AND check that weakref is not dead (in case memory address was reused)
+        schedule = [entry for entry in manager._schedule if entry.pool_id == pool_id and entry.pool_ref() is not None]
         assert len(schedule) == 1
 
         pool.close()
