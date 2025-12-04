@@ -2381,9 +2381,14 @@ class _PoolMetadata:
         float  # timestamp when this pool should be checked next (for heapq ordering)
     )
     pool_id: int = field(compare=False)  # id(pool) for identification
+    # we use a weakref to the connection pool itself; this is because clients rely
+    # on garbage collection to close a pool after it's no longer needed.
+    # however, if we didn't use a weakref, the IdleConnectionCleanupManager
+    # would always have a reference to the pool which is never dropped, and
+    # the GC + disconnect would never happen.
     pool_ref: weakref.ref = field(compare=False)
     idle_timeout: float = field(compare=False)
-    check_interval: float = field(compare=False)  # minimum time between checks
+    minimum_check_interval: float = field(compare=False)  # minimum time between checks
 
 
 class IdleConnectionCleanupManager:
@@ -2401,7 +2406,7 @@ class IdleConnectionCleanupManager:
         self._schedule_lock = threading.RLock()
         self._condition = threading.Condition(self._schedule_lock)
         self._schedule: List[_PoolMetadata] = []  # heapq-based priority queue
-        self._registered_pools: set[int] = set()  # set of pool ids in the _schedule
+        self._registered_pool_ids: set[int] = set()  # set of pool ids in the _schedule
         self._worker_thread: Optional[threading.Thread] = None
         self._shutdown_event = threading.Event()
         # WAL-style tracking: if we pop a pool from schedule but crash before re-adding,
@@ -2437,7 +2442,7 @@ class IdleConnectionCleanupManager:
         pool_id = id(pool)
 
         with self._condition:
-            if pool_id in self._registered_pools:
+            if pool_id in self._registered_pool_ids:
                 # no-op if already registered
                 return
 
@@ -2446,10 +2451,10 @@ class IdleConnectionCleanupManager:
                 pool_id=pool_id,
                 pool_ref=weakref.ref(pool),
                 idle_timeout=pool.idle_connection_timeout,
-                check_interval=pool.idle_check_interval,
+                minimum_check_interval=pool.idle_check_interval,
             )
 
-            self._registered_pools.add(pool_id)
+            self._registered_pool_ids.add(pool_id)
             heapq.heappush(self._schedule, metadata)
 
             # wake up worker to potentially adjust sleep time
@@ -2459,7 +2464,7 @@ class IdleConnectionCleanupManager:
         # Unregister a pool from cleanup
         pool_id = id(pool)
         with self._condition:
-            self._registered_pools.discard(pool_id)
+            self._registered_pool_ids.discard(pool_id)
             # Note: We don't remove from schedule immediately, because the heapq
             # doesn't have a fast way to do this. The worker will skip it when it
             # processes the entry.
@@ -2530,20 +2535,20 @@ class IdleConnectionCleanupManager:
 
         heapq.heappop(self._schedule)
 
-        if metadata.pool_id not in self._registered_pools:
+        if metadata.pool_id not in self._registered_pool_ids:
             # pool was unregistered
             return None
 
         pool = metadata.pool_ref()
         if pool is None:
             # pool was GC'd
-            self._registered_pools.discard(metadata.pool_id)
+            self._registered_pool_ids.discard(metadata.pool_id)
             return None
 
         return metadata, pool
 
     def _reschedule_pool(self, metadata: _PoolMetadata, oldest_conn_time: float | None):
-        if metadata.pool_id not in self._registered_pools:
+        if metadata.pool_id not in self._registered_pool_ids:
             # pool was unregistered while we were cleaning it
             return
 
@@ -2553,14 +2558,14 @@ class IdleConnectionCleanupManager:
                 # check when the oldest connection will become idle
                 oldest_conn_time + metadata.idle_timeout,
                 # ...but don't check more frequently than check_interval
-                time.time() + metadata.check_interval,
+                time.time() + metadata.minimum_check_interval,
             )
             # Pool has connections, reschedule it
             metadata.next_check_time = next_check
             heapq.heappush(self._schedule, metadata)
         else:
             # Pool is empty, remove from tracking entirely
-            self._registered_pools.discard(metadata.pool_id)
+            self._registered_pool_ids.discard(metadata.pool_id)
 
 
 class PooledConnection:
@@ -3283,7 +3288,9 @@ class BlockingConnectionPool(ConnectionPool):
 
     def _get_free_connections(self):
         with self._lock:
-            return [pooled.connection for pooled in self.pool.queue if pooled is not None]
+            return [
+                pooled.connection for pooled in self.pool.queue if pooled is not None
+            ]
 
     def _get_in_use_connections(self):
         with self._lock:
