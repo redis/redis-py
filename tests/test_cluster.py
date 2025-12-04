@@ -1742,6 +1742,30 @@ class TestClusterRedisCommands:
         assert len(res) > 2
         assert "prefixes" in res or b"prefixes" in res
 
+    @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise()
+    def test_client_tracking(self, r):
+        # simple case - will execute on all nodes
+        assert r.client_tracking_on()
+        assert r.client_tracking_off()
+
+        # id based
+        node = r.get_default_node()
+        # when id is provided - the command should be sent to the node that
+        # owns the connection with this id
+        client_id = node.redis_connection.client_id()
+        assert r.client_tracking_on(clientid=client_id, target_nodes=node)
+        assert r.client_tracking_off(clientid=client_id, target_nodes=node)
+
+        # execute with client id and prefixes and bcast
+        assert r.client_tracking_on(
+            clientid=client_id, prefix=["foo", "bar"], bcast=True, target_nodes=node
+        )
+
+        # now with some prefixes and without bcast
+        with pytest.raises(DataError):
+            assert r.client_tracking_on(prefix=["foo", "bar", "blee"])
+
     @skip_if_server_version_lt("2.9.50")
     def test_client_pause(self, r):
         node = r.get_primaries()[0]

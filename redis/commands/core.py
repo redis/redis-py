@@ -685,7 +685,7 @@ class ManagementCommands(CommandsProtocol):
         if noloop:
             pieces.append("NOLOOP")
 
-        return self.execute_command("CLIENT TRACKING", *pieces)
+        return self.execute_command("CLIENT TRACKING", *pieces, **kwargs)
 
     def client_trackinginfo(self, **kwargs) -> ResponseT:
         """

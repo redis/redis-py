@@ -11,6 +11,7 @@ from typing import (
     Mapping,
     NoReturn,
     Optional,
+    Sequence,
     Union,
 )
 
@@ -25,6 +26,7 @@ from redis.typing import (
     PatternT,
     ResponseT,
 )
+from redis.utils import deprecated_function
 
 from .core import (
     ACLCommands,
@@ -755,6 +757,76 @@ class ClusterManagementCommands(ManagementCommands):
         self.read_from_replicas = False
         return self.execute_command("READWRITE", target_nodes=target_nodes)
 
+    @deprecated_function(
+        version="7.2.0",
+        reason="Use client-side caching feature instead.",
+    )
+    def client_tracking_on(
+        self,
+        clientid: Optional[int] = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+        target_nodes: Optional["TargetNodesT"] = "all",
+    ) -> ResponseT:
+        """
+        Enables the tracking feature of the Redis server, that is used
+        for server assisted client side caching.
+
+        When clientid is provided - in target_nodes only the node that owns the
+        connection with this id should be provided.
+        When clientid is not provided - target_nodes can be any node.
+
+        For more information see https://redis.io/commands/client-tracking
+        """
+        return self.client_tracking(
+            True,
+            clientid,
+            prefix,
+            bcast,
+            optin,
+            optout,
+            noloop,
+            target_nodes=target_nodes,
+        )
+
+    @deprecated_function(
+        version="7.2.0",
+        reason="Use client-side caching feature instead.",
+    )
+    def client_tracking_off(
+        self,
+        clientid: Optional[int] = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+        target_nodes: Optional["TargetNodesT"] = "all",
+    ) -> ResponseT:
+        """
+        Disables the tracking feature of the Redis server, that is used
+        for server assisted client side caching.
+
+        When clientid is provided - in target_nodes only the node that owns the
+        connection with this id should be provided.
+        When clientid is not provided - target_nodes can be any node.
+
+        For more information see https://redis.io/commands/client-tracking
+        """
+        return self.client_tracking(
+            False,
+            clientid,
+            prefix,
+            bcast,
+            optin,
+            optout,
+            noloop,
+            target_nodes=target_nodes,
+        )
+
 
 class AsyncClusterManagementCommands(
     ClusterManagementCommands, AsyncManagementCommands
@@ -780,6 +852,76 @@ class AsyncClusterManagementCommands(
                 asyncio.create_task(self.execute_command("CLUSTER DELSLOTS", slot))
                 for slot in slots
             )
+        )
+
+    @deprecated_function(
+        version="7.2.0",
+        reason="Use client-side caching feature instead.",
+    )
+    async def client_tracking_on(
+        self,
+        clientid: Optional[int] = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+        target_nodes: Optional["TargetNodesT"] = "all",
+    ) -> ResponseT:
+        """
+        Enables the tracking feature of the Redis server, that is used
+        for server assisted client side caching.
+
+        When clientid is provided - in target_nodes only the node that owns the
+        connection with this id should be provided.
+        When clientid is not provided - target_nodes can be any node.
+
+        For more information see https://redis.io/commands/client-tracking
+        """
+        return await self.client_tracking(
+            True,
+            clientid,
+            prefix,
+            bcast,
+            optin,
+            optout,
+            noloop,
+            target_nodes=target_nodes,
+        )
+
+    @deprecated_function(
+        version="7.2.0",
+        reason="Use client-side caching feature instead.",
+    )
+    async def client_tracking_off(
+        self,
+        clientid: Optional[int] = None,
+        prefix: Sequence[KeyT] = [],
+        bcast: bool = False,
+        optin: bool = False,
+        optout: bool = False,
+        noloop: bool = False,
+        target_nodes: Optional["TargetNodesT"] = "all",
+    ) -> ResponseT:
+        """
+        Disables the tracking feature of the Redis server, that is used
+        for server assisted client side caching.
+
+        When clientid is provided - in target_nodes only the node that owns the
+        connection with this id should be provided.
+        When clientid is not provided - target_nodes can be any node.
+
+        For more information see https://redis.io/commands/client-tracking
+        """
+        return await self.client_tracking(
+            False,
+            clientid,
+            prefix,
+            bcast,
+            optin,
+            optout,
+            noloop,
+            target_nodes=target_nodes,
         )
 
 
