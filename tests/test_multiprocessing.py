@@ -125,7 +125,9 @@ class TestMultiprocessing:
                 pool.release(parent_conn)
                 assert pool._created_connections == 1
                 assert child_conn in [p.connection for p in pool._available_connections]
-                assert parent_conn not in [p.connection for p in pool._available_connections]
+                assert parent_conn not in [
+                    p.connection for p in pool._available_connections
+                ]
 
         proc = self._mp_context.Process(target=target, args=(pool, parent_conn))
         proc.start()
