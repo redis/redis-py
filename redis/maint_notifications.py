@@ -5,7 +5,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Union
 
 from redis.typing import Number
 
@@ -463,9 +463,7 @@ class OSSNodeMigratedNotification(MaintenanceNotification):
 
     Args:
         id (int): Unique identifier for this notification
-        node_address (Optional[str]): Address of the node that has completed migration
-                                      in the format "host:port"
-        slots (Optional[List[int]]): List of slots that have been migrated
+        nodes_to_slots_mapping (Dict[str, str]): Mapping of node addresses to slots
     """
 
     DEFAULT_TTL = 30
@@ -473,12 +471,10 @@ class OSSNodeMigratedNotification(MaintenanceNotification):
     def __init__(
         self,
         id: int,
-        node_address: str,
-        slots: Optional[List[int]] = None,
+        nodes_to_slots_mapping: Dict[str, str],
     ):
         super().__init__(id, OSSNodeMigratedNotification.DEFAULT_TTL)
-        self.node_address = node_address
-        self.slots = slots
+        self.nodes_to_slots_mapping = nodes_to_slots_mapping
 
     def __repr__(self) -> str:
         expiry_time = self.creation_time + self.ttl
@@ -486,8 +482,7 @@ class OSSNodeMigratedNotification(MaintenanceNotification):
         return (
             f"{self.__class__.__name__}("
             f"id={self.id}, "
-            f"node_address={self.node_address}, "
-            f"slots={self.slots}, "
+            f"nodes_to_slots_mapping={self.nodes_to_slots_mapping}, "
             f"ttl={self.ttl}, "
             f"creation_time={self.creation_time}, "
             f"expires_at={expiry_time}, "
@@ -999,10 +994,15 @@ class OSSMaintNotificationsHandler:
 
             # Updates the cluster slots cache with the new slots mapping
             # This will also update the nodes cache with the new nodes mapping
-            new_node_host, new_node_port = notification.node_address.split(":")
+            additional_startup_nodes_info = []
+            for node_address, _ in notification.nodes_to_slots_mapping.items():
+                new_node_host, new_node_port = node_address.split(":")
+                additional_startup_nodes_info.append(
+                    (new_node_host, int(new_node_port))
+                )
             self.cluster_client.nodes_manager.initialize(
                 disconnect_startup_nodes_pools=False,
-                additional_startup_nodes_info=[(new_node_host, int(new_node_port))],
+                additional_startup_nodes_info=additional_startup_nodes_info,
             )
             # mark for reconnect all in use connections to the node - this will force them to
             # disconnect after they complete their current commands
