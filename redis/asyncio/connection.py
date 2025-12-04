@@ -299,7 +299,9 @@ class AbstractConnection:
         # try once the socket connect with the handshake, retry the whole
         # connect/handshake flow based on retry policy
         await self.retry.call_with_retry(
-            lambda: self.connect_check_health(check_health=True, retry_socket_connect=False),
+            lambda: self.connect_check_health(
+                check_health=True, retry_socket_connect=False
+            ),
             lambda error: self.disconnect(),
         )
 
