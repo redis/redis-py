@@ -1,6 +1,5 @@
 import copy
 import datetime
-from dataclasses import dataclass, field
 import heapq
 import logging
 import os
@@ -11,6 +10,7 @@ import time
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from itertools import chain
 from queue import Empty, Full, LifoQueue, Queue
 from typing import (
@@ -2373,12 +2373,6 @@ class MaintNotificationsAbstractConnectionPool:
                     conn.disconnect()
 
 
-def _cleanup_idle_connections_worker(
-    pool_ref: weakref.ref,
-    stop_event: threading.Event,
-    check_interval: float,
-) -> None:
-    """Background worker that periodically removes idle connections.
 @dataclass(order=True)
 class _PoolMetadata:
     """Metadata for a registered pool, used both for tracking and scheduling."""
@@ -2981,21 +2975,21 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def set_retry(self, retry: Retry) -> None:
         self.connection_kwargs.update({"retry": retry})
-        for pooled_conn in self._available_connections:
-            pooled_conn.connection.retry = retry
+        for conn in self._get_free_connections():
+            conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
 
     def re_auth_callback(self, token: TokenInterface):
         with self._lock:
-            for pooled_conn in self._available_connections:
-                pooled_conn.connection.retry.call_with_retry(
+            for conn in self._get_free_connections():
+                conn.retry.call_with_retry(
                     lambda: conn.send_command(
                         "AUTH", token.try_get("oid"), token.get_value()
                     ),
                     lambda error: self._mock(error),
                 )
-                pooled_conn.connection.retry.call_with_retry(
+                conn.retry.call_with_retry(
                     lambda: conn.read_response(), lambda error: self._mock(error)
                 )
             for conn in self._in_use_connections:
@@ -3006,7 +3000,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def _get_free_connections(self):
         with self._lock:
-            return self._available_connections
+            return [p.connection for p in self._available_connections]
 
     def _get_in_use_connections(self):
         with self._lock:
@@ -3281,7 +3275,7 @@ class BlockingConnectionPool(ConnectionPool):
 
     def _get_free_connections(self):
         with self._lock:
-            return self._available_connections
+            return [pooled.connection for pooled in self.pool.queue if pooled is not None]
 
     def _get_in_use_connections(self):
         with self._lock:
