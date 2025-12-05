@@ -57,6 +57,7 @@ from redis.exceptions import (
     AuthenticationWrongNumberOfArgsError,
     ConnectionError,
     DataError,
+    MaxConnectionsError,
     RedisError,
     ResponseError,
     TimeoutError,
@@ -1208,7 +1209,7 @@ class ConnectionPool:
             connection = self._available_connections.pop()
         except IndexError:
             if len(self._in_use_connections) >= self.max_connections:
-                raise ConnectionError("Too many connections") from None
+                raise MaxConnectionsError("Too many connections") from None
             connection = self.make_connection()
         self._in_use_connections.add(connection)
         return connection
