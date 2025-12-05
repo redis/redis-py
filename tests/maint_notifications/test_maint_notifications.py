@@ -864,7 +864,9 @@ class TestMaintNotificationsConnectionHandler:
             self.handler, "handle_maintenance_start_notification"
         ) as mock_handle:
             self.handler.handle_notification(notification)
-            mock_handle.assert_called_once_with(MaintenanceState.MAINTENANCE)
+            mock_handle.assert_called_once_with(
+                MaintenanceState.MAINTENANCE, notification
+            )
 
     def test_handle_notification_migrated(self):
         """Test handling of NodeMigratedNotification."""
@@ -884,7 +886,9 @@ class TestMaintNotificationsConnectionHandler:
             self.handler, "handle_maintenance_start_notification"
         ) as mock_handle:
             self.handler.handle_notification(notification)
-            mock_handle.assert_called_once_with(MaintenanceState.MAINTENANCE)
+            mock_handle.assert_called_once_with(
+                MaintenanceState.MAINTENANCE, notification
+            )
 
     def test_handle_notification_failed_over(self):
         """Test handling of NodeFailedOverNotification."""
@@ -911,7 +915,7 @@ class TestMaintNotificationsConnectionHandler:
         handler = MaintNotificationsConnectionHandler(self.mock_connection, config)
 
         result = handler.handle_maintenance_start_notification(
-            MaintenanceState.MAINTENANCE
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
         )
 
         assert result is None
@@ -922,7 +926,7 @@ class TestMaintNotificationsConnectionHandler:
         self.mock_connection.maintenance_state = MaintenanceState.MOVING
 
         result = self.handler.handle_maintenance_start_notification(
-            MaintenanceState.MAINTENANCE
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
         )
         assert result is None
         self.mock_connection.update_current_socket_timeout.assert_not_called()
@@ -931,7 +935,9 @@ class TestMaintNotificationsConnectionHandler:
         """Test successful maintenance start notification handling for migrating."""
         self.mock_connection.maintenance_state = MaintenanceState.NONE
 
-        self.handler.handle_maintenance_start_notification(MaintenanceState.MAINTENANCE)
+        self.handler.handle_maintenance_start_notification(
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
+        )
 
         assert self.mock_connection.maintenance_state == MaintenanceState.MAINTENANCE
         self.mock_connection.update_current_socket_timeout.assert_called_once_with(20)
