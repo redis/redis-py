@@ -190,6 +190,9 @@ class RedisMetricsCollector:
             error_type: Error type
             retry_attempts: Retry attempts
         """
+        if not hasattr(self, "client_errors"):
+            return
+
         attrs = self.attr_builder.build_base_attributes(
             server_address=server_address,
             server_port=server_port,
@@ -229,6 +232,9 @@ class RedisMetricsCollector:
             network_peer_port: Network peer port
             maint_notification: Maintenance notification
         """
+        if not hasattr(self, "maintenance_notifications"):
+            return
+
         attrs = self.attr_builder.build_base_attributes(
             server_address=server_address,
             server_port=server_port,
@@ -260,6 +266,9 @@ class RedisMetricsCollector:
             state: Connection state ('idle' or 'used')
             is_pubsub: Whether or not the connection is pubsub
         """
+        if not hasattr(self, "connection_count"):
+            return
+
         attrs = self.attr_builder.build_connection_pool_attributes(
             pool_name=pool_name,
             connection_state=state,
@@ -274,6 +283,9 @@ class RedisMetricsCollector:
         Args:
             pool_name: Connection pool name
         """
+        if not hasattr(self, "connection_timeouts"):
+            return
+
         attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
         self.connection_timeouts.add(1, attributes=attrs)
 
@@ -289,6 +301,9 @@ class RedisMetricsCollector:
             pool_name: Connection pool name
             duration_seconds: Creation time in seconds
         """
+        if not hasattr(self, "connection_create_time"):
+            return
+
         attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
         self.connection_create_time.record(duration_seconds, attributes=attrs)
 
@@ -304,6 +319,9 @@ class RedisMetricsCollector:
             pool_name: Connection pool name
             duration_seconds: Wait time in seconds
         """
+        if not hasattr(self, "connection_wait_time"):
+            return
+
         attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
         self.connection_wait_time.record(duration_seconds, attributes=attrs)
 
@@ -319,6 +337,9 @@ class RedisMetricsCollector:
             pool_name: Connection pool name
             duration_seconds: Use time in seconds
         """
+        if not hasattr(self, "connection_use_time"):
+            return
+
         attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
         self.connection_use_time.record(duration_seconds, attributes=attrs)
 
@@ -357,6 +378,8 @@ class RedisMetricsCollector:
             retry_attempts: Number of retry attempts made
             is_blocking: Whether the operation is a blocking command
         """
+        if not hasattr(self, "operation_duration"):
+            return
 
         # Check if this command should be tracked
         if not self.config.should_track_command(command_name):
@@ -404,6 +427,9 @@ class RedisMetricsCollector:
             close_reason: Reason for closing (e.g., 'idle_timeout', 'error', 'shutdown')
             error_type: Error type if closed due to error
         """
+        if not hasattr(self, "connection_closed"):
+            return
+
         attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
         if close_reason:
             attrs[REDIS_CLIENT_CONNECTION_CLOSE_REASON] = close_reason
@@ -425,6 +451,9 @@ class RedisMetricsCollector:
             maint_notification: Maintenance notification type
             relaxed: True to count up (relaxed), False to count down (unrelaxed)
         """
+        if not hasattr(self, "connection_relaxed_timeout"):
+            return
+
         attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
         attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] = maint_notification
         self.connection_relaxed_timeout.add(1 if relaxed else -1, attributes=attrs)
@@ -439,6 +468,9 @@ class RedisMetricsCollector:
         Args:
             pool_name: Connection pool name
         """
+        if not hasattr(self, "connection_handoff"):
+            return
+
         attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
         self.connection_handoff.add(1, attributes=attrs)
 
@@ -458,6 +490,9 @@ class RedisMetricsCollector:
             channel: Pub/Sub channel name
             sharded: True if sharded Pub/Sub channel
         """
+        if not hasattr(self, "pubsub_messages"):
+            return
+
         attrs = self.attr_builder.build_pubsub_message_attributes(
             direction=direction,
             channel=channel,
@@ -483,6 +518,9 @@ class RedisMetricsCollector:
             consumer_group: Consumer group name
             consumer_name: Consumer name
         """
+        if not hasattr(self, "stream_lag"):
+            return
+
         attrs = self.attr_builder.build_streaming_attributes(
             stream_name=stream_name,
             consumer_group=consumer_group,

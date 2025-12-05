@@ -22,7 +22,7 @@ Usage in Redis core code:
 import time
 from typing import Optional
 
-from redis.observability.attributes import PubSubDirection
+from redis.observability.attributes import PubSubDirection, ConnectionState
 from redis.observability.metrics import RedisMetricsCollector
 
 # Global metrics collector instance (lazy-initialized)
@@ -124,7 +124,7 @@ def record_connection_create_time(
 def record_connection_count(
         count: int,
         pool_name: str,
-        state: str,
+        state: ConnectionState,
         is_pubsub: bool = False,
 ) -> None:
     """
@@ -148,11 +148,10 @@ def record_connection_count(
 
     # try:
         from redis.observability.attributes import ConnectionState
-        connection_state = ConnectionState.IDLE if state == 'idle' else ConnectionState.USED
         _metrics_collector.record_connection_count(
             count=count,
             pool_name=pool_name,
-            state=connection_state,
+            state=state,
             is_pubsub=is_pubsub,
         )
     # except Exception:
@@ -408,14 +407,11 @@ def record_pubsub_message(
         if _metrics_collector is None:
             return
 
-    # try:
-        _metrics_collector.record_pubsub_message(
-            direction=direction,
-            channel=channel,
-            sharded=sharded,
-        )
-    # except Exception:
-    #     pass
+    _metrics_collector.record_pubsub_message(
+        direction=direction,
+        channel=channel,
+        sharded=sharded,
+    )
 
 
 def record_streaming_lag(
