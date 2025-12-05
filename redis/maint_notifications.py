@@ -894,12 +894,14 @@ class MaintNotificationsConnectionHandler:
             return
 
         if notification_type:
-            self.handle_maintenance_start_notification(MaintenanceState.MAINTENANCE)
+            self.handle_maintenance_start_notification(
+                MaintenanceState.MAINTENANCE, notification
+            )
         else:
             self.handle_maintenance_completed_notification()
 
     def handle_maintenance_start_notification(
-        self, maintenance_state: MaintenanceState
+        self, maintenance_state: MaintenanceState, notification: MaintenanceNotification
     ):
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING
@@ -913,6 +915,11 @@ class MaintNotificationsConnectionHandler:
         )
         # extend the timeout for all created connections
         self.connection.update_current_socket_timeout(self.config.relaxed_timeout)
+        if isinstance(notification, OSSNodeMigratingNotification):
+            # add the notification id to the set of processed start maint notifications
+            # this is used to skip the unrelaxing of the timeouts if we have received more than
+            # one start notification before the the final end notification
+            self.connection.add_miant_start_notification(notification.id)
 
     def handle_maintenance_completed_notification(self):
         # Only reset timeouts if state is not MOVING and relaxed timeouts are enabled
@@ -926,6 +933,9 @@ class MaintNotificationsConnectionHandler:
         # timeouts by providing -1 as the relaxed timeout
         self.connection.update_current_socket_timeout(-1)
         self.connection.maintenance_state = MaintenanceState.NONE
+        # reset the sets that keep track of received start maint
+        # notifications and skipped end maint notifications
+        self.connection.reset_received_notifications()
 
 
 class OSSMaintNotificationsHandler:
@@ -1024,15 +1034,26 @@ class OSSMaintNotificationsHandler:
             else:
                 if self.config.is_relaxed_timeouts_enabled():
                     # reset the timeouts for the node to which the connection is connected
-                    # TODO: add check if other maintenance ops are in progress for the same node - CAE-1038
-                    # and if so, don't reset the timeouts
+                    # Perform check if other maintenance ops are in progress for the same node
+                    # and if so, don't reset the timeouts and wait for the last maintenance
+                    # to complete
                     for conn in (
                         *current_node.redis_connection.connection_pool._get_in_use_connections(),
                         *current_node.redis_connection.connection_pool._get_free_connections(),
                     ):
-                        conn.reset_tmp_settings(reset_relaxed_timeout=True)
-                        conn.update_current_socket_timeout(relaxed_timeout=-1)
-                        conn.maintenance_state = MaintenanceState.NONE
+                        if (
+                            len(conn.get_processed_start_notifications())
+                            > len(conn.get_skipped_end_notifications()) + 1
+                        ):
+                            # we have received more start notifications than end notifications
+                            # for this connection - we should not reset the timeouts
+                            # and add the notification id to the set of skipped end notifications
+                            conn.add_skipped_end_notification(notification.id)
+                        else:
+                            conn.reset_tmp_settings(reset_relaxed_timeout=True)
+                            conn.update_current_socket_timeout(relaxed_timeout=-1)
+                            conn.maintenance_state = MaintenanceState.NONE
+                            conn.reset_received_notifications()
 
             # mark the notification as processed
             self._processed_notifications.add(notification)
