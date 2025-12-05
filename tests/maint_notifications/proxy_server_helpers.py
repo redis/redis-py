@@ -11,37 +11,51 @@ class RespTranslator:
     """Helper class to translate between RESP and other encodings."""
 
     @staticmethod
-    def str_or_list_to_resp(txt: str) -> str:
-        """
-        Convert specific string or list to RESP format.
-        """
-        if re.match(r"^<.*>$", txt):
-            items = txt[1:-1].split(",")
-            return f"*{len(items)}\r\n" + "\r\n".join(
-                f"${len(x)}\r\n{x}" for x in items
+    def oss_maint_notification_to_resp(txt: str) -> str:
+        """Convert query to RESP format."""
+        if txt.startswith("SMIGRATED"):
+            # Format: SMIGRATED SeqID host:port slot1,range1-range2 host1:port1 slot2,range3-range4
+            # SMIGRATED 93923 abc.com:6789 123,789-1000 abc.com:4545 1000-2000 abc.com:4323 900,910,920
+            # SMIGRATED - simple string
+            # SeqID - integer
+            # host and slots info are provided as array of arrays
+            # host:port - simple string
+            # slots - simple string
+
+            parts = txt.split()
+            notification = parts[0]
+            seq_id = parts[1]
+            hosts_and_slots = parts[2:]
+            resp = (
+                ">3\r\n"  # Push message with 3 elements
+                f"+{notification}\r\n"  # Element 1: Command
+                f":{seq_id}\r\n"  # Element 2: SeqID
+                f"*{len(hosts_and_slots) // 2}\r\n"  # Element 3: Array of host:port, slots pairs
             )
+            for i in range(0, len(hosts_and_slots), 2):
+                resp += "*2\r\n"
+                resp += f"+{hosts_and_slots[i]}\r\n"
+                resp += f"+{hosts_and_slots[i + 1]}\r\n"
         else:
-            return f"${len(txt)}\r\n{txt}"
+            # SMIGRATING
+            # Format: SMIGRATING SeqID slot,range1-range2
+            # SMIGRATING 93923 123,789-1000
+            # SMIGRATING - simple string
+            # SeqID - integer
+            # slots - simple string
 
-    @staticmethod
-    def cluster_slots_to_resp(resp: str) -> str:
-        """Convert query to RESP format."""
-        return (
-            f"*{len(resp.split())}\r\n"
-            + "\r\n".join(f"${len(x)}\r\n{x}" for x in resp.split())
-            + "\r\n"
-        )
+            parts = txt.split()
+            notification = parts[0]
+            seq_id = parts[1]
+            slots = parts[2]
 
-    @staticmethod
-    def oss_maint_notification_to_resp(resp: str) -> str:
-        """Convert query to RESP format."""
-        return (
-            f">{len(resp.split())}\r\n"
-            + "\r\n".join(
-                f"{RespTranslator.str_or_list_to_resp(x)}" for x in resp.split()
+            resp = (
+                ">3\r\n"  # Push message with 3 elements
+                f"+{notification}\r\n"  # Element 1: Command
+                f":{seq_id}\r\n"  # Element 2: SeqID
+                f"+{slots}\r\n"  # Element 3: Array of [host:port, slots] pairs
             )
-            + "\r\n"
-        )
+        return resp
 
 
 @dataclass
