@@ -276,11 +276,6 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                         unhealthy_db = e.database
                         unhealthy_db.circuit.state = CBState.OPEN
 
-                        logger.exception(
-                            "Health check failed, due to exception",
-                            exc_info=e.original_exception,
-                        )
-
                         if on_error:
                             on_error(e.original_exception)
             except TimeoutError:
