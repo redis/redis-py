@@ -2509,7 +2509,7 @@ class IdleConnectionCleanupManager:
 
                 with self._condition:
                     self._reschedule_pool(metadata, oldest_conn_time)
-                    # the pool after the pool is rescheduled, we can clean up the WAL
+                    # after the pool is rescheduled, we can clean up the WAL
                     self._pool_being_cleaned = None
             except Exception as e:
                 logger.error(
@@ -2531,7 +2531,7 @@ class IdleConnectionCleanupManager:
         if wait_time > 0:
             # Sleep until next scheduled check (or until notified)
             self._condition.wait(timeout=wait_time)
-            return
+            return None
 
         heapq.heappop(self._schedule)
 
@@ -2590,6 +2590,14 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     Maintenance notifications are supported only with RESP3.
     If the ``maint_notifications_config`` is not provided but the ``protocol`` is 3,
     the maintenance notifications will be enabled by default.
+
+    The pool can automatically close idle connections to free up resources.
+    Set ``idle_connection_timeout`` (in seconds) to enable this feature.
+    Connections that remain idle (not checked out from the pool) longer than
+    this timeout will be automatically closed and removed from the pool.
+    The ``idle_check_interval`` parameter controls the minimum time between
+    cleanup checks (default: 60 seconds). All pools in the process share a
+    single background thread for cleanup operations.
 
     Any additional keyword arguments are passed to the constructor of
     ``connection_class``.
@@ -3052,6 +3060,9 @@ class BlockingConnectionPool(ConnectionPool):
         >>> # Raise a ``ConnectionError`` after five seconds if a connection is
         >>> # not available.
         >>> pool = BlockingConnectionPool(timeout=5)
+
+    Like :py:class:`~redis.ConnectionPool`, this pool also supports automatic
+    idle connection cleanup via the ``idle_connection_timeout`` parameter.
     """
 
     def __init__(
@@ -3067,8 +3078,7 @@ class BlockingConnectionPool(ConnectionPool):
         self.queue_class = queue_class
         self.timeout = timeout
         self._in_maintenance = False
-        self._locked = False
-        self.pool: Queue[PooledConnection | None] = self.queue_class(max_connections)
+        self.pool: Queue[PooledConnection | None]
         super().__init__(
             connection_class=connection_class,
             max_connections=max_connections,
@@ -3285,6 +3295,7 @@ class BlockingConnectionPool(ConnectionPool):
                     e,
                     exc_info=True,
                 )
+        return oldest_connection_time
 
     def _get_free_connections(self):
         with self._lock:
@@ -3307,15 +3318,12 @@ class BlockingConnectionPool(ConnectionPool):
 
     @contextmanager
     def _maintenance_lock(self):
+        locked = False
         try:
             if self._in_maintenance:
                 self._lock.acquire()
-                self._locked = True
+                locked = True
             yield
         finally:
-            if self._locked:
-                try:
-                    self._lock.release()
-                except Exception:
-                    pass
-                self._locked = False
+            if locked:
+                self._lock.release()

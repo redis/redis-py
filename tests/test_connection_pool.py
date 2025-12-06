@@ -987,9 +987,7 @@ class MockDateTime:
         mock_time = self._time_patcher.__enter__()
 
         mock_datetime.datetime.now = lambda: self.current_time
-        mock_datetime.datetime.side_effect = lambda *args, **kwargs: datetime.datetime(
-            *args, **kwargs
-        )
+        mock_datetime.datetime.side_effect = datetime.datetime
         mock_time.time = lambda: self.current_time.timestamp()
 
         return self
