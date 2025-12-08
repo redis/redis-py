@@ -82,10 +82,10 @@ class OTelConfig:
     def __init__(
             self,
             # Core enablement
-            enabled_telemetry: List[TelemetryOption] = None,
+            enabled_telemetry: Optional[List[TelemetryOption]] = None,
             # Metrics-specific
             metrics_sample_percentage: float = 100.0,
-            metric_groups: List[MetricGroup] = None,
+            metric_groups: Optional[List[MetricGroup]] = None,
             # Redis-specific telemetry controls
             include_commands: Optional[List[str]] = None,
             exclude_commands: Optional[List[str]] = None,

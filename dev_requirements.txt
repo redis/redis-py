@@ -30,3 +30,7 @@ numpy>=1.24.0,<2.0 ; platform_python_implementation == "PyPy"
 
 redis-entraid==1.0.0
 pybreaker>=1.4.0
+
+opentelemetry-api>=1.18.0
+opentelemetry-sdk>=1.18.0
+opentelemetry-exporter-otlp-http>=1.18.0

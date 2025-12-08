@@ -269,7 +269,7 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_count"):
             return
 
-        attrs = self.attr_builder.build_connection_pool_attributes(
+        attrs = self.attr_builder.build_connection_attributes(
             pool_name=pool_name,
             connection_state=state,
             is_pubsub=is_pubsub,
@@ -286,7 +286,7 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_timeouts"):
             return
 
-        attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
+        attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
         self.connection_timeouts.add(1, attributes=attrs)
 
     def record_connection_create_time(
@@ -304,7 +304,7 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_create_time"):
             return
 
-        attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
+        attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
         self.connection_create_time.record(duration_seconds, attributes=attrs)
 
     def record_connection_wait_time(
@@ -322,7 +322,7 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_wait_time"):
             return
 
-        attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
+        attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
         self.connection_wait_time.record(duration_seconds, attributes=attrs)
 
     def record_connection_use_time(
@@ -340,7 +340,7 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_use_time"):
             return
 
-        attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
+        attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
         self.connection_use_time.record(duration_seconds, attributes=attrs)
 
     # Command execution metric recording methods
@@ -430,7 +430,7 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_closed"):
             return
 
-        attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
+        attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
         if close_reason:
             attrs[REDIS_CLIENT_CONNECTION_CLOSE_REASON] = close_reason
         if error_type:
@@ -454,7 +454,7 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_relaxed_timeout"):
             return
 
-        attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
+        attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
         attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] = maint_notification
         self.connection_relaxed_timeout.add(1 if relaxed else -1, attributes=attrs)
 
@@ -471,7 +471,7 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_handoff"):
             return
 
-        attrs = self.attr_builder.build_connection_pool_attributes(pool_name=pool_name)
+        attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
         self.connection_handoff.add(1, attributes=attrs)
 
     # PubSub metric recording methods

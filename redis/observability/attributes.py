@@ -155,7 +155,7 @@ class AttributeBuilder:
         return attrs
 
     @staticmethod
-    def build_connection_pool_attributes(
+    def build_connection_attributes(
             pool_name: str,
             connection_state: Optional[ConnectionState] = None,
             is_pubsub: Optional[bool] = None,
