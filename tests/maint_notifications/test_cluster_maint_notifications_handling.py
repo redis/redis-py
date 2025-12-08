@@ -1,6 +1,4 @@
-from asyncio import Queue
 from dataclasses import dataclass
-from threading import Thread
 from typing import List, Optional, cast
 
 from redis import ConnectionPool, RedisCluster
@@ -28,6 +26,32 @@ PROXY_CLUSTER_NODES = [
     ClusterNode("127.0.0.1", NODE_PORT_2),
     ClusterNode("127.0.0.1", NODE_PORT_3),
 ]
+
+CLUSTER_SLOTS_INTERCEPTOR_NAME = "test_topology"
+
+
+class TestRespTranslatorHelper:
+    def test_oss_maint_notification_to_resp(self):
+        resp = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATING 12 123,456,5000-7000"
+        )
+        assert resp == ">3\r\n+SMIGRATING\r\n:12\r\n+123,456,5000-7000\r\n"
+
+        resp = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATED 12 127.0.0.1:15380 123,456,5000-7000"
+        )
+        assert (
+            resp
+            == ">3\r\n+SMIGRATED\r\n:12\r\n*1\r\n*2\r\n+127.0.0.1:15380\r\n+123,456,5000-7000\r\n"
+        )
+        resp = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATED 12 127.0.0.1:15380 123,456,5000-7000 127.0.0.1:15381 7000-8000 127.0.0.1:15382 8000-9000"
+        )
+
+        assert (
+            resp
+            == ">3\r\n+SMIGRATED\r\n:12\r\n*3\r\n*2\r\n+127.0.0.1:15380\r\n+123,456,5000-7000\r\n*2\r\n+127.0.0.1:15381\r\n+7000-8000\r\n*2\r\n+127.0.0.1:15382\r\n+8000-9000\r\n"
+        )
 
 
 class TestClusterMaintNotificationsBase:
@@ -409,6 +433,7 @@ class TestClusterMaintNotificationsHandlingBase(TestClusterMaintNotificationsBas
     def setup_method(self):
         """Set up test fixtures with mocked sockets."""
         self.proxy_helper = ProxyInterceptorHelper()
+        self.proxy_helper.cleanup_interceptors(CLUSTER_SLOTS_INTERCEPTOR_NAME)
 
         # Create maintenance notifications config
         self.config = MaintNotificationsConfig(
@@ -419,6 +444,7 @@ class TestClusterMaintNotificationsHandlingBase(TestClusterMaintNotificationsBas
     def teardown_method(self):
         """Clean up test fixtures."""
         self.cluster.close()
+        # interceptors that are changed during the tests are collected in the proxy helper
         self.proxy_helper.cleanup_interceptors()
 
 
@@ -513,7 +539,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
 
         # send a notification to node 1
         notification = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 12 <123,456,5000-7000>"
+            "SMIGRATING 12 123,456,5000-7000"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, notification)
 
@@ -570,7 +596,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
 
         # send a notification to node 1
         notification = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 12 <123,456,5000-7000>"
+            "SMIGRATING 12 123,456,5000-7000"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, notification)
 
@@ -596,7 +622,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         self._warm_up_connection_pools(self.cluster, created_connections_count=3)
 
         self.proxy_helper.set_cluster_slots(
-            "test_topology",
+            CLUSTER_SLOTS_INTERCEPTOR_NAME,
             [
                 SlotsRange("0.0.0.0", NODE_PORT_NEW, 0, 5460),
                 SlotsRange("0.0.0.0", NODE_PORT_2, 5461, 10922),
@@ -605,7 +631,36 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
         # send a notification to node 1
         notification = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATED 12 127.0.0.1:15380 <123,456,5000-7000>"
+            "SMIGRATED 12 127.0.0.1:15380 123,456,5000-7000"
+        )
+        self.proxy_helper.send_notification(NODE_PORT_1, notification)
+
+        # execute a command that will receive the notification
+        res = self.cluster.set("anyprefix:{3}:k", "VAL")
+        assert res is True
+
+        # validate the cluster topology was updated
+        new_node = self.cluster.nodes_manager.get_node(
+            host="0.0.0.0", port=NODE_PORT_NEW
+        )
+        assert new_node is not None
+
+    def test_receive_smigrated_notification_with_two_nodes(self):
+        """Test receiving an OSS maintenance completed notification."""
+        # create three connections in each node's connection pool
+        self._warm_up_connection_pools(self.cluster, created_connections_count=3)
+
+        self.proxy_helper.set_cluster_slots(
+            CLUSTER_SLOTS_INTERCEPTOR_NAME,
+            [
+                SlotsRange("0.0.0.0", NODE_PORT_NEW, 0, 5460),
+                SlotsRange("0.0.0.0", NODE_PORT_2, 5461, 10922),
+                SlotsRange("0.0.0.0", NODE_PORT_3, 10923, 16383),
+            ],
+        )
+        # send a notification to node 1
+        notification = RespTranslator.oss_maint_notification_to_resp(
+            "SMIGRATED 12 127.0.0.1:15380 123,456,5000-7000 127.0.0.1:15382 110-120"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, notification)
 
@@ -628,7 +683,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         node_2 = self.cluster.nodes_manager.get_node(host="0.0.0.0", port=NODE_PORT_2)
 
         smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 12 <123,2000-3000>"
+            "SMIGRATING 12 123,2000-3000"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrating_node_1)
         # execute command with node 1 connection
@@ -649,7 +704,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
 
         smigrating_node_2 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 13 <8000-9000>"
+            "SMIGRATING 13 8000-9000"
         )
         self.proxy_helper.send_notification(NODE_PORT_2, smigrating_node_2)
 
@@ -674,17 +729,17 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
             ],
         )
         smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATED 14 0.0.0.0:15381 <123,2000-3000>"
+            "SMIGRATED 14 0.0.0.0:15381 123,2000-3000"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrated_node_1)
 
         smigrated_node_2 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATED 15 0.0.0.0:15381 <8000-9000>"
+            "SMIGRATED 15 0.0.0.0:15381 8000-9000"
         )
         self.proxy_helper.send_notification(NODE_PORT_2, smigrated_node_2)
 
         self.proxy_helper.set_cluster_slots(
-            "test_topology",
+            CLUSTER_SLOTS_INTERCEPTOR_NAME,
             [
                 SlotsRange("0.0.0.0", NODE_PORT_1, 0, 122),
                 SlotsRange("0.0.0.0", NODE_PORT_3, 123, 123),
@@ -725,7 +780,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
 
         self.proxy_helper.set_cluster_slots(
-            "test_topology",
+            CLUSTER_SLOTS_INTERCEPTOR_NAME,
             [
                 SlotsRange("0.0.0.0", NODE_PORT_1, 0, 122),
                 SlotsRange("0.0.0.0", NODE_PORT_3, 123, 123),
@@ -774,7 +829,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         node_3 = self.cluster.nodes_manager.get_node(host="0.0.0.0", port=NODE_PORT_3)
 
         smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 12 <0-5460>"
+            "SMIGRATING 12 0-5460"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrating_node_1)
         # execute command with node 1 connection
@@ -795,7 +850,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
 
         smigrating_node_2 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 13 <5461-10922>"
+            "SMIGRATING 13 5461-10922"
         )
         self.proxy_helper.send_notification(NODE_PORT_2, smigrating_node_2)
 
@@ -821,16 +876,16 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
 
         smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATED 14 0.0.0.0:15382 <0-5460>"
+            "SMIGRATED 14 0.0.0.0:15382 0-5460"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrated_node_1)
 
         smigrated_node_2 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATED 15 0.0.0.0:15382 <5461-10922>"
+            "SMIGRATED 15 0.0.0.0:15382 5461-10922"
         )
         self.proxy_helper.send_notification(NODE_PORT_2, smigrated_node_2)
         self.proxy_helper.set_cluster_slots(
-            "test_topology",
+            CLUSTER_SLOTS_INTERCEPTOR_NAME,
             [
                 SlotsRange("0.0.0.0", 15382, 0, 5460),
                 SlotsRange("0.0.0.0", NODE_PORT_2, 5461, 10922),
@@ -871,7 +926,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
 
         self.proxy_helper.set_cluster_slots(
-            "test_topology",
+            CLUSTER_SLOTS_INTERCEPTOR_NAME,
             [
                 SlotsRange("0.0.0.0", 15382, 0, 5460),
                 SlotsRange("0.0.0.0", 15383, 5461, 10922),
@@ -909,7 +964,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         self._warm_up_connection_pools(self.cluster, created_connections_count=1)
 
         smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 12 <1000-2000>"
+            "SMIGRATING 12 1000-2000"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrating_node_1)
         # execute command with node 1 connection
@@ -927,7 +982,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
 
         smigrating_node_1_2 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 13 <3000-4000>"
+            "SMIGRATING 13 3000-4000"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrating_node_1_2)
         # execute command with node 1 connection
@@ -944,26 +999,26 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
             ],
         )
         smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATED 14 0.0.0.0:15380 <1000-2000>"
+            "SMIGRATED 14 0.0.0.0:15380 1000-2000"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrated_node_1)
         # execute command with node 1 connection
         self.cluster.set("anyprefix:{3}:k", "VAL")
         # this functionality is part of CAE-1038 and will be added later
         # validate the timeout is still relaxed
-        # self._validate_connections_states(
-        #     self.cluster,
-        #     [
-        #         ConnectionStateExpectation(
-        #             node_port=NODE_PORT_1,
-        #             changed_connections_count=1,
-        #             state=MaintenanceState.MAINTENANCE,
-        #             relaxed_timeout=self.config.relaxed_timeout,
-        #         ),
-        #     ],
-        # )
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+            ],
+        )
         smigrated_node_1_2 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATED 15 0.0.0.0:15381 <3000-4000>"
+            "SMIGRATED 15 0.0.0.0:15381 3000-4000"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrated_node_1_2)
         # execute command with node 1 connection
@@ -1002,7 +1057,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         assert msg is not None and msg["type"] == "ssubscribe"
 
         smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 12 <5200-5460>"
+            "SMIGRATING 12 5200-5460"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrating_node_1)
 
@@ -1020,7 +1075,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
 
         self.proxy_helper.set_cluster_slots(
-            "test_topology",
+            CLUSTER_SLOTS_INTERCEPTOR_NAME,
             [
                 SlotsRange("0.0.0.0", NODE_PORT_1, 0, 5200),
                 SlotsRange("0.0.0.0", NODE_PORT_2, 5201, 10922),
@@ -1029,7 +1084,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
 
         smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATED 14 0.0.0.0:15380 <5200-5460>"
+            "SMIGRATED 14 0.0.0.0:15380 5200-5460"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrated_node_1)
         # execute command with node 1 connection
@@ -1090,7 +1145,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         assert msg is not None and msg["type"] == "subscribe"
 
         smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATING 12 <5200-5460>"
+            "SMIGRATING 12 5200-5460"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrating_node_1)
 
@@ -1105,7 +1160,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         assert pubsub.connection._socket_connect_timeout == 30
 
         self.proxy_helper.set_cluster_slots(
-            "test_topology",
+            CLUSTER_SLOTS_INTERCEPTOR_NAME,
             [
                 SlotsRange("0.0.0.0", NODE_PORT_1, 0, 5200),
                 SlotsRange("0.0.0.0", NODE_PORT_2, 5201, 10922),
@@ -1114,7 +1169,7 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         )
 
         smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
-            "SMIGRATED 14 0.0.0.0:15380 <5200-5460>"
+            "SMIGRATED 14 0.0.0.0:15380 5200-5460"
         )
         self.proxy_helper.send_notification(NODE_PORT_1, smigrated_node_1)
         # execute command with node 1 connection

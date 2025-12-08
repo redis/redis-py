@@ -319,6 +319,8 @@ class MaintNotificationsAbstractConnection:
             oss_cluster_maint_notifications_handler,
             parser,
         )
+        self._processed_start_maint_notifications = set()
+        self._skipped_end_maint_notifications = set()
 
     @abstractmethod
     def _get_parser(self) -> Union[_HiredisParser, _RESP3Parser]:
@@ -666,6 +668,22 @@ class MaintNotificationsAbstractConnection:
     @maintenance_state.setter
     def maintenance_state(self, state: "MaintenanceState"):
         self._maintenance_state = state
+
+    def add_maint_start_notification(self, id: int):
+        self._processed_start_maint_notifications.add(id)
+
+    def get_processed_start_notifications(self) -> set:
+        return self._processed_start_maint_notifications
+
+    def add_skipped_end_notification(self, id: int):
+        self._skipped_end_maint_notifications.add(id)
+
+    def get_skipped_end_notifications(self) -> set:
+        return self._skipped_end_maint_notifications
+
+    def reset_received_notifications(self):
+        self._processed_start_maint_notifications.clear()
+        self._skipped_end_maint_notifications.clear()
 
     def getpeername(self):
         """
