@@ -192,12 +192,14 @@ class MaintenanceNotificationsParser:
     @staticmethod
     def parse_oss_maintenance_completed_msg(response):
         # Expected message format is:
-        # SMIGRATED <seq_number> <host:port> <slot, range1-range2,...>
+        # SMIGRATED <seq_number> [<host:port> <slot, range1-range2,...>, ...]
         id = response[1]
-        node_address = safe_str(response[2])
-        slots = response[3]
+        nodes_to_slots_mapping_data = response[2]
+        nodes_to_slots_mapping = {}
+        for node, slots in nodes_to_slots_mapping_data:
+            nodes_to_slots_mapping[safe_str(node)] = safe_str(slots)
 
-        return OSSNodeMigratedNotification(id, node_address, slots)
+        return OSSNodeMigratedNotification(id, nodes_to_slots_mapping)
 
     @staticmethod
     def parse_maintenance_start_msg(response, notification_type):
