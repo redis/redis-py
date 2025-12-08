@@ -669,7 +669,7 @@ class MaintNotificationsAbstractConnection:
     def maintenance_state(self, state: "MaintenanceState"):
         self._maintenance_state = state
 
-    def add_miant_start_notification(self, id: int):
+    def add_maint_start_notification(self, id: int):
         self._processed_start_maint_notifications.add(id)
 
     def get_processed_start_notifications(self) -> set:
