@@ -1014,7 +1014,7 @@ class PubSub:
                 response
                 in [
                     self.health_check_response,  # If there is a subscription
-                    self.HEALTH_CHECK_MESSAGE,  # If there is no subscriptions and decode_responses=True
+                    self.HEALTH_CHECK_MESSAGE,  # If there are no subscriptions and decode_responses=True
                 ]
             )
         else:
