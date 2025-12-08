@@ -1006,17 +1006,17 @@ class TestClusterMaintNotificationsHandling(TestClusterMaintNotificationsHandlin
         self.cluster.set("anyprefix:{3}:k", "VAL")
         # this functionality is part of CAE-1038 and will be added later
         # validate the timeout is still relaxed
-        # self._validate_connections_states(
-        #     self.cluster,
-        #     [
-        #         ConnectionStateExpectation(
-        #             node_port=NODE_PORT_1,
-        #             changed_connections_count=1,
-        #             state=MaintenanceState.MAINTENANCE,
-        #             relaxed_timeout=self.config.relaxed_timeout,
-        #         ),
-        #     ],
-        # )
+        self._validate_connections_states(
+            self.cluster,
+            [
+                ConnectionStateExpectation(
+                    node_port=NODE_PORT_1,
+                    changed_connections_count=1,
+                    state=MaintenanceState.MAINTENANCE,
+                    relaxed_timeout=self.config.relaxed_timeout,
+                ),
+            ],
+        )
         smigrated_node_1_2 = RespTranslator.oss_maint_notification_to_resp(
             "SMIGRATED 15 0.0.0.0:15381 3000-4000"
         )
