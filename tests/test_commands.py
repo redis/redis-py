@@ -9,7 +9,7 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-from redis import RedisClusterException, ResponseError
+from redis import DataError, RedisClusterException, ResponseError
 import redis
 from redis import exceptions
 from redis._parsers.helpers import (
@@ -1501,6 +1501,114 @@ class TestRedisCommands:
         del r["a"]
         assert r.get("a") is None
 
+    def _ensure_str(self, x):
+        return x.decode("ascii") if isinstance(x, (bytes, bytearray)) else x
+
+    def _server_xxh3_digest(self, r, key):
+        """
+        Get the server-computed XXH3 hex digest for the key's value.
+        Requires the DIGEST command implemented on the server.
+        """
+        d = r.execute_command("DIGEST", key)
+        return None if d is None else self._ensure_str(d).lower()
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_nonexistent(self, r):
+        r.delete("nope")
+        assert r.delex("nope") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_unconditional_delete_string(self, r):
+        r.set("k", b"v")
+        assert r.exists("k") == 1
+        assert r.delex("k") == 1
+        assert r.exists("k") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_unconditional_delete_nonstring_allowed(self, r):
+        # Spec: error happens only when a condition is specified on a non-string key.
+        r.lpush("lst", "a")
+        assert r.delex("lst") == 1
+        assert r.exists("lst") == 0
+
+        r.lpush("lst", "a")
+
+        with pytest.raises(redis.ResponseError):
+            r.delex("lst", ifeq=b"a")
+        assert r.exists("lst") == 1
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_ifeq(self, r):
+        r.set("k", b"abc")
+        assert r.delex("k", ifeq=b"abc") == 1  # matches → deleted
+        assert r.exists("k") == 0
+
+        r.set("k", b"abc")
+        assert r.delex("k", ifeq=b"zzz") == 0  # not match → not deleted
+        assert r.get("k") == b"abc"  # still there
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_ifne(self, r):
+        r.set("k2", b"abc")
+        assert r.delex("k2", ifne=b"zzz") == 1  # different → deleted
+        assert r.exists("k2") == 0
+
+        r.set("k2", b"abc")
+        assert r.delex("k2", ifne=b"abc") == 0  # equal → not deleted
+        assert r.get("k2") == b"abc"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_with_conditionon_nonstring_values(self, r):
+        r.lpush("nk", "x")
+        with pytest.raises(redis.ResponseError):
+            r.delex("nk", ifeq=b"x")
+        with pytest.raises(redis.ResponseError):
+            r.delex("nk", ifne=b"x")
+        with pytest.raises(redis.ResponseError):
+            r.delex("nk", ifdeq="deadbeef")
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize("val", [b"", b"abc", b"The quick brown fox"])
+    def test_delex_ifdeq_and_ifdne(self, r, val):
+        r.set("h", val)
+        d = self._server_xxh3_digest(r, "h")
+        assert d is not None
+
+        # IFDEQ should delete with exact digest
+        r.set("h", val)
+        assert r.delex("h", ifdeq=d) == 1
+        assert r.exists("h") == 0
+
+        # IFDNE should NOT delete when digest matches
+        r.set("h", val)
+        assert r.delex("h", ifdne=d) == 0
+        assert r.get("h") == val
+
+        # IFDNE should delete when digest doesn't match
+        r.set("h", val)
+        wrong = "0" * len(d)
+        if wrong == d:
+            wrong = "f" * len(d)
+        assert r.delex("h", ifdne=wrong) == 1
+        assert r.exists("h") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_pipeline(self, r):
+        r.mset({"p1{45}": b"A", "p2{45}": b"B"})
+        p = r.pipeline()
+        p.delex("p1{45}", ifeq=b"A")
+        p.delex("p2{45}", ifne=b"B")  # false → 0
+        p.delex("nope")  # nonexistent → 0
+        out = p.execute()
+        assert out == [1, 0, 0]
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_delex_mutual_exclusion_client_side(self, r):
+        with pytest.raises(ValueError):
+            r.delex("k", ifeq=b"A", ifne=b"B")
+        with pytest.raises(ValueError):
+            r.delex("k", ifdeq="aa", ifdne="bb")
+
     @skip_if_server_version_lt("4.0.0")
     def test_unlink(self, r):
         assert r.unlink("a") == 0
@@ -1665,6 +1773,48 @@ class TestRedisCommands:
         assert r.expireat("key", expire_at, lt=True) is False
         expire_at = redis_server_time(r) + datetime.timedelta(minutes=1)
         assert r.expireat("key", expire_at, lt=True) is True
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_digest_nonexistent_returns_none(self, r):
+        assert r.digest("no:such:key") is None
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_digest_wrong_type_raises(self, r):
+        r.lpush("alist", "x")
+        with pytest.raises(Exception):  # or redis.exceptions.ResponseError
+            r.digest("alist")
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize(
+        "value", [b"", b"abc", b"The quick brown fox jumps over the lazy dog"]
+    )
+    def test_digest_response_when_available(self, r, value):
+        key = "k:digest"
+        r.delete(key)
+        r.set(key, value)
+
+        res = r.digest(key)
+        # got is str if decode_responses=True; ensure bytes->str for comparison
+        if isinstance(res, bytes):
+            res = res.decode()
+        assert res is not None
+        assert all(c in "0123456789abcdefABCDEF" for c in res)
+
+        assert len(res) == 16
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_pipeline_digest(self, r):
+        k1, k2 = "k:d1{42}", "k:d2{42}"
+        r.mset({k1: b"A", k2: b"B"})
+        p = r.pipeline()
+        p.digest(k1)
+        p.digest(k2)
+        out = p.execute()
+        assert len(out) == 2
+        for d in out:
+            if isinstance(d, bytes):
+                d = d.decode()
+            assert d is None or len(d) == 16
 
     def test_get_and_set(self, r):
         # get and set can't be tested independently of each other
@@ -2377,6 +2527,98 @@ class TestRedisCommands:
         assert r.get("a") == b"2"
         assert 0 < r.ttl("a") <= 10
 
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifeq_true_sets_and_returns_true(self, r):
+        r.delete("k")
+        r.set("k", b"foo")
+        assert r.set("k", b"bar", ifeq=b"foo") is True
+        assert r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifeq_false_does_not_set_returns_none(self, r):
+        r.delete("k")
+        r.set("k", b"foo")
+        assert r.set("k", b"bar", ifeq=b"nope") is None
+        assert r.get("k") == b"foo"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifne_true_sets(self, r):
+        r.delete("k")
+        r.set("k", b"foo")
+        assert r.set("k", b"bar", ifne=b"zzz") is True
+        assert r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifne_false_does_not_set(self, r):
+        r.delete("k")
+        r.set("k", b"foo")
+        assert r.set("k", b"bar", ifne=b"foo") is None
+        assert r.get("k") == b"foo"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifeq_when_key_missing_does_not_create(self, r):
+        r.delete("k")
+        assert r.set("k", b"bar", ifeq=b"foo") is None
+        assert r.exists("k") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_ifne_when_key_missing_creates(self, r):
+        r.delete("k")
+        assert r.set("k", b"bar", ifne=b"foo") is True
+        assert r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize("val", [b"", b"abc", b"The quick brown fox"])
+    def test_set_ifdeq_and_ifdne(self, r, val):
+        r.delete("k")
+        r.set("k", val)
+        d = self._server_xxh3_digest(r, "k")
+        assert d is not None
+
+        # IFDEQ must match to set; if key missing => won't create
+        assert r.set("k", b"X", ifdeq=d) is True
+        assert r.get("k") == b"X"
+
+        r.delete("k")
+        # key missing + IFDEQ => not created
+        assert r.set("k", b"Y", ifdeq=d) is None
+        assert r.exists("k") == 0
+
+        # IFDNE: create when missing, and set when digest differs
+        assert r.set("k", b"bar", ifdne=d) is True
+        prev_d = self._server_xxh3_digest(r, "k")
+        assert prev_d is not None
+        # If digest equal → do not set
+        assert r.set("k", b"zzz", ifdne=prev_d) is None
+        assert r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_with_get_returns_previous_value(self, r):
+        r.delete("k")
+        # when key didn’t exist → returns None, and key is created if condition allows it
+        prev = r.set("k", b"v1", get=True, ifne=b"any")  # IFNE on missing creates
+        assert prev is None
+        # subsequent GET returns previous value, regardless of whether set occurs
+        prev2 = r.set("k", b"v2", get=True, ifeq=b"v1")  # matches → set; returns "v1"
+        assert prev2 == b"v1"
+        prev3 = r.set("k", b"v3", get=True, ifeq=b"no")  # no set; returns previous "v2"
+        assert prev3 == b"v2"
+        assert r.get("k") == b"v2"
+
+    @skip_if_server_version_lt("8.3.224")
+    def test_set_mutual_exclusion_client_side(self, r):
+        r.delete("k")
+        with pytest.raises(DataError):
+            r.set("k", b"v", nx=True, ifeq=b"x")
+        with pytest.raises(DataError):
+            r.set("k", b"v", ifdeq="aa", ifdne="bb")
+        with pytest.raises(DataError):
+            r.set("k", b"v", ex=1, px=1)
+        with pytest.raises(DataError):
+            r.set("k", b"v", exat=1, pxat=1)
+        with pytest.raises(DataError):
+            r.set("k", b"v", ex=1, exat=1)
+
     @skip_if_server_version_lt("6.2.0")
     def test_set_get(self, r):
         assert r.set("a", "True", get=True) is None
@@ -2650,6 +2892,8 @@ class TestRedisCommands:
         assert r.lrange("a", 0, 2) == [b"1", b"2", b"3"]
         assert r.lrange("a", 2, 10) == [b"3", b"4", b"5"]
         assert r.lrange("a", 0, -1) == [b"1", b"2", b"3", b"4", b"5"]
+        r.rpush(b"345", "12", "22", "32", "42", "52")
+        assert r.lrange(b"345", 0, 0) == [b"12"]
 
     def test_lrem(self, r):
         r.rpush("a", "Z", "b", "Z", "Z", "c", "Z", "Z")
@@ -2741,6 +2985,99 @@ class TestRedisCommands:
         r.rpush("a", "1", "2", "3")
         assert r.rpushx("a", "4") == 4
         assert r.lrange("a", 0, -1) == [b"1", b"2", b"3", b"4"]
+
+    @pytest.mark.onlynoncluster
+    def test_lists_with_byte_keys(self, r):
+        r.rpush(b"b", b"1", b"2", b"3")
+        assert r.lrange(b"b", 0, -1) == [b"1", b"2", b"3"]
+        # LPOS command with byte keys
+        assert r.lpos(b"b", b"2") == 1
+        assert r.lpos(b"b", b"2", rank=1) == 1
+        assert r.lpos(b"b", b"2", rank=2) is None
+        # LCS command with byte keys
+        r.set(b"key1", b"ohmytext")
+        r.set(b"key2", b"mynewtext")
+        assert r.lcs(b"key1", b"key2") == b"mytext"
+        # TYPE command with byte keys
+        assert r.type(b"b") == b"list"
+        assert r.type(b"key1") == b"string"
+        # SCAN command with byte keys
+        r.set(b"scan_key1", b"value1")
+        r.set(b"scan_key2", b"value2")
+        cursor, keys = r.scan(match=b"scan_key*")
+        assert cursor == 0
+        assert set(keys) == {b"scan_key1", b"scan_key2"}
+        # PEXPIRETIME command with byte keys
+        r.set(b"expire_key", b"value")
+        r.pexpire(b"expire_key", 10000)
+        pexpiretime = r.pexpiretime(b"expire_key")
+        assert pexpiretime > 0
+        # LMOVE command with byte keys (src and dest)
+        r.rpush(b"list_src", b"a", b"b", b"c")
+        r.rpush(b"list_dest", b"x")
+        moved = r.lmove(b"list_src", b"list_dest", src=b"LEFT", dest=b"RIGHT")
+        assert moved == b"a"
+        assert r.lrange(b"list_dest", 0, -1) == [b"x", b"a"]
+        # SMOVE command with byte keys (src and dst)
+        r.sadd(b"set_src", b"member1", b"member2")
+        r.sadd(b"set_dest", b"member3")
+        assert r.smove(b"set_src", b"set_dest", b"member1") == 1
+        assert b"member1" in r.smembers(b"set_dest")
+
+    @pytest.mark.onlynoncluster
+    def test_lists_with_memoryview_keys(self, r):
+        # Create memoryview objects for key names
+        mv_b = memoryview(b"b")
+        mv_key1 = memoryview(b"key1")
+        mv_key2 = memoryview(b"key2")
+        mv_scan_key1 = memoryview(b"scan_key1")
+        mv_scan_key2 = memoryview(b"scan_key2")
+        mv_expire_key = memoryview(b"expire_key")
+        mv_list_src = memoryview(b"list_src")
+        mv_list_dest = memoryview(b"list_dest")
+        mv_set_src = memoryview(b"set_src")
+        mv_set_dest = memoryview(b"set_dest")
+
+        r.rpush(mv_b, b"1", b"2", b"3")
+        assert r.lrange(mv_b, 0, -1) == [b"1", b"2", b"3"]
+        # LPOS command with memoryview keys
+        assert r.lpos(mv_b, b"2") == 1
+        assert r.lpos(mv_b, b"2", rank=1) == 1
+        assert r.lpos(mv_b, b"2", rank=2) is None
+        # LCS command with memoryview keys
+        r.set(mv_key1, b"ohmytext")
+        r.set(mv_key2, b"mynewtext")
+        assert r.lcs(mv_key1, mv_key2) == b"mytext"
+        # TYPE command with memoryview keys
+        assert r.type(mv_b) == b"list"
+        assert r.type(mv_key1) == b"string"
+        # SCAN command with memoryview keys
+        r.set(mv_scan_key1, b"value1")
+        r.set(mv_scan_key2, b"value2")
+        cursor, keys = r.scan(match=memoryview(b"scan_key*"))
+        assert cursor == 0
+        assert set(keys) == {b"scan_key1", b"scan_key2"}
+        # PEXPIRETIME command with memoryview keys
+        r.set(mv_expire_key, b"value")
+        r.pexpire(mv_expire_key, 10000)
+        pexpiretime = r.pexpiretime(mv_expire_key)
+        assert pexpiretime > 0
+        # LMOVE command with memoryview keys (src and dest)
+        r.rpush(mv_list_src, b"a", b"b", b"c")
+        r.rpush(mv_list_dest, b"x")
+        moved = r.lmove(
+            mv_list_src,
+            mv_list_dest,
+            src=memoryview(b"LEFT"),
+            dest=memoryview(b"RIGHT"),
+        )
+        assert moved == b"a"
+        assert r.lrange(mv_list_dest, 0, -1) == [b"x", b"a"]
+        # SMOVE command with memoryview keys (src and dst)
+        r.sadd(mv_set_src, b"member1", b"member2")
+        r.sadd(mv_set_dest, b"member3")
+        assert r.smove(mv_set_src, mv_set_dest, b"member1") == 1
+        assert b"member1" in r.smembers(mv_set_dest)
 
     # SCAN COMMANDS
     @pytest.mark.onlynoncluster

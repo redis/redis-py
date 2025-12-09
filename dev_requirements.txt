@@ -10,6 +10,7 @@ pytest==8.3.4 ; platform_python_implementation == "PyPy"
 pytest-asyncio>=0.23.0
 pytest-asyncio==1.1.0 ; platform_python_implementation == "PyPy"
 pytest-cov
+coverage<7.11.1
 pytest-cov==6.0.0 ; platform_python_implementation == "PyPy"
 coverage==7.6.12 ; platform_python_implementation == "PyPy"
 pytest-profiling==1.8.1

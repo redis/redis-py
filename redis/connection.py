@@ -539,7 +539,7 @@ class MaintNotificationsAbstractConnection:
                 import logging
 
                 logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to enable maintenance notifications: {e}")
+                logger.debug(f"Failed to enable maintenance notifications: {e}")
             else:
                 raise
 
@@ -843,7 +843,14 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
     def connect(self):
         "Connects to the Redis server if not already connected"
-        self.connect_check_health(check_health=True)
+        # try once the socket connect with the handshake, retry the whole
+        # connect/handshake flow based on retry policy
+        self.retry.call_with_retry(
+            lambda: self.connect_check_health(
+                check_health=True, retry_socket_connect=False
+            ),
+            lambda error: self.disconnect(error),
+        )
 
     def connect_check_health(
         self, check_health: bool = True, retry_socket_connect: bool = True
@@ -1423,7 +1430,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         with self._cache_lock:
             # Command is write command or not allowed
             # to be cached.
-            if not self._cache.is_cachable(CacheKey(command=args[0], redis_keys=())):
+            if not self._cache.is_cachable(
+                CacheKey(command=args[0], redis_keys=(), redis_args=())
+            ):
                 self._current_command_cache_key = None
                 self._conn.send_command(*args, **kwargs)
                 return
@@ -1433,7 +1442,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
         # Creates cache key.
         self._current_command_cache_key = CacheKey(
-            command=args[0], redis_keys=tuple(kwargs.get("keys"))
+            command=args[0], redis_keys=tuple(kwargs.get("keys")), redis_args=args
         )
 
         with self._cache_lock:

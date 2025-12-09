@@ -57,6 +57,7 @@ from redis.exceptions import (
     AuthenticationWrongNumberOfArgsError,
     ConnectionError,
     DataError,
+    MaxConnectionsError,
     RedisError,
     ResponseError,
     TimeoutError,
@@ -295,7 +296,14 @@ class AbstractConnection:
 
     async def connect(self):
         """Connects to the Redis server if not already connected"""
-        await self.connect_check_health(check_health=True)
+        # try once the socket connect with the handshake, retry the whole
+        # connect/handshake flow based on retry policy
+        await self.retry.call_with_retry(
+            lambda: self.connect_check_health(
+                check_health=True, retry_socket_connect=False
+            ),
+            lambda error: self.disconnect(),
+        )
 
     async def connect_check_health(
         self, check_health: bool = True, retry_socket_connect: bool = True
@@ -1208,7 +1216,7 @@ class ConnectionPool:
             connection = self._available_connections.pop()
         except IndexError:
             if len(self._in_use_connections) >= self.max_connections:
-                raise ConnectionError("Too many connections") from None
+                raise MaxConnectionsError("Too many connections") from None
             connection = self.make_connection()
         self._in_use_connections.add(connection)
         return connection

@@ -47,10 +47,12 @@ from redis.typing import (
 )
 from redis.utils import (
     deprecated_function,
+    experimental_args,
+    experimental_method,
     extract_expire_flags,
 )
 
-from .helpers import list_or_args
+from .helpers import at_most_one_value_set, list_or_args
 
 if TYPE_CHECKING:
     import redis.asyncio.client
@@ -683,7 +685,7 @@ class ManagementCommands(CommandsProtocol):
         if noloop:
             pieces.append("NOLOOP")
 
-        return self.execute_command("CLIENT TRACKING", *pieces)
+        return self.execute_command("CLIENT TRACKING", *pieces, **kwargs)
 
     def client_trackinginfo(self, **kwargs) -> ResponseT:
         """
@@ -1729,6 +1731,57 @@ class BasicKeyCommands(CommandsProtocol):
     def __delitem__(self, name: KeyT):
         self.delete(name)
 
+    @experimental_method()
+    def delex(
+        self,
+        name: KeyT,
+        ifeq: Optional[Union[bytes, str]] = None,
+        ifne: Optional[Union[bytes, str]] = None,
+        ifdeq: Optional[str] = None,  # hex digest
+        ifdne: Optional[str] = None,  # hex digest
+    ) -> int:
+        """
+        Conditionally removes the specified key.
+
+        Warning:
+        **Experimental** since 7.1.
+        This API may change or be removed without notice.
+        The API may change based on feedback.
+
+        Arguments:
+            name: KeyT - the key to delete
+            ifeq match-valu: Optional[Union[bytes, str]] - Delete the key only if its value is equal to match-value
+            ifne match-value: Optional[Union[bytes, str]] - Delete the key only if its value is not equal to match-value
+            ifdeq match-digest: Optional[str] - Delete the key only if the digest of its value is equal to match-digest
+            ifdne match-digest: Optional[str] - Delete the key only if the digest of its value is not equal to match-digest
+
+        Returns:
+            int: 1 if the key was deleted, 0 otherwise.
+        Raises:
+            redis.exceptions.ResponseError: if key exists but is not a string
+                                            and a condition is specified.
+            ValueError: if more than one condition is provided.
+
+
+        Requires Redis 8.4 or greater.
+        For more information, see https://redis.io/commands/delex
+        """
+        conds = [x is not None for x in (ifeq, ifne, ifdeq, ifdne)]
+        if sum(conds) > 1:
+            raise ValueError("Only one of IFEQ/IFNE/IFDEQ/IFDNE may be specified")
+
+        pieces = ["DELEX", name]
+        if ifeq is not None:
+            pieces += ["IFEQ", ifeq]
+        elif ifne is not None:
+            pieces += ["IFNE", ifne]
+        elif ifdeq is not None:
+            pieces += ["IFDEQ", ifdeq]
+        elif ifdne is not None:
+            pieces += ["IFDNE", ifdne]
+
+        return self.execute_command(*pieces)
+
     def dump(self, name: KeyT) -> ResponseT:
         """
         Return a serialized version of the value stored at the specified key.
@@ -1835,6 +1888,32 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("EXPIRETIME", key)
 
+    @experimental_method()
+    def digest(self, name: KeyT) -> Optional[str]:
+        """
+        Return the digest of the value stored at the specified key.
+
+        Warning:
+        **Experimental** since 7.1.
+        This API may change or be removed without notice.
+        The API may change based on feedback.
+
+        Arguments:
+          - name: KeyT - the key to get the digest of
+
+        Returns:
+          - None if the key does not exist
+          - (bulk string) the XXH3 digest of the value as a hex string
+        Raises:
+          - ResponseError if key exists but is not a string
+
+
+        Requires Redis 8.4 or greater.
+        For more information, see https://redis.io/commands/digest
+        """
+        # Bulk string response is already handled (bytes/str based on decode_responses)
+        return self.execute_command("DIGEST", name)
+
     def get(self, name: KeyT) -> ResponseT:
         """
         Return the value at key ``name``, or None if the key doesn't exist
@@ -1883,8 +1962,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/getex
         """
-        opset = {ex, px, exat, pxat}
-        if len(opset) > 2 or len(opset) > 1 and persist:
+        if not at_most_one_value_set((ex, px, exat, pxat, persist)):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``persist`` are mutually exclusive."
@@ -2072,8 +2150,7 @@ class BasicKeyCommands(CommandsProtocol):
         Available since Redis 8.4
         For more information, see https://redis.io/commands/msetex
         """
-        opset = {ex, px, exat, pxat}
-        if len(opset) > 2 or len(opset) > 1 and keepttl:
+        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."
@@ -2327,6 +2404,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("RESTORE", *params)
 
+    @experimental_args(["ifeq", "ifne", "ifdeq", "ifdne"])
     def set(
         self,
         name: KeyT,
@@ -2339,9 +2417,19 @@ class BasicKeyCommands(CommandsProtocol):
         get: bool = False,
         exat: Optional[AbsExpiryT] = None,
         pxat: Optional[AbsExpiryT] = None,
+        ifeq: Optional[Union[bytes, str]] = None,
+        ifne: Optional[Union[bytes, str]] = None,
+        ifdeq: Optional[str] = None,  # hex digest of current value
+        ifdne: Optional[str] = None,  # hex digest of current value
     ) -> ResponseT:
         """
         Set the value at key ``name`` to ``value``
+
+        Warning:
+        **Experimental** since 7.1.
+        The usage of the arguments ``ifeq``, ``ifne``, ``ifdeq``, and ``ifdne``
+        is experimental. The API or returned results when those parameters are used
+        may change based on feedback.
 
         ``ex`` sets an expire flag on key ``name`` for ``ex`` seconds.
 
@@ -2366,34 +2454,66 @@ class BasicKeyCommands(CommandsProtocol):
         ``pxat`` sets an expire flag on key ``name`` for ``ex`` milliseconds,
             specified in unix time.
 
+        ``ifeq`` set the value at key ``name`` to ``value`` only if the current
+            value exactly matches the argument.
+            If key doesn’t exist - it won’t be created.
+            (Requires Redis 8.4 or greater)
+
+        ``ifne`` set the value at key ``name`` to ``value`` only if the current
+            value does not exactly match the argument.
+            If key doesn’t exist - it will be created.
+            (Requires Redis 8.4 or greater)
+
+        ``ifdeq`` set the value at key ``name`` to ``value`` only if the current
+            value XXH3 hex digest exactly matches the argument.
+            If key doesn’t exist - it won’t be created.
+            (Requires Redis 8.4 or greater)
+
+        ``ifdne`` set the value at key ``name`` to ``value`` only if the current
+            value XXH3 hex digest does not exactly match the argument.
+            If key doesn’t exist - it will be created.
+            (Requires Redis 8.4 or greater)
+
         For more information, see https://redis.io/commands/set
         """
-        opset = {ex, px, exat, pxat}
-        if len(opset) > 2 or len(opset) > 1 and keepttl:
+
+        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."
             )
 
-        if nx and xx:
-            raise DataError("``nx`` and ``xx`` are mutually exclusive.")
+        # Enforce mutual exclusivity among all conditional switches.
+        if not at_most_one_value_set((nx, xx, ifeq, ifne, ifdeq, ifdne)):
+            raise DataError(
+                "``nx``, ``xx``, ``ifeq``, ``ifne``, ``ifdeq``, ``ifdne`` are mutually exclusive."
+            )
 
         pieces: list[EncodableT] = [name, value]
         options = {}
+
+        # Conditional modifier (exactly one at most)
+        if nx:
+            pieces.append("NX")
+        elif xx:
+            pieces.append("XX")
+        elif ifeq is not None:
+            pieces.extend(("IFEQ", ifeq))
+        elif ifne is not None:
+            pieces.extend(("IFNE", ifne))
+        elif ifdeq is not None:
+            pieces.extend(("IFDEQ", ifdeq))
+        elif ifdne is not None:
+            pieces.extend(("IFDNE", ifdne))
+
+        if get:
+            pieces.append("GET")
+            options["get"] = True
 
         pieces.extend(extract_expire_flags(ex, px, exat, pxat))
 
         if keepttl:
             pieces.append("KEEPTTL")
-
-        if nx:
-            pieces.append("NX")
-        if xx:
-            pieces.append("XX")
-
-        if get:
-            pieces.append("GET")
-            options["get"] = True
 
         return self.execute_command("SET", *pieces, **options)
 
@@ -2672,7 +2792,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("BRPOP", *keys)
 
     def brpoplpush(
-        self, src: str, dst: str, timeout: Optional[Number] = 0
+        self, src: KeyT, dst: KeyT, timeout: Optional[Number] = 0
     ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
@@ -2729,7 +2849,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("LMPOP", *cmd_args)
 
     def lindex(
-        self, name: str, index: int
+        self, name: KeyT, index: int
     ) -> Union[Awaitable[Optional[str]], Optional[str]]:
         """
         Return the item from list ``name`` at position ``index``
@@ -2742,7 +2862,7 @@ class ListCommands(CommandsProtocol):
         return self.execute_command("LINDEX", name, index, keys=[name])
 
     def linsert(
-        self, name: str, where: str, refvalue: str, value: str
+        self, name: KeyT, where: str, refvalue: str, value: str
     ) -> Union[Awaitable[int], int]:
         """
         Insert ``value`` in list ``name`` either immediately before or after
@@ -2755,7 +2875,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LINSERT", name, where, refvalue, value)
 
-    def llen(self, name: str) -> Union[Awaitable[int], int]:
+    def llen(self, name: KeyT) -> Union[Awaitable[int], int]:
         """
         Return the length of the list ``name``
 
@@ -2765,7 +2885,7 @@ class ListCommands(CommandsProtocol):
 
     def lpop(
         self,
-        name: str,
+        name: KeyT,
         count: Optional[int] = None,
     ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
         """
@@ -2782,7 +2902,7 @@ class ListCommands(CommandsProtocol):
         else:
             return self.execute_command("LPOP", name)
 
-    def lpush(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
+    def lpush(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Push ``values`` onto the head of the list ``name``
 
@@ -2790,7 +2910,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LPUSH", name, *values)
 
-    def lpushx(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
+    def lpushx(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Push ``value`` onto the head of the list ``name`` if ``name`` exists
 
@@ -2798,7 +2918,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LPUSHX", name, *values)
 
-    def lrange(self, name: str, start: int, end: int) -> Union[Awaitable[list], list]:
+    def lrange(self, name: KeyT, start: int, end: int) -> Union[Awaitable[list], list]:
         """
         Return a slice of the list ``name`` between
         position ``start`` and ``end``
@@ -2810,7 +2930,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LRANGE", name, start, end, keys=[name])
 
-    def lrem(self, name: str, count: int, value: str) -> Union[Awaitable[int], int]:
+    def lrem(self, name: KeyT, count: int, value: str) -> Union[Awaitable[int], int]:
         """
         Remove the first ``count`` occurrences of elements equal to ``value``
         from the list stored at ``name``.
@@ -2824,7 +2944,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LREM", name, count, value)
 
-    def lset(self, name: str, index: int, value: str) -> Union[Awaitable[str], str]:
+    def lset(self, name: KeyT, index: int, value: str) -> Union[Awaitable[str], str]:
         """
         Set element at ``index`` of list ``name`` to ``value``
 
@@ -2832,7 +2952,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LSET", name, index, value)
 
-    def ltrim(self, name: str, start: int, end: int) -> Union[Awaitable[str], str]:
+    def ltrim(self, name: KeyT, start: int, end: int) -> Union[Awaitable[str], str]:
         """
         Trim the list ``name``, removing all values not within the slice
         between ``start`` and ``end``
@@ -2846,7 +2966,7 @@ class ListCommands(CommandsProtocol):
 
     def rpop(
         self,
-        name: str,
+        name: KeyT,
         count: Optional[int] = None,
     ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
         """
@@ -2863,7 +2983,7 @@ class ListCommands(CommandsProtocol):
         else:
             return self.execute_command("RPOP", name)
 
-    def rpoplpush(self, src: str, dst: str) -> Union[Awaitable[str], str]:
+    def rpoplpush(self, src: KeyT, dst: KeyT) -> Union[Awaitable[str], str]:
         """
         RPOP a value off of the ``src`` list and atomically LPUSH it
         on to the ``dst`` list.  Returns the value.
@@ -2872,7 +2992,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPOPLPUSH", src, dst)
 
-    def rpush(self, name: str, *values: FieldT) -> Union[Awaitable[int], int]:
+    def rpush(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
         """
         Push ``values`` onto the tail of the list ``name``
 
@@ -2880,7 +3000,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPUSH", name, *values)
 
-    def rpushx(self, name: str, *values: str) -> Union[Awaitable[int], int]:
+    def rpushx(self, name: KeyT, *values: str) -> Union[Awaitable[int], int]:
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
 
@@ -2890,7 +3010,7 @@ class ListCommands(CommandsProtocol):
 
     def lpos(
         self,
-        name: str,
+        name: KeyT,
         value: str,
         rank: Optional[int] = None,
         count: Optional[int] = None,
@@ -2935,7 +3055,7 @@ class ListCommands(CommandsProtocol):
 
     def sort(
         self,
-        name: str,
+        name: KeyT,
         start: Optional[int] = None,
         num: Optional[int] = None,
         by: Optional[str] = None,
@@ -5201,8 +5321,7 @@ class HashCommands(CommandsProtocol):
         if not keys:
             raise DataError("'hgetex' should have at least one key provided")
 
-        opset = {ex, px, exat, pxat}
-        if len(opset) > 2 or len(opset) > 1 and persist:
+        if not at_most_one_value_set((ex, px, exat, pxat, persist)):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``persist`` are mutually exclusive."
@@ -5347,8 +5466,7 @@ class HashCommands(CommandsProtocol):
                 "'items' must contain a list of key/value pairs."
             )
 
-        opset = {ex, px, exat, pxat}
-        if len(opset) > 2 or len(opset) > 1 and keepttl:
+        if not at_most_one_value_set((ex, px, exat, pxat, keepttl)):
             raise DataError(
                 "``ex``, ``px``, ``exat``, ``pxat``, "
                 "and ``keepttl`` are mutually exclusive."

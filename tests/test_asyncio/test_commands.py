@@ -11,7 +11,7 @@ from string import ascii_letters
 
 import pytest
 import pytest_asyncio
-from redis import RedisClusterException, ResponseError
+from redis import DataError, RedisClusterException, ResponseError
 import redis
 from redis import exceptions
 from redis._parsers.helpers import (
@@ -1032,6 +1032,114 @@ class TestRedisCommands:
         await r.delete("a")
         assert await r.get("a") is None
 
+    def _ensure_str(self, x):
+        return x.decode("ascii") if isinstance(x, (bytes, bytearray)) else x
+
+    async def _server_xxh3_digest(self, r, key):
+        """
+        Get the server-computed XXH3 hex digest for the key's value.
+        Requires the DIGEST command implemented on the server.
+        """
+        d = await r.execute_command("DIGEST", key)
+        return None if d is None else self._ensure_str(d).lower()
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_nonexistent(self, r):
+        await r.delete("nope")
+        assert await r.delex("nope") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_unconditional_delete_string(self, r):
+        await r.set("k", b"v")
+        assert await r.exists("k") == 1
+        assert await r.delex("k") == 1
+        assert await r.exists("k") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_unconditional_delete_nonstring_allowed(self, r):
+        # Spec: error happens only when a condition is specified on a non-string key.
+        await r.lpush("lst", "a")
+        assert await r.delex("lst") == 1
+        assert await r.exists("lst") == 0
+
+        await r.lpush("lst", "a")
+
+        with pytest.raises(redis.ResponseError):
+            await r.delex("lst", ifeq=b"a")
+        assert await r.exists("lst") == 1
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_ifeq(self, r):
+        await r.set("k", b"abc")
+        assert await r.delex("k", ifeq=b"abc") == 1  # matches → deleted
+        assert await r.exists("k") == 0
+
+        await r.set("k", b"abc")
+        assert await r.delex("k", ifeq=b"zzz") == 0  # not match → not deleted
+        assert await r.get("k") == b"abc"  # still there
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_ifne(self, r):
+        await r.set("k2", b"abc")
+        assert await r.delex("k2", ifne=b"zzz") == 1  # different → deleted
+        assert await r.exists("k2") == 0
+
+        await r.set("k2", b"abc")
+        assert await r.delex("k2", ifne=b"abc") == 0  # equal → not deleted
+        assert await r.get("k2") == b"abc"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_with_conditionon_nonstring_values(self, r):
+        await r.lpush("nk", "x")
+        with pytest.raises(redis.ResponseError):
+            await r.delex("nk", ifeq=b"x")
+        with pytest.raises(redis.ResponseError):
+            await r.delex("nk", ifne=b"x")
+        with pytest.raises(redis.ResponseError):
+            await r.delex("nk", ifdeq="deadbeef")
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize("val", [b"", b"abc", b"The quick brown fox"])
+    async def test_delex_ifdeq_and_ifdne(self, r, val):
+        await r.set("h", val)
+        d = await self._server_xxh3_digest(r, "h")
+        assert d is not None
+
+        # IFDEQ should delete with exact digest
+        await r.set("h", val)
+        assert await r.delex("h", ifdeq=d) == 1
+        assert await r.exists("h") == 0
+
+        # IFDNE should NOT delete when digest matches
+        await r.set("h", val)
+        assert await r.delex("h", ifdne=d) == 0
+        assert await r.get("h") == val
+
+        # IFDNE should delete when digest doesn't match
+        await r.set("h", val)
+        wrong = "0" * len(d)
+        if wrong == d:
+            wrong = "f" * len(d)
+        assert await r.delex("h", ifdne=wrong) == 1
+        assert await r.exists("h") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_pipeline(self, r):
+        await r.mset({"p1{45}": b"A", "p2{45}": b"B"})
+        p = r.pipeline()
+        p.delex("p1{45}", ifeq=b"A")
+        p.delex("p2{45}", ifne=b"B")  # false → 0
+        p.delex("nope")  # nonexistent → 0
+        out = await p.execute()
+        assert out == [1, 0, 0]
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_delex_mutual_exclusion_client_side(self, r):
+        with pytest.raises(ValueError):
+            await r.delex("k", ifeq=b"A", ifne=b"B")
+        with pytest.raises(ValueError):
+            await r.delex("k", ifdeq="aa", ifdne="bb")
+
     @skip_if_server_version_lt("4.0.0")
     async def test_unlink(self, r: redis.Redis):
         assert await r.unlink("a") == 0
@@ -1114,6 +1222,48 @@ class TestRedisCommands:
         expire_at_seconds = int(expire_at.timestamp())
         assert await r.expireat("a", expire_at_seconds)
         assert 0 < await r.ttl("a") <= 61
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_digest_nonexistent_returns_none(self, r):
+        assert await r.digest("no:such:key") is None
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_digest_wrong_type_raises(self, r):
+        await r.lpush("alist", "x")
+        with pytest.raises(Exception):  # or redis.exceptions.ResponseError
+            await r.digest("alist")
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize(
+        "value", [b"", b"abc", b"The quick brown fox jumps over the lazy dog"]
+    )
+    async def test_digest_response_when_available(self, r, value):
+        key = "k:digest"
+        await r.delete(key)
+        await r.set(key, value)
+
+        res = await r.digest(key)
+        # got is str if decode_responses=True; ensure bytes->str for comparison
+        if isinstance(res, bytes):
+            res = res.decode()
+        assert res is not None
+        assert all(c in "0123456789abcdefABCDEF" for c in res)
+
+        assert len(res) == 16
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_pipeline_digest(self, r):
+        k1, k2 = "k:d1{42}", "k:d2{42}"
+        await r.mset({k1: b"A", k2: b"B"})
+        p = r.pipeline()
+        p.digest(k1)
+        p.digest(k2)
+        out = await p.execute()
+        assert len(out) == 2
+        for d in out:
+            if isinstance(d, bytes):
+                d = d.decode()
+            assert d is None or len(d) == 16
 
     async def test_get_and_set(self, r: redis.Redis):
         # get and set can't be tested independently of each other
@@ -1698,6 +1848,102 @@ class TestRedisCommands:
         await r.set("a", "2", keepttl=True)
         assert await r.get("a") == b"2"
         assert 0 < await r.ttl("a") <= 10
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifeq_true_sets_and_returns_true(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifeq=b"foo") is True
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifeq_false_does_not_set_returns_none(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifeq=b"nope") is None
+        assert await r.get("k") == b"foo"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifne_true_sets(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifne=b"zzz") is True
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifne_false_does_not_set(self, r):
+        await r.delete("k")
+        await r.set("k", b"foo")
+        assert await r.set("k", b"bar", ifne=b"foo") is None
+        assert await r.get("k") == b"foo"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifeq_when_key_missing_does_not_create(self, r):
+        await r.delete("k")
+        assert await r.set("k", b"bar", ifeq=b"foo") is None
+        assert await r.exists("k") == 0
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_ifne_when_key_missing_creates(self, r):
+        await r.delete("k")
+        assert await r.set("k", b"bar", ifne=b"foo") is True
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize("val", [b"", b"abc", b"The quick brown fox"])
+    async def test_set_ifdeq_and_ifdne(self, r, val):
+        await r.delete("k")
+        await r.set("k", val)
+        d = await self._server_xxh3_digest(r, "k")
+        assert d is not None
+
+        # IFDEQ must match to set; if key missing => won't create
+        assert await r.set("k", b"X", ifdeq=d) is True
+        assert await r.get("k") == b"X"
+
+        await r.delete("k")
+        # key missing + IFDEQ => not created
+        assert await r.set("k", b"Y", ifdeq=d) is None
+        assert await r.exists("k") == 0
+
+        # IFDNE: create when missing, and set when digest differs
+        assert await r.set("k", b"bar", ifdne=d) is True
+        prev_d = await self._server_xxh3_digest(r, "k")
+        assert prev_d is not None
+        # If digest equal → do not set
+        assert await r.set("k", b"zzz", ifdne=prev_d) is None
+        assert await r.get("k") == b"bar"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_with_get_returns_previous_value(self, r):
+        await r.delete("k")
+        # when key didn’t exist → returns None, and key is created if condition allows it
+        prev = await r.set("k", b"v1", get=True, ifne=b"any")  # IFNE on missing creates
+        assert prev is None
+        # subsequent GET returns previous value, regardless of whether set occurs
+        prev2 = await r.set(
+            "k", b"v2", get=True, ifeq=b"v1"
+        )  # matches → set; returns "v1"
+        assert prev2 == b"v1"
+        prev3 = await r.set(
+            "k", b"v3", get=True, ifeq=b"no"
+        )  # no set; returns previous "v2"
+        assert prev3 == b"v2"
+        assert await r.get("k") == b"v2"
+
+    @skip_if_server_version_lt("8.3.224")
+    async def test_set_mutual_exclusion_client_side(self, r):
+        await r.delete("k")
+        with pytest.raises(DataError):
+            await r.set("k", b"v", nx=True, ifeq=b"x")
+        with pytest.raises(DataError):
+            await r.set("k", b"v", ifdeq="aa", ifdne="bb")
+        with pytest.raises(DataError):
+            await r.set("k", b"v", ex=1, px=1)
+        with pytest.raises(DataError):
+            await r.set("k", b"v", exat=1, pxat=1)
+        with pytest.raises(DataError):
+            await r.set("k", b"v", ex=1, exat=1)
 
     async def test_setex(self, r: redis.Redis):
         assert await r.setex("a", 60, "1")

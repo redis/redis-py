@@ -124,15 +124,30 @@ class TestConnection:
         assert conn._connect.call_count == 3
         self.clear(conn)
 
-    def test_connect_without_retry_on_os_error(self):
-        """Test that the _connect function is not being retried in case of a OSError"""
+    def test_connect_without_retry_on_non_retryable_error(self):
+        """Test that the _connect function is not being retried in case of a non-retryable error"""
         with patch.object(Connection, "_connect") as _connect:
-            _connect.side_effect = OSError("")
+            _connect.side_effect = RedisError("")
             conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 2))
-            with pytest.raises(ConnectionError):
+            with pytest.raises(RedisError):
                 conn.connect()
             assert _connect.call_count == 1
             self.clear(conn)
+
+    def test_connect_with_retries(self):
+        """
+        Validate that retries occur for the entire connect+handshake flow when OSError
+        happens during the handshake phase.
+        """
+        with patch.object(socket.socket, "sendall") as sendall:
+            sendall.side_effect = OSError(ECONNREFUSED)
+            conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 2))
+            with pytest.raises(ConnectionError):
+                conn.connect()
+            # the handshake commands are the failing ones
+            # validate that we don't execute too many commands on each retry
+            # 3 retries --> 3 commands
+            assert sendall.call_count == 3
 
     def test_connect_timeout_error_without_retry(self):
         """Test that the _connect function is not being retried if retry_on_timeout is
@@ -348,12 +363,17 @@ def test_format_error_message(conn, error, expected_message):
 
 
 def test_network_connection_failure():
-    exp_err = f"Error {ECONNREFUSED} connecting to localhost:9999. Connection refused."
+    # Match only the stable part of the error message across OS
+    exp_err = rf"Error {ECONNREFUSED} connecting to localhost:9999\."
     with pytest.raises(ConnectionError, match=exp_err):
         redis = Redis(port=9999)
         redis.set("a", "b")
 
 
+@pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX"),
+    reason="Unix domain sockets not supported on this platform",
+)
 def test_unix_socket_connection_failure():
     exp_err = "Error 2 connecting to unix:///tmp/a.sock. No such file or directory."
     with pytest.raises(ConnectionError, match=exp_err):
@@ -423,7 +443,9 @@ class TestUnitConnectionPool:
 class TestUnitCacheProxyConnection:
     def test_clears_cache_on_disconnect(self, mock_connection, cache_conf):
         cache = DefaultCache(CacheConfig(max_size=10))
-        cache_key = CacheKey(command="GET", redis_keys=("foo",))
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
 
         cache.set(
             CacheEntry(
@@ -463,25 +485,33 @@ class TestUnitCacheProxyConnection:
             None,
             None,
             CacheEntry(
-                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                cache_key=CacheKey(
+                    command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+                ),
                 cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
                 status=CacheEntryStatus.IN_PROGRESS,
                 connection_ref=mock_connection,
             ),
             CacheEntry(
-                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                cache_key=CacheKey(
+                    command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+                ),
                 cache_value=b"bar",
                 status=CacheEntryStatus.VALID,
                 connection_ref=mock_connection,
             ),
             CacheEntry(
-                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                cache_key=CacheKey(
+                    command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+                ),
                 cache_value=b"bar",
                 status=CacheEntryStatus.VALID,
                 connection_ref=mock_connection,
             ),
             CacheEntry(
-                cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                cache_key=CacheKey(
+                    command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+                ),
                 cache_value=b"bar",
                 status=CacheEntryStatus.VALID,
                 connection_ref=mock_connection,
@@ -503,7 +533,11 @@ class TestUnitCacheProxyConnection:
             [
                 call(
                     CacheEntry(
-                        cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                        cache_key=CacheKey(
+                            command="GET",
+                            redis_keys=("foo",),
+                            redis_args=("GET", "foo"),
+                        ),
                         cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
                         status=CacheEntryStatus.IN_PROGRESS,
                         connection_ref=mock_connection,
@@ -511,7 +545,11 @@ class TestUnitCacheProxyConnection:
                 ),
                 call(
                     CacheEntry(
-                        cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+                        cache_key=CacheKey(
+                            command="GET",
+                            redis_keys=("foo",),
+                            redis_args=("GET", "foo"),
+                        ),
                         cache_value=b"bar",
                         status=CacheEntryStatus.VALID,
                         connection_ref=mock_connection,
@@ -522,9 +560,21 @@ class TestUnitCacheProxyConnection:
 
         mock_cache.get.assert_has_calls(
             [
-                call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
-                call(CacheKey(command="GET", redis_keys=("foo",))),
+                call(
+                    CacheKey(
+                        command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+                    )
+                ),
+                call(
+                    CacheKey(
+                        command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+                    )
+                ),
+                call(
+                    CacheKey(
+                        command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+                    )
+                ),
             ]
         )
 
@@ -544,7 +594,9 @@ class TestUnitCacheProxyConnection:
         another_conn.can_read.side_effect = [True, False]
         another_conn.read_response.return_value = None
         cache_entry = CacheEntry(
-            cache_key=CacheKey(command="GET", redis_keys=("foo",)),
+            cache_key=CacheKey(
+                command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+            ),
             cache_value=b"bar",
             status=CacheEntryStatus.VALID,
             connection_ref=another_conn,
