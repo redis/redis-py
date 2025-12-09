@@ -465,10 +465,17 @@ class TestStreamingCredentialProvider:
         mock_pool.connection_kwargs = {
             "credential_provider": credential_provider,
         }
-        mock_pool.get_connection.side_effect = [
-            mock_pubsub_connection,
-            mock_another_connection,
-        ]
+
+        async def get_connection_side_effect():
+            if not hasattr(get_connection_side_effect, "call_count"):
+                get_connection_side_effect.call_count = 0
+            result = [mock_pubsub_connection, mock_another_connection][
+                get_connection_side_effect.call_count
+            ]
+            get_connection_side_effect.call_count += 1
+            return result
+
+        mock_pool.get_connection = AsyncMock(side_effect=get_connection_side_effect)
         mock_pool._available_connections = [mock_another_connection]
         mock_pool._lock = AsyncLock()
         auth_token = None
@@ -527,10 +534,17 @@ class TestStreamingCredentialProvider:
         mock_pool.connection_kwargs = {
             "credential_provider": credential_provider,
         }
-        mock_pool.get_connection.side_effect = [
-            mock_pubsub_connection,
-            mock_another_connection,
-        ]
+
+        async def get_connection_side_effect():
+            if not hasattr(get_connection_side_effect, "call_count"):
+                get_connection_side_effect.call_count = 0
+            result = [mock_pubsub_connection, mock_another_connection][
+                get_connection_side_effect.call_count
+            ]
+            get_connection_side_effect.call_count += 1
+            return result
+
+        mock_pool.get_connection = AsyncMock(side_effect=get_connection_side_effect)
         mock_pool._available_connections = [mock_another_connection]
         mock_pool._lock = AsyncLock()
         auth_token = None
