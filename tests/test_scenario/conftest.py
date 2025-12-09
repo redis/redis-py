@@ -22,7 +22,10 @@ from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import Redis
 from redis.maint_notifications import EndpointType, MaintNotificationsConfig
 from redis.retry import Retry
-from tests.test_scenario.fault_injector_client import FaultInjectorClient
+from tests.test_scenario.fault_injector_client import (
+    ProxyServerFaultInjector,
+    REFaultInjector,
+)
 
 RELAXED_TIMEOUT = 30
 CLIENT_TIMEOUT = 5
@@ -69,8 +72,13 @@ def endpoints_config(endpoint_name: str):
 
 @pytest.fixture()
 def fault_injector_client():
-    url = os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324")
-    return FaultInjectorClient(url)
+    # TODO this check might be different, for now I will leave it to be set as env var
+    # default behaviour is to use Redis Enterprise cluster setup
+    if os.getenv("REDIS_ENTERPRISE_TESTS", "true").lower() == "false":
+        return ProxyServerFaultInjector(oss_cluster=False)
+    else:
+        url = os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324")
+        return REFaultInjector(url)
 
 
 @pytest.fixture()

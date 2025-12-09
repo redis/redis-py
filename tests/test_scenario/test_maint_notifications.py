@@ -130,7 +130,7 @@ class TestPushNotifications:
         target_node: str,
         empty_node: str,
     ):
-        migrate_action_id = ClusterOperations.execute_rladmin_migrate(
+        migrate_action_id = ClusterOperations.execute_migrate(
             fault_injector=fault_injector_client,
             endpoint_config=endpoints_config,
             target_node=target_node,
@@ -150,7 +150,7 @@ class TestPushNotifications:
         endpoints_config: Dict[str, Any],
         endpoint_id: str,
     ):
-        bind_action_id = ClusterOperations.execute_rladmin_bind_endpoint(
+        bind_action_id = ClusterOperations.execute_rebind(
             fault_injector_client, endpoints_config, endpoint_id
         )
 
