@@ -37,29 +37,21 @@ class SentinelManagedConnection(Connection):
             s = s % host_info
         return s
 
-    def connect_to(self, address):
-        self.host, self.port = address
-
-        self.connect_check_health(
-            check_health=self.connection_pool.check_connection,
-            retry_socket_connect=False,
-        )
-
-    def _connect_retry(self):
+    def _connect(self):
         if self._sock:
-            return  # already connected
+            super()._connect()
+            return None # already connected
         if self.connection_pool.is_master:
-            self.connect_to(self.connection_pool.get_master_address())
-        else:
-            for slave in self.connection_pool.rotate_slaves():
-                try:
-                    return self.connect_to(slave)
-                except ConnectionError:
-                    continue
-            raise SlaveNotFoundError  # Never be here
-
-    def connect(self):
-        return self.retry.call_with_retry(self._connect_retry, lambda error: None)
+            self.host, self.port = self.connection_pool.get_master_address()
+            super()._connect()
+            return None
+        for slave in self.connection_pool.rotate_slaves():
+            try:
+                self.host, self.port = slave
+                return super()._connect()
+            except ConnectionError:
+                continue
+        raise SlaveNotFoundError  # Never be here
 
     def read_response(
         self,
