@@ -50,7 +50,8 @@ class SentinelManagedConnection(Connection):
         async for slave in self.connection_pool.rotate_slaves():
             try:
                 self.host, self.port = slave
-                return await super()._connect()
+                await super()._connect()
+                return None
             except ConnectionError:
                 continue
         raise SlaveNotFoundError  # Never be here

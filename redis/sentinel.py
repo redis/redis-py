@@ -39,12 +39,10 @@ class SentinelManagedConnection(Connection):
 
     def _connect(self):
         if self._sock:
-            super()._connect()
-            return None # already connected
+            return super()._connect() # already connected
         if self.connection_pool.is_master:
             self.host, self.port = self.connection_pool.get_master_address()
-            super()._connect()
-            return None
+            return super()._connect()
         for slave in self.connection_pool.rotate_slaves():
             try:
                 self.host, self.port = slave
