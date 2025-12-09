@@ -2,6 +2,8 @@ import socket
 from unittest import mock
 
 import pytest
+
+from redis.asyncio import Connection
 from redis.asyncio.retry import Retry
 from redis.asyncio.sentinel import SentinelManagedConnection
 from redis.backoff import NoBackoff
@@ -20,18 +22,17 @@ async def test_connect_retry_on_timeout_error(connect_args):
         retry=Retry(NoBackoff(), 3),
         connection_pool=connection_pool,
     )
-    origin_connect = conn._connect
-    conn._connect = mock.AsyncMock()
+    original_super_connect = Connection._connect.__get__(conn, Connection)
 
-    async def mock_connect():
-        # connect only on the last retry
-        if conn._connect.call_count <= 2:
-            raise socket.timeout
-        else:
-            return await origin_connect()
+    with mock.patch.object(Connection, "_connect", new_callable=mock.AsyncMock) as mock_super_connect:
+        async def side_effect(*args, **kwargs):
+            if mock_super_connect.await_count <= 2:
+                raise socket.timeout()
+            return await original_super_connect(*args, **kwargs)
 
-    conn._connect.side_effect = mock_connect
-    await conn.connect()
-    assert conn._connect.call_count == 3
-    assert connection_pool.get_master_address.call_count == 3
-    await conn.disconnect()
+        mock_super_connect.side_effect = side_effect
+
+        await conn.connect()
+        assert mock_super_connect.await_count == 3
+        assert connection_pool.get_master_address.call_count == 3
+        await conn.disconnect()
