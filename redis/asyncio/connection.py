@@ -323,6 +323,8 @@ class AbstractConnection:
             raise TimeoutError("Timeout connecting to server")
         except OSError as e:
             raise ConnectionError(self._error_message(e))
+        except ConnectionError:
+            raise
         except Exception as exc:
             raise ConnectionError(exc) from exc
 
