@@ -1,6 +1,7 @@
 from redis import asyncio  # noqa
 from redis.backoff import default_backoff
 from redis.client import Redis, StrictRedis
+from redis.driver_info import DriverInfo
 from redis.cluster import RedisCluster
 from redis.connection import (
     BlockingConnectionPool,
@@ -63,6 +64,7 @@ __all__ = [
     "CredentialProvider",
     "CrossSlotTransactionError",
     "DataError",
+	"DriverInfo",
     "from_url",
     "default_backoff",
     "InvalidPipelineStack",

@@ -744,6 +744,17 @@ class TestRedisCommands:
         info = r2.client_info()
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
+
+    @skip_if_server_version_lt("7.2.0")
+    def test_client_setinfo_with_driver_info(self, r: redis.Redis):
+        from redis import DriverInfo
+
+        info = DriverInfo().add_upstream_driver("django-redis", "5.4.0")
+        r2 = redis.Redis(driver_info=info)
+        r2.ping()
+        client_info = r2.client_info()
+        assert client_info["lib-name"] == "redis-py(django-redis_v5.4.0)"
+        assert client_info["lib-ver"] == redis.__version__
         r3 = redis.Redis(lib_name=None, lib_version=None)
         info = r3.client_info()
         assert info["lib-name"] == ""

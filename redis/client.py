@@ -60,6 +60,7 @@ from redis.maint_notifications import (
     MaintNotificationsConfig,
 )
 from redis.retry import Retry
+from redis.driver_info import DriverInfo
 from redis.utils import (
     _set_info_logger,
     deprecated_args,
@@ -242,6 +243,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         client_name: Optional[str] = None,
         lib_name: Optional[str] = "redis-py",
         lib_version: Optional[str] = get_lib_version(),
+        driver_info: Optional["DriverInfo"] = None,
         username: Optional[str] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
@@ -280,6 +282,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         decode_responses:
             if `True`, the response will be decoded to utf-8.
             Argument is ignored when connection_pool is provided.
+        driver_info:
+            Optional DriverInfo object to identify upstream libraries.
+            Argument is ignored when connection_pool is provided.
         maint_notifications_config:
             configuration the pool to support maintenance notifications - see
             `redis.maint_notifications.MaintNotificationsConfig` for details.
@@ -296,6 +301,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if not connection_pool:
             if not retry_on_error:
                 retry_on_error = []
+            if driver_info is not None:
+                computed_lib_name = driver_info.formatted_name
+            else:
+                computed_lib_name = lib_name
+
             kwargs = {
                 "db": db,
                 "username": username,
@@ -309,7 +319,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
-                "lib_name": lib_name,
+                "lib_name": computed_lib_name,
                 "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,

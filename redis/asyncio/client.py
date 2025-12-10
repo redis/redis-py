@@ -39,6 +39,7 @@ from redis.asyncio.connection import (
 )
 from redis.asyncio.lock import Lock
 from redis.asyncio.retry import Retry
+from redis.driver_info import DriverInfo
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import (
     EMPTY_RESPONSE,
@@ -252,6 +253,7 @@ class Redis(
         client_name: Optional[str] = None,
         lib_name: Optional[str] = "redis-py",
         lib_version: Optional[str] = get_lib_version(),
+        driver_info: Optional["DriverInfo"] = None,
         username: Optional[str] = None,
         auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
@@ -304,6 +306,11 @@ class Redis(
             # Create internal connection pool, expected to be closed by Redis instance
             if not retry_on_error:
                 retry_on_error = []
+            if driver_info is not None:
+                computed_lib_name = driver_info.formatted_name
+            else:
+                computed_lib_name = lib_name
+
             kwargs = {
                 "db": db,
                 "username": username,
@@ -318,7 +325,7 @@ class Redis(
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
-                "lib_name": lib_name,
+                "lib_name": computed_lib_name,
                 "lib_version": lib_version,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
