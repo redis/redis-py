@@ -64,7 +64,7 @@ __all__ = [
     "CredentialProvider",
     "CrossSlotTransactionError",
     "DataError",
-	"DriverInfo",
+    "DriverInfo",
     "from_url",
     "default_backoff",
     "InvalidPipelineStack",

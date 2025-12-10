@@ -40,6 +40,7 @@ from redis.connection import (
     UnixDomainSocketConnection,
 )
 from redis.credentials import CredentialProvider
+from redis.driver_info import DriverInfo
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
     AfterPubSubConnectionInstantiationEvent,
@@ -60,7 +61,6 @@ from redis.maint_notifications import (
     MaintNotificationsConfig,
 )
 from redis.retry import Retry
-from redis.driver_info import DriverInfo
 from redis.utils import (
     _set_info_logger,
     deprecated_args,

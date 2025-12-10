@@ -39,7 +39,6 @@ from redis.asyncio.connection import (
 )
 from redis.asyncio.lock import Lock
 from redis.asyncio.retry import Retry
-from redis.driver_info import DriverInfo
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import (
     EMPTY_RESPONSE,
@@ -54,6 +53,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.credentials import CredentialProvider
+from redis.driver_info import DriverInfo
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
     AfterPubSubConnectionInstantiationEvent,
