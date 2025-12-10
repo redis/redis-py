@@ -2,8 +2,6 @@ build
 build==1.2.2.post1 ; platform_python_implementation == "PyPy"
 click==8.0.4
 invoke==2.2.0
-mock
-mock==5.1.0 ; platform_python_implementation == "PyPy"
 packaging>=20.4
 packaging==24.2 ; platform_python_implementation == "PyPy"
 
