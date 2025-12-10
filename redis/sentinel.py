@@ -39,7 +39,7 @@ class SentinelManagedConnection(Connection):
 
     def _connect(self):
         if self._sock:
-            return super()._connect() # already connected
+            return super()._connect()  # already connected
         if self.connection_pool.is_master:
             self.host, self.port = self.connection_pool.get_master_address()
             return super()._connect()
