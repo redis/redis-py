@@ -550,10 +550,7 @@ class TestRedisCommands:
         r2 = redis.asyncio.Redis(driver_info=info)
         await r2.ping()
         client_info = await r2.client_info()
-        assert (
-            client_info["lib-name"]
-            == "redis-py(celery_v5.4.1)"
-        )
+        assert client_info["lib-name"] == "redis-py(celery_v5.4.1)"
         assert client_info["lib-ver"] == redis.__version__
         await r2.aclose()
         r3 = redis.asyncio.Redis(lib_name=None, lib_version=None)
