@@ -1,28 +1,52 @@
+from enum import Enum
+
 "Core exceptions raised by the Redis client"
 
 
+class ExceptionType(Enum):
+    NETWORK = 'network'
+    TLS = 'tls'
+    AUTH = 'auth'
+    SERVER = 'server'
+
+
 class RedisError(Exception):
-    pass
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.error_type = ExceptionType.SERVER
+
+    def __repr__(self):
+        return f"{self.error_type.value}:{self.__class__.__name__}"
 
 
 class ConnectionError(RedisError):
-    pass
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.error_type = ExceptionType.NETWORK
 
 
 class TimeoutError(RedisError):
-    pass
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.error_type = ExceptionType.NETWORK
 
 
 class AuthenticationError(ConnectionError):
-    pass
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.error_type = ExceptionType.AUTH
 
 
 class AuthorizationError(ConnectionError):
-    pass
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.error_type = ExceptionType.AUTH
 
 
 class BusyLoadingError(ConnectionError):
-    pass
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.error_type = ExceptionType.NETWORK
 
 
 class InvalidResponse(RedisError):
@@ -70,7 +94,9 @@ class ReadOnlyError(ResponseError):
 
 
 class NoPermissionError(ResponseError):
-    pass
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.error_type = ExceptionType.AUTH
 
 
 class ModuleError(ResponseError):
@@ -84,6 +110,7 @@ class LockError(RedisError, ValueError):
     # This was originally chosen to behave like threading.Lock.
 
     def __init__(self, message=None, lock_name=None):
+        super().__init__(message)
         self.message = message
         self.lock_name = lock_name
 
@@ -106,7 +133,9 @@ class AuthenticationWrongNumberOfArgsError(ResponseError):
     were sent to the AUTH command
     """
 
-    pass
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.error_type = ExceptionType.AUTH
 
 
 class RedisClusterException(Exception):
@@ -114,7 +143,12 @@ class RedisClusterException(Exception):
     Base exception for the RedisCluster client
     """
 
-    pass
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.error_type = ExceptionType.SERVER
+
+    def __repr__(self):
+        return f"{self.error_type.value}:{self.__class__.__name__}"
 
 
 class ClusterError(RedisError):
@@ -123,7 +157,9 @@ class ClusterError(RedisError):
     command execution TTL
     """
 
-    pass
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.error_type = ExceptionType.SERVER
 
 
 class ClusterDownError(ClusterError, ResponseError):
@@ -140,6 +176,7 @@ class ClusterDownError(ClusterError, ResponseError):
     def __init__(self, resp):
         self.args = (resp,)
         self.message = resp
+        self.error_type = ExceptionType.SERVER
 
 
 class AskError(ResponseError):
@@ -160,6 +197,7 @@ class AskError(ResponseError):
 
     def __init__(self, resp):
         """should only redirect to master node"""
+        super().__init__(resp)
         self.args = (resp,)
         self.message = resp
         slot_id, new_node = resp.split(" ")
@@ -176,7 +214,7 @@ class TryAgainError(ResponseError):
     """
 
     def __init__(self, *args, **kwargs):
-        pass
+        super().__init__(*args)
 
 
 class ClusterCrossSlotError(ResponseError):
@@ -187,6 +225,10 @@ class ClusterCrossSlotError(ResponseError):
     """
 
     message = "Keys in request don't hash to the same slot"
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.error_type = ExceptionType.SERVER
 
 
 class MovedError(AskError):

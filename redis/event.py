@@ -1,11 +1,13 @@
 import asyncio
 import threading
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Type, Union
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
+from redis.observability.recorder import record_operation_duration
 
 
 class EventListenerInterface(ABC):
@@ -90,6 +92,7 @@ class EventDispatcher(EventDispatcherInterface):
             ],
             AfterPubSubConnectionInstantiationEvent: [RegisterReAuthForPubSub()],
             AfterAsyncClusterInstantiationEvent: [RegisterReAuthForAsyncClusterNodes()],
+            AfterCommandExecutionEvent: [ExportOperationDurationMetric()],
             AsyncAfterConnectionReleasedEvent: [
                 AsyncReAuthConnectionListener(),
             ],
@@ -295,6 +298,19 @@ class OnCommandsFailEvent:
     def exception(self) -> Exception:
         return self._exception
 
+@dataclass
+class AfterCommandExecutionEvent:
+    """
+    Event fired after command execution.
+    """
+    command_name: str
+    duration_seconds: float
+    server_address: Optional[str] = None
+    server_port: Optional[int] = None
+    db_namespace: Optional[str] = None
+    error: Optional[Exception] = None
+    is_blocking: Optional[bool] = None
+    batch_size: Optional[int] = None
 
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
@@ -466,3 +482,19 @@ class RegisterReAuthForPubSub(EventListenerInterface):
 
     async def _raise_on_error_async(self, error: Exception):
         raise EventException(error, self._event)
+
+class ExportOperationDurationMetric(EventListenerInterface):
+    """
+    Listener that exports operation duration metric after command execution.
+    """
+    def listen(self, event: AfterCommandExecutionEvent):
+        record_operation_duration(
+            command_name=event.command_name,
+            duration_seconds=event.duration_seconds,
+            server_address=event.server_address,
+            server_port=event.server_port,
+            db_namespace=event.db_namespace,
+            error=event.error,
+            is_blocking=event.is_blocking,
+            batch_size=event.batch_size,
+        )

@@ -44,7 +44,7 @@ class RedisMetricsCollector:
     METER_NAME = "redis-py"
     METER_VERSION = "1.0.0"
 
-    def __init__(self, meter: "Meter", config: OTelConfig):
+    def __init__(self, meter: Meter, config: OTelConfig):
         if not OTEL_AVAILABLE:
             raise ImportError(
                 "OpenTelemetry API is not installed. "
@@ -207,9 +207,7 @@ class RedisMetricsCollector:
         )
 
         attrs.update(
-            self.attr_builder.build_error_attributes(
-                error_type=error_type,
-            )
+            self.attr_builder.build_error_attributes()
         )
 
         self.client_errors.add(1, attributes=attrs)
@@ -406,11 +404,8 @@ class RedisMetricsCollector:
         )
 
         attrs.update(
-            self.attr_builder.build_error_attributes(
-                error_type=error_type,
-            )
+            self.attr_builder.build_error_attributes()
         )
-
         self.operation_duration.record(duration_seconds, attributes=attrs)
 
     def record_connection_closed(
