@@ -311,6 +311,7 @@ class AfterCommandExecutionEvent:
     error: Optional[Exception] = None
     is_blocking: Optional[bool] = None
     batch_size: Optional[int] = None
+    retry_attempts: Optional[int] = None
 
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
@@ -497,4 +498,5 @@ class ExportOperationDurationMetric(EventListenerInterface):
             error=event.error,
             is_blocking=event.is_blocking,
             batch_size=event.batch_size,
+            retry_attempts=event.retry_attempts,
         )

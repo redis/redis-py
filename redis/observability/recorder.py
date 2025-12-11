@@ -39,6 +39,7 @@ def record_operation_duration(
         error: Optional[Exception] = None,
         is_blocking: Optional[bool] = None,
         batch_size: Optional[int] = None,
+        retry_attempts: Optional[int] = None,
 ) -> None:
     """
     Record a Redis command execution duration.
@@ -55,6 +56,7 @@ def record_operation_duration(
         error: Exception if command failed, None if successful
         is_blocking: Whether the operation is a blocking command
         batch_size: Number of commands in batch (for pipelines/transactions)
+        retry_attempts: Number of retry attempts made
 
     Example:
         >>> start = time.monotonic()
@@ -89,6 +91,7 @@ def record_operation_duration(
         network_peer_port=server_port,
         is_blocking=is_blocking,
         batch_size=batch_size,
+        retry_attempts=retry_attempts,
     )
     # except Exception:
     #     # Don't let metric recording errors break Redis operations

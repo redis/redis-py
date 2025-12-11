@@ -29,7 +29,7 @@ from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
     AfterPubSubConnectionInstantiationEvent,
     ClientType,
-    EventDispatcher,
+    EventDispatcher, AfterCommandExecutionEvent,
 )
 from redis.exceptions import (
     AskError,
@@ -984,6 +984,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             retry=self.retry,
             lock=self._lock,
             transaction=transaction,
+            event_dispatcher=self._event_dispatcher
         )
 
     def lock(
@@ -1367,6 +1368,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         moved = False
         ttl = int(self.RedisClusterRequestTTL)
 
+        # Start timing for observability
+        start_time = time.monotonic()
+
         while ttl > 0:
             ttl -= 1
             try:
@@ -1401,14 +1405,32 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     response = self.cluster_response_callbacks[command](
                         response, **kwargs
                     )
+
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                )
                 return response
-            except AuthenticationError:
+            except AuthenticationError as e:
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
-            except MaxConnectionsError:
+            except MaxConnectionsError as e:
                 # MaxConnectionsError indicates client-side resource exhaustion
                 # (too many connections in the pool), not a node failure.
                 # Don't treat this as a node failure - just re-raise the error
                 # without reinitializing the cluster.
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
             except (ConnectionError, TimeoutError) as e:
                 # ConnectionError can also be raised if we couldn't get a
@@ -1423,6 +1445,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 # Reset the cluster node's connection
                 target_node.redis_connection = None
                 self.nodes_manager.initialize()
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise e
             except MovedError as e:
                 # First, we will try to patch the slots/nodes cache with the
@@ -1441,13 +1469,33 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 else:
                     self.nodes_manager.update_moved_exception(e)
                 moved = True
-            except TryAgainError:
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
+            except TryAgainError as e:
                 if ttl < self.RedisClusterRequestTTL / 2:
                     time.sleep(0.05)
+
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
             except AskError as e:
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
-            except (ClusterDownError, SlotNotCoveredError):
+
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
+            except (ClusterDownError, SlotNotCoveredError) as e:
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
@@ -1459,18 +1507,59 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
 
                 time.sleep(0.25)
                 self.nodes_manager.initialize()
+
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
-            except ResponseError:
+            except ResponseError as e:
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
             except Exception as e:
                 if connection:
                     connection.disconnect()
+
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise e
             finally:
                 if connection is not None:
                     redis_node.connection_pool.release(connection)
 
         raise ClusterError("TTL exhausted.")
+
+    def _emit_after_command_execution_event(
+            self,
+            command_name: str,
+            duration_seconds: float,
+            connection: Connection,
+            error=None
+    ):
+        """
+        Triggers AfterCommandExecutionEvent emit.
+        """
+        self._event_dispatcher.dispatch(
+            AfterCommandExecutionEvent(
+                command_name=command_name,
+                duration_seconds=duration_seconds,
+                server_address=connection.host,
+                server_port=connection.port,
+                db_namespace=str(connection.db),
+                error=error,
+            )
+        )
 
     def close(self) -> None:
         try:
@@ -2326,6 +2415,7 @@ class ClusterPipeline(RedisCluster):
         lock=None,
         transaction=False,
         policy_resolver: PolicyResolver = StaticPolicyResolver(),
+        event_dispatcher: Optional["EventDispatcher"] = None,
         **kwargs,
     ):
         """ """
@@ -2394,6 +2484,11 @@ class ClusterPipeline(RedisCluster):
         }
 
         self._policy_resolver = policy_resolver
+
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
 
     def __repr__(self):
         """ """
@@ -2889,7 +2984,7 @@ class PipelineStrategy(AbstractStrategy):
     def execute_command(self, *args, **kwargs):
         return self.pipeline_execute_command(*args, **kwargs)
 
-    def _raise_first_error(self, stack):
+    def _raise_first_error(self, stack, start_time):
         """
         Raise the first exception on the stack
         """
@@ -2897,6 +2992,16 @@ class PipelineStrategy(AbstractStrategy):
             r = c.result
             if isinstance(r, Exception):
                 self.annotate_exception(r, c.position + 1, c.args)
+
+                self._pipe._event_dispatcher.dispatch(
+                    AfterCommandExecutionEvent(
+                        command_name="PIPELINE",
+                        duration_seconds=time.monotonic() - start_time,
+                        batch_size=len(stack),
+                        error=r,
+                    )
+                )
+
                 raise r
 
     def execute(self, raise_on_error: bool = True) -> List[Any]:
@@ -3076,6 +3181,10 @@ class PipelineStrategy(AbstractStrategy):
         # so that we can read them from different sockets as they come back.
         # we dont' multiplex on the sockets as they come available,
         # but that shouldn't make too much difference.
+
+        # Start timing for observability
+        start_time = time.monotonic()
+
         try:
             node_commands = nodes.values()
             for n in node_commands:
@@ -3083,6 +3192,17 @@ class PipelineStrategy(AbstractStrategy):
 
             for n in node_commands:
                 n.read()
+
+                self._pipe._event_dispatcher.dispatch(
+                    AfterCommandExecutionEvent(
+                        command_name="PIPELINE",
+                        duration_seconds=time.monotonic() - start_time,
+                        server_address=n.connection.host,
+                        server_port=n.connection.port,
+                        db_namespace=str(n.connection.db),
+                        batch_size=len(n.commands),
+                    )
+                )
         finally:
             # release all of the redis connections we allocated earlier
             # back into the connection pool.
@@ -3168,7 +3288,7 @@ class PipelineStrategy(AbstractStrategy):
             response.append(c.result)
 
         if raise_on_error:
-            self._raise_first_error(stack)
+            self._raise_first_error(stack, start_time)
 
         return response
 
@@ -3373,9 +3493,38 @@ class TransactionStrategy(AbstractStrategy):
 
     def _get_connection_and_send_command(self, *args, **options):
         redis_node, connection = self._get_client_and_connection_for_transaction()
-        return self._send_command_parse_response(
-            connection, redis_node, args[0], *args, **options
-        )
+
+        # Start timing for observability
+        start_time = time.monotonic()
+
+        try:
+            response = self._send_command_parse_response(
+                connection, redis_node, args[0], *args, **options
+            )
+
+            self._pipe._event_dispatcher.dispatch(
+                AfterCommandExecutionEvent(
+                    command_name=args[0],
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=connection.host,
+                    server_port=connection.port,
+                    db_namespace=str(connection.db),
+                )
+            )
+
+            return response
+        except Exception as e:
+            self._pipe._event_dispatcher.dispatch(
+                AfterCommandExecutionEvent(
+                    command_name=args[0],
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=connection.host,
+                    server_port=connection.port,
+                    db_namespace=str(connection.db),
+                    error=e,
+                )
+            )
+            raise
 
     def _send_command_parse_response(
         self, conn, redis_node: Redis, command_name, *args, **options
@@ -3413,13 +3562,24 @@ class TransactionStrategy(AbstractStrategy):
 
         self._executing = False
 
-    def _raise_first_error(self, responses, stack):
+    def _raise_first_error(self, responses, stack, start_time):
         """
         Raise the first exception on the stack
         """
         for r, cmd in zip(responses, stack):
             if isinstance(r, Exception):
                 self.annotate_exception(r, cmd.position + 1, cmd.args)
+
+                self._pipe._event_dispatcher.dispatch(
+                    AfterCommandExecutionEvent(
+                        command_name='TRANSACTION',
+                        duration_seconds=time.monotonic() - start_time,
+                        server_address=self._transaction_connection.host,
+                        server_port=self._transaction_connection.port,
+                        db_namespace=str(self._transaction_connection.db),
+                    )
+                )
+
                 raise r
 
     def execute(self, raise_on_error: bool = True) -> List[Any]:
@@ -3456,6 +3616,10 @@ class TransactionStrategy(AbstractStrategy):
         )
         commands = [c.args for c in stack if EMPTY_RESPONSE not in c.options]
         packed_commands = connection.pack_commands(commands)
+
+        # Start timing for observability
+        start_time = time.monotonic()
+
         connection.send_packed_command(packed_commands)
         errors = []
 
@@ -3500,6 +3664,17 @@ class TransactionStrategy(AbstractStrategy):
 
         self._executing = False
 
+        self._pipe._event_dispatcher.dispatch(
+            AfterCommandExecutionEvent(
+                command_name='TRANSACTION',
+                duration_seconds=time.monotonic() - start_time,
+                server_address=connection.host,
+                server_port=connection.port,
+                db_namespace=str(connection.db),
+                batch_size=len(self._command_queue),
+            )
+        )
+
         # EXEC clears any watched keys
         self._watching = False
 
@@ -3523,6 +3698,7 @@ class TransactionStrategy(AbstractStrategy):
             self._raise_first_error(
                 response,
                 self._command_queue,
+                start_time,
             )
 
         # We have to run response callbacks manually
