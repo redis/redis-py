@@ -1,6 +1,7 @@
 import pytest
 import redis
 from redis import exceptions
+from redis.cluster import RedisCluster
 from redis.commands.core import Script
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
@@ -52,6 +53,22 @@ class TestScript:
         encoder = Script(r, script_bytes).get_encoder()
         assert encoder is not None
         assert encoder.encode("fake-script") == b"fake-script"
+
+    def test_script_with_cluster_client(self, script_str):
+        """Test that Script class accepts RedisCluster as registered_client.
+
+        This verifies the type hints fix for register_script to support RedisCluster.
+        We use a mock-like approach since we don't need actual cluster connection.
+        """
+        from unittest.mock import MagicMock
+
+        # Create a mock RedisCluster instance
+        mock_cluster = MagicMock(spec=RedisCluster)
+
+        # Script should accept RedisCluster without type errors
+        script = Script(mock_cluster, script_str)
+        assert script.registered_client is mock_cluster
+        assert script.script == script_str
 
 
 class TestScripting:

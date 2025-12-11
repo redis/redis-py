@@ -1,6 +1,8 @@
 import pytest
 import pytest_asyncio
 from redis import exceptions
+from redis.asyncio.cluster import RedisCluster
+from redis.commands.core import AsyncScript
 from tests.conftest import skip_if_server_version_lt
 
 multiply_script = """
@@ -150,3 +152,25 @@ class TestScripting:
         with pytest.raises(exceptions.ResponseError) as excinfo:
             await pipe.execute()
         assert excinfo.type == exceptions.ResponseError
+
+
+class TestAsyncScriptTypeHints:
+    """Tests for AsyncScript type hints with RedisCluster support."""
+
+    @pytest.mark.asyncio()
+    async def test_async_script_with_cluster_client(self):
+        """Test that AsyncScript class accepts RedisCluster as registered_client.
+
+        This verifies the type hints fix for register_script to support RedisCluster.
+        We use a mock-like approach since we don't need actual cluster connection.
+        """
+        from unittest.mock import MagicMock
+
+        # Create a mock RedisCluster instance
+        mock_cluster = MagicMock(spec=RedisCluster)
+        test_script = "return 1"
+
+        # AsyncScript should accept RedisCluster without type errors
+        script = AsyncScript(mock_cluster, test_script)
+        assert script.registered_client is mock_cluster
+        assert script.script == test_script
