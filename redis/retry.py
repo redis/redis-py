@@ -10,7 +10,7 @@ from typing import (
     Optional,
     Tuple,
     Type,
-    TypeVar,
+    TypeVar, Union,
 )
 
 from redis.exceptions import ConnectionError, TimeoutError
@@ -100,7 +100,7 @@ class Retry(AbstractRetry[Exception]):
     def call_with_retry(
         self,
         do: Callable[[], T],
-        fail: Callable[[Exception], Any],
+        fail: Callable[[Exception, int], Any],
         is_retryable: Optional[Callable[[Exception], bool]] = None,
     ) -> T:
         """
@@ -118,7 +118,7 @@ class Retry(AbstractRetry[Exception]):
                 if is_retryable and not is_retryable(error):
                     raise
                 failures += 1
-                fail(error)
+                fail(error, failures)
                 if self._retries >= 0 and failures > self._retries:
                     raise error
                 backoff = self._backoff.compute(failures)

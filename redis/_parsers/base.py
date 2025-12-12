@@ -113,7 +113,7 @@ class BaseParser(ABC):
             exception_class = cls.EXCEPTION_CLASSES[error_code]
             if isinstance(exception_class, dict):
                 exception_class = exception_class.get(response, ResponseError)
-            return exception_class(response)
+            return exception_class(response, status_code=error_code)
         return ResponseError(response)
 
     def on_disconnect(self):

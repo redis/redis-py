@@ -3,7 +3,7 @@ from unittest import mock
 import pytest
 
 import redis
-from redis.event import EventDispatcher
+from redis.event import EventDispatcher, OnErrorEvent, EventListenerInterface
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
@@ -345,3 +345,292 @@ class TestRedisClientEventEmission:
 
         # batch_size should not be present for single commands
         assert 'db.operation.batch_size' not in attrs
+
+    def test_retry_emits_event_on_each_attempt(
+        self, mock_connection_pool, mock_meter
+    ):
+        """
+        Test that when a command is retried, an AfterCommandExecutionEvent
+        is emitted for each retry attempt with retry_attempts attribute.
+        """
+        # Create connection with retry behavior
+        mock_connection = mock.MagicMock()
+        mock_connection.host = 'localhost'
+        mock_connection.port = 6379
+        mock_connection.db = 0
+        mock_connection.should_reconnect.return_value = False
+
+        # Track retry attempts
+        attempt_count = [0]
+        max_retries = 2
+
+        def call_with_retry_impl(func, error_handler):
+            """Simulate retry behavior - fail twice, then succeed."""
+            for attempt in range(max_retries + 1):
+                try:
+                    return func()
+                except redis.ConnectionError as e:
+                    attempt_count[0] += 1
+                    if attempt < max_retries:
+                        error_handler(e, attempt + 1)
+                    else:
+                        raise
+
+        mock_connection.retry.call_with_retry = call_with_retry_impl
+        mock_connection.retry.get_retries.return_value = max_retries
+
+        mock_connection_pool.get_connection.return_value = mock_connection
+
+        recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(
+            recorder, '_get_or_create_collector', return_value=collector
+        ):
+            event_dispatcher = EventDispatcher()
+
+            client = redis.Redis(
+                connection_pool=mock_connection_pool,
+                event_dispatcher=event_dispatcher,
+            )
+
+            # Make command fail twice then succeed
+            call_count = [0]
+
+            def send_command_impl(*args, **kwargs):
+                call_count[0] += 1
+                if call_count[0] <= 2:
+                    raise redis.ConnectionError("Connection failed")
+                return True
+
+            client._send_command_parse_response = mock.MagicMock(
+                side_effect=send_command_impl
+            )
+
+            # Execute command - should retry twice then succeed
+            client.execute_command('SET', 'key', 'value')
+
+            # Verify histogram.record() was called 3 times:
+            # 2 retry attempts + 1 final success
+            assert self.operation_duration.record.call_count == 3
+
+            calls = self.operation_duration.record.call_args_list
+
+            # First two calls should have error.type (retry attempts)
+            assert 'error.type' in calls[0][1]['attributes']
+            assert 'error.type' in calls[1][1]['attributes']
+
+            # Last call should be success (no error.type)
+            assert 'error.type' not in calls[2][1]['attributes']
+
+        recorder.reset_collector()
+
+    def test_retry_exhausted_emits_final_error_event(
+        self, mock_connection_pool, mock_meter
+    ):
+        """
+        Test that when all retries are exhausted, a final AfterCommandExecutionEvent
+        is emitted with the error.
+        """
+        mock_connection = mock.MagicMock()
+        mock_connection.host = 'localhost'
+        mock_connection.port = 6379
+        mock_connection.db = 0
+        mock_connection.should_reconnect.return_value = False
+
+        max_retries = 2
+
+        def call_with_retry_impl(func, error_handler):
+            """Simulate retry behavior - always fail."""
+            for attempt in range(max_retries + 1):
+                try:
+                    return func()
+                except redis.ConnectionError as e:
+                    if attempt < max_retries:
+                        error_handler(e, attempt + 1)
+                    else:
+                        raise
+
+        mock_connection.retry.call_with_retry = call_with_retry_impl
+        mock_connection.retry.get_retries.return_value = max_retries
+
+        mock_connection_pool.get_connection.return_value = mock_connection
+
+        recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(
+            recorder, '_get_or_create_collector', return_value=collector
+        ):
+            event_dispatcher = EventDispatcher()
+
+            client = redis.Redis(
+                connection_pool=mock_connection_pool,
+                event_dispatcher=event_dispatcher,
+            )
+
+            # Make command always fail
+            client._send_command_parse_response = mock.MagicMock(
+                side_effect=redis.ConnectionError("Connection failed")
+            )
+
+            # Execute command - should fail after all retries
+            with pytest.raises(redis.ConnectionError):
+                client.execute_command('SET', 'key', 'value')
+
+            # Verify histogram.record() was called 3 times:
+            # 2 retry attempts + 1 final error
+            assert self.operation_duration.record.call_count == 3
+
+            calls = self.operation_duration.record.call_args_list
+
+            # All calls should have error.type
+            for call in calls:
+                assert 'error.type' in call[1]['attributes']
+                assert call[1]['attributes']['db.operation.name'] == 'SET'
+
+        recorder.reset_collector()
+
+    def test_on_error_event_emitted_on_retry(
+        self, mock_connection_pool, mock_meter
+    ):
+        """
+        Test that OnErrorEvent is emitted during retry attempts.
+        """
+
+        mock_connection = mock.MagicMock()
+        mock_connection.host = 'localhost'
+        mock_connection.port = 6379
+        mock_connection.db = 0
+        mock_connection.should_reconnect.return_value = False
+
+        max_retries = 1
+
+        def call_with_retry_impl(func, error_handler):
+            """Simulate retry behavior - fail once, then succeed."""
+            for attempt in range(max_retries + 1):
+                try:
+                    return func()
+                except redis.ConnectionError as e:
+                    if attempt < max_retries:
+                        error_handler(e, attempt + 1)
+                    else:
+                        raise
+
+        mock_connection.retry.call_with_retry = call_with_retry_impl
+        mock_connection.retry.get_retries.return_value = max_retries
+
+        mock_connection_pool.get_connection.return_value = mock_connection
+
+        # Track OnErrorEvent dispatches
+        error_events = []
+
+        class ErrorEventTracker(EventListenerInterface):
+            def listen(self, event: object):
+                if isinstance(event, OnErrorEvent):
+                    error_events.append(event)
+
+        event_dispatcher = EventDispatcher()
+        tracker = ErrorEventTracker()
+        event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
+
+        client = redis.Redis(
+            connection_pool=mock_connection_pool,
+            event_dispatcher=event_dispatcher,
+        )
+
+        # Make command fail once then succeed
+        call_count = [0]
+
+        def send_command_impl(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise redis.ConnectionError("Connection failed")
+            return True
+
+        client._send_command_parse_response = mock.MagicMock(
+            side_effect=send_command_impl
+        )
+
+        # Execute command
+        client.execute_command('SET', 'key', 'value')
+
+        # Verify OnErrorEvent was dispatched during retry
+        assert len(error_events) == 1
+        assert error_events[0].server_address == 'localhost'
+        assert error_events[0].server_port == 6379
+        assert error_events[0].retry_attempts == 1
+
+    def test_on_error_event_emitted_on_final_failure(
+        self, mock_connection_pool, mock_meter
+    ):
+        """
+        Test that OnErrorEvent is emitted when command fails after all retries.
+        """
+
+        mock_connection = mock.MagicMock()
+        mock_connection.host = 'localhost'
+        mock_connection.port = 6379
+        mock_connection.db = 0
+        mock_connection.should_reconnect.return_value = False
+
+        max_retries = 1
+
+        def call_with_retry_impl(func, error_handler):
+            """Simulate retry behavior - always fail."""
+            for attempt in range(max_retries + 1):
+                try:
+                    return func()
+                except redis.ConnectionError as e:
+                    if attempt < max_retries:
+                        error_handler(e, attempt + 1)
+                    else:
+                        raise
+
+        mock_connection.retry.call_with_retry = call_with_retry_impl
+        mock_connection.retry.get_retries.return_value = max_retries
+
+        mock_connection_pool.get_connection.return_value = mock_connection
+
+        # Track OnErrorEvent dispatches
+        error_events = []
+
+        class ErrorEventTracker(EventListenerInterface):
+            def listen(self, event: object):
+                if isinstance(event, OnErrorEvent):
+                    error_events.append(event)
+
+        event_dispatcher = EventDispatcher()
+        tracker = ErrorEventTracker()
+        event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
+
+        client = redis.Redis(
+            connection_pool=mock_connection_pool,
+            event_dispatcher=event_dispatcher,
+        )
+
+        # Make command always fail
+        client._send_command_parse_response = mock.MagicMock(
+            side_effect=redis.ConnectionError("Connection failed")
+        )
+
+        # Execute command - should fail
+        with pytest.raises(redis.ConnectionError):
+            client.execute_command('SET', 'key', 'value')
+
+        # Verify OnErrorEvent was dispatched:
+        # 1 during retry + 1 on final failure
+        assert len(error_events) == 2
+
+        # First event is from retry
+        assert error_events[0].retry_attempts == 1
+
+        # Second event is from final failure (is_internal=False)
+        assert error_events[1].is_internal is False
+        assert error_events[1].retry_attempts == max_retries

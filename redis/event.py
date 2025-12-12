@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Type, Union
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
-from redis.observability.recorder import record_operation_duration
+from redis.observability.recorder import record_operation_duration, record_error_count
 
 
 class EventListenerInterface(ABC):
@@ -96,6 +96,7 @@ class EventDispatcher(EventDispatcherInterface):
             AsyncAfterConnectionReleasedEvent: [
                 AsyncReAuthConnectionListener(),
             ],
+            OnErrorEvent: [ExportErrorCountMetric()],
         }
 
         self._lock = threading.Lock()
@@ -313,6 +314,17 @@ class AfterCommandExecutionEvent:
     batch_size: Optional[int] = None
     retry_attempts: Optional[int] = None
 
+@dataclass
+class OnErrorEvent:
+    """
+    Event fired whenever an error occurs.
+    """
+    error: Exception
+    server_address: Optional[str] = None
+    server_port: Optional[int] = None
+    is_internal: bool = True
+    retry_attempts: Optional[int] = None
+
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
 
@@ -499,4 +511,19 @@ class ExportOperationDurationMetric(EventListenerInterface):
             is_blocking=event.is_blocking,
             batch_size=event.batch_size,
             retry_attempts=event.retry_attempts,
+        )
+
+class ExportErrorCountMetric(EventListenerInterface):
+    """
+    Listener that exports error count metric.
+    """
+    def listen(self, event: OnErrorEvent):
+        record_error_count(
+            server_address=event.server_address,
+            server_port=event.server_port,
+            network_peer_address=event.server_address,
+            network_peer_port=event.server_port,
+            error_type=event.error,
+            retry_attempts=event.retry_attempts,
+            is_internal=event.is_internal,
         )

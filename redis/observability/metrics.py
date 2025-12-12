@@ -178,6 +178,7 @@ class RedisMetricsCollector:
             network_peer_port: int,
             error_type: Exception,
             retry_attempts: int,
+            is_internal: bool,
     ):
         """
         Record error count
@@ -189,6 +190,7 @@ class RedisMetricsCollector:
             network_peer_port: Network peer port
             error_type: Error type
             retry_attempts: Retry attempts
+            is_internal: Whether the error is internal (e.g., timeout, network error)
         """
         if not hasattr(self, "client_errors"):
             return
@@ -199,7 +201,6 @@ class RedisMetricsCollector:
         )
         attrs.update(
             self.attr_builder.build_operation_attributes(
-                error_type=error_type,
                 network_peer_address=network_peer_address,
                 network_peer_port=network_peer_port,
                 retry_attempts=retry_attempts,
@@ -207,7 +208,10 @@ class RedisMetricsCollector:
         )
 
         attrs.update(
-            self.attr_builder.build_error_attributes()
+            self.attr_builder.build_error_attributes(
+                error_type=error_type,
+                is_internal=is_internal,
+            )
         )
 
         self.client_errors.add(1, attributes=attrs)
@@ -351,7 +355,6 @@ class RedisMetricsCollector:
             server_port: Optional[int] = None,
             db_namespace: Optional[int] = None,
             batch_size: Optional[int] = None,
-            response_status_code: Optional[str] = None,
             error_type: Optional[Exception] = None,
             network_peer_address: Optional[str] = None,
             network_peer_port: Optional[int] = None,
@@ -369,7 +372,6 @@ class RedisMetricsCollector:
             server_port: Redis server port
             db_namespace: Redis database index
             batch_size: Number of commands in batch (for pipelines/transactions)
-            response_status_code: Redis error prefix if operation failed
             error_type: Error type if operation failed
             network_peer_address: Resolved peer address
             network_peer_port: Peer port number
@@ -394,8 +396,6 @@ class RedisMetricsCollector:
             self.attr_builder.build_operation_attributes(
                 command_name=command_name,
                 batch_size=batch_size,
-                response_status_code=response_status_code,
-                error_type=error_type,
                 network_peer_address=network_peer_address,
                 network_peer_port=network_peer_port,
                 retry_attempts=retry_attempts,
@@ -404,7 +404,9 @@ class RedisMetricsCollector:
         )
 
         attrs.update(
-            self.attr_builder.build_error_attributes()
+            self.attr_builder.build_error_attributes(
+                error_type=error_type,
+            )
         )
         self.operation_duration.record(duration_seconds, attributes=attrs)
 

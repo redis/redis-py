@@ -72,11 +72,6 @@ def record_operation_duration(
         if _metrics_collector is None:
             return  # Observability not enabled
 
-    # Determine error type and status
-    status_code = "ok"
-    if error is not None:
-        status_code = "error"
-
     # Record the metric
     # try:
     _metrics_collector.record_operation_duration(
@@ -86,7 +81,6 @@ def record_operation_duration(
         server_port=server_port,
         db_namespace=db_namespace,
         error_type=error,
-        response_status_code=status_code,
         network_peer_address=server_address,
         network_peer_port=server_port,
         is_blocking=is_blocking,
@@ -359,6 +353,7 @@ def record_error_count(
         network_peer_port: int,
         error_type: Exception,
         retry_attempts: int,
+        is_internal: bool = True,
 ) -> None:
     """
     Record error count.
@@ -370,6 +365,7 @@ def record_error_count(
         network_peer_port: Network peer port
         error_type: Error type (Exception)
         retry_attempts: Retry attempts
+        is_internal: Whether the error is internal (e.g., timeout, network error)
 
     Example:
         >>> record_error_count('localhost', 6379, 'localhost', 6379, ConnectionError(), 3)
@@ -382,14 +378,15 @@ def record_error_count(
             return
 
     # try:
-        _metrics_collector.record_error_count(
-            server_address=server_address,
-            server_port=server_port,
-            network_peer_address=network_peer_address,
-            network_peer_port=network_peer_port,
-            error_type=error_type,
-            retry_attempts=retry_attempts,
-        )
+    _metrics_collector.record_error_count(
+        server_address=server_address,
+        server_port=server_port,
+        network_peer_address=network_peer_address,
+        network_peer_port=network_peer_port,
+        error_type=error_type,
+        retry_attempts=retry_attempts,
+        is_internal=is_internal,
+    )
     # except Exception:
     #     pass
 
