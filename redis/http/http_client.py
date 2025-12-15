@@ -275,7 +275,7 @@ class HttpClient:
         try:
             return self.retry.call_with_retry(
                 lambda: self._make_request(req, context=context, timeout=timeout),
-                lambda _: dummy_fail(),
+                lambda _, __: dummy_fail(),
                 lambda error: self._is_retryable_http_error(error),
             )
         except HTTPError as e:

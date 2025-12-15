@@ -29,7 +29,7 @@ from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
     AfterPubSubConnectionInstantiationEvent,
     ClientType,
-    EventDispatcher, AfterCommandExecutionEvent,
+    EventDispatcher, AfterCommandExecutionEvent, OnErrorEvent,
 )
 from redis.exceptions import (
     AskError,
@@ -1311,6 +1311,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         retry_attempts = 0 if target_nodes_specified else self.retry.get_retries()
         # Add one for the first execution
         execute_attempts = 1 + retry_attempts
+        failure_count = 0
+
+        # Start timing for observability
+        start_time = time.monotonic()
+
         for _ in range(execute_attempts):
             try:
                 res = {}
@@ -1351,9 +1356,38 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
                     retry_attempts -= 1
+                    failure_count += 1
+
+                    if hasattr(e, "connection"):
+                        self._emit_after_command_execution_event(
+                            command_name=args[0],
+                            duration_seconds=time.monotonic() - start_time,
+                            connection=e.connection,
+                            error=e,
+                        )
+
+                        self._emit_on_error_event(
+                            error=e,
+                            connection=e.connection,
+                            retry_attempts=failure_count,
+                        )
                     continue
                 else:
                     # raise the exception
+                    if hasattr(e, "connection"):
+                        self._emit_after_command_execution_event(
+                            command_name=args[0],
+                            duration_seconds=time.monotonic() - start_time,
+                            connection=e.connection,
+                            error=e,
+                        )
+
+                        self._emit_on_error_event(
+                            error=e,
+                            connection=e.connection,
+                            retry_attempts=failure_count,
+                            is_internal=False,
+                        )
                     raise e
 
     def _execute_command(self, target_node, *args, **kwargs):
@@ -1413,24 +1447,14 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 )
                 return response
             except AuthenticationError as e:
-                self._emit_after_command_execution_event(
-                    command_name=command,
-                    duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
-                    error=e,
-                )
+                e.connection = connection
                 raise
             except MaxConnectionsError as e:
                 # MaxConnectionsError indicates client-side resource exhaustion
                 # (too many connections in the pool), not a node failure.
                 # Don't treat this as a node failure - just re-raise the error
                 # without reinitializing the cluster.
-                self._emit_after_command_execution_event(
-                    command_name=command,
-                    duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
-                    error=e,
-                )
+                e.connection = connection
                 raise
             except (ConnectionError, TimeoutError) as e:
                 # ConnectionError can also be raised if we couldn't get a
@@ -1445,12 +1469,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 # Reset the cluster node's connection
                 target_node.redis_connection = None
                 self.nodes_manager.initialize()
-                self._emit_after_command_execution_event(
-                    command_name=command,
-                    duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
-                    error=e,
-                )
+                e.connection = connection
                 raise e
             except MovedError as e:
                 # First, we will try to patch the slots/nodes cache with the
@@ -1475,6 +1494,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     connection=connection,
                     error=e,
                 )
+                self._emit_on_error_event(
+                    error=e,
+                    connection=connection,
+                )
             except TryAgainError as e:
                 if ttl < self.RedisClusterRequestTTL / 2:
                     time.sleep(0.05)
@@ -1485,6 +1508,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     connection=connection,
                     error=e,
                 )
+                self._emit_on_error_event(
+                    error=e,
+                    connection=connection,
+                )
             except AskError as e:
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
@@ -1494,6 +1521,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     duration_seconds=time.monotonic() - start_time,
                     connection=connection,
                     error=e,
+                )
+                self._emit_on_error_event(
+                    error=e,
+                    connection=connection,
                 )
             except (ClusterDownError, SlotNotCoveredError) as e:
                 # ClusterDownError can occur during a failover and to get
@@ -1508,37 +1539,24 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 time.sleep(0.25)
                 self.nodes_manager.initialize()
 
-                self._emit_after_command_execution_event(
-                    command_name=command,
-                    duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
-                    error=e,
-                )
+                e.connection = connection
                 raise
             except ResponseError as e:
-                self._emit_after_command_execution_event(
-                    command_name=command,
-                    duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
-                    error=e,
-                )
+                e.connection = connection
                 raise
             except Exception as e:
                 if connection:
                     connection.disconnect()
 
-                self._emit_after_command_execution_event(
-                    command_name=command,
-                    duration_seconds=time.monotonic() - start_time,
-                    connection=connection,
-                    error=e,
-                )
+                e.connection = connection
                 raise e
             finally:
                 if connection is not None:
                     redis_node.connection_pool.release(connection)
 
-        raise ClusterError("TTL exhausted.")
+        e = ClusterError("TTL exhausted.")
+        e.connection = connection
+        raise e
 
     def _emit_after_command_execution_event(
             self,
@@ -1558,6 +1576,26 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 server_port=connection.port,
                 db_namespace=str(connection.db),
                 error=error,
+            )
+        )
+
+    def _emit_on_error_event(
+            self,
+            error: Exception,
+            connection: Connection,
+            is_internal: bool = True,
+            retry_attempts: Optional[int] = None,
+    ):
+        """
+        Triggers OnErrorEvent emit.
+        """
+        self._event_dispatcher.dispatch(
+            OnErrorEvent(
+                error=error,
+                server_address=connection.host,
+                server_port=connection.port,
+                is_internal=is_internal,
+                retry_attempts=retry_attempts,
             )
         )
 
@@ -3488,7 +3526,7 @@ class TransactionStrategy(AbstractStrategy):
     def _immediate_execute_command(self, *args, **options):
         return self._retry.call_with_retry(
             lambda: self._get_connection_and_send_command(*args, **options),
-            self._reinitialize_on_error,
+            lambda error, failure_count: self._reinitialize_on_error(error, failure_count),
         )
 
     def _get_connection_and_send_command(self, *args, **options):
@@ -3514,6 +3552,7 @@ class TransactionStrategy(AbstractStrategy):
 
             return response
         except Exception as e:
+            e.connection = connection
             self._pipe._event_dispatcher.dispatch(
                 AfterCommandExecutionEvent(
                     command_name=args[0],
@@ -3540,7 +3579,18 @@ class TransactionStrategy(AbstractStrategy):
             self._watching = False
         return output
 
-    def _reinitialize_on_error(self, error):
+    def _reinitialize_on_error(self, error, failure_count):
+        if hasattr(error, "connection"):
+            self._pipe._event_dispatcher.dispatch(
+                OnErrorEvent(
+                    error=error,
+                    server_address=error.conn.host,
+                    server_port=error.conn.port,
+                    is_internal=False,
+                    retry_attempts=failure_count,
+                )
+            )
+
         if self._watching:
             if type(error) in self.SLOT_REDIRECT_ERRORS and self._executing:
                 raise WatchError("Slot rebalancing occurred while watching keys")
@@ -3594,7 +3644,7 @@ class TransactionStrategy(AbstractStrategy):
     ):
         return self._retry.call_with_retry(
             lambda: self._execute_transaction(stack, raise_on_error),
-            self._reinitialize_on_error,
+            lambda error, failure_count: self._reinitialize_on_error(error, failure_count),
         )
 
     def _execute_transaction(

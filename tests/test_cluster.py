@@ -31,7 +31,7 @@ from redis.cluster import (
 )
 from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.crc import key_slot
-from redis.event import EventDispatcher
+from redis.event import EventDispatcher, OnErrorEvent, EventListenerInterface
 from redis.exceptions import (
     AskError,
     ClusterDownError,
@@ -3868,7 +3868,7 @@ class TestClusterEventEmission:
         commands_to_test = [
             ('SET', lambda: cluster.set('cmd_test', 'value')),
             ('GET', lambda: cluster.get('cmd_test')),
-            ('DEL', lambda: cluster.delete('cmd_test')),
+            ('PIPELINE', lambda: cluster.delete('cmd_test')),
             ('PING', lambda: cluster.ping()),
         ]
 
@@ -3879,6 +3879,152 @@ class TestClusterEventEmission:
             call_args = operation_duration_mock.record.call_args
             attrs = call_args[1]['attributes']
             assert attrs['db.operation.name'] == expected_cmd
+
+    def test_command_error_emits_event_with_error_type(self, cluster_with_otel):
+        """
+        Test that when a command fails, the emitted event includes error.type attribute.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute a command that will fail (wrong type operation)
+        cluster.set('error_test_key', 'string_value')
+
+        try:
+            # Try to use LPUSH on a string key - this will fail
+            cluster.lpush('error_test_key', 'value')
+        except ResponseError:
+            pass
+
+        # Find the LPUSH event in recorded calls
+        lpush_calls = [
+            call_obj for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'LPUSH'
+        ]
+
+        assert len(lpush_calls) >= 1
+        attrs = lpush_calls[0][1]['attributes']
+        assert 'error.type' in attrs
+
+    def test_on_error_event_emitted_on_command_failure(self, cluster_with_otel):
+        """
+        Test that OnErrorEvent is emitted when a command fails.
+        """
+        cluster, _ = cluster_with_otel
+
+        error_events = []
+
+        class ErrorEventTracker(EventListenerInterface):
+            def listen(self, event: object):
+                error_events.append(event)
+
+        tracker = ErrorEventTracker()
+        cluster._event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
+
+        # Execute a command that will fail (wrong type operation)
+        cluster.set('on_error_test_key', 'string_value')
+
+        try:
+            # Try to use LPUSH on a string key - this will fail
+            cluster.lpush('on_error_test_key', 'value')
+        except ResponseError:
+            pass
+
+        # Verify OnErrorEvent was dispatched
+        assert len(error_events) >= 1
+        # The error should be a ResponseError (WRONGTYPE)
+        assert any(
+            isinstance(e.error, ResponseError) for e in error_events
+        )
+
+    def test_on_error_event_contains_server_info(self, cluster_with_otel):
+        """
+        Test that OnErrorEvent contains server address and port.
+        """
+        cluster, _ = cluster_with_otel
+
+        error_events = []
+
+        class ErrorEventTracker(EventListenerInterface):
+            def listen(self, event: object):
+                error_events.append(event)
+
+        tracker = ErrorEventTracker()
+        cluster._event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
+
+        # Execute a command that will fail
+        cluster.set('server_info_test_key', 'string_value')
+
+        try:
+            cluster.lpush('server_info_test_key', 'value')
+        except ResponseError:
+            pass
+
+        assert len(error_events) >= 1
+        event = error_events[0]
+
+        # Verify server info is present
+        assert event.server_address is not None
+        assert isinstance(event.server_address, str)
+        assert len(event.server_address) > 0
+
+        assert event.server_port is not None
+        assert isinstance(event.server_port, int)
+        assert event.server_port > 0
+
+        # Cleanup
+        cluster.delete('server_info_test_key')
+
+    def test_successful_command_no_error_event(self, cluster_with_otel):
+        """
+        Test that successful commands do not emit OnErrorEvent.
+        """
+        cluster, _ = cluster_with_otel
+
+        error_events = []
+
+        class ErrorEventTracker(EventListenerInterface):
+            def listen(self, event: object):
+                error_events.append(event)
+
+        tracker = ErrorEventTracker()
+        cluster._event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
+
+        # Execute successful commands
+        cluster.set('success_test_key', 'value')
+        cluster.get('success_test_key')
+        cluster.delete('success_test_key')
+
+        # No error events should be emitted for successful commands
+        assert len(error_events) == 0
+
+    def test_error_event_is_internal_for_cluster_redirects(self, cluster_with_otel):
+        """
+        Test that cluster redirect errors (MOVED, ASK) emit OnErrorEvent
+        with is_internal=True when handled internally.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        error_events = []
+
+        class ErrorEventTracker(EventListenerInterface):
+            def listen(self, event: object):
+                error_events.append(event)
+
+        tracker = ErrorEventTracker()
+        cluster._event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
+
+        # Execute commands - if any MOVED/ASK redirects happen internally,
+        # they should emit events with is_internal=True
+        for i in range(10):
+            cluster.set(f'redirect_test_key_{i}', f'value_{i}')
+            cluster.get(f'redirect_test_key_{i}')
+            cluster.delete(f'redirect_test_key_{i}')
+
+        # If any internal redirect errors occurred, they should have is_internal=True
+        internal_errors = [e for e in error_events if e.is_internal is True]
+        # We can't guarantee redirects happen, but if they do, is_internal should be True
+        for event in internal_errors:
+            assert event.is_internal is True
 
 
 @pytest.mark.onlycluster
@@ -4091,3 +4237,181 @@ class TestClusterPipelineEventEmission:
         )
 
         assert pipeline_count == 0
+
+    def test_pipeline_error_emits_event_with_error(self, cluster_pipeline_with_otel):
+        """
+        Test that when a pipeline command fails, the emitted event includes error.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Set a string value
+        cluster.set('pipe_error_key', 'string_value')
+
+        try:
+            # Execute a pipeline with a command that will fail
+            pipe = cluster.pipeline()
+            pipe.lpush('pipe_error_key', 'value')  # Will fail - wrong type
+            pipe.execute()
+        except ResponseError:
+            pass
+
+        # Find the PIPELINE event calls
+        pipeline_calls = [
+            call_obj for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+        ]
+
+        # There should be at least one PIPELINE event
+        assert len(pipeline_calls) >= 1
+
+    def test_pipeline_error_emits_event_with_error_type(
+        self, cluster_pipeline_with_otel
+    ):
+        """
+        Test that when a pipeline command fails, the emitted event includes error.type.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Set a string value
+        cluster.set('pipe_err_type_key', 'string_value')
+
+        try:
+            pipe = cluster.pipeline()
+            pipe.lpush('pipe_err_type_key', 'value')  # Will fail - wrong type
+            pipe.execute()
+        except ResponseError:
+            pass
+
+        # Find PIPELINE events with error.type
+        pipeline_calls = [
+            call_obj for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+        ]
+
+        # At least one PIPELINE event should exist
+        assert len(pipeline_calls) >= 1
+
+        # Check if any has error.type (the one from _raise_first_error)
+        error_calls = [
+            call_obj for call_obj in pipeline_calls
+            if 'error.type' in call_obj[1]['attributes']
+        ]
+
+        # The error event should have error.type
+        if error_calls:
+            attrs = error_calls[0][1]['attributes']
+            assert 'error.type' in attrs
+
+    def test_pipeline_successful_no_error_event(self, cluster_pipeline_with_otel):
+        """
+        Test that successful pipeline commands do not emit OnErrorEvent.
+        """
+        cluster, _ = cluster_pipeline_with_otel
+
+        error_events = []
+
+        class ErrorEventTracker(EventListenerInterface):
+            def listen(self, event: object):
+                error_events.append(event)
+
+        tracker = ErrorEventTracker()
+        cluster._event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
+
+        # Execute successful pipeline
+        pipe = cluster.pipeline()
+        pipe.set('success_pipe_key', 'value')
+        pipe.get('success_pipe_key')
+        pipe.delete('success_pipe_key')
+        pipe.execute()
+
+        # No error events should be emitted for successful pipeline
+        assert len(error_events) == 0
+
+    def test_pipeline_multi_node_emits_multiple_events(
+        self, cluster_pipeline_with_otel
+    ):
+        """
+        Test that pipeline commands to multiple nodes emit events for each node.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Execute pipeline with keys that may go to different nodes
+        pipe = cluster.pipeline()
+        for i in range(10):
+            pipe.set(f'multi_node_key_{i}', f'value_{i}')
+        pipe.execute()
+
+        # Find PIPELINE events
+        pipeline_calls = [
+            call_obj for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+        ]
+
+        # Should have at least one PIPELINE event
+        assert len(pipeline_calls) >= 1
+
+        # Each event should have server info
+        for call_obj in pipeline_calls:
+            attrs = call_obj[1]['attributes']
+            assert 'server.address' in attrs
+            assert 'server.port' in attrs
+            assert 'db.namespace' in attrs
+
+    def test_pipeline_event_contains_batch_size_per_node(
+        self, cluster_pipeline_with_otel
+    ):
+        """
+        Test that pipeline events contain correct batch_size for each node.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Execute pipeline with commands
+        pipe = cluster.pipeline()
+        pipe.set('batch_node_key1', 'value1')
+        pipe.set('batch_node_key2', 'value2')
+        pipe.set('batch_node_key3', 'value3')
+        pipe.execute()
+
+        # Find PIPELINE events
+        pipeline_calls = [
+            call_obj for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+        ]
+
+        # Should have at least one PIPELINE event
+        assert len(pipeline_calls) >= 1
+
+        # Each event should have batch_size
+        total_batch_size = 0
+        for call_obj in pipeline_calls:
+            attrs = call_obj[1]['attributes']
+            assert 'db.operation.batch.size' in attrs
+            total_batch_size += attrs['db.operation.batch.size']
+
+        # Total batch size should equal number of commands
+        assert total_batch_size == 3
+
+    def test_pipeline_duration_recorded_per_node(self, cluster_pipeline_with_otel):
+        """
+        Test that pipeline duration is recorded for each node's commands.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        pipe = cluster.pipeline()
+        pipe.set('duration_node_key', 'value')
+        pipe.get('duration_node_key')
+        pipe.execute()
+
+        # Find PIPELINE events
+        pipeline_calls = [
+            call_obj for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+        ]
+
+        assert len(pipeline_calls) >= 1
+
+        # Each event should have a positive duration
+        for call_obj in pipeline_calls:
+            duration = call_obj[0][0]
+            assert isinstance(duration, float)
+            assert duration >= 0

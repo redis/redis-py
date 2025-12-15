@@ -124,7 +124,7 @@ class AttributeBuilder:
         if command_name is not None:
             attrs[DB_OPERATION_NAME] = command_name.upper()
 
-        if batch_size is not None and batch_size >= 2:
+        if batch_size is not None:
             attrs[DB_OPERATION_BATCH_SIZE] = batch_size
 
         if network_peer_address is not None:

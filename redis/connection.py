@@ -35,7 +35,7 @@ from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
-from .event import AfterConnectionReleasedEvent, EventDispatcher
+from .event import AfterConnectionReleasedEvent, EventDispatcher, OnErrorEvent
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -853,14 +853,34 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         try:
             if retry_socket_connect:
                 sock = self.retry.call_with_retry(
-                    lambda: self._connect(), lambda error: self.disconnect(error)
+                    lambda: self._connect(), lambda error, failure_count: self.disconnect(error, failure_count)
                 )
             else:
                 sock = self._connect()
         except socket.timeout:
-            raise TimeoutError("Timeout connecting to server")
+            e = TimeoutError("Timeout connecting to server")
+            self._event_dispatcher.dispatch(
+                OnErrorEvent(
+                    error=e,
+                    server_address=self.host,
+                    server_port=self.port,
+                    is_internal=False,
+                    retry_attempts=self.retry.get_retries(),
+                )
+            )
+            raise e
         except OSError as e:
-            raise ConnectionError(self._error_message(e))
+            e = ConnectionError(self._error_message(e))
+            self._event_dispatcher.dispatch(
+                OnErrorEvent(
+                    error=e,
+                    server_address=self.host,
+                    server_port=self.port,
+                    is_internal=False,
+                    retry_attempts=self.retry.get_retries(),
+                )
+            )
+            raise e
 
         self._sock = sock
         try:
@@ -1036,6 +1056,17 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         except OSError:
             pass
 
+        if len(args) > 0 and isinstance(args[0], Exception):
+            if args[1] <= self.retry.get_retries():
+                self._event_dispatcher.dispatch(
+                    OnErrorEvent(
+                        error=args[0],
+                        server_address=self.host,
+                        server_port=self.port,
+                        retry_attempts=args[1],
+                    )
+                )
+
     def mark_for_reconnect(self):
         self._should_reconnect = True
 
@@ -1051,14 +1082,17 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         if str_if_bytes(self.read_response()) != "PONG":
             raise ConnectionError("Bad response from PING health check")
 
-    def _ping_failed(self, error):
+    def _ping_failed(self, error, failure_count):
         """Function to call when PING fails"""
-        self.disconnect()
+        self.disconnect(error, failure_count)
 
     def check_health(self):
         """Check the health of the connection with a PING/PONG"""
         if self.health_check_interval and time.monotonic() > self.next_health_check:
-            self.retry.call_with_retry(self._send_ping, self._ping_failed)
+            self.retry.call_with_retry(
+                self._send_ping,
+                lambda error, failure_count: self._ping_failed(error, failure_count)
+            )
 
     def send_packed_command(self, command, check_health=True):
         """Send an already packed command to the Redis server"""
@@ -2714,10 +2748,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                     lambda: conn.send_command(
                         "AUTH", token.try_get("oid"), token.get_value()
                     ),
-                    lambda error: self._mock(error),
+                    lambda error, _: self._mock(error),
                 )
                 conn.retry.call_with_retry(
-                    lambda: conn.read_response(), lambda error: self._mock(error)
+                    lambda: conn.read_response(), lambda error, _: self._mock(error)
                 )
             for conn in self._in_use_connections:
                 conn.set_re_auth_token(token)
