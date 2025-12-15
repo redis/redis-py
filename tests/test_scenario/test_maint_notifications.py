@@ -1403,7 +1403,7 @@ class TestClusterClientPushNotifications(TestPushNotificationsBase):
         # so after failover the node is removed from the cluster
         # and the previous replica that is promoted to primary is added as a new node
 
-        # the overlall number of nodes should be the same - one removed and one added
+        # the overall number of nodes should be the same - one removed and one added
         assert len(cluster_nodes) == len(
             cluster_client_maint_notifications.nodes_manager.nodes_cache
         )
