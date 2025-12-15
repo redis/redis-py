@@ -134,6 +134,8 @@ services:
       API_PORT: "4000"
       ENABLE_LOGGING: true
       SIMULATE_CLUSTER: true
+      DEFAULT_INTERCEPTORS: "cluster,hitless,logger"
+
     ports:
       - "15379:15379"
       - "15380:15380"
