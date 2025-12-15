@@ -410,7 +410,7 @@ class REFaultInjector(FaultInjectorClient):
                 endpoints_section_started = True
                 continue
             elif line.startswith("SHARDS:"):
-                endpoints_section_started = False
+
                 break
             elif endpoints_section_started and line and not line.startswith("DB:ID"):
                 # Parse endpoint line: db:1  m-standard  endpoint:1:1  node:2  single  No
@@ -563,7 +563,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
         self.proxy_helper.set_cluster_slots(
             self.CLUSTER_SLOTS_INTERCEPTOR_NAME, self.DEFAULT_CLUSTER_SLOTS
         )
-        logging.info("Sleeping for 1 seconds to allow proxy to apply the changes...")
+        logging.info("Sleeping for 2 seconds to allow proxy to apply the changes...")
         time.sleep(2)
 
         self.seq_id = 0
@@ -595,11 +595,12 @@ class ProxyServerFaultInjector(FaultInjectorClient):
         self, endpoint_config: Dict[str, Any], timeout: int = 60
     ) -> Dict[str, Any]:
         """
-        Execute failover command and wait for completion.
-        Run in separate thread so that it can simulate the actual failover process.
-        This will run always for the same nodes - node 1 to node 3!
-        Assuming that the initial state is the DEFAULT_CLUSTER_SLOTS - shard 1 on node 1 and shard 2 on node 2.
-        In a real RE cluster we would have on some other node the replica - and we simulate that with node 3.
+        Simulates a failover operation and waits for completion.
+        This method does not create or manage threads; if asynchronous execution is required,
+        it should be called from a separate thread by the caller.
+        This will always run for the same nodes - node 1 to node 3!
+        Assumes that the initial state is the DEFAULT_CLUSTER_SLOTS - shard 1 on node 1 and shard 2 on node 2.
+        In a real RE cluster, a replica would exist on another node, which is simulated here with node 3.
         """
 
         # send smigrating
@@ -645,7 +646,8 @@ class ProxyServerFaultInjector(FaultInjectorClient):
     ) -> str:
         """
         Simulate migrate command execution.
-        Run in separate thread so that it can simulate the actual migrate process.
+        This method does not create or manage threads; it simulates the migration process synchronously.
+        If asynchronous execution is desired, the caller should run this method in a separate thread.
         This will run always for the same nodes - node 1 to node 2!
         Assuming that the initial state is the DEFAULT_CLUSTER_SLOTS - shard 1 on node 1 and shard 2 on node 2.
 
@@ -693,7 +695,8 @@ class ProxyServerFaultInjector(FaultInjectorClient):
     def execute_rebind(self, endpoint_config: Dict[str, Any], endpoint_id: str) -> str:
         """
         Execute rladmin bind endpoint command and wait for completion.
-        Run in separate thread so that it can simulate the actual bind process.
+        This method simulates the actual bind process. It does not create or manage threads;
+        if you wish to run it in a separate thread, you must do so from the caller.
         This will run always for the same nodes - node 1 to node 3!
         Assuming that the initial state is the DEFAULT_CLUSTER_SLOTS - shard 1 on node 1
         and shard 2 on node 2.

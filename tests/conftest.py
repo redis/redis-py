@@ -167,7 +167,7 @@ def pytest_addoption(parser):
         "--cluster-endpoint-name",
         action="store",
         default=None,
-        help="Name of the Redis endpoint with OSS APIthe tests should be executed on",
+        help="Name of the Redis endpoint with OSS API the tests should be executed on",
     )
 
 

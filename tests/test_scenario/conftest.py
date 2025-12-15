@@ -232,7 +232,7 @@ def _get_client_maint_notifications(
         raise ValueError(f"Could not parse host from endpoint URL: {endpoints[0]}")
 
     logging.info(
-        f"Connecting to Redis Enterprise: {host}:{port} with user: {username} using OSS API client"
+        f"Connecting to Redis Enterprise: {host}:{port} with user: {username}"
     )
 
     # Configure maintenance notifications
