@@ -1,21 +1,48 @@
 import logging
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 import pytest
+from redis import RedisCluster
 
 from redis.client import Redis
 from redis.connection import Connection
 from tests.test_scenario.fault_injector_client import (
-    ActionRequest,
-    ActionType,
     FaultInjectorClient,
+    NodeInfo,
 )
 
 
 class ClientValidations:
     @staticmethod
+    def get_default_connection(redis_client: Union[Redis, RedisCluster]) -> Connection:
+        """Get a random connection from the pool."""
+        if isinstance(redis_client, RedisCluster):
+            return redis_client.get_default_node().redis_connection.connection_pool.get_connection()
+        if isinstance(redis_client, Redis):
+            return redis_client.connection_pool.get_connection()
+        raise ValueError(f"Unsupported redis client type: {type(redis_client)}")
+
+    @staticmethod
+    def release_connection(
+        redis_client: Union[Redis, RedisCluster], connection: Connection
+    ):
+        """Release a connection back to the pool."""
+        if isinstance(redis_client, RedisCluster):
+            node_address = connection.host + ":" + str(connection.port)
+            node = redis_client.get_node(node_address)
+            if node is None:
+                raise ValueError(
+                    f"Node not found in cluster for address: {node_address}"
+                )
+            node.redis_connection.connection_pool.release(connection)
+        elif isinstance(redis_client, Redis):
+            redis_client.connection_pool.release(connection)
+        else:
+            raise ValueError(f"Unsupported redis client type: {type(redis_client)}")
+
+    @staticmethod
     def wait_push_notification(
-        redis_client: Redis,
+        redis_client: Union[Redis, RedisCluster],
         timeout: int = 120,
         fail_on_timeout: bool = True,
         connection: Optional[Connection] = None,
@@ -24,8 +51,11 @@ class ClientValidations:
         start_time = time.time()
         check_interval = 0.2  # Check more frequently during operations
         test_conn = (
-            connection if connection else redis_client.connection_pool.get_connection()
+            connection
+            if connection
+            else ClientValidations.get_default_connection(redis_client)
         )
+        logging.info(f"Waiting for push notification on connection: {test_conn}")
 
         try:
             while time.time() - start_time < timeout:
@@ -49,7 +79,7 @@ class ClientValidations:
             # Release the connection back to the pool
             try:
                 if not connection:
-                    redis_client.connection_pool.release(test_conn)
+                    ClientValidations.release_connection(redis_client, test_conn)
             except Exception as e:
                 logging.error(f"Error releasing connection: {e}")
 
@@ -68,7 +98,7 @@ class ClusterOperations:
     def find_target_node_and_empty_node(
         fault_injector: FaultInjectorClient,
         endpoint_config: Dict[str, Any],
-    ) -> Tuple[str, str]:
+    ) -> Tuple[NodeInfo, NodeInfo]:
         """Find the node with master shards and the node with no shards.
 
         Returns:

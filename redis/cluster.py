@@ -2027,10 +2027,10 @@ class NodesManager:
                 # Make sure cluster mode is enabled on this node
                 try:
                     cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
+                    # For some cases we might not want to disconnect current pool and
+                    # lose in flight commands responses
                     if disconnect_startup_nodes_pools:
                         # Disconnect the connection pool to avoid keeping the connection open
-                        # For some cases we might not want to disconnect current pool and
-                        # lose in flight commands responses
                         r.connection_pool.disconnect()
                 except ResponseError:
                     raise RedisClusterException(

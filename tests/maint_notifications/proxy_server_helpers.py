@@ -11,6 +11,25 @@ class RespTranslator:
     """Helper class to translate between RESP and other encodings."""
 
     @staticmethod
+    def re_cluster_maint_notification_to_resp(txt: str) -> str:
+        """Convert query to RESP format."""
+        parts = txt.split()
+
+        match parts:
+            case ["MOVING", seq_id, time, new_host]:
+                return f">4\r\n+MOVING\r\n:{seq_id}\r\n:{time}\r\n+{new_host}\r\n"
+            case ["MIGRATING", seq_id, time, shards]:
+                return f">4\r\n+MIGRATING\r\n:{seq_id}\r\n:{time}\r\n+{shards}\r\n"
+            case ["MIGRATED", seq_id, shards]:
+                return f">3\r\n+MIGRATED\r\n:{seq_id}\r\n+{shards}\r\n"
+            case ["FAILING_OVER", seq_id, time, shards]:
+                return f">4\r\n+FAILING_OVER\r\n:{seq_id}\r\n:{time}\r\n+{shards}\r\n"
+            case ["FAILED_OVER", seq_id, shards]:
+                return f">3\r\n+FAILED_OVER\r\n:{seq_id}\r\n+{shards}\r\n"
+            case _:
+                raise NotImplementedError(f"Unknown notification: {txt}")
+
+    @staticmethod
     def oss_maint_notification_to_resp(txt: str) -> str:
         """Convert query to RESP format."""
         if txt.startswith("SMIGRATED"):
@@ -232,8 +251,7 @@ class ProxyInterceptorHelper:
 
         if not conn_ids:
             raise RuntimeError(
-                f"No connections found for node {node_port}. "
-                f"Available nodes: {list(set(c.get('node') for c in stats.get('connections', {}).values()))}"
+                f"No connections found for node {connected_to_port}. \nStats: {stats}"
             )
 
         # Send notification to each connection

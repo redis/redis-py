@@ -698,7 +698,13 @@ class MaintNotificationsAbstractConnection:
         conn_socket = self._get_socket()
         if conn_socket:
             timeout = relaxed_timeout if relaxed_timeout != -1 else self.socket_timeout
-            conn_socket.settimeout(timeout)
+            # if the current timeout is 0 it means we are in the middle of a can_read call
+            # in this case we don't want to change the timeout because the operation
+            # is non-blovking and should return immediately
+            # Changing the state from non-blovking to blovking in the middle of a read operation
+            # will lead to a deadlock
+            if conn_socket.gettimeout() != 0:
+                conn_socket.settimeout(timeout)
             self.update_parser_timeout(timeout)
 
     def update_parser_timeout(self, timeout: Optional[float] = None):

@@ -1,7 +1,7 @@
 from abc import abstractmethod
+from dataclasses import dataclass
 import json
 import logging
-import threading
 import time
 import urllib.request
 import urllib.error
@@ -65,12 +65,30 @@ class ActionRequest:
         }
 
 
+@dataclass
+class NodeInfo:
+    node_id: str
+    role: str
+    internal_address: str
+    external_address: str
+    hostname: str
+    port: int
+
+
 class FaultInjectorClient:
+    @abstractmethod
+    def get_operation_result(
+        self,
+        action_id: str,
+        timeout: int = 60,
+    ) -> Dict[str, Any]:
+        pass
+
     @abstractmethod
     def find_target_node_and_empty_node(
         self,
         endpoint_config: Dict[str, Any],
-    ) -> Tuple[str, str]:
+    ) -> Tuple[NodeInfo, NodeInfo]:
         pass
 
     @abstractmethod
@@ -114,8 +132,16 @@ class FaultInjectorClient:
     ) -> str:
         pass
 
+    @abstractmethod
+    def get_moving_ttl(self) -> int:
+        pass
+
 
 class REFaultInjector(FaultInjectorClient):
+    """Fault injector client for Redis Enterprise cluster setup."""
+
+    MOVING_TTL = 15
+
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
 
@@ -245,13 +271,14 @@ class REFaultInjector(FaultInjectorClient):
     def find_target_node_and_empty_node(
         self,
         endpoint_config: Dict[str, Any],
-    ) -> Tuple[str, str]:
+    ) -> Tuple[NodeInfo, NodeInfo]:
         """Find the node with master shards and the node with no shards.
 
         Returns:
             tuple: (target_node, empty_node) where target_node has master shards
                 and empty_node has no shards
         """
+        db_port = int(endpoint_config.get("port", 0))
         cluster_info = self.get_cluster_nodes_info(endpoint_config)
         output = cluster_info.get("output", {}).get("output", "")
 
@@ -265,6 +292,7 @@ class REFaultInjector(FaultInjectorClient):
 
         # Get all node IDs from CLUSTER NODES section
         all_nodes = set()
+        all_nodes_details = {}
         nodes_with_any_shards = set()  # Nodes with shards from ANY database
         nodes_with_target_db_shards = set()  # Nodes with shards from target database
         master_nodes = set()  # Master nodes for target database only
@@ -284,7 +312,21 @@ class REFaultInjector(FaultInjectorClient):
                 parts = line.split()
                 if len(parts) >= 1:
                     node_id = parts[0].replace("*", "")  # Remove * prefix if present
+                    node_role = parts[1]
+                    node_internal_address = parts[2]
+                    node_external_address = parts[3]
+                    node_hostname = parts[4]
+
+                    node = NodeInfo(
+                        node_id.split(":")[1],
+                        node_role,
+                        node_internal_address,
+                        node_external_address,
+                        node_hostname,
+                        db_port,
+                    )
                     all_nodes.add(node_id)
+                    all_nodes_details[node_id.split(":")[1]] = node
 
             # Start of SHARDS section - only care about shard roles here
             if line.startswith("SHARDS:"):
@@ -337,7 +379,7 @@ class REFaultInjector(FaultInjectorClient):
         ]  # node:1 -> 1
         target_node = next(iter(master_nodes)).split(":")[1]  # node:2 -> 2
 
-        return target_node, empty_node
+        return all_nodes_details[target_node], all_nodes_details[empty_node]
 
     def find_endpoint_for_bind(
         self,
@@ -483,6 +525,9 @@ class REFaultInjector(FaultInjectorClient):
         except Exception as e:
             raise Exception(f"Failed to execute rladmin bind endpoint: {e}")
 
+    def get_moving_ttl(self) -> int:
+        return self.MOVING_TTL
+
 
 class ProxyServerFaultInjector(FaultInjectorClient):
     """Fault injector client for proxy server setup."""
@@ -504,20 +549,47 @@ class ProxyServerFaultInjector(FaultInjectorClient):
 
     CLUSTER_SLOTS_INTERCEPTOR_NAME = "test_topology"
 
+    SLEEP_TIME_BETWEEN_START_END_NOTIFICATIONS = 2
+    MOVING_TTL = 4
+
     def __init__(self, oss_cluster: bool = False):
         self.oss_cluster = oss_cluster
         self.proxy_helper = ProxyInterceptorHelper()
 
         # set the initial state of the proxy server
+        logging.info(
+            f"Setting up initial cluster slots -> {self.DEFAULT_CLUSTER_SLOTS}"
+        )
         self.proxy_helper.set_cluster_slots(
             self.CLUSTER_SLOTS_INTERCEPTOR_NAME, self.DEFAULT_CLUSTER_SLOTS
         )
+        logging.info("Sleeping for 1 seconds to allow proxy to apply the changes...")
+        time.sleep(2)
 
         self.seq_id = 0
 
     def _get_seq_id(self):
         self.seq_id += 1
         return self.seq_id
+
+    def find_target_node_and_empty_node(
+        self,
+        endpoint_config: Dict[str, Any],
+    ) -> Tuple[NodeInfo, NodeInfo]:
+        target_node = NodeInfo(
+            "1", "master", "0.0.0.0", "127.0.0.1", "localhost", self.NODE_PORT_1
+        )
+        empty_node = NodeInfo(
+            "3", "master", "0.0.0.0", "127.0.0.1", "localhost", self.NODE_PORT_3
+        )
+        return target_node, empty_node
+
+    def find_endpoint_for_bind(
+        self,
+        endpoint_config: Dict[str, Any],
+        endpoint_name: str,
+    ) -> str:
+        return "1:1"
 
     def execute_failover(
         self, endpoint_config: Dict[str, Any], timeout: int = 60
@@ -530,16 +602,23 @@ class ProxyServerFaultInjector(FaultInjectorClient):
         In a real RE cluster we would have on some other node the replica - and we simulate that with node 3.
         """
 
-        def run():
-            # send smigrating
-            smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
+        # send smigrating
+        if self.oss_cluster:
+            start_maint_notif = RespTranslator.oss_maint_notification_to_resp(
                 f"SMIGRATING {self._get_seq_id()} 0-8191"
             )
-            self.proxy_helper.send_notification(self.NODE_PORT_1, smigrating_node_1)
+        else:
+            # send failing over
+            start_maint_notif = RespTranslator.re_cluster_maint_notification_to_resp(
+                f"FAILING_OVER {self._get_seq_id()} 2 [1]"
+            )
 
-            # sleep to allow the client to receive the notification
-            time.sleep(2)
+        self.proxy_helper.send_notification(self.NODE_PORT_1, start_maint_notif)
 
+        # sleep to allow the client to receive the notification
+        time.sleep(self.SLEEP_TIME_BETWEEN_START_END_NOTIFICATIONS)
+
+        if self.oss_cluster:
             # intercept cluster slots
             self.proxy_helper.set_cluster_slots(
                 self.CLUSTER_SLOTS_INTERCEPTOR_NAME,
@@ -549,13 +628,17 @@ class ProxyServerFaultInjector(FaultInjectorClient):
                 ],
             )
             # send smigrated
-            smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
-                f"SMIGRATED {self._get_seq_id()} 0.0.0.0:{self.NODE_PORT_3} 0-8191"
+            end_maint_notif = RespTranslator.oss_maint_notification_to_resp(
+                f"SMIGRATED {self._get_seq_id()} 127.0.0.1:{self.NODE_PORT_3} 0-8191"
             )
-            self.proxy_helper.send_notification(self.NODE_PORT_1, smigrated_node_1)
+        else:
+            # send failed over
+            end_maint_notif = RespTranslator.re_cluster_maint_notification_to_resp(
+                f"FAILED_OVER {self._get_seq_id()} [1]"
+            )
+        self.proxy_helper.send_notification(self.NODE_PORT_1, end_maint_notif)
 
-        thread = threading.Thread(target=run).start()
-        return {"failover_thread": thread}
+        return {"status": "done"}
 
     def execute_migrate(
         self, endpoint_config: Dict[str, Any], target_node: str, empty_node: str
@@ -568,16 +651,23 @@ class ProxyServerFaultInjector(FaultInjectorClient):
 
         """
 
-        def run():
+        if self.oss_cluster:
             # send smigrating
-            smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
-                f"SMIGRATING {self._get_seq_id()} 0.0.0.0:{self.NODE_PORT_1} 0-200"
+            start_maint_notif = RespTranslator.oss_maint_notification_to_resp(
+                f"SMIGRATING {self._get_seq_id()} 0-200"
             )
-            self.proxy_helper.send_notification(self.NODE_PORT_1, smigrating_node_1)
+        else:
+            # send migrating
+            start_maint_notif = RespTranslator.re_cluster_maint_notification_to_resp(
+                f"MIGRATING {self._get_seq_id()} 2 [1]"
+            )
 
-            # sleep to allow the client to receive the notification
-            time.sleep(2)
+        self.proxy_helper.send_notification(self.NODE_PORT_1, start_maint_notif)
 
+        # sleep to allow the client to receive the notification
+        time.sleep(self.SLEEP_TIME_BETWEEN_START_END_NOTIFICATIONS)
+
+        if self.oss_cluster:
             # intercept cluster slots
             self.proxy_helper.set_cluster_slots(
                 self.CLUSTER_SLOTS_INTERCEPTOR_NAME,
@@ -588,12 +678,16 @@ class ProxyServerFaultInjector(FaultInjectorClient):
                 ],
             )
             # send smigrated
-            smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
-                f"SMIGRATED {self._get_seq_id()} 0.0.0.0:{self.NODE_PORT_2} 0-200"
+            end_maint_notif = RespTranslator.oss_maint_notification_to_resp(
+                f"SMIGRATED {self._get_seq_id()} 127.0.0.1:{self.NODE_PORT_2} 0-200"
             )
-            self.proxy_helper.send_notification(self.NODE_PORT_1, smigrated_node_1)
+        else:
+            # send migrated
+            end_maint_notif = RespTranslator.re_cluster_maint_notification_to_resp(
+                f"MIGRATED {self._get_seq_id()} [1]"
+            )
+        self.proxy_helper.send_notification(self.NODE_PORT_1, end_maint_notif)
 
-        threading.Thread(target=run).start()
         return "done"
 
     def execute_rebind(self, endpoint_config: Dict[str, Any], endpoint_id: str) -> str:
@@ -605,16 +699,24 @@ class ProxyServerFaultInjector(FaultInjectorClient):
         and shard 2 on node 2.
 
         """
-
-        def run():
+        sleep_time = self.SLEEP_TIME_BETWEEN_START_END_NOTIFICATIONS
+        if self.oss_cluster:
             # send smigrating
-            smigrating_node_1 = RespTranslator.oss_maint_notification_to_resp(
+            maint_start_notif = RespTranslator.oss_maint_notification_to_resp(
                 f"SMIGRATING {self._get_seq_id()} 0-8191"
             )
-            self.proxy_helper.send_notification(self.NODE_PORT_1, smigrating_node_1)
+        else:
+            # send moving
+            sleep_time = self.MOVING_TTL
+            maint_start_notif = RespTranslator.re_cluster_maint_notification_to_resp(
+                f"MOVING {self._get_seq_id()} {sleep_time} 127.0.0.1:{self.NODE_PORT_3}"
+            )
+        self.proxy_helper.send_notification(self.NODE_PORT_1, maint_start_notif)
 
-            # sleep to allow the client to receive the notification
-            time.sleep(2)
+        # sleep to allow the client to receive the notification
+        time.sleep(sleep_time)
+
+        if self.oss_cluster:
             # intercept cluster slots
             self.proxy_helper.set_cluster_slots(
                 self.CLUSTER_SLOTS_INTERCEPTOR_NAME,
@@ -625,9 +727,14 @@ class ProxyServerFaultInjector(FaultInjectorClient):
             )
             # send smigrated
             smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
-                f"SMIGRATED {self._get_seq_id()} 0.0.0.0:{self.NODE_PORT_3} 0-8191"
+                f"SMIGRATED {self._get_seq_id()} 127.0.0.1:{self.NODE_PORT_3} 0-8191"
             )
             self.proxy_helper.send_notification(self.NODE_PORT_1, smigrated_node_1)
+        else:
+            # TODO drop connections to node 1
+            pass
 
-        threading.Thread(target=run).start()
         return "done"
+
+    def get_moving_ttl(self) -> int:
+        return self.MOVING_TTL

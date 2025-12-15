@@ -6,6 +6,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import pytest
+from redis import RedisCluster
 
 from redis.backoff import NoBackoff, ExponentialBackoff
 from redis.event import EventDispatcher, EventListenerInterface
@@ -31,6 +32,7 @@ RELAXED_TIMEOUT = 30
 CLIENT_TIMEOUT = 5
 
 DEFAULT_ENDPOINT_NAME = "m-standard"
+DEFAULT_OSS_API_ENDPOINT_NAME = "oss-api"
 
 
 class CheckActiveDatabaseChangedListener(EventListenerInterface):
@@ -41,10 +43,21 @@ class CheckActiveDatabaseChangedListener(EventListenerInterface):
         self.is_changed_flag = True
 
 
+def use_mock_proxy():
+    return os.getenv("REDIS_ENTERPRISE_TESTS", "true").lower() == "false"
+
+
 @pytest.fixture()
 def endpoint_name(request):
     return request.config.getoption("--endpoint-name") or os.getenv(
         "REDIS_ENDPOINT_NAME", DEFAULT_ENDPOINT_NAME
+    )
+
+
+@pytest.fixture()
+def cluster_endpoint_name(request):
+    return request.config.getoption("--cluster-endpoint-name") or os.getenv(
+        "REDIS_CLUSTER_ENDPOINT_NAME", DEFAULT_OSS_API_ENDPOINT_NAME
     )
 
 
@@ -71,11 +84,23 @@ def endpoints_config(endpoint_name: str):
 
 
 @pytest.fixture()
+def cluster_endpoints_config(cluster_endpoint_name: str):
+    return get_endpoints_config(cluster_endpoint_name)
+
+
+@pytest.fixture()
 def fault_injector_client():
-    # TODO this check might be different, for now I will leave it to be set as env var
-    # default behaviour is to use Redis Enterprise cluster setup
-    if os.getenv("REDIS_ENTERPRISE_TESTS", "true").lower() == "false":
+    if use_mock_proxy():
         return ProxyServerFaultInjector(oss_cluster=False)
+    else:
+        url = os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324")
+        return REFaultInjector(url)
+
+
+@pytest.fixture()
+def fault_injector_client_oss_api():
+    if use_mock_proxy():
+        return ProxyServerFaultInjector(oss_cluster=True)
     else:
         url = os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324")
         return REFaultInjector(url)
@@ -206,7 +231,9 @@ def _get_client_maint_notifications(
     if not host:
         raise ValueError(f"Could not parse host from endpoint URL: {endpoints[0]}")
 
-    logging.info(f"Connecting to Redis Enterprise: {host}:{port} with user: {username}")
+    logging.info(
+        f"Connecting to Redis Enterprise: {host}:{port} with user: {username} using OSS API client"
+    )
 
     # Configure maintenance notifications
     maintenance_config = MaintNotificationsConfig(
@@ -216,8 +243,6 @@ def _get_client_maint_notifications(
         endpoint_type=endpoint_type,
     )
 
-    # Create Redis client with maintenance notifications config
-    # This will automatically create the MaintNotificationsPoolHandler
     if disable_retries:
         retry = Retry(NoBackoff(), 0)
     else:
@@ -226,6 +251,8 @@ def _get_client_maint_notifications(
     tls_enabled = True if parsed.scheme == "rediss" else False
     logging.info(f"TLS enabled: {tls_enabled}")
 
+    # Create Redis client with maintenance notifications config
+    # This will automatically create the MaintNotificationsPoolHandler
     client = Redis(
         host=host,
         port=port,
@@ -241,5 +268,78 @@ def _get_client_maint_notifications(
     )
     logging.info("Redis client created with maintenance notifications enabled")
     logging.info(f"Client uses Protocol: {client.connection_pool.get_protocol()}")
+
+    return client
+
+
+@pytest.fixture()
+def cluster_client_maint_notifications(cluster_endpoints_config):
+    return _get_cluster_client_maint_notifications(cluster_endpoints_config)
+
+
+def _get_cluster_client_maint_notifications(
+    endpoints_config,
+    protocol: int = 3,
+    enable_maintenance_notifications: bool = True,
+    endpoint_type: Optional[EndpointType] = None,
+    enable_relaxed_timeout: bool = True,
+    enable_proactive_reconnect: bool = True,
+    disable_retries: bool = False,
+    socket_timeout: Optional[float] = None,
+    host_config: Optional[str] = None,
+):
+    """Create Redis cluster client with maintenance notifications enabled."""
+    # Get credentials from the configuration
+    username = endpoints_config.get("username")
+    password = endpoints_config.get("password")
+
+    # Parse host and port from endpoints URL
+    endpoints = endpoints_config.get("endpoints", [])
+    if not endpoints:
+        raise ValueError("No endpoints found in configuration")
+
+    parsed = urlparse(endpoints[0])
+    host = parsed.hostname
+    port = parsed.port
+
+    if not host:
+        raise ValueError(f"Could not parse host from endpoint URL: {endpoints[0]}")
+
+    logging.info(f"Connecting to Redis Enterprise: {host}:{port} with user: {username}")
+
+    if disable_retries:
+        retry = Retry(NoBackoff(), 0)
+    else:
+        retry = Retry(backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3)
+
+    tls_enabled = True if parsed.scheme == "rediss" else False
+    logging.info(f"TLS enabled: {tls_enabled}")
+
+    # Configure maintenance notifications
+    maintenance_config = MaintNotificationsConfig(
+        enabled=enable_maintenance_notifications,
+        proactive_reconnect=enable_proactive_reconnect,
+        relaxed_timeout=RELAXED_TIMEOUT if enable_relaxed_timeout else -1,
+        endpoint_type=endpoint_type,
+    )
+
+    # Create Redis cluster client with maintenance notifications config
+    client = RedisCluster(
+        host=host,
+        port=port,
+        socket_timeout=CLIENT_TIMEOUT if socket_timeout is None else socket_timeout,
+        username=username,
+        password=password,
+        ssl=tls_enabled,
+        ssl_cert_reqs="none",
+        ssl_check_hostname=False,
+        protocol=protocol,  # RESP3 required for push notifications
+        maint_notifications_config=maintenance_config,
+        retry=retry,
+    )
+    logging.info("Redis cluster client created with maintenance notifications enabled")
+    logging.info(
+        f"Cluster working with the following nodes: {[(node.name, node.server_type) for node in client.get_nodes()]}"
+    )
 
     return client
