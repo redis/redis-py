@@ -2588,6 +2588,9 @@ class TestRedisCommands:
         d = self._server_xxh3_digest(r, "k")
         assert d is not None
 
+        # sanity check: local digest matches server's
+        assert d == r.digest_local(val)
+
         # IFDEQ must match to set; if key missing => won't create
         assert r.set("k", b"X", ifdeq=d) is True
         assert r.get("k") == b"X"

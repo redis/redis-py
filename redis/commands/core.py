@@ -2,6 +2,7 @@
 
 import datetime
 import hashlib
+import xxhash
 import warnings
 from enum import Enum
 from typing import (
@@ -23,6 +24,7 @@ from typing import (
     Union,
 )
 
+from docs.conf import version
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 from redis.typing import (
     AbsExpiryT,
@@ -1887,6 +1889,27 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/expiretime
         """
         return self.execute_command("EXPIRETIME", key)
+
+    @experimental_method()
+    def digest_local(self, value: Union[bytes, str]) -> str:
+        """
+        Compute the hexadecimal digest of the value locally, without sending it to the server.
+
+        This is useful for conditional operations like IFDEQ/IFDNE where you need to
+        compute the digest client-side before sending a command.
+
+        Warning:
+        **Experimental** - This API may change or be removed without notice.
+
+        Arguments:
+          - value: Union[bytes, str] - the value to compute the digest of.
+
+        Returns:
+          - (str) the XXH3 digest of the value as a hex string (16 hex characters)
+
+        For more information, see https://redis.io/commands/digest
+        """
+        return xxhash.xxh3_64(value).hexdigest()
 
     @experimental_method()
     def digest(self, name: KeyT) -> Optional[str]:

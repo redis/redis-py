@@ -28,7 +28,10 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = ['async-timeout>=4.0.3; python_full_version<"3.11.3"']
+dependencies = [
+    'async-timeout>=4.0.3; python_full_version<"3.11.3"',
+    'xxhash~=3.6.0',
+]
 
 [project.optional-dependencies]
 hiredis = [
