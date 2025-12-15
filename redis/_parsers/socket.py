@@ -62,7 +62,7 @@ class SocketBuffer:
             sock.settimeout(timeout)
         try:
             while True:
-                data = self._sock.recv(socket_read_size)
+                data = sock.recv(socket_read_size)
                 # an empty string indicates the server shutdown the socket
                 if isinstance(data, bytes) and len(data) == 0:
                     raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)

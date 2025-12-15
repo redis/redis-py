@@ -163,6 +163,13 @@ def pytest_addoption(parser):
         help="Name of the Redis endpoint the tests should be executed on",
     )
 
+    parser.addoption(
+        "--cluster-endpoint-name",
+        action="store",
+        default=None,
+        help="Name of the Redis endpoint with OSS API the tests should be executed on",
+    )
+
 
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
