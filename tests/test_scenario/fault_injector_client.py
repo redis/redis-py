@@ -1,4 +1,4 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import json
 import logging
@@ -75,7 +75,7 @@ class NodeInfo:
     port: int
 
 
-class FaultInjectorClient:
+class FaultInjectorClient(ABC):
     @abstractmethod
     def get_operation_result(
         self,
@@ -97,14 +97,6 @@ class FaultInjectorClient:
         endpoint_config: Dict[str, Any],
         endpoint_name: str,
     ) -> str:
-        pass
-
-    @abstractmethod
-    def get_cluster_nodes_info(
-        self,
-        endpoint_config: Dict[str, Any],
-        timeout: int = 60,
-    ) -> Dict[str, Any]:
         pass
 
     @abstractmethod
@@ -410,7 +402,6 @@ class REFaultInjector(FaultInjectorClient):
                 endpoints_section_started = True
                 continue
             elif line.startswith("SHARDS:"):
-
                 break
             elif endpoints_section_started and line and not line.startswith("DB:ID"):
                 # Parse endpoint line: db:1  m-standard  endpoint:1:1  node:2  single  No

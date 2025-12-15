@@ -86,15 +86,6 @@ class ClientValidations:
 
 class ClusterOperations:
     @staticmethod
-    def get_cluster_nodes_info(
-        fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
-        timeout: int = 60,
-    ) -> Dict[str, Any]:
-        """Get cluster nodes information from server using fault injector."""
-        return fault_injector.get_cluster_nodes_info(endpoint_config, timeout)
-
-    @staticmethod
     def find_target_node_and_empty_node(
         fault_injector: FaultInjectorClient,
         endpoint_config: Dict[str, Any],

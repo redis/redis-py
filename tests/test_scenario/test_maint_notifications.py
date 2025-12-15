@@ -1174,11 +1174,12 @@ class TestClusterClientPushNotifications(TestPushNotificationsBase):
         cluster_endpoint_name: str,
     ):
         # Initialize cleanup flags first to ensure they exist even if setup fails
-        # fault_injector_client_oss_api.
         self._failover_executed = False
         self._migration_executed = False
         self._bind_executed = False
         self.endpoint_id = None
+        self.target_node = None
+        self.empty_node = None
 
         try:
             target_node, empty_node = ClusterOperations.find_target_node_and_empty_node(
@@ -1304,7 +1305,7 @@ class TestClusterClientPushNotifications(TestPushNotificationsBase):
         # so after failover the node is removed from the cluster
         # and the previous replica that is promoted to primary is added as a new node
 
-        # the overlall number of nodes should be the same - one removed and one added
+        # the overall number of nodes should be the same - one removed and one added
         assert len(cluster_nodes) == len(
             cluster_client_maint_notifications.nodes_manager.nodes_cache
         )
@@ -1548,11 +1549,6 @@ class TestClusterClientPushNotifications(TestPushNotificationsBase):
                     )
             logging.debug(f"{threading.current_thread().name}: Thread ended")
 
-        logging.info("Creating one connection in the pool.")
-        # get the node covering first shard - it is the node we will migrate from
-        target_node = (
-            cluster_client_maint_notifications.nodes_manager.get_node_from_slot(0)
-        )
         cluster_nodes = (
             cluster_client_maint_notifications.nodes_manager.nodes_cache.copy()
         )
