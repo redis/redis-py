@@ -456,10 +456,6 @@ class TestClusterTransactionEventEmission:
             '_get_or_create_collector',
             return_value=collector
         ):
-            # Create a new event dispatcher and attach it to the cluster
-            event_dispatcher = EventDispatcher()
-            r._event_dispatcher = event_dispatcher
-
             yield r, self.operation_duration
 
         # Cleanup
