@@ -1490,7 +1490,7 @@ class TestClusterClientPushNotifications(TestPushNotificationsBase):
 
         assert conn.should_reconnect() is True
 
-        # the overlall number of nodes should be the same - one removed and one added
+        # the overall number of nodes should be the same - one removed and one added
         assert len(cluster_nodes) == len(
             cluster_client_maint_notifications.nodes_manager.nodes_cache
         )
