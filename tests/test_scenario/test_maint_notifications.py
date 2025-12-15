@@ -1533,7 +1533,7 @@ class TestClusterClientPushNotifications(TestPushNotificationsBase):
             start = time.time()
             while time.time() - start < duration:
                 try:
-                    # the slot is covered by the first shard - this one will failover
+                    # the slot is covered by the first shard - this one will have slots migrated
                     cluster_client_maint_notifications.set("key:{3}", "value")
                     cluster_client_maint_notifications.get("key:{3}")
                     # execute also commands that will run on the second shard
