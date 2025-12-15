@@ -228,41 +228,27 @@ class TestConnectionPool:
         ensure_connection call, which involves socket connection and handshake.
         This is important for performance under high load.
         """
+        lock_states = []
 
         class SlowConnectConnection(DummyConnection):
             """Connection that simulates slow connection establishment"""
 
-            def __init__(self, **kwargs):
-                super().__init__(**kwargs)
-                self.connect_called = False
-                self.lock_held_during_connect = None
-
             async def connect(self):
-                self.connect_called = True
                 # Check if the pool's lock is held during connection
-                pool = self.kwargs.get("_pool")
-                if pool:
-                    self.lock_held_during_connect = pool._lock.locked()
+                # We access the pool through the outer scope
+                lock_states.append(pool._lock.locked())
                 # Simulate slow connection
                 await asyncio.sleep(0.01)
                 self._connected = True
 
-        async with self.get_pool(
-            connection_class=SlowConnectConnection,
-            connection_kwargs={"_pool": None},
-        ) as pool:
-            # Pass the pool to the connection so it can check lock status
-            pool.connection_kwargs["_pool"] = pool
-
+        async with self.get_pool(connection_class=SlowConnectConnection) as pool:
             # Get a connection - this should call connect() outside the lock
             connection = await pool.get_connection()
 
-            # Verify connect was called
-            assert connection.connect_called
-
             # Verify the lock was NOT held during connect
+            assert len(lock_states) > 0, "connect() should have been called"
             assert (
-                connection.lock_held_during_connect is False
+                lock_states[0] is False
             ), "Lock should not be held during connection establishment"
 
             await pool.release(connection)
@@ -272,13 +258,15 @@ class TestConnectionPool:
         Test that multiple concurrent connection acquisitions don't block
         each other during connection establishment.
         """
+        connection_delay = 0.05
+        num_connections = 3
 
         class SlowConnectConnection(DummyConnection):
             """Connection that simulates slow connection establishment"""
 
             async def connect(self):
                 # Simulate slow connection (e.g., network latency, TLS handshake)
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(connection_delay)
                 self._connected = True
 
         async with self.get_pool(
@@ -287,22 +275,22 @@ class TestConnectionPool:
             # Start acquiring multiple connections concurrently
             start_time = asyncio.get_running_loop().time()
 
-            # Try to get 3 connections concurrently
+            # Try to get connections concurrently
             connections = await asyncio.gather(
-                pool.get_connection(),
-                pool.get_connection(),
-                pool.get_connection(),
+                *[pool.get_connection() for _ in range(num_connections)]
             )
 
             elapsed_time = asyncio.get_running_loop().time() - start_time
 
             # With proper lock handling, these should complete mostly in parallel
-            # If the lock was held during connect(), it would take 3 * 0.05 = 0.15s
-            # With lock only during pop, it should take ~0.05s (connections in parallel)
-            # We allow some overhead, so check it's less than 0.12s
-            assert elapsed_time < 0.12, (
-                f"Concurrent connections took {elapsed_time}s, "
-                f"suggesting lock was held during connection establishment"
+            # If the lock was held during connect(), it would take num_connections * connection_delay
+            # With lock only during pop, it should take ~connection_delay (connections in parallel)
+            # We allow 2.5x overhead for system variance
+            max_allowed_time = connection_delay * 2.5
+            assert elapsed_time < max_allowed_time, (
+                f"Concurrent connections took {elapsed_time:.3f}s, "
+                f"expected < {max_allowed_time:.3f}s. "
+                f"This suggests lock was held during connection establishment."
             )
 
             # Clean up
