@@ -141,3 +141,29 @@ class TestSSL:
 
         finally:
             await r.aclose()
+
+    async def test_ssl_ca_path_parameter(self, request):
+        """Test that ssl_ca_path parameter is properly passed to SSLConnection"""
+        ssl_url = request.config.option.redis_ssl_url
+        parsed_url = urlparse(ssl_url)
+
+        # Test with a mock ca_path directory
+        test_ca_path = "/tmp/test_ca_certs"
+
+        r = redis.Redis(
+            host=parsed_url.hostname,
+            port=parsed_url.port,
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_ca_path=test_ca_path,
+        )
+
+        try:
+            # Get the connection to verify ssl_ca_path is passed through
+            conn = r.connection_pool.make_connection()
+            assert isinstance(conn, redis.SSLConnection)
+
+            # Verify the ca_path is stored in the SSL context
+            assert conn.ssl_context.ca_path == test_ca_path
+        finally:
+            await r.aclose()
