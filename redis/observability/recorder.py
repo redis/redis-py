@@ -24,6 +24,7 @@ from typing import Optional
 
 from redis.observability.attributes import PubSubDirection, ConnectionState
 from redis.observability.metrics import RedisMetricsCollector
+from redis.observability.providers import get_observability_instance
 
 # Global metrics collector instance (lazy-initialized)
 _metrics_collector: Optional[RedisMetricsCollector] = None
@@ -36,6 +37,9 @@ def record_operation_duration(
         server_port: Optional[int] = None,
         db_namespace: Optional[str] = None,
         error: Optional[Exception] = None,
+        is_blocking: Optional[bool] = None,
+        batch_size: Optional[int] = None,
+        retry_attempts: Optional[int] = None,
 ) -> None:
     """
     Record a Redis command execution duration.
@@ -50,6 +54,9 @@ def record_operation_duration(
         server_port: Redis server port
         db_namespace: Redis database index
         error: Exception if command failed, None if successful
+        is_blocking: Whether the operation is a blocking command
+        batch_size: Number of commands in batch (for pipelines/transactions)
+        retry_attempts: Number of retry attempts made
 
     Example:
         >>> start = time.monotonic()
@@ -82,6 +89,9 @@ def record_operation_duration(
         response_status_code=status_code,
         network_peer_address=server_address,
         network_peer_port=server_port,
+        is_blocking=is_blocking,
+        batch_size=batch_size,
+        retry_attempts=retry_attempts,
     )
     # except Exception:
     #     # Don't let metric recording errors break Redis operations
@@ -455,11 +465,8 @@ def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
         RedisMetricsCollector instance if observability is enabled, None otherwise
     """
     try:
-        from redis.observability.providers import get_provider_manager
-        from redis.observability.metrics import RedisMetricsCollector
-
-        manager = get_provider_manager()
-        if manager is None or not manager.config.enable_metrics:
+        manager = get_observability_instance().get_provider_manager()
+        if manager is None or not manager.config.enabled_telemetry:
             return None
 
         # Get meter from the global MeterProvider

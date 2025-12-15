@@ -31,6 +31,7 @@ from redis.cluster import (
 )
 from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.crc import key_slot
+from redis.event import EventDispatcher
 from redis.exceptions import (
     AskError,
     ClusterDownError,
@@ -43,6 +44,9 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.observability import recorder
+from redis.observability.config import OTelConfig, MetricGroup
+from redis.observability.metrics import RedisMetricsCollector
 from redis.retry import Retry
 from redis.utils import str_if_bytes
 from tests.test_pubsub import wait_for_message
@@ -3687,3 +3691,403 @@ class TestClusterMonitor:
         r.flushall()
         assert r.get("x") is None
         assert r.get("y") is None
+
+
+@pytest.mark.onlycluster
+class TestClusterEventEmission:
+    """
+    Integration tests that verify AfterCommandExecutionEvent is properly emitted
+    from RedisCluster and delivered to the Meter through the event dispatcher chain.
+
+    These tests use a real Redis cluster connection but mock the OTel Meter
+    to verify events are correctly emitted.
+    """
+
+    @pytest.fixture
+    def mock_meter(self):
+        """Create a mock Meter that tracks all instrument calls."""
+        meter = Mock()
+
+        # Create mock histogram for operation duration
+        self.operation_duration = Mock()
+
+        def create_histogram_side_effect(name, **kwargs):
+            if name == 'db.client.operation.duration':
+                return self.operation_duration
+            return Mock()
+
+        meter.create_counter.return_value = Mock()
+        meter.create_up_down_counter.return_value = Mock()
+        meter.create_histogram.side_effect = create_histogram_side_effect
+
+        return meter
+
+    @pytest.fixture
+    def cluster_with_otel(self, r, mock_meter):
+        """
+        Setup a RedisCluster with real connection and mocked OTel collector.
+        Returns tuple of (cluster, operation_duration_mock).
+        """
+
+        # Reset any existing collector state
+        recorder.reset_collector()
+
+        # Create config with COMMAND group enabled
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        # Create collector with mocked meter
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Patch the recorder to use our collector
+        with patch.object(
+            recorder,
+            '_get_or_create_collector',
+            return_value=collector
+        ):
+            # Create a new event dispatcher and attach it to the cluster
+            event_dispatcher = EventDispatcher()
+            r._event_dispatcher = event_dispatcher
+
+            yield r, self.operation_duration
+
+        # Cleanup
+        recorder.reset_collector()
+
+    def test_execute_command_emits_event_to_meter(self, cluster_with_otel):
+        """
+        Test that execute_command emits AfterCommandExecutionEvent to Meter.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute a command
+        cluster.set('test_key', 'test_value')
+
+        # Verify the Meter's histogram.record() was called
+        operation_duration_mock.record.assert_called()
+
+        # Get the last call arguments
+        call_args = operation_duration_mock.record.call_args
+
+        # Verify duration was recorded
+        duration = call_args[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+        # Verify attributes
+        attrs = call_args[1]['attributes']
+        assert attrs['db.operation.name'] == 'SET'
+        assert 'server.address' in attrs
+        assert 'server.port' in attrs
+        assert 'db.namespace' in attrs
+
+    def test_get_command_emits_event_to_meter(self, cluster_with_otel):
+        """
+        Test that GET command emits event with correct command name.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute GET command
+        cluster.get('test_key')
+
+        # Verify command name is GET
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]['attributes']
+        assert attrs['db.operation.name'] == 'GET'
+
+    def test_multiple_commands_emit_multiple_events(self, cluster_with_otel):
+        """
+        Test that multiple command executions emit multiple events.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        # Execute multiple commands
+        cluster.set('key1', 'value1')
+        cluster.get('key1')
+        cluster.delete('key1')
+
+        # Verify histogram.record() was called 3 times
+        assert operation_duration_mock.record.call_count == 3
+
+    def test_server_attributes_recorded(self, cluster_with_otel):
+        """
+        Test that server address, port, and db namespace are recorded.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        cluster.ping()
+
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]['attributes']
+
+        # Verify server attributes are present and have valid values
+        assert 'server.address' in attrs
+        assert isinstance(attrs['server.address'], str)
+        assert len(attrs['server.address']) > 0
+
+        assert 'server.port' in attrs
+        assert isinstance(attrs['server.port'], int)
+        assert attrs['server.port'] > 0
+
+        assert 'db.namespace' in attrs
+
+    def test_duration_is_positive(self, cluster_with_otel):
+        """
+        Test that the recorded duration is a positive float.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        cluster.set('duration_test', 'value')
+
+        call_args = operation_duration_mock.record.call_args
+        duration = call_args[0][0]
+
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+    def test_no_batch_size_for_single_command(self, cluster_with_otel):
+        """
+        Test that single commands don't include batch_size attribute.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        cluster.get('single_command_key')
+
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]['attributes']
+
+        # batch_size should not be present for single commands
+        assert 'db.operation.batch_size' not in attrs
+
+    def test_different_commands_emit_correct_names(self, cluster_with_otel):
+        """
+        Test that different commands emit events with correct command names.
+        """
+        cluster, operation_duration_mock = cluster_with_otel
+
+        commands_to_test = [
+            ('SET', lambda: cluster.set('cmd_test', 'value')),
+            ('GET', lambda: cluster.get('cmd_test')),
+            ('DEL', lambda: cluster.delete('cmd_test')),
+            ('PING', lambda: cluster.ping()),
+        ]
+
+        for expected_cmd, cmd_func in commands_to_test:
+            operation_duration_mock.reset_mock()
+            cmd_func()
+
+            call_args = operation_duration_mock.record.call_args
+            attrs = call_args[1]['attributes']
+            assert attrs['db.operation.name'] == expected_cmd
+
+
+@pytest.mark.onlycluster
+class TestClusterPipelineEventEmission:
+    """
+    Integration tests that verify AfterCommandExecutionEvent is properly emitted
+    from ClusterPipeline and delivered to the Meter through the event dispatcher chain.
+
+    These tests use a real Redis cluster connection but mock the OTel Meter
+    to verify events are correctly emitted.
+    """
+
+    @pytest.fixture
+    def mock_meter(self):
+        """Create a mock Meter that tracks all instrument calls."""
+        meter = Mock()
+
+        # Create mock histogram for operation duration
+        self.operation_duration = Mock()
+
+        def create_histogram_side_effect(name, **kwargs):
+            if name == 'db.client.operation.duration':
+                return self.operation_duration
+            return Mock()
+
+        meter.create_counter.return_value = Mock()
+        meter.create_up_down_counter.return_value = Mock()
+        meter.create_histogram.side_effect = create_histogram_side_effect
+
+        return meter
+
+    @pytest.fixture
+    def cluster_pipeline_with_otel(self, r, mock_meter):
+        """
+        Setup a ClusterPipeline with real connection and mocked OTel collector.
+        Returns tuple of (cluster, operation_duration_mock).
+        """
+
+        # Reset any existing collector state
+        recorder.reset_collector()
+
+        # Create config with COMMAND group enabled
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        # Create collector with mocked meter
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Patch the recorder to use our collector
+        with patch.object(
+            recorder,
+            '_get_or_create_collector',
+            return_value=collector
+        ):
+            # Create a new event dispatcher and attach it to the cluster
+            event_dispatcher = EventDispatcher()
+            r._event_dispatcher = event_dispatcher
+
+            yield r, self.operation_duration
+
+        # Cleanup
+        recorder.reset_collector()
+
+    def test_pipeline_execute_emits_event_to_meter(self, cluster_pipeline_with_otel):
+        """
+        Test that pipeline execute emits AfterCommandExecutionEvent to Meter.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Execute a pipeline
+        pipe = cluster.pipeline()
+        pipe.set('pipe_key1', 'value1')
+        pipe.get('pipe_key1')
+        pipe.execute()
+
+        # Verify the Meter's histogram.record() was called
+        operation_duration_mock.record.assert_called()
+
+        # Get the last call arguments (pipeline event)
+        call_args = operation_duration_mock.record.call_args
+
+        # Verify duration was recorded
+        duration = call_args[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+        # Verify attributes
+        attrs = call_args[1]['attributes']
+        assert attrs['db.operation.name'] == 'PIPELINE'
+
+    def test_pipeline_batch_size_recorded(self, cluster_pipeline_with_otel):
+        """
+        Test that pipeline batch_size is correctly recorded.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Execute a pipeline with 3 commands
+        pipe = cluster.pipeline()
+        pipe.set('batch_key', 'value1')
+        pipe.get('batch_key')
+        pipe.delete('batch_key')
+        pipe.execute()
+
+        # Find the PIPELINE event call
+        pipeline_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]['attributes']
+            if attrs.get('db.operation.name') == 'PIPELINE':
+                pipeline_call = call_obj
+                break
+
+        assert pipeline_call is not None
+        attrs = pipeline_call[1]['attributes']
+        assert 'db.operation.batch.size' in attrs
+        assert attrs['db.operation.batch.size'] == 3
+
+    def test_pipeline_server_attributes_recorded(self, cluster_pipeline_with_otel):
+        """
+        Test that server address, port, and db namespace are recorded for pipeline.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        pipe = cluster.pipeline()
+        pipe.set('server_attr_key', 'value')
+        pipe.execute()
+
+        # Find the PIPELINE event call
+        pipeline_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]['attributes']
+            if attrs.get('db.operation.name') == 'PIPELINE':
+                pipeline_call = call_obj
+                break
+
+        assert pipeline_call is not None
+        attrs = pipeline_call[1]['attributes']
+
+        # Verify server attributes are present
+        assert 'server.address' in attrs
+        assert isinstance(attrs['server.address'], str)
+
+        assert 'server.port' in attrs
+        assert isinstance(attrs['server.port'], int)
+
+        assert 'db.namespace' in attrs
+
+    def test_pipeline_duration_is_positive(self, cluster_pipeline_with_otel):
+        """
+        Test that the recorded duration for pipeline is a positive float.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        pipe = cluster.pipeline()
+        pipe.set('duration_key', 'value')
+        pipe.execute()
+
+        # Find the PIPELINE event call
+        pipeline_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]['attributes']
+            if attrs.get('db.operation.name') == 'PIPELINE':
+                pipeline_call = call_obj
+                break
+
+        assert pipeline_call is not None
+        duration = pipeline_call[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+    def test_multiple_pipeline_executions_emit_multiple_events(
+        self, cluster_pipeline_with_otel
+    ):
+        """
+        Test that multiple pipeline executions emit multiple events.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Execute first pipeline
+        pipe1 = cluster.pipeline()
+        pipe1.set('multi_key1', 'value1')
+        pipe1.execute()
+
+        # Execute second pipeline
+        pipe2 = cluster.pipeline()
+        pipe2.set('multi_key2', 'value2')
+        pipe2.execute()
+
+        # Count PIPELINE events
+        pipeline_count = sum(
+            1 for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+        )
+
+        assert pipeline_count >= 2
+
+    def test_empty_pipeline_does_not_emit_event(self, cluster_pipeline_with_otel):
+        """
+        Test that an empty pipeline does not emit events.
+        """
+        cluster, operation_duration_mock = cluster_pipeline_with_otel
+
+        # Execute an empty pipeline
+        pipe = cluster.pipeline()
+        pipe.execute()
+
+        # Count PIPELINE events - should be 0
+        pipeline_count = sum(
+            1 for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+        )
+
+        assert pipeline_count == 0

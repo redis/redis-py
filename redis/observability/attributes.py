@@ -185,7 +185,6 @@ class AttributeBuilder:
     @staticmethod
     def build_error_attributes(
             is_internal: bool = False,
-            error_type: Optional[Exception] = None,
     ) -> Dict[str, Any]:
         """
         Build error attributes.
@@ -198,10 +197,6 @@ class AttributeBuilder:
             Dictionary of error attributes
         """
         attrs: Dict[str, Any] = {REDIS_CLIENT_ERROR_INTERNAL: is_internal}
-
-        if error_type is not None:
-            attrs[DB_RESPONSE_STATUS_CODE] = None
-
         return attrs
 
     @staticmethod
@@ -274,7 +269,11 @@ class AttributeBuilder:
         Returns:
             Error type string (exception class name)
         """
-        return type(exception).__name__
+
+        if hasattr(exception, "error_type"):
+            return repr(exception)
+        else:
+            return f"other:{type(exception).__name__}"
 
     @staticmethod
     def build_pool_name(

@@ -4,6 +4,11 @@ from unittest import mock
 import pytest
 from redis import RedisClusterException
 import redis
+from redis.client import Pipeline
+from redis.event import EventDispatcher
+from redis.observability import recorder
+from redis.observability.config import OTelConfig, MetricGroup
+from redis.observability.metrics import RedisMetricsCollector
 
 from .conftest import skip_if_server_version_lt, wait_for_command
 
@@ -454,3 +459,348 @@ class TestPipeline:
             p_transaction.msetex(
                 {"key1_transaction": "value1", "key2_transaction": "value2"}, ex=10
             )
+
+
+class TestPipelineEventEmission:
+    """
+    Unit tests that verify AfterCommandExecutionEvent is properly emitted from Pipeline
+    and delivered to the Meter through the event dispatcher chain.
+
+    These tests use fully mocked connection and connection pool - no real Redis
+    or OTel integration is used.
+    """
+
+    @pytest.fixture
+    def mock_connection(self):
+        """Create a mock connection with required attributes."""
+        conn = mock.MagicMock()
+        conn.host = 'localhost'
+        conn.port = 6379
+        conn.db = 0
+
+        # Mock retry to just execute the function directly
+        conn.retry.call_with_retry = lambda func, _: func()
+
+        return conn
+
+    @pytest.fixture
+    def mock_connection_pool(self, mock_connection):
+        """Create a mock connection pool."""
+        pool = mock.MagicMock()
+        pool.get_connection.return_value = mock_connection
+        pool.get_encoder.return_value = mock.MagicMock()
+        return pool
+
+    @pytest.fixture
+    def mock_meter(self):
+        """Create a mock Meter that tracks all instrument calls."""
+        meter = mock.MagicMock()
+
+        # Create mock histogram for operation duration
+        self.operation_duration = mock.MagicMock()
+
+        def create_histogram_side_effect(name, **kwargs):
+            if name == 'db.client.operation.duration':
+                return self.operation_duration
+            return mock.MagicMock()
+
+        meter.create_counter.return_value = mock.MagicMock()
+        meter.create_up_down_counter.return_value = mock.MagicMock()
+        meter.create_histogram.side_effect = create_histogram_side_effect
+
+        return meter
+
+    @pytest.fixture
+    def setup_pipeline_with_otel(self, mock_connection_pool, mock_connection, mock_meter):
+        """
+        Setup a Pipeline with mocked connection and OTel collector.
+        Returns tuple of (pipeline, operation_duration_mock).
+        """
+
+        # Reset any existing collector state
+        recorder.reset_collector()
+
+        # Create config with COMMAND group enabled
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        # Create collector with mocked meter
+        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Patch the recorder to use our collector
+        with mock.patch.object(
+            recorder,
+            '_get_or_create_collector',
+            return_value=collector
+        ):
+            # Create event dispatcher (real one, to test the full chain)
+            event_dispatcher = EventDispatcher()
+
+            # Create pipeline with mocked connection pool
+            pipeline = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+                event_dispatcher=event_dispatcher,
+            )
+
+            yield pipeline, self.operation_duration
+
+        # Cleanup
+        recorder.reset_collector()
+
+    def test_pipeline_execute_emits_event_to_meter(self, setup_pipeline_with_otel):
+        """
+        Test that executing a pipeline emits AfterCommandExecutionEvent
+        which is delivered to the Meter's histogram.record() method.
+        """
+        pipeline, operation_duration_mock = setup_pipeline_with_otel
+
+        # Mock _execute_transaction to return successful responses
+        pipeline._execute_transaction = mock.MagicMock(
+            return_value=[True, True, b'value1']
+        )
+
+        # Queue commands in the pipeline
+        pipeline.command_stack = [
+            (('SET', 'key1', 'value1'), {}),
+            (('SET', 'key2', 'value2'), {}),
+            (('GET', 'key1'), {}),
+        ]
+
+        # Execute the pipeline
+        pipeline.execute()
+
+        # Verify the Meter's histogram.record() was called
+        operation_duration_mock.record.assert_called_once()
+
+        # Get the call arguments
+        call_args = operation_duration_mock.record.call_args
+
+        # Verify duration was recorded (first positional arg)
+        duration = call_args[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+        # Verify attributes
+        attrs = call_args[1]['attributes']
+        assert attrs['db.operation.name'] == 'MULTI'
+        assert attrs['db.operation.batch.size'] == 3
+        assert attrs['server.address'] == 'localhost'
+        assert attrs['server.port'] == 6379
+        assert attrs['db.namespace'] == '0'
+
+    def test_pipeline_no_transaction_emits_pipeline_command_name(
+        self, mock_connection_pool, mock_connection, mock_meter
+    ):
+        """
+        Test that executing a pipeline without transaction
+        emits AfterCommandExecutionEvent with command_name='PIPELINE'.
+        """
+        recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            event_dispatcher = EventDispatcher()
+
+            # Create pipeline with transaction=False
+            pipeline = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=False,  # Non-transaction mode
+                shard_hint=None,
+                event_dispatcher=event_dispatcher,
+            )
+
+            pipeline._execute_pipeline = mock.MagicMock(return_value=[True, True])
+            pipeline.command_stack = [
+                (('SET', 'key1', 'value1'), {}),
+                (('SET', 'key2', 'value2'), {}),
+            ]
+
+            pipeline.execute()
+
+            # Verify command name is PIPELINE
+            call_args = self.operation_duration.record.call_args
+            attrs = call_args[1]['attributes']
+            assert attrs['db.operation.name'] == 'PIPELINE'
+
+        recorder.reset_collector()
+
+    def test_pipeline_error_emits_event_with_error(
+        self, mock_connection_pool, mock_connection, mock_meter
+    ):
+        """
+        Test that when a pipeline execution raises an exception,
+        AfterCommandExecutionEvent is still emitted with error information.
+        """
+        recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            event_dispatcher = EventDispatcher()
+
+            pipeline = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=False,
+                shard_hint=None,
+                event_dispatcher=event_dispatcher,
+            )
+
+            # Make execute raise an exception
+            test_error = redis.ResponseError("WRONGTYPE Operation error")
+            pipeline._execute_pipeline = mock.MagicMock(side_effect=test_error)
+            pipeline.command_stack = [(('LPUSH', 'string_key', 'value'), {})]
+
+            # Execute should raise the error
+            with pytest.raises(redis.ResponseError):
+                pipeline.execute()
+
+            # Verify the Meter's histogram.record() was still called
+            self.operation_duration.record.assert_called_once()
+
+            # Verify error type is recorded in attributes
+            call_args = self.operation_duration.record.call_args
+            attrs = call_args[1]['attributes']
+            assert attrs['db.operation.name'] == 'PIPELINE'
+            assert 'error.type' in attrs
+
+        recorder.reset_collector()
+
+    def test_pipeline_batch_size_recorded_correctly(self, setup_pipeline_with_otel):
+        """
+        Test that the batch_size attribute correctly reflects
+        the number of commands in the pipeline.
+        """
+        pipeline, operation_duration_mock = setup_pipeline_with_otel
+
+        pipeline._execute_transaction = mock.MagicMock(
+            return_value=[True, True, True, True, True]
+        )
+
+        # Queue exactly 5 commands
+        pipeline.command_stack = [
+            (('SET', 'key1', 'v1'), {}),
+            (('SET', 'key2', 'v2'), {}),
+            (('SET', 'key3', 'v3'), {}),
+            (('SET', 'key4', 'v4'), {}),
+            (('SET', 'key5', 'v5'), {}),
+        ]
+
+        pipeline.execute()
+
+        # Verify batch_size is 5
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]['attributes']
+        assert attrs['db.operation.batch.size'] == 5
+
+    def test_pipeline_server_attributes_recorded(self, setup_pipeline_with_otel):
+        """
+        Test that server address, port, and db namespace are correctly recorded.
+        """
+        pipeline, operation_duration_mock = setup_pipeline_with_otel
+
+        pipeline._execute_transaction = mock.MagicMock(return_value=[True])
+        pipeline.command_stack = [(('PING',), {})]
+
+        pipeline.execute()
+
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]['attributes']
+
+        # Verify server attributes match mock connection
+        assert attrs['server.address'] == 'localhost'
+        assert attrs['server.port'] == 6379
+        assert attrs['db.namespace'] == '0'
+
+    def test_multiple_pipeline_executions_emit_multiple_events(
+        self, mock_connection_pool, mock_connection, mock_meter
+    ):
+        """
+        Test that each pipeline execution emits a separate event to the Meter.
+        """
+        recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            event_dispatcher = EventDispatcher()
+
+            # First pipeline execution
+            pipeline1 = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+                event_dispatcher=event_dispatcher,
+            )
+            pipeline1._execute_transaction = mock.MagicMock(return_value=[True])
+            pipeline1.command_stack = [(('SET', 'key1', 'value1'), {})]
+            pipeline1.execute()
+
+            # Second pipeline execution
+            pipeline2 = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+                event_dispatcher=event_dispatcher,
+            )
+            pipeline2._execute_transaction = mock.MagicMock(return_value=[True, True])
+            pipeline2.command_stack = [
+                (('SET', 'key2', 'value2'), {}),
+                (('SET', 'key3', 'value3'), {}),
+            ]
+            pipeline2.execute()
+
+            # Verify histogram.record() was called twice
+            assert self.operation_duration.record.call_count == 2
+
+        recorder.reset_collector()
+
+    def test_empty_pipeline_does_not_emit_event(
+        self, mock_connection_pool, mock_connection, mock_meter
+    ):
+        """
+        Test that an empty pipeline (no commands) does not emit an event.
+        """
+        recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with mock.patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            event_dispatcher = EventDispatcher()
+
+            pipeline = Pipeline(
+                connection_pool=mock_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+                event_dispatcher=event_dispatcher,
+            )
+
+            # Empty command stack
+            pipeline.command_stack = []
+
+            # Execute empty pipeline
+            result = pipeline.execute()
+
+            # Should return empty list
+            assert result == []
+
+            # No event should be emitted for empty pipeline
+            self.operation_duration.record.assert_not_called()
+
+        recorder.reset_collector()

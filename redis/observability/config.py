@@ -16,8 +16,6 @@ class MetricGroup(IntFlag):
 class TelemetryOption(IntFlag):
     """Telemetry options to export."""
     METRICS = auto()
-    TRACES = auto()
-    LOGS = auto()
 
 
 """
@@ -165,5 +163,5 @@ class OTelConfig:
 
     def __repr__(self) -> str:
         return (
-            f"OTelConfig(enabled_telemetry={self.enabled_telemetry}, "
+            f"OTelConfig(enabled_telemetry={self.enabled_telemetry}"
         )
