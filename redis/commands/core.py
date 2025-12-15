@@ -6262,9 +6262,7 @@ class AsyncScriptCommands(ScriptCommands):
         return super().script_debug()
 
     def register_script(
-        self: Union[
-            "redis.asyncio.client.Redis", "redis.asyncio.cluster.RedisCluster"
-        ],
+        self: Union["redis.asyncio.client.Redis", "redis.asyncio.cluster.RedisCluster"],
         script: ScriptTextT,
     ) -> AsyncScript:
         """

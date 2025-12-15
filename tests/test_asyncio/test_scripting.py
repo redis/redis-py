@@ -163,12 +163,14 @@ class TestAsyncScriptTypeHints:
 
         This verifies the type hints fix for register_script to support RedisCluster.
         We use a mock-like approach since we don't need actual cluster connection.
+        Using bytes script to avoid encoder dependency in mock.
         """
         from unittest.mock import MagicMock
 
         # Create a mock RedisCluster instance
         mock_cluster = MagicMock(spec=RedisCluster)
-        test_script = "return 1"
+        # Using bytes script to bypass encoder.encode() call
+        test_script = b"return 1"
 
         # AsyncScript should accept RedisCluster without type errors
         script = AsyncScript(mock_cluster, test_script)

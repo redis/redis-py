@@ -54,11 +54,12 @@ class TestScript:
         assert encoder is not None
         assert encoder.encode("fake-script") == b"fake-script"
 
-    def test_script_with_cluster_client(self, script_str):
+    def test_script_with_cluster_client(self, script_bytes):
         """Test that Script class accepts RedisCluster as registered_client.
 
         This verifies the type hints fix for register_script to support RedisCluster.
         We use a mock-like approach since we don't need actual cluster connection.
+        Using bytes script to avoid encoder dependency in mock.
         """
         from unittest.mock import MagicMock
 
@@ -66,9 +67,10 @@ class TestScript:
         mock_cluster = MagicMock(spec=RedisCluster)
 
         # Script should accept RedisCluster without type errors
-        script = Script(mock_cluster, script_str)
+        # Using bytes script to bypass encoder.encode() call
+        script = Script(mock_cluster, script_bytes)
         assert script.registered_client is mock_cluster
-        assert script.script == script_str
+        assert script.script == script_bytes
 
 
 class TestScripting:
