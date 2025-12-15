@@ -231,9 +231,7 @@ def _get_client_maint_notifications(
     if not host:
         raise ValueError(f"Could not parse host from endpoint URL: {endpoints[0]}")
 
-    logging.info(
-        f"Connecting to Redis Enterprise: {host}:{port} with user: {username}"
-    )
+    logging.info(f"Connecting to Redis Enterprise: {host}:{port} with user: {username}")
 
     # Configure maintenance notifications
     maintenance_config = MaintNotificationsConfig(
