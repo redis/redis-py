@@ -84,13 +84,9 @@ class TestRedisClientEventEmission:
             '_get_or_create_collector',
             return_value=collector
         ):
-            # Create event dispatcher (real one, to test the full chain)
-            event_dispatcher = EventDispatcher()
-
             # Create Redis client with mocked connection pool
             client = redis.Redis(
                 connection_pool=mock_connection_pool,
-                event_dispatcher=event_dispatcher,
             )
 
             yield client, self.operation_duration
@@ -145,11 +141,8 @@ class TestRedisClientEventEmission:
         with mock.patch.object(
             recorder, '_get_or_create_collector', return_value=collector
         ):
-            event_dispatcher = EventDispatcher()
-
             client = redis.Redis(
                 connection_pool=mock_connection_pool,
-                event_dispatcher=event_dispatcher,
             )
 
             client._send_command_parse_response = mock.MagicMock(return_value=b'value1')
@@ -181,11 +174,8 @@ class TestRedisClientEventEmission:
         with mock.patch.object(
             recorder, '_get_or_create_collector', return_value=collector
         ):
-            event_dispatcher = EventDispatcher()
-
             client = redis.Redis(
                 connection_pool=mock_connection_pool,
-                event_dispatcher=event_dispatcher,
             )
 
             # Make command raise an exception
@@ -241,11 +231,8 @@ class TestRedisClientEventEmission:
         with mock.patch.object(
             recorder, '_get_or_create_collector', return_value=collector
         ):
-            event_dispatcher = EventDispatcher()
-
             client = redis.Redis(
                 connection_pool=mock_connection_pool,
-                event_dispatcher=event_dispatcher,
             )
 
             client._send_command_parse_response = mock.MagicMock(return_value=True)
@@ -292,11 +279,8 @@ class TestRedisClientEventEmission:
         with mock.patch.object(
             recorder, '_get_or_create_collector', return_value=collector
         ):
-            event_dispatcher = EventDispatcher()
-
             client = redis.Redis(
                 connection_pool=mock_connection_pool,
-                event_dispatcher=event_dispatcher,
             )
 
             client._send_command_parse_response = mock.MagicMock(return_value=True)

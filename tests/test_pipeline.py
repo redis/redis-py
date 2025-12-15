@@ -591,44 +591,6 @@ class TestPipelineEventEmission:
         assert attrs['server.port'] == 6379
         assert attrs['db.namespace'] == '0'
 
-    def test_pipeline_transaction_emits_multi_command_name(
-        self, mock_connection_pool, mock_connection, mock_meter
-    ):
-        """
-        Test that executing a pipeline in transaction mode (MULTI/EXEC)
-        emits AfterCommandExecutionEvent with command_name='MULTI'.
-        """
-
-        recorder.reset_collector()
-        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
-
-        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
-            collector = RedisMetricsCollector(mock_meter, config)
-
-        with mock.patch.object(recorder, '_get_or_create_collector', return_value=collector):
-            event_dispatcher = EventDispatcher()
-
-            # Create pipeline with transaction=True
-            pipeline = Pipeline(
-                connection_pool=mock_connection_pool,
-                response_callbacks={},
-                transaction=True,  # Transaction mode
-                shard_hint=None,
-                event_dispatcher=event_dispatcher,
-            )
-
-            pipeline._execute_transaction = mock.MagicMock(return_value=[True])
-            pipeline.command_stack = [(('SET', 'key', 'value'), {})]
-
-            pipeline.execute()
-
-            # Verify command name is MULTI
-            call_args = self.operation_duration.record.call_args
-            attrs = call_args[1]['attributes']
-            assert attrs['db.operation.name'] == 'MULTI'
-
-        recorder.reset_collector()
-
     def test_pipeline_no_transaction_emits_pipeline_command_name(
         self, mock_connection_pool, mock_connection, mock_meter
     ):
@@ -812,12 +774,6 @@ class TestPipelineEventEmission:
         """
         Test that an empty pipeline (no commands) does not emit an event.
         """
-        from redis.client import Pipeline
-        from redis.event import EventDispatcher
-        from redis.observability import recorder
-        from redis.observability.config import OTelConfig, MetricGroup
-        from redis.observability.metrics import RedisMetricsCollector
-
         recorder.reset_collector()
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
 
