@@ -24,7 +24,6 @@ from typing import (
     Union,
 )
 
-from docs.conf import version
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 from redis.typing import (
     AbsExpiryT,
