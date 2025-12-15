@@ -185,6 +185,7 @@ REDIS_ALLOWED_KEYS = (
     "ssl",
     "ssl_ca_certs",
     "ssl_ca_data",
+    "ssl_ca_path",
     "ssl_certfile",
     "ssl_cert_reqs",
     "ssl_include_verify_flags",
