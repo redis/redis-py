@@ -35,7 +35,7 @@ from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
-from .event import AfterConnectionReleasedEvent, EventDispatcher, OnErrorEvent
+from .event import AfterConnectionReleasedEvent, EventDispatcher, OnErrorEvent, OnMaintenanceNotificationEvent
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -51,7 +51,7 @@ from .maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
     MaintNotificationsConnectionHandler,
-    MaintNotificationsPoolHandler,
+    MaintNotificationsPoolHandler, MaintenanceNotification,
 )
 from .retry import Retry
 from .utils import (
@@ -387,6 +387,7 @@ class MaintNotificationsAbstractConnection:
         orig_socket_timeout=None,
         orig_socket_connect_timeout=None,
         parser: Optional[Union[_HiredisParser, _RESP3Parser]] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
         Enable maintenance notifications by setting up
@@ -452,6 +453,10 @@ class MaintNotificationsAbstractConnection:
             if orig_socket_connect_timeout
             else self.socket_connect_timeout
         )
+        if event_dispatcher is not None:
+            self.event_dispatcher = event_dispatcher
+        else:
+            self.event_dispatcher = EventDispatcher()
 
     def set_maint_notifications_pool_handler_for_connection(
         self, maint_notifications_pool_handler: MaintNotificationsPoolHandler

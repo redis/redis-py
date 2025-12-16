@@ -6,8 +6,10 @@ from enum import Enum
 from typing import Dict, List, Optional, Type, Union
 
 from redis.auth.token import TokenInterface
+from redis.connection import ConnectionInterface, AbstractConnection, MaintNotificationsAbstractConnection
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
-from redis.observability.recorder import record_operation_duration, record_error_count
+from redis.maint_notifications import MaintenanceNotification
+from redis.observability.recorder import record_operation_duration, record_error_count, record_maint_notification_count
 
 
 class EventListenerInterface(ABC):
@@ -325,6 +327,14 @@ class OnErrorEvent:
     is_internal: bool = True
     retry_attempts: Optional[int] = None
 
+@dataclass
+class OnMaintenanceNotificationEvent:
+    """
+    Event fired whenever a maintenance notification is received.
+    """
+    notification: MaintenanceNotification
+    connection: Union[AbstractConnection, MaintNotificationsAbstractConnection]
+
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
 
@@ -526,4 +536,17 @@ class ExportErrorCountMetric(EventListenerInterface):
             error_type=event.error,
             retry_attempts=event.retry_attempts,
             is_internal=event.is_internal,
+        )
+
+class ExportMaintenanceNotificationCountMetric(EventListenerInterface):
+    """
+    Listener that exports maintenance notification count metric.
+    """
+    def listen(self, event: OnMaintenanceNotificationEvent):
+        record_maint_notification_count(
+            server_address=event.connection.host,
+            server_port=event.connection.port,
+            network_peer_address=event.connection.host,
+            network_peer_port=event.connection.port,
+            maint_notification=repr(event.notification),
         )
