@@ -73,12 +73,14 @@ class TestPushNotificationsBase:
         endpoints_config: Dict[str, Any],
         target_node: str,
         empty_node: str,
+        skip_end_notification: bool = False,
     ):
         migrate_action_id = ClusterOperations.execute_migrate(
             fault_injector=fault_injector_client,
             endpoint_config=endpoints_config,
             target_node=target_node,
             empty_node=empty_node,
+            skip_end_notification=skip_end_notification,
         )
 
         self._migration_executed = True
@@ -118,6 +120,7 @@ class TestPushNotificationsBase:
             endpoints_config=endpoints_config,
             target_node=target_node,
             empty_node=empty_node,
+            skip_end_notification=True,
         )
         self._execute_bind(
             fault_injector_client=fault_injector_client,
@@ -1364,7 +1367,6 @@ class TestClusterClientPushNotifications(TestPushNotificationsBase):
                     )
             logging.debug(f"{threading.current_thread().name}: Thread ended")
 
-        logging.info("Creating one connection in the pool.")
         # get the node covering first shard - it is the node we will failover
         target_node = (
             cluster_client_maint_notifications.nodes_manager.get_node_from_slot(0)
@@ -1447,7 +1449,7 @@ class TestClusterClientPushNotifications(TestPushNotificationsBase):
             cluster_client_maint_notifications.nodes_manager.nodes_cache.copy()
         )
 
-        logging.info("Executing failover command...")
+        logging.info("Executing migrate command...")
         migration_thread = Thread(
             target=self._execute_migration,
             name="migration_thread",
@@ -1566,7 +1568,7 @@ class TestClusterClientPushNotifications(TestPushNotificationsBase):
             thread.start()
             threads.append(thread)
 
-        logging.info("Executing failover command...")
+        logging.info("Executing migrate command...")
         migration_thread = Thread(
             target=self._execute_migration,
             name="migration_thread",
@@ -1592,6 +1594,195 @@ class TestClusterClientPushNotifications(TestPushNotificationsBase):
             assert (
                 node_key in cluster_client_maint_notifications.nodes_manager.nodes_cache
             )
+
+        for (
+            node
+        ) in cluster_client_maint_notifications.nodes_manager.nodes_cache.values():
+            # validate connections settings
+            self._validate_default_state(
+                node.redis_connection,
+                expected_matching_conns_count=10,
+                configured_timeout=socket_timeout,
+            )
+
+        # validate no errors were raised in the command execution threads
+        assert errors.empty(), f"Errors occurred in threads: {errors.queue}"
+
+    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    def test_notification_handling_during_migration_and_re_bind(
+        self,
+        cluster_client_maint_notifications: RedisCluster,
+        fault_injector_client_oss_api: FaultInjectorClient,
+        cluster_endpoints_config: Dict[str, Any],
+    ):
+        """
+        Test the push notifications are received when executing re cluster operations.
+
+        """
+        # get the node covering first shard - it is the node we will have migrated slots
+        target_node = (
+            cluster_client_maint_notifications.nodes_manager.get_node_from_slot(0)
+        )
+        logging.info(
+            f"Creating one connection in the pool using node {target_node.name}."
+        )
+        conn = target_node.redis_connection.connection_pool.get_connection()
+        cluster_nodes = (
+            cluster_client_maint_notifications.nodes_manager.nodes_cache.copy()
+        )
+
+        logging.info("Executing migrate and bind flow ...")
+        migrate_and_bind_thread = Thread(
+            target=self._execute_migrate_bind_flow,
+            name="migrate_and_bind_thread",
+            args=(
+                fault_injector_client_oss_api,
+                cluster_endpoints_config,
+                self.target_node.node_id,
+                self.empty_node.node_id,
+                self.endpoint_id,
+            ),
+        )
+        migrate_and_bind_thread.start()
+
+        logging.info("Waiting for SMIGRATING push notifications...")
+        ClientValidations.wait_push_notification(
+            cluster_client_maint_notifications,
+            timeout=SMIGRATING_TIMEOUT,
+            connection=conn,
+        )
+
+        logging.info("Validating connection maintenance state...")
+        assert conn.maintenance_state == MaintenanceState.MAINTENANCE
+        assert conn._sock.gettimeout() == RELAXED_TIMEOUT
+        assert conn.should_reconnect() is False
+
+        assert len(cluster_nodes) == len(
+            cluster_client_maint_notifications.nodes_manager.nodes_cache
+        )
+        for node_key in cluster_nodes.keys():
+            assert (
+                node_key in cluster_client_maint_notifications.nodes_manager.nodes_cache
+            )
+
+        logging.info("Waiting for SMIGRATED push notifications...")
+        ClientValidations.wait_push_notification(
+            cluster_client_maint_notifications,
+            timeout=SMIGRATED_TIMEOUT,
+            connection=conn,
+        )
+
+        logging.info("Validating connection state after SMIGRATED ...")
+
+        assert conn.should_reconnect() is True
+
+        # the overall number of nodes should be the same - one removed and one added
+        assert len(cluster_nodes) == len(
+            cluster_client_maint_notifications.nodes_manager.nodes_cache
+        )
+        assert (
+            target_node.name
+            not in cluster_client_maint_notifications.nodes_manager.nodes_cache
+        )
+
+        logging.info("Releasing connection back to the pool...")
+        target_node.redis_connection.connection_pool.release(conn)
+
+        migrate_and_bind_thread.join()
+
+    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    def test_command_execution_during_migration_and_re_bind(
+        self,
+        fault_injector_client_oss_api: FaultInjectorClient,
+        cluster_endpoints_config: Dict[str, Any],
+    ):
+        """
+        Test the push notifications are received when executing re cluster operations.
+        """
+
+        errors = Queue()
+        if isinstance(fault_injector_client_oss_api, ProxyServerFaultInjector):
+            execution_duration = 20
+        else:
+            execution_duration = 180
+
+        socket_timeout = 0.5
+
+        cluster_client_maint_notifications = _get_cluster_client_maint_notifications(
+            endpoints_config=cluster_endpoints_config,
+            disable_retries=True,
+            socket_timeout=socket_timeout,
+            enable_maintenance_notifications=True,
+        )
+
+        def execute_commands(duration: int, errors: Queue):
+            start = time.time()
+            while time.time() - start < duration:
+                try:
+                    # the slot is covered by the first shard - this one will have slots migrated
+                    cluster_client_maint_notifications.set("key:{3}", "value")
+                    cluster_client_maint_notifications.get("key:{3}")
+                    # execute also commands that will run on the second shard
+                    cluster_client_maint_notifications.set("key:{0}", "value")
+                    cluster_client_maint_notifications.get("key:{0}")
+                except Exception as e:
+                    logging.error(
+                        f"Error in thread {threading.current_thread().name}: {e}"
+                    )
+                    errors.put(
+                        f"Command failed in thread {threading.current_thread().name}: {e}"
+                    )
+            logging.debug(f"{threading.current_thread().name}: Thread ended")
+
+        # get the node covering first shard - it is the node we will migrate and remove
+        target_node = (
+            cluster_client_maint_notifications.nodes_manager.get_node_from_slot(0)
+        )
+
+        cluster_nodes = (
+            cluster_client_maint_notifications.nodes_manager.nodes_cache.copy()
+        )
+
+        threads = []
+        for i in range(10):
+            thread = Thread(
+                target=execute_commands,
+                name=f"command_execution_thread_{i}",
+                args=(
+                    execution_duration,
+                    errors,
+                ),
+            )
+            thread.start()
+            threads.append(thread)
+
+        logging.info("Executing migrate and bind flow...")
+        migrate_and_bind_thread = Thread(
+            target=self._execute_migrate_bind_flow,
+            name="migrate_and_bind_thread",
+            args=(
+                fault_injector_client_oss_api,
+                cluster_endpoints_config,
+                self.target_node.node_id,
+                self.empty_node.node_id,
+                self.endpoint_id,
+            ),
+        )
+        migrate_and_bind_thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        migrate_and_bind_thread.join()
+
+        # validate cluster nodes
+        assert len(cluster_nodes) == len(
+            cluster_client_maint_notifications.nodes_manager.nodes_cache
+        )
+        assert (
+            target_node.name
+            not in cluster_client_maint_notifications.nodes_manager.nodes_cache
+        )
 
         for (
             node

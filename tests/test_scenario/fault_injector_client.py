@@ -113,6 +113,7 @@ class FaultInjectorClient(ABC):
         endpoint_config: Dict[str, Any],
         target_node: str,
         empty_node: str,
+        skip_end_notification: bool = False,
     ) -> str:
         pass
 
@@ -452,6 +453,7 @@ class REFaultInjector(FaultInjectorClient):
         endpoint_config: Dict[str, Any],
         target_node: str,
         empty_node: str,
+        skip_end_notification: bool = False,
     ) -> str:
         """Execute rladmin migrate command and wait for completion."""
         command = f"migrate node {target_node} all_shards target_node {empty_node}"
@@ -554,14 +556,19 @@ class ProxyServerFaultInjector(FaultInjectorClient):
         self.proxy_helper.set_cluster_slots(
             self.CLUSTER_SLOTS_INTERCEPTOR_NAME, self.DEFAULT_CLUSTER_SLOTS
         )
-        logging.info("Sleeping for 2 seconds to allow proxy to apply the changes...")
-        time.sleep(2)
 
         self.seq_id = 0
 
     def _get_seq_id(self):
         self.seq_id += 1
         return self.seq_id
+
+    def get_operation_result(
+        self,
+        action_id: str,
+        timeout: int = 60,
+    ) -> Dict[str, Any]:
+        return {"status": "done"}
 
     def find_target_node_and_empty_node(
         self,
@@ -633,7 +640,11 @@ class ProxyServerFaultInjector(FaultInjectorClient):
         return {"status": "done"}
 
     def execute_migrate(
-        self, endpoint_config: Dict[str, Any], target_node: str, empty_node: str
+        self,
+        endpoint_config: Dict[str, Any],
+        target_node: str,
+        empty_node: str,
+        skip_end_notification: bool = False,
     ) -> str:
         """
         Simulate migrate command execution.
@@ -661,25 +672,27 @@ class ProxyServerFaultInjector(FaultInjectorClient):
         time.sleep(self.SLEEP_TIME_BETWEEN_START_END_NOTIFICATIONS)
 
         if self.oss_cluster:
-            # intercept cluster slots
-            self.proxy_helper.set_cluster_slots(
-                self.CLUSTER_SLOTS_INTERCEPTOR_NAME,
-                [
-                    SlotsRange("127.0.0.1", self.NODE_PORT_2, 0, 200),
-                    SlotsRange("127.0.0.1", self.NODE_PORT_1, 201, 8191),
-                    SlotsRange("127.0.0.1", self.NODE_PORT_2, 8192, 16383),
-                ],
-            )
-            # send smigrated
-            end_maint_notif = RespTranslator.oss_maint_notification_to_resp(
-                f"SMIGRATED {self._get_seq_id()} 127.0.0.1:{self.NODE_PORT_2} 0-200"
-            )
+            if not skip_end_notification:
+                # intercept cluster slots
+                self.proxy_helper.set_cluster_slots(
+                    self.CLUSTER_SLOTS_INTERCEPTOR_NAME,
+                    [
+                        SlotsRange("127.0.0.1", self.NODE_PORT_2, 0, 200),
+                        SlotsRange("127.0.0.1", self.NODE_PORT_1, 201, 8191),
+                        SlotsRange("127.0.0.1", self.NODE_PORT_2, 8192, 16383),
+                    ],
+                )
+                # send smigrated
+                end_maint_notif = RespTranslator.oss_maint_notification_to_resp(
+                    f"SMIGRATED {self._get_seq_id()} 127.0.0.1:{self.NODE_PORT_2} 0-200"
+                )
+                self.proxy_helper.send_notification(self.NODE_PORT_1, end_maint_notif)
         else:
             # send migrated
             end_maint_notif = RespTranslator.re_cluster_maint_notification_to_resp(
                 f"MIGRATED {self._get_seq_id()} [1]"
             )
-        self.proxy_helper.send_notification(self.NODE_PORT_1, end_maint_notif)
+            self.proxy_helper.send_notification(self.NODE_PORT_1, end_maint_notif)
 
         return "done"
 
@@ -695,17 +708,15 @@ class ProxyServerFaultInjector(FaultInjectorClient):
         """
         sleep_time = self.SLEEP_TIME_BETWEEN_START_END_NOTIFICATIONS
         if self.oss_cluster:
-            # send smigrating
-            maint_start_notif = RespTranslator.oss_maint_notification_to_resp(
-                f"SMIGRATING {self._get_seq_id()} 0-8191"
-            )
+            # smigrating should be sent as part of the migrate flow
+            pass
         else:
             # send moving
             sleep_time = self.MOVING_TTL
             maint_start_notif = RespTranslator.re_cluster_maint_notification_to_resp(
                 f"MOVING {self._get_seq_id()} {sleep_time} 127.0.0.1:{self.NODE_PORT_3}"
             )
-        self.proxy_helper.send_notification(self.NODE_PORT_1, maint_start_notif)
+            self.proxy_helper.send_notification(self.NODE_PORT_1, maint_start_notif)
 
         # sleep to allow the client to receive the notification
         time.sleep(sleep_time)
@@ -725,7 +736,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
             )
             self.proxy_helper.send_notification(self.NODE_PORT_1, smigrated_node_1)
         else:
-            # TODO drop connections to node 1
+            # TODO drop connections to node 1 to simulate that the node is removed
             pass
 
         return "done"
