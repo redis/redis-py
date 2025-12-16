@@ -893,6 +893,67 @@ class TestPubSubPings:
 
 
 @pytest.mark.onlynoncluster
+class TestPubSubHealthCheckResponse:
+    """Tests for health check response validation with different decode_responses settings"""
+
+    def test_is_health_check_response_decode_false_list_format(self, r):
+        """Test is_health_check_response recognizes list format with decode_responses=False"""
+        p = r.pubsub()
+        # List format: [b"pong", b"redis-py-health-check"]
+        assert p.is_health_check_response([b"pong", b"redis-py-health-check"])
+
+    def test_is_health_check_response_decode_false_bytes_format(self, r):
+        """Test is_health_check_response recognizes bytes format with decode_responses=False"""
+        p = r.pubsub()
+        # Bytes format: b"redis-py-health-check"
+        assert p.is_health_check_response(b"redis-py-health-check")
+
+    def test_is_health_check_response_decode_false_rejects_string(self, r):
+        """Test is_health_check_response rejects string format with decode_responses=False"""
+        p = r.pubsub()
+        # String format should NOT be recognized when decode_responses=False
+        assert not p.is_health_check_response("redis-py-health-check")
+
+    def test_is_health_check_response_decode_true_list_format(self, request):
+        """Test is_health_check_response recognizes list format with decode_responses=True"""
+        r = _get_client(redis.Redis, request, decode_responses=True)
+        p = r.pubsub()
+        # List format: ["pong", "redis-py-health-check"]
+        assert p.is_health_check_response(["pong", "redis-py-health-check"])
+
+    def test_is_health_check_response_decode_true_string_format(self, request):
+        """Test is_health_check_response recognizes string format with decode_responses=True"""
+        r = _get_client(redis.Redis, request, decode_responses=True)
+        p = r.pubsub()
+        # String format: "redis-py-health-check" (THE FIX!)
+        assert p.is_health_check_response("redis-py-health-check")
+
+    def test_is_health_check_response_decode_true_rejects_bytes(self, request):
+        """Test is_health_check_response rejects bytes format with decode_responses=True"""
+        r = _get_client(redis.Redis, request, decode_responses=True)
+        p = r.pubsub()
+        # Bytes format should NOT be recognized when decode_responses=True
+        assert not p.is_health_check_response(b"redis-py-health-check")
+
+    def test_is_health_check_response_decode_true_rejects_invalid(self, request):
+        """Test is_health_check_response rejects invalid responses with decode_responses=True"""
+        r = _get_client(redis.Redis, request, decode_responses=True)
+        p = r.pubsub()
+        # Invalid responses should be rejected
+        assert not p.is_health_check_response("invalid-response")
+        assert not p.is_health_check_response(["pong", "invalid-response"])
+        assert not p.is_health_check_response(None)
+
+    def test_is_health_check_response_decode_false_rejects_invalid(self, r):
+        """Test is_health_check_response rejects invalid responses with decode_responses=False"""
+        p = r.pubsub()
+        # Invalid responses should be rejected
+        assert not p.is_health_check_response(b"invalid-response")
+        assert not p.is_health_check_response([b"pong", b"invalid-response"])
+        assert not p.is_health_check_response(None)
+
+
+@pytest.mark.onlynoncluster
 class TestPubSubConnectionKilled:
     @skip_if_server_version_lt("3.0.0")
     @skip_if_redis_enterprise()
