@@ -243,9 +243,11 @@ class Redis(
         ssl_exclude_verify_flags: Optional[List[VerifyFlags]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
+        ssl_ca_path: Optional[str] = None,
         ssl_check_hostname: bool = True,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
+        ssl_password: Optional[str] = None,
         max_connections: Optional[int] = None,
         single_connection_client: bool = False,
         health_check_interval: int = 0,
@@ -354,9 +356,11 @@ class Redis(
                             "ssl_exclude_verify_flags": ssl_exclude_verify_flags,
                             "ssl_ca_certs": ssl_ca_certs,
                             "ssl_ca_data": ssl_ca_data,
+                            "ssl_ca_path": ssl_ca_path,
                             "ssl_check_hostname": ssl_check_hostname,
                             "ssl_min_version": ssl_min_version,
                             "ssl_ciphers": ssl_ciphers,
+                            "ssl_password": ssl_password,
                         }
                     )
             # This arg only used if no pool is passed in

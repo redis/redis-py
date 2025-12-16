@@ -813,9 +813,11 @@ class SSLConnection(Connection):
         ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
+        ssl_ca_path: Optional[str] = None,
         ssl_check_hostname: bool = True,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
+        ssl_password: Optional[str] = None,
         **kwargs,
     ):
         if not SSL_AVAILABLE:
@@ -829,9 +831,11 @@ class SSLConnection(Connection):
             exclude_verify_flags=ssl_exclude_verify_flags,
             ca_certs=ssl_ca_certs,
             ca_data=ssl_ca_data,
+            ca_path=ssl_ca_path,
             check_hostname=ssl_check_hostname,
             min_version=ssl_min_version,
             ciphers=ssl_ciphers,
+            password=ssl_password,
         )
         super().__init__(**kwargs)
 
@@ -886,10 +890,12 @@ class RedisSSLContext:
         "exclude_verify_flags",
         "ca_certs",
         "ca_data",
+        "ca_path",
         "context",
         "check_hostname",
         "min_version",
         "ciphers",
+        "password",
     )
 
     def __init__(
@@ -901,9 +907,11 @@ class RedisSSLContext:
         exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
+        ca_path: Optional[str] = None,
         check_hostname: bool = False,
         min_version: Optional[TLSVersion] = None,
         ciphers: Optional[str] = None,
+        password: Optional[str] = None,
     ):
         if not SSL_AVAILABLE:
             raise RedisError("Python wasn't built with SSL support")
@@ -928,11 +936,13 @@ class RedisSSLContext:
         self.exclude_verify_flags = exclude_verify_flags
         self.ca_certs = ca_certs
         self.ca_data = ca_data
+        self.ca_path = ca_path
         self.check_hostname = (
             check_hostname if self.cert_reqs != ssl.CERT_NONE else False
         )
         self.min_version = min_version
         self.ciphers = ciphers
+        self.password = password
         self.context: Optional[SSLContext] = None
 
     def get(self) -> SSLContext:
@@ -946,10 +956,16 @@ class RedisSSLContext:
             if self.exclude_verify_flags:
                 for flag in self.exclude_verify_flags:
                     context.verify_flags &= ~flag
-            if self.certfile and self.keyfile:
-                context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
-            if self.ca_certs or self.ca_data:
-                context.load_verify_locations(cafile=self.ca_certs, cadata=self.ca_data)
+            if self.certfile or self.keyfile:
+                context.load_cert_chain(
+                    certfile=self.certfile,
+                    keyfile=self.keyfile,
+                    password=self.password,
+                )
+            if self.ca_certs or self.ca_data or self.ca_path:
+                context.load_verify_locations(
+                    cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
+                )
             if self.min_version is not None:
                 context.minimum_version = self.min_version
             if self.ciphers is not None:
