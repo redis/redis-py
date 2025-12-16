@@ -817,6 +817,7 @@ class SSLConnection(Connection):
         ssl_check_hostname: bool = True,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
+        ssl_password: Optional[str] = None,
         **kwargs,
     ):
         if not SSL_AVAILABLE:
@@ -834,6 +835,7 @@ class SSLConnection(Connection):
             check_hostname=ssl_check_hostname,
             min_version=ssl_min_version,
             ciphers=ssl_ciphers,
+            password=ssl_password,
         )
         super().__init__(**kwargs)
 
@@ -893,6 +895,7 @@ class RedisSSLContext:
         "check_hostname",
         "min_version",
         "ciphers",
+        "password",
     )
 
     def __init__(
@@ -908,6 +911,7 @@ class RedisSSLContext:
         check_hostname: bool = False,
         min_version: Optional[TLSVersion] = None,
         ciphers: Optional[str] = None,
+        password: Optional[str] = None,
     ):
         if not SSL_AVAILABLE:
             raise RedisError("Python wasn't built with SSL support")
@@ -938,6 +942,7 @@ class RedisSSLContext:
         )
         self.min_version = min_version
         self.ciphers = ciphers
+        self.password = password
         self.context: Optional[SSLContext] = None
 
     def get(self) -> SSLContext:
@@ -951,8 +956,12 @@ class RedisSSLContext:
             if self.exclude_verify_flags:
                 for flag in self.exclude_verify_flags:
                     context.verify_flags &= ~flag
-            if self.certfile and self.keyfile:
-                context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
+            if self.certfile or self.keyfile:
+                context.load_cert_chain(
+                    certfile=self.certfile,
+                    keyfile=self.keyfile,
+                    password=self.password,
+                )
             if self.ca_certs or self.ca_data or self.ca_path:
                 context.load_verify_locations(
                     cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
