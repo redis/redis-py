@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Python client for Redis database and key-value store"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [{ name = "Redis Inc.", email = "oss@redis.com" }]
 keywords = ["Redis", "database", "key-value-store"]
 classifiers = [
@@ -20,11 +20,11 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -41,6 +41,9 @@ ocsp = [
 ]
 jwt = [
     "PyJWT>=2.9.0",
+]
+circuit_breaker = [
+    "pybreaker>=1.4.0"
 ]
 
 [project.urls]
@@ -80,9 +83,15 @@ filterwarnings = [
     # Ignore a coverage warning when COVERAGE_CORE=sysmon for Pythons < 3.12.
     "ignore:sys.monitoring isn't available:coverage.exceptions.CoverageWarning",
 ]
+log_cli_level = "INFO"
+log_cli_date_format = "%H:%M:%S:%f"
+log_cli = false
+log_cli_format = "%(asctime)s %(levelname)s %(threadName)s: %(message)s"
+log_level = "INFO"
+capture = "yes"
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 88
 exclude = [
     "*.egg-info",

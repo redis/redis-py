@@ -7,13 +7,17 @@ import pytest
 from time import sleep
 
 from redis import Redis
+from redis.cache import CacheConfig
 from redis.connection import (
     AbstractConnection,
+    Connection,
     ConnectionPool,
     BlockingConnectionPool,
     MaintenanceState,
 )
+from redis.exceptions import ResponseError
 from redis.maint_notifications import (
+    EndpointType,
     MaintNotificationsConfig,
     NodeMigratingNotification,
     NodeMigratedNotification,
@@ -66,7 +70,7 @@ class Helpers:
         # and timeout is updated
         for connection in in_use_connections:
             if expected_should_reconnect != "any":
-                assert connection._should_reconnect == expected_should_reconnect
+                assert connection.should_reconnect() == expected_should_reconnect
             assert connection.host == expected_host_address
             assert connection.socket_timeout == expected_socket_timeout
             assert connection.socket_connect_timeout == expected_socket_connect_timeout
@@ -76,13 +80,12 @@ class Helpers:
                 connection.orig_socket_connect_timeout
                 == expected_orig_socket_connect_timeout
             )
-            if connection._sock is not None:
-                assert connection._sock.gettimeout() == expected_current_socket_timeout
-                assert connection._sock.connected is True
+            conn_socket = connection._get_socket()
+            if conn_socket is not None:
+                assert conn_socket.gettimeout() == expected_current_socket_timeout
+                assert conn_socket.connected is True
                 if expected_current_peername != "any":
-                    assert (
-                        connection._sock.getpeername()[0] == expected_current_peername
-                    )
+                    assert conn_socket.getpeername()[0] == expected_current_peername
             assert connection.maintenance_state == expected_state
 
     @staticmethod
@@ -110,7 +113,7 @@ class Helpers:
 
         connected_count = 0
         for connection in free_connections:
-            assert connection._should_reconnect is False
+            assert connection.should_reconnect() is False
             assert connection.host == expected_host_address
             assert connection.socket_timeout == expected_socket_timeout
             assert connection.socket_connect_timeout == expected_socket_connect_timeout
@@ -124,10 +127,11 @@ class Helpers:
             if expected_state == MaintenanceState.NONE:
                 assert connection.maintenance_notification_hash is None
 
-            if connection._sock is not None:
-                assert connection._sock.connected is True
+            conn_socket = connection._get_socket()
+            if conn_socket is not None:
+                assert conn_socket.connected is True
                 if connected_to_tmp_address and tmp_address != "any":
-                    assert connection._sock.getpeername()[0] == tmp_address
+                    assert conn_socket.getpeername()[0] == tmp_address
                 connected_count += 1
         assert connected_count == should_be_connected_count
 
@@ -199,7 +203,11 @@ class MockSocket:
 
         # Analyze the command and prepare appropriate response
         if b"HELLO" in data:
-            response = b"%7\r\n$6\r\nserver\r\n$5\r\nredis\r\n$7\r\nversion\r\n$5\r\n7.0.0\r\n$5\r\nproto\r\n:3\r\n$2\r\nid\r\n:1\r\n$4\r\nmode\r\n$10\r\nstandalone\r\n$4\r\nrole\r\n$6\r\nmaster\r\n$7\r\nmodules\r\n*0\r\n"
+            response = b"%7\r\n$6\r\nserver\r\n$5\r\nredis\r\n$7\r\nversion\r\n$5\r\n7.4.0\r\n$5\r\nproto\r\n:3\r\n$2\r\nid\r\n:1\r\n$4\r\nmode\r\n$10\r\nstandalone\r\n$4\r\nrole\r\n$6\r\nmaster\r\n$7\r\nmodules\r\n*0\r\n"
+            self.pending_responses.append(response)
+        elif b"MAINT_NOTIFICATIONS" in data and b"internal-ip" in data:
+            # Simulate error response - activate it only for internal-ip tests
+            response = b"+ERROR\r\n"
             self.pending_responses.append(response)
         elif b"SET" in data:
             response = b"+OK\r\n"
@@ -296,6 +304,38 @@ class MockSocket:
 
             raise BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
 
+    def recv_into(self, buffer, nbytes=0):
+        """
+        Receive data from Redis and write it into the provided buffer.
+        Returns the number of bytes written.
+
+        This method is used by the hiredis parser for efficient data reading.
+        """
+        if self.closed:
+            raise ConnectionError("Socket is closed")
+
+        # Use pending responses that were prepared when commands were sent
+        if self.pending_responses:
+            response = self.pending_responses.pop(0)
+            if b"MOVING" in response:
+                self.moving_sent = True
+
+            # Determine how many bytes to write
+            if nbytes == 0:
+                nbytes = len(buffer)
+
+            # Write data into the buffer (up to nbytes or response length)
+            bytes_to_write = min(len(response), nbytes, len(buffer))
+            buffer[:bytes_to_write] = response[:bytes_to_write]
+
+            return bytes_to_write
+        else:
+            # No data available - this should block or raise an exception
+            # For can_read checks, we should indicate no data is available
+            import errno
+
+            raise BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
+
     def fileno(self):
         """Return a fake file descriptor for select/poll operations."""
         return 1  # Fake file descriptor
@@ -324,6 +364,9 @@ class MockSocket:
         """Simulate setting socket options."""
         pass
 
+    def setblocking(self, blocking):
+        pass
+
     def getpeername(self):
         """Simulate getting peer name."""
         return self.address
@@ -337,8 +380,8 @@ class MockSocket:
         pass
 
 
-class TestMaintenanceNotificationsHandlingSingleProxy:
-    """Integration tests for maintenance notifications handling with real connection pool."""
+class TestMaintenanceNotificationsBase:
+    """Base class for maintenance notifications handling tests."""
 
     def setup_method(self):
         """Set up test fixtures with mocked sockets."""
@@ -383,9 +426,10 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
     def _get_client(
         self,
         pool_class,
+        connection_class=Connection,
+        enable_cache=False,
         max_connections=10,
         maint_notifications_config=None,
-        setup_pool_handler=False,
     ):
         """Helper method to create a pool and Redis client with maintenance notifications configuration.
 
@@ -393,7 +437,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
             pool_class: The connection pool class (ConnectionPool or BlockingConnectionPool)
             max_connections: Maximum number of connections in the pool (default: 10)
             maint_notifications_config: Optional MaintNotificationsConfig to use. If not provided,
-                                     uses self.config from setup_method (default: None)
+                                    uses self.config from setup_method (default: None)
             setup_pool_handler: Whether to set up pool handler for moving notifications (default: False)
 
         Returns:
@@ -404,26 +448,90 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
             if maint_notifications_config is not None
             else self.config
         )
+        pool_kwargs = {}
+        if enable_cache:
+            pool_kwargs = {"cache_config": CacheConfig()}
 
         test_pool = pool_class(
+            connection_class=connection_class,
             host=DEFAULT_ADDRESS.split(":")[0],
             port=int(DEFAULT_ADDRESS.split(":")[1]),
             max_connections=max_connections,
             protocol=3,  # Required for maintenance notifications
             maint_notifications_config=config,
+            **pool_kwargs,
         )
         test_redis_client = Redis(connection_pool=test_pool)
 
-        # Set up pool handler for moving notifications if requested
-        if setup_pool_handler:
-            pool_handler = MaintNotificationsPoolHandler(
-                test_redis_client.connection_pool, config
-            )
-            test_redis_client.connection_pool.set_maint_notifications_pool_handler(
-                pool_handler
-            )
-
         return test_redis_client
+
+
+class TestMaintenanceNotificationsHandshake(TestMaintenanceNotificationsBase):
+    """Integration tests for maintenance notifications handling with real connection pool."""
+
+    def test_handshake_success_when_enabled(self):
+        """Test that handshake is performed correctly."""
+        maint_notifications_config = MaintNotificationsConfig(
+            enabled=True, endpoint_type=EndpointType.EXTERNAL_IP
+        )
+        test_redis_client = self._get_client(
+            ConnectionPool, maint_notifications_config=maint_notifications_config
+        )
+
+        try:
+            # Perform Redis operations that should work with our improved mock responses
+            result_set = test_redis_client.set("hello", "world")
+            result_get = test_redis_client.get("hello")
+
+            # Verify operations completed successfully
+            assert result_set is True
+            assert result_get == b"world"
+
+        finally:
+            test_redis_client.close()
+
+    def test_handshake_success_when_auto_and_command_not_supported(self):
+        """Test that when maintenance notifications are set to 'auto', the client gracefully handles unsupported MAINT_NOTIFICATIONS commands and normal Redis operations succeed."""
+        maint_notifications_config = MaintNotificationsConfig(
+            enabled="auto", endpoint_type=EndpointType.INTERNAL_IP
+        )
+        test_redis_client = self._get_client(
+            ConnectionPool, maint_notifications_config=maint_notifications_config
+        )
+
+        try:
+            # Perform Redis operations that should work with our improved mock responses
+            result_set = test_redis_client.set("hello", "world")
+            result_get = test_redis_client.get("hello")
+
+            # Verify operations completed successfully
+            assert result_set is True
+            assert result_get == b"world"
+
+        finally:
+            test_redis_client.close()
+
+    def test_handshake_failure_when_enabled(self):
+        """Test that handshake is performed correctly."""
+        maint_notifications_config = MaintNotificationsConfig(
+            enabled=True, endpoint_type=EndpointType.INTERNAL_IP
+        )
+        test_redis_client = self._get_client(
+            ConnectionPool, maint_notifications_config=maint_notifications_config
+        )
+        try:
+            with pytest.raises(ResponseError):
+                # handshake should fail
+                # socket mock will return error when enabling maint notifications
+                # for internal-ip
+                test_redis_client.set("hello", "world")
+
+        finally:
+            test_redis_client.close()
+
+
+class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificationsBase):
+    """Integration tests for maintenance notifications handling with real connection pool."""
 
     def _validate_connection_handlers(self, conn, pool_handler, config):
         """Helper method to validate connection handlers are properly set."""
@@ -432,7 +540,13 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         assert parser_handler is not None
         assert hasattr(parser_handler, "__self__")
         assert hasattr(parser_handler, "__func__")
-        assert parser_handler.__self__ is pool_handler
+        assert parser_handler.__self__.connection is conn
+        assert parser_handler.__self__.pool is pool_handler.pool
+        assert parser_handler.__self__._lock is pool_handler._lock
+        assert (
+            parser_handler.__self__._processed_notifications
+            is pool_handler._processed_notifications
+        )
         assert parser_handler.__func__ is pool_handler.handle_notification.__func__
 
         # Test that the maintenance handler function is correctly set
@@ -502,36 +616,12 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         assert pool_handler.config == self.config
 
         conn = test_redis_client.connection_pool.get_connection()
-        assert conn._should_reconnect is False
+
+        assert conn.should_reconnect() is False
         assert conn.orig_host_address == "localhost"
         assert conn.orig_socket_timeout is None
 
-        # Test that the node moving handler function is correctly set by
-        # comparing the underlying function and instance
-        parser_handler = conn._parser.node_moving_push_handler_func
-        assert parser_handler is not None
-        assert hasattr(parser_handler, "__self__")
-        assert hasattr(parser_handler, "__func__")
-        assert parser_handler.__self__ is pool_handler
-        assert parser_handler.__func__ is pool_handler.handle_notification.__func__
-
-        # Test that the maintenance handler function is correctly set
-        maintenance_handler = conn._parser.maintenance_push_handler_func
-        assert maintenance_handler is not None
-        assert hasattr(maintenance_handler, "__self__")
-        assert hasattr(maintenance_handler, "__func__")
-        # The maintenance handler should be bound to the connection's
-        # maintenance notification connection handler
-        assert (
-            maintenance_handler.__self__ is conn._maint_notifications_connection_handler
-        )
-        assert (
-            maintenance_handler.__func__
-            is conn._maint_notifications_connection_handler.handle_notification.__func__
-        )
-
-        # Validate that the connection's maintenance handler has the same config object
-        assert conn._maint_notifications_connection_handler.config is self.config
+        self._validate_connection_handlers(conn, pool_handler, self.config)
 
     def test_maint_handler_init_for_existing_connections(self):
         """Test that maintenance notification handlers are properly set on existing and new connections
@@ -556,13 +646,13 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         enabled_config = MaintNotificationsConfig(
             enabled=True, proactive_reconnect=True, relaxed_timeout=30
         )
-        pool_handler = MaintNotificationsPoolHandler(
-            test_redis_client.connection_pool, enabled_config
-        )
-        test_redis_client.connection_pool.set_maint_notifications_pool_handler(
-            pool_handler
+        test_redis_client.connection_pool.update_maint_notifications_config(
+            enabled_config
         )
 
+        pool_handler = (
+            test_redis_client.connection_pool._maint_notifications_pool_handler
+        )
         # Validate the existing connection after enabling maintenance notifications
         # Both existing and new connections should now have full handler setup
         self._validate_connection_handlers(existing_conn, pool_handler, enabled_config)
@@ -570,6 +660,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         # Create a new connection and validate it has full handlers
         new_conn = test_redis_client.connection_pool.get_connection()
         self._validate_connection_handlers(new_conn, pool_handler, enabled_config)
+        self._validate_connection_handlers(existing_conn, pool_handler, enabled_config)
 
         # Clean up connections
         test_redis_client.connection_pool.release(existing_conn)
@@ -591,11 +682,11 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
                 == self.config
             )
             # Pool should have maintenance notifications enabled
-            assert test_pool.maint_notifications_pool_handler_enabled() is True
+            assert test_pool.maint_notifications_enabled() is True
 
             # Create and set a pool handler
-            pool_handler = MaintNotificationsPoolHandler(test_pool, self.config)
-            test_pool.set_maint_notifications_pool_handler(pool_handler)
+            test_pool.update_maint_notifications_config(self.config)
+            pool_handler = test_pool._maint_notifications_pool_handler
 
             # Validate that the handler is properly set on the pool
             assert (
@@ -982,9 +1073,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         5. Tests both ConnectionPool and BlockingConnectionPool implementations
         """
         # Create a pool and Redis client with maintenance notifications and pool handler
-        test_redis_client = self._get_client(
-            pool_class, max_connections=10, setup_pool_handler=True
-        )
+        test_redis_client = self._get_client(pool_class, max_connections=10)
 
         try:
             # Create several connections and return them in the pool
@@ -1116,9 +1205,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         5. Tests both ConnectionPool and BlockingConnectionPool implementations
         """
         # Create a pool and Redis client with maintenance notifications and pool handler
-        test_redis_client = self._get_client(
-            pool_class, max_connections=10, setup_pool_handler=True
-        )
+        test_redis_client = self._get_client(pool_class, max_connections=10)
 
         try:
             # Create several connections and return them in the pool
@@ -1265,9 +1352,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         3. Pool configuration is properly applied to newly created connections
         """
         # Create a pool and Redis client with maintenance notifications and pool handler
-        test_redis_client = self._get_client(
-            pool_class, max_connections=10, setup_pool_handler=True
-        )
+        test_redis_client = self._get_client(pool_class, max_connections=10)
 
         try:
             # Create several connections and return them in the pool
@@ -1325,13 +1410,15 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
             assert new_connection.host == AFTER_MOVING_ADDRESS.split(":")[0]
             assert new_connection.socket_timeout is self.config.relaxed_timeout
             # New connections should be connected to the temporary address
-            assert new_connection._sock is not None
-            assert new_connection._sock.connected is True
+            assert new_connection._get_socket() is not None
+            assert new_connection._get_socket().connected is True
             assert (
-                new_connection._sock.getpeername()[0]
+                new_connection._get_socket().getpeername()[0]
                 == AFTER_MOVING_ADDRESS.split(":")[0]
             )
-            assert new_connection._sock.gettimeout() == self.config.relaxed_timeout
+            assert (
+                new_connection._get_socket().gettimeout() == self.config.relaxed_timeout
+            )
 
         finally:
             if hasattr(test_redis_client.connection_pool, "disconnect"):
@@ -1348,9 +1435,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         3. New connections don't inherit temporary settings
         """
         # Create a pool and Redis client with maintenance notifications and pool handler
-        test_redis_client = self._get_client(
-            pool_class, max_connections=10, setup_pool_handler=True
-        )
+        test_redis_client = self._get_client(pool_class, max_connections=10)
 
         try:
             # Create several connections and return them in the pool
@@ -1391,10 +1476,10 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
             assert new_connection.orig_host_address == DEFAULT_ADDRESS.split(":")[0]
             assert new_connection.orig_socket_timeout is None
             # New connections should be connected to the original address
-            assert new_connection._sock is not None
-            assert new_connection._sock.connected is True
+            assert new_connection._get_socket() is not None
+            assert new_connection._get_socket().connected is True
             # Socket timeout should be None (original timeout)
-            assert new_connection._sock.gettimeout() is None
+            assert new_connection._get_socket().gettimeout() is None
 
         finally:
             if hasattr(test_redis_client.connection_pool, "disconnect"):
@@ -1415,9 +1500,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         it should not decrease timeouts (future refactoring consideration).
         """
         # Create a pool and Redis client with maintenance notifications and pool handler
-        test_redis_client = self._get_client(
-            pool_class, max_connections=10, setup_pool_handler=True
-        )
+        test_redis_client = self._get_client(pool_class, max_connections=10)
 
         try:
             # Create several connections and return them in the pool
@@ -1501,8 +1584,8 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
                 # Note: New connections may not inherit the exact relaxed timeout value
                 # but they should have the temporary host address
                 # New connections should be connected
-                if connection._sock is not None:
-                    assert connection._sock.connected is True
+                if connection._get_socket() is not None:
+                    assert connection._get_socket().connected is True
 
             # Release the new connections
             for connection in new_connections:
@@ -1523,9 +1606,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         Ensures that the second MOVING notification updates the pool and connections as expected, and that expiry/cleanup works.
         """
         global AFTER_MOVING_ADDRESS
-        test_redis_client = self._get_client(
-            pool_class, max_connections=5, setup_pool_handler=True
-        )
+        test_redis_client = self._get_client(pool_class, max_connections=5)
         try:
             # Create and release some connections
             in_use_connections = []
@@ -1634,7 +1715,6 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
                     expected_current_socket_timeout=self.config.relaxed_timeout,
                     expected_current_peername=orig_after_moving.split(":")[0],
                 )
-                # print(test_redis_client.connection_pool._available_connections)
                 Helpers.validate_free_connections_state(
                     test_redis_client.connection_pool,
                     should_be_connected_count=1,
@@ -1677,9 +1757,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         """
         import threading
 
-        test_redis_client = self._get_client(
-            pool_class, max_connections=5, setup_pool_handler=True
-        )
+        test_redis_client = self._get_client(pool_class, max_connections=5)
         results = []
         errors = []
 
@@ -1716,8 +1794,18 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         if hasattr(test_redis_client.connection_pool, "disconnect"):
             test_redis_client.connection_pool.disconnect()
 
-    @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
-    def test_moving_migrating_migrated_moved_state_transitions(self, pool_class):
+    @pytest.mark.parametrize(
+        "pool_class,enable_cache",
+        [
+            (ConnectionPool, False),
+            (ConnectionPool, True),
+            (BlockingConnectionPool, False),
+            (BlockingConnectionPool, True),
+        ],
+    )
+    def test_moving_migrating_migrated_moved_state_transitions(
+        self, pool_class, enable_cache
+    ):
         """
         Test moving configs are not lost if the per connection notifications get picked up after moving is handled.
         Sequence of notifications: MOVING, MIGRATING, MIGRATED, FAILING_OVER, FAILED_OVER, MOVED.
@@ -1726,17 +1814,18 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
         """
         # Setup
         test_redis_client = self._get_client(
-            pool_class, max_connections=5, setup_pool_handler=True
+            pool_class,
+            max_connections=5,
+            enable_cache=enable_cache,
         )
         pool = test_redis_client.connection_pool
-        pool_handler = pool.connection_kwargs["maint_notifications_pool_handler"]
 
         # Create and release some connections
         in_use_connections = []
         for _ in range(3):
             in_use_connections.append(pool.get_connection())
 
-        pool_handler.set_connection(in_use_connections[0])
+        pool_handler = in_use_connections[0]._maint_notifications_pool_handler
 
         while len(in_use_connections) > 0:
             pool.release(in_use_connections.pop())
@@ -1891,39 +1980,15 @@ class TestMaintenanceNotificationsHandlingSingleProxy:
             pool.disconnect()
 
 
-class TestMaintenanceNotificationsHandlingMultipleProxies:
+class TestMaintenanceNotificationsHandlingMultipleProxies(
+    TestMaintenanceNotificationsBase
+):
     """Integration tests for maintenance notifications handling with real connection pool."""
 
     def setup_method(self):
         """Set up test fixtures with mocked sockets."""
-        self.mock_sockets = []
-        self.original_socket = socket.socket
+        super().setup_method()
         self.orig_host = "test.address.com"
-
-        # Mock socket creation to return our mock sockets
-        def mock_socket_factory(*args, **kwargs):
-            mock_sock = MockSocket()
-            self.mock_sockets.append(mock_sock)
-            return mock_sock
-
-        self.socket_patcher = patch("socket.socket", side_effect=mock_socket_factory)
-        self.socket_patcher.start()
-
-        # Mock select.select to simulate data availability for reading
-        def mock_select(rlist, wlist, xlist, timeout=0):
-            # Check if any of the sockets in rlist have data available
-            ready_sockets = []
-            for sock in rlist:
-                if hasattr(sock, "connected") and sock.connected and not sock.closed:
-                    # Only return socket as ready if it actually has data to read
-                    if hasattr(sock, "pending_responses") and sock.pending_responses:
-                        ready_sockets.append(sock)
-                    # Don't return socket as ready just because it received commands
-                    # Only when there are actual responses available
-            return (ready_sockets, [], [])
-
-        self.select_patcher = patch("select.select", side_effect=mock_select)
-        self.select_patcher.start()
 
         ips = ["1.2.3.4", "5.6.7.8", "9.10.11.12"]
         ips = ips * 3
@@ -1952,15 +2017,9 @@ class TestMaintenanceNotificationsHandlingMultipleProxies:
         )
         self.getaddrinfo_patcher.start()
 
-        # Create maintenance notifications config
-        self.config = MaintNotificationsConfig(
-            enabled=True, proactive_reconnect=True, relaxed_timeout=30
-        )
-
     def teardown_method(self):
         """Clean up test fixtures."""
-        self.socket_patcher.stop()
-        self.select_patcher.stop()
+        super().teardown_method()
         self.getaddrinfo_patcher.stop()
 
     @pytest.mark.parametrize("pool_class", [ConnectionPool, BlockingConnectionPool])
@@ -1975,10 +2034,8 @@ class TestMaintenanceNotificationsHandlingMultipleProxies:
             protocol=3,  # Required for maintenance notifications
             maint_notifications_config=self.config,
         )
-        pool.set_maint_notifications_pool_handler(
-            MaintNotificationsPoolHandler(pool, self.config)
-        )
-        pool_handler = pool.connection_kwargs["maint_notifications_pool_handler"]
+
+        pool_handler = pool._maint_notifications_pool_handler
 
         # Create and release some connections
         key1 = "1.2.3.4"

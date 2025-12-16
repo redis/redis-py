@@ -71,7 +71,9 @@ class TestCache:
         # get key from redis and save in local cache
         assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"bar",
             "bar",
         ]
@@ -80,10 +82,94 @@ class TestCache:
         # Retrieves a new value from server and cache it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"barbar",
             "barbar",
         ]
+
+    @pytest.mark.parametrize(
+        "r",
+        [
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": True,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+            },
+            {
+                "cache": DefaultCache(CacheConfig(max_size=5)),
+                "single_connection_client": False,
+                "decode_responses": True,
+            },
+        ],
+        ids=["single", "pool", "decoded"],
+        indirect=True,
+    )
+    @pytest.mark.onlynoncluster
+    def test_hash_get_from_given_cache(self, r, r2):
+        cache = r.get_cache()
+        hash_key = "hash_foo_key"
+        field_1 = "bar"
+        field_2 = "bar2"
+
+        # add hash key to redis
+        r.hset(hash_key, field_1, "baz")
+        r.hset(hash_key, field_2, "baz2")
+        # get keys from redis and save them in local cache
+        assert r.hget(hash_key, field_1) in [b"baz", "baz"]
+        assert r.hget(hash_key, field_2) in [b"baz2", "baz2"]
+        # get key from local cache
+        assert cache.get(
+            CacheKey(
+                command="HGET",
+                redis_keys=(hash_key,),
+                redis_args=("HGET", hash_key, field_1),
+            )
+        ).cache_value in [
+            b"baz",
+            "baz",
+        ]
+        assert cache.get(
+            CacheKey(
+                command="HGET",
+                redis_keys=(hash_key,),
+                redis_args=("HGET", hash_key, field_2),
+            )
+        ).cache_value in [
+            b"baz2",
+            "baz2",
+        ]
+        # change key in redis (cause invalidation)
+        r2.hset(hash_key, field_1, "barbar")
+        # Retrieves a new value from server and cache it
+        assert r.hget(hash_key, field_1) in [b"barbar", "barbar"]
+        # Make sure that new value was cached
+        assert cache.get(
+            CacheKey(
+                command="HGET",
+                redis_keys=(hash_key,),
+                redis_args=("HGET", hash_key, field_1),
+            )
+        ).cache_value in [
+            b"barbar",
+            "barbar",
+        ]
+        # The other field is also reset, because the invalidation message contains only the hash key.
+        assert (
+            cache.get(
+                CacheKey(
+                    command="HGET",
+                    redis_keys=(hash_key,),
+                    redis_args=("HGET", hash_key, field_2),
+                )
+            )
+            is None
+        )
+        assert r.hget(hash_key, field_2) in [b"baz2", "baz2"]
 
     @pytest.mark.parametrize(
         "r",
@@ -116,7 +202,9 @@ class TestCache:
         # get key from redis and save in local cache
         assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"bar",
             "bar",
         ]
@@ -129,7 +217,9 @@ class TestCache:
         # Retrieves a new value from server and cache it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"barbar",
             "barbar",
         ]
@@ -158,7 +248,9 @@ class TestCache:
         assert r.get("foo") == b"bar"
         # get key from local cache
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            cache.get(
+                CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            ).cache_value
             == b"bar"
         )
         # Force disconnection
@@ -194,22 +286,37 @@ class TestCache:
         assert r.get("foo3") == b"bar3"
         # get the 3 keys from local cache
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            cache.get(
+                CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            ).cache_value
             == b"bar"
         )
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo2",))).cache_value
+            cache.get(
+                CacheKey(
+                    command="GET", redis_keys=("foo2",), redis_args=("GET", "foo2")
+                )
+            ).cache_value
             == b"bar2"
         )
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo3",))).cache_value
+            cache.get(
+                CacheKey(
+                    command="GET", redis_keys=("foo3",), redis_args=("GET", "foo3")
+                )
+            ).cache_value
             == b"bar3"
         )
         # add 1 more key to redis (exceed the max size)
         r.set("foo4", "bar4")
         assert r.get("foo4") == b"bar4"
         # the first key is not in the local cache anymore
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))) is None
+        assert (
+            cache.get(
+                CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            )
+            is None
+        )
         assert cache.size == 3
 
     @pytest.mark.parametrize(
@@ -234,7 +341,16 @@ class TestCache:
         assert r.hset("foo", "bar", "baz")
         # get random field
         assert r.hrandfield("foo") == b"bar"
-        assert cache.get(CacheKey(command="HRANDFIELD", redis_keys=("foo",))) is None
+        assert (
+            cache.get(
+                CacheKey(
+                    command="HRANDFIELD",
+                    redis_keys=("foo",),
+                    redis_args=("HRANDFIELD", "foo"),
+                )
+            )
+            is None
+        )
 
     @pytest.mark.parametrize(
         "r",
@@ -262,7 +378,13 @@ class TestCache:
         # Make sure that replies was cached
         assert res == [b"bar", b"foo"]
         assert (
-            cache.get(CacheKey(command="MGET", redis_keys=("foo", "bar"))).cache_value
+            cache.get(
+                CacheKey(
+                    command="MGET",
+                    redis_keys=("foo", "bar"),
+                    redis_args=("MGET", "foo", "bar"),
+                )
+            ).cache_value
             == res
         )
 
@@ -275,9 +397,20 @@ class TestCache:
         # all associated cached entries was removed
         assert r.set("foo", "baz")
         assert r.get("foo") == b"baz"
-        assert cache.get(CacheKey(command="MGET", redis_keys=("foo", "bar"))) is None
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            cache.get(
+                CacheKey(
+                    command="MGET",
+                    redis_keys=("foo", "bar"),
+                    redis_args=("MGET", "foo", "bar"),
+                )
+            )
+            is None
+        )
+        assert (
+            cache.get(
+                CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            ).cache_value
             == b"baz"
         )
 
@@ -309,15 +442,21 @@ class TestCache:
         assert r.get("bar") == b"foo"
         assert r.get("baz") == b"bar"
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            cache.get(
+                CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            ).cache_value
             == b"bar"
         )
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("bar",))).cache_value
+            cache.get(
+                CacheKey(command="GET", redis_keys=("bar",), redis_args=("GET", "bar"))
+            ).cache_value
             == b"foo"
         )
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("baz",))).cache_value
+            cache.get(
+                CacheKey(command="GET", redis_keys=("baz",), redis_args=("GET", "baz"))
+            ).cache_value
             == b"bar"
         )
 
@@ -352,7 +491,9 @@ class TestClusterCache:
         # get key from redis and save in local cache
         assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"bar",
             "bar",
         ]
@@ -361,7 +502,9 @@ class TestClusterCache:
         # Retrieves a new value from server and cache it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"barbar",
             "barbar",
         ]
@@ -393,7 +536,9 @@ class TestClusterCache:
         # get key from redis and save in local cache
         assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"bar",
             "bar",
         ]
@@ -402,7 +547,9 @@ class TestClusterCache:
         # Retrieves a new value from server and cache it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"barbar",
             "barbar",
         ]
@@ -425,7 +572,9 @@ class TestClusterCache:
         assert r.get("foo") == b"bar"
         # get key from local cache
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            cache.get(
+                CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            ).cache_value
             == b"bar"
         )
         # Force disconnection
@@ -457,22 +606,49 @@ class TestClusterCache:
         assert r.get("foo3{slot}") == b"bar3"
         # get the 3 keys from local cache
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo{slot}",))).cache_value
+            cache.get(
+                CacheKey(
+                    command="GET",
+                    redis_keys=("foo{slot}",),
+                    redis_args=("GET", "foo{slot}"),
+                )
+            ).cache_value
             == b"bar"
         )
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo2{slot}",))).cache_value
+            cache.get(
+                CacheKey(
+                    command="GET",
+                    redis_keys=("foo2{slot}",),
+                    redis_args=("GET", "foo2{slot}"),
+                )
+            ).cache_value
             == b"bar2"
         )
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo3{slot}",))).cache_value
+            cache.get(
+                CacheKey(
+                    command="GET",
+                    redis_keys=("foo3{slot}",),
+                    redis_args=("GET", "foo3{slot}"),
+                )
+            ).cache_value
             == b"bar3"
         )
         # add 1 more key to redis (exceed the max size)
         r.set("foo4{slot}", "bar4")
         assert r.get("foo4{slot}") == b"bar4"
         # the first key is not in the local cache_data anymore
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo{slot}",))) is None
+        assert (
+            cache.get(
+                CacheKey(
+                    command="GET",
+                    redis_keys=("foo{slot}",),
+                    redis_args=("GET", "foo{slot}"),
+                )
+            )
+            is None
+        )
 
     @pytest.mark.parametrize(
         "r",
@@ -490,7 +666,16 @@ class TestClusterCache:
         assert r.hset("foo", "bar", "baz")
         # get random field
         assert r.hrandfield("foo") == b"bar"
-        assert cache.get(CacheKey(command="HRANDFIELD", redis_keys=("foo",))) is None
+        assert (
+            cache.get(
+                CacheKey(
+                    command="HRANDFIELD",
+                    redis_keys=("foo",),
+                    redis_args=("HRANDFIELD", "foo"),
+                )
+            )
+            is None
+        )
 
     @pytest.mark.parametrize(
         "r",
@@ -511,7 +696,15 @@ class TestClusterCache:
         # Make sure that replies was cached
         assert r.mget("foo{slot}", "bar{slot}") == [b"bar", b"foo"]
         assert cache.get(
-            CacheKey(command="MGET", redis_keys=("foo{slot}", "bar{slot}")),
+            CacheKey(
+                command="MGET",
+                redis_keys=("foo{slot}", "bar{slot}"),
+                redis_args=(
+                    "MGET",
+                    "foo{slot}",
+                    "bar{slot}",
+                ),
+            ),
         ).cache_value == [b"bar", b"foo"]
 
         # Invalidate one of the keys and make sure
@@ -520,12 +713,22 @@ class TestClusterCache:
         assert r.get("foo{slot}") == b"baz"
         assert (
             cache.get(
-                CacheKey(command="MGET", redis_keys=("foo{slot}", "bar{slot}")),
+                CacheKey(
+                    command="MGET",
+                    redis_keys=("foo{slot}", "bar{slot}"),
+                    redis_args=("MGET", "foo{slot}", "bar{slot}"),
+                ),
             )
             is None
         )
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo{slot}",))).cache_value
+            cache.get(
+                CacheKey(
+                    command="GET",
+                    redis_keys=("foo{slot}",),
+                    redis_args=("GET", "foo{slot}"),
+                )
+            ).cache_value
             == b"baz"
         )
 
@@ -551,15 +754,33 @@ class TestClusterCache:
         assert r.get("bar{slot}") == b"foo"
         assert r.get("baz{slot}") == b"bar"
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo{slot}",))).cache_value
+            cache.get(
+                CacheKey(
+                    command="GET",
+                    redis_keys=("foo{slot}",),
+                    redis_args=("GET", "foo{slot}"),
+                )
+            ).cache_value
             == b"bar"
         )
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("bar{slot}",))).cache_value
+            cache.get(
+                CacheKey(
+                    command="GET",
+                    redis_keys=("bar{slot}",),
+                    redis_args=("GET", "bar{slot}"),
+                )
+            ).cache_value
             == b"foo"
         )
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("baz{slot}",))).cache_value
+            cache.get(
+                CacheKey(
+                    command="GET",
+                    redis_keys=("baz{slot}",),
+                    redis_args=("GET", "baz{slot}"),
+                )
+            ).cache_value
             == b"bar"
         )
 
@@ -595,7 +816,9 @@ class TestSentinelCache:
         # get key from redis and save in local cache_data
         assert master.get("foo") in [b"bar", "bar"]
         # get key from local cache_data
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"bar",
             "bar",
         ]
@@ -604,7 +827,9 @@ class TestSentinelCache:
         # get key from redis
         assert master.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"barbar",
             "barbar",
         ]
@@ -631,7 +856,9 @@ class TestSentinelCache:
         # get key from redis and save in local cache_data
         assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache_data
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"bar",
             "bar",
         ]
@@ -641,7 +868,9 @@ class TestSentinelCache:
         # Retrieves a new value from server and cache_data it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"barbar",
             "barbar",
         ]
@@ -665,7 +894,9 @@ class TestSentinelCache:
         assert master.get("foo") == b"bar"
         # get key from local cache_data
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            cache.get(
+                CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            ).cache_value
             == b"bar"
         )
         # Force disconnection
@@ -701,7 +932,9 @@ class TestSSLCache:
         # get key from redis and save in local cache_data
         assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache_data
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"bar",
             "bar",
         ]
@@ -713,7 +946,9 @@ class TestSSLCache:
         # Retrieves a new value from server and cache_data it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"barbar",
             "barbar",
         ]
@@ -742,7 +977,9 @@ class TestSSLCache:
         # get key from redis and save in local cache_data
         assert r.get("foo") in [b"bar", "bar"]
         # get key from local cache_data
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"bar",
             "bar",
         ]
@@ -754,7 +991,9 @@ class TestSSLCache:
         # Retrieves a new value from server and cache_data it
         assert r.get("foo") in [b"barbar", "barbar"]
         # Make sure that new value was cached
-        assert cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value in [
+        assert cache.get(
+            CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        ).cache_value in [
             b"barbar",
             "barbar",
         ]
@@ -779,7 +1018,11 @@ class TestSSLCache:
         # Make sure that replies was cached
         assert r.mget("foo", "bar") == [b"bar", b"foo"]
         assert cache.get(
-            CacheKey(command="MGET", redis_keys=("foo", "bar"))
+            CacheKey(
+                command="MGET",
+                redis_keys=("foo", "bar"),
+                redis_args=("MGET", "foo", "bar"),
+            )
         ).cache_value == [b"bar", b"foo"]
 
         # Invalidate one of the keys and make sure
@@ -789,9 +1032,20 @@ class TestSSLCache:
         # between data appears in socket buffer
         time.sleep(0.1)
         assert r.get("foo") == b"baz"
-        assert cache.get(CacheKey(command="MGET", redis_keys=("foo", "bar"))) is None
         assert (
-            cache.get(CacheKey(command="GET", redis_keys=("foo",))).cache_value
+            cache.get(
+                CacheKey(
+                    command="MGET",
+                    redis_keys=("foo", "bar"),
+                    redis_args=("MGET", "foo", "bar"),
+                )
+            )
+            is None
+        )
+        assert (
+            cache.get(
+                CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            ).cache_value
             == b"baz"
         )
 
@@ -868,9 +1122,15 @@ class TestUnitDefaultCache:
 
     def test_set_evict_lru_cache_key_on_reaching_max_size(self, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=3))
-        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
-        cache_key2 = CacheKey(command="GET", redis_keys=("foo1",))
-        cache_key3 = CacheKey(command="GET", redis_keys=("foo2",))
+        cache_key1 = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_key2 = CacheKey(
+            command="GET", redis_keys=("foo1",), redis_args=("GET", "foo1")
+        )
+        cache_key3 = CacheKey(
+            command="GET", redis_keys=("foo2",), redis_args=("GET", "foo2")
+        )
 
         # Set 3 different keys
         assert cache.set(
@@ -904,7 +1164,9 @@ class TestUnitDefaultCache:
         assert cache.get(cache_key3).cache_value == b"bar2"
         assert cache.get(cache_key1).cache_value == b"bar"
 
-        cache_key4 = CacheKey(command="GET", redis_keys=("foo3",))
+        cache_key4 = CacheKey(
+            command="GET", redis_keys=("foo3",), redis_args=("GET", "foo3")
+        )
         assert cache.set(
             CacheEntry(
                 cache_key=cache_key4,
@@ -934,7 +1196,9 @@ class TestUnitDefaultCache:
         )
         assert cache.get(cache_key).cache_value == b"val"
 
-        wrong_key = CacheKey(command="HGET", redis_keys=("foo",))
+        wrong_key = CacheKey(
+            command="HGET", redis_keys=("foo",), redis_args=("HGET", "foo", "bar")
+        )
         assert cache.get(wrong_key) is None
 
         result = cache.get(cache_key)
@@ -953,10 +1217,18 @@ class TestUnitDefaultCache:
     def test_delete_by_cache_keys_removes_associated_entries(self, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
-        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
-        cache_key2 = CacheKey(command="GET", redis_keys=("foo1",))
-        cache_key3 = CacheKey(command="GET", redis_keys=("foo2",))
-        cache_key4 = CacheKey(command="GET", redis_keys=("foo3",))
+        cache_key1 = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_key2 = CacheKey(
+            command="GET", redis_keys=("foo1",), redis_args=("GET", "foo1")
+        )
+        cache_key3 = CacheKey(
+            command="GET", redis_keys=("foo2",), redis_args=("GET", "foo2")
+        )
+        cache_key4 = CacheKey(
+            command="GET", redis_keys=("foo3",), redis_args=("GET", "foo3")
+        )
 
         # Set 3 different keys
         assert cache.set(
@@ -995,10 +1267,22 @@ class TestUnitDefaultCache:
     def test_delete_by_redis_keys_removes_associated_entries(self, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
-        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
-        cache_key2 = CacheKey(command="GET", redis_keys=("foo1",))
-        cache_key3 = CacheKey(command="MGET", redis_keys=("foo", "foo3"))
-        cache_key4 = CacheKey(command="MGET", redis_keys=("foo2", "foo3"))
+        cache_key1 = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_key2 = CacheKey(
+            command="GET", redis_keys=("foo1",), redis_args=("GET", "foo1")
+        )
+        cache_key3 = CacheKey(
+            command="MGET",
+            redis_keys=("foo", "foo3"),
+            redis_args=("MGET", "foo", "foo3"),
+        )
+        cache_key4 = CacheKey(
+            command="MGET",
+            redis_keys=("foo2", "foo3"),
+            redis_args=("MGET", "foo2", "foo3"),
+        )
 
         # Set 3 different keys
         assert cache.set(
@@ -1038,12 +1322,52 @@ class TestUnitDefaultCache:
         assert len(cache.collection) == 1
         assert cache.get(cache_key4).cache_value == b"bar3"
 
+    def test_delete_by_redis_keys_with_non_utf8_bytes_key(self, mock_connection):
+        """cache fails to invalidate entries when redis_keys contain non-UTF-8 bytes."""
+        cache = DefaultCache(CacheConfig(max_size=5))
+
+        # Valid UTF-8 key works
+        utf8_key = b"foo"
+        utf8_cache_key = CacheKey(command="GET", redis_keys=(utf8_key,))
+        assert cache.set(
+            CacheEntry(
+                cache_key=utf8_cache_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        # Non-UTF-8 bytes key
+        bad_key = b"f\xffoo"
+        bad_cache_key = CacheKey(command="GET", redis_keys=(bad_key,))
+        assert cache.set(
+            CacheEntry(
+                cache_key=bad_cache_key,
+                cache_value=b"bar2",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        # Delete both keys: utf8 should succeed, non-utf8 exposes bug
+        results = cache.delete_by_redis_keys([utf8_key, bad_key])
+
+        assert results[0] is True
+        assert results[1] is True, "Cache did not remove entry for non-UTF8 bytes key"
+
     def test_flush(self, mock_connection):
         cache = DefaultCache(CacheConfig(max_size=5))
 
-        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
-        cache_key2 = CacheKey(command="GET", redis_keys=("foo1",))
-        cache_key3 = CacheKey(command="GET", redis_keys=("foo2",))
+        cache_key1 = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_key2 = CacheKey(
+            command="GET", redis_keys=("foo1",), redis_args=("GET", "foo1")
+        )
+        cache_key3 = CacheKey(
+            command="GET", redis_keys=("foo2",), redis_args=("GET", "foo2")
+        )
 
         # Set 3 different keys
         assert cache.set(
@@ -1086,8 +1410,12 @@ class TestUnitLRUPolicy:
         )
         policy = cache.eviction_policy
 
-        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
-        cache_key2 = CacheKey(command="GET", redis_keys=("bar",))
+        cache_key1 = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_key2 = CacheKey(
+            command="GET", redis_keys=("bar",), redis_args=("GET", "bar")
+        )
 
         assert cache.set(
             CacheEntry(
@@ -1114,9 +1442,15 @@ class TestUnitLRUPolicy:
             CacheConfig(max_size=5, eviction_policy=EvictionPolicy.LRU)
         )
         policy = cache.eviction_policy
-        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
-        cache_key2 = CacheKey(command="GET", redis_keys=("bar",))
-        cache_key3 = CacheKey(command="GET", redis_keys=("baz",))
+        cache_key1 = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_key2 = CacheKey(
+            command="GET", redis_keys=("bar",), redis_args=("GET", "bar")
+        )
+        cache_key3 = CacheKey(
+            command="GET", redis_keys=("baz",), redis_args=("GET", "baz")
+        )
 
         assert cache.set(
             CacheEntry(
@@ -1156,8 +1490,12 @@ class TestUnitLRUPolicy:
         )
         policy = cache.eviction_policy
 
-        cache_key1 = CacheKey(command="GET", redis_keys=("foo",))
-        cache_key2 = CacheKey(command="GET", redis_keys=("bar",))
+        cache_key1 = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache_key2 = CacheKey(
+            command="GET", redis_keys=("bar",), redis_args=("GET", "bar")
+        )
 
         cache.set(
             CacheEntry(

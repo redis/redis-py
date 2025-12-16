@@ -30,11 +30,12 @@ from ..utils import SSL_AVAILABLE
 
 if SSL_AVAILABLE:
     import ssl
-    from ssl import SSLContext, TLSVersion
+    from ssl import SSLContext, TLSVersion, VerifyFlags
 else:
     ssl = None
     TLSVersion = None
     SSLContext = None
+    VerifyFlags = None
 
 from ..auth.token import TokenInterface
 from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
@@ -56,6 +57,7 @@ from redis.exceptions import (
     AuthenticationWrongNumberOfArgsError,
     ConnectionError,
     DataError,
+    MaxConnectionsError,
     RedisError,
     ResponseError,
     TimeoutError,
@@ -212,6 +214,7 @@ class AbstractConnection:
         self._connect_callbacks: List[weakref.WeakMethod[ConnectCallbackT]] = []
         self._buffer_cutoff = 6000
         self._re_auth_token: Optional[TokenInterface] = None
+        self._should_reconnect = False
 
         try:
             p = int(protocol)
@@ -293,7 +296,14 @@ class AbstractConnection:
 
     async def connect(self):
         """Connects to the Redis server if not already connected"""
-        await self.connect_check_health(check_health=True)
+        # try once the socket connect with the handshake, retry the whole
+        # connect/handshake flow based on retry policy
+        await self.retry.call_with_retry(
+            lambda: self.connect_check_health(
+                check_health=True, retry_socket_connect=False
+            ),
+            lambda error: self.disconnect(),
+        )
 
     async def connect_check_health(
         self, check_health: bool = True, retry_socket_connect: bool = True
@@ -341,6 +351,12 @@ class AbstractConnection:
             task = callback(self)
             if task and inspect.isawaitable(task):
                 await task
+
+    def mark_for_reconnect(self):
+        self._should_reconnect = True
+
+    def should_reconnect(self):
+        return self._should_reconnect
 
     @abstractmethod
     async def _connect(self):
@@ -793,11 +809,15 @@ class SSLConnection(Connection):
         ssl_keyfile: Optional[str] = None,
         ssl_certfile: Optional[str] = None,
         ssl_cert_reqs: Union[str, ssl.VerifyMode] = "required",
+        ssl_include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
+        ssl_ca_path: Optional[str] = None,
         ssl_check_hostname: bool = True,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
+        ssl_password: Optional[str] = None,
         **kwargs,
     ):
         if not SSL_AVAILABLE:
@@ -807,11 +827,15 @@ class SSLConnection(Connection):
             keyfile=ssl_keyfile,
             certfile=ssl_certfile,
             cert_reqs=ssl_cert_reqs,
+            include_verify_flags=ssl_include_verify_flags,
+            exclude_verify_flags=ssl_exclude_verify_flags,
             ca_certs=ssl_ca_certs,
             ca_data=ssl_ca_data,
+            ca_path=ssl_ca_path,
             check_hostname=ssl_check_hostname,
             min_version=ssl_min_version,
             ciphers=ssl_ciphers,
+            password=ssl_password,
         )
         super().__init__(**kwargs)
 
@@ -831,6 +855,14 @@ class SSLConnection(Connection):
     @property
     def cert_reqs(self):
         return self.ssl_context.cert_reqs
+
+    @property
+    def include_verify_flags(self):
+        return self.ssl_context.include_verify_flags
+
+    @property
+    def exclude_verify_flags(self):
+        return self.ssl_context.exclude_verify_flags
 
     @property
     def ca_certs(self):
@@ -854,12 +886,16 @@ class RedisSSLContext:
         "keyfile",
         "certfile",
         "cert_reqs",
+        "include_verify_flags",
+        "exclude_verify_flags",
         "ca_certs",
         "ca_data",
+        "ca_path",
         "context",
         "check_hostname",
         "min_version",
         "ciphers",
+        "password",
     )
 
     def __init__(
@@ -867,11 +903,15 @@ class RedisSSLContext:
         keyfile: Optional[str] = None,
         certfile: Optional[str] = None,
         cert_reqs: Optional[Union[str, ssl.VerifyMode]] = None,
+        include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
+        ca_path: Optional[str] = None,
         check_hostname: bool = False,
         min_version: Optional[TLSVersion] = None,
         ciphers: Optional[str] = None,
+        password: Optional[str] = None,
     ):
         if not SSL_AVAILABLE:
             raise RedisError("Python wasn't built with SSL support")
@@ -892,13 +932,17 @@ class RedisSSLContext:
                 )
             cert_reqs = CERT_REQS[cert_reqs]
         self.cert_reqs = cert_reqs
+        self.include_verify_flags = include_verify_flags
+        self.exclude_verify_flags = exclude_verify_flags
         self.ca_certs = ca_certs
         self.ca_data = ca_data
+        self.ca_path = ca_path
         self.check_hostname = (
             check_hostname if self.cert_reqs != ssl.CERT_NONE else False
         )
         self.min_version = min_version
         self.ciphers = ciphers
+        self.password = password
         self.context: Optional[SSLContext] = None
 
     def get(self) -> SSLContext:
@@ -906,10 +950,22 @@ class RedisSSLContext:
             context = ssl.create_default_context()
             context.check_hostname = self.check_hostname
             context.verify_mode = self.cert_reqs
-            if self.certfile and self.keyfile:
-                context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
-            if self.ca_certs or self.ca_data:
-                context.load_verify_locations(cafile=self.ca_certs, cadata=self.ca_data)
+            if self.include_verify_flags:
+                for flag in self.include_verify_flags:
+                    context.verify_flags |= flag
+            if self.exclude_verify_flags:
+                for flag in self.exclude_verify_flags:
+                    context.verify_flags &= ~flag
+            if self.certfile or self.keyfile:
+                context.load_cert_chain(
+                    certfile=self.certfile,
+                    keyfile=self.keyfile,
+                    password=self.password,
+                )
+            if self.ca_certs or self.ca_data or self.ca_path:
+                context.load_verify_locations(
+                    cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
+                )
             if self.min_version is not None:
                 context.minimum_version = self.min_version
             if self.ciphers is not None:
@@ -953,6 +1009,20 @@ def to_bool(value) -> Optional[bool]:
     return bool(value)
 
 
+def parse_ssl_verify_flags(value):
+    # flags are passed in as a string representation of a list,
+    # e.g. VERIFY_X509_STRICT, VERIFY_X509_PARTIAL_CHAIN
+    verify_flags_str = value.replace("[", "").replace("]", "")
+
+    verify_flags = []
+    for flag in verify_flags_str.split(","):
+        flag = flag.strip()
+        if not hasattr(VerifyFlags, flag):
+            raise ValueError(f"Invalid ssl verify flag: {flag}")
+        verify_flags.append(getattr(VerifyFlags, flag))
+    return verify_flags
+
+
 URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyType(
     {
         "db": int,
@@ -963,6 +1033,8 @@ URL_QUERY_ARGUMENT_PARSERS: Mapping[str, Callable[..., object]] = MappingProxyTy
         "max_connections": int,
         "health_check_interval": int,
         "ssl_check_hostname": to_bool,
+        "ssl_include_verify_flags": parse_ssl_verify_flags,
+        "ssl_exclude_verify_flags": parse_ssl_verify_flags,
         "timeout": float,
     }
 )
@@ -1021,6 +1093,7 @@ def parse_url(url: str) -> ConnectKwargs:
 
         if parsed.scheme == "rediss":
             kwargs["connection_class"] = SSLConnection
+
     else:
         valid_schemes = "redis://, rediss://, unix://"
         raise ValueError(
@@ -1159,7 +1232,7 @@ class ConnectionPool:
             connection = self._available_connections.pop()
         except IndexError:
             if len(self._in_use_connections) >= self.max_connections:
-                raise ConnectionError("Too many connections") from None
+                raise MaxConnectionsError("Too many connections") from None
             connection = self.make_connection()
         self._in_use_connections.add(connection)
         return connection
@@ -1198,6 +1271,9 @@ class ConnectionPool:
         # Connections should always be returned to the correct pool,
         # not doing so is an error that will cause an exception here.
         self._in_use_connections.remove(connection)
+        if connection.should_reconnect():
+            await connection.disconnect()
+
         self._available_connections.append(connection)
         await self._event_dispatcher.dispatch_async(
             AsyncAfterConnectionReleasedEvent(connection)
@@ -1224,6 +1300,14 @@ class ConnectionPool:
         exc = next((r for r in resp if isinstance(r, BaseException)), None)
         if exc:
             raise exc
+
+    async def update_active_connections_for_reconnect(self):
+        """
+        Mark all active connections for reconnect.
+        """
+        async with self._lock:
+            for conn in self._in_use_connections:
+                conn.mark_for_reconnect()
 
     async def aclose(self) -> None:
         """Close the pool, disconnecting all connections"""
@@ -1296,7 +1380,7 @@ class BlockingConnectionPool(ConnectionPool):
     def __init__(
         self,
         max_connections: int = 50,
-        timeout: Optional[int] = 20,
+        timeout: Optional[float] = 20,
         connection_class: Type[AbstractConnection] = Connection,
         queue_class: Type[asyncio.Queue] = asyncio.LifoQueue,  # deprecated
         **connection_kwargs,

@@ -1,13 +1,17 @@
 import datetime
 import logging
 import textwrap
+import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Dict, List, Mapping, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, TypeVar, Union
 
 from redis.exceptions import DataError
 from redis.typing import AbsExpiryT, EncodableT, ExpiryT
+
+if TYPE_CHECKING:
+    from redis.client import Redis
 
 try:
     import hiredis  # noqa
@@ -39,7 +43,7 @@ except ImportError:
 from importlib import metadata
 
 
-def from_url(url, **kwargs):
+def from_url(url: str, **kwargs: Any) -> "Redis":
     """
     Returns an active Redis client generated from the given database URL.
 
@@ -312,3 +316,109 @@ def truncate_text(txt, max_length=100):
     return textwrap.shorten(
         text=txt, width=max_length, placeholder="...", break_long_words=True
     )
+
+
+def dummy_fail():
+    """
+    Fake function for a Retry object if you don't need to handle each failure.
+    """
+    pass
+
+
+async def dummy_fail_async():
+    """
+    Async fake function for a Retry object if you don't need to handle each failure.
+    """
+    pass
+
+
+def experimental(cls):
+    """
+    Decorator to mark a class as experimental.
+    """
+    original_init = cls.__init__
+
+    @wraps(original_init)
+    def new_init(self, *args, **kwargs):
+        warnings.warn(
+            f"{cls.__name__} is an experimental and may change or be removed in future versions.",
+            category=UserWarning,
+            stacklevel=2,
+        )
+        original_init(self, *args, **kwargs)
+
+    cls.__init__ = new_init
+    return cls
+
+
+def warn_experimental(name, stacklevel=2):
+    import warnings
+
+    msg = (
+        f"Call to experimental method {name}. "
+        "Be aware that the function arguments can "
+        "change or be removed in future versions."
+    )
+    warnings.warn(msg, category=UserWarning, stacklevel=stacklevel)
+
+
+def experimental_method() -> Callable[[C], C]:
+    """
+    Decorator to mark a function as experimental.
+    """
+
+    def decorator(func: C) -> C:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            warn_experimental(func.__name__, stacklevel=2)
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def warn_experimental_arg_usage(
+    arg_name: Union[list, str],
+    function_name: str,
+    stacklevel: int = 2,
+):
+    import warnings
+
+    msg = (
+        f"Call to '{function_name}' method with experimental"
+        f" usage of input argument/s '{arg_name}'."
+    )
+    warnings.warn(msg, category=UserWarning, stacklevel=stacklevel)
+
+
+def experimental_args(
+    args_to_warn: list = ["*"],
+) -> Callable[[C], C]:
+    """
+    Decorator to mark specified args of a function as experimental.
+    """
+
+    def decorator(func: C) -> C:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get function argument names
+            arg_names = func.__code__.co_varnames[: func.__code__.co_argcount]
+
+            provided_args = dict(zip(arg_names, args))
+            provided_args.update(kwargs)
+
+            provided_args.pop("self", None)
+
+            if len(provided_args) == 0:
+                return func(*args, **kwargs)
+
+            for arg in args_to_warn:
+                if arg in provided_args:
+                    warn_experimental_arg_usage(arg, func.__name__, stacklevel=3)
+
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator

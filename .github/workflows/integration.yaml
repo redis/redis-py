@@ -27,15 +27,17 @@ env:
   CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   # this speeds up coverage with Python 3.12: https://github.com/nedbat/coveragepy/issues/1665
   COVERAGE_CORE: sysmon
-  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: '8.2'
-  CURRENT_REDIS_VERSION: '8.2'
+  # patch releases get included in the base version image when they are published
+  # for example after 8.2.1 is published, 8.2 image contains 8.2.1 content
+  CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: '8.4.0'
+  CURRENT_REDIS_VERSION: '8.4.0'
 
 jobs:
   dependency-audit:
     name: Dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: pypa/gh-action-pip-audit@v1.0.8
         with:
           inputs: dev_requirements.txt
@@ -46,10 +48,10 @@ jobs:
     name: Code linters
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: 3.9
+          python-version: "3.10"
           cache: 'pip'
       - name: run code linters
         run: |
@@ -74,15 +76,15 @@ jobs:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: ['8.2.1-pre', '${{ needs.redis_version.outputs.CURRENT }}', '8.0.2' ,'7.4.4', '7.2.9']
-        python-version: ['3.9', '3.13']
+        redis-version: ['${{ needs.redis_version.outputs.CURRENT }}', '8.2', '8.0.2' ,'7.4.4', '7.2.9']
+        python-version: ['3.10', '3.14']
         parser-backend: ['plain']
         event-loop: ['asyncio']
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
@@ -92,21 +94,21 @@ jobs:
 
   python-compatibility-tests:
     runs-on: ubuntu-latest
-    needs: [ redis_version, tests ]
+    needs: [ redis_version ]
     timeout-minutes: 60
     strategy:
       max-parallel: 15
       fail-fast: false
       matrix:
         redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
-        python-version: ['3.10', '3.11', '3.12', 'pypy-3.9', 'pypy-3.10']
+        python-version: ['3.11', '3.12', '3.13', 'pypy-3.10', 'pypy-3.11']
         parser-backend: [ 'plain' ]
         event-loop: [ 'asyncio' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
@@ -116,14 +118,14 @@ jobs:
 
   hiredis-tests:
     runs-on: ubuntu-latest
-    needs: [redis_version, tests]
+    needs: [redis_version]
     timeout-minutes: 60
     strategy:
       max-parallel: 15
       fail-fast: false
       matrix:
         redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
-        python-version: [ '3.9', '3.13']
+        python-version: [ '3.10', '3.14']
         parser-backend: [ 'hiredis' ]
         hiredis-version: [ '>=3.2.0', '<3.0.0' ]
         event-loop: [ 'asyncio' ]
@@ -131,7 +133,7 @@ jobs:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}} (${{ matrix.hiredis-version }}); EL:${{matrix.event-loop}}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
@@ -142,21 +144,21 @@ jobs:
 
   uvloop-tests:
     runs-on: ubuntu-latest
-    needs: [redis_version, tests]
+    needs: [redis_version]
     timeout-minutes: 60
     strategy:
       max-parallel: 15
       fail-fast: false
       matrix:
         redis-version: [ '${{ needs.redis_version.outputs.CURRENT }}' ]
-        python-version: [ '3.9', '3.13' ]
+        python-version: [ '3.10', '3.14' ]
         parser-backend: [ 'plain' ]
         event-loop: [ 'uvloop' ]
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
     name: Redis ${{ matrix.redis-version }}; Python ${{ matrix.python-version }}; RESP Parser:${{matrix.parser-backend}}; EL:${{matrix.event-loop}}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Run tests
         uses: ./.github/actions/run-tests
         with:
@@ -168,16 +170,16 @@ jobs:
   build-and-test-package:
     name: Validate building and installing the package
     runs-on: ubuntu-latest
-    needs: [tests]
+    needs: [redis_version]
     strategy:
       fail-fast: false
       matrix:
         extension: ['tar.gz', 'whl']
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: 3.9
+          python-version: "3.10"
       - name: Run installed unit tests
         env:
           CLIENT_LIBS_TEST_IMAGE_TAG: ${{ env.CURRENT_REDIS_VERSION }}
@@ -191,10 +193,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', 'pypy-3.9', 'pypy-3.10']
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14', 'pypy-3.10', 'pypy-3.11']
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'

@@ -95,15 +95,20 @@ class DummyConnection(Connection):
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        self._connected = False
 
     def repr_pieces(self):
         return [("id", id(self)), ("kwargs", self.kwargs)]
 
     async def connect(self):
-        pass
+        self._connected = True
 
     async def disconnect(self):
-        pass
+        self._connected = False
+
+    @property
+    def is_connected(self):
+        return self._connected
 
     async def can_read_destructive(self, timeout: float = 0):
         return False
@@ -113,6 +118,9 @@ class DummyConnection(Connection):
 
     async def re_auth(self):
         pass
+
+    def should_reconnect(self):
+        return False
 
 
 class TestConnectionPool:
@@ -200,6 +208,20 @@ class TestConnectionPool:
             expected = "path=/abc,db=1,client_name=test-client"
             assert expected in repr(pool)
 
+    async def test_pool_disconnect(self, master_host):
+        connection_kwargs = {
+            "host": master_host[0],
+            "port": master_host[1],
+        }
+        async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
+            conn = await pool.get_connection()
+            await pool.disconnect(inuse_connections=True)
+            assert not conn.is_connected
+
+            await conn.connect()
+            await pool.disconnect(inuse_connections=False)
+            assert conn.is_connected
+
 
 class TestBlockingConnectionPool:
     @asynccontextmanager
@@ -228,8 +250,7 @@ class TestBlockingConnectionPool:
             assert isinstance(connection, DummyConnection)
             assert connection.kwargs == connection_kwargs
 
-    async def test_disconnect(self, master_host):
-        """A regression test for #1047"""
+    async def test_pool_disconnect(self, master_host):
         connection_kwargs = {
             "foo": "bar",
             "biz": "baz",
@@ -237,8 +258,13 @@ class TestBlockingConnectionPool:
             "port": master_host[1],
         }
         async with self.get_pool(connection_kwargs=connection_kwargs) as pool:
-            await pool.get_connection()
+            conn = await pool.get_connection()
             await pool.disconnect()
+            assert not conn.is_connected
+
+            await conn.connect()
+            await pool.disconnect(inuse_connections=False)
+            assert conn.is_connected
 
     async def test_multiple_connections(self, master_host):
         connection_kwargs = {"host": master_host[0], "port": master_host[1]}
