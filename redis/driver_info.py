@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 _BRACES = {"(", ")", "[", "]", "{", "}"}
 
@@ -54,11 +54,22 @@ def _format_driver_entry(driver_name: str, driver_version: str) -> str:
 
 @dataclass
 class DriverInfo:
-    """Driver information used to build the CLIENT SETINFO LIB-NAME value.
+    """Driver information used to build the CLIENT SETINFO LIB-NAME and LIB-VER values.
+
+    This class consolidates all driver metadata (redis-py version and upstream drivers)
+    into a single object that is propagated through connection pools and connections.
 
     The formatted name follows the pattern::
 
         name(driver1_vVersion1;driver2_vVersion2)
+
+    Parameters
+    ----------
+    name : str, optional
+        The base library name (default: "redis-py")
+    lib_version : str, optional
+        The redis-py library version. If None, the version will be determined
+        automatically from the installed package.
 
     Examples
     --------
@@ -69,10 +80,22 @@ class DriverInfo:
     >>> info = DriverInfo().add_upstream_driver("django-redis", "5.4.0")
     >>> info.formatted_name
     'redis-py(django-redis_v5.4.0)'
+
+    >>> info = DriverInfo(lib_version="5.0.0")
+    >>> info.lib_version
+    '5.0.0'
     """
 
     name: str = "redis-py"
+    lib_version: Optional[str] = None
     _upstream: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        """Initialize lib_version if not provided."""
+        if self.lib_version is None:
+            from redis.utils import get_lib_version
+
+            self.lib_version = get_lib_version()
 
     @property
     def upstream_drivers(self) -> List[str]:

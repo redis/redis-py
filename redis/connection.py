@@ -35,6 +35,7 @@ from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from .driver_info import DriverInfo
 from .event import AfterConnectionReleasedEvent, EventDispatcher
 from .exceptions import (
     AuthenticationError,
@@ -655,6 +656,11 @@ class MaintNotificationsAbstractConnection:
 class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterface):
     "Manages communication to and from a Redis server"
 
+    @deprecated_args(
+        args_to_warn=["lib_name", "lib_version"],
+        reason="Use 'driver_info' parameter instead. "
+        "lib_name and lib_version will be removed in a future version.",
+    )
     def __init__(
         self,
         db: int = 0,
@@ -670,8 +676,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         socket_read_size: int = 65536,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = "redis-py",
-        lib_version: Optional[str] = get_lib_version(),
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
+        driver_info: Optional[DriverInfo] = None,
         username: Optional[str] = None,
         retry: Union[Any, None] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
@@ -691,10 +698,22 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
     ):
         """
         Initialize a new Connection.
+
         To specify a retry policy for specific errors, first set
         `retry_on_error` to a list of the error/s to retry on, then set
         `retry` to a valid `Retry` object.
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
+
+        Parameters
+        ----------
+        driver_info : DriverInfo, optional
+            Driver metadata for CLIENT SETINFO. If provided, lib_name and lib_version
+            are ignored. If not provided, a DriverInfo will be created from lib_name
+            and lib_version (or defaults if those are also None).
+        lib_name : str, optional
+            **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
+        lib_version : str, optional
+            **Deprecated.** Use driver_info instead. Library version for CLIENT SETINFO.
         """
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -710,8 +729,17 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self.pid = os.getpid()
         self.db = db
         self.client_name = client_name
-        self.lib_name = lib_name
-        self.lib_version = lib_version
+
+        # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+        if driver_info is not None:
+            self.driver_info = driver_info
+        else:
+            # Fallback: create DriverInfo from lib_name and lib_version
+            # Use defaults if not provided
+            name = lib_name if lib_name is not None else "redis-py"
+            version = lib_version if lib_version is not None else get_lib_version()
+            self.driver_info = DriverInfo(name=name, lib_version=version)
+
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
@@ -988,14 +1016,14 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
+        # Set the library name and version from driver_info
         try:
-            # set the library name and version
-            if self.lib_name:
+            if self.driver_info and self.driver_info.formatted_name:
                 self.send_command(
                     "CLIENT",
                     "SETINFO",
                     "LIB-NAME",
-                    self.lib_name,
+                    self.driver_info.formatted_name,
                     check_health=check_health,
                 )
                 self.read_response()
@@ -1003,12 +1031,12 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             pass
 
         try:
-            if self.lib_version:
+            if self.driver_info and self.driver_info.lib_version:
                 self.send_command(
                     "CLIENT",
                     "SETINFO",
                     "LIB-VER",
-                    self.lib_version,
+                    self.driver_info.lib_version,
                     check_health=check_health,
                 )
                 self.read_response()
@@ -2481,6 +2509,9 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self._event_dispatcher = self._connection_kwargs.get("event_dispatcher", None)
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
+
+        # Store driver_info for propagation to connections
+        self.driver_info = self._connection_kwargs.get("driver_info", None)
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as

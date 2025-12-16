@@ -731,16 +731,21 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.2.0")
     def test_client_setinfo(self, r: redis.Redis):
+        from redis.utils import get_lib_version
+
         r.ping()
         info = r.client_info()
         assert info["lib-name"] == "redis-py"
-        assert info["lib-ver"] == redis.__version__
+        assert info["lib-ver"] == get_lib_version()
         assert r.client_setinfo("lib-name", "test")
         assert r.client_setinfo("lib-ver", "123")
         info = r.client_info()
         assert info["lib-name"] == "test"
         assert info["lib-ver"] == "123"
-        r2 = redis.Redis(lib_name="test2", lib_version="1234")
+
+        # Test deprecated lib_name/lib_version parameters
+        with pytest.warns(DeprecationWarning):
+            r2 = redis.Redis(lib_name="test2", lib_version="1234")
         info = r2.client_info()
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
@@ -748,17 +753,14 @@ class TestRedisCommands:
     @skip_if_server_version_lt("7.2.0")
     def test_client_setinfo_with_driver_info(self, r: redis.Redis):
         from redis import DriverInfo
+        from redis.utils import get_lib_version
 
         info = DriverInfo().add_upstream_driver("django-redis", "5.4.0")
         r2 = redis.Redis(driver_info=info)
         r2.ping()
         client_info = r2.client_info()
         assert client_info["lib-name"] == "redis-py(django-redis_v5.4.0)"
-        assert client_info["lib-ver"] == redis.__version__
-        r3 = redis.Redis(lib_name=None, lib_version=None)
-        info = r3.client_info()
-        assert info["lib-name"] == ""
-        assert info["lib-ver"] == ""
+        assert client_info["lib-ver"] == get_lib_version()
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.9")

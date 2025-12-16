@@ -528,36 +528,38 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.2.0")
     async def test_client_setinfo(self, r: redis.Redis):
+        from redis.utils import get_lib_version
+
         await r.ping()
         info = await r.client_info()
         assert info["lib-name"] == "redis-py"
-        assert info["lib-ver"] == redis.__version__
+        assert info["lib-ver"] == get_lib_version()
         assert await r.client_setinfo("lib-name", "test")
         assert await r.client_setinfo("lib-ver", "123")
         info = await r.client_info()
         assert info["lib-name"] == "test"
         assert info["lib-ver"] == "123"
-        r2 = redis.asyncio.Redis(lib_name="test2", lib_version="1234")
+
+        # Test deprecated lib_name/lib_version parameters
+        with pytest.warns(DeprecationWarning):
+            r2 = redis.asyncio.Redis(lib_name="test2", lib_version="1234")
         info = await r2.client_info()
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
+        await r2.aclose()
 
     @skip_if_server_version_lt("7.2.0")
     async def test_client_setinfo_with_driver_info(self, r: redis.Redis):
         from redis import DriverInfo
+        from redis.utils import get_lib_version
 
         info = DriverInfo().add_upstream_driver("celery", "5.4.1")
         r2 = redis.asyncio.Redis(driver_info=info)
         await r2.ping()
         client_info = await r2.client_info()
         assert client_info["lib-name"] == "redis-py(celery_v5.4.1)"
-        assert client_info["lib-ver"] == redis.__version__
+        assert client_info["lib-ver"] == get_lib_version()
         await r2.aclose()
-        r3 = redis.asyncio.Redis(lib_name=None, lib_version=None)
-        info = await r3.client_info()
-        assert info["lib-name"] == ""
-        assert info["lib-ver"] == ""
-        await r3.aclose()
 
     @skip_if_server_version_lt("2.6.9")
     @pytest.mark.onlynoncluster

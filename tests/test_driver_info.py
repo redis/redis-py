@@ -1,12 +1,20 @@
 import pytest
 
 from redis.driver_info import DriverInfo
+from redis.utils import get_lib_version
 
 
 def test_driver_info_default_name_no_upstream():
     info = DriverInfo()
     assert info.formatted_name == "redis-py"
     assert info.upstream_drivers == []
+    assert info.lib_version == get_lib_version()
+
+
+def test_driver_info_custom_lib_version():
+    info = DriverInfo(lib_version="5.0.0")
+    assert info.lib_version == "5.0.0"
+    assert info.formatted_name == "redis-py"
 
 
 def test_driver_info_single_upstream():

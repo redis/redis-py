@@ -38,6 +38,7 @@ else:
     VerifyFlags = None
 
 from ..auth.token import TokenInterface
+from ..driver_info import DriverInfo
 from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
 from ..utils import deprecated_args, format_error_message
 
@@ -137,6 +138,11 @@ class AbstractConnection:
         "__dict__",
     )
 
+    @deprecated_args(
+        args_to_warn=["lib_name", "lib_version"],
+        reason="Use 'driver_info' parameter instead. "
+        "lib_name and lib_version will be removed in a future version.",
+    )
     def __init__(
         self,
         *,
@@ -153,8 +159,9 @@ class AbstractConnection:
         socket_read_size: int = 65536,
         health_check_interval: float = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = "redis-py",
-        lib_version: Optional[str] = get_lib_version(),
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
+        driver_info: Optional[DriverInfo] = None,
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
         redis_connect_func: Optional[ConnectCallbackT] = None,
@@ -163,6 +170,20 @@ class AbstractConnection:
         protocol: Optional[int] = 2,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
+        """
+        Initialize a new async Connection.
+
+        Parameters
+        ----------
+        driver_info : DriverInfo, optional
+            Driver metadata for CLIENT SETINFO. If provided, lib_name and lib_version
+            are ignored. If not provided, a DriverInfo will be created from lib_name
+            and lib_version (or defaults if those are also None).
+        lib_name : str, optional
+            **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
+        lib_version : str, optional
+            **Deprecated.** Use driver_info instead. Library version for CLIENT SETINFO.
+        """
         if (username or password) and credential_provider is not None:
             raise DataError(
                 "'username' and 'password' cannot be passed along with 'credential_"
@@ -176,8 +197,17 @@ class AbstractConnection:
             self._event_dispatcher = event_dispatcher
         self.db = db
         self.client_name = client_name
-        self.lib_name = lib_name
-        self.lib_version = lib_version
+
+        # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+        if driver_info is not None:
+            self.driver_info = driver_info
+        else:
+            # Fallback: create DriverInfo from lib_name and lib_version
+            # Use defaults if not provided
+            name = lib_name if lib_name is not None else "redis-py"
+            version = lib_version if lib_version is not None else get_lib_version()
+            self.driver_info = DriverInfo(name=name, lib_version=version)
+
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
@@ -452,29 +482,36 @@ class AbstractConnection:
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
-        # set the library name and version, pipeline for lower startup latency
-        if self.lib_name:
+        # Set the library name and version from driver_info, pipeline for lower startup latency
+        lib_name_sent = False
+        lib_version_sent = False
+
+        if self.driver_info and self.driver_info.formatted_name:
             await self.send_command(
                 "CLIENT",
                 "SETINFO",
                 "LIB-NAME",
-                self.lib_name,
+                self.driver_info.formatted_name,
                 check_health=check_health,
             )
-        if self.lib_version:
+            lib_name_sent = True
+
+        if self.driver_info and self.driver_info.lib_version:
             await self.send_command(
                 "CLIENT",
                 "SETINFO",
                 "LIB-VER",
-                self.lib_version,
+                self.driver_info.lib_version,
                 check_health=check_health,
             )
+            lib_version_sent = True
+
         # if a database is specified, switch to it. Also pipeline this
         if self.db:
             await self.send_command("SELECT", self.db, check_health=check_health)
 
         # read responses from pipeline
-        for _ in (sent for sent in (self.lib_name, self.lib_version) if sent):
+        for _ in range(sum([lib_name_sent, lib_version_sent])):
             try:
                 await self.read_response()
             except ResponseError:
@@ -1173,6 +1210,9 @@ class ConnectionPool:
         self._event_dispatcher = self.connection_kwargs.get("event_dispatcher", None)
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
+
+        # Store driver_info for propagation to connections
+        self.driver_info = self.connection_kwargs.get("driver_info", None)
 
     def __repr__(self):
         conn_kwargs = ",".join([f"{k}={v}" for k, v in self.connection_kwargs.items()])

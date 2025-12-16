@@ -200,6 +200,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         reason="TimeoutError is included by default.",
         version="6.0.0",
     )
+    @deprecated_args(
+        args_to_warn=["lib_name", "lib_version"],
+        reason="Use 'driver_info' parameter instead. "
+        "lib_name and lib_version will be removed in a future version.",
+    )
     def __init__(
         self,
         host: str = "localhost",
@@ -241,8 +246,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         single_connection_client: bool = False,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = "redis-py",
-        lib_version: Optional[str] = get_lib_version(),
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
         driver_info: Optional["DriverInfo"] = None,
         username: Optional[str] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
@@ -284,7 +289,13 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             Argument is ignored when connection_pool is provided.
         driver_info:
             Optional DriverInfo object to identify upstream libraries.
+            If provided, lib_name and lib_version are ignored.
+            If not provided, a DriverInfo will be created from lib_name and lib_version.
             Argument is ignored when connection_pool is provided.
+        lib_name:
+            **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
+        lib_version:
+            **Deprecated.** Use driver_info instead. Library version for CLIENT SETINFO.
         maint_notifications_config:
             configuration the pool to support maintenance notifications - see
             `redis.maint_notifications.MaintNotificationsConfig` for details.
@@ -301,10 +312,16 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if not connection_pool:
             if not retry_on_error:
                 retry_on_error = []
+
+            # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
             if driver_info is not None:
-                computed_lib_name = driver_info.formatted_name
+                computed_driver_info = driver_info
             else:
-                computed_lib_name = lib_name
+                # Fallback: create DriverInfo from lib_name and lib_version
+                # Use defaults if not provided
+                name = lib_name if lib_name is not None else "redis-py"
+                version = lib_version if lib_version is not None else get_lib_version()
+                computed_driver_info = DriverInfo(name=name, lib_version=version)
 
             kwargs = {
                 "db": db,
@@ -319,8 +336,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
-                "lib_name": computed_lib_name,
-                "lib_version": lib_version,
+                "driver_info": computed_driver_info,
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,

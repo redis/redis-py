@@ -215,6 +215,11 @@ class Redis(
         reason="TimeoutError is included by default.",
         version="6.0.0",
     )
+    @deprecated_args(
+        args_to_warn=["lib_name", "lib_version"],
+        reason="Use 'driver_info' parameter instead. "
+        "lib_name and lib_version will be removed in a future version.",
+    )
     def __init__(
         self,
         *,
@@ -251,8 +256,8 @@ class Redis(
         single_connection_client: bool = False,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = "redis-py",
-        lib_version: Optional[str] = get_lib_version(),
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
         driver_info: Optional["DriverInfo"] = None,
         username: Optional[str] = None,
         auto_close_connection_pool: Optional[bool] = None,
@@ -306,10 +311,16 @@ class Redis(
             # Create internal connection pool, expected to be closed by Redis instance
             if not retry_on_error:
                 retry_on_error = []
+
+            # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
             if driver_info is not None:
-                computed_lib_name = driver_info.formatted_name
+                computed_driver_info = driver_info
             else:
-                computed_lib_name = lib_name
+                # Fallback: create DriverInfo from lib_name and lib_version
+                # Use defaults if not provided
+                name = lib_name if lib_name is not None else "redis-py"
+                version = lib_version if lib_version is not None else get_lib_version()
+                computed_driver_info = DriverInfo(name=name, lib_version=version)
 
             kwargs = {
                 "db": db,
@@ -325,8 +336,7 @@ class Redis(
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
-                "lib_name": computed_lib_name,
-                "lib_version": lib_version,
+                "driver_info": computed_driver_info,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
             }
