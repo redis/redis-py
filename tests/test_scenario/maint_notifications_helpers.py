@@ -127,9 +127,12 @@ class ClusterOperations:
         endpoint_config: Dict[str, Any],
         target_node: str,
         empty_node: str,
+        skip_end_notification: bool = False,
     ) -> str:
         """Execute rladmin migrate command and wait for completion."""
-        return fault_injector.execute_migrate(endpoint_config, target_node, empty_node)
+        return fault_injector.execute_migrate(
+            endpoint_config, target_node, empty_node, skip_end_notification
+        )
 
     @staticmethod
     def execute_rebind(
