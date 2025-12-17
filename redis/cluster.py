@@ -3527,6 +3527,7 @@ class TransactionStrategy(AbstractStrategy):
         return self._retry.call_with_retry(
             lambda: self._get_connection_and_send_command(*args, **options),
             lambda error, failure_count: self._reinitialize_on_error(error, failure_count),
+            with_failure_count=True
         )
 
     def _get_connection_and_send_command(self, *args, **options):
@@ -3645,6 +3646,7 @@ class TransactionStrategy(AbstractStrategy):
         return self._retry.call_with_retry(
             lambda: self._execute_transaction(stack, raise_on_error),
             lambda error, failure_count: self._reinitialize_on_error(error, failure_count),
+            with_failure_count=True
         )
 
     def _execute_transaction(

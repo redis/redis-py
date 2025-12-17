@@ -307,7 +307,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
 
         return self._command_retry.call_with_retry(
             lambda: wrapper(),
-            lambda error, _: self._on_command_fail(error, *cmds),
+            lambda error: self._on_command_fail(error, *cmds),
         )
 
     def _on_command_fail(self, error, *args):

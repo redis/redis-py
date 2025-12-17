@@ -707,6 +707,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     start_time,
                     command_name,
                 ),
+                with_failure_count=True
             )
 
             self._event_dispatcher.dispatch(
@@ -736,7 +737,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     server_address=conn.host,
                     server_port=conn.port,
                     is_internal=False,
-                    retry_attempts=conn.retry.get_retries(),
                 )
             )
             raise
@@ -1044,14 +1044,14 @@ class PubSub:
                     )
                 )
 
-        self._event_dispatcher.dispatch(
-            OnErrorEvent(
-                error=error,
-                server_address=conn.host,
-                server_port=conn.port,
-                retry_attempts=failure_count,
+            self._event_dispatcher.dispatch(
+                OnErrorEvent(
+                    error=error,
+                    server_address=conn.host,
+                    server_port=conn.port,
+                    retry_attempts=failure_count,
+                )
             )
-        )
         conn.disconnect()
         conn.connect()
 
@@ -1085,6 +1085,7 @@ class PubSub:
                     start_time,
                     command_name,
                 ),
+                with_failure_count=True
             )
 
             if command_name:
@@ -1117,7 +1118,6 @@ class PubSub:
                     server_address=conn.host,
                     server_port=conn.port,
                     is_internal=False,
-                    retry_attempts=conn.retry.get_retries(),
                 )
             )
             raise
@@ -1688,6 +1688,7 @@ class Pipeline(Redis):
                     start_time,
                     command_name,
                 ),
+                with_failure_count=True
             )
 
             self._event_dispatcher.dispatch(
@@ -1717,8 +1718,7 @@ class Pipeline(Redis):
                     error=e,
                     server_address=conn.host,
                     server_port=conn.port,
-                    is_internal=False,
-                    retry_attempts=conn.retry.get_retries(),
+                    is_internal=False
                 )
             )
             raise
@@ -1900,7 +1900,7 @@ class Pipeline(Redis):
                     error=error,
                     server_address=conn.host,
                     server_port=conn.port,
-                    retry_attempts=failure_count,
+                    retry_attempts=failure_count
                 )
             )
         conn.disconnect()
@@ -1947,6 +1947,7 @@ class Pipeline(Redis):
                     operation_name,
                     len(stack),
                 ),
+                with_failure_count=True
             )
 
             self._event_dispatcher.dispatch(
@@ -1977,8 +1978,7 @@ class Pipeline(Redis):
                     error=e,
                     server_address=conn.host,
                     server_port=conn.port,
-                    is_internal=False,
-                    retry_attempts=conn.retry.get_retries(),
+                    is_internal=False
                 )
             )
             raise

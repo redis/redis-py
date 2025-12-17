@@ -6,9 +6,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Type, Union
 
 from redis.auth.token import TokenInterface
-from redis.connection import ConnectionInterface, AbstractConnection, MaintNotificationsAbstractConnection
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
-from redis.maint_notifications import MaintenanceNotification
 from redis.observability.recorder import record_operation_duration, record_error_count, record_maint_notification_count
 
 
@@ -332,8 +330,8 @@ class OnMaintenanceNotificationEvent:
     """
     Event fired whenever a maintenance notification is received.
     """
-    notification: MaintenanceNotification
-    connection: Union[AbstractConnection, MaintNotificationsAbstractConnection]
+    notification: "MaintenanceNotification"
+    connection: Union["MaintNotificationsAbstractConnection"]
 
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass

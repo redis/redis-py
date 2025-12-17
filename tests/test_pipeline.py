@@ -479,7 +479,9 @@ class TestPipelineEventEmission:
         conn.db = 0
 
         # Mock retry to just execute the function directly
-        conn.retry.call_with_retry = lambda func, _: func()
+        def mock_call_with_retry(do, fail, is_retryable=None, with_failure_count=False):
+            return do()
+        conn.retry.call_with_retry = mock_call_with_retry
 
         return conn
 
@@ -821,14 +823,17 @@ class TestPipelineEventEmission:
         # Track retry attempts
         max_retries = 2
 
-        def call_with_retry_impl(func, error_handler):
+        def call_with_retry_impl(do, fail, is_retryable=None, with_failure_count=False):
             """Simulate retry behavior - fail twice, then succeed."""
             for attempt in range(max_retries + 1):
                 try:
-                    return func()
+                    return do()
                 except redis.ConnectionError as e:
                     if attempt < max_retries:
-                        error_handler(e, attempt + 1)
+                        if with_failure_count:
+                            fail(e, attempt + 1)
+                        else:
+                            fail(e)
                     else:
                         raise
 
@@ -909,14 +914,17 @@ class TestPipelineEventEmission:
 
         max_retries = 2
 
-        def call_with_retry_impl(func, error_handler):
+        def call_with_retry_impl(do, fail, is_retryable=None, with_failure_count=False):
             """Simulate retry behavior - always fail."""
             for attempt in range(max_retries + 1):
                 try:
-                    return func()
+                    return do()
                 except redis.ConnectionError as e:
                     if attempt < max_retries:
-                        error_handler(e, attempt + 1)
+                        if with_failure_count:
+                            fail(e, attempt + 1)
+                        else:
+                            fail(e)
                     else:
                         raise
 
@@ -983,14 +991,17 @@ class TestPipelineEventEmission:
 
         max_retries = 1
 
-        def call_with_retry_impl(func, error_handler):
+        def call_with_retry_impl(do, fail, is_retryable=None, with_failure_count=False):
             """Simulate retry behavior - fail once, then succeed."""
             for attempt in range(max_retries + 1):
                 try:
-                    return func()
+                    return do()
                 except redis.ConnectionError as e:
                     if attempt < max_retries:
-                        error_handler(e, attempt + 1)
+                        if with_failure_count:
+                            fail(e, attempt + 1)
+                        else:
+                            fail(e)
                     else:
                         raise
 
@@ -1056,14 +1067,17 @@ class TestPipelineEventEmission:
 
         max_retries = 1
 
-        def call_with_retry_impl(func, error_handler):
+        def call_with_retry_impl(do, fail, is_retryable=None, with_failure_count=False):
             """Simulate retry behavior - always fail."""
             for attempt in range(max_retries + 1):
                 try:
-                    return func()
+                    return do()
                 except redis.ConnectionError as e:
                     if attempt < max_retries:
-                        error_handler(e, attempt + 1)
+                        if with_failure_count:
+                            fail(e, attempt + 1)
+                        else:
+                            fail(e)
                     else:
                         raise
 
@@ -1111,4 +1125,3 @@ class TestPipelineEventEmission:
 
         # Second event is from final failure (is_internal=False)
         assert error_events[1].is_internal is False
-        assert error_events[1].retry_attempts == max_retries
