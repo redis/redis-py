@@ -1035,10 +1035,22 @@ class PubSub:
         If there are no subscriptions redis responds to PING command with a
         bulk response, instead of a multi-bulk with "pong" and the response.
         """
-        return response in [
-            self.health_check_response,  # If there was a subscription
-            self.health_check_response_b,  # If there wasn't
-        ]
+        if self.encoder.decode_responses:
+            return (
+                response
+                in [
+                    self.health_check_response,  # If there is a subscription
+                    self.HEALTH_CHECK_MESSAGE,  # If there are no subscriptions and decode_responses=True
+                ]
+            )
+        else:
+            return (
+                response
+                in [
+                    self.health_check_response,  # If there is a subscription
+                    self.health_check_response_b,  # If there isn't a subscription and decode_responses=False
+                ]
+            )
 
     def check_health(self) -> None:
         conn = self.connection
