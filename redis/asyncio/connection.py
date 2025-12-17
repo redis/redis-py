@@ -1215,16 +1215,17 @@ class ConnectionPool:
         version="5.3.0",
     )
     async def get_connection(self, command_name=None, *keys, **options):
+        """Get a connected connection from the pool"""
         async with self._lock:
-            """Get a connected connection from the pool"""
             connection = self.get_available_connection()
-            try:
-                await self.ensure_connection(connection)
-            except BaseException:
-                await self.release(connection)
-                raise
 
-        return connection
+        # We now perform the connection check outside of the lock.
+        try:
+            await self.ensure_connection(connection)
+            return connection
+        except BaseException:
+            await self.release(connection)
+            raise
 
     def get_available_connection(self):
         """Get a connection from the pool, without making sure it is connected"""
