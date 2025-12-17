@@ -331,7 +331,7 @@ class OnMaintenanceNotificationEvent:
     Event fired whenever a maintenance notification is received.
     """
     notification: "MaintenanceNotification"
-    connection: Union["MaintNotificationsAbstractConnection"]
+    connection: "MaintNotificationsAbstractConnection"
 
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
