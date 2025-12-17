@@ -11,41 +11,42 @@ class ExceptionType(Enum):
 
 
 class RedisError(Exception):
-    def __init__(self, *args):
+    def __init__(self, *args, status_code: str = None):
         super().__init__(*args)
         self.error_type = ExceptionType.SERVER
+        self.status_code = status_code
 
     def __repr__(self):
         return f"{self.error_type.value}:{self.__class__.__name__}"
 
 
 class ConnectionError(RedisError):
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, status_code: str = None):
+        super().__init__(*args, status_code=status_code)
         self.error_type = ExceptionType.NETWORK
 
 
 class TimeoutError(RedisError):
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, status_code: str = None):
+        super().__init__(*args, status_code=status_code)
         self.error_type = ExceptionType.NETWORK
 
 
 class AuthenticationError(ConnectionError):
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, status_code: str = None):
+        super().__init__(*args, status_code=status_code)
         self.error_type = ExceptionType.AUTH
 
 
 class AuthorizationError(ConnectionError):
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, status_code: str = None):
+        super().__init__(*args, status_code=status_code)
         self.error_type = ExceptionType.AUTH
 
 
 class BusyLoadingError(ConnectionError):
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, status_code: str = None):
+        super().__init__(*args, status_code=status_code)
         self.error_type = ExceptionType.NETWORK
 
 
@@ -94,8 +95,8 @@ class ReadOnlyError(ResponseError):
 
 
 class NoPermissionError(ResponseError):
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, status_code: str = None):
+        super().__init__(*args, status_code=status_code)
         self.error_type = ExceptionType.AUTH
 
 
@@ -133,8 +134,8 @@ class AuthenticationWrongNumberOfArgsError(ResponseError):
     were sent to the AUTH command
     """
 
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, status_code: str = None):
+        super().__init__(*args, status_code=status_code)
         self.error_type = ExceptionType.AUTH
 
 
@@ -157,8 +158,8 @@ class ClusterError(RedisError):
     command execution TTL
     """
 
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, status_code: str = None):
+        super().__init__(*args, status_code=status_code)
         self.error_type = ExceptionType.SERVER
 
 
@@ -173,10 +174,11 @@ class ClusterDownError(ClusterError, ResponseError):
     are covered again.
     """
 
-    def __init__(self, resp):
+    def __init__(self, resp, status_code: str = None):
         self.args = (resp,)
         self.message = resp
         self.error_type = ExceptionType.SERVER
+        self.status_code = status_code
 
 
 class AskError(ResponseError):
@@ -195,9 +197,9 @@ class AskError(ResponseError):
         any op will be allowed after asking command
     """
 
-    def __init__(self, resp):
+    def __init__(self, resp, status_code: str = None):
         """should only redirect to master node"""
-        super().__init__(resp)
+        super().__init__(resp, status_code=status_code)
         self.args = (resp,)
         self.message = resp
         slot_id, new_node = resp.split(" ")
@@ -213,8 +215,8 @@ class TryAgainError(ResponseError):
     between the source and destination nodes, will generate a -TRYAGAIN error.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args)
+    def __init__(self, *args, status_code: str = None, **kwargs):
+        super().__init__(*args, status_code=status_code)
 
 
 class ClusterCrossSlotError(ResponseError):
@@ -226,8 +228,8 @@ class ClusterCrossSlotError(ResponseError):
 
     message = "Keys in request don't hash to the same slot"
 
-    def __init__(self, *args):
-        super().__init__(*args)
+    def __init__(self, *args, status_code: str = None):
+        super().__init__(*args, status_code=status_code)
         self.error_type = ExceptionType.SERVER
 
 

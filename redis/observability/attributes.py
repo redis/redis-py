@@ -98,8 +98,6 @@ class AttributeBuilder:
     def build_operation_attributes(
             command_name: Optional[str] = None,
             batch_size: Optional[int] = None,
-            response_status_code: Optional[str] = None,
-            error_type: Optional[Exception] = None,
             network_peer_address: Optional[str] = None,
             network_peer_port: Optional[int] = None,
             stored_procedure_name: Optional[str] = None,
@@ -112,8 +110,6 @@ class AttributeBuilder:
         Args:
             command_name: Redis command name (e.g., 'GET', 'SET', 'MULTI')
             batch_size: Number of commands in batch (for pipelines/transactions)
-            response_status_code: Redis error prefix (e.g., 'ERR', 'WRONGTYPE')
-            error_type: Error type if operation failed
             network_peer_address: Resolved peer address
             network_peer_port: Peer port number
             stored_procedure_name: Lua script name or SHA1 digest
@@ -128,14 +124,8 @@ class AttributeBuilder:
         if command_name is not None:
             attrs[DB_OPERATION_NAME] = command_name.upper()
 
-        if batch_size is not None and batch_size >= 2:
+        if batch_size is not None:
             attrs[DB_OPERATION_BATCH_SIZE] = batch_size
-
-        if response_status_code is not None:
-            attrs[DB_RESPONSE_STATUS_CODE] = response_status_code
-
-        if error_type is not None:
-            attrs[ERROR_TYPE] = AttributeBuilder.extract_error_type(error_type)
 
         if network_peer_address is not None:
             attrs[NETWORK_PEER_ADDRESS] = network_peer_address
@@ -184,7 +174,8 @@ class AttributeBuilder:
 
     @staticmethod
     def build_error_attributes(
-            is_internal: bool = False,
+            error_type: Optional[Exception] = None,
+            is_internal: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Build error attributes.
@@ -196,7 +187,19 @@ class AttributeBuilder:
         Returns:
             Dictionary of error attributes
         """
-        attrs: Dict[str, Any] = {REDIS_CLIENT_ERROR_INTERNAL: is_internal}
+        attrs: Dict[str, Any] = {}
+
+        if error_type is not None:
+            attrs[ERROR_TYPE] = AttributeBuilder.extract_error_type(error_type)
+
+            if hasattr(error_type, "status_code") and error_type.status_code is not None:
+                attrs[DB_RESPONSE_STATUS_CODE] = error_type.status_code
+            else:
+                attrs[DB_RESPONSE_STATUS_CODE] = "error"
+
+        if is_internal is not None:
+            attrs[REDIS_CLIENT_ERROR_INTERNAL] = is_internal
+
         return attrs
 
     @staticmethod

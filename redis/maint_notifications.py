@@ -7,6 +7,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
+from redis.event import OnMaintenanceNotificationEvent
 from redis.typing import Number
 
 
@@ -770,6 +771,13 @@ class MaintNotificationsConnectionHandler:
     def handle_notification(self, notification: MaintenanceNotification):
         # get the notification type by checking its class in the _NOTIFICATION_TYPES dict
         notification_type = self._NOTIFICATION_TYPES.get(notification.__class__, None)
+
+        self.connection.event_dispatcher.dispatch(
+            OnMaintenanceNotificationEvent(
+                notification=notification,
+                connection=self.connection,
+            )
+        )
 
         if notification_type is None:
             logging.error(f"Unhandled notification type: {notification}")

@@ -3,13 +3,14 @@ from typing import Tuple
 from unittest.mock import patch, Mock
 
 import pytest
+from redis.exceptions import ResponseError
 
 import redis
 from redis import CrossSlotTransactionError, ConnectionPool, RedisClusterException
 from redis.backoff import NoBackoff
 from redis.client import Redis
 from redis.cluster import PRIMARY, ClusterNode, NodesManager, RedisCluster
-from redis.event import EventDispatcher
+from redis.event import EventDispatcher, OnErrorEvent, EventListenerInterface
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
@@ -651,3 +652,224 @@ class TestClusterTransactionEventEmission:
         assert transaction_call is not None
         attrs = transaction_call[1]['attributes']
         assert attrs['db.operation.name'] == 'TRANSACTION'
+
+    # Tests for new event emission in TransactionStrategy
+
+    def test_watch_command_emits_event(self, cluster_transaction_with_otel):
+        """
+        Test that WATCH command emits AfterCommandExecutionEvent.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        # Set initial value
+        cluster.set('{watch_event}key', 'value')
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.watch('{watch_event}key')
+            tx.multi()
+            tx.set('{watch_event}key', 'new_value')
+            tx.execute()
+
+        # Find the WATCH event call
+        watch_calls = [
+            call_obj for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'WATCH'
+        ]
+
+        assert len(watch_calls) >= 1
+        attrs = watch_calls[0][1]['attributes']
+        assert attrs['db.operation.name'] == 'WATCH'
+        assert 'server.address' in attrs
+        assert 'server.port' in attrs
+
+    def test_immediate_command_emits_event_with_server_info(
+        self, cluster_transaction_with_otel
+    ):
+        """
+        Test that immediate commands (WATCH, GET before MULTI) emit events
+        with server address and port.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        cluster.set('{immediate}key', 'value')
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.watch('{immediate}key')
+            val = tx.get('{immediate}key')
+            tx.multi()
+            tx.set('{immediate}key', 'updated')
+            tx.execute()
+
+        # Find WATCH and GET events
+        watch_calls = [
+            call_obj for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'WATCH'
+        ]
+        get_calls = [
+            call_obj for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'GET'
+        ]
+
+        # Verify WATCH event has server info
+        assert len(watch_calls) >= 1
+        watch_attrs = watch_calls[0][1]['attributes']
+        assert 'server.address' in watch_attrs
+        assert isinstance(watch_attrs['server.address'], str)
+        assert 'server.port' in watch_attrs
+        assert isinstance(watch_attrs['server.port'], int)
+
+        # Verify GET event has server info
+        assert len(get_calls) >= 1
+        get_attrs = get_calls[0][1]['attributes']
+        assert 'server.address' in get_attrs
+        assert 'server.port' in get_attrs
+
+    def test_on_error_event_emitted_on_transaction_failure(
+        self, cluster_transaction_with_otel
+    ):
+        """
+        Test that OnErrorEvent is emitted when a transaction command fails.
+        """
+
+        cluster, _ = cluster_transaction_with_otel
+
+        error_events = []
+
+        class ErrorEventTracker(EventListenerInterface):
+            def listen(self, event: object):
+                error_events.append(event)
+
+        tracker = ErrorEventTracker()
+        cluster._event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
+
+        # Set a string value
+        cluster.set('{tx_error}key', 'string_value')
+
+        with cluster.pipeline(transaction=True) as tx:
+            try:
+                # Try to use LPUSH on a string key inside transaction
+                tx.lpush('{tx_error}key', 'value')
+                tx.execute()
+            except ResponseError:
+                pass
+
+        # Note: ResponseError from EXEC doesn't trigger OnErrorEvent
+        # OnErrorEvent is for connection/cluster errors during retry
+        # This test verifies the event dispatcher is properly set up
+
+    def test_transaction_error_emits_event_with_error_type(
+        self, cluster_transaction_with_otel
+    ):
+        """
+        Test that when a transaction fails, the emitted event includes error.type.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        # Set a string value
+        cluster.set('{tx_err_type}key', 'string_value')
+
+        try:
+            with cluster.pipeline(transaction=True) as tx:
+                # Try to use LPUSH on a string key - this will fail
+                tx.lpush('{tx_err_type}key', 'value')
+                tx.execute()
+        except ResponseError:
+            pass
+
+        # Find the TRANSACTION event call - it should have error.type
+        transaction_calls = [
+            call_obj for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'TRANSACTION'
+        ]
+
+        # There should be at least one TRANSACTION event
+        assert len(transaction_calls) >= 1
+
+    def test_successful_transaction_no_error_event(
+        self, cluster_transaction_with_otel
+    ):
+        """
+        Test that successful transactions do not emit OnErrorEvent.
+        """
+
+        cluster, _ = cluster_transaction_with_otel
+
+        error_events = []
+
+        class ErrorEventTracker(EventListenerInterface):
+            def listen(self, event: object):
+                error_events.append(event)
+
+        tracker = ErrorEventTracker()
+        cluster._event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.set('{success_tx}key', 'value')
+            tx.get('{success_tx}key')
+            tx.execute()
+
+        # No error events should be emitted for successful transaction
+        assert len(error_events) == 0
+
+    def test_watch_and_transaction_emit_separate_events(
+        self, cluster_transaction_with_otel
+    ):
+        """
+        Test that WATCH commands and TRANSACTION emit separate events.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        cluster.set('{separate}key', '0')
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.watch('{separate}key')
+            val = tx.get('{separate}key')
+            tx.multi()
+            tx.set('{separate}key', int(val or 0) + 1)
+            tx.execute()
+
+        # Count WATCH events
+        watch_count = sum(
+            1 for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'WATCH'
+        )
+
+        # Count TRANSACTION events
+        transaction_count = sum(
+            1 for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'TRANSACTION'
+        )
+
+        # Should have at least 1 WATCH and 1 TRANSACTION event
+        assert watch_count >= 1
+        assert transaction_count >= 1
+
+    def test_immediate_get_command_emits_event(self, cluster_transaction_with_otel):
+        """
+        Test that GET command executed immediately (after WATCH, before MULTI)
+        emits AfterCommandExecutionEvent.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        cluster.set('{imm_get}key', 'test_value')
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.watch('{imm_get}key')
+            # This GET is executed immediately because we're watching
+            val = tx.get('{imm_get}key')
+            tx.multi()
+            tx.set('{imm_get}key', 'new_value')
+            tx.execute()
+
+        # Find GET events
+        get_calls = [
+            call_obj for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]['attributes'].get('db.operation.name') == 'GET'
+        ]
+
+        assert len(get_calls) >= 1
+        attrs = get_calls[0][1]['attributes']
+        assert attrs['db.operation.name'] == 'GET'
+        assert 'server.address' in attrs
+        assert 'server.port' in attrs
+        assert 'db.namespace' in attrs

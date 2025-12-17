@@ -35,7 +35,7 @@ from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
-from .event import AfterConnectionReleasedEvent, EventDispatcher
+from .event import AfterConnectionReleasedEvent, EventDispatcher, OnErrorEvent, OnMaintenanceNotificationEvent
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -51,7 +51,7 @@ from .maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
     MaintNotificationsConnectionHandler,
-    MaintNotificationsPoolHandler,
+    MaintNotificationsPoolHandler, MaintenanceNotification,
 )
 from .retry import Retry
 from .utils import (
@@ -286,6 +286,7 @@ class MaintNotificationsAbstractConnection:
         orig_socket_timeout: Optional[float] = None,
         orig_socket_connect_timeout: Optional[float] = None,
         parser: Optional[Union[_HiredisParser, _RESP3Parser]] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
         Initialize the maintenance notifications for the connection.
@@ -305,6 +306,12 @@ class MaintNotificationsAbstractConnection:
         self.maint_notifications_config = maint_notifications_config
         self.maintenance_state = maintenance_state
         self.maintenance_notification_hash = maintenance_notification_hash
+
+        if event_dispatcher is not None:
+            self.event_dispatcher = event_dispatcher
+        else:
+            self.event_dispatcher = EventDispatcher()
+
         self._configure_maintenance_notifications(
             maint_notifications_pool_handler,
             orig_host_address,
@@ -783,6 +790,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             orig_socket_timeout,
             orig_socket_connect_timeout,
             self._parser,
+            event_dispatcher=self._event_dispatcher
         )
 
     def __repr__(self):
@@ -853,14 +861,34 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         try:
             if retry_socket_connect:
                 sock = self.retry.call_with_retry(
-                    lambda: self._connect(), lambda error: self.disconnect(error)
+                    lambda: self._connect(),
+                    lambda error, failure_count: self.disconnect(error, failure_count),
+                    with_failure_count=True
                 )
             else:
                 sock = self._connect()
         except socket.timeout:
-            raise TimeoutError("Timeout connecting to server")
+            e = TimeoutError("Timeout connecting to server")
+            self._event_dispatcher.dispatch(
+                OnErrorEvent(
+                    error=e,
+                    server_address=self.host,
+                    server_port=self.port,
+                    is_internal=False,
+                )
+            )
+            raise e
         except OSError as e:
-            raise ConnectionError(self._error_message(e))
+            e = ConnectionError(self._error_message(e))
+            self._event_dispatcher.dispatch(
+                OnErrorEvent(
+                    error=e,
+                    server_address=self.host,
+                    server_port=self.port,
+                    is_internal=False,
+                )
+            )
+            raise e
 
         self._sock = sock
         try:
@@ -1036,6 +1064,17 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         except OSError:
             pass
 
+        if len(args) > 0 and isinstance(args[0], Exception):
+            if args[1] <= self.retry.get_retries():
+                self._event_dispatcher.dispatch(
+                    OnErrorEvent(
+                        error=args[0],
+                        server_address=self.host,
+                        server_port=self.port,
+                        retry_attempts=args[1],
+                    )
+                )
+
     def mark_for_reconnect(self):
         self._should_reconnect = True
 
@@ -1051,14 +1090,18 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         if str_if_bytes(self.read_response()) != "PONG":
             raise ConnectionError("Bad response from PING health check")
 
-    def _ping_failed(self, error):
+    def _ping_failed(self, error, failure_count):
         """Function to call when PING fails"""
-        self.disconnect()
+        self.disconnect(error, failure_count)
 
     def check_health(self):
         """Check the health of the connection with a PING/PONG"""
         if self.health_check_interval and time.monotonic() > self.next_health_check:
-            self.retry.call_with_retry(self._send_ping, self._ping_failed)
+            self.retry.call_with_retry(
+                self._send_ping,
+                lambda error, failure_count: self._ping_failed(error, failure_count),
+                with_failure_count=True
+            )
 
     def send_packed_command(self, command, check_health=True):
         """Send an already packed command to the Redis server"""
@@ -1353,6 +1396,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 self._conn.socket_timeout,
                 self._conn.socket_connect_timeout,
                 self._conn._get_parser(),
+                event_dispatcher=self._conn.event_dispatcher,
             )
 
     def repr_pieces(self):
