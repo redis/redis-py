@@ -17,6 +17,7 @@ from typing import (
 )
 
 from redis._parsers.encoders import Encoder
+from redis._parsers.socket import SENTINEL
 from redis._parsers.helpers import (
     _RedisCallbacks,
     _RedisCallbacksRESP2,
@@ -1140,7 +1141,44 @@ class PubSub:
             raise
 
     def parse_response(self, block=True, timeout=0):
-        """Parse the response from a publish/subscribe command"""
+        """
+        Parse the response from a publish/subscribe command.
+
+        Args:
+            block: If True, block indefinitely until a message is available.
+                   If False, return immediately if no message is available.
+                   Default: True
+            timeout: The timeout in seconds for reading a response when block=False.
+                     This parameter is ignored when block=True.
+                     Default: 0 (return immediately if no data available)
+
+        Returns:
+            The parsed response from the server, or None if no message is available
+            within the timeout period (when block=False).
+
+        Important:
+            The block and timeout parameters work together:
+            - When block=True: timeout is IGNORED, method blocks indefinitely
+            - When block=False: timeout is USED, method returns after timeout expires
+
+            Typically, you should use get_message(timeout=X) instead of calling
+            parse_response() directly. The get_message() method automatically sets
+            block=False when a timeout is provided, and block=True when timeout=None.
+
+        Example:
+            # Block indefinitely (timeout is ignored)
+            response = pubsub.parse_response(block=True, timeout=0.1)
+
+            # Non-blocking with 0.1 second timeout
+            response = pubsub.parse_response(block=False, timeout=0.1)
+
+            # Non-blocking, return immediately
+            response = pubsub.parse_response(block=False, timeout=0)
+
+            # Recommended: use get_message() instead
+            msg = pubsub.get_message(timeout=0.1)  # automatically sets block=False
+            msg = pubsub.get_message(timeout=None)  # automatically sets block=True
+        """
         conn = self.connection
         if conn is None:
             raise RuntimeError(
@@ -1154,9 +1192,13 @@ class PubSub:
             if not block:
                 if not conn.can_read(timeout=timeout):
                     return None
+                read_timeout = timeout
             else:
                 conn.connect()
-            return conn.read_response(disconnect_on_error=False, push_request=True)
+                read_timeout = SENTINEL  # Use default socket timeout for blocking
+            return conn.read_response(
+                disconnect_on_error=False, push_request=True, timeout=read_timeout
+            )
 
         response = self._execute(conn, try_read)
 

@@ -96,23 +96,23 @@ class SocketBuffer:
             timeout=timeout, raise_on_timeout=False
         )
 
-    def read(self, length: int) -> bytes:
+    def read(self, length: int, timeout: Union[float, object] = SENTINEL) -> bytes:
         length = length + 2  # make sure to read the \r\n terminator
         # BufferIO will return less than requested if buffer is short
         data = self._buffer.read(length)
         missing = length - len(data)
         if missing:
             # fill up the buffer and read the remainder
-            self._read_from_socket(missing)
+            self._read_from_socket(length=missing, timeout=timeout)
             data += self._buffer.read(missing)
         return data[:-2]
 
-    def readline(self) -> bytes:
+    def readline(self, timeout: Union[float, object] = SENTINEL) -> bytes:
         buf = self._buffer
         data = buf.readline()
         while not data.endswith(SYM_CRLF):
             # there's more data in the socket that we need
-            self._read_from_socket()
+            self._read_from_socket(timeout=timeout)
             data += buf.readline()
 
         return data[:-2]

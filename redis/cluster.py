@@ -2636,10 +2636,14 @@ class ClusterPubSub(PubSub):
             self.node_pubsub_mapping[node.name] = pubsub
             return pubsub
 
-    def _sharded_message_generator(self):
+    def _sharded_message_generator(self, timeout=0.0):
         for _ in range(len(self.node_pubsub_mapping)):
             pubsub = next(self._pubsubs_generator)
-            message = pubsub.get_message()
+            # Don't pass ignore_subscribe_messages here - let get_sharded_message
+            # handle the filtering after processing subscription state changes
+            message = pubsub.get_message(
+                ignore_subscribe_messages=False, timeout=timeout
+            )
             if message is not None:
                 return message
         return None
@@ -2657,7 +2661,7 @@ class ClusterPubSub(PubSub):
                 ignore_subscribe_messages=ignore_subscribe_messages, timeout=timeout
             )
         else:
-            message = self._sharded_message_generator()
+            message = self._sharded_message_generator(timeout=timeout)
         if message is None:
             return None
         elif str_if_bytes(message["type"]) == "sunsubscribe":

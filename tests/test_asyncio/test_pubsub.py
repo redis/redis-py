@@ -1169,3 +1169,192 @@ class TestBaseException:
 
         # the timeout on the read should not cause disconnect
         assert pubsub.connection.is_connected
+
+
+@pytest.mark.onlynoncluster
+class TestAsyncPubSubTimeoutPropagation:
+    """
+    Tests for timeout propagation through the entire async pubsub read chain.
+    Ensures that timeouts are properly passed from get_message() through
+    parse_response() to the parser and socket buffer layers.
+    """
+
+    @pytest.mark.asyncio
+    async def test_get_message_timeout_is_respected(self, r):
+        """
+        Test that get_message() with timeout parameter respects the timeout
+        and returns None when no message arrives within the timeout period.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "subscribe"
+
+        # Call get_message with a short timeout - should return None
+        start = asyncio.get_running_loop().time()
+        msg = await p.get_message(timeout=0.1)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert msg is None
+        # Verify timeout was actually respected (within reasonable bounds)
+        assert elapsed < 0.5
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_get_message_timeout_with_published_message(self, r):
+        """
+        Test that get_message() with timeout returns a message if one
+        arrives before the timeout expires.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Publish a message
+        await r.publish("foo", "hello")
+
+        # get_message with timeout should return the message
+        msg = await p.get_message(timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "message"
+        assert msg["data"] == b"hello"
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_parse_response_timeout_propagation(self, r):
+        """
+        Test that parse_response() properly propagates timeout to read_response().
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Call parse_response with timeout - should respect it
+        start = asyncio.get_running_loop().time()
+        response = await p.parse_response(block=False, timeout=0.1)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert response is None
+        assert elapsed < 0.5
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_get_message_timeout_zero_returns_immediately(self, r):
+        """
+        Test that get_message(timeout=0) returns immediately without blocking.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # get_message with timeout=0 should return immediately
+        start = asyncio.get_running_loop().time()
+        msg = await p.get_message(timeout=0)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert msg is None
+        assert elapsed < 0.1
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_get_message_timeout_none_blocks(self, r):
+        """
+        Test that get_message(timeout=None) blocks indefinitely.
+        We test this by using a task to publish a message after a delay.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Publish a message after a short delay in a task
+        async def publish_after_delay():
+            await asyncio.sleep(0.2)
+            await r.publish("foo", "delayed_message")
+
+        task = asyncio.create_task(publish_after_delay())
+
+        # get_message with timeout=None should block until message arrives
+        start = asyncio.get_running_loop().time()
+        msg = await p.get_message(timeout=None)
+        elapsed = asyncio.get_running_loop().time() - start
+        assert msg is not None
+        assert msg["type"] == "message"
+        assert msg["data"] == b"delayed_message"
+        # Should have waited at least 0.15 seconds
+        assert elapsed >= 0.15
+        await task
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_multiple_messages_with_timeout(self, r):
+        """
+        Test that timeout is properly handled when reading multiple messages.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # Publish multiple messages
+        await r.publish("foo", "msg1")
+        await r.publish("foo", "msg2")
+        await r.publish("foo", "msg3")
+
+        # Read all messages with timeout
+        messages = []
+        for _ in range(3):
+            msg = await wait_for_message(p, timeout=1.0)
+            if msg:
+                messages.append(msg)
+
+        assert len(messages) == 3
+        assert messages[0]["data"] == b"msg1"
+        assert messages[1]["data"] == b"msg2"
+        assert messages[2]["data"] == b"msg3"
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_timeout_with_pattern_subscribe(self, r):
+        """
+        Test that timeout works correctly with pattern subscriptions.
+        """
+        p = r.pubsub()
+        await p.psubscribe("foo*")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "psubscribe"
+
+        # Publish a message matching the pattern
+        await r.publish("foobar", "hello")
+
+        # get_message with timeout should return the message
+        msg = await p.get_message(timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "pmessage"
+        assert msg["data"] == b"hello"
+        await p.aclose()
+
+    @pytest.mark.asyncio
+    async def test_timeout_with_no_subscription(self, r):
+        """
+        Test that get_message with timeout returns None when subscribed but no messages.
+        """
+        p = r.pubsub()
+        await p.subscribe("foo")
+        # Read subscription message
+        msg = await wait_for_message(p, timeout=1.0)
+        assert msg is not None
+
+        # get_message with timeout should return None when no messages
+        msg = await p.get_message(timeout=0.1)
+        assert msg is None
+        await p.aclose()

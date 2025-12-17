@@ -13,6 +13,7 @@ import pytest
 import redis
 from redis import ConnectionPool, Redis
 from redis._parsers import _HiredisParser, _RESP2Parser, _RESP3Parser
+from redis._parsers.socket import SENTINEL
 from redis.backoff import NoBackoff
 from redis.cache import (
     CacheConfig,
@@ -631,6 +632,121 @@ class TestUnitCacheProxyConnection:
         assert proxy_connection.read_response() == b"bar"
         assert another_conn.can_read.call_count == 2
         another_conn.read_response.assert_called_once()
+
+    def test_read_response_propagates_timeout_parameter(self, mock_connection):
+        """Test that timeout parameter is propagated to underlying connection."""
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.read_response.return_value = b"OK"
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        # Test with specific timeout value
+        proxy_connection.read_response(timeout=0.5)
+        mock_connection.read_response.assert_called_with(
+            disable_decoding=False,
+            timeout=0.5,
+            disconnect_on_error=True,
+            push_request=False,
+        )
+
+    def test_read_response_timeout_default_is_sentinel(self, mock_connection):
+        """Test that default timeout value is SENTINEL."""
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.read_response.return_value = b"OK"
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        # Test default timeout is SENTINEL
+        proxy_connection.read_response()
+        mock_connection.read_response.assert_called_with(
+            disable_decoding=False,
+            timeout=SENTINEL,
+            disconnect_on_error=True,
+            push_request=False,
+        )
+
+    def test_read_response_timeout_none_passed_through(self, mock_connection):
+        """Test that timeout=None is passed through for blocking behavior."""
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.read_response.return_value = b"OK"
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        # Test timeout=None is passed through
+        proxy_connection.read_response(timeout=None)
+        mock_connection.read_response.assert_called_with(
+            disable_decoding=False,
+            timeout=None,
+            disconnect_on_error=True,
+            push_request=False,
+        )
+
+    def test_read_response_timeout_zero_passed_through(self, mock_connection):
+        """Test that timeout=0 is passed through for non-blocking behavior."""
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.read_response.return_value = b"OK"
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        # Test timeout=0 is passed through
+        proxy_connection.read_response(timeout=0)
+        mock_connection.read_response.assert_called_with(
+            disable_decoding=False,
+            timeout=0,
+            disconnect_on_error=True,
+            push_request=False,
+        )
+
+    def test_read_response_all_params_with_timeout(self, mock_connection):
+        """Test that all parameters including timeout are correctly passed."""
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.read_response.return_value = b"OK"
+
+        cache = DefaultCache(CacheConfig(max_size=10))
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+
+        # Test all parameters together
+        proxy_connection.read_response(
+            disable_decoding=True,
+            timeout=1.5,
+            disconnect_on_error=False,
+            push_request=True,
+        )
+        mock_connection.read_response.assert_called_with(
+            disable_decoding=True,
+            timeout=1.5,
+            disconnect_on_error=False,
+            push_request=True,
+        )
 
 
 class TestConnectionPoolGetConnectionCount:
