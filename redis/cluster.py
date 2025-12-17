@@ -2199,31 +2199,17 @@ class ClusterPubSub(PubSub):
             return pubsub
 
     def _sharded_message_generator(self):
-        """
-        Iterate through pubsubs until a complete cycle is done.
-        """
-        while True:
+        for _ in range(len(self.node_pubsub_mapping)):
             pubsub = next(self._pubsubs_generator)
-
-            # None marks end of cycle
-            if pubsub is None:
-                break
-
             message = pubsub.get_message()
             if message is not None:
                 return message
-
         return None
 
     def _pubsubs_generator(self):
-        """
-        Generator that yields pubsubs in round-robin fashion.
-        Yields None to mark cycle boundaries.
-        """
         while True:
             current_nodes = list(self.node_pubsub_mapping.values())
             yield from current_nodes
-            yield None  # Cycle marker
 
     def get_sharded_message(
         self, ignore_subscribe_messages=False, timeout=0.0, target_node=None

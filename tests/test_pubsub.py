@@ -959,10 +959,9 @@ class TestPubSubSubcommands:
         assert msg is not None
         assert msg["type"] == "ssubscribe"
 
-        # Get initial mapping size (if available)
-        initial_size = 0
-        if hasattr(pubsub, "node_pubsub_mapping"):
-            initial_size = len(pubsub.node_pubsub_mapping)
+        # Get initial mapping size (cluster pubsub only)
+        assert hasattr(pubsub, "node_pubsub_mapping"), "Test requires ClusterPubSub"
+        initial_size = len(pubsub.node_pubsub_mapping)
 
         # Subscribe to second channel (modifies mapping during potential iteration)
         pubsub.ssubscribe(channel2)
@@ -970,9 +969,8 @@ class TestPubSubSubcommands:
         assert msg is not None
         assert msg["type"] == "ssubscribe"
 
-        # Verify mapping was updated (if available)
-        if hasattr(pubsub, "node_pubsub_mapping"):
-            assert len(pubsub.node_pubsub_mapping) >= initial_size
+        # Verify mapping was updated
+        assert len(pubsub.node_pubsub_mapping) >= initial_size
 
         # Publish and read messages - should not raise RuntimeError
         r.spublish(channel1, "msg1")
