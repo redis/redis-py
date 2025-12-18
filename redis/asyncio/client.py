@@ -53,7 +53,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.credentials import CredentialProvider
-from redis.driver_info import DriverInfo
+from redis.driver_info import DriverInfo, resolve_driver_info
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
     AfterPubSubConnectionInstantiationEvent,
@@ -75,7 +75,6 @@ from redis.utils import (
     _set_info_logger,
     deprecated_args,
     deprecated_function,
-    get_lib_version,
     safe_str,
     str_if_bytes,
     truncate_text,
@@ -315,14 +314,9 @@ class Redis(
                 retry_on_error = []
 
             # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
-            if driver_info is not None:
-                computed_driver_info = driver_info
-            else:
-                # Fallback: create DriverInfo from lib_name and lib_version
-                # Use defaults if not provided
-                name = lib_name if lib_name is not None else "redis-py"
-                version = lib_version if lib_version is not None else get_lib_version()
-                computed_driver_info = DriverInfo(name=name, lib_version=version)
+            computed_driver_info = resolve_driver_info(
+                driver_info, lib_name, lib_version
+            )
 
             kwargs = {
                 "db": db,

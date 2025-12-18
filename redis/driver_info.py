@@ -139,3 +139,38 @@ class DriverInfo:
         if not self._upstream:
             return self.name
         return f"{self.name}({';'.join(self._upstream)})"
+
+
+def resolve_driver_info(
+    driver_info: Optional[DriverInfo],
+    lib_name: Optional[str],
+    lib_version: Optional[str],
+) -> DriverInfo:
+    """Resolve driver_info from parameters.
+
+    If driver_info is provided, use it. Otherwise, create DriverInfo from
+    lib_name and lib_version (using defaults if not provided).
+
+    Parameters
+    ----------
+    driver_info : DriverInfo, optional
+        The DriverInfo instance to use
+    lib_name : str, optional
+        The library name (default: "redis-py")
+    lib_version : str, optional
+        The library version (default: auto-detected)
+
+    Returns
+    -------
+    DriverInfo
+        The resolved DriverInfo instance
+    """
+    if driver_info is not None:
+        return driver_info
+
+    # Fallback: create DriverInfo from lib_name and lib_version
+    from redis.utils import get_lib_version
+
+    name = lib_name if lib_name is not None else "redis-py"
+    version = lib_version if lib_version is not None else get_lib_version()
+    return DriverInfo(name=name, lib_version=version)

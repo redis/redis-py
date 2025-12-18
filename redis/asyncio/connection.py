@@ -38,7 +38,7 @@ else:
     VerifyFlags = None
 
 from ..auth.token import TokenInterface
-from ..driver_info import DriverInfo
+from ..driver_info import DriverInfo, resolve_driver_info
 from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
 from ..utils import deprecated_args, format_error_message
 
@@ -64,7 +64,7 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.typing import EncodableT
-from redis.utils import HIREDIS_AVAILABLE, get_lib_version, str_if_bytes
+from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
 from .._parsers import (
     BaseParser,
@@ -199,14 +199,7 @@ class AbstractConnection:
         self.client_name = client_name
 
         # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
-        if driver_info is not None:
-            self.driver_info = driver_info
-        else:
-            # Fallback: create DriverInfo from lib_name and lib_version
-            # Use defaults if not provided
-            name = lib_name if lib_name is not None else "redis-py"
-            version = lib_version if lib_version is not None else get_lib_version()
-            self.driver_info = DriverInfo(name=name, lib_version=version)
+        self.driver_info = resolve_driver_info(driver_info, lib_name, lib_version)
 
         self.credential_provider = credential_provider
         self.password = password
