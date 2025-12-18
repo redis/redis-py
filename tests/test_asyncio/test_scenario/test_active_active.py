@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+from typing import Optional
 
 import pytest
 
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 async def trigger_network_failure_action(
-    fault_injector_client, config, event: asyncio.Event = None
+    fault_injector_client, config, event: Optional[asyncio.Event] = None
 ):
     action_request = ActionRequest(
         action_type=ActionType.NETWORK_FAILURE,
@@ -32,12 +33,15 @@ async def trigger_network_failure_action(
     result = fault_injector_client.trigger_action(action_request)
     status_result = fault_injector_client.get_action_status(result["action_id"])
 
+    waiting_iteration = 0
     while status_result["status"] != "success":
         await asyncio.sleep(0.1)
         status_result = fault_injector_client.get_action_status(result["action_id"])
-        logger.info(
-            f"Waiting for action to complete. Status: {status_result['status']}"
-        )
+        if waiting_iteration % 10 == 0:
+            logger.info(
+                f"Waiting for action to complete. Status: {status_result['status']}"
+            )
+        waiting_iteration += 1
 
     if event:
         event.set()
@@ -101,6 +105,7 @@ class TestActiveActive:
                 )
                 await asyncio.sleep(0.5)
 
+    @pytest.mark.skip(reason="Skip while validating credentials are configured in CI")
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "r_multi_db",

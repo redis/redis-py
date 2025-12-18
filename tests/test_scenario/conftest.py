@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import pytest
 
 from redis.backoff import NoBackoff, ExponentialBackoff
+from redis.cluster import RedisCluster
 from redis.event import EventDispatcher, EventListenerInterface
 from redis.multidb.client import MultiDBClient
 from redis.multidb.config import (
@@ -108,14 +109,19 @@ def r_multi_db(
     )
     db_configs = []
 
+    client_kwargs = {
+        "username": username,
+        "password": password,
+        "decode_responses": True,
+    }
+
+    if client_class == RedisCluster:
+        client_kwargs["dynamic_startup_nodes"] = False
+
     db_config = DatabaseConfig(
         weight=1.0,
         from_url=endpoint_config["endpoints"][0],
-        client_kwargs={
-            "username": username,
-            "password": password,
-            "decode_responses": True,
-        },
+        client_kwargs=client_kwargs,
         health_check_url=extract_cluster_fqdn(endpoint_config["endpoints"][0]),
     )
     db_configs.append(db_config)
@@ -123,11 +129,7 @@ def r_multi_db(
     db_config1 = DatabaseConfig(
         weight=0.9,
         from_url=endpoint_config["endpoints"][1],
-        client_kwargs={
-            "username": username,
-            "password": password,
-            "decode_responses": True,
-        },
+        client_kwargs=client_kwargs,
         health_check_url=extract_cluster_fqdn(endpoint_config["endpoints"][1]),
     )
     db_configs.append(db_config1)
