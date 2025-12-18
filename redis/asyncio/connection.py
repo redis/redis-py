@@ -1220,9 +1220,6 @@ class ConnectionPool:
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
 
-        # Store driver_info for propagation to connections
-        self.driver_info = self.connection_kwargs.get("driver_info", None)
-
     def __repr__(self):
         conn_kwargs = ",".join([f"{k}={v}" for k, v in self.connection_kwargs.items()])
         return (

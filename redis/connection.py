@@ -2502,9 +2502,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         if self._event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
 
-        # Store driver_info for propagation to connections
-        self.driver_info = self._connection_kwargs.get("driver_info", None)
-
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
         # after a fork. during this time, multiple threads in the child
