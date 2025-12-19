@@ -1,9 +1,17 @@
 from unittest import mock
+from unittest.mock import MagicMock
 
 import pytest
 
 import redis
-from redis.event import EventDispatcher, OnErrorEvent, EventListenerInterface
+from redis.event import (
+    AfterPooledConnectionsInstantiationEvent,
+    ClientType,
+    EventDispatcher,
+    EventListenerInterface,
+    InitializeConnectionCountObservability,
+    OnErrorEvent,
+)
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
@@ -633,3 +641,36 @@ class TestRedisClientEventEmission:
 
         # Second event is from final failure (is_internal=False)
         assert error_events[1].is_internal is False
+
+class TestInitializeConnectionCountObservabilityListener:
+    """
+    Unit tests that verify InitializeConnectionCountObservability listener
+    is correctly called when Redis client is instantiated, and that
+    the connection pools are passed to the OTel recorder.
+    """
+
+    def test_redis_client_init_calls_init_connection_count_with_pools(self):
+        """Test that Redis.__init__ triggers init_connection_count with connection pools."""
+        mock_pool = MagicMock()
+        mock_pool.get_protocol.return_value = 2
+
+        with mock.patch(
+            "redis.client.ConnectionPool", return_value=mock_pool
+        ), mock.patch(
+            "redis.event.init_connection_count"
+        ) as mock_init_connection_count:
+            redis.Redis(host="localhost", port=6379)
+
+            mock_init_connection_count.assert_called_once_with([mock_pool])
+
+    def test_redis_client_with_external_pool_calls_init_connection_count(self):
+        """Test that Redis with external pool triggers init_connection_count."""
+        mock_pool = MagicMock()
+        mock_pool.get_protocol.return_value = 2
+
+        with mock.patch(
+            "redis.event.init_connection_count"
+        ) as mock_init_connection_count:
+            redis.Redis(connection_pool=mock_pool)
+
+            mock_init_connection_count.assert_called_once_with([mock_pool])

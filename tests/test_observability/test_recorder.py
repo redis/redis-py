@@ -41,12 +41,12 @@ from redis.observability.attributes import (
     # Streaming attributes
     REDIS_CLIENT_STREAM_NAME,
     REDIS_CLIENT_CONSUMER_GROUP,
-    REDIS_CLIENT_CONSUMER_NAME,
+    REDIS_CLIENT_CONSUMER_NAME, DB_CLIENT_CONNECTION_NAME,
 )
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
 from redis.observability.recorder import record_operation_duration, record_connection_create_time, \
-    record_connection_count, record_connection_timeout, record_connection_wait_time, record_connection_use_time, \
+    record_connection_timeout, record_connection_wait_time, record_connection_use_time, \
     record_connection_closed, record_connection_relaxed_timeout, record_connection_handoff, record_error_count, \
     record_pubsub_message, reset_collector, record_streaming_lag
 
@@ -63,8 +63,10 @@ class MockInstruments:
         self.connection_handoff = MagicMock()
         self.pubsub_messages = MagicMock()
 
-        # UpDownCounters
+        # Gauges
         self.connection_count = MagicMock()
+
+        # UpDownCounters
         self.connection_relaxed_timeout = MagicMock()
 
         # Histograms
@@ -97,9 +99,14 @@ def mock_meter(mock_instruments):
         }
         return instrument_map.get(name, MagicMock())
 
-    def create_up_down_counter_side_effect(name, **kwargs):
+    def create_gauge_side_effect(name, **kwargs):
         instrument_map = {
             'db.client.connection.count': mock_instruments.connection_count,
+        }
+        return instrument_map.get(name, MagicMock())
+
+    def create_up_down_counter_side_effect(name, **kwargs):
+        instrument_map = {
             'redis.client.connection.relaxed_timeout': mock_instruments.connection_relaxed_timeout,
         }
         return instrument_map.get(name, MagicMock())
@@ -115,6 +122,7 @@ def mock_meter(mock_instruments):
         return instrument_map.get(name, MagicMock())
 
     meter.create_counter.side_effect = create_counter_side_effect
+    meter.create_gauge.side_effect = create_gauge_side_effect
     meter.create_up_down_counter.side_effect = create_up_down_counter_side_effect
     meter.create_histogram.side_effect = create_histogram_side_effect
 
@@ -198,7 +206,6 @@ class TestRecordOperationDuration:
         assert attrs[SERVER_PORT] == 6379
         assert attrs[DB_NAMESPACE] == '0'
         assert attrs[DB_OPERATION_NAME] == 'SET'
-        assert attrs[DB_RESPONSE_STATUS_CODE] == 'ok'
 
     def test_record_operation_duration_with_error(self, setup_recorder):
         """Test that error information is included in attributes."""
@@ -219,8 +226,8 @@ class TestRecordOperationDuration:
 
         attrs = call_args[1]['attributes']
         assert attrs[DB_OPERATION_NAME] == 'GET'
-        assert attrs[DB_RESPONSE_STATUS_CODE] is None
-        assert attrs[ERROR_TYPE] == 'ConnectionError'
+        assert attrs[DB_RESPONSE_STATUS_CODE] == 'error'
+        assert attrs[ERROR_TYPE] == 'other:ConnectionError'
 
 
 class TestRecordConnectionCreateTime:
@@ -232,7 +239,7 @@ class TestRecordConnectionCreateTime:
         instruments = setup_recorder
 
         record_connection_create_time(
-            pool_name='ConnectionPool<localhost:6379>',
+            connection_pool='ConnectionPool<localhost:6379>',
             duration_seconds=0.025,
         )
 
@@ -244,55 +251,7 @@ class TestRecordConnectionCreateTime:
 
         # Verify attributes
         attrs = call_args[1]['attributes']
-        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == 'ConnectionPool<localhost:6379>'
-
-
-class TestRecordConnectionCount:
-    """Tests for record_connection_count - verifies UpDownCounter.add() calls."""
-
-    def test_record_connection_count_idle_increment(self, setup_recorder):
-        """Test incrementing idle connection count."""
-
-        instruments = setup_recorder
-
-        record_connection_count(
-            count=1,
-            pool_name='ConnectionPool<localhost:6379>',
-            state=ConnectionState.IDLE,
-            is_pubsub=False,
-        )
-
-        instruments.connection_count.add.assert_called_once()
-        call_args = instruments.connection_count.add.call_args
-
-        # Verify increment value
-        assert call_args[0][0] == 1
-
-        # Verify attributes
-        attrs = call_args[1]['attributes']
-        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == 'ConnectionPool<localhost:6379>'
-        assert attrs[DB_CLIENT_CONNECTION_STATE] == ConnectionState.IDLE.value
-        assert attrs[REDIS_CLIENT_CONNECTION_PUBSUB] is False
-
-    def test_record_connection_count_used_decrement(self, setup_recorder):
-        """Test decrementing used connection count for pubsub."""
-
-        instruments = setup_recorder
-
-        record_connection_count(
-            count=-1,
-            pool_name='ConnectionPool<localhost:6379>',
-            state=ConnectionState.USED,
-            is_pubsub=True,
-        )
-
-        instruments.connection_count.add.assert_called_once()
-        call_args = instruments.connection_count.add.call_args
-
-        assert call_args[0][0] == -1
-        attrs = call_args[1]['attributes']
-        assert attrs[DB_CLIENT_CONNECTION_STATE] == ConnectionState.USED.value
-        assert attrs[REDIS_CLIENT_CONNECTION_PUBSUB] is True
+        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "'ConnectionPool<localhost:6379>'"
 
 
 class TestRecordConnectionTimeout:
@@ -395,7 +354,7 @@ class TestRecordConnectionClosed:
         instruments.connection_closed.add.assert_called_once()
         attrs = instruments.connection_closed.add.call_args[1]['attributes']
         assert attrs[REDIS_CLIENT_CONNECTION_CLOSE_REASON] == 'error'
-        assert attrs[ERROR_TYPE] == 'ConnectionResetError'
+        assert attrs[ERROR_TYPE] == 'other:ConnectionResetError'
 
 
 class TestRecordConnectionRelaxedTimeout:
@@ -407,7 +366,7 @@ class TestRecordConnectionRelaxedTimeout:
         instruments = setup_recorder
 
         record_connection_relaxed_timeout(
-            pool_name='ConnectionPool<localhost:6379>',
+            connection_name='Connection<localhost:6379>',
             maint_notification='MOVING',
             relaxed=True,
         )
@@ -418,7 +377,7 @@ class TestRecordConnectionRelaxedTimeout:
         # relaxed=True means count up (+1)
         assert call_args[0][0] == 1
         attrs = call_args[1]['attributes']
-        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == 'ConnectionPool<localhost:6379>'
+        assert attrs[DB_CLIENT_CONNECTION_NAME] == 'Connection<localhost:6379>'
         assert attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] == 'MOVING'
 
     def test_record_connection_relaxed_timeout_unrelaxed(self, setup_recorder):
@@ -427,7 +386,7 @@ class TestRecordConnectionRelaxedTimeout:
         instruments = setup_recorder
 
         record_connection_relaxed_timeout(
-            pool_name='ConnectionPool<localhost:6379>',
+            connection_name='ConnectionPool<localhost:6379>',
             maint_notification='MIGRATING',
             relaxed=False,
         )
@@ -477,6 +436,7 @@ class TestRecordErrorCount:
             network_peer_port=6379,
             error_type=error,
             retry_attempts=3,
+            is_internal=True,
         )
 
         instruments.client_errors.add.assert_called_once()
@@ -488,8 +448,82 @@ class TestRecordErrorCount:
         assert attrs[SERVER_PORT] == 6379
         assert attrs[NETWORK_PEER_ADDRESS] == '127.0.0.1'
         assert attrs[NETWORK_PEER_PORT] == 6379
-        assert attrs[ERROR_TYPE] == 'ConnectionError'
+        assert attrs[ERROR_TYPE] == 'other:ConnectionError'
         assert attrs[REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS] == 3
+
+    def test_record_error_count_with_is_internal_false(self, setup_recorder):
+        """Test recording error count with is_internal=False."""
+
+        instruments = setup_recorder
+
+        error = TimeoutError("Connection timed out")
+        record_error_count(
+            server_address='localhost',
+            server_port=6379,
+            network_peer_address='127.0.0.1',
+            network_peer_port=6379,
+            error_type=error,
+            retry_attempts=2,
+            is_internal=False,
+        )
+
+        instruments.client_errors.add.assert_called_once()
+        call_args = instruments.client_errors.add.call_args
+
+        assert call_args[0][0] == 1
+        attrs = call_args[1]['attributes']
+        assert attrs[ERROR_TYPE] == 'other:TimeoutError'
+        assert attrs[REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS] == 2
+
+
+class TestRecordMaintNotificationCount:
+    """Tests for record_maint_notification_count - verifies Counter.add() calls."""
+
+    def test_record_maint_notification_count(self, setup_recorder):
+        """Test recording maintenance notification count with all attributes."""
+
+        instruments = setup_recorder
+
+        recorder.record_maint_notification_count(
+            server_address='localhost',
+            server_port=6379,
+            network_peer_address='127.0.0.1',
+            network_peer_port=6379,
+            maint_notification='MOVING',
+        )
+
+        instruments.maintenance_notifications.add.assert_called_once()
+        call_args = instruments.maintenance_notifications.add.call_args
+
+        assert call_args[0][0] == 1
+        attrs = call_args[1]['attributes']
+        assert attrs[SERVER_ADDRESS] == 'localhost'
+        assert attrs[SERVER_PORT] == 6379
+        assert attrs[NETWORK_PEER_ADDRESS] == '127.0.0.1'
+        assert attrs[NETWORK_PEER_PORT] == 6379
+        assert attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] == 'MOVING'
+
+    def test_record_maint_notification_count_migrating(self, setup_recorder):
+        """Test recording maintenance notification count with MIGRATING type."""
+
+        instruments = setup_recorder
+
+        recorder.record_maint_notification_count(
+            server_address='redis-primary',
+            server_port=6380,
+            network_peer_address='10.0.0.1',
+            network_peer_port=6380,
+            maint_notification='MIGRATING',
+        )
+
+        instruments.maintenance_notifications.add.assert_called_once()
+        call_args = instruments.maintenance_notifications.add.call_args
+
+        assert call_args[0][0] == 1
+        attrs = call_args[1]['attributes']
+        assert attrs[SERVER_ADDRESS] == 'redis-primary'
+        assert attrs[SERVER_PORT] == 6380
+        assert attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] == 'MIGRATING'
 
 
 class TestRecordPubsubMessage:
@@ -626,7 +660,6 @@ class TestRecorderDisabled:
         with patch.object(recorder, '_get_or_create_collector', return_value=None):
             # None of these should raise
             recorder.record_connection_create_time('pool', 0.1)
-            recorder.record_connection_count(1, 'pool', ConnectionState.IDLE, False)
             recorder.record_connection_timeout('pool')
             recorder.record_connection_wait_time('pool', 0.1)
             recorder.record_connection_use_time('pool', 0.1)
@@ -634,6 +667,7 @@ class TestRecorderDisabled:
             recorder.record_connection_relaxed_timeout('pool', 'MOVING', True)
             recorder.record_connection_handoff('pool')
             recorder.record_error_count('host', 6379, '127.0.0.1', 6379, Exception(), 0)
+            recorder.record_maint_notification_count('host', 6379, '127.0.0.1', 6379, 'MOVING')
             recorder.record_pubsub_message(PubSubDirection.PUBLISH)
             recorder.record_streaming_lag(0.1, 'stream', 'group', 'consumer')
 
@@ -672,9 +706,14 @@ class TestMetricGroupsDisabled:
             }
             return instrument_map.get(name, MagicMock())
 
-        def create_up_down_counter_side_effect(name, **kwargs):
+        def create_gauge_side_effect(name, **kwargs):
             instrument_map = {
                 'db.client.connection.count': mock_instruments.connection_count,
+            }
+            return instrument_map.get(name, MagicMock())
+
+        def create_up_down_counter_side_effect(name, **kwargs):
+            instrument_map = {
                 'redis.client.connection.relaxed_timeout': mock_instruments.connection_relaxed_timeout,
             }
             return instrument_map.get(name, MagicMock())
@@ -690,6 +729,7 @@ class TestMetricGroupsDisabled:
             return instrument_map.get(name, MagicMock())
 
         mock_meter.create_counter.side_effect = create_counter_side_effect
+        mock_meter.create_gauge.side_effect = create_gauge_side_effect
         mock_meter.create_up_down_counter.side_effect = create_up_down_counter_side_effect
         mock_meter.create_histogram.side_effect = create_histogram_side_effect
 
@@ -718,26 +758,6 @@ class TestMetricGroupsDisabled:
         # Verify no call to the histogram's record method
         instruments.operation_duration.record.assert_not_called()
 
-    def test_record_connection_count_no_meter_call_when_connection_basic_disabled(self):
-        """Test that record_connection_count makes no Meter calls when CONNECTION_BASIC is disabled."""
-        instruments = MockInstruments()
-        collector = self._create_collector_with_disabled_groups(
-            instruments,
-            [MetricGroup.COMMAND]  # No CONNECTION_BASIC
-        )
-
-        recorder.reset_collector()
-        with patch.object(recorder, '_get_or_create_collector', return_value=collector):
-            record_connection_count(
-                count=1,
-                pool_name='test-pool',
-                state=ConnectionState.IDLE,
-                is_pubsub=False,
-            )
-
-        # Verify no call to the up_down_counter's add method
-        instruments.connection_count.add.assert_not_called()
-
     def test_record_connection_create_time_no_meter_call_when_connection_basic_disabled(self):
         """Test that record_connection_create_time makes no Meter calls when CONNECTION_BASIC is disabled."""
         instruments = MockInstruments()
@@ -749,7 +769,7 @@ class TestMetricGroupsDisabled:
         recorder.reset_collector()
         with patch.object(recorder, '_get_or_create_collector', return_value=collector):
             record_connection_create_time(
-                pool_name='test-pool',
+                connection_pool='test-pool',
                 duration_seconds=0.050,
             )
 
@@ -821,7 +841,7 @@ class TestMetricGroupsDisabled:
         recorder.reset_collector()
         with patch.object(recorder, '_get_or_create_collector', return_value=collector):
             record_connection_relaxed_timeout(
-                pool_name='test-pool',
+                connection_name='test-pool',
                 maint_notification='MOVING',
                 relaxed=True,
             )
@@ -889,6 +909,27 @@ class TestMetricGroupsDisabled:
         # Verify no call to the counter's add method
         instruments.client_errors.add.assert_not_called()
 
+    def test_record_maint_notification_count_no_meter_call_when_resiliency_disabled(self):
+        """Test that record_maint_notification_count makes no Meter calls when RESILIENCY group is disabled."""
+        instruments = MockInstruments()
+        collector = self._create_collector_with_disabled_groups(
+            instruments,
+            [MetricGroup.COMMAND]  # No RESILIENCY
+        )
+
+        recorder.reset_collector()
+        with patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            recorder.record_maint_notification_count(
+                server_address='localhost',
+                server_port=6379,
+                network_peer_address='127.0.0.1',
+                network_peer_port=6379,
+                maint_notification='MOVING',
+            )
+
+        # Verify no call to the counter's add method
+        instruments.maintenance_notifications.add.assert_not_called()
+
     def test_all_record_functions_no_meter_calls_when_all_groups_disabled(self):
         """Test that all record_* functions make no Meter calls when all groups are disabled."""
         instruments = MockInstruments()
@@ -902,7 +943,6 @@ class TestMetricGroupsDisabled:
             # Call all record functions
             record_operation_duration('GET', 0.001, 'localhost', 6379)
             record_connection_create_time('pool', 0.050)
-            record_connection_count(1, 'pool', ConnectionState.IDLE, False)
             record_connection_timeout('pool')
             record_connection_wait_time('pool', 0.010)
             record_connection_use_time('pool', 0.100)
@@ -910,13 +950,14 @@ class TestMetricGroupsDisabled:
             record_connection_relaxed_timeout('pool', 'MOVING', True)
             record_connection_handoff('pool')
             record_error_count('localhost', 6379, '127.0.0.1', 6379, Exception('err'), 0)
+            recorder.record_maint_notification_count('localhost', 6379, '127.0.0.1', 6379, 'MOVING')
             record_pubsub_message(PubSubDirection.PUBLISH, 'channel')
             record_streaming_lag(0.150, 'stream', 'group', 'consumer')
 
         # Verify no Meter instrument methods were called
         instruments.operation_duration.record.assert_not_called()
         instruments.connection_create_time.record.assert_not_called()
-        instruments.connection_count.add.assert_not_called()
+        instruments.connection_count.set.assert_not_called()
         instruments.connection_timeouts.add.assert_not_called()
         instruments.connection_wait_time.record.assert_not_called()
         instruments.connection_use_time.record.assert_not_called()
@@ -924,6 +965,7 @@ class TestMetricGroupsDisabled:
         instruments.connection_relaxed_timeout.add.assert_not_called()
         instruments.connection_handoff.add.assert_not_called()
         instruments.client_errors.add.assert_not_called()
+        instruments.maintenance_notifications.add.assert_not_called()
         instruments.pubsub_messages.add.assert_not_called()
         instruments.stream_lag.record.assert_not_called()
 
@@ -942,8 +984,8 @@ class TestMetricGroupsDisabled:
             record_pubsub_message(PubSubDirection.PUBLISH, 'channel')
 
             # Call functions from disabled groups
-            record_connection_count(1, 'pool', ConnectionState.IDLE, False)
             record_error_count('localhost', 6379, '127.0.0.1', 6379, Exception('err'), 0)
+            recorder.record_maint_notification_count('localhost', 6379, '127.0.0.1', 6379, 'MOVING')
             record_streaming_lag(0.150, 'stream', 'group', 'consumer')
 
         # Enabled groups should have received Meter calls
@@ -951,6 +993,7 @@ class TestMetricGroupsDisabled:
         instruments.pubsub_messages.add.assert_called_once()
 
         # Disabled groups should NOT have received Meter calls
-        instruments.connection_count.add.assert_not_called()
+        instruments.connection_count.set.assert_not_called()
         instruments.client_errors.add.assert_not_called()
+        instruments.maintenance_notifications.add.assert_not_called()
         instruments.stream_lag.record.assert_not_called()

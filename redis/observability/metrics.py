@@ -7,7 +7,7 @@ OTel semantic conventions for database clients.
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Callable, List
 
 from redis.observability.attributes import AttributeBuilder, ConnectionState, REDIS_CLIENT_CONNECTION_NOTIFICATION, \
     REDIS_CLIENT_CONNECTION_CLOSE_REASON, ERROR_TYPE, PubSubDirection
@@ -54,6 +54,7 @@ class RedisMetricsCollector:
         self.meter = meter
         self.config = config
         self.attr_builder = AttributeBuilder()
+        self.connection_count = None
 
         # Initialize enabled metric instruments
 
@@ -93,12 +94,6 @@ class RedisMetricsCollector:
 
     def _init_connection_basic_metrics(self) -> None:
         """Initialize basic connection metrics."""
-        self.connection_count = self.meter.create_up_down_counter(
-            name="db.client.connection.count",
-            unit="{connections}",
-            description="Current connections by state (idle/used)",
-        )
-
         self.connection_create_time = self.meter.create_histogram(
             name="db.client.connection.create_time",
             unit="{seconds}",
@@ -252,31 +247,25 @@ class RedisMetricsCollector:
         attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] = maint_notification
         self.maintenance_notifications.add(1, attributes=attrs)
 
-    def record_connection_count(
+    def init_connection_count(
             self,
-            count: int,
-            pool_name: str,
-            state: ConnectionState,
-            is_pubsub: bool,
+            callback: Callable,
     ) -> None:
         """
-        Record current connection count by state.
+        Initialize observable gauge for connection count metric.
 
         Args:
-            count: Increment/Decrement
-            pool_name: Connection pool name
-            state: Connection state ('idle' or 'used')
-            is_pubsub: Whether or not the connection is pubsub
+            callback: Callback function to retrieve connection count
         """
-        if not hasattr(self, "connection_count"):
+        if not MetricGroup.CONNECTION_BASIC in self.config.metric_groups:
             return
 
-        attrs = self.attr_builder.build_connection_attributes(
-            pool_name=pool_name,
-            connection_state=state,
-            is_pubsub=is_pubsub,
+        self.connection_count = self.meter.create_observable_gauge(
+            name="db.client.connection.count",
+            unit="connections",
+            description="Number of connections in the pool",
+            callbacks=[callback],
         )
-        self.connection_count.add(count, attributes=attrs)
 
     def record_connection_timeout(self, pool_name: str) -> None:
         """
@@ -293,20 +282,20 @@ class RedisMetricsCollector:
 
     def record_connection_create_time(
             self,
-            pool_name: str,
+            connection_pool: "ConnectionPoolInterface",
             duration_seconds: float,
     ) -> None:
         """
         Record time taken to create a new connection.
 
         Args:
-            pool_name: Connection pool name
+            connection_pool: Connection pool implementation
             duration_seconds: Creation time in seconds
         """
         if not hasattr(self, "connection_create_time"):
             return
 
-        attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
+        attrs = self.attr_builder.build_connection_attributes(pool_name=repr(connection_pool))
         self.connection_create_time.record(duration_seconds, attributes=attrs)
 
     def record_connection_wait_time(
@@ -436,7 +425,7 @@ class RedisMetricsCollector:
 
     def record_connection_relaxed_timeout(
             self,
-            pool_name: str,
+            connection_name: str,
             maint_notification: str,
             relaxed: bool,
     ) -> None:
@@ -444,14 +433,14 @@ class RedisMetricsCollector:
         Record a connection timeout relaxation event.
 
         Args:
-            pool_name: Connection pool name
+            connection_name: Connection pool name
             maint_notification: Maintenance notification type
             relaxed: True to count up (relaxed), False to count down (unrelaxed)
         """
         if not hasattr(self, "connection_relaxed_timeout"):
             return
 
-        attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
+        attrs = self.attr_builder.build_connection_attributes(connection_name=connection_name)
         attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] = maint_notification
         self.connection_relaxed_timeout.add(1 if relaxed else -1, attributes=attrs)
 

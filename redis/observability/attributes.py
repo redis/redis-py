@@ -31,6 +31,7 @@ SERVER_PORT = "server.port"
 # Connection pool attributes
 DB_CLIENT_CONNECTION_POOL_NAME = "db.client.connection.pool.name"
 DB_CLIENT_CONNECTION_STATE = "db.client.connection.state"
+DB_CLIENT_CONNECTION_NAME = "db.client.connection.name"
 
 # Redis-specific attributes
 REDIS_CLIENT_LIBRARY = "redis.client.library"
@@ -146,8 +147,9 @@ class AttributeBuilder:
 
     @staticmethod
     def build_connection_attributes(
-            pool_name: str,
+            pool_name: Optional[str] = None,
             connection_state: Optional[ConnectionState] = None,
+            connection_name: Optional[str] = None,
             is_pubsub: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
@@ -157,18 +159,24 @@ class AttributeBuilder:
             pool_name: Unique connection pool name
             connection_state: Connection state ('idle' or 'used')
             is_pubsub: Whether this is a PubSub connection
+            connection_name: Unique connection name
 
         Returns:
             Dictionary of connection pool attributes
         """
         attrs: Dict[str, Any] = AttributeBuilder.build_base_attributes()
-        attrs[DB_CLIENT_CONNECTION_POOL_NAME] = pool_name
+
+        if pool_name is not None:
+            attrs[DB_CLIENT_CONNECTION_POOL_NAME] = pool_name
 
         if connection_state is not None:
             attrs[DB_CLIENT_CONNECTION_STATE] = connection_state.value
 
         if is_pubsub is not None:
             attrs[REDIS_CLIENT_CONNECTION_PUBSUB] = is_pubsub
+
+        if connection_name is not None:
+            attrs[DB_CLIENT_CONNECTION_NAME] = connection_name
 
         return attrs
 

@@ -4,11 +4,13 @@ import time
 from contextlib import closing
 from threading import Thread
 from unittest import mock
+from unittest.mock import MagicMock
 
 import pytest
 import redis
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
+from redis.event import AfterConnectionCreatedEvent, EventDispatcher, EventListenerInterface
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
@@ -42,6 +44,9 @@ class DummyConnection:
 
     def should_reconnect(self):
         return False
+
+    def re_auth(self):
+        pass
 
 
 class TestConnectionPool:
@@ -955,3 +960,163 @@ class TestHealthCheck:
             assert wait_for_message(p) is None
             m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)
+
+class TestConnectionPoolEventEmission:
+    """Tests for event emission from ConnectionPool."""
+
+    def test_connection_created_event_emitted_on_new_connection(self):
+        """Test that AfterConnectionCreatedEvent is emitted when a new connection is created."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionCreatedEvent: [listener],
+        })
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        pool.get_connection()
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, AfterConnectionCreatedEvent)
+        assert event.connection_pool is pool
+        assert event.duration_seconds >= 0
+
+    def test_connection_created_event_not_emitted_on_reused_connection(self):
+        """Test that AfterConnectionCreatedEvent is NOT emitted when reusing a connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionCreatedEvent: [listener],
+        })
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        # Reset the mock to clear the first call
+        listener.reset_mock()
+
+        # Get the same connection again (reused)
+        pool.get_connection()
+
+        # Event should NOT be emitted for reused connection
+        listener.listen.assert_not_called()
+
+    def test_connection_created_event_emitted_multiple_times_for_new_connections(self):
+        """Test that AfterConnectionCreatedEvent is emitted for each new connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionCreatedEvent: [listener],
+        })
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        pool.get_connection()
+        pool.get_connection()
+
+        assert listener.listen.call_count == 2
+
+    def test_connection_created_event_contains_duration(self):
+        """Test that AfterConnectionCreatedEvent contains a positive duration."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionCreatedEvent: [listener],
+        })
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        pool.get_connection()
+
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event.duration_seconds, float)
+        assert event.duration_seconds >= 0
+
+
+class TestBlockingConnectionPoolEventEmission:
+    """Tests for event emission from BlockingConnectionPool."""
+
+    def test_connection_created_event_emitted_on_new_connection(self):
+        """Test that AfterConnectionCreatedEvent is emitted when a new connection is created."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionCreatedEvent: [listener],
+        })
+
+        pool = redis.BlockingConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+            max_connections=10,
+            timeout=5,
+        )
+
+        pool.get_connection()
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, AfterConnectionCreatedEvent)
+        assert event.connection_pool is pool
+        assert event.duration_seconds >= 0
+
+    def test_connection_created_event_not_emitted_on_reused_connection(self):
+        """Test that AfterConnectionCreatedEvent is NOT emitted when reusing a connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionCreatedEvent: [listener],
+        })
+
+        pool = redis.BlockingConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+            max_connections=10,
+            timeout=5,
+        )
+
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        # Reset the mock to clear the first call
+        listener.reset_mock()
+
+        # Get the same connection again (reused)
+        pool.get_connection()
+
+        # Event should NOT be emitted for reused connection
+        listener.listen.assert_not_called()
+
+    def test_connection_created_event_emitted_multiple_times_for_new_connections(self):
+        """Test that AfterConnectionCreatedEvent is emitted for each new connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionCreatedEvent: [listener],
+        })
+
+        pool = redis.BlockingConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+            max_connections=10,
+            timeout=5,
+        )
+
+        pool.get_connection()
+        pool.get_connection()
+
+        assert listener.listen.call_count == 2

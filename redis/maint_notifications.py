@@ -7,7 +7,8 @@ import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
-from redis.event import OnMaintenanceNotificationEvent
+from redis.event import OnMaintenanceNotificationEvent, EventDispatcherInterface, EventDispatcher, \
+    AfterConnectionTimeoutRelaxedEvent, AfterConnectionHandoffEvent
 from redis.typing import Number
 
 
@@ -560,12 +561,18 @@ class MaintNotificationsPoolHandler:
         self,
         pool: "MaintNotificationsAbstractConnectionPool",
         config: MaintNotificationsConfig,
+        event_dispatcher: Optional[EventDispatcherInterface] = None,
     ) -> None:
         self.pool = pool
         self.config = config
         self._processed_notifications = set()
         self._lock = threading.RLock()
         self.connection = None
+
+        if event_dispatcher is not None:
+            self.event_dispatcher = event_dispatcher
+        else:
+            self.event_dispatcher = EventDispatcher()
 
     def set_connection(self, connection: "MaintNotificationsAbstractConnection"):
         self.connection = connection
@@ -683,6 +690,12 @@ class MaintNotificationsPoolHandler:
                 args=(notification,),
             ).start()
 
+            self.event_dispatcher.dispatch(
+                AfterConnectionHandoffEvent(
+                    connection_pool=self.pool,
+                )
+            )
+
             self._processed_notifications.add(notification)
 
     def run_proactive_reconnect(self, moving_address_src: Optional[str] = None):
@@ -784,12 +797,12 @@ class MaintNotificationsConnectionHandler:
             return
 
         if notification_type:
-            self.handle_maintenance_start_notification(MaintenanceState.MAINTENANCE)
+            self.handle_maintenance_start_notification(MaintenanceState.MAINTENANCE, notification=notification)
         else:
-            self.handle_maintenance_completed_notification()
+            self.handle_maintenance_completed_notification(notification=notification)
 
     def handle_maintenance_start_notification(
-        self, maintenance_state: MaintenanceState
+        self, maintenance_state: MaintenanceState, **kwargs
     ):
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING
@@ -804,7 +817,16 @@ class MaintNotificationsConnectionHandler:
         # extend the timeout for all created connections
         self.connection.update_current_socket_timeout(self.config.relaxed_timeout)
 
-    def handle_maintenance_completed_notification(self):
+        if kwargs.get('notification', None) is not None:
+            self.connection.event_dispatcher.dispatch(
+                AfterConnectionTimeoutRelaxedEvent(
+                    connection=self.connection,
+                    notification=kwargs.get('notification'),
+                    relaxed=True,
+                )
+            )
+
+    def handle_maintenance_completed_notification(self, **kwargs):
         # Only reset timeouts if state is not MOVING and relaxed timeouts are enabled
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING
@@ -816,3 +838,12 @@ class MaintNotificationsConnectionHandler:
         # timeouts by providing -1 as the relaxed timeout
         self.connection.update_current_socket_timeout(-1)
         self.connection.maintenance_state = MaintenanceState.NONE
+
+        if kwargs.get('notification', None) is not None:
+            self.connection.event_dispatcher.dispatch(
+                AfterConnectionTimeoutRelaxedEvent(
+                    connection=self.connection,
+                    notification=kwargs.get('notification'),
+                    relaxed=False,
+                )
+            )
