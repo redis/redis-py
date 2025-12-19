@@ -737,12 +737,31 @@ class Redis(
         if self.single_connection_client:
             await self._single_conn_lock.acquire()
         try:
-            return await conn.retry.call_with_retry(
+            result = await conn.retry.call_with_retry(
                 lambda: self._send_command_parse_response(
                     conn, command_name, *args, **options
                 ),
                 lambda _: self._close_connection(conn),
             )
+
+            # Clean up iter_req_id for SCAN family commands when the cursor returns to 0
+            iter_req_id = options.get("iter_req_id")
+            if iter_req_id and command_name.upper() in (
+                "SCAN",
+                "SSCAN",
+                "HSCAN",
+                "ZSCAN",
+            ):
+                # If the result is a tuple with cursor as the first element and cursor is 0, cleanup
+                if (
+                    isinstance(result, (list, tuple))
+                    and len(result) >= 2
+                    and result[0] == 0
+                ):
+                    if hasattr(pool, "cleanup"):
+                        await pool.cleanup(iter_req_id)
+
+            return result
         finally:
             if self.single_connection_client:
                 self._single_conn_lock.release()
