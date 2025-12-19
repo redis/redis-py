@@ -53,6 +53,7 @@ from redis.commands import (
     list_or_args,
 )
 from redis.credentials import CredentialProvider
+from redis.driver_info import DriverInfo, resolve_driver_info
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
     AfterPubSubConnectionInstantiationEvent,
@@ -74,7 +75,6 @@ from redis.utils import (
     _set_info_logger,
     deprecated_args,
     deprecated_function,
-    get_lib_version,
     safe_str,
     str_if_bytes,
     truncate_text,
@@ -214,6 +214,11 @@ class Redis(
         reason="TimeoutError is included by default.",
         version="6.0.0",
     )
+    @deprecated_args(
+        args_to_warn=["lib_name", "lib_version"],
+        reason="Use 'driver_info' parameter instead. "
+        "lib_name and lib_version will be removed in a future version.",
+    )
     def __init__(
         self,
         *,
@@ -252,8 +257,9 @@ class Redis(
         single_connection_client: bool = False,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = "redis-py",
-        lib_version: Optional[str] = get_lib_version(),
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
+        driver_info: Optional["DriverInfo"] = None,
         username: Optional[str] = None,
         auto_close_connection_pool: Optional[bool] = None,
         redis_connect_func=None,
@@ -306,6 +312,12 @@ class Redis(
             # Create internal connection pool, expected to be closed by Redis instance
             if not retry_on_error:
                 retry_on_error = []
+
+            # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+            computed_driver_info = resolve_driver_info(
+                driver_info, lib_name, lib_version
+            )
+
             kwargs = {
                 "db": db,
                 "username": username,
@@ -320,8 +332,7 @@ class Redis(
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
-                "lib_name": lib_name,
-                "lib_version": lib_version,
+                "driver_info": computed_driver_info,
                 "redis_connect_func": redis_connect_func,
                 "protocol": protocol,
             }
