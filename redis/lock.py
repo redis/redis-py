@@ -3,7 +3,7 @@ import threading
 import time as mod_time
 import uuid
 from types import SimpleNamespace, TracebackType
-from typing import Optional, Type
+from typing import Literal, Optional, Type
 
 from redis.exceptions import LockError, LockNotOwnedError
 from redis.typing import Number
@@ -284,7 +284,7 @@ class Lock:
                 lock_name=self.name,
             )
 
-    def extend(self, additional_time: Number, replace_ttl: bool = False) -> bool:
+    def extend(self, additional_time: Number, replace_ttl: bool = False) -> Literal[True]:
         """
         Adds more time to an already acquired lock.
 
@@ -301,7 +301,7 @@ class Lock:
             raise LockError("Cannot extend a lock with no timeout", lock_name=self.name)
         return self.do_extend(additional_time, replace_ttl)
 
-    def do_extend(self, additional_time: Number, replace_ttl: bool) -> bool:
+    def do_extend(self, additional_time: Number, replace_ttl: bool) -> Literal[True]:
         additional_time = int(additional_time * 1000)
         if not bool(
             self.lua_extend(
