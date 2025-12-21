@@ -1,3 +1,5 @@
+from unittest.mock import MagicMock
+
 import pytest
 import pytest_asyncio
 from redis import exceptions
@@ -165,14 +167,13 @@ class TestAsyncScriptTypeHints:
         We use a mock-like approach since we don't need actual cluster connection.
         Using bytes script to avoid encoder dependency in mock.
         """
-        from unittest.mock import MagicMock
-
         # Create a mock RedisCluster instance
         mock_cluster = MagicMock(spec=RedisCluster)
         # Using bytes script to bypass encoder.encode() call
         test_script = b"return 1"
 
         # AsyncScript should accept RedisCluster without type errors
-        script = AsyncScript(mock_cluster, test_script)
+        script = RedisCluster.register_script(mock_cluster, test_script)
+        assert isinstance(script, AsyncScript)
         assert script.registered_client is mock_cluster
         assert script.script == test_script

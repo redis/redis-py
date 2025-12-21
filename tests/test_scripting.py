@@ -1,3 +1,5 @@
+from unittest.mock import MagicMock
+
 import pytest
 import redis
 from redis import exceptions
@@ -61,14 +63,13 @@ class TestScript:
         We use a mock-like approach since we don't need actual cluster connection.
         Using bytes script to avoid encoder dependency in mock.
         """
-        from unittest.mock import MagicMock
-
         # Create a mock RedisCluster instance
         mock_cluster = MagicMock(spec=RedisCluster)
 
         # Script should accept RedisCluster without type errors
         # Using bytes script to bypass encoder.encode() call
-        script = Script(mock_cluster, script_bytes)
+        script = RedisCluster.register_script(mock_cluster, script_bytes)
+        assert isinstance(script, Script)
         assert script.registered_client is mock_cluster
         assert script.script == script_bytes
 
