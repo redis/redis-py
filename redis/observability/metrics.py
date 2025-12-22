@@ -419,8 +419,13 @@ class RedisMetricsCollector:
         attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
         if close_reason:
             attrs[REDIS_CLIENT_CONNECTION_CLOSE_REASON] = close_reason
-        if error_type:
-            attrs[ERROR_TYPE] = AttributeBuilder.extract_error_type(error_type)
+
+        attrs.update(
+            self.attr_builder.build_error_attributes(
+                error_type=error_type,
+            )
+        )
+
         self.connection_closed.add(1, attributes=attrs)
 
     def record_connection_relaxed_timeout(

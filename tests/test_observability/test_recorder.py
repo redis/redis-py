@@ -227,7 +227,7 @@ class TestRecordOperationDuration:
         attrs = call_args[1]['attributes']
         assert attrs[DB_OPERATION_NAME] == 'GET'
         assert attrs[DB_RESPONSE_STATUS_CODE] == 'error'
-        assert attrs[ERROR_TYPE] == 'other:ConnectionError'
+        assert attrs[ERROR_TYPE] == 'ConnectionError'
 
 
 class TestRecordConnectionCreateTime:
@@ -354,7 +354,7 @@ class TestRecordConnectionClosed:
         instruments.connection_closed.add.assert_called_once()
         attrs = instruments.connection_closed.add.call_args[1]['attributes']
         assert attrs[REDIS_CLIENT_CONNECTION_CLOSE_REASON] == 'error'
-        assert attrs[ERROR_TYPE] == 'other:ConnectionResetError'
+        assert attrs[ERROR_TYPE] == 'ConnectionResetError'
 
 
 class TestRecordConnectionRelaxedTimeout:
@@ -448,7 +448,7 @@ class TestRecordErrorCount:
         assert attrs[SERVER_PORT] == 6379
         assert attrs[NETWORK_PEER_ADDRESS] == '127.0.0.1'
         assert attrs[NETWORK_PEER_PORT] == 6379
-        assert attrs[ERROR_TYPE] == 'other:ConnectionError'
+        assert attrs[ERROR_TYPE] == 'ConnectionError'
         assert attrs[REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS] == 3
 
     def test_record_error_count_with_is_internal_false(self, setup_recorder):
@@ -472,7 +472,7 @@ class TestRecordErrorCount:
 
         assert call_args[0][0] == 1
         attrs = call_args[1]['attributes']
-        assert attrs[ERROR_TYPE] == 'other:TimeoutError'
+        assert attrs[ERROR_TYPE] == 'TimeoutError'
         assert attrs[REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS] == 2
 
 
