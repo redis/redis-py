@@ -20,7 +20,7 @@ Usage in Redis core code:
 """
 
 import time
-from typing import Optional
+from typing import Optional, Callable
 
 from redis.observability.attributes import PubSubDirection, ConnectionState
 from redis.observability.metrics import RedisMetricsCollector
@@ -93,14 +93,14 @@ def record_operation_duration(
 
 
 def record_connection_create_time(
-        pool_name: str,
+        connection_pool: "ConnectionPoolInterface",
         duration_seconds: float,
 ) -> None:
     """
     Record connection creation time.
 
     Args:
-        pool_name: Connection pool identifier
+        connection_pool: Connection pool implementation
         duration_seconds: Time taken to create connection in seconds
 
     Example:
@@ -118,30 +118,21 @@ def record_connection_create_time(
 
     # try:
         _metrics_collector.record_connection_create_time(
-            pool_name=pool_name,
+            connection_pool=connection_pool,
             duration_seconds=duration_seconds,
         )
     # except Exception:
     #     pass
 
 
-def record_connection_count(
-        count: int,
-        pool_name: str,
-        state: ConnectionState,
-        is_pubsub: bool = False,
+def init_connection_count(
+        connection_pools: list,
 ) -> None:
     """
-    Record current connection count by state.
+    Initialize observable gauge for connection count metric.
 
     Args:
-        count: Increment/Decrement
-        pool_name: Connection pool identifier
-        state: Connection state ('idle' or 'used')
-        is_pubsub: Whether or not the connection is pubsub
-
-    Example:
-        >>> record_connection_count(1, 'ConnectionPool<localhost:6379>', 'idle', False)
+        connection_pools: Connection pools to collect metrics from.
     """
     global _metrics_collector
 
@@ -150,14 +141,20 @@ def record_connection_count(
         if _metrics_collector is None:
             return
 
+    # Lazy import
+    from opentelemetry.metrics import Observation
+
+    def connection_count_callback(__):
+        observations = []
+        for pool in connection_pools:
+            for count, attributes in pool.get_connection_count():
+                observations.append(Observation(count, attributes))
+        return observations
+
     # try:
-        from redis.observability.attributes import ConnectionState
-        _metrics_collector.record_connection_count(
-            count=count,
-            pool_name=pool_name,
-            state=state,
-            is_pubsub=is_pubsub,
-        )
+    _metrics_collector.init_connection_count(
+        callback=connection_count_callback,
+    )
     # except Exception:
     #     pass
 
@@ -287,7 +284,7 @@ def record_connection_closed(
 
 
 def record_connection_relaxed_timeout(
-        pool_name: str,
+        connection_name: str,
         maint_notification: str,
         relaxed: bool,
 ) -> None:
@@ -295,12 +292,12 @@ def record_connection_relaxed_timeout(
     Record a connection timeout relaxation event.
 
     Args:
-        pool_name: Connection pool identifier
+        connection_name: Connection identifier
         maint_notification: Maintenance notification type
         relaxed: True to count up (relaxed), False to count down (unrelaxed)
 
     Example:
-        >>> record_connection_relaxed_timeout('ConnectionPool<localhost:6379>', 'MOVING', True)
+        >>> record_connection_relaxed_timeout('Connection<localhost:6379>', 'MOVING', True)
     """
     global _metrics_collector
 
@@ -310,11 +307,11 @@ def record_connection_relaxed_timeout(
             return
 
     # try:
-        _metrics_collector.record_connection_relaxed_timeout(
-            pool_name=pool_name,
-            maint_notification=maint_notification,
-            relaxed=relaxed,
-        )
+    _metrics_collector.record_connection_relaxed_timeout(
+        connection_name=connection_name,
+        maint_notification=maint_notification,
+        relaxed=relaxed,
+    )
     # except Exception:
     #     pass
 
@@ -339,9 +336,9 @@ def record_connection_handoff(
             return
 
     # try:
-        _metrics_collector.record_connection_handoff(
-            pool_name=pool_name,
-        )
+    _metrics_collector.record_connection_handoff(
+        pool_name=pool_name,
+    )
     # except Exception:
     #     pass
 

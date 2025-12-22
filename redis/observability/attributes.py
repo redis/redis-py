@@ -31,6 +31,7 @@ SERVER_PORT = "server.port"
 # Connection pool attributes
 DB_CLIENT_CONNECTION_POOL_NAME = "db.client.connection.pool.name"
 DB_CLIENT_CONNECTION_STATE = "db.client.connection.state"
+DB_CLIENT_CONNECTION_NAME = "db.client.connection.name"
 
 # Redis-specific attributes
 REDIS_CLIENT_LIBRARY = "redis.client.library"
@@ -43,6 +44,7 @@ REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION = "redis.client.pubsub.message.direction"
 REDIS_CLIENT_PUBSUB_CHANNEL = "redis.client.pubsub.channel"
 REDIS_CLIENT_PUBSUB_SHARDED = "redis.client.pubsub.sharded"
 REDIS_CLIENT_ERROR_INTERNAL = "redis.client.errors.internal"
+REDIS_CLIENT_ERROR_CATEGORY = "redis.client.errors.category"
 REDIS_CLIENT_STREAM_NAME = "redis.client.stream.name"
 REDIS_CLIENT_CONSUMER_GROUP = "redis.client.consumer_group"
 REDIS_CLIENT_CONSUMER_NAME = "redis.client.consumer_name"
@@ -146,8 +148,9 @@ class AttributeBuilder:
 
     @staticmethod
     def build_connection_attributes(
-            pool_name: str,
+            pool_name: Optional[str] = None,
             connection_state: Optional[ConnectionState] = None,
+            connection_name: Optional[str] = None,
             is_pubsub: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
@@ -157,18 +160,24 @@ class AttributeBuilder:
             pool_name: Unique connection pool name
             connection_state: Connection state ('idle' or 'used')
             is_pubsub: Whether this is a PubSub connection
+            connection_name: Unique connection name
 
         Returns:
             Dictionary of connection pool attributes
         """
         attrs: Dict[str, Any] = AttributeBuilder.build_base_attributes()
-        attrs[DB_CLIENT_CONNECTION_POOL_NAME] = pool_name
+
+        if pool_name is not None:
+            attrs[DB_CLIENT_CONNECTION_POOL_NAME] = pool_name
 
         if connection_state is not None:
             attrs[DB_CLIENT_CONNECTION_STATE] = connection_state.value
 
         if is_pubsub is not None:
             attrs[REDIS_CLIENT_CONNECTION_PUBSUB] = is_pubsub
+
+        if connection_name is not None:
+            attrs[DB_CLIENT_CONNECTION_NAME] = connection_name
 
         return attrs
 
@@ -190,12 +199,17 @@ class AttributeBuilder:
         attrs: Dict[str, Any] = {}
 
         if error_type is not None:
-            attrs[ERROR_TYPE] = AttributeBuilder.extract_error_type(error_type)
+            attrs[ERROR_TYPE] = error_type.__class__.__name__
 
             if hasattr(error_type, "status_code") and error_type.status_code is not None:
                 attrs[DB_RESPONSE_STATUS_CODE] = error_type.status_code
             else:
                 attrs[DB_RESPONSE_STATUS_CODE] = "error"
+
+            if hasattr(error_type, "error_type") and error_type.error_type is not None:
+                attrs[REDIS_CLIENT_ERROR_CATEGORY] = error_type.error_type.value
+            else:
+                attrs[REDIS_CLIENT_ERROR_CATEGORY] = 'other'
 
         if is_internal is not None:
             attrs[REDIS_CLIENT_ERROR_INTERNAL] = is_internal
@@ -259,24 +273,6 @@ class AttributeBuilder:
             attrs[REDIS_CLIENT_CONSUMER_NAME] = consumer_name
 
         return attrs
-
-
-    @staticmethod
-    def extract_error_type(exception: Exception) -> str:
-        """
-        Extract error type from an exception.
-
-        Args:
-            exception: The exception that occurred
-
-        Returns:
-            Error type string (exception class name)
-        """
-
-        if hasattr(exception, "error_type"):
-            return repr(exception)
-        else:
-            return f"other:{type(exception).__name__}"
 
     @staticmethod
     def build_pool_name(
