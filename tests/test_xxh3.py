@@ -5,12 +5,8 @@ Tests correctness against xxhash C library and measures performance.
 """
 
 import time
-import sys
-import os
 
-# Add parent directory to path to import xxh3 directly
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../redis'))
-from xxh3 import xxh3_64, xxh3_64_hexdigest
+from redis.xxh3 import xxh3_64, xxh3_64_hexdigest
 
 try:
     import xxhash
