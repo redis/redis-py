@@ -1807,6 +1807,8 @@ class TestRedisCommands:
         r.set(key, value)
 
         res = r.digest(key)
+        assert res == r.digest_local(value)
+
         # got is str if decode_responses=True; ensure bytes->str for comparison
         if isinstance(res, bytes):
             res = res.decode()

@@ -2,7 +2,15 @@
 
 import datetime
 import hashlib
-import xxhash
+
+# Try to import the xxhash library as an optional dependency
+try:
+    import xxhash
+    HAS_XXHASH = True
+except ImportError:
+    HAS_XXHASH = False
+    from redis.xxh3 import xxh3_64_hexdigest
+
 import warnings
 from enum import Enum
 from typing import (
@@ -1908,10 +1916,14 @@ class BasicKeyCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/digest
         """
-        return xxhash.xxh3_64(value).hexdigest()
+        if HAS_XXHASH:
+            return xxhash.xxh3_64(value).hexdigest()
+        else:
+            return xxh3_64_hexdigest();
+
 
     @experimental_method()
-    def digest(self, name: KeyT) -> Optional[str]:
+    def digest(self, name: KeyT, local: bool = False) -> Optional[str]:
         """
         Return the digest of the value stored at the specified key.
 

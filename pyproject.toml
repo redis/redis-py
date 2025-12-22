@@ -30,13 +30,17 @@ classifiers = [
 ]
 dependencies = [
     'async-timeout>=4.0.3; python_full_version<"3.11.3"',
-    'xxhash~=3.6.0',
 ]
 
 [project.optional-dependencies]
 hiredis = [
     "hiredis>=3.2.0",
 ]
+
+xxhash = [
+   'xxhash~=3.6.0',
+]
+
 ocsp = [
     "cryptography>=36.0.1",
     "pyopenssl>=20.0.1",
