@@ -1898,7 +1898,7 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("EXPIRETIME", key)
 
     @experimental_method()
-    def digest_local(self, value: Union[bytes, str]) -> str:
+    def digest_local(self, value: Union[bytes, str]) -> Union[bytes, str]:
         """
         Compute the hexadecimal digest of the value locally, without sending it to the server.
 
@@ -1917,13 +1917,21 @@ class BasicKeyCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/digest
         """
         if HAS_XXHASH:
-            return xxhash.xxh3_64(value).hexdigest()
+            local_digest = xxhash.xxh3_64(value).hexdigest()
         else:
-            return xxh3_64_hexdigest(value)
+            local_digest = xxh3_64_hexdigest(value)
+
+        # To align with digest, we want to return bytes if decode_responses is False.
+        # The following should work because Python's mixin approach.
+        if hasattr(self, 'connection_pool'):
+            if not self.connection_pool.connection_kwargs.get('decode_responses', False):
+                local_digest = local_digest.encode()
+
+        return local_digest
 
 
     @experimental_method()
-    def digest(self, name: KeyT, local: bool = False) -> Optional[str]:
+    def digest(self, name: KeyT) -> Union[str, bytes, None]:
         """
         Return the digest of the value stored at the specified key.
 
