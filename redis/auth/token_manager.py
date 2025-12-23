@@ -150,8 +150,12 @@ class TokenManager:
             loop_ready = threading.Event()
 
             def start_loop():
+                # This runs in the background thread. First, bind the event loop to
+                # this thread, then signal that the loop is ready so the calling
+                # thread can safely schedule work (via call_soon_threadsafe) before
+                # we block in run_forever().
                 asyncio.set_event_loop(loop)
-                loop_ready.set()  # Signal that loop is ready
+                loop_ready.set()  # Signal that loop is ready for cross-thread use
                 loop.run_forever()
 
             thread = threading.Thread(target=start_loop, daemon=True)
