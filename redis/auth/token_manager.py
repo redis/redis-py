@@ -263,9 +263,7 @@ class TokenManager:
             - (datetime.now(timezone.utc).timestamp() * 1000)
         )
 
-    def _renew_token(
-        self, skip_initial: bool = False
-    ):
+    def _renew_token(self, skip_initial: bool = False):
         """
         Task to renew token from identity provider.
         Schedules renewal tasks based on token TTL.
