@@ -6,6 +6,7 @@ Tests correctness against xxhash C library and measures performance.
 
 import time
 
+from redis import Redis
 from redis.xxh3 import xxh3_64, xxh3_64_hexdigest
 
 try:
@@ -154,4 +155,10 @@ def test_edge_cases():
     except Exception as e:
         print(f"✗ Memoryview input failed: {e}")
 
+def test_digest_local():
+    """Test if the response of the response type of digest_local depends on the decode_responses flag."""
+    r_raw = Redis(decode_responses=False)
+    assert r_raw.digest_local("world") == b'd6476c25083d69be'
+    r_decoded = Redis(decode_responses=True)
+    assert r_decoded.digest_local("world") == 'd6476c25083d69be'
 
