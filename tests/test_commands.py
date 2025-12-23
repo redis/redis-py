@@ -1807,6 +1807,7 @@ class TestRedisCommands:
         r.set(key, value)
 
         res = r.digest(key)
+
         # got is str if decode_responses=True; ensure bytes->str for comparison
         if isinstance(res, bytes):
             res = res.decode()
@@ -2587,6 +2588,9 @@ class TestRedisCommands:
         r.set("k", val)
         d = self._server_xxh3_digest(r, "k")
         assert d is not None
+
+        # sanity check: local digest matches server's
+        assert d == self._ensure_str(r.digest_local(val))
 
         # IFDEQ must match to set; if key missing => won't create
         assert r.set("k", b"X", ifdeq=d) is True
