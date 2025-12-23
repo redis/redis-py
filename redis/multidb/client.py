@@ -277,7 +277,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                         unhealthy_db.circuit.state = CBState.OPEN
 
                         logger.debug(
-                            f"Health check failed, due to exception",
+                            "Health check failed, due to exception",
                             exc_info=e.original_exception,
                         )
 
