@@ -337,7 +337,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             return
 
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
-            logger.error(f"Database {circuit.database} is unreachable. Failover has been initiated.")
+            logger.error(
+                f"Database {circuit.database} is unreachable. Failover has been initiated."
+            )
             loop.call_later(DEFAULT_GRACE_PERIOD, _half_open_circuit, circuit)
 
         if old_state != CBState.CLOSED and new_state == CBState.CLOSED:
