@@ -67,3 +67,6 @@ class Database(BaseDatabase, AsyncDatabase):
     @circuit.setter
     def circuit(self, circuit: CircuitBreaker):
         self._cb = circuit
+
+    def __repr__(self):
+        return f"Database(client={self.client}, weight={self.weight})"

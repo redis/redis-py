@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class MultiDBClient(RedisModuleCommands, CoreCommands):
     """
     Client that operates on multiple logical Redis databases.
-    Should be used in Active-Active database setups.
+    Should be used in Client-side geographic failover database setups.
     """
 
     def __init__(self, config: MultiDbConfig):
@@ -276,6 +276,11 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
                         unhealthy_db = e.database
                         unhealthy_db.circuit.state = CBState.OPEN
 
+                        logger.debug(
+                            "Health check failed, due to exception",
+                            exc_info=e.original_exception,
+                        )
+
                         if on_error:
                             on_error(e.original_exception)
             except TimeoutError:
@@ -291,9 +296,16 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             return
 
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
+            logger.error(
+                f"Database {circuit.database} is unreachable. Failover has been initiated."
+            )
+
             self._bg_scheduler.run_once(
                 DEFAULT_GRACE_PERIOD, _half_open_circuit, circuit
             )
+
+        if old_state != CBState.CLOSED and new_state == CBState.CLOSED:
+            logger.info(f"Database {circuit.database} is reachable again.")
 
     def close(self):
         """
