@@ -1919,7 +1919,7 @@ class BasicKeyCommands(CommandsProtocol):
         if HAS_XXHASH:
             return xxhash.xxh3_64(value).hexdigest()
         else:
-            return xxh3_64_hexdigest();
+            return xxh3_64_hexdigest(value)
 
 
     @experimental_method()
