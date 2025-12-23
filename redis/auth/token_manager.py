@@ -170,7 +170,7 @@ class TokenManager:
                 init_done.set()
 
         # Schedule using call_soon_threadsafe for thread-safe scheduling
-        loop.call_soon_threadsafe(renew_with_callback)
+        self._init_timer = loop.call_soon_threadsafe(renew_with_callback)
         logger.info("Token manager started")
 
         # Blocks using thread-safe Event
