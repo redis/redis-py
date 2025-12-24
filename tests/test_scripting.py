@@ -97,6 +97,19 @@ class TestScripting:
         assert result == 8
 
     @pytest.mark.onlycluster
+    def test_register_script_with_cluster_client(self, r):
+        """Test that register_script works with RedisCluster client.
+
+        This verifies the type hints fix for register_script to support RedisCluster.
+        """
+        r.set("a", 2)
+        multiply = r.register_script(multiply_script)
+        assert isinstance(multiply, Script)
+        assert multiply.registered_client is r
+        # Verify the script actually works
+        assert multiply(keys=["a"], args=[3]) == 6
+
+    @pytest.mark.onlycluster
     def test_eval_crossslot(self, r):
         """
         In a clustered redis, the script keys must be in the same slot.
