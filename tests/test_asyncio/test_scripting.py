@@ -1,9 +1,6 @@
-from unittest.mock import MagicMock
-
 import pytest
 import pytest_asyncio
 from redis import exceptions
-from redis.asyncio.cluster import RedisCluster
 from redis.commands.core import AsyncScript
 from tests.conftest import skip_if_server_version_lt
 
@@ -156,24 +153,25 @@ class TestScripting:
         assert excinfo.type == exceptions.ResponseError
 
 
-class TestAsyncScriptTypeHints:
-    """Tests for AsyncScript type hints with RedisCluster support."""
+@pytest.mark.onlycluster
+class TestAsyncScriptWithCluster:
+    """Tests for AsyncScript with RedisCluster support."""
+
+    @pytest_asyncio.fixture
+    async def r(self, create_redis):
+        redis = await create_redis()
+        yield redis
+        await redis.script_flush()
 
     @pytest.mark.asyncio()
-    async def test_async_script_with_cluster_client(self):
-        """Test that AsyncScript class accepts RedisCluster as registered_client.
+    async def test_register_script_with_cluster_client(self, r):
+        """Test that register_script works with async RedisCluster client.
 
         This verifies the type hints fix for register_script to support RedisCluster.
-        We use a mock-like approach since we don't need actual cluster connection.
-        Using bytes script to avoid encoder dependency in mock.
         """
-        # Create a mock RedisCluster instance
-        mock_cluster = MagicMock(spec=RedisCluster)
-        # Using bytes script to bypass encoder.encode() call
-        test_script = b"return 1"
-
-        # AsyncScript should accept RedisCluster without type errors
-        script = RedisCluster.register_script(mock_cluster, test_script)
-        assert isinstance(script, AsyncScript)
-        assert script.registered_client is mock_cluster
-        assert script.script == test_script
+        await r.set("a", 2)
+        multiply = r.register_script(multiply_script)
+        assert isinstance(multiply, AsyncScript)
+        assert multiply.registered_client is r
+        # Verify the script actually works
+        assert await multiply(keys=["a"], args=[3]) == 6

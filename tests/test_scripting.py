@@ -1,9 +1,6 @@
-from unittest.mock import MagicMock
-
 import pytest
 import redis
 from redis import exceptions
-from redis.cluster import RedisCluster
 from redis.commands.core import Script
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
@@ -56,23 +53,6 @@ class TestScript:
         assert encoder is not None
         assert encoder.encode("fake-script") == b"fake-script"
 
-    def test_script_with_cluster_client(self, script_bytes):
-        """Test that Script class accepts RedisCluster as registered_client.
-
-        This verifies the type hints fix for register_script to support RedisCluster.
-        We use a mock-like approach since we don't need actual cluster connection.
-        Using bytes script to avoid encoder dependency in mock.
-        """
-        # Create a mock RedisCluster instance
-        mock_cluster = MagicMock(spec=RedisCluster)
-
-        # Script should accept RedisCluster without type errors
-        # Using bytes script to bypass encoder.encode() call
-        script = RedisCluster.register_script(mock_cluster, script_bytes)
-        assert isinstance(script, Script)
-        assert script.registered_client is mock_cluster
-        assert script.script == script_bytes
-
 
 class TestScripting:
     @pytest.fixture(autouse=True)
@@ -115,6 +95,19 @@ class TestScripting:
         """
         result = r.eval(script, 2, "A{foo}", "B{foo}")
         assert result == 8
+
+    @pytest.mark.onlycluster
+    def test_register_script_with_cluster_client(self, r):
+        """Test that register_script works with RedisCluster client.
+
+        This verifies the type hints fix for register_script to support RedisCluster.
+        """
+        r.set("a", 2)
+        multiply = r.register_script(multiply_script)
+        assert isinstance(multiply, Script)
+        assert multiply.registered_client is r
+        # Verify the script actually works
+        assert multiply(keys=["a"], args=[3]) == 6
 
     @pytest.mark.onlycluster
     def test_eval_crossslot(self, r):
