@@ -312,10 +312,11 @@ def run_scenario(scenario: str, config: LoadGeneratorConfig) -> BenchmarkResult:
             from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
             from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 
-            # HTTP exporter - configurable via OTEL_EXPORTER_OTLP_ENDPOINT env var,
-            # default is http://localhost:4318/v1/metrics
-            endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-            exporter = OTLPMetricExporter(endpoint=endpoint) if endpoint else OTLPMetricExporter()
+            # HTTP exporter - host configurable via OTEL_COLLECTOR_HOST env var,
+            # default is localhost (port 4318)
+            host = os.environ.get("OTEL_COLLECTOR_HOST", "localhost")
+            endpoint = f"http://{host}:4318/v1/metrics"
+            exporter = OTLPMetricExporter(endpoint=endpoint)
             reader = PeriodicExportingMetricReader(exporter, export_interval_millis=10000)
             provider = MeterProvider(metric_readers=[reader])
             metrics.set_meter_provider(provider)
@@ -324,8 +325,7 @@ def run_scenario(scenario: str, config: LoadGeneratorConfig) -> BenchmarkResult:
             from redis.observability.config import OTelConfig
             otel = get_observability_instance()
             otel.init(OTelConfig())
-            endpoint_info = endpoint or "http://localhost:4318/v1/metrics (default)"
-            description = f"OTel with PeriodicExportingMetricReader (HTTP) -> {endpoint_info}"
+            description = f"OTel with PeriodicExportingMetricReader (HTTP) -> {endpoint}"
 
         elif scenario == "otel_enabled_grpc":
             from opentelemetry import metrics
@@ -333,10 +333,11 @@ def run_scenario(scenario: str, config: LoadGeneratorConfig) -> BenchmarkResult:
             from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
             from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 
-            # gRPC exporter - configurable via OTEL_EXPORTER_OTLP_ENDPOINT env var,
-            # default is localhost:4317
-            endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-            exporter = OTLPMetricExporter(endpoint=endpoint) if endpoint else OTLPMetricExporter()
+            # gRPC exporter - host configurable via OTEL_COLLECTOR_HOST env var,
+            # default is localhost (port 4317)
+            host = os.environ.get("OTEL_COLLECTOR_HOST", "localhost")
+            endpoint = f"{host}:4317"
+            exporter = OTLPMetricExporter(endpoint=endpoint)
             reader = PeriodicExportingMetricReader(exporter, export_interval_millis=10000)
             provider = MeterProvider(metric_readers=[reader])
             metrics.set_meter_provider(provider)
@@ -345,8 +346,7 @@ def run_scenario(scenario: str, config: LoadGeneratorConfig) -> BenchmarkResult:
             from redis.observability.config import OTelConfig
             otel = get_observability_instance()
             otel.init(OTelConfig())
-            endpoint_info = endpoint or "localhost:4317 (default)"
-            description = f"OTel with PeriodicExportingMetricReader (gRPC) -> {endpoint_info}"
+            description = f"OTel with PeriodicExportingMetricReader (gRPC) -> {endpoint}"
         else:
             raise ValueError(f"Unknown scenario: {scenario}")
 
