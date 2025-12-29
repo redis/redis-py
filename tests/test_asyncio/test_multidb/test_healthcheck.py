@@ -1,5 +1,6 @@
+from unittest.mock import AsyncMock, Mock
+
 import pytest
-from mock.mock import AsyncMock, Mock
 
 from redis.asyncio.multidb.database import Database
 from redis.asyncio.multidb.healthcheck import (

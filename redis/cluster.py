@@ -185,6 +185,7 @@ REDIS_ALLOWED_KEYS = (
     "ssl",
     "ssl_ca_certs",
     "ssl_ca_data",
+    "ssl_ca_path",
     "ssl_certfile",
     "ssl_cert_reqs",
     "ssl_include_verify_flags",
@@ -2210,7 +2211,8 @@ class ClusterPubSub(PubSub):
 
     def _pubsubs_generator(self):
         while True:
-            yield from self.node_pubsub_mapping.values()
+            current_nodes = list(self.node_pubsub_mapping.values())
+            yield from current_nodes
 
     def get_sharded_message(
         self, ignore_subscribe_messages=False, timeout=0.0, target_node=None
