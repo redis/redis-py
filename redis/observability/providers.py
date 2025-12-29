@@ -151,6 +151,11 @@ class OTelProviderManager:
         if self._meter_provider is None:
             return True
 
+        # NoOpMeterProvider doesn't have force_flush method
+        if not hasattr(self._meter_provider, "force_flush"):
+            logger.debug("MeterProvider does not support force_flush, skipping")
+            return True
+
         try:
             logger.debug("Force flushing metrics from global MeterProvider")
             self._meter_provider.force_flush(timeout_millis=timeout_millis)
@@ -338,3 +343,21 @@ def get_observability_instance() -> ObservabilityInstance:
         _observability_instance = ObservabilityInstance()
 
     return _observability_instance
+
+
+def reset_observability_instance() -> None:
+    """
+    Reset the global observability singleton instance.
+
+    This is primarily used for testing and benchmarking to ensure
+    a clean state between test runs.
+
+    Warning:
+        This will shutdown any active provider manager and reset
+        the global state. Use with caution in production code.
+    """
+    global _observability_instance
+
+    if _observability_instance is not None:
+        _observability_instance.shutdown()
+        _observability_instance = None
