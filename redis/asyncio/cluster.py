@@ -1457,6 +1457,9 @@ class NodesManager:
             )
             self.set_nodes(self.nodes_cache, {redirected_node.name: redirected_node})
         if redirected_node in self.slots_cache[e.slot_id]:
+            if redirected_node == self.slots_cache[e.slot_id][0]:
+                # The redirected node is already the primary of this shard. Do nothing.
+                return
             # The MOVED error resulted from a failover, and the new slot owner
             # had previously been a replica.
             old_primary = self.slots_cache[e.slot_id][0]

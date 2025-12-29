@@ -273,18 +273,22 @@ def find_node_ip_based_on_port(cluster_client, port):
             return node.host
 
 
-def moved_redirection_helper(request, failover=False):
+def moved_redirection_helper(request, failover=False, circular_moved=False):
     """
-    Test that the client handles MOVED response after a failover.
-    Redirection after a failover means that the redirection address is of a
-    replica that was promoted to a primary.
+    Test that the client correctly handles MOVED responses in the following scenarios:
+    1.	Slot migration to a different shard (failover=False, circular_moved=False) —
+        a standard slot move between shards.
+    2.	Failover event (failover=True, circular_moved=False) —
+        the redirect target is a replica that has just been promoted to primary.
+    3.	Circular MOVED (failover=False, circular_moved=True) —
+        the redirect points to a node already known to be the primary of its shard.
 
     At first call it should return a MOVED ResponseError that will point
     the client to the next server it should talk to.
 
     Verify that:
     1. it tries to talk to the redirected node
-    2. it updates the slot's primary to the redirected node
+    2. it updates the slot's primary to the redirected node, if required
 
     For a failover, also verify:
     3. the redirected node's server type updated to 'primary'
@@ -300,8 +304,10 @@ def moved_redirection_helper(request, failover=False):
             warnings.warn("Skipping this test since it requires to have a replica")
             return
         redirect_node = rc.nodes_manager.slots_cache[slot][1]
+    elif circular_moved:
+        redirect_node = prev_primary
     else:
-        # Use one of the primaries to be the redirected node
+        # Use one of the other primaries to be the redirected node
         redirect_node = rc.get_primaries()[0]
     r_host = redirect_node.host
     r_port = redirect_node.port
@@ -324,6 +330,10 @@ def moved_redirection_helper(request, failover=False):
         if failover:
             assert rc.get_node(host=r_host, port=r_port).server_type == PRIMARY
             assert prev_primary.server_type == REPLICA
+        elif circular_moved:
+            fetched_node = rc.get_node(host=r_host, port=r_port)
+            assert fetched_node == prev_primary
+            assert fetched_node.server_type == PRIMARY
 
 
 @pytest.mark.onlycluster
@@ -546,6 +556,13 @@ class TestRedisClusterObj:
         Test that the client handles MOVED response after a failover.
         """
         moved_redirection_helper(request, failover=True)
+
+    def test_moved_redirection_circular_moved(self, request):
+        """
+        Verify that the client does not update its slot map when receiving a circular MOVED response
+        (i.e., a MOVED redirect pointing back to the same node), and retries again the same node.
+        """
+        moved_redirection_helper(request, failover=False, circular_moved=True)
 
     def test_refresh_using_specific_nodes(self, request):
         """
