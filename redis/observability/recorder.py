@@ -441,12 +441,12 @@ def record_streaming_lag(
             return
 
     # try:
-        _metrics_collector.record_streaming_lag(
-            lag_seconds=lag_seconds,
-            stream_name=stream_name,
-            consumer_group=consumer_group,
-            consumer_name=consumer_name,
-        )
+    _metrics_collector.record_streaming_lag(
+        lag_seconds=lag_seconds,
+        stream_name=stream_name,
+        consumer_group=consumer_group,
+        consumer_name=consumer_name,
+    )
     # except Exception:
     #     pass
 

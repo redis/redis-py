@@ -50,6 +50,7 @@ ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Except
 
 
 class CommandsProtocol(Protocol):
+    _event_dispatcher: "EventDispatcherInterface"
     def execute_command(self, *args, **options) -> ResponseT: ...
 
 
