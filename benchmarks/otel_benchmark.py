@@ -39,6 +39,7 @@ class BenchmarkResult:
     min_latency_ms: float
     max_latency_ms: float
     errors: int = 0
+    first_error: Optional[str] = None
     metadata: Dict = field(default_factory=dict)
 
 
@@ -64,6 +65,7 @@ class LoadGenerator:
         self.config = config
         self.latencies: List[float] = []
         self.errors: int = 0
+        self.first_error: Optional[str] = None
         self._value = "x" * config.value_size_bytes
         self._key_counter = 0
 
@@ -80,7 +82,9 @@ class LoadGenerator:
         try:
             self.client.set(key, self._value)
             self.client.get(key)
-        except Exception:
+        except Exception as e:
+            if self.first_error is None:
+                self.first_error = str(e)
             self.errors += 1
             return 0.0
         end = time.perf_counter()
@@ -94,6 +98,7 @@ class LoadGenerator:
             self._run_operation()
         self.latencies.clear()
         self.errors = 0
+        self.first_error = None
         self._key_counter = 0
 
     def run(self) -> BenchmarkResult:
@@ -120,7 +125,7 @@ class LoadGenerator:
                 scenario="unknown", duration_seconds=duration, total_operations=0,
                 operations_per_second=0, avg_latency_ms=0, p50_latency_ms=0,
                 p95_latency_ms=0, p99_latency_ms=0, min_latency_ms=0,
-                max_latency_ms=0, errors=self.errors,
+                max_latency_ms=0, errors=self.errors, first_error=self.first_error,
             )
 
         sorted_latencies = sorted(self.latencies)
@@ -138,6 +143,7 @@ class LoadGenerator:
             min_latency_ms=min(self.latencies),
             max_latency_ms=max(self.latencies),
             errors=self.errors,
+            first_error=self.first_error,
         )
 
 
@@ -156,6 +162,8 @@ def print_result(result: BenchmarkResult) -> None:
     print(f"  Min latency:  {result.min_latency_ms:.3f}ms")
     print(f"  Max latency:  {result.max_latency_ms:.3f}ms")
     print(f"  Errors:       {result.errors}")
+    if result.first_error:
+        print(f"  First error:  {result.first_error}")
     if result.metadata.get("description"):
         print(f"  Description:  {result.metadata['description']}")
     print("=" * 60)
