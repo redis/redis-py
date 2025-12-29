@@ -4213,7 +4213,15 @@ class StreamCommands(CommandsProtocol):
         keys, values = zip(*streams.items())
         pieces.extend(keys)
         pieces.extend(values)
-        return self.execute_command("XREAD", *pieces, keys=keys)
+        response = self.execute_command("XREAD", *pieces, keys=keys)
+
+        self._event_dispatcher.dispatch(
+            OnStreamMessageReceivedEvent(
+                response=response
+            )
+        )
+
+        return response
 
     def xreadgroup(
         self,
