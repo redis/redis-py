@@ -259,6 +259,42 @@ class TestLock:
         with pytest.raises(LockNotOwnedError):
             await lock.reacquire()
 
+    async def test_release_cancellation_preserves_lock_state(self, r):
+        """
+        Test that cancelling release() doesn't leave lock in inconsistent state.
+
+        Regression test for GitHub issue #3847. Before the fix, if release()
+        was cancelled during execution, the token would be cleared but the
+        Redis key would remain, causing a permanent deadlock.
+        """
+        lock = self.get_lock(r, "foo")
+        await lock.acquire(blocking=False)
+
+        # Verify lock is owned
+        original_token = lock.local.token
+        assert original_token is not None
+        assert await lock.owned()
+
+        # Create release task and cancel it immediately
+        release_task = asyncio.create_task(lock.release())
+        release_task.cancel()
+
+        try:
+            await release_task
+        except asyncio.CancelledError:
+            pass
+
+        # Check the lock state after cancellation
+        if lock.local.token is not None:
+            # Release was cancelled before completion - token preserved
+            # This is the fix: we can now retry the release
+            assert lock.local.token == original_token
+            await lock.release()
+            assert await lock.locked() is False
+        else:
+            # Release completed before cancel took effect
+            assert await lock.locked() is False
+
 
 @pytest.mark.onlynoncluster
 class TestLockClassSelection:
