@@ -372,7 +372,7 @@ def setup_scenario(scenario: str) -> str:
         # default is localhost (port 4317)
         host = os.environ.get("OTEL_COLLECTOR_HOST", "localhost")
         endpoint = f"{host}:4317"
-        exporter = OTLPMetricExporter(endpoint=endpoint)
+        exporter = OTLPMetricExporter(endpoint=endpoint, insecure=True)
         reader = PeriodicExportingMetricReader(exporter, export_interval_millis=10000)
         provider = MeterProvider(metric_readers=[reader])
         metrics.set_meter_provider(provider)
