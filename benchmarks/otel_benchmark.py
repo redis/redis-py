@@ -148,11 +148,13 @@ class LoadGenerator:
         )
 
 
-def print_result(result: BenchmarkResult) -> None:
+def print_result(result: BenchmarkResult, iterations: int = 1) -> None:
     """Print a single benchmark result."""
     print("\n" + "=" * 60)
     print(f"BENCHMARK RESULT: {result.scenario}")
     print("=" * 60)
+    if iterations > 1:
+        print(f"  Iterations:   {iterations} (averaged)")
     print(f"  Duration:     {result.duration_seconds:.2f}s")
     print(f"  Operations:   {result.total_operations:,}")
     print(f"  Ops/sec:      {result.operations_per_second:,.0f}")
@@ -168,6 +170,38 @@ def print_result(result: BenchmarkResult) -> None:
     if result.metadata.get("description"):
         print(f"  Description:  {result.metadata['description']}")
     print("=" * 60)
+
+
+def average_results(results: List[BenchmarkResult]) -> BenchmarkResult:
+    """Average multiple benchmark results into a single result."""
+    if not results:
+        raise ValueError("Cannot average empty results list")
+    if len(results) == 1:
+        return results[0]
+
+    n = len(results)
+    # Find first error from any iteration
+    first_error = None
+    for r in results:
+        if r.first_error:
+            first_error = r.first_error
+            break
+
+    return BenchmarkResult(
+        scenario=results[0].scenario,
+        duration_seconds=sum(r.duration_seconds for r in results) / n,
+        total_operations=sum(r.total_operations for r in results) // n,
+        operations_per_second=sum(r.operations_per_second for r in results) / n,
+        avg_latency_ms=sum(r.avg_latency_ms for r in results) / n,
+        p50_latency_ms=sum(r.p50_latency_ms for r in results) / n,
+        p95_latency_ms=sum(r.p95_latency_ms for r in results) / n,
+        p99_latency_ms=sum(r.p99_latency_ms for r in results) / n,
+        min_latency_ms=min(r.min_latency_ms for r in results),
+        max_latency_ms=max(r.max_latency_ms for r in results),
+        errors=sum(r.errors for r in results),
+        first_error=first_error,
+        metadata=results[0].metadata,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -207,6 +241,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--json", action="store_true",
         help="Output result as JSON"
+    )
+    parser.add_argument(
+        "--iterations", type=int, default=5,
+        help="Number of iterations to run (default: 5). Final result is averaged."
     )
     return parser.parse_args()
 
@@ -269,87 +307,94 @@ def run_baseline_scenario(tag: str, config: LoadGeneratorConfig) -> Optional[Ben
             _clear_redis_modules()
 
 
-def run_scenario(scenario: str, config: LoadGeneratorConfig) -> BenchmarkResult:
+def setup_scenario(scenario: str) -> str:
     """
-    Run a single benchmark scenario.
+    Set up OTel for a scenario. Returns the description.
+    This should only be called once per process.
+    """
+    if scenario == "otel_disabled":
+        return "OTel not initialized"
+
+    elif scenario == "otel_noop":
+        from opentelemetry import metrics
+        from opentelemetry.metrics import NoOpMeterProvider
+        metrics.set_meter_provider(NoOpMeterProvider())
+
+        from redis.observability.providers import get_observability_instance
+        from redis.observability.config import OTelConfig
+        otel = get_observability_instance()
+        otel.init(OTelConfig())
+        return "OTel with NoOpMeterProvider"
+
+    elif scenario == "otel_inmemory":
+        from opentelemetry import metrics
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+        reader = InMemoryMetricReader()
+        provider = MeterProvider(metric_readers=[reader])
+        metrics.set_meter_provider(provider)
+
+        from redis.observability.providers import get_observability_instance
+        from redis.observability.config import OTelConfig
+        otel = get_observability_instance()
+        otel.init(OTelConfig())
+        return "OTel with InMemoryMetricReader"
+
+    elif scenario == "otel_enabled_http":
+        from opentelemetry import metrics
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+
+        # HTTP exporter - host configurable via OTEL_COLLECTOR_HOST env var,
+        # default is localhost (port 4318)
+        host = os.environ.get("OTEL_COLLECTOR_HOST", "localhost")
+        endpoint = f"http://{host}:4318/v1/metrics"
+        exporter = OTLPMetricExporter(endpoint=endpoint)
+        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=10000)
+        provider = MeterProvider(metric_readers=[reader])
+        metrics.set_meter_provider(provider)
+
+        from redis.observability.providers import get_observability_instance
+        from redis.observability.config import OTelConfig
+        otel = get_observability_instance()
+        otel.init(OTelConfig())
+        return f"OTel with PeriodicExportingMetricReader (HTTP) -> {endpoint}"
+
+    elif scenario == "otel_enabled_grpc":
+        from opentelemetry import metrics
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+
+        # gRPC exporter - host configurable via OTEL_COLLECTOR_HOST env var,
+        # default is localhost (port 4317)
+        host = os.environ.get("OTEL_COLLECTOR_HOST", "localhost")
+        endpoint = f"{host}:4317"
+        exporter = OTLPMetricExporter(endpoint=endpoint)
+        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=10000)
+        provider = MeterProvider(metric_readers=[reader])
+        metrics.set_meter_provider(provider)
+
+        from redis.observability.providers import get_observability_instance
+        from redis.observability.config import OTelConfig
+        otel = get_observability_instance()
+        otel.init(OTelConfig())
+        return f"OTel with PeriodicExportingMetricReader (gRPC) -> {endpoint}"
+
+    else:
+        raise ValueError(f"Unknown scenario: {scenario}")
+
+
+def run_iteration(scenario: str, config: LoadGeneratorConfig, description: str) -> BenchmarkResult:
+    """
+    Run a single benchmark iteration (without OTel setup).
     """
     import redis
     client = redis.Redis(host=config.redis_host, port=config.redis_port, decode_responses=True)
 
     try:
-        if scenario == "otel_disabled":
-            description = "OTel not initialized"
-
-        elif scenario == "otel_noop":
-            from opentelemetry import metrics
-            from opentelemetry.metrics import NoOpMeterProvider
-            metrics.set_meter_provider(NoOpMeterProvider())
-
-            from redis.observability.providers import get_observability_instance
-            from redis.observability.config import OTelConfig
-            otel = get_observability_instance()
-            otel.init(OTelConfig())
-            description = "OTel with NoOpMeterProvider"
-
-        elif scenario == "otel_inmemory":
-            from opentelemetry import metrics
-            from opentelemetry.sdk.metrics import MeterProvider
-            from opentelemetry.sdk.metrics.export import InMemoryMetricReader
-
-            reader = InMemoryMetricReader()
-            provider = MeterProvider(metric_readers=[reader])
-            metrics.set_meter_provider(provider)
-
-            from redis.observability.providers import get_observability_instance
-            from redis.observability.config import OTelConfig
-            otel = get_observability_instance()
-            otel.init(OTelConfig())
-            description = "OTel with InMemoryMetricReader"
-
-        elif scenario == "otel_enabled_http":
-            from opentelemetry import metrics
-            from opentelemetry.sdk.metrics import MeterProvider
-            from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-            from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-
-            # HTTP exporter - host configurable via OTEL_COLLECTOR_HOST env var,
-            # default is localhost (port 4318)
-            host = os.environ.get("OTEL_COLLECTOR_HOST", "localhost")
-            endpoint = f"http://{host}:4318/v1/metrics"
-            exporter = OTLPMetricExporter(endpoint=endpoint)
-            reader = PeriodicExportingMetricReader(exporter, export_interval_millis=10000)
-            provider = MeterProvider(metric_readers=[reader])
-            metrics.set_meter_provider(provider)
-
-            from redis.observability.providers import get_observability_instance
-            from redis.observability.config import OTelConfig
-            otel = get_observability_instance()
-            otel.init(OTelConfig())
-            description = f"OTel with PeriodicExportingMetricReader (HTTP) -> {endpoint}"
-
-        elif scenario == "otel_enabled_grpc":
-            from opentelemetry import metrics
-            from opentelemetry.sdk.metrics import MeterProvider
-            from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
-
-            # gRPC exporter - host configurable via OTEL_COLLECTOR_HOST env var,
-            # default is localhost (port 4317)
-            host = os.environ.get("OTEL_COLLECTOR_HOST", "localhost")
-            endpoint = f"{host}:4317"
-            exporter = OTLPMetricExporter(endpoint=endpoint)
-            reader = PeriodicExportingMetricReader(exporter, export_interval_millis=10000)
-            provider = MeterProvider(metric_readers=[reader])
-            metrics.set_meter_provider(provider)
-
-            from redis.observability.providers import get_observability_instance
-            from redis.observability.config import OTelConfig
-            otel = get_observability_instance()
-            otel.init(OTelConfig())
-            description = f"OTel with PeriodicExportingMetricReader (gRPC) -> {endpoint}"
-        else:
-            raise ValueError(f"Unknown scenario: {scenario}")
-
         generator = LoadGenerator(client, config)
         generator.warmup()
         result = generator.run()
@@ -375,8 +420,9 @@ def main() -> int:
     if args.baseline_tag:
         print(f"Baseline tag: {args.baseline_tag}")
     print("=" * 60)
-    print(f"Duration: {args.duration}s")
-    print(f"Warmup: {args.warmup}s")
+    print(f"Duration: {args.duration}s per iteration")
+    print(f"Warmup: {args.warmup}s per iteration")
+    print(f"Iterations: {args.iterations}")
     print(f"Value size: {args.value_size} bytes")
     print(f"Redis: {args.host}:{args.port}")
 
@@ -388,18 +434,33 @@ def main() -> int:
         redis_port=args.port,
     )
 
-    if args.scenario == "baseline":
-        result = run_baseline_scenario(tag=args.baseline_tag, config=config)
-        if result is None:
-            print("ERROR: Baseline benchmark failed")
-            return 1
-    else:
-        result = run_scenario(args.scenario, config)
+    # Set up OTel once (for non-baseline scenarios)
+    description = ""
+    if args.scenario != "baseline":
+        print("\nSetting up OTel...")
+        description = setup_scenario(args.scenario)
+        print(f"  {description}")
+
+    results: List[BenchmarkResult] = []
+    for i in range(args.iterations):
+        print(f"\n--- Iteration {i + 1}/{args.iterations} ---")
+        if args.scenario == "baseline":
+            result = run_baseline_scenario(tag=args.baseline_tag, config=config)
+            if result is None:
+                print("ERROR: Baseline benchmark failed")
+                return 1
+        else:
+            result = run_iteration(args.scenario, config, description)
+        results.append(result)
+        print(f"  Ops/sec: {result.operations_per_second:,.0f}")
+
+    # Average results across all iterations
+    final_result = average_results(results)
 
     if args.json:
-        print(json.dumps(asdict(result), indent=2))
+        print(json.dumps(asdict(final_result), indent=2))
     else:
-        print_result(result)
+        print_result(final_result, iterations=args.iterations)
 
     return 0
 
