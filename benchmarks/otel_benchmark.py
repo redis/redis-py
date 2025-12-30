@@ -246,6 +246,10 @@ def parse_args() -> argparse.Namespace:
         "--iterations", type=int, default=5,
         help="Number of iterations to run (default: 5). Final result is averaged."
     )
+    parser.add_argument(
+        "--with-command-metrics", action="store_true",
+        help="Include COMMAND metric group (for otel_enabled_http/grpc scenarios)"
+    )
     return parser.parse_args()
 
 
@@ -307,10 +311,15 @@ def run_baseline_scenario(tag: str, config: LoadGeneratorConfig) -> Optional[Ben
             _clear_redis_modules()
 
 
-def setup_scenario(scenario: str) -> str:
+def setup_scenario(scenario: str, with_command_metrics: bool = False) -> str:
     """
     Set up OTel for a scenario. Returns the description.
     This should only be called once per process.
+
+    Args:
+        scenario: The scenario name
+        with_command_metrics: If True, include MetricGroup.COMMAND along with defaults
+                              (only applies to otel_enabled_http and otel_enabled_grpc)
     """
     if scenario == "otel_disabled":
         return "OTel not initialized"
@@ -357,10 +366,15 @@ def setup_scenario(scenario: str) -> str:
         metrics.set_meter_provider(provider)
 
         from redis.observability.providers import get_observability_instance
-        from redis.observability.config import OTelConfig
+        from redis.observability.config import OTelConfig, MetricGroup
         otel = get_observability_instance()
-        otel.init(OTelConfig())
-        return f"OTel with PeriodicExportingMetricReader (HTTP) -> {endpoint}"
+        if with_command_metrics:
+            metric_groups = [MetricGroup.RESILIENCY, MetricGroup.CONNECTION_BASIC, MetricGroup.COMMAND]
+            otel.init(OTelConfig(metric_groups=metric_groups))
+            return f"OTel with PeriodicExportingMetricReader (HTTP) -> {endpoint} [+COMMAND metrics]"
+        else:
+            otel.init(OTelConfig())
+            return f"OTel with PeriodicExportingMetricReader (HTTP) -> {endpoint}"
 
     elif scenario == "otel_enabled_grpc":
         from opentelemetry import metrics
@@ -378,10 +392,15 @@ def setup_scenario(scenario: str) -> str:
         metrics.set_meter_provider(provider)
 
         from redis.observability.providers import get_observability_instance
-        from redis.observability.config import OTelConfig
+        from redis.observability.config import OTelConfig, MetricGroup
         otel = get_observability_instance()
-        otel.init(OTelConfig())
-        return f"OTel with PeriodicExportingMetricReader (gRPC) -> {endpoint}"
+        if with_command_metrics:
+            metric_groups = [MetricGroup.RESILIENCY, MetricGroup.CONNECTION_BASIC, MetricGroup.COMMAND]
+            otel.init(OTelConfig(metric_groups=metric_groups))
+            return f"OTel with PeriodicExportingMetricReader (gRPC) -> {endpoint} [+COMMAND metrics]"
+        else:
+            otel.init(OTelConfig())
+            return f"OTel with PeriodicExportingMetricReader (gRPC) -> {endpoint}"
 
     else:
         raise ValueError(f"Unknown scenario: {scenario}")
@@ -438,7 +457,7 @@ def main() -> int:
     description = ""
     if args.scenario != "baseline":
         print("\nSetting up OTel...")
-        description = setup_scenario(args.scenario)
+        description = setup_scenario(args.scenario, with_command_metrics=args.with_command_metrics)
         print(f"  {description}")
 
     results: List[BenchmarkResult] = []
