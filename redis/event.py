@@ -3,11 +3,12 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Type, Union
+from typing import Dict, List, Optional, Type, Union, Callable
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
-from redis.observability.recorder import record_operation_duration, record_error_count, record_maint_notification_count
+from redis.observability.recorder import record_operation_duration, record_error_count, record_maint_notification_count, \
+    record_connection_create_time, init_connection_count, record_connection_relaxed_timeout, record_connection_handoff
 
 
 class EventListenerInterface(ABC):
@@ -85,7 +86,8 @@ class EventDispatcher(EventDispatcherInterface):
                 ReAuthConnectionListener(),
             ],
             AfterPooledConnectionsInstantiationEvent: [
-                RegisterReAuthForPooledConnections()
+                RegisterReAuthForPooledConnections(),
+                InitializeConnectionCountObservability()
             ],
             AfterSingleConnectionInstantiationEvent: [
                 RegisterReAuthForSingleConnection()
@@ -97,6 +99,16 @@ class EventDispatcher(EventDispatcherInterface):
                 AsyncReAuthConnectionListener(),
             ],
             OnErrorEvent: [ExportErrorCountMetric()],
+            OnMaintenanceNotificationEvent: [
+                ExportMaintenanceNotificationCountMetric(),
+            ],
+            AfterConnectionCreatedEvent: [ExportConnectionCreateTimeMetric()],
+            AfterConnectionTimeoutUpdatedEvent: [
+                ExportConnectionRelaxedTimeoutMetric(),
+            ],
+            AfterConnectionHandoffEvent: [
+                ExportConnectionHandoffMetric(),
+            ],
         }
 
         self._lock = threading.Lock()
@@ -333,6 +345,30 @@ class OnMaintenanceNotificationEvent:
     notification: "MaintenanceNotification"
     connection: "MaintNotificationsAbstractConnection"
 
+@dataclass
+class AfterConnectionCreatedEvent:
+    """
+    Event fired after connection is created in pool.
+    """
+    connection_pool: "ConnectionPoolInterface"
+    duration_seconds: float
+
+@dataclass
+class AfterConnectionTimeoutUpdatedEvent:
+    """
+    Event fired after connection timeout is updated.
+    """
+    connection: "MaintNotificationsAbstractConnection"
+    notification: "MaintenanceNotification"
+    relaxed: bool
+
+@dataclass
+class AfterConnectionHandoffEvent:
+    """
+    Event fired after connection is handed off.
+    """
+    connection_pool: "ConnectionPoolInterface"
+
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
 
@@ -547,4 +583,41 @@ class ExportMaintenanceNotificationCountMetric(EventListenerInterface):
             network_peer_address=event.connection.host,
             network_peer_port=event.connection.port,
             maint_notification=repr(event.notification),
+        )
+
+class ExportConnectionCreateTimeMetric(EventListenerInterface):
+    """
+    Listener that exports connection create time metric.
+    """
+    def listen(self, event: AfterConnectionCreatedEvent):
+        record_connection_create_time(
+            connection_pool=event.connection_pool,
+            duration_seconds=event.duration_seconds,
+        )
+
+class InitializeConnectionCountObservability(EventListenerInterface):
+    """
+    Listener that initializes connection count observability.
+    """
+    def listen(self, event: AfterPooledConnectionsInstantiationEvent):
+        init_connection_count(event.connection_pools)
+
+class ExportConnectionRelaxedTimeoutMetric(EventListenerInterface):
+    """
+    Listener that exports connection relaxed timeout metric.
+    """
+    def listen(self, event: AfterConnectionTimeoutUpdatedEvent):
+        record_connection_relaxed_timeout(
+            connection_name=repr(event.connection),
+            maint_notification=repr(event.notification),
+            relaxed=event.relaxed,
+        )
+
+class ExportConnectionHandoffMetric(EventListenerInterface):
+    """
+    Listener that exports connection handoff metric.
+    """
+    def listen(self, event: AfterConnectionHandoffEvent):
+        record_connection_handoff(
+            pool_name=repr(event.connection_pool),
         )

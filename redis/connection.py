@@ -35,7 +35,8 @@ from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
-from .event import AfterConnectionReleasedEvent, EventDispatcher, OnErrorEvent, OnMaintenanceNotificationEvent
+from .event import AfterConnectionReleasedEvent, EventDispatcher, OnErrorEvent, OnMaintenanceNotificationEvent, \
+    AfterConnectionCreatedEvent
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -53,6 +54,8 @@ from .maint_notifications import (
     MaintNotificationsConnectionHandler,
     MaintNotificationsPoolHandler, MaintenanceNotification,
 )
+from .observability.attributes import AttributeBuilder, DB_CLIENT_CONNECTION_STATE, ConnectionState, \
+    DB_CLIENT_CONNECTION_POOL_NAME
 from .retry import Retry
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
@@ -2060,6 +2063,13 @@ class ConnectionPoolInterface(ABC):
     def re_auth_callback(self, token: TokenInterface):
         pass
 
+    @abstractmethod
+    def get_connection_count(self) -> list[tuple[int, dict]]:
+        """
+        Returns a connection count (both idle and in use).
+        """
+        pass
+
 
 class MaintNotificationsAbstractConnectionPool:
     """
@@ -2088,8 +2098,12 @@ class MaintNotificationsAbstractConnectionPool:
                     "Maintenance notifications handlers on connection are only supported with RESP version 3"
                 )
 
+            self._event_dispatcher = kwargs.get("event_dispatcher", None)
+            if self._event_dispatcher is None:
+                self._event_dispatcher = EventDispatcher()
+
             self._maint_notifications_pool_handler = MaintNotificationsPoolHandler(
-                self, maint_notifications_config
+                self, maint_notifications_config, self._event_dispatcher
             )
 
             self._update_connection_kwargs_for_maint_notifications(
@@ -2157,7 +2171,7 @@ class MaintNotificationsAbstractConnectionPool:
         # first update pool settings
         if not self._maint_notifications_pool_handler:
             self._maint_notifications_pool_handler = MaintNotificationsPoolHandler(
-                self, maint_notifications_config
+                self, maint_notifications_config, self._event_dispatcher
             )
         else:
             self._maint_notifications_pool_handler.config = maint_notifications_config
@@ -2635,11 +2649,17 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         "Get a connection from the pool"
 
         self._checkpid()
+        is_created = False
+
         with self._lock:
             try:
                 connection = self._available_connections.pop()
             except IndexError:
+                # Start timing for observability
+                start_time = time.monotonic()
+
                 connection = self.make_connection()
+                is_created = True
             self._in_use_connections.add(connection)
 
         try:
@@ -2666,6 +2686,14 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             # leak it
             self.release(connection)
             raise
+
+        if is_created:
+            self._event_dispatcher.dispatch(
+                AfterConnectionCreatedEvent(
+                    connection_pool=self,
+                    duration_seconds=time.monotonic() - start_time,
+                )
+            )
         return connection
 
     def get_encoder(self) -> Encoder:
@@ -2784,6 +2812,20 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         :return:
         """
         pass
+
+    def get_connection_count(self) -> List[tuple[int, dict]]:
+        attributes = AttributeBuilder.build_base_attributes()
+        attributes[DB_CLIENT_CONNECTION_POOL_NAME] = repr(self)
+        free_connections_attributes = attributes.copy()
+        in_use_connections_attributes = attributes.copy()
+
+        free_connections_attributes[DB_CLIENT_CONNECTION_STATE] = ConnectionState.IDLE.value
+        in_use_connections_attributes[DB_CLIENT_CONNECTION_STATE] = ConnectionState.USED.value
+
+        return [
+            (len(self._get_free_connections()), free_connections_attributes),
+            (len(self._get_in_use_connections()), in_use_connections_attributes),
+        ]
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -2917,6 +2959,7 @@ class BlockingConnectionPool(ConnectionPool):
         """
         # Make sure we haven't changed process.
         self._checkpid()
+        is_created = False
 
         # Try and get a connection from the pool. If one isn't available within
         # self.timeout then raise a ``ConnectionError``.
@@ -2935,7 +2978,10 @@ class BlockingConnectionPool(ConnectionPool):
             # If the ``connection`` is actually ``None`` then that's a cue to make
             # a new connection to add to the pool.
             if connection is None:
+                # Start timing for observability
+                start_time = time.monotonic()
                 connection = self.make_connection()
+                is_created = True
         finally:
             if self._locked:
                 try:
@@ -2963,6 +3009,14 @@ class BlockingConnectionPool(ConnectionPool):
             # release the connection back to the pool so that we don't leak it
             self.release(connection)
             raise
+
+        if is_created:
+            self._event_dispatcher.dispatch(
+                AfterConnectionCreatedEvent(
+                    connection_pool=self,
+                    duration_seconds=time.monotonic() - start_time,
+                )
+            )
 
         return connection
 

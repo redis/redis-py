@@ -23,11 +23,18 @@ initializing observability:
 import logging
 from typing import Optional
 
-from opentelemetry.sdk.metrics import MeterProvider
-
 from redis.observability.config import OTelConfig
 
 logger = logging.getLogger(__name__)
+
+# Optional imports - OTel SDK may not be installed
+try:
+    from opentelemetry.sdk.metrics import MeterProvider
+
+    OTEL_AVAILABLE = True
+except ImportError:
+    OTEL_AVAILABLE = False
+    MeterProvider = None
 
 # Global singleton instance
 _global_provider_manager: Optional["OTelProviderManager"] = None

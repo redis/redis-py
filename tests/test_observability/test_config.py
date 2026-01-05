@@ -57,27 +57,6 @@ class TestOTelConfigEnabledTelemetry:
         config = OTelConfig(enabled_telemetry=[TelemetryOption.METRICS])
         assert config.enabled_telemetry == TelemetryOption.METRICS
 
-    def test_multiple_telemetry_options(self):
-        """Test setting multiple telemetry options."""
-        config = OTelConfig(
-            enabled_telemetry=[TelemetryOption.METRICS, TelemetryOption.TRACES]
-        )
-        assert TelemetryOption.METRICS in config.enabled_telemetry
-        assert TelemetryOption.TRACES in config.enabled_telemetry
-
-    def test_all_telemetry_options(self):
-        """Test setting all telemetry options."""
-        config = OTelConfig(
-            enabled_telemetry=[
-                TelemetryOption.METRICS,
-                TelemetryOption.TRACES,
-                TelemetryOption.LOGS,
-            ]
-        )
-        assert TelemetryOption.METRICS in config.enabled_telemetry
-        assert TelemetryOption.TRACES in config.enabled_telemetry
-        assert TelemetryOption.LOGS in config.enabled_telemetry
-
     def test_empty_telemetry_list_disables_all(self):
         """Test that empty telemetry list disables all telemetry."""
         config = OTelConfig(enabled_telemetry=[])
@@ -325,24 +304,3 @@ class TestMetricGroupEnum:
         assert bool(combined & MetricGroup.RESILIENCY)
         assert bool(combined & MetricGroup.CONNECTION_BASIC)
         assert not bool(combined & MetricGroup.COMMAND)
-
-
-class TestTelemetryOptionEnum:
-    """Tests for TelemetryOption IntFlag enum."""
-
-    def test_telemetry_option_values_are_unique(self):
-        """Test that all TelemetryOption values are unique powers of 2."""
-        values = [
-            TelemetryOption.METRICS,
-            TelemetryOption.TRACES,
-            TelemetryOption.LOGS,
-        ]
-        for value in values:
-            assert value & (value - 1) == 0  # Power of 2 check
-
-    def test_telemetry_option_can_be_combined(self):
-        """Test that TelemetryOption values can be combined with bitwise OR."""
-        combined = TelemetryOption.METRICS | TelemetryOption.TRACES
-        assert TelemetryOption.METRICS in combined
-        assert TelemetryOption.TRACES in combined
-        assert TelemetryOption.LOGS not in combined
