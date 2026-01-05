@@ -107,7 +107,7 @@ class EventDispatcher(EventDispatcherInterface):
                 ExportMaintenanceNotificationCountMetric(),
             ],
             AfterConnectionCreatedEvent: [ExportConnectionCreateTimeMetric()],
-            AfterConnectionTimeoutRelaxedEvent: [
+            AfterConnectionTimeoutUpdatedEvent: [
                 ExportConnectionRelaxedTimeoutMetric(),
             ],
             AfterConnectionHandoffEvent: [
@@ -382,9 +382,9 @@ class AfterConnectionCreatedEvent:
     duration_seconds: float
 
 @dataclass
-class AfterConnectionTimeoutRelaxedEvent:
+class AfterConnectionTimeoutUpdatedEvent:
     """
-    Event fired after connection timeout is relaxed.
+    Event fired after connection timeout is updated.
     """
     connection: "MaintNotificationsAbstractConnection"
     notification: "MaintenanceNotification"
@@ -634,7 +634,7 @@ class ExportConnectionRelaxedTimeoutMetric(EventListenerInterface):
     """
     Listener that exports connection relaxed timeout metric.
     """
-    def listen(self, event: AfterConnectionTimeoutRelaxedEvent):
+    def listen(self, event: AfterConnectionTimeoutUpdatedEvent):
         record_connection_relaxed_timeout(
             connection_name=repr(event.connection),
             maint_notification=repr(event.notification),

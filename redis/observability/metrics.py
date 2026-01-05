@@ -438,7 +438,7 @@ class RedisMetricsCollector:
         Record a connection timeout relaxation event.
 
         Args:
-            connection_name: Connection pool name
+            connection_name: Connection name
             maint_notification: Maintenance notification type
             relaxed: True to count up (relaxed), False to count down (unrelaxed)
         """
