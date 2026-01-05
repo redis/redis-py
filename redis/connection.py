@@ -2098,8 +2098,12 @@ class MaintNotificationsAbstractConnectionPool:
                     "Maintenance notifications handlers on connection are only supported with RESP version 3"
                 )
 
+            self._event_dispatcher = kwargs.get("event_dispatcher", None)
+            if self._event_dispatcher is None:
+                self._event_dispatcher = EventDispatcher()
+
             self._maint_notifications_pool_handler = MaintNotificationsPoolHandler(
-                self, maint_notifications_config
+                self, maint_notifications_config, self._event_dispatcher
             )
 
             self._update_connection_kwargs_for_maint_notifications(
@@ -2167,7 +2171,7 @@ class MaintNotificationsAbstractConnectionPool:
         # first update pool settings
         if not self._maint_notifications_pool_handler:
             self._maint_notifications_pool_handler = MaintNotificationsPoolHandler(
-                self, maint_notifications_config
+                self, maint_notifications_config, self._event_dispatcher
             )
         else:
             self._maint_notifications_pool_handler.config = maint_notifications_config
@@ -2809,7 +2813,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         """
         pass
 
-    def get_connection_count(self) -> list[tuple[int, dict]]:
+    def get_connection_count(self) -> List[tuple[int, dict]]:
         attributes = AttributeBuilder.build_base_attributes()
         attributes[DB_CLIENT_CONNECTION_POOL_NAME] = repr(self)
         free_connections_attributes = attributes.copy()
@@ -2818,11 +2822,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         free_connections_attributes[DB_CLIENT_CONNECTION_STATE] = ConnectionState.IDLE.value
         in_use_connections_attributes[DB_CLIENT_CONNECTION_STATE] = ConnectionState.USED.value
 
-        with self._lock:
-            return [
-                (len(self._available_connections), free_connections_attributes),
-                (len(self._in_use_connections), in_use_connections_attributes),
-            ]
+        return [
+            (len(self._get_free_connections()), free_connections_attributes),
+            (len(self._get_in_use_connections()), in_use_connections_attributes),
+        ]
 
 
 class BlockingConnectionPool(ConnectionPool):
