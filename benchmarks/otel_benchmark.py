@@ -106,6 +106,7 @@ class LoadGenerator:
         """Run the load generator for the configured duration."""
         self.latencies = []
         self.errors = 0
+        self.first_error = None
 
         print(f"  Running load for {self.config.duration_seconds}s...")
         start_time = time.monotonic()
