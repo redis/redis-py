@@ -669,7 +669,7 @@ class ExportStreamingLagMetric(EventListenerInterface):
         now = datetime.now().timestamp()
 
         # RESP3
-        if type(event.response) == dict:
+        if isinstance(event.response, dict):
             for stream_name, stream_messages in event.response.items():
                 for messages in stream_messages:
                     for message in messages:
