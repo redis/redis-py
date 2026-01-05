@@ -191,7 +191,7 @@ def average_results(results: List[BenchmarkResult]) -> BenchmarkResult:
     return BenchmarkResult(
         scenario=results[0].scenario,
         duration_seconds=sum(r.duration_seconds for r in results) / n,
-        total_operations=sum(r.total_operations for r in results) // n,
+        total_operations=int(sum(r.total_operations for r in results) / n),
         operations_per_second=sum(r.operations_per_second for r in results) / n,
         avg_latency_ms=sum(r.avg_latency_ms for r in results) / n,
         p50_latency_ms=sum(r.p50_latency_ms for r in results) / n,
