@@ -51,7 +51,7 @@ class LoadGeneratorConfig:
     duration_seconds: float = 30.0
     value_size_bytes: int = 100
     key_prefix: str = "otel_bench"
-    warmup_seconds: float = 2.0
+    warmup_seconds: float = 5.0
     redis_host: str = "localhost"
     redis_port: int = 6379
 
