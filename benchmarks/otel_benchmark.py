@@ -87,7 +87,6 @@ class LoadGenerator:
             if self.first_error is None:
                 self.first_error = str(e)
             self.errors += 1
-            return 0.0
         end = time.perf_counter()
         return (end - start) * 1000  # Convert to milliseconds
 
