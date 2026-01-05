@@ -9,6 +9,7 @@ Run one scenario at a time:
     python -m benchmarks.otel_benchmark --scenario baseline --baseline-tag v5.2.1
     python -m benchmarks.otel_benchmark --scenario otel_disabled
     python -m benchmarks.otel_benchmark --scenario otel_noop
+    python -m benchmarks.otel_benchmark --scenario otel_inmemory
     python -m benchmarks.otel_benchmark --scenario otel_enabled_http
     python -m benchmarks.otel_benchmark --scenario otel_enabled_grpc
 """
