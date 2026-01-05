@@ -1,14 +1,18 @@
 import asyncio
 import threading
 from abc import ABC, abstractmethod
+from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Type, Union, Callable
+from typing import Dict, List, Optional, Type, Union, Callable, Iterable
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
+from redis.observability.attributes import PubSubDirection
 from redis.observability.recorder import record_operation_duration, record_error_count, record_maint_notification_count, \
-    record_connection_create_time, init_connection_count, record_connection_relaxed_timeout, record_connection_handoff
+    record_connection_create_time, init_connection_count, record_connection_relaxed_timeout, record_connection_handoff, \
+    record_pubsub_message, record_streaming_lag
+from redis.utils import str_if_bytes
 
 
 class EventListenerInterface(ABC):
@@ -108,6 +112,12 @@ class EventDispatcher(EventDispatcherInterface):
             ],
             AfterConnectionHandoffEvent: [
                 ExportConnectionHandoffMetric(),
+            ],
+            OnPubSubMessageEvent: [
+                ExportPubSubMessageMetric(),
+            ],
+            OnStreamMessageReceivedEvent: [
+                ExportStreamingLagMetric(),
             ],
         }
 
@@ -336,6 +346,24 @@ class OnErrorEvent:
     server_port: Optional[int] = None
     is_internal: bool = True
     retry_attempts: Optional[int] = None
+
+@dataclass
+class OnPubSubMessageEvent:
+    """
+    Event fired whenever a pub/sub message is published/received.
+    """
+    direction: PubSubDirection
+    channel: str
+    sharded: bool = False
+
+@dataclass
+class OnStreamMessageReceivedEvent:
+    """
+    Event fired whenever a stream message is received.
+    """
+    response: Union[list, dict]
+    consumer_group: Optional[str] = None
+    consumer_name: Optional[str] = None
 
 @dataclass
 class OnMaintenanceNotificationEvent:
@@ -621,3 +649,58 @@ class ExportConnectionHandoffMetric(EventListenerInterface):
         record_connection_handoff(
             pool_name=repr(event.connection_pool),
         )
+
+class ExportPubSubMessageMetric(EventListenerInterface):
+    """
+    Listener that exports pubsub message metric.
+    """
+    def listen(self, event: OnPubSubMessageEvent):
+        record_pubsub_message(
+            direction=event.direction,
+            channel=event.channel,
+            sharded=event.sharded,
+        )
+
+class ExportStreamingLagMetric(EventListenerInterface):
+    """
+    Listener that exports streaming lag metric per stream message.
+    """
+    def listen(self, event: OnStreamMessageReceivedEvent):
+        now = datetime.now().timestamp()
+
+        if not event.response:
+            return
+
+        # RESP3
+        if isinstance(event.response, dict):
+            for stream_name, stream_messages in event.response.items():
+                for messages in stream_messages:
+                    for message in messages:
+                        message_id, message = message
+                        message_id = str_if_bytes(message_id)
+                        timestamp, _ = message_id.split("-")
+                        lag_seconds = now - int(timestamp) / 1000
+
+                        record_streaming_lag(
+                            lag_seconds=lag_seconds,
+                            stream_name=str_if_bytes(stream_name),
+                            consumer_group=event.consumer_group,
+                            consumer_name=event.consumer_name,
+                        )
+        else:
+            # RESP 2
+            for stream_entry in event.response:
+                stream_name = str_if_bytes(stream_entry[0])
+
+                for message in stream_entry[1]:
+                    message_id, message = message
+                    message_id = str_if_bytes(message_id)
+                    timestamp, _ = message_id.split("-")
+                    lag_seconds = now - int(timestamp) / 1000
+
+                    record_streaming_lag(
+                        lag_seconds=lag_seconds,
+                        stream_name=stream_name,
+                        consumer_group=event.consumer_group,
+                        consumer_name=event.consumer_name,
+                    )

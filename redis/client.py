@@ -45,7 +45,7 @@ from redis.event import (
     AfterPubSubConnectionInstantiationEvent,
     AfterSingleConnectionInstantiationEvent,
     ClientType,
-    EventDispatcher, AfterCommandExecutionEvent, OnErrorEvent,
+    EventDispatcher, AfterCommandExecutionEvent, OnErrorEvent, OnPubSubMessageEvent,
 )
 from redis.exceptions import (
     ConnectionError,
@@ -59,6 +59,7 @@ from redis.lock import Lock
 from redis.maint_notifications import (
     MaintNotificationsConfig,
 )
+from redis.observability.attributes import PubSubDirection
 from redis.retry import Retry
 from redis.utils import (
     _set_info_logger,
@@ -1381,6 +1382,24 @@ class PubSub:
                 "channel": response[1],
                 "data": response[2],
             }
+
+        if message_type in ["message", "pmessage"]:
+            channel = str_if_bytes(message["channel"])
+            self._event_dispatcher.dispatch(
+                OnPubSubMessageEvent(
+                    direction=PubSubDirection.RECEIVE,
+                    channel=channel,
+                )
+            )
+        elif message_type == "smessage":
+            channel = str_if_bytes(message["channel"])
+            self._event_dispatcher.dispatch(
+                OnPubSubMessageEvent(
+                    direction=PubSubDirection.RECEIVE,
+                    channel=channel,
+                    sharded=True,
+                )
+            )
 
         # if this is an unsubscribe message, remove it from memory
         if message_type in self.UNSUBSCRIBE_MESSAGE_TYPES:
