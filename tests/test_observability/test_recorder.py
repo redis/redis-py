@@ -123,6 +123,7 @@ def mock_meter(mock_instruments):
 
     meter.create_counter.side_effect = create_counter_side_effect
     meter.create_gauge.side_effect = create_gauge_side_effect
+    meter.create_observable_gauge.side_effect = create_gauge_side_effect
     meter.create_up_down_counter.side_effect = create_up_down_counter_side_effect
     meter.create_histogram.side_effect = create_histogram_side_effect
 
