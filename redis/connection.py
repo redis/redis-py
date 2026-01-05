@@ -2818,10 +2818,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         free_connections_attributes[DB_CLIENT_CONNECTION_STATE] = ConnectionState.IDLE.value
         in_use_connections_attributes[DB_CLIENT_CONNECTION_STATE] = ConnectionState.USED.value
 
-        return [
-            (len(self._available_connections), free_connections_attributes),
-            (len(self._in_use_connections), in_use_connections_attributes),
-        ]
+        with self._lock:
+            return [
+                (len(self._available_connections), free_connections_attributes),
+                (len(self._in_use_connections), in_use_connections_attributes),
+            ]
 
 
 class BlockingConnectionPool(ConnectionPool):

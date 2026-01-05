@@ -817,7 +817,7 @@ class MaintNotificationsConnectionHandler:
         # extend the timeout for all created connections
         self.connection.update_current_socket_timeout(self.config.relaxed_timeout)
 
-        if kwargs.get('notification', None) is not None:
+        if kwargs.get('notification'):
             self.connection.event_dispatcher.dispatch(
                 AfterConnectionTimeoutRelaxedEvent(
                     connection=self.connection,
@@ -839,7 +839,7 @@ class MaintNotificationsConnectionHandler:
         self.connection.update_current_socket_timeout(-1)
         self.connection.maintenance_state = MaintenanceState.NONE
 
-        if kwargs.get('notification', None) is not None:
+        if kwargs.get('notification'):
             self.connection.event_dispatcher.dispatch(
                 AfterConnectionTimeoutRelaxedEvent(
                     connection=self.connection,
