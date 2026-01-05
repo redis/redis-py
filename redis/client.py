@@ -1384,17 +1384,19 @@ class PubSub:
             }
 
         if message_type in ["message", "pmessage"]:
+            channel = str_if_bytes(message["channel"])
             self._event_dispatcher.dispatch(
                 OnPubSubMessageEvent(
                     direction=PubSubDirection.RECEIVE,
-                    channel=message["channel"],
+                    channel=channel,
                 )
             )
         elif message_type == "smessage":
+            channel = str_if_bytes(message["channel"])
             self._event_dispatcher.dispatch(
                 OnPubSubMessageEvent(
                     direction=PubSubDirection.RECEIVE,
-                    channel=message["channel"],
+                    channel=channel,
                     sharded=True,
                 )
             )
