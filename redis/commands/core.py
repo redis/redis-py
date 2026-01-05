@@ -49,7 +49,7 @@ from redis.utils import (
     deprecated_function,
     experimental_args,
     experimental_method,
-    extract_expire_flags,
+    extract_expire_flags, str_if_bytes,
 )
 
 from .helpers import at_most_one_value_set, list_or_args
@@ -6062,7 +6062,7 @@ class PubSubCommands(CommandsProtocol):
         self._event_dispatcher.dispatch(
             OnPubSubMessageEvent(
                 direction=PubSubDirection.PUBLISH,
-                channel=channel,
+                channel=str_if_bytes(channel),
             )
         )
         return response
@@ -6078,7 +6078,7 @@ class PubSubCommands(CommandsProtocol):
         self._event_dispatcher.dispatch(
             OnPubSubMessageEvent(
                 direction=PubSubDirection.PUBLISH,
-                channel=shard_channel,
+                channel=str_if_bytes(shard_channel),
                 sharded=True,
             )
         )
