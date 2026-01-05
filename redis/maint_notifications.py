@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
 from redis.event import OnMaintenanceNotificationEvent, EventDispatcherInterface, EventDispatcher, \
-    AfterConnectionTimeoutRelaxedEvent, AfterConnectionHandoffEvent
+    AfterConnectionTimeoutUpdatedEvent, AfterConnectionHandoffEvent
 from redis.typing import Number
 
 
@@ -581,7 +581,7 @@ class MaintNotificationsPoolHandler:
         # Copy all data that should be shared between connections
         # but each connection should have its own pool handler
         # since each connection can be in a different state
-        copy = MaintNotificationsPoolHandler(self.pool, self.config)
+        copy = MaintNotificationsPoolHandler(self.pool, self.config, self.event_dispatcher)
         copy._processed_notifications = self._processed_notifications
         copy._lock = self._lock
         copy.connection = None
@@ -817,9 +817,9 @@ class MaintNotificationsConnectionHandler:
         # extend the timeout for all created connections
         self.connection.update_current_socket_timeout(self.config.relaxed_timeout)
 
-        if kwargs.get('notification', None) is not None:
+        if kwargs.get('notification'):
             self.connection.event_dispatcher.dispatch(
-                AfterConnectionTimeoutRelaxedEvent(
+                AfterConnectionTimeoutUpdatedEvent(
                     connection=self.connection,
                     notification=kwargs.get('notification'),
                     relaxed=True,
@@ -839,9 +839,9 @@ class MaintNotificationsConnectionHandler:
         self.connection.update_current_socket_timeout(-1)
         self.connection.maintenance_state = MaintenanceState.NONE
 
-        if kwargs.get('notification', None) is not None:
+        if kwargs.get('notification'):
             self.connection.event_dispatcher.dispatch(
-                AfterConnectionTimeoutRelaxedEvent(
+                AfterConnectionTimeoutUpdatedEvent(
                     connection=self.connection,
                     notification=kwargs.get('notification'),
                     relaxed=False,
