@@ -117,10 +117,10 @@ def record_connection_create_time(
             return
 
     # try:
-        _metrics_collector.record_connection_create_time(
-            connection_pool=connection_pool,
-            duration_seconds=duration_seconds,
-        )
+    _metrics_collector.record_connection_create_time(
+        connection_pool=connection_pool,
+        duration_seconds=duration_seconds,
+    )
     # except Exception:
     #     pass
 
@@ -179,9 +179,9 @@ def record_connection_timeout(
             return
 
     # try:
-        _metrics_collector.record_connection_timeout(
-            pool_name=pool_name,
-        )
+    _metrics_collector.record_connection_timeout(
+        pool_name=pool_name,
+    )
     # except Exception:
     #     pass
 
@@ -210,10 +210,10 @@ def record_connection_wait_time(
             return
 
     # try:
-        _metrics_collector.record_connection_wait_time(
-            pool_name=pool_name,
-            duration_seconds=duration_seconds,
-        )
+    _metrics_collector.record_connection_wait_time(
+        pool_name=pool_name,
+        duration_seconds=duration_seconds,
+    )
     # except Exception:
     #     pass
 
@@ -242,10 +242,10 @@ def record_connection_use_time(
             return
 
     # try:
-        _metrics_collector.record_connection_use_time(
-            pool_name=pool_name,
-            duration_seconds=duration_seconds,
-        )
+    _metrics_collector.record_connection_use_time(
+        pool_name=pool_name,
+        duration_seconds=duration_seconds,
+    )
     # except Exception:
     #     pass
 
@@ -274,11 +274,11 @@ def record_connection_closed(
             return
 
     # try:
-        _metrics_collector.record_connection_closed(
-            pool_name=pool_name,
-            close_reason=close_reason,
-            error_type=error_type,
-        )
+    _metrics_collector.record_connection_closed(
+        pool_name=pool_name,
+        close_reason=close_reason,
+        error_type=error_type,
+    )
     # except Exception:
     #     pass
 

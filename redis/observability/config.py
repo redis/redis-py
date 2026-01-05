@@ -75,7 +75,7 @@ class OTelConfig:
     """
 
     DEFAULT_TELEMETRY = TelemetryOption.METRICS
-    DEFAULT_METRIC_GROUPS = MetricGroup.COMMAND | MetricGroup.CONNECTION_BASIC | MetricGroup.RESILIENCY
+    DEFAULT_METRIC_GROUPS = MetricGroup.CONNECTION_BASIC | MetricGroup.RESILIENCY
 
     def __init__(
             self,
