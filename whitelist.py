@@ -16,3 +16,9 @@ traceback  # unused variable (/data/repos/redis/redis-py/redis/asyncio/utils.py:
 AsyncConnectionPool  # unused import (//data/repos/redis/redis-py/redis/typing.py:9)
 AsyncRedis  # unused import (//data/repos/redis/redis-py/redis/commands/core.py:49)
 TargetNodesT  # unused import (//data/repos/redis/redis-py/redis/commands/cluster.py:46)
+RedisDecoded  # unused import (redis/client.py:86) - used in TYPE_CHECKING for type annotations
+RedisEncoded  # unused import (redis/client.py:87) - used in TYPE_CHECKING for type annotations
+RedisEncodedOrDecoded  # unused import (redis/client.py:88) - used in TYPE_CHECKING for type annotations
+RedisDecoded  # unused import (redis/asyncio/client.py:109) - used in TYPE_CHECKING for type annotations
+RedisEncoded  # unused import (redis/asyncio/client.py:110) - used in TYPE_CHECKING for type annotations
+RedisEncodedOrDecoded  # unused import (redis/asyncio/client.py:111) - used in TYPE_CHECKING for type annotations
