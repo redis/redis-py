@@ -51,7 +51,9 @@ from redis.typing import (
     ResponseTypeListOfAnyStrings,
     ResponseTypeOptionalAnyString,
     ResponseTypeOptionalEncodedString,
+    ResponseTypeStrAlgoResult,
     ScriptTextT,
+    StrAlgoResultType,
     StreamIdT,
     TimeoutSecT,
     ZScoreBoundT,
@@ -1589,6 +1591,7 @@ class BasicKeyCommands(
         ResponseTypeFloat,
         ResponseTypeInteger,
         ResponseTypeOptionalEncodedString,
+        ResponseTypeStrAlgoResult,
         ResponseTypeAnyString,
         ResponseTypeOptionalAnyString,
         ResponseTypeListOfAnyStrings,
@@ -2610,7 +2613,7 @@ class BasicKeyCommands(
         minmatchlen: Optional[int] = None,
         withmatchlen: bool = False,
         **kwargs,
-    ) -> ResponseT:
+    ) -> ResponseTypeStrAlgoResult:
         """
         Implements complex algorithms that operate on strings.
         Right now the only algorithm implemented is the LCS algorithm
@@ -2763,6 +2766,7 @@ class AsyncBasicKeyCommands(
         ResponseTypeFloat,
         ResponseTypeInteger,
         ResponseTypeOptionalEncodedString,
+        ResponseTypeStrAlgoResult,
         ResponseTypeAnyString,
         ResponseTypeOptionalAnyString,
         ResponseTypeListOfAnyStrings,
@@ -6973,6 +6977,7 @@ class DataAccessCommands(
         FloatType,
         IntegerType,
         OptionalEncodedStringType,
+        StrAlgoResultType,
         ResponseTypeAnyString,
         ResponseTypeOptionalAnyString,
         ResponseTypeListOfAnyStrings,
@@ -6999,6 +7004,7 @@ class AsyncDataAccessCommands(
         Awaitable[FloatType],
         Awaitable[IntegerType],
         Awaitable[OptionalEncodedStringType],
+        Awaitable[StrAlgoResultType],
         Awaitable[ResponseTypeAnyString],
         Awaitable[ResponseTypeOptionalAnyString],
         Awaitable[ResponseTypeListOfAnyStrings],

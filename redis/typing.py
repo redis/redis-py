@@ -5,8 +5,10 @@ from typing import (
     Awaitable,
     Iterable,
     Mapping,
+    Optional,
     Protocol,
     Type,
+    TypedDict,
     TypeVar,
     Union,
 )
@@ -52,20 +54,62 @@ FloatType = float
 
 DecodedStringType = str
 EncodedStringType = bytes
-AnyStringType = DecodedStringType | EncodedStringType
-OptionalDecodedStringType = DecodedStringType | None
-OptionalEncodedStringType = EncodedStringType | None
-OptionalAnyString = OptionalDecodedStringType | OptionalEncodedStringType
+AnyStringType = Union[DecodedStringType, EncodedStringType]
+OptionalDecodedStringType = Optional[DecodedStringType]
+OptionalEncodedStringType = Optional[EncodedStringType]
+OptionalAnyString = Union[OptionalDecodedStringType, OptionalEncodedStringType]
 
 ListOfDecodedStringsType = list[DecodedStringType]
 ListOfEncodedStringsType = list[EncodedStringType]
-ListOfAnyStrings = ListOfDecodedStringsType | ListOfEncodedStringsType
+ListOfAnyStrings = Union[ListOfDecodedStringsType, ListOfEncodedStringsType]
 
 ListOfOptionalDecodedStringsType = list[OptionalDecodedStringType]
 ListOfOptionalEncodedStringsType = list[OptionalEncodedStringType]
-ListOfAnyOptionalStringsType = (
-    ListOfOptionalDecodedStringsType | ListOfOptionalEncodedStringsType
-)
+ListOfAnyOptionalStringsType = Union[
+    ListOfOptionalDecodedStringsType,
+    ListOfOptionalEncodedStringsType,
+]
+
+# STRALGO return types
+# Represents the ranges, e.g., (4, 7)
+PositionRange = tuple[IntegerType, IntegerType]
+
+# Represents a match entry when WITHMATCHLEN is False
+# Example: [(4, 7), (5, 8)]
+MatchSequence = list[PositionRange]
+
+# Represents a match entry when WITHMATCHLEN is True
+# Example: [4, (4, 7), (5, 8)]  <-- First item is int (len), rest are ranges
+MatchSequenceWithLen = list[Union[IntegerType, PositionRange]]
+
+
+class StrAlgoIdxResponse(TypedDict):
+    """
+    Return type when IDX=True (No WITHMATCHLEN)
+    Example: {'matches': [[(4, 7), (5, 8)]], 'len': 6}
+    """
+
+    matches: list[MatchSequence]
+    len: IntegerType
+
+
+class StrAlgoIdxWithLenResponse(TypedDict):
+    """
+    Return type when IDX=True AND WITHMATCHLEN=True
+    Example: {'matches': [[4, (4, 7), (5, 8)]], 'len': 6}
+    """
+
+    matches: list[MatchSequenceWithLen]
+    len: IntegerType
+
+
+StrAlgoResultType = Union[
+    DecodedStringType,  # str (default)
+    IntegerType,  # int (LEN argument)
+    StrAlgoIdxResponse,  # dict (IDX argument)
+    StrAlgoIdxWithLenResponse,  # dict (IDX + WITHMATCHLEN argument)
+]
+
 
 ResponseTypeBoolean = TypeVar(
     "ResponseTypeBoolean",
@@ -98,6 +142,10 @@ ResponseTypeListOfAnyStrings = TypeVar(
 ResponseTypeListOfAnyOptionalStrings = TypeVar(
     "ResponseTypeListOfAnyOptionalStrings",
     bound=Awaitable[ListOfAnyOptionalStringsType] | ListOfAnyOptionalStringsType,
+)
+ResponseTypeStrAlgoResult = TypeVar(
+    "ResponseTypeStrAlgoResult",
+    bound=Awaitable[StrAlgoResultType] | StrAlgoResultType,
 )
 
 
