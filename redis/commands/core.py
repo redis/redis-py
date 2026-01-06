@@ -2398,7 +2398,7 @@ class BasicKeyCommands(
         absttl: bool = False,
         idletime: Optional[int] = None,
         frequency: Optional[int] = None,
-    ) -> ResponseT:
+    ) -> ResponseTypeBoolean:
         """
         Create a key using the provided serialized value, previously obtained
         using DUMP.
