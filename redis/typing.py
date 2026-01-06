@@ -1,5 +1,3 @@
-# from __future__ import annotations
-
 from datetime import datetime, timedelta
 from typing import (
     TYPE_CHECKING,
@@ -48,6 +46,60 @@ AnyChannelT = TypeVar("AnyChannelT", bytes, str, memoryview)
 
 ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Exception]]]]
 
+BooleanType = bool
+IntegerType = int
+FloatType = float
+
+DecodedStringType = str
+EncodedStringType = bytes
+AnyStringType = DecodedStringType | EncodedStringType
+OptionalDecodedStringType = DecodedStringType | None
+OptionalEncodedStringType = EncodedStringType | None
+OptionalAnyString = OptionalDecodedStringType | OptionalEncodedStringType
+
+ListOfDecodedStringsType = list[DecodedStringType]
+ListOfEncodedStringsType = list[EncodedStringType]
+ListOfAnyStrings = ListOfDecodedStringsType | ListOfEncodedStringsType
+
+ListOfOptionalDecodedStringsType = list[OptionalDecodedStringType]
+ListOfOptionalEncodedStringsType = list[OptionalEncodedStringType]
+ListOfAnyOptionalStringsType = (
+    ListOfOptionalDecodedStringsType | ListOfOptionalEncodedStringsType
+)
+
+ResponseTypeBoolean = TypeVar(
+    "ResponseTypeBoolean",
+    bound=Awaitable[BooleanType] | BooleanType,
+)
+ResponseTypeInteger = TypeVar(
+    "ResponseTypeInteger",
+    bound=Awaitable[IntegerType] | IntegerType,
+)
+ResponseTypeFloat = TypeVar(
+    "ResponseTypeFloat",
+    bound=Awaitable[FloatType] | FloatType,
+)
+ResponseTypeAnyString = TypeVar(
+    "ResponseTypeAnyString",
+    bound=Awaitable[AnyStringType] | AnyStringType,
+)
+ResponseTypeOptionalEncodedString = TypeVar(
+    "ResponseTypeOptionalEncodedString",
+    bound=Awaitable[OptionalEncodedStringType] | OptionalEncodedStringType,
+)
+ResponseTypeOptionalAnyString = TypeVar(
+    "ResponseTypeOptionalAnyString",
+    bound=Awaitable[OptionalAnyString] | OptionalAnyString,
+)
+ResponseTypeListOfAnyStrings = TypeVar(
+    "ResponseTypeListOfAnyStrings",
+    bound=Awaitable[ListOfAnyStrings] | ListOfAnyStrings,
+)
+ResponseTypeListOfAnyOptionalStrings = TypeVar(
+    "ResponseTypeListOfAnyOptionalStrings",
+    bound=Awaitable[ListOfAnyOptionalStringsType] | ListOfAnyOptionalStringsType,
+)
+
 
 class CommandsProtocol(Protocol):
     def execute_command(self, *args, **options) -> ResponseT: ...
@@ -55,3 +107,26 @@ class CommandsProtocol(Protocol):
 
 class ClusterCommandsProtocol(CommandsProtocol):
     encoder: "Encoder"
+
+
+if TYPE_CHECKING:
+    from redis.client import Redis
+
+    RedisEncoded = Redis[
+        EncodedStringType,
+        OptionalEncodedStringType,
+        ListOfEncodedStringsType,
+        ListOfOptionalEncodedStringsType,
+    ]
+    RedisDecoded = Redis[
+        DecodedStringType,
+        OptionalDecodedStringType,
+        ListOfDecodedStringsType,
+        ListOfOptionalDecodedStringsType,
+    ]
+    RedisEncodedOrDecoded = Redis[
+        AnyStringType,
+        OptionalAnyString,
+        ListOfAnyStrings,
+        ListOfAnyOptionalStringsType,
+    ]
