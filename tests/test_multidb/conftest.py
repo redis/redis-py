@@ -10,6 +10,7 @@ from redis.multidb.config import (
     DatabaseConfig,
     DEFAULT_HEALTH_CHECK_INTERVAL,
     DEFAULT_AUTO_FALLBACK_INTERVAL,
+    InitialHealthCheck,
 )
 from redis.multidb.database import Database, Databases
 from redis.multidb.failover import FailoverStrategy
@@ -106,6 +107,9 @@ def mock_multi_db_config(request, mock_fd, mock_fs, mock_hc, mock_ed) -> MultiDb
     health_check_probes = request.param.get(
         "health_check_probes", DEFAULT_HEALTH_CHECK_PROBES
     )
+    initial_health_check_policy = request.param.get(
+        "initial_health_check_policy", InitialHealthCheck.ALL_HEALTHY
+    )
 
     config = MultiDbConfig(
         databases_config=[Mock(spec=DatabaseConfig)],
@@ -117,6 +121,7 @@ def mock_multi_db_config(request, mock_fd, mock_fs, mock_hc, mock_ed) -> MultiDb
         failover_strategy=mock_fs,
         auto_fallback_interval=auto_fallback_interval,
         event_dispatcher=mock_ed,
+        initial_health_check_policy=initial_health_check_policy,
     )
 
     return config

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import List, Type, Union
 
 import pybreaker
@@ -39,6 +40,12 @@ from redis.multidb.healthcheck import (
 from redis.retry import Retry
 
 DEFAULT_AUTO_FALLBACK_INTERVAL = 120
+
+
+class InitialHealthCheck(Enum):
+    ALL_HEALTHY = "all_healthy"
+    MAJORITY_HEALTHY = "majority_healthy"
+    ANY_HEALTHY = "any_healthy"
 
 
 def default_event_dispatcher() -> EventDispatcherInterface:
@@ -107,6 +114,8 @@ class MultiDbConfig:
         failover_delay: Delay between failover attempts.
         auto_fallback_interval: Time interval to trigger automatic fallback.
         event_dispatcher: Interface for dispatching events related to database operations.
+        initial_health_check_policy: Defines the policy used to determine whether the databases setup is
+                                     healthy during the initial health check.
 
     Methods:
         databases:
@@ -147,6 +156,7 @@ class MultiDbConfig:
     event_dispatcher: EventDispatcherInterface = field(
         default_factory=default_event_dispatcher
     )
+    initial_health_check_policy: InitialHealthCheck = InitialHealthCheck.ALL_HEALTHY
 
     def databases(self) -> Databases:
         databases = WeightedList()
