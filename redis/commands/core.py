@@ -54,6 +54,7 @@ from redis.typing import (
     KeyT,
     Number,
     OptionalEncodedStringType,
+    OptionalIntegerType,
     PatternT,
     ResponseT,
     ResponseTypeAnyString,
@@ -62,8 +63,12 @@ from redis.typing import (
     ResponseTypeInteger,
     ResponseTypeListOfAnyOptionalStrings,
     ResponseTypeListOfAnyStrings,
+    ResponseTypeLPopRPop,
     ResponseTypeOptionalAnyString,
     ResponseTypeOptionalEncodedString,
+    ResponseTypeOptionalInteger,
+    ResponseTypeOptionalListOfAnyStrings,
+    ResponseTypeOptionalLMPop,
     ResponseTypeStrAlgoResult,
     ScriptTextT,
     StrAlgoResultType,
@@ -2942,7 +2947,20 @@ class AsyncBasicKeyCommands(
         return super().unwatch()
 
 
-class ListCommands(CommandsProtocol):
+class ListCommands(
+    CommandsProtocol,
+    Generic[
+        ResponseTypeBoolean,
+        ResponseTypeInteger,
+        ResponseTypeOptionalInteger,
+        ResponseTypeAnyString,
+        ResponseTypeOptionalAnyString,
+        ResponseTypeListOfAnyStrings,
+        ResponseTypeOptionalListOfAnyStrings,
+        ResponseTypeOptionalLMPop,
+        ResponseTypeLPopRPop,
+    ],
+):
     """
     Redis commands for List data type.
     see: https://redis.io/topics/data-types#lists
@@ -2950,7 +2968,7 @@ class ListCommands(CommandsProtocol):
 
     def blpop(
         self, keys: KeysT, timeout: Optional[Number] = 0
-    ) -> Union[Awaitable[list], list]:
+    ) -> ResponseTypeOptionalListOfAnyStrings:
         """
         LPOP a value off of the first non-empty list
         named in ``keys``.
@@ -2971,7 +2989,7 @@ class ListCommands(CommandsProtocol):
 
     def brpop(
         self, keys: KeysT, timeout: Optional[Number] = 0
-    ) -> Union[Awaitable[list], list]:
+    ) -> ResponseTypeOptionalListOfAnyStrings:
         """
         RPOP a value off of the first non-empty list
         named in ``keys``.
@@ -2992,7 +3010,7 @@ class ListCommands(CommandsProtocol):
 
     def brpoplpush(
         self, src: KeyT, dst: KeyT, timeout: Optional[Number] = 0
-    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+    ) -> ResponseTypeOptionalAnyString:
         """
         Pop a value off the tail of ``src``, push it on the head of ``dst``
         and then return it.
@@ -3014,7 +3032,7 @@ class ListCommands(CommandsProtocol):
         *args: str,
         direction: str,
         count: Optional[int] = 1,
-    ) -> Optional[list]:
+    ) -> ResponseTypeOptionalLMPop:
         """
         Pop ``count`` values (default 1) from first non-empty in the list
         of provided key names.
@@ -3034,7 +3052,7 @@ class ListCommands(CommandsProtocol):
         *args: str,
         direction: str,
         count: Optional[int] = 1,
-    ) -> Union[Awaitable[list], list]:
+    ) -> ResponseTypeOptionalLMPop:
         """
         Pop ``count`` values (default 1) first non-empty list key from the list
         of args provided key names.
@@ -3047,9 +3065,7 @@ class ListCommands(CommandsProtocol):
 
         return self.execute_command("LMPOP", *cmd_args)
 
-    def lindex(
-        self, name: KeyT, index: int
-    ) -> Union[Awaitable[Optional[str]], Optional[str]]:
+    def lindex(self, name: KeyT, index: int) -> ResponseTypeOptionalAnyString:
         """
         Return the item from list ``name`` at position ``index``
 
@@ -3062,7 +3078,7 @@ class ListCommands(CommandsProtocol):
 
     def linsert(
         self, name: KeyT, where: str, refvalue: str, value: str
-    ) -> Union[Awaitable[int], int]:
+    ) -> ResponseTypeInteger:
         """
         Insert ``value`` in list ``name`` either immediately before or after
         [``where``] ``refvalue``
@@ -3074,7 +3090,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LINSERT", name, where, refvalue, value)
 
-    def llen(self, name: KeyT) -> Union[Awaitable[int], int]:
+    def llen(self, name: KeyT) -> ResponseTypeInteger:
         """
         Return the length of the list ``name``
 
@@ -3086,7 +3102,7 @@ class ListCommands(CommandsProtocol):
         self,
         name: KeyT,
         count: Optional[int] = None,
-    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
+    ) -> ResponseTypeLPopRPop:
         """
         Removes and returns the first elements of the list ``name``.
 
@@ -3101,7 +3117,7 @@ class ListCommands(CommandsProtocol):
         else:
             return self.execute_command("LPOP", name)
 
-    def lpush(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    def lpush(self, name: KeyT, *values: FieldT) -> ResponseTypeInteger:
         """
         Push ``values`` onto the head of the list ``name``
 
@@ -3109,7 +3125,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LPUSH", name, *values)
 
-    def lpushx(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    def lpushx(self, name: KeyT, *values: FieldT) -> ResponseTypeInteger:
         """
         Push ``value`` onto the head of the list ``name`` if ``name`` exists
 
@@ -3117,7 +3133,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LPUSHX", name, *values)
 
-    def lrange(self, name: KeyT, start: int, end: int) -> Union[Awaitable[list], list]:
+    def lrange(self, name: KeyT, start: int, end: int) -> ResponseTypeListOfAnyStrings:
         """
         Return a slice of the list ``name`` between
         position ``start`` and ``end``
@@ -3129,7 +3145,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LRANGE", name, start, end, keys=[name])
 
-    def lrem(self, name: KeyT, count: int, value: str) -> Union[Awaitable[int], int]:
+    def lrem(self, name: KeyT, count: int, value: str) -> ResponseTypeInteger:
         """
         Remove the first ``count`` occurrences of elements equal to ``value``
         from the list stored at ``name``.
@@ -3143,7 +3159,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LREM", name, count, value)
 
-    def lset(self, name: KeyT, index: int, value: str) -> Union[Awaitable[str], str]:
+    def lset(self, name: KeyT, index: int, value: str) -> ResponseTypeBoolean:
         """
         Set element at ``index`` of list ``name`` to ``value``
 
@@ -3151,7 +3167,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("LSET", name, index, value)
 
-    def ltrim(self, name: KeyT, start: int, end: int) -> Union[Awaitable[str], str]:
+    def ltrim(self, name: KeyT, start: int, end: int) -> ResponseTypeBoolean:
         """
         Trim the list ``name``, removing all values not within the slice
         between ``start`` and ``end``
@@ -3167,7 +3183,7 @@ class ListCommands(CommandsProtocol):
         self,
         name: KeyT,
         count: Optional[int] = None,
-    ) -> Union[Awaitable[Union[str, List, None]], Union[str, List, None]]:
+    ) -> ResponseTypeLPopRPop:
         """
         Removes and returns the last elements of the list ``name``.
 
@@ -3182,7 +3198,7 @@ class ListCommands(CommandsProtocol):
         else:
             return self.execute_command("RPOP", name)
 
-    def rpoplpush(self, src: KeyT, dst: KeyT) -> Union[Awaitable[str], str]:
+    def rpoplpush(self, src: KeyT, dst: KeyT) -> ResponseTypeOptionalAnyString:
         """
         RPOP a value off of the ``src`` list and atomically LPUSH it
         on to the ``dst`` list.  Returns the value.
@@ -3191,7 +3207,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPOPLPUSH", src, dst)
 
-    def rpush(self, name: KeyT, *values: FieldT) -> Union[Awaitable[int], int]:
+    def rpush(self, name: KeyT, *values: FieldT) -> ResponseTypeInteger:
         """
         Push ``values`` onto the tail of the list ``name``
 
@@ -3199,7 +3215,7 @@ class ListCommands(CommandsProtocol):
         """
         return self.execute_command("RPUSH", name, *values)
 
-    def rpushx(self, name: KeyT, *values: str) -> Union[Awaitable[int], int]:
+    def rpushx(self, name: KeyT, *values: str) -> ResponseTypeInteger:
         """
         Push ``value`` onto the tail of the list ``name`` if ``name`` exists
 
@@ -3214,7 +3230,7 @@ class ListCommands(CommandsProtocol):
         rank: Optional[int] = None,
         count: Optional[int] = None,
         maxlen: Optional[int] = None,
-    ) -> Union[str, List, None]:
+    ) -> ResponseTypeOptionalInteger:
         """
         Get position of ``value`` within the list ``name``
 
@@ -3263,7 +3279,7 @@ class ListCommands(CommandsProtocol):
         alpha: bool = False,
         store: Optional[str] = None,
         groups: Optional[bool] = False,
-    ) -> Union[List, int]:
+    ) -> ResponseTypeListOfAnyStrings:
         """
         Sort and return the list, set or sorted set at ``name``.
 
@@ -3334,7 +3350,7 @@ class ListCommands(CommandsProtocol):
         get: Optional[List[str]] = None,
         desc: bool = False,
         alpha: bool = False,
-    ) -> list:
+    ) -> ResponseTypeListOfAnyStrings:
         """
         Returns the elements contained in the list, set or sorted set at key.
         (read-only variant of the SORT command)
@@ -7274,7 +7290,17 @@ class DataAccessCommands(
     HyperlogCommands,
     HashCommands,
     GeoCommands,
-    ListCommands,
+    ListCommands[
+        BooleanType,
+        IntegerType,
+        OptionalIntegerType,
+        ResponseTypeAnyString,
+        ResponseTypeOptionalAnyString,
+        ResponseTypeListOfAnyStrings,
+        ResponseTypeOptionalListOfAnyStrings,
+        ResponseTypeOptionalLMPop,
+        ResponseTypeLPopRPop,
+    ],
     ScanCommands,
     SetCommands,
     StreamCommands,
@@ -7301,7 +7327,17 @@ class AsyncDataAccessCommands(
     AsyncHyperlogCommands,
     AsyncHashCommands,
     AsyncGeoCommands,
-    AsyncListCommands,
+    AsyncListCommands[
+        Awaitable[BooleanType],
+        Awaitable[IntegerType],
+        Awaitable[OptionalIntegerType],
+        Awaitable[ResponseTypeAnyString],
+        Awaitable[ResponseTypeOptionalAnyString],
+        Awaitable[ResponseTypeListOfAnyStrings],
+        Awaitable[ResponseTypeOptionalListOfAnyStrings],
+        Awaitable[ResponseTypeOptionalLMPop],
+        Awaitable[ResponseTypeLPopRPop],
+    ],
     AsyncScanCommands,
     AsyncSetCommands,
     AsyncStreamCommands,
@@ -7321,6 +7357,9 @@ class CoreCommands(
         ResponseTypeOptionalAnyString,
         ResponseTypeListOfAnyStrings,
         ResponseTypeListOfAnyOptionalStrings,
+        ResponseTypeOptionalListOfAnyStrings,
+        ResponseTypeOptionalLMPop,
+        ResponseTypeLPopRPop,
     ],
     ManagementCommands,
     ModuleCommands,
@@ -7342,6 +7381,9 @@ class AsyncCoreCommands(
         ResponseTypeOptionalAnyString,
         ResponseTypeListOfAnyStrings,
         ResponseTypeListOfAnyOptionalStrings,
+        ResponseTypeOptionalListOfAnyStrings,
+        ResponseTypeOptionalLMPop,
+        ResponseTypeLPopRPop,
     ],
     AsyncManagementCommands,
     AsyncModuleCommands,

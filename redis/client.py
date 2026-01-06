@@ -76,7 +76,10 @@ from redis.typing import (
     ResponseTypeAnyString,
     ResponseTypeListOfAnyOptionalStrings,
     ResponseTypeListOfAnyStrings,
+    ResponseTypeLPopRPop,
     ResponseTypeOptionalAnyString,
+    ResponseTypeOptionalListOfAnyStrings,
+    ResponseTypeOptionalLMPop,
 )
 from redis.utils import (
     _set_info_logger,
@@ -157,6 +160,9 @@ class Redis(
         ResponseTypeOptionalAnyString,
         ResponseTypeListOfAnyStrings,
         ResponseTypeListOfAnyOptionalStrings,
+        ResponseTypeOptionalListOfAnyStrings,
+        ResponseTypeOptionalLMPop,
+        ResponseTypeLPopRPop,
     ],
     SentinelCommands,
 ):
