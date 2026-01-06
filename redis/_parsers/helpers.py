@@ -803,6 +803,7 @@ _RedisCallbacks = {
     "FUNCTION DELETE": bool_ok,
     "FUNCTION FLUSH": bool_ok,
     "FUNCTION RESTORE": bool_ok,
+    "RESTORE": bool_ok,
     "GEODIST": float_or_none,
     "HSCAN": parse_hscan,
     "INFO": parse_info,
