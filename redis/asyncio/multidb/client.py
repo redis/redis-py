@@ -1,16 +1,16 @@
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Union
+from typing import Any, Awaitable, Callable, List, Optional, Union
 
 from redis.asyncio.client import PubSubHandler
 from redis.asyncio.multidb.command_executor import DefaultCommandExecutor
 from redis.asyncio.multidb.config import (
     DEFAULT_GRACE_PERIOD,
-    MultiDbConfig,
     DatabaseConfig,
     InitialHealthCheck,
+    MultiDbConfig,
 )
-from redis.asyncio.multidb.database import AsyncDatabase, Databases, Database
+from redis.asyncio.multidb.database import AsyncDatabase, Database, Databases
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
 from redis.asyncio.multidb.healthcheck import HealthCheck, HealthCheckPolicy
 from redis.asyncio.retry import Retry
@@ -20,9 +20,9 @@ from redis.commands import AsyncCoreCommands, AsyncRedisModuleCommands
 from redis.multidb.circuit import CircuitBreaker
 from redis.multidb.circuit import State as CBState
 from redis.multidb.exception import (
+    InitialHealthCheckFailedError,
     NoValidDatabaseException,
     UnhealthyDatabaseException,
-    InitialHealthCheckFailedError,
 )
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import experimental

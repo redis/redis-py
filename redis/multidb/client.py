@@ -13,15 +13,15 @@ from redis.multidb.circuit import State as CBState
 from redis.multidb.command_executor import DefaultCommandExecutor
 from redis.multidb.config import (
     DEFAULT_GRACE_PERIOD,
-    MultiDbConfig,
-    InitialHealthCheck,
     DatabaseConfig,
+    InitialHealthCheck,
+    MultiDbConfig,
 )
 from redis.multidb.database import Database, Databases, SyncDatabase
 from redis.multidb.exception import (
+    InitialHealthCheckFailedError,
     NoValidDatabaseException,
     UnhealthyDatabaseException,
-    InitialHealthCheckFailedError,
 )
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck, HealthCheckPolicy
