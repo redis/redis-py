@@ -78,7 +78,10 @@ from redis.typing import (
     ResponseTypeAnyString,
     ResponseTypeListOfAnyOptionalStrings,
     ResponseTypeListOfAnyStrings,
+    ResponseTypeLPopRPop,
     ResponseTypeOptionalAnyString,
+    ResponseTypeOptionalListOfAnyStrings,
+    ResponseTypeOptionalLMPop,
 )
 from redis.utils import (
     SSL_AVAILABLE,
@@ -138,6 +141,9 @@ class Redis(
         ResponseTypeOptionalAnyString,
         ResponseTypeListOfAnyStrings,
         ResponseTypeListOfAnyOptionalStrings,
+        ResponseTypeOptionalListOfAnyStrings,
+        ResponseTypeOptionalLMPop,
+        ResponseTypeLPopRPop,
     ],
     AsyncSentinelCommands,
 ):

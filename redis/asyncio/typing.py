@@ -7,14 +7,23 @@ if TYPE_CHECKING:
         DecodedStringType,
         EncodedStringType,
         ListOfAnyOptionalStringsType,
-        ListOfAnyStrings,
+        ListOfAnyStringsType,
         ListOfDecodedStringsType,
         ListOfEncodedStringsType,
         ListOfOptionalDecodedStringsType,
         ListOfOptionalEncodedStringsType,
-        OptionalAnyString,
+        LMPopAnyReturnType,
+        LMPopDecodedReturnType,
+        LMPopEncodedReturnType,
+        LPopRPopAnyReturnType,
+        LPopRPopDecodedReturnType,
+        LPopRPopEncodedReturnType,
+        OptionalAnyStringType,
         OptionalDecodedStringType,
         OptionalEncodedStringType,
+        OptionalListOfAnyStringsType,
+        OptionalListOfDecodedStringsType,
+        OptionalListOfEncodedStringsType,
     )
 
     RedisEncoded = Redis[
@@ -22,16 +31,25 @@ if TYPE_CHECKING:
         OptionalEncodedStringType,
         ListOfEncodedStringsType,
         ListOfOptionalEncodedStringsType,
+        OptionalListOfEncodedStringsType,
+        LMPopEncodedReturnType,
+        LPopRPopEncodedReturnType,
     ]
     RedisDecoded = Redis[
         DecodedStringType,
         OptionalDecodedStringType,
         ListOfDecodedStringsType,
         ListOfOptionalDecodedStringsType,
+        OptionalListOfDecodedStringsType,
+        LMPopDecodedReturnType,
+        LPopRPopDecodedReturnType,
     ]
     RedisEncodedOrDecoded = Redis[
         AnyStringType,
-        OptionalAnyString,
-        ListOfAnyStrings,
+        OptionalAnyStringType,
+        ListOfAnyStringsType,
         ListOfAnyOptionalStringsType,
+        OptionalListOfAnyStringsType,
+        LMPopAnyReturnType,
+        LPopRPopAnyReturnType,
     ]

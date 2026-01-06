@@ -50,6 +50,7 @@ ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Except
 
 BooleanType = bool
 IntegerType = int
+OptionalIntegerType = Optional[IntegerType]
 FloatType = float
 
 DecodedStringType = str
@@ -57,11 +58,17 @@ EncodedStringType = bytes
 AnyStringType = Union[DecodedStringType, EncodedStringType]
 OptionalDecodedStringType = Optional[DecodedStringType]
 OptionalEncodedStringType = Optional[EncodedStringType]
-OptionalAnyString = Union[OptionalDecodedStringType, OptionalEncodedStringType]
+OptionalAnyStringType = Union[OptionalDecodedStringType, OptionalEncodedStringType]
 
 ListOfDecodedStringsType = list[DecodedStringType]
 ListOfEncodedStringsType = list[EncodedStringType]
-ListOfAnyStrings = Union[ListOfDecodedStringsType, ListOfEncodedStringsType]
+OptionalListOfDecodedStringsType = Optional[ListOfDecodedStringsType]
+OptionalListOfEncodedStringsType = Optional[ListOfEncodedStringsType]
+ListOfAnyStringsType = Union[ListOfDecodedStringsType, ListOfEncodedStringsType]
+OptionalListOfAnyStringsType = Union[
+    OptionalListOfDecodedStringsType,
+    OptionalListOfEncodedStringsType,
+]
 
 ListOfOptionalDecodedStringsType = list[OptionalDecodedStringType]
 ListOfOptionalEncodedStringsType = list[OptionalEncodedStringType]
@@ -69,6 +76,46 @@ ListOfAnyOptionalStringsType = Union[
     ListOfOptionalDecodedStringsType,
     ListOfOptionalEncodedStringsType,
 ]
+
+LPopRPopDecodedReturnType = Union[
+    DecodedStringType,  # Single value when count not specified
+    ListOfDecodedStringsType,  # List when count is specified
+    None,  # None when list is empty
+]
+LPopRPopEncodedReturnType = Union[
+    EncodedStringType,  # Single value when count not specified
+    ListOfEncodedStringsType,  # List when count is specified
+    None,  # None when list is empty
+]
+
+# lpop / rpop can return single value, list, or None
+LPopRPopAnyReturnType = Union[
+    LPopRPopDecodedReturnType,
+    LPopRPopEncodedReturnType,
+]
+
+# blmpop / lmpop return types
+# Returns a list containing [key_name, [values...]] or None
+# PyCharm doesn't like use of Optional here
+LMPopDecodedReturnType = Union[
+    list[
+        Union[
+            DecodedStringType,  # key_name
+            list[DecodedStringType],  # [values, ...]
+        ],
+    ],
+    None,  # or None
+]
+LMPopEncodedReturnType = Union[
+    list[
+        Union[
+            EncodedStringType,  # key_name
+            list[EncodedStringType],  # [values, ...]
+        ],
+    ],
+    None,  # or None
+]
+LMPopAnyReturnType = Union[LMPopDecodedReturnType, LMPopEncodedReturnType]
 
 # STRALGO return types
 # Represents the ranges, e.g., (4, 7)
@@ -133,15 +180,31 @@ ResponseTypeOptionalEncodedString = TypeVar(
 )
 ResponseTypeOptionalAnyString = TypeVar(
     "ResponseTypeOptionalAnyString",
-    bound=Awaitable[OptionalAnyString] | OptionalAnyString,
+    bound=Awaitable[OptionalAnyStringType] | OptionalAnyStringType,
 )
 ResponseTypeListOfAnyStrings = TypeVar(
     "ResponseTypeListOfAnyStrings",
-    bound=Awaitable[ListOfAnyStrings] | ListOfAnyStrings,
+    bound=Awaitable[ListOfAnyStringsType] | ListOfAnyStringsType,
 )
 ResponseTypeListOfAnyOptionalStrings = TypeVar(
     "ResponseTypeListOfAnyOptionalStrings",
     bound=Awaitable[ListOfAnyOptionalStringsType] | ListOfAnyOptionalStringsType,
+)
+ResponseTypeOptionalInteger = TypeVar(
+    "ResponseTypeOptionalInteger",
+    bound=Awaitable[OptionalIntegerType] | OptionalIntegerType,
+)
+ResponseTypeOptionalListOfAnyStrings = TypeVar(
+    "ResponseTypeOptionalListOfAnyStrings",
+    bound=Awaitable[OptionalListOfAnyStringsType] | OptionalListOfAnyStringsType,
+)
+ResponseTypeLPopRPop = TypeVar(
+    "ResponseTypeLPopRPop",
+    bound=Awaitable[LPopRPopAnyReturnType] | LPopRPopAnyReturnType,
+)
+ResponseTypeOptionalLMPop = TypeVar(
+    "ResponseTypeOptionalLMPop",
+    bound=Awaitable[LMPopAnyReturnType] | LMPopAnyReturnType,
 )
 ResponseTypeStrAlgoResult = TypeVar(
     "ResponseTypeStrAlgoResult",
@@ -165,16 +228,25 @@ if TYPE_CHECKING:
         OptionalEncodedStringType,
         ListOfEncodedStringsType,
         ListOfOptionalEncodedStringsType,
+        OptionalListOfEncodedStringsType,
+        LMPopEncodedReturnType,
+        LPopRPopEncodedReturnType,
     ]
     RedisDecoded = Redis[
         DecodedStringType,
         OptionalDecodedStringType,
         ListOfDecodedStringsType,
         ListOfOptionalDecodedStringsType,
+        OptionalListOfDecodedStringsType,
+        LMPopDecodedReturnType,
+        LPopRPopDecodedReturnType,
     ]
     RedisEncodedOrDecoded = Redis[
         AnyStringType,
-        OptionalAnyString,
-        ListOfAnyStrings,
+        OptionalAnyStringType,
+        ListOfAnyStringsType,
         ListOfAnyOptionalStringsType,
+        OptionalListOfAnyStringsType,
+        LMPopAnyReturnType,
+        LPopRPopAnyReturnType,
     ]
