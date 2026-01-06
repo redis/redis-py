@@ -1,5 +1,3 @@
-# from __future__ import annotations
-
 import datetime
 import hashlib
 import inspect
@@ -21,6 +19,7 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
+    Generic,
     Iterable,
     Iterator,
     List,
@@ -41,18 +40,30 @@ from redis.typing import (
     AbsExpiryT,
     AnyKeyT,
     BitfieldOffsetT,
+    BooleanType,
     ChannelT,
     CommandsProtocol,
     ConsumerT,
     EncodableT,
     ExpiryT,
     FieldT,
+    FloatType,
     GroupT,
+    IntegerType,
     KeysT,
     KeyT,
     Number,
+    OptionalEncodedStringType,
     PatternT,
     ResponseT,
+    ResponseTypeAnyString,
+    ResponseTypeBoolean,
+    ResponseTypeFloat,
+    ResponseTypeInteger,
+    ResponseTypeListOfAnyOptionalStrings,
+    ResponseTypeListOfAnyStrings,
+    ResponseTypeOptionalAnyString,
+    ResponseTypeOptionalEncodedString,
     ScriptTextT,
     StreamIdT,
     TimeoutSecT,
@@ -1683,12 +1694,24 @@ class DataPersistOptions(Enum):
     XX = "XX"
 
 
-class BasicKeyCommands(CommandsProtocol):
+class BasicKeyCommands(
+    CommandsProtocol,
+    Generic[
+        ResponseTypeBoolean,
+        ResponseTypeFloat,
+        ResponseTypeInteger,
+        ResponseTypeOptionalEncodedString,
+        ResponseTypeAnyString,
+        ResponseTypeOptionalAnyString,
+        ResponseTypeListOfAnyStrings,
+        ResponseTypeListOfAnyOptionalStrings,
+    ],
+):
     """
     Redis basic key-based commands
     """
 
-    def append(self, key: KeyT, value: EncodableT) -> ResponseT:
+    def append(self, key: KeyT, value: EncodableT) -> ResponseTypeInteger:
         """
         Appends the string ``value`` to the value at ``key``. If ``key``
         doesn't already exist, create it with a value of ``value``.
@@ -1704,7 +1727,7 @@ class BasicKeyCommands(CommandsProtocol):
         start: Optional[int] = None,
         end: Optional[int] = None,
         mode: Optional[str] = None,
-    ) -> ResponseT:
+    ) -> ResponseTypeInteger:
         """
         Returns the count of set bits in the value of ``key``.  Optional
         ``start`` and ``end`` parameters indicate which bytes to consider
@@ -1740,7 +1763,7 @@ class BasicKeyCommands(CommandsProtocol):
         encoding: str,
         offset: BitfieldOffsetT,
         items: Optional[list] = None,
-    ) -> ResponseT:
+    ) -> ResponseTypeInteger:
         """
         Return an array of the specified bitfield values
         where the first value is found using ``encoding`` and ``offset``
@@ -1757,7 +1780,7 @@ class BasicKeyCommands(CommandsProtocol):
             params.extend(["GET", encoding, offset])
         return self.execute_command("BITFIELD_RO", *params, keys=[key])
 
-    def bitop(self, operation: str, dest: KeyT, *keys: KeyT) -> ResponseT:
+    def bitop(self, operation: str, dest: KeyT, *keys: KeyT) -> ResponseTypeInteger:
         """
         Perform a bitwise operation using ``operation`` between ``keys`` and
         store the result in ``dest``.
@@ -1773,7 +1796,7 @@ class BasicKeyCommands(CommandsProtocol):
         start: Optional[int] = None,
         end: Optional[int] = None,
         mode: Optional[str] = None,
-    ) -> ResponseT:
+    ) -> ResponseTypeInteger:
         """
         Return the position of the first bit set to 1 or 0 in a string.
         ``start`` and ``end`` defines search range. The range is interpreted
@@ -1803,7 +1826,7 @@ class BasicKeyCommands(CommandsProtocol):
         destination: str,
         destination_db: Optional[str] = None,
         replace: bool = False,
-    ) -> ResponseT:
+    ) -> ResponseTypeBoolean:
         """
         Copy the value stored in the ``source`` key to the ``destination`` key.
 
@@ -1823,7 +1846,7 @@ class BasicKeyCommands(CommandsProtocol):
             params.append("REPLACE")
         return self.execute_command("COPY", *params)
 
-    def decrby(self, name: KeyT, amount: int = 1) -> ResponseT:
+    def decrby(self, name: KeyT, amount: int = 1) -> ResponseTypeInteger:
         """
         Decrements the value of ``key`` by ``amount``.  If no key exists,
         the value will be initialized as 0 - ``amount``
@@ -1834,7 +1857,7 @@ class BasicKeyCommands(CommandsProtocol):
 
     decr = decrby
 
-    def delete(self, *names: KeyT) -> ResponseT:
+    def delete(self, *names: KeyT) -> ResponseTypeInteger:
         """
         Delete one or more keys specified by ``names``
         """
@@ -1851,7 +1874,7 @@ class BasicKeyCommands(CommandsProtocol):
         ifne: Optional[Union[bytes, str]] = None,
         ifdeq: Optional[str] = None,  # hex digest
         ifdne: Optional[str] = None,  # hex digest
-    ) -> int:
+    ) -> ResponseTypeInteger:
         """
         Conditionally removes the specified key.
 
@@ -1894,7 +1917,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command(*pieces)
 
-    def dump(self, name: KeyT) -> ResponseT:
+    def dump(self, name: KeyT) -> ResponseTypeOptionalEncodedString:
         """
         Return a serialized version of the value stored at the specified key.
         If key does not exist a nil bulk reply is returned.
@@ -1907,7 +1930,7 @@ class BasicKeyCommands(CommandsProtocol):
         options[NEVER_DECODE] = []
         return self.execute_command("DUMP", name, **options)
 
-    def exists(self, *names: KeyT) -> ResponseT:
+    def exists(self, *names: KeyT) -> ResponseTypeInteger:
         """
         Returns the number of ``names`` that exist
 
@@ -1925,7 +1948,7 @@ class BasicKeyCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> ResponseTypeBoolean:
         """
         Set an expire flag on key ``name`` for ``time`` seconds with given
         ``option``. ``time`` can be represented by an integer or a Python timedelta
@@ -1962,7 +1985,7 @@ class BasicKeyCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> ResponseTypeBoolean:
         """
         Set an expire flag on key ``name`` with given ``option``. ``when``
         can be represented as an integer indicating unix time or a Python
@@ -1991,7 +2014,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("EXPIREAT", name, when, *exp_option)
 
-    def expiretime(self, key: str) -> int:
+    def expiretime(self, key: str) -> ResponseTypeInteger:
         """
         Returns the absolute Unix timestamp (since January 1, 1970) in seconds
         at which the given key will expire.
@@ -2001,7 +2024,7 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("EXPIRETIME", key)
 
     @experimental_method()
-    def digest_local(self, value: Union[bytes, str]) -> Union[bytes, str]:
+    def digest_local(self, value: Union[bytes, str]) -> ResponseTypeAnyString:
         """
         Compute the hexadecimal digest of the value locally, without sending it to the server.
 
@@ -2039,7 +2062,7 @@ class BasicKeyCommands(CommandsProtocol):
         return local_digest
 
     @experimental_method()
-    def digest(self, name: KeyT) -> Union[str, bytes, None]:
+    def digest(self, name: KeyT) -> ResponseTypeOptionalAnyString:
         """
         Return the digest of the value stored at the specified key.
 
@@ -2064,7 +2087,7 @@ class BasicKeyCommands(CommandsProtocol):
         # Bulk string response is already handled (bytes/str based on decode_responses)
         return self.execute_command("DIGEST", name)
 
-    def get(self, name: KeyT) -> ResponseT:
+    def get(self, name: KeyT) -> ResponseTypeOptionalAnyString:
         """
         Return the value at key ``name``, or None if the key doesn't exist
 
@@ -2072,7 +2095,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("GET", name, keys=[name])
 
-    def getdel(self, name: KeyT) -> ResponseT:
+    def getdel(self, name: KeyT) -> ResponseTypeOptionalAnyString:
         """
         Get the value at key ``name`` and delete the key. This command
         is similar to GET, except for the fact that it also deletes
@@ -2091,7 +2114,7 @@ class BasicKeyCommands(CommandsProtocol):
         exat: Optional[AbsExpiryT] = None,
         pxat: Optional[AbsExpiryT] = None,
         persist: bool = False,
-    ) -> ResponseT:
+    ) -> ResponseTypeOptionalAnyString:
         """
         Get the value of key and optionally set its expiration.
         GETEX is similar to GET, but is a write command with
@@ -2125,7 +2148,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("GETEX", name, *exp_options)
 
-    def __getitem__(self, name: KeyT):
+    def __getitem__(self, name: KeyT) -> ResponseTypeAnyString:
         """
         Return the value at key ``name``, raises a KeyError if the key
         doesn't exist.
@@ -2135,7 +2158,7 @@ class BasicKeyCommands(CommandsProtocol):
             return value
         raise KeyError(name)
 
-    def getbit(self, name: KeyT, offset: int) -> ResponseT:
+    def getbit(self, name: KeyT, offset: int) -> ResponseTypeInteger:
         """
         Returns an integer indicating the value of ``offset`` in ``name``
 
@@ -2143,7 +2166,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("GETBIT", name, offset, keys=[name])
 
-    def getrange(self, key: KeyT, start: int, end: int) -> ResponseT:
+    def getrange(self, key: KeyT, start: int, end: int) -> ResponseTypeAnyString:
         """
         Returns the substring of the string value stored at ``key``,
         determined by the offsets ``start`` and ``end`` (both are inclusive)
@@ -2152,7 +2175,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("GETRANGE", key, start, end, keys=[key])
 
-    def getset(self, name: KeyT, value: EncodableT) -> ResponseT:
+    def getset(self, name: KeyT, value: EncodableT) -> ResponseTypeOptionalAnyString:
         """
         Sets the value at key ``name`` to ``value``
         and returns the old value at key ``name`` atomically.
@@ -2164,7 +2187,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("GETSET", name, value)
 
-    def incrby(self, name: KeyT, amount: int = 1) -> ResponseT:
+    def incrby(self, name: KeyT, amount: int = 1) -> ResponseTypeInteger:
         """
         Increments the value of ``key`` by ``amount``.  If no key exists,
         the value will be initialized as ``amount``
@@ -2175,7 +2198,7 @@ class BasicKeyCommands(CommandsProtocol):
 
     incr = incrby
 
-    def incrbyfloat(self, name: KeyT, amount: float = 1.0) -> ResponseT:
+    def incrbyfloat(self, name: KeyT, amount: float = 1.0) -> ResponseTypeFloat:
         """
         Increments the value at key ``name`` by floating ``amount``.
         If no key exists, the value will be initialized as ``amount``
@@ -2184,7 +2207,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("INCRBYFLOAT", name, amount)
 
-    def keys(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
+    def keys(self, pattern: PatternT = "*", **kwargs) -> ResponseTypeListOfAnyStrings:
         """
         Returns a list of keys matching ``pattern``
 
@@ -2194,7 +2217,7 @@ class BasicKeyCommands(CommandsProtocol):
 
     def lmove(
         self, first_list: str, second_list: str, src: str = "LEFT", dest: str = "RIGHT"
-    ) -> ResponseT:
+    ) -> ResponseTypeAnyString:
         """
         Atomically returns and removes the first/last element of a list,
         pushing it as the first/last element on the destination list.
@@ -2212,7 +2235,7 @@ class BasicKeyCommands(CommandsProtocol):
         timeout: int,
         src: str = "LEFT",
         dest: str = "RIGHT",
-    ) -> ResponseT:
+    ) -> ResponseTypeAnyString:
         """
         Blocking version of lmove.
 
@@ -2221,7 +2244,9 @@ class BasicKeyCommands(CommandsProtocol):
         params = [first_list, second_list, src, dest, timeout]
         return self.execute_command("BLMOVE", *params)
 
-    def mget(self, keys: KeysT, *args: EncodableT) -> ResponseT:
+    def mget(
+        self, keys: KeysT, *args: EncodableT
+    ) -> ResponseTypeListOfAnyOptionalStrings:
         """
         Returns a list of values ordered identically to ``keys``
 
@@ -2240,7 +2265,7 @@ class BasicKeyCommands(CommandsProtocol):
         options["keys"] = args
         return self.execute_command("MGET", *args, **options)
 
-    def mset(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
+    def mset(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseTypeBoolean:
         """
         Sets key/values based on a mapping. Mapping is a dictionary of
         key/value pairs. Both keys and values should be strings or types that
@@ -2266,7 +2291,7 @@ class BasicKeyCommands(CommandsProtocol):
         exat: Optional[AbsExpiryT] = None,
         pxat: Optional[AbsExpiryT] = None,
         keepttl: bool = False,
-    ) -> Union[Awaitable[int], int]:
+    ) -> ResponseTypeInteger:
         """
         Sets key/values based on the provided ``mapping`` items.
 
@@ -2322,7 +2347,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command(*pieces, *exp_options)
 
-    def msetnx(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseT:
+    def msetnx(self, mapping: Mapping[AnyKeyT, EncodableT]) -> ResponseTypeBoolean:
         """
         Sets key/values based on a mapping if none of the keys are already set.
         Mapping is a dictionary of key/value pairs. Both keys and values
@@ -2340,7 +2365,7 @@ class BasicKeyCommands(CommandsProtocol):
             items.extend(pair)
         return self.execute_command("MSETNX", *items)
 
-    def move(self, name: KeyT, db: int) -> ResponseT:
+    def move(self, name: KeyT, db: int) -> ResponseTypeBoolean:
         """
         Moves the key ``name`` to a different Redis database ``db``
 
@@ -2348,7 +2373,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("MOVE", name, db)
 
-    def persist(self, name: KeyT) -> ResponseT:
+    def persist(self, name: KeyT) -> ResponseTypeBoolean:
         """
         Removes an expiration on ``name``
 
@@ -2364,7 +2389,7 @@ class BasicKeyCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> ResponseTypeBoolean:
         """
         Set an expire flag on key ``name`` for ``time`` milliseconds
         with given ``option``. ``time`` can be represented by an
@@ -2400,7 +2425,7 @@ class BasicKeyCommands(CommandsProtocol):
         xx: bool = False,
         gt: bool = False,
         lt: bool = False,
-    ) -> ResponseT:
+    ) -> ResponseTypeBoolean:
         """
         Set an expire flag on key ``name`` with given ``option``. ``when``
         can be represented as an integer representing unix time in
@@ -2427,7 +2452,7 @@ class BasicKeyCommands(CommandsProtocol):
             exp_option.append("LT")
         return self.execute_command("PEXPIREAT", name, when, *exp_option)
 
-    def pexpiretime(self, key: str) -> int:
+    def pexpiretime(self, key: str) -> ResponseTypeInteger:
         """
         Returns the absolute Unix timestamp (since January 1, 1970) in milliseconds
         at which the given key will expire.
@@ -2436,7 +2461,9 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("PEXPIRETIME", key)
 
-    def psetex(self, name: KeyT, time_ms: ExpiryT, value: EncodableT):
+    def psetex(
+        self, name: KeyT, time_ms: ExpiryT, value: EncodableT
+    ) -> ResponseTypeBoolean:
         """
         Set the value of key ``name`` to ``value`` that expires in ``time_ms``
         milliseconds. ``time_ms`` can be represented by an integer or a Python
@@ -2448,7 +2475,7 @@ class BasicKeyCommands(CommandsProtocol):
             time_ms = int(time_ms.total_seconds() * 1000)
         return self.execute_command("PSETEX", name, time_ms, value)
 
-    def pttl(self, name: KeyT) -> ResponseT:
+    def pttl(self, name: KeyT) -> ResponseTypeInteger:
         """
         Returns the number of milliseconds until the key ``name`` will expire
 
@@ -2457,8 +2484,8 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("PTTL", name)
 
     def hrandfield(
-        self, key: str, count: Optional[int] = None, withvalues: bool = False
-    ) -> ResponseT:
+        self, key: str, count: int = None, withvalues: bool = False
+    ) -> ResponseTypeListOfAnyStrings:
         """
         Return a random field from the hash value stored at key.
 
@@ -2480,7 +2507,7 @@ class BasicKeyCommands(CommandsProtocol):
 
         return self.execute_command("HRANDFIELD", key, *params)
 
-    def randomkey(self, **kwargs) -> ResponseT:
+    def randomkey(self, **kwargs) -> ResponseTypeAnyString:
         """
         Returns the name of a random key
 
@@ -2488,7 +2515,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("RANDOMKEY", **kwargs)
 
-    def rename(self, src: KeyT, dst: KeyT) -> ResponseT:
+    def rename(self, src: KeyT, dst: KeyT) -> ResponseTypeBoolean:
         """
         Rename key ``src`` to ``dst``
 
@@ -2496,7 +2523,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("RENAME", src, dst)
 
-    def renamenx(self, src: KeyT, dst: KeyT):
+    def renamenx(self, src: KeyT, dst: KeyT) -> ResponseTypeBoolean:
         """
         Rename key ``src`` to ``dst`` if ``dst`` doesn't already exist
 
@@ -2571,7 +2598,7 @@ class BasicKeyCommands(CommandsProtocol):
         ifne: Optional[Union[bytes, str]] = None,
         ifdeq: Optional[str] = None,  # hex digest of current value
         ifdne: Optional[str] = None,  # hex digest of current value
-    ) -> ResponseT:
+    ) -> ResponseTypeBoolean:
         """
         Set the value at key ``name`` to ``value``
 
@@ -2670,7 +2697,7 @@ class BasicKeyCommands(CommandsProtocol):
     def __setitem__(self, name: KeyT, value: EncodableT):
         self.set(name, value)
 
-    def setbit(self, name: KeyT, offset: int, value: int) -> ResponseT:
+    def setbit(self, name: KeyT, offset: int, value: int) -> ResponseTypeInteger:
         """
         Flag the ``offset`` in ``name`` as ``value``. Returns an integer
         indicating the previous value of ``offset``.
@@ -2680,7 +2707,9 @@ class BasicKeyCommands(CommandsProtocol):
         value = value and 1 or 0
         return self.execute_command("SETBIT", name, offset, value)
 
-    def setex(self, name: KeyT, time: ExpiryT, value: EncodableT) -> ResponseT:
+    def setex(
+        self, name: KeyT, time: ExpiryT, value: EncodableT
+    ) -> ResponseTypeBoolean:
         """
         Set the value of key ``name`` to ``value`` that expires in ``time``
         seconds. ``time`` can be represented by an integer or a Python
@@ -2692,7 +2721,7 @@ class BasicKeyCommands(CommandsProtocol):
             time = int(time.total_seconds())
         return self.execute_command("SETEX", name, time, value)
 
-    def setnx(self, name: KeyT, value: EncodableT) -> ResponseT:
+    def setnx(self, name: KeyT, value: EncodableT) -> ResponseTypeBoolean:
         """
         Set the value of key ``name`` to ``value`` if key doesn't exist
 
@@ -2700,7 +2729,12 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("SETNX", name, value)
 
-    def setrange(self, name: KeyT, offset: int, value: EncodableT) -> ResponseT:
+    def setrange(
+        self,
+        name: KeyT,
+        offset: int,
+        value: EncodableT,
+    ) -> ResponseTypeInteger:
         """
         Overwrite bytes in the value of ``name`` starting at ``offset`` with
         ``value``. If ``offset`` plus the length of ``value`` exceeds the
@@ -2779,7 +2813,7 @@ class BasicKeyCommands(CommandsProtocol):
             **kwargs,
         )
 
-    def strlen(self, name: KeyT) -> ResponseT:
+    def strlen(self, name: KeyT) -> ResponseTypeInteger:
         """
         Return the number of bytes stored in the value of ``name``
 
@@ -2787,14 +2821,14 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("STRLEN", name, keys=[name])
 
-    def substr(self, name: KeyT, start: int, end: int = -1) -> ResponseT:
+    def substr(self, name: KeyT, start: int, end: int = -1) -> ResponseTypeAnyString:
         """
         Return a substring of the string at key ``name``. ``start`` and ``end``
         are 0-based integers specifying the portion of the string to return.
         """
         return self.execute_command("SUBSTR", name, start, end, keys=[name])
 
-    def touch(self, *args: KeyT) -> ResponseT:
+    def touch(self, *args: KeyT) -> ResponseTypeInteger:
         """
         Alters the last access time of a key(s) ``*args``. A key is ignored
         if it does not exist.
@@ -2803,7 +2837,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("TOUCH", *args)
 
-    def ttl(self, name: KeyT) -> ResponseT:
+    def ttl(self, name: KeyT) -> ResponseTypeInteger:
         """
         Returns the number of seconds until the key ``name`` will expire
 
@@ -2811,7 +2845,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         return self.execute_command("TTL", name)
 
-    def type(self, name: KeyT) -> ResponseT:
+    def type(self, name: KeyT) -> ResponseTypeAnyString:
         """
         Returns the type of key ``name``
 
@@ -2835,7 +2869,7 @@ class BasicKeyCommands(CommandsProtocol):
         """
         warnings.warn(DeprecationWarning("Call UNWATCH from a Pipeline object"))
 
-    def unlink(self, *names: KeyT) -> ResponseT:
+    def unlink(self, *names: KeyT) -> ResponseTypeInteger:
         """
         Unlink one or more keys specified by ``names``
 
@@ -2851,7 +2885,7 @@ class BasicKeyCommands(CommandsProtocol):
         idx: Optional[bool] = False,
         minmatchlen: Optional[int] = 0,
         withmatchlen: Optional[bool] = False,
-    ) -> Union[str, int, list]:
+    ) -> ResponseTypeAnyString:
         """
         Find the longest common subsequence between ``key1`` and ``key2``.
         If ``len`` is true the length of the match will will be returned.
@@ -2873,7 +2907,18 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("LCS", *pieces, keys=[key1, key2])
 
 
-class AsyncBasicKeyCommands(BasicKeyCommands):
+class AsyncBasicKeyCommands(
+    BasicKeyCommands[
+        ResponseTypeBoolean,
+        ResponseTypeFloat,
+        ResponseTypeInteger,
+        ResponseTypeOptionalEncodedString,
+        ResponseTypeAnyString,
+        ResponseTypeOptionalAnyString,
+        ResponseTypeListOfAnyStrings,
+        ResponseTypeListOfAnyOptionalStrings,
+    ],
+):
     def __delitem__(self, name: KeyT):
         raise TypeError("Async Redis client does not support class deletion")
 
@@ -7211,7 +7256,16 @@ AsyncFunctionCommands = FunctionCommands
 
 
 class DataAccessCommands(
-    BasicKeyCommands,
+    BasicKeyCommands[
+        BooleanType,
+        FloatType,
+        IntegerType,
+        OptionalEncodedStringType,
+        ResponseTypeAnyString,
+        ResponseTypeOptionalAnyString,
+        ResponseTypeListOfAnyStrings,
+        ResponseTypeListOfAnyOptionalStrings,
+    ],
     HyperlogCommands,
     HashCommands,
     GeoCommands,
@@ -7228,7 +7282,16 @@ class DataAccessCommands(
 
 
 class AsyncDataAccessCommands(
-    AsyncBasicKeyCommands,
+    AsyncBasicKeyCommands[
+        Awaitable[BooleanType],
+        Awaitable[FloatType],
+        Awaitable[IntegerType],
+        Awaitable[OptionalEncodedStringType],
+        Awaitable[ResponseTypeAnyString],
+        Awaitable[ResponseTypeOptionalAnyString],
+        Awaitable[ResponseTypeListOfAnyStrings],
+        Awaitable[ResponseTypeListOfAnyOptionalStrings],
+    ],
     AsyncHyperlogCommands,
     AsyncHashCommands,
     AsyncGeoCommands,
@@ -7247,7 +7310,12 @@ class AsyncDataAccessCommands(
 class CoreCommands(
     ACLCommands,
     ClusterCommands,
-    DataAccessCommands,
+    DataAccessCommands[
+        ResponseTypeAnyString,
+        ResponseTypeOptionalAnyString,
+        ResponseTypeListOfAnyStrings,
+        ResponseTypeListOfAnyOptionalStrings,
+    ],
     ManagementCommands,
     ModuleCommands,
     PubSubCommands,
@@ -7263,7 +7331,12 @@ class CoreCommands(
 class AsyncCoreCommands(
     AsyncACLCommands,
     AsyncClusterCommands,
-    AsyncDataAccessCommands,
+    AsyncDataAccessCommands[
+        ResponseTypeAnyString,
+        ResponseTypeOptionalAnyString,
+        ResponseTypeListOfAnyStrings,
+        ResponseTypeListOfAnyOptionalStrings,
+    ],
     AsyncManagementCommands,
     AsyncModuleCommands,
     AsyncPubSubCommands,
