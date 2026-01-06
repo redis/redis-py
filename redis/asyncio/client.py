@@ -87,10 +87,17 @@ else:
     VerifyMode = None
     VerifyFlags = None
 
+if TYPE_CHECKING:
+    import sys
+
+    if sys.version_info < (3, 11):
+        from typing_extensions import Self
+    else:
+        from typing import Self
+
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
 _KeyT = TypeVar("_KeyT", bound=KeyT)
 _ArgT = TypeVar("_ArgT", KeyT, EncodableT)
-_RedisT = TypeVar("_RedisT", bound="Redis")
 _NormalizeKeysT = TypeVar("_NormalizeKeysT", bound=Mapping[ChannelT, object])
 if TYPE_CHECKING:
     from redis.commands.core import Script
@@ -422,7 +429,7 @@ class Redis(
     def __await__(self):
         return self.initialize().__await__()
 
-    async def initialize(self: _RedisT) -> _RedisT:
+    async def initialize(self) -> "Self":
         if self.single_connection_client:
             async with self._single_conn_lock:
                 if self.connection is None:
@@ -619,7 +626,7 @@ class Redis(
             connection_pool=self.connection_pool, single_connection_client=True
         )
 
-    async def __aenter__(self: _RedisT) -> _RedisT:
+    async def __aenter__(self) -> "Self":
         """
         Async context manager entry. Increments a usage counter so that the
         connection pool is only closed (via aclose()) when no context is using
@@ -1359,7 +1366,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         self.scripts: Set[Script] = set()
         self.explicit_transaction = False
 
-    async def __aenter__(self: _RedisT) -> _RedisT:
+    async def __aenter__(self) -> "Self":
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
