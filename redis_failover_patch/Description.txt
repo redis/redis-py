@@ -1,0 +1,11 @@
+Automatically Detect Master Changes on Redis Sentinel Failover
+
+Language: python
+Category: feature_request
+Difficulty: medium
+
+The redis-py client currently relies on retries to detect a new master after a Redis Sentinel failover, which slows failover recovery. Unlike other Redis client libraries, it does not automatically update its internal master reference when Sentinel broadcasts a `switch-master` event. 
+
+Extend the Sentinel client to subscribe to `switch-master` events and automatically update the internal master host and port references for all clients using the Sentinel connection, ensuring both synchronous and asynchronous clients follow the new master immediately. Existing retry logic and normal operations should remain unaffected. 
+
+The implementation must handle edge cases such as rapid consecutive failovers or missed events, be deterministic, and fully testable using mocks to simulate failovers. The change should be scoped to the Sentinel handling module only and maintain compatibility with the existing client architecture.
