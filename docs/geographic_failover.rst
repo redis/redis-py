@@ -1,4 +1,4 @@
-Multi-database client (Active-Active)
+Client-side geographic failover (Active-Active)
 =====================================
 
 The multi-database client allows your application to connect to multiple Redis databases, which are typically replicas of each other.

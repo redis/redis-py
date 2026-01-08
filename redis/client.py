@@ -40,6 +40,7 @@ from redis.connection import (
     UnixDomainSocketConnection,
 )
 from redis.credentials import CredentialProvider
+from redis.driver_info import DriverInfo, resolve_driver_info
 from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
     AfterPubSubConnectionInstantiationEvent,
@@ -63,7 +64,6 @@ from redis.retry import Retry
 from redis.utils import (
     _set_info_logger,
     deprecated_args,
-    get_lib_version,
     safe_str,
     str_if_bytes,
     truncate_text,
@@ -199,6 +199,11 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         reason="TimeoutError is included by default.",
         version="6.0.0",
     )
+    @deprecated_args(
+        args_to_warn=["lib_name", "lib_version"],
+        reason="Use 'driver_info' parameter instead. "
+        "lib_name and lib_version will be removed in a future version.",
+    )
     def __init__(
         self,
         host: str = "localhost",
@@ -240,8 +245,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         single_connection_client: bool = False,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = "redis-py",
-        lib_version: Optional[str] = get_lib_version(),
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
+        driver_info: Optional["DriverInfo"] = None,
         username: Optional[str] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
         credential_provider: Optional[CredentialProvider] = None,
@@ -280,6 +286,15 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         decode_responses:
             if `True`, the response will be decoded to utf-8.
             Argument is ignored when connection_pool is provided.
+        driver_info:
+            Optional DriverInfo object to identify upstream libraries.
+            If provided, lib_name and lib_version are ignored.
+            If not provided, a DriverInfo will be created from lib_name and lib_version.
+            Argument is ignored when connection_pool is provided.
+        lib_name:
+            **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
+        lib_version:
+            **Deprecated.** Use driver_info instead. Library version for CLIENT SETINFO.
         maint_notifications_config:
             configuration the pool to support maintenance notifications - see
             `redis.maint_notifications.MaintNotificationsConfig` for details.
@@ -296,6 +311,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         if not connection_pool:
             if not retry_on_error:
                 retry_on_error = []
+
+            # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+            computed_driver_info = resolve_driver_info(
+                driver_info, lib_name, lib_version
+            )
+
             kwargs = {
                 "db": db,
                 "username": username,
@@ -309,8 +330,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "max_connections": max_connections,
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
-                "lib_name": lib_name,
-                "lib_version": lib_version,
+                "driver_info": computed_driver_info,
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,
@@ -1009,10 +1029,22 @@ class PubSub:
         If there are no subscriptions redis responds to PING command with a
         bulk response, instead of a multi-bulk with "pong" and the response.
         """
-        return response in [
-            self.health_check_response,  # If there was a subscription
-            self.health_check_response_b,  # If there wasn't
-        ]
+        if self.encoder.decode_responses:
+            return (
+                response
+                in [
+                    self.health_check_response,  # If there is a subscription
+                    self.HEALTH_CHECK_MESSAGE,  # If there are no subscriptions and decode_responses=True
+                ]
+            )
+        else:
+            return (
+                response
+                in [
+                    self.health_check_response,  # If there is a subscription
+                    self.health_check_response_b,  # If there isn't a subscription and decode_responses=False
+                ]
+            )
 
     def check_health(self) -> None:
         conn = self.connection
