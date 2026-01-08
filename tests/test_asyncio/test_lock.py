@@ -282,6 +282,7 @@ class TestLock:
         try:
             await release_task
         except asyncio.CancelledError:
+            # Expected: the release task was deliberately cancelled to test lock state.
             pass
 
         # Check the lock state after cancellation
