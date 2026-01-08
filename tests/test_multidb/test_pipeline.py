@@ -7,6 +7,7 @@ import pytest
 from redis.client import Pipeline
 from redis.multidb.circuit import State as CBState, PBCircuitBreakerAdapter
 from redis.multidb.client import MultiDBClient
+from redis.multidb.config import InitialHealthCheck
 from redis.multidb.failover import (
     WeightBasedFailoverStrategy,
 )
@@ -71,7 +72,7 @@ class TestPipeline:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {},
+                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_HEALTHY},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.OPEN}},
@@ -330,7 +331,7 @@ class TestTransaction:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {},
+                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_HEALTHY},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.OPEN}},
