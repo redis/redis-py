@@ -1,7 +1,7 @@
 import copy
 import random
 import string
-from typing import List, Tuple
+from typing import Any, Iterable, List, Tuple
 
 import redis
 from redis.typing import KeysT, KeyT
@@ -96,3 +96,22 @@ def get_protocol_version(client):
         return client.connection_pool.connection_kwargs.get("protocol")
     elif isinstance(client, redis.cluster.AbstractRedisCluster):
         return client.nodes_manager.connection_kwargs.get("protocol")
+
+
+def at_most_one_value_set(iterable: Iterable[Any]):
+    """
+    Checks that at most one of the values in the iterable is truthy.
+
+    Args:
+        iterable: An iterable of values to check.
+
+    Returns:
+        True if at most one value is truthy, False otherwise.
+
+    Raises:
+        Might raise an error if the values in iterable are not boolean-compatible.
+        For example if the type of the values implement
+        __len__ or __bool__ methods and they raise an error.
+    """
+    values = (bool(x) for x in iterable)
+    return sum(values) <= 1

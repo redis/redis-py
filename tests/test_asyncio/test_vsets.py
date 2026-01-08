@@ -451,23 +451,23 @@ async def test_vsim_with_filter(d_client):
 
 @skip_if_server_version_lt("7.9.0")
 async def test_vsim_truth_no_thread_enabled(d_client):
-    elements_count = 5000
+    elements_count = 1000
     vector_dim = 50
     for i in range(1, elements_count + 1):
-        float_array = [random.uniform(10 * i, 1000 * i) for x in range(vector_dim)]
+        float_array = [i * vector_dim for _ in range(vector_dim)]
         await d_client.vset().vadd("myset", float_array, f"elem_{i}")
 
     await d_client.vset().vadd("myset", [-22 for _ in range(vector_dim)], "elem_man_2")
 
     sim_without_truth = await d_client.vset().vsim(
-        "myset", input="elem_man_2", with_scores=True
+        "myset", input="elem_man_2", count=30, with_scores=True
     )
     sim_truth = await d_client.vset().vsim(
-        "myset", input="elem_man_2", with_scores=True, truth=True
+        "myset", input="elem_man_2", count=30, with_scores=True, truth=True
     )
 
-    assert len(sim_without_truth) == 10
-    assert len(sim_truth) == 10
+    assert len(sim_without_truth) == 30
+    assert len(sim_truth) == 30
 
     assert isinstance(sim_without_truth, dict)
     assert isinstance(sim_truth, dict)

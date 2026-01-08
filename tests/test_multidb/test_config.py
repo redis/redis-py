@@ -16,7 +16,7 @@ from redis.multidb.config import (
 )
 from redis.multidb.database import Database
 from redis.multidb.failure_detector import CommandFailureDetector, FailureDetector
-from redis.multidb.healthcheck import EchoHealthCheck, HealthCheck
+from redis.multidb.healthcheck import PingHealthCheck, HealthCheck
 from redis.multidb.failover import WeightBasedFailoverStrategy, FailoverStrategy
 from redis.retry import Retry
 
@@ -53,7 +53,7 @@ class TestMultiDbConfig:
         assert len(config.default_failure_detectors()) == 1
         assert isinstance(config.default_failure_detectors()[0], CommandFailureDetector)
         assert len(config.default_health_checks()) == 1
-        assert isinstance(config.default_health_checks()[0], EchoHealthCheck)
+        assert isinstance(config.default_health_checks()[0], PingHealthCheck)
         assert config.health_check_interval == DEFAULT_HEALTH_CHECK_INTERVAL
         assert isinstance(
             config.default_failover_strategy(), WeightBasedFailoverStrategy

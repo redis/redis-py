@@ -39,7 +39,7 @@ class TestBackgroundScheduler:
         ],
     )
     def test_run_recurring(self, interval, timeout, call_count):
-        execute_counter = 0
+        execute_counter = []
         one = "arg1"
         two = 9999
 
@@ -48,18 +48,18 @@ class TestBackgroundScheduler:
             nonlocal one
             nonlocal two
 
-            execute_counter += 1
+            execute_counter.append(1)
 
             assert arg1 == one
             assert arg2 == two
 
         scheduler = BackgroundScheduler()
         scheduler.run_recurring(interval, callback, one, two)
-        assert execute_counter == 0
+        assert len(execute_counter) == 0
 
         sleep(timeout)
 
-        assert execute_counter == call_count
+        assert len(execute_counter) == call_count
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -71,7 +71,7 @@ class TestBackgroundScheduler:
         ],
     )
     async def test_run_recurring_async(self, interval, timeout, call_count):
-        execute_counter = 0
+        execute_counter = []
         one = "arg1"
         two = 9999
 
@@ -80,15 +80,15 @@ class TestBackgroundScheduler:
             nonlocal one
             nonlocal two
 
-            execute_counter += 1
+            execute_counter.append(1)
 
             assert arg1 == one
             assert arg2 == two
 
         scheduler = BackgroundScheduler()
         await scheduler.run_recurring_async(interval, callback, one, two)
-        assert execute_counter == 0
+        assert len(execute_counter) == 0
 
         await asyncio.sleep(timeout)
 
-        assert execute_counter == call_count
+        assert len(execute_counter) == call_count

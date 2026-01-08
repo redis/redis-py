@@ -155,14 +155,31 @@ async def test_connect_retry_on_timeout_error(connect_args):
     await conn.disconnect()
 
 
-async def test_connect_without_retry_on_os_error():
-    """Test that the _connect function is not being retried in case of a OSError"""
+async def test_connect_without_retry_on_non_retryable_error():
+    """
+    Test that the _connect function is not being retried in case of a CancelledError -
+    error that is not in the list of retry-able errors"""
     with patch.object(Connection, "_connect") as _connect:
-        _connect.side_effect = OSError("")
+        _connect.side_effect = asyncio.CancelledError("")
+        conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 2))
+        with pytest.raises(asyncio.CancelledError):
+            await conn.connect()
+        assert _connect.call_count == 1
+
+
+async def test_connect_with_retries():
+    """
+    Test that retries occur for the entire connect+handshake flow when OSError happens during the handshake phase.
+    """
+    with patch.object(asyncio.StreamWriter, "writelines") as writelines:
+        writelines.side_effect = OSError(ECONNREFUSED)
         conn = Connection(retry_on_timeout=True, retry=Retry(NoBackoff(), 2))
         with pytest.raises(ConnectionError):
             await conn.connect()
-        assert _connect.call_count == 1
+        # the handshake commands are the failing ones
+        # validate that we don't execute too many commands on each retry
+        # 3 retries --> 3 commands
+        assert writelines.call_count == 3
 
 
 async def test_connect_timeout_error_without_retry():

@@ -15,3 +15,9 @@ class TemporaryUnavailableException(Exception):
     """Exception raised when all databases in setup are temporary unavailable."""
 
     pass
+
+
+class InitialHealthCheckFailedError(Exception):
+    """Exception raised when initial health check fails."""
+
+    pass

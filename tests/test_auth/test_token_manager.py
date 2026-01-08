@@ -174,13 +174,13 @@ class TestTokenManager:
         mock_provider.request_token.side_effect = [
             SimpleToken(
                 "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 50,
+                (datetime.now(timezone.utc).timestamp() * 1000) + 1000,
                 (datetime.now(timezone.utc).timestamp() * 1000),
                 {"oid": "test"},
             ),
             SimpleToken(
                 "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 150,
+                (datetime.now(timezone.utc).timestamp() * 1000) + 1500,
                 (datetime.now(timezone.utc).timestamp() * 1000),
                 {"oid": "test"},
             ),
@@ -194,12 +194,12 @@ class TestTokenManager:
         mock_listener.on_next = on_next
 
         retry_policy = RetryPolicy(3, 10)
-        config = TokenManagerConfig(1, 0, 1000, retry_policy)
+        config = TokenManagerConfig(0.5, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         mgr.start(mock_listener, skip_initial=True)
-        # Should be less than a 0.1, or it will be flacky due to
-        # additional token renewal.
-        sleep(0.1)
+        assert len(tokens) == 0
+
+        sleep(0.6)
 
         assert len(tokens) > 0
 
@@ -210,19 +210,19 @@ class TestTokenManager:
         mock_provider.request_token.side_effect = [
             SimpleToken(
                 "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 100,
+                (datetime.now(timezone.utc).timestamp() * 1000) + 1000,
                 (datetime.now(timezone.utc).timestamp() * 1000),
                 {"oid": "test"},
             ),
             SimpleToken(
                 "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 120,
+                (datetime.now(timezone.utc).timestamp() * 1000) + 1200,
                 (datetime.now(timezone.utc).timestamp() * 1000),
                 {"oid": "test"},
             ),
             SimpleToken(
                 "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 140,
+                (datetime.now(timezone.utc).timestamp() * 1000) + 1400,
                 (datetime.now(timezone.utc).timestamp() * 1000),
                 {"oid": "test"},
             ),
@@ -236,13 +236,12 @@ class TestTokenManager:
         mock_listener.on_next = on_next
 
         retry_policy = RetryPolicy(3, 10)
-        config = TokenManagerConfig(1, 0, 1000, retry_policy)
+        config = TokenManagerConfig(0.5, 0, 1000, retry_policy)
         mgr = TokenManager(mock_provider, config)
         await mgr.start_async(mock_listener, skip_initial=True)
-        # Should be less than a 0.1, or it will be flacky
-        # due to additional token renewal.
-        await asyncio.sleep(0.2)
+        assert len(tokens) == 0
 
+        await asyncio.sleep(0.6)
         assert len(tokens) > 0
 
     def test_success_token_renewal_with_retry(self):

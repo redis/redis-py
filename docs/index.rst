@@ -66,6 +66,7 @@ Module Documentation
 
    connections
    clustering
+   multi_database
    exceptions
    backoff
    lock

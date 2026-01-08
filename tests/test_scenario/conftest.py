@@ -233,9 +233,5 @@ def _get_client_maint_notifications(
     )
     logging.info("Redis client created with maintenance notifications enabled")
     logging.info(f"Client uses Protocol: {client.connection_pool.get_protocol()}")
-    maintenance_handler_exists = client.maint_notifications_pool_handler is not None
-    logging.info(
-        f"Maintenance notifications pool handler: {maintenance_handler_exists}"
-    )
 
     return client

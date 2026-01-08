@@ -1,5 +1,6 @@
 import contextlib
 import multiprocessing
+import platform
 
 import pytest
 import redis
@@ -17,6 +18,13 @@ def exit_callback(callback, *args):
         callback(*args)
 
 
+@pytest.mark.skipif(
+    platform.python_implementation() == "PyPy",
+    reason=(
+        "Pypy has issues with multiprocessing using fork as start method. "
+        "Causes processes to hang quite often"
+    ),
+)
 class TestMultiprocessing:
     # On macOS and newly non-macOS POSIX systems (since Python 3.14),
     # the default method has been changed to forkserver.

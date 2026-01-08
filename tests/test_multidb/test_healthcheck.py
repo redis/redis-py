@@ -5,7 +5,7 @@ import pytest
 from redis.multidb.database import Database
 from redis.http.http_client import HttpError
 from redis.multidb.healthcheck import (
-    EchoHealthCheck,
+    PingHealthCheck,
     LagAwareHealthCheck,
     HealthCheck,
     HealthyAllPolicy,
@@ -201,14 +201,14 @@ class TestHealthyAnyPolicy:
 
 
 @pytest.mark.onlynoncluster
-class TestEchoHealthCheck:
+class TestPingHealthCheck:
     def test_database_is_healthy_on_echo_response(self, mock_client, mock_cb):
         """
         Mocking responses to mix error and actual responses to ensure that health check retry
         according to given configuration.
         """
-        mock_client.execute_command.return_value = "healthcheck"
-        hc = EchoHealthCheck()
+        mock_client.execute_command.return_value = "PONG"
+        hc = PingHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
         assert hc.check_health(db)
@@ -221,8 +221,8 @@ class TestEchoHealthCheck:
         Mocking responses to mix error and actual responses to ensure that health check retry
         according to given configuration.
         """
-        mock_client.execute_command.return_value = "wrong"
-        hc = EchoHealthCheck()
+        mock_client.execute_command.return_value = False
+        hc = PingHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
         assert not hc.check_health(db)
@@ -231,9 +231,9 @@ class TestEchoHealthCheck:
     def test_database_close_circuit_on_successful_healthcheck(
         self, mock_client, mock_cb
     ):
-        mock_client.execute_command.return_value = "healthcheck"
+        mock_client.execute_command.return_value = "PONG"
         mock_cb.state = CBState.HALF_OPEN
-        hc = EchoHealthCheck()
+        hc = PingHealthCheck()
         db = Database(mock_client, mock_cb, 0.9)
 
         assert hc.check_health(db)
