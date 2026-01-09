@@ -1539,7 +1539,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
             # Cache only responses that still valid
             # and wasn't invalidated by another connection in meantime.
-            if cache_entry is self._current_command_cache_entry:
+            if cache_entry is not None:
                 cache_entry.status = CacheEntryStatus.VALID
                 cache_entry.cache_value = response
                 self._cache.set(cache_entry)

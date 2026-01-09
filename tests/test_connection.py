@@ -483,7 +483,6 @@ class TestUnitCacheProxyConnection:
         mock_cache.is_cachable.return_value = True
         mock_cache.get.side_effect = [
             None,
-            None,
             CacheEntry(
                 cache_key=CacheKey(
                     command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
@@ -560,11 +559,6 @@ class TestUnitCacheProxyConnection:
 
         mock_cache.get.assert_has_calls(
             [
-                call(
-                    CacheKey(
-                        command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
-                    )
-                ),
                 call(
                     CacheKey(
                         command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
