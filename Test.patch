@@ -1,0 +1,44 @@
+diff --git a/tests/new_test_sentinel_failover.py b/tests/new_test_sentinel_failover.py
+new file mode 100644
+index 0000000..abcdef0
+--- /dev/null
++++ b/tests/new_test_sentinel_failover.py
+@@ -0,0 +1,48 @@
++from unittest.mock import Mock
++from redis.sentinel import Sentinel
++
++
++def _create_client(sentinel, service, host, port):
++    client = sentinel.master_for(service)
++    client.connection_pool.connection_kwargs["host"] = host
++    client.connection_pool.connection_kwargs["port"] = port
++    return client
++
++
++def test_client_updates_on_master_change():
++    sentinel = Sentinel([("127.0.0.1", 26379)])
++
++    client = _create_client(sentinel, "mymaster", "127.0.0.1", 6379)
++
++    sentinel.discover_master = Mock(return_value=("127.0.0.2", 6380))
++
++    sentinel.master_for("mymaster")
++
++    assert client.connection_pool.connection_kwargs["host"] == "127.0.0.2"
++    assert client.connection_pool.connection_kwargs["port"] == 6380
++
++
++def test_latest_master_wins_after_multiple_changes():
++    sentinel = Sentinel([("127.0.0.1", 26379)])
++
++    client = _create_client(sentinel, "mymaster", "127.0.0.1", 6379)
++
++    sentinel.discover_master = Mock(
++        side_effect=[("127.0.0.2", 6380), ("127.0.0.3", 6381)]
++    )
++
++    sentinel.master_for("mymaster")
++    sentinel.master_for("mymaster")
++
++    assert client.connection_pool.connection_kwargs["host"] == "127.0.0.3"
++    assert client.connection_pool.connection_kwargs["port"] == 6381
