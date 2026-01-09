@@ -1,223 +1,36 @@
-# redis-py
+\# Redis Sentinel Master Auto-Update Problem
 
-The Python interface to the Redis key-value store.
 
-[![CI](https://github.com/redis/redis-py/workflows/CI/badge.svg?branch=master)](https://github.com/redis/redis-py/actions?query=workflow%3ACI+branch%3Amaster)
-[![docs](https://readthedocs.org/projects/redis/badge/?version=stable&style=flat)](https://redis.readthedocs.io/en/stable/)
-[![MIT licensed](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![pypi](https://badge.fury.io/py/redis.svg)](https://pypi.org/project/redis/)
-[![pre-release](https://img.shields.io/github/v/release/redis/redis-py?include_prereleases&label=latest-prerelease)](https://github.com/redis/redis-py/releases)
-[![codecov](https://codecov.io/gh/redis/redis-py/branch/master/graph/badge.svg?token=yenl5fzxxr)](https://codecov.io/gh/redis/redis-py)
 
-[Installation](#installation) |  [Usage](#usage) | [Advanced Topics](#advanced-topics) | [Contributing](https://github.com/redis/redis-py/blob/master/CONTRIBUTING.md)
+This problem evaluates the ability to design a real-world engineering challenge based on an actively used open-source repository.
 
----------------------------------------------
 
-**Note:** redis-py 5.0 is the last version of redis-py that supports Python 3.7, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 5.1 supports Python 3.8+.<br>
-**Note:** redis-py 6.1.0 is the last version of redis-py that supports Python 3.8, as it has reached [end of life](https://devguide.python.org/versions/). redis-py 6.2.0 supports Python 3.9+.
 
----------------------------------------------
+\## Why This Problem
 
-## How do I Redis?
+Redis Sentinel failovers are common in production systems. Ensuring that clients immediately follow the active master without relying on retry-based discovery reflects realistic distributed systems behavior.
 
-[Learn for free at Redis University](https://redis.io/learn/university)
 
-[Try the Redis Cloud](https://redis.io/try-free/)
 
-[Dive in developer tutorials](https://redis.io/learn)
+The problem focuses on correctness, determinism, and architectural alignment rather than implementation shortcuts.
 
-[Join the Redis community](https://redis.io/community/)
 
-[Work at Redis](https://redis.io/careers/)
 
-## Installation
+\## Difficulty Justification
 
-Start a redis via docker (for Redis versions >= 8.0):
+Difficulty is classified as \*\*Medium\*\* because:
 
-``` bash
-docker run -p 6379:6379 -it redis:latest
-```
+\- The scope is limited to Sentinel-related behavior
 
-Start a redis via docker (for Redis versions < 8.0):
+\- Requires understanding of Redis client lifecycle
 
-``` bash
-docker run -p 6379:6379 -it redis/redis-stack:latest
-```
-To install redis-py, simply:
+\- Involves state consistency across existing objects
 
-``` bash
-$ pip install redis
-```
+\- Does not require system-wide refactoring
 
-For faster performance, install redis with hiredis support, this provides a compiled response parser, and *for most cases* requires zero code changes.
-By default, if hiredis >= 1.0 is available, redis-py will attempt to use it for response parsing.
 
-``` bash
-$ pip install "redis[hiredis]"
-```
 
-Looking for a high-level library to handle object mapping? See [redis-om-python](https://github.com/redis/redis-om-python)!
+The task is solvable within 1.5–4 hours by an experienced engineer.
 
-## Supported Redis Versions
 
-The most recent version of this library supports Redis version [7.2](https://github.com/redis/redis/blob/7.2/00-RELEASENOTES), [7.4](https://github.com/redis/redis/blob/7.4/00-RELEASENOTES), [8.0](https://github.com/redis/redis/blob/8.0/00-RELEASENOTES) and [8.2](https://github.com/redis/redis/blob/8.2/00-RELEASENOTES).
 
-The table below highlights version compatibility of the most-recent library versions and redis versions.
-
-| Library version | Supported redis versions |
-|-----------------|-------------------|
-| 3.5.3 | <= 6.2 Family of releases |
-| >= 4.5.0 | Version 5.0 to 7.0 |
-| >= 5.0.0 | Version 5.0 to 7.4 |
-| >= 6.0.0 | Version 7.2 to current |
-
-
-## Usage
-
-### Basic Example
-
-``` python
->>> import redis
->>> r = redis.Redis(host='localhost', port=6379, db=0)
->>> r.set('foo', 'bar')
-True
->>> r.get('foo')
-b'bar'
-```
-
-The above code connects to localhost on port 6379, sets a value in Redis, and retrieves it. All responses are returned as bytes in Python, to receive decoded strings, set *decode_responses=True*.  For this, and more connection options, see [these examples](https://redis.readthedocs.io/en/stable/examples.html).
-
-
-#### RESP3 Support
-To enable support for RESP3, ensure you have at least version 5.0 of the client, and change your connection object to include *protocol=3*
-
-``` python
->>> import redis
->>> r = redis.Redis(host='localhost', port=6379, db=0, protocol=3)
-```
-
-### Connection Pools
-
-By default, redis-py uses a connection pool to manage connections. Each instance of a Redis class receives its own connection pool. You can however define your own [redis.ConnectionPool](https://redis.readthedocs.io/en/stable/connections.html#connection-pools).
-
-``` python
->>> pool = redis.ConnectionPool(host='localhost', port=6379, db=0)
->>> r = redis.Redis(connection_pool=pool)
-```
-
-Alternatively, you might want to look at [Async connections](https://redis.readthedocs.io/en/stable/examples/asyncio_examples.html), or [Cluster connections](https://redis.readthedocs.io/en/stable/connections.html#cluster-client), or even [Async Cluster connections](https://redis.readthedocs.io/en/stable/connections.html#async-cluster-client).
-
-### Redis Commands
-
-There is built-in support for all of the [out-of-the-box Redis commands](https://redis.io/commands). They are exposed using the raw Redis command names (`HSET`, `HGETALL`, etc.) except where a word (i.e. del) is reserved by the language. The complete set of commands can be found [here](https://github.com/redis/redis-py/tree/master/redis/commands), or [the documentation](https://redis.readthedocs.io/en/stable/commands.html).
-
-## Advanced Topics
-
-The [official Redis command documentation](https://redis.io/commands)
-does a great job of explaining each command in detail. redis-py attempts
-to adhere to the official command syntax. There are a few exceptions:
-
--   **MULTI/EXEC**: These are implemented as part of the Pipeline class.
-    The pipeline is wrapped with the MULTI and EXEC statements by
-    default when it is executed, which can be disabled by specifying
-    transaction=False. See more about Pipelines below.
-
--   **SUBSCRIBE/LISTEN**: Similar to pipelines, PubSub is implemented as
-    a separate class as it places the underlying connection in a state
-    where it can\'t execute non-pubsub commands. Calling the pubsub
-    method from the Redis client will return a PubSub instance where you
-    can subscribe to channels and listen for messages. You can only call
-    PUBLISH from the Redis client (see [this comment on issue
-    #151](https://github.com/redis/redis-py/issues/151#issuecomment-1545015)
-    for details).
-
-For more details, please see the documentation on [advanced topics page](https://redis.readthedocs.io/en/stable/advanced_features.html).
-
-### Pipelines
-
-The following is a basic example of a [Redis pipeline](https://redis.io/docs/manual/pipelining/), a method to optimize round-trip calls, by batching Redis commands, and receiving their results as a list.
-
-
-``` python
->>> pipe = r.pipeline()
->>> pipe.set('foo', 5)
->>> pipe.set('bar', 18.5)
->>> pipe.set('blee', "hello world!")
->>> pipe.execute()
-[True, True, True]
-```
-
-### PubSub
-
-The following example shows how to utilize [Redis Pub/Sub](https://redis.io/docs/manual/pubsub/) to subscribe to specific channels.
-
-``` python
->>> r = redis.Redis(...)
->>> p = r.pubsub()
->>> p.subscribe('my-first-channel', 'my-second-channel', ...)
->>> p.get_message()
-{'pattern': None, 'type': 'subscribe', 'channel': b'my-second-channel', 'data': 1}
-```
-
-### Redis’ search and query capabilities default dialect
-
-Release 6.0.0 introduces a client-side default dialect for Redis’ search and query capabilities.
-By default, the client now overrides the server-side dialect with version 2, automatically appending *DIALECT 2* to commands like *FT.AGGREGATE* and *FT.SEARCH*.
-
-**Important**: Be aware that the query dialect may impact the results returned. If needed, you can revert to a different dialect version by configuring the client accordingly.
-
-``` python
->>> from redis.commands.search.field import TextField
->>> from redis.commands.search.query import Query
->>> from redis.commands.search.index_definition import IndexDefinition
->>> import redis
-
->>> r = redis.Redis(host='localhost', port=6379, db=0)
->>> r.ft().create_index(
->>>     (TextField("name"), TextField("lastname")),
->>>     definition=IndexDefinition(prefix=["test:"]),
->>> )
-
->>> r.hset("test:1", "name", "James")
->>> r.hset("test:1", "lastname", "Brown")
-
->>> # Query with default DIALECT 2
->>> query = "@name: James Brown"
->>> q = Query(query)
->>> res = r.ft().search(q)
-
->>> # Query with explicit DIALECT 1
->>> query = "@name: James Brown"
->>> q = Query(query).dialect(1)
->>> res = r.ft().search(q)
-```
-
-You can find further details in the [query dialect documentation](https://redis.io/docs/latest/develop/interact/search-and-query/advanced-concepts/dialects/).
-
-### Multi-database client (Active-Active)
-
-The multi-database client allows your application to connect to multiple Redis databases, which are typically replicas of each other. It is designed to work with Redis Software and Redis Cloud Active-Active setups. The client continuously monitors database health, detects failures, and automatically fails over to the next healthy database using a configurable strategy. When the original database becomes healthy again, the client can automatically switch back to it.<br>
-This is useful when:
-
-1. You have more than one Redis deployment. This might include two independent Redis servers or two or more Redis databases replicated across multiple [active-active Redis Enterprise](https://redis.io/docs/latest/operate/rs/databases/active-active/) clusters.
-2. You want your application to connect to one deployment at a time and to fail over to the next available deployment if the first deployment becomes unavailable.
-
-For the complete failover configuration options and examples, see the [Multi-database client docs](https://redis.readthedocs.io/en/latest/multi_database.html).
-
----------------------------------------------
-
-### Author
-
-redis-py is developed and maintained by [Redis Inc](https://redis.io). It can be found [here](
-https://github.com/redis/redis-py), or downloaded from [pypi](https://pypi.org/project/redis/).
-
-Special thanks to:
-
--   Andy McCurdy (<sedrik@gmail.com>) the original author of redis-py.
--   Ludovico Magnocavallo, author of the original Python Redis client,
-    from which some of the socket code is still used.
--   Alexander Solovyov for ideas on the generic response callback
-    system.
--   Paul Hubbard for initial packaging support.
-
-[![Redis](./docs/_static/logo-redis.svg)](https://redis.io)
