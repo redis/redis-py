@@ -526,7 +526,7 @@ class TestUnitCacheProxyConnection:
         )
         proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
         assert proxy_connection.read_response() == b"bar"
-        assert proxy_connection._current_command_cache_key is None
+        assert proxy_connection._current_command_cache_entry is None
         assert proxy_connection.read_response() == b"bar"
 
         mock_cache.set.assert_has_calls(
