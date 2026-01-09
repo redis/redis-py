@@ -238,7 +238,7 @@ class _AsyncHiredisParser(AsyncBaseParser, AsyncPushNotificationsParser):
 
     async def can_read_destructive(self):
         if not self._connected:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+            raise OSError("Buffer is closed.")
         if self._reader.gets() is not NOT_ENOUGH_DATA:
             return True
         try:
