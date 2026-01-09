@@ -414,7 +414,7 @@ class _AsyncRESPBase(AsyncBaseParser):
         """Called when the stream connects"""
         self._stream = connection._reader
         if self._stream is None:
-            raise OSError("Buffer is closed.")
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
         self.encoder = connection.encoder
         self._clear()
         self._connected = True
