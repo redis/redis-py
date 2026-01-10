@@ -487,14 +487,6 @@ class TestUnitCacheProxyConnection:
                 cache_key=CacheKey(
                     command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
                 ),
-                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
-                status=CacheEntryStatus.IN_PROGRESS,
-                connection_ref=mock_connection,
-            ),
-            CacheEntry(
-                cache_key=CacheKey(
-                    command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
-                ),
                 cache_value=b"bar",
                 status=CacheEntryStatus.VALID,
                 connection_ref=mock_connection,
@@ -526,22 +518,14 @@ class TestUnitCacheProxyConnection:
         proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
         assert proxy_connection.read_response() == b"bar"
         assert proxy_connection._current_command_cache_entry is None
+
+        # cached reply
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
         assert proxy_connection.read_response() == b"bar"
+        assert proxy_connection._current_command_cache_entry is None
 
         mock_cache.set.assert_has_calls(
             [
-                call(
-                    CacheEntry(
-                        cache_key=CacheKey(
-                            command="GET",
-                            redis_keys=("foo",),
-                            redis_args=("GET", "foo"),
-                        ),
-                        cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
-                        status=CacheEntryStatus.IN_PROGRESS,
-                        connection_ref=mock_connection,
-                    )
-                ),
                 call(
                     CacheEntry(
                         cache_key=CacheKey(

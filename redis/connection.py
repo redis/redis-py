@@ -1475,7 +1475,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                     with self._pool_lock:
                         while cache_entry.connection_ref.can_read():
                             cache_entry.connection_ref.read_response(push_request=True)
-                    # Check if entry still exists.
+                    # Check if entry still exists, if so it must be cache_entry we got because of cache_lock
                     if self._cache.get(cache_key) is not None:
                         self._current_command_cache_entry = cache_entry
                         return
@@ -1533,17 +1533,12 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             cache_key = self._current_command_cache_entry.cache_key
             if response is None:
                 self._cache.delete_by_cache_keys([cache_key])
+                self._current_command_cache_entry = None
                 return response
 
-            cache_entry = self._cache.get(cache_key)
-
-            # Cache only responses that still valid
-            # and wasn't invalidated by another connection in meantime.
-            if cache_entry is not None:
-                cache_entry.status = CacheEntryStatus.VALID
-                cache_entry.cache_value = response
-                self._cache.set(cache_entry)
-
+            # No bother entry exists in cache or not, this ensures we don't overwrite another entry.
+            self._current_command_cache_entry.status = CacheEntryStatus.VALID
+            self._current_command_cache_entry.cache_value = response
             self._current_command_cache_entry = None
 
         return response
