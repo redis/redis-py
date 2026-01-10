@@ -125,6 +125,17 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     Connection object to talk to redis.
 
     It is not safe to pass PubSub or Pipeline objects between threads.
+
+    :param float idle_connection_timeout:
+        If set, connections that have been idle for longer than this timeout
+        (in seconds) will be automatically closed. If unset, idle connections
+        are never closed. This parameter is passed through to the connection pool
+        constructor, so it's only used when a connection_pool instance is not provided.
+    :param float idle_check_interval:
+        Minimum time between idle connection cleanup runs. Defaults to 60 seconds.
+        Only used when idle_connection_timeout is set. As with idle_connection_timeout,
+        this parameter is passed through to the connection pool constructor,
+        so it's only used when a connection_pool instance is not provided.
     """
 
     @classmethod
@@ -256,6 +267,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        idle_connection_timeout: Optional[float] = None,
+        idle_check_interval: float = 60.0,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -334,6 +347,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 "redis_connect_func": redis_connect_func,
                 "credential_provider": credential_provider,
                 "protocol": protocol,
+                "idle_connection_timeout": idle_connection_timeout,
+                "idle_check_interval": idle_check_interval,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
