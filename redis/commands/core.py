@@ -2,6 +2,15 @@
 
 import datetime
 import hashlib
+
+# Try to import the xxhash library as an optional dependency
+try:
+    import xxhash
+    HAS_XXHASH = True
+except ImportError:
+    HAS_XXHASH = False
+    from redis.xxh3 import xxh3_64_hexdigest
+
 import warnings
 from enum import Enum
 from typing import (
@@ -1889,7 +1898,40 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("EXPIRETIME", key)
 
     @experimental_method()
-    def digest(self, name: KeyT) -> Optional[str]:
+    def digest_local(self, value: Union[bytes, str]) -> Union[bytes, str]:
+        """
+        Compute the hexadecimal digest of the value locally, without sending it to the server.
+
+        This is useful for conditional operations like IFDEQ/IFDNE where you need to
+        compute the digest client-side before sending a command.
+
+        Warning:
+        **Experimental** - This API may change or be removed without notice.
+
+        Arguments:
+          - value: Union[bytes, str] - the value to compute the digest of.
+
+        Returns:
+          - (str) the XXH3 digest of the value as a hex string (16 hex characters)
+
+        For more information, see https://redis.io/commands/digest
+        """
+        if HAS_XXHASH:
+            local_digest = xxhash.xxh3_64(value).hexdigest()
+        else:
+            local_digest = xxh3_64_hexdigest(value)
+
+        # To align with digest, we want to return bytes if decode_responses is False.
+        # The following should work because Python's mixin approach.
+        if hasattr(self, 'connection_pool'):
+            if not self.connection_pool.connection_kwargs.get('decode_responses', False):
+                local_digest = local_digest.encode()
+
+        return local_digest
+
+
+    @experimental_method()
+    def digest(self, name: KeyT) -> Union[str, bytes, None]:
         """
         Return the digest of the value stored at the specified key.
 
