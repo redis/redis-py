@@ -1513,9 +1513,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 self._current_command_cache_entry is not None
                 and self._current_command_cache_entry.status == CacheEntryStatus.VALID
             ):
-                res = copy.deepcopy(
-                    self._current_command_cache_entry.cache_value
-                )
+                res = copy.deepcopy(self._current_command_cache_entry.cache_value)
                 self._current_command_cache_entry = None
                 return res
 

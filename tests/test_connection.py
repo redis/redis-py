@@ -592,14 +592,11 @@ class TestUnitCacheProxyConnection:
         assert another_conn.can_read.call_count == 2
         another_conn.read_response.assert_called_once()
 
-
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",
         reason="Pypy doesn't support side_effect",
     )
-    def test_cache_entry_in_progress(
-        self, mock_cache, mock_connection
-    ):
+    def test_cache_entry_in_progress(self, mock_cache, mock_connection):
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
@@ -629,14 +626,11 @@ class TestUnitCacheProxyConnection:
         mock_connection.send_command.assert_called_once()
         mock_connection.read_response.assert_called_once()
 
-
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",
         reason="Pypy doesn't support side_effect",
     )
-    def test_cache_entry_gone_between_send_and_read(
-        self, mock_cache, mock_connection
-    ):
+    def test_cache_entry_gone_between_send_and_read(self, mock_cache, mock_connection):
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
@@ -669,14 +663,11 @@ class TestUnitCacheProxyConnection:
         mock_connection.send_command.assert_not_called()
         mock_connection.read_response.assert_not_called()
 
-
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",
         reason="Pypy doesn't support side_effect",
     )
-    def test_cache_entry_fill_between_send_and_read(
-        self, mock_cache, mock_connection
-    ):
+    def test_cache_entry_fill_between_send_and_read(self, mock_cache, mock_connection):
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
