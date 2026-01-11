@@ -1456,27 +1456,30 @@ class NodesManager:
                 e.host, e.port, PRIMARY, **self.connection_kwargs
             )
             self.set_nodes(self.nodes_cache, {redirected_node.name: redirected_node})
-        if redirected_node in self.slots_cache[e.slot_id]:
-            # The MOVED error resulted from a failover, and the new slot owner
-            # had previously been a replica.
-            old_primary = self.slots_cache[e.slot_id][0]
-            # Update the old primary to be a replica and add it to the end of
-            # the slot's node list
-            old_primary.server_type = REPLICA
-            self.slots_cache[e.slot_id].append(old_primary)
-            # Remove the old replica, which is now a primary, from the slot's
-            # node list
-            self.slots_cache[e.slot_id].remove(redirected_node)
-            # Override the old primary with the new one
-            self.slots_cache[e.slot_id][0] = redirected_node
-            if self.default_node == old_primary:
-                # Update the default node with the new primary
-                self.default_node = redirected_node
-        else:
+        slot_nodes = self.slots_cache[e.slot_id]
+        if redirected_node not in slot_nodes:
             # The new slot owner is a new server, or a server from a different
             # shard. We need to remove all current nodes from the slot's list
             # (including replications) and add just the new node.
             self.slots_cache[e.slot_id] = [redirected_node]
+        elif redirected_node is not slot_nodes[0]:
+            # The MOVED error resulted from a failover, and the new slot owner
+            # had previously been a replica.
+            old_primary = slot_nodes[0]
+            # Update the old primary to be a replica and add it to the end of
+            # the slot's node list
+            old_primary.server_type = REPLICA
+            slot_nodes.append(old_primary)
+            # Remove the old replica, which is now a primary, from the slot's
+            # node list
+            slot_nodes.remove(redirected_node)
+            # Override the old primary with the new one
+            slot_nodes[0] = redirected_node
+            if self.default_node == old_primary:
+                # Update the default node with the new primary
+                self.default_node = redirected_node
+        # else: circular MOVED to current primary -> no-op
+
         # Reset moved_exception
         self._moved_exception = None
 
