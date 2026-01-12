@@ -263,16 +263,27 @@ class Lock:
             stored_token = encoder.encode(stored_token)
         return self.local.token is not None and stored_token == self.local.token
 
-    def release(self) -> Awaitable[None]:
-        """Releases the already acquired lock"""
+    async def release(self) -> None:
+        """Releases the already acquired lock.
+
+        The token is only cleared after the Redis release operation completes
+        successfully. This ensures that if the release is cancelled mid-operation,
+        the lock state remains consistent and can be retried.
+        """
         expected_token = self.local.token
         if expected_token is None:
             raise LockError(
                 "Cannot release a lock that's not owned or is already unlocked.",
                 lock_name=self.name,
             )
+        try:
+            await self.do_release(expected_token)
+        except LockNotOwnedError:
+            # Lock doesn't exist in Redis, safe to clear token
+            self.local.token = None
+            raise
+        # Only clear token after successful release
         self.local.token = None
-        return self.do_release(expected_token)
 
     async def do_release(self, expected_token: bytes) -> None:
         if not bool(
