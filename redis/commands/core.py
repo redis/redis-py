@@ -6,10 +6,10 @@ import hashlib
 # Try to import the xxhash library as an optional dependency
 try:
     import xxhash
+
     HAS_XXHASH = True
 except ImportError:
     HAS_XXHASH = False
-    from redis.xxh3 import xxh3_64_hexdigest
 
 import warnings
 from enum import Enum
@@ -1912,23 +1912,24 @@ class BasicKeyCommands(CommandsProtocol):
           - value: Union[bytes, str] - the value to compute the digest of.
 
         Returns:
-          - (str) the XXH3 digest of the value as a hex string (16 hex characters)
+          - (str | bytes) the XXH3 digest of the value as a hex string (16 hex characters)
 
         For more information, see https://redis.io/commands/digest
         """
-        if HAS_XXHASH:
-            local_digest = xxhash.xxh3_64(value).hexdigest()
-        else:
-            local_digest = xxh3_64_hexdigest(value)
+        if not HAS_XXHASH:
+            raise NotImplementedError(
+                "XXHASH library not installed. Install with: "
+                "'pip install xxhash' or 'pip install redis[xxhash]' to use this feature."
+            )
+
+        local_digest = xxhash.xxh3_64(value).hexdigest()
 
         # To align with digest, we want to return bytes if decode_responses is False.
         # The following should work because Python's mixin approach.
-        if hasattr(self, 'connection_pool'):
-            if not self.connection_pool.connection_kwargs.get('decode_responses', False):
-                local_digest = local_digest.encode()
+        if not self.get_encoder().decode_responses:
+            local_digest = local_digest.encode()
 
         return local_digest
-
 
     @experimental_method()
     def digest(self, name: KeyT) -> Union[str, bytes, None]:
