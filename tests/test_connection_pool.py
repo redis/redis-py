@@ -10,7 +10,16 @@ import pytest
 import redis
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
-from redis.event import AfterConnectionCreatedEvent, EventDispatcher, EventListenerInterface
+from redis.event import (
+    AfterConnectionCreatedEvent,
+    AfterConnectionAcquiredEvent,
+    AfterConnectionReleasedEvent,
+    AfterConnectionClosedEvent,
+    OnErrorEvent,
+    EventDispatcher,
+    EventListenerInterface,
+)
+from redis.connection import CloseReason
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
@@ -1120,3 +1129,337 @@ class TestBlockingConnectionPoolEventEmission:
         pool.get_connection()
 
         assert listener.listen.call_count == 2
+
+    def test_connection_acquired_event_emitted_on_get_connection(self):
+        """Test that AfterConnectionAcquiredEvent is emitted when getting a connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionAcquiredEvent: [listener],
+        })
+
+        pool = redis.BlockingConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+            max_connections=10,
+            timeout=5,
+        )
+
+        pool.get_connection()
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, AfterConnectionAcquiredEvent)
+        assert event.connection_pool is pool
+        assert event.duration_seconds >= 0
+
+    def test_connection_acquired_event_emitted_on_reused_connection(self):
+        """Test that AfterConnectionAcquiredEvent is emitted even when reusing a connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionAcquiredEvent: [listener],
+        })
+
+        pool = redis.BlockingConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+            max_connections=10,
+            timeout=5,
+        )
+
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        # Reset the mock to clear the first call
+        listener.reset_mock()
+
+        # Get the same connection again (reused)
+        pool.get_connection()
+
+        # Event SHOULD be emitted for reused connection
+        listener.listen.assert_called_once()
+
+    def test_connection_released_event_emitted_on_release(self):
+        """Test that AfterConnectionReleasedEvent is emitted when releasing a connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionReleasedEvent: [listener],
+        })
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+            max_connections=10,
+            timeout=5,
+        )
+
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, AfterConnectionReleasedEvent)
+
+
+class TestConnectionPoolAcquiredEventEmission:
+    """Tests for AfterConnectionAcquiredEvent emission from ConnectionPool."""
+
+    def test_connection_acquired_event_emitted_on_get_connection(self):
+        """Test that AfterConnectionAcquiredEvent is emitted when getting a connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionAcquiredEvent: [listener],
+        })
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        pool.get_connection()
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, AfterConnectionAcquiredEvent)
+        assert event.connection_pool is pool
+        assert event.duration_seconds >= 0
+
+    def test_connection_acquired_event_emitted_on_reused_connection(self):
+        """Test that AfterConnectionAcquiredEvent is emitted even when reusing a connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionAcquiredEvent: [listener],
+        })
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        # Reset the mock to clear the first call
+        listener.reset_mock()
+
+        # Get the same connection again (reused)
+        pool.get_connection()
+
+        # Event SHOULD be emitted for reused connection
+        listener.listen.assert_called_once()
+
+
+class TestConnectionPoolReleasedEventEmission:
+    """Tests for AfterConnectionReleasedEvent emission from ConnectionPool."""
+
+    def test_connection_released_event_emitted_on_release(self):
+        """Test that AfterConnectionReleasedEvent is emitted when releasing a connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionReleasedEvent: [listener],
+        })
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, AfterConnectionReleasedEvent)
+
+    def test_connection_released_event_not_emitted_for_foreign_connection(self):
+        """Test that AfterConnectionReleasedEvent is NOT emitted for connections not owned by pool."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionReleasedEvent: [listener],
+        })
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        # Create a connection that doesn't belong to this pool
+        foreign_conn = DummyConnection()
+
+        pool.release(foreign_conn)
+
+        # Event should NOT be emitted for foreign connection
+        listener.listen.assert_not_called()
+
+
+class TestConnectionClosedEventEmission:
+    """Tests for AfterConnectionClosedEvent emission from Connection."""
+
+    def test_connection_closed_event_emitted_on_disconnect(self):
+        """Test that AfterConnectionClosedEvent is emitted when disconnecting."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionClosedEvent: [listener],
+        })
+
+        conn = Connection(
+            host="localhost",
+            port=6379,
+            event_dispatcher=event_dispatcher,
+        )
+
+        # Mock the socket to simulate a connected state
+        mock_sock = MagicMock()
+        conn._sock = mock_sock
+
+        conn.disconnect()
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, AfterConnectionClosedEvent)
+        assert event.close_reason == CloseReason.APPLICATION_CLOSE
+        assert event.error is None
+
+    def test_connection_closed_event_with_error_reason(self):
+        """Test that AfterConnectionClosedEvent is emitted with ERROR reason on error."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionClosedEvent: [listener],
+        })
+
+        conn = Connection(
+            host="localhost",
+            port=6379,
+            event_dispatcher=event_dispatcher,
+        )
+
+        # Mock the socket to simulate a connected state
+        mock_sock = MagicMock()
+        conn._sock = mock_sock
+
+        error = ConnectionError("Connection lost")
+        conn.disconnect(error, 0)
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, AfterConnectionClosedEvent)
+        assert event.close_reason == CloseReason.ERROR
+        assert event.error is error
+
+    def test_connection_closed_event_with_healthcheck_failed_reason(self):
+        """Test that AfterConnectionClosedEvent is emitted with HEALTHCHECK_FAILED reason."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            AfterConnectionClosedEvent: [listener],
+        })
+
+        conn = Connection(
+            host="localhost",
+            port=6379,
+            event_dispatcher=event_dispatcher,
+        )
+
+        # Mock the socket to simulate a connected state
+        mock_sock = MagicMock()
+        conn._sock = mock_sock
+
+        error = ConnectionError("Health check failed")
+        # Third argument True indicates health check failure
+        conn.disconnect(error, 0, True)
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, AfterConnectionClosedEvent)
+        assert event.close_reason == CloseReason.HEALTHCHECK_FAILED
+        assert event.error is error
+
+
+class TestConnectionOnErrorEventEmission:
+    """Tests for OnErrorEvent emission from Connection."""
+
+    def test_on_error_event_emitted_on_disconnect_with_error(self):
+        """Test that OnErrorEvent is emitted when disconnecting with an error."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            OnErrorEvent: [listener],
+        })
+
+        conn = Connection(
+            host="localhost",
+            port=6379,
+            event_dispatcher=event_dispatcher,
+        )
+
+        # Mock the socket to simulate a connected state
+        mock_sock = MagicMock()
+        conn._sock = mock_sock
+
+        error = ConnectionError("Connection lost")
+        # retry_attempts=0 which is <= default retries (0), so event should be emitted
+        conn.disconnect(error, 0)
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, OnErrorEvent)
+        assert event.error is error
+        assert event.server_address == "localhost"
+        assert event.server_port == 6379
+        assert event.retry_attempts == 0
+
+    def test_on_error_event_not_emitted_when_retry_exceeds_limit(self):
+        """Test that OnErrorEvent is NOT emitted when retry attempts exceed limit."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            OnErrorEvent: [listener],
+        })
+
+        conn = Connection(
+            host="localhost",
+            port=6379,
+            event_dispatcher=event_dispatcher,
+        )
+
+        # Mock the socket to simulate a connected state
+        mock_sock = MagicMock()
+        conn._sock = mock_sock
+
+        error = ConnectionError("Connection lost")
+        # retry_attempts=5 which is > default retries (0), so event should NOT be emitted
+        conn.disconnect(error, 5)
+
+        # OnErrorEvent should NOT be called
+        listener.listen.assert_not_called()
+
+    def test_on_error_event_not_emitted_on_normal_disconnect(self):
+        """Test that OnErrorEvent is NOT emitted on normal disconnect without error."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            OnErrorEvent: [listener],
+        })
+
+        conn = Connection(
+            host="localhost",
+            port=6379,
+            event_dispatcher=event_dispatcher,
+        )
+
+        # Mock the socket to simulate a connected state
+        mock_sock = MagicMock()
+        conn._sock = mock_sock
+
+        conn.disconnect()
+
+        # OnErrorEvent should NOT be called for normal disconnect
+        listener.listen.assert_not_called()

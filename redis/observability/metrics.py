@@ -7,6 +7,7 @@ OTel semantic conventions for database clients.
 
 import logging
 import time
+from enum import Enum
 from typing import Any, Dict, Optional, Callable, List
 
 from redis.observability.attributes import AttributeBuilder, ConnectionState, REDIS_CLIENT_CONNECTION_NOTIFICATION, \
@@ -26,6 +27,11 @@ except ImportError:
     Histogram = None
     Meter = None
     UpDownCounter = None
+
+class CloseReason(Enum):
+    APPLICATION_CLOSE = "application_close"
+    ERROR = "error"
+    HEALTHCHECK_FAILED = "healthcheck_failed"
 
 
 class RedisMetricsCollector:
@@ -401,24 +407,22 @@ class RedisMetricsCollector:
 
     def record_connection_closed(
             self,
-            pool_name: str,
-            close_reason: Optional[str] = None,
+            close_reason: Optional[CloseReason] = None,
             error_type: Optional[Exception] = None,
     ) -> None:
         """
         Record a connection closed event.
 
         Args:
-            pool_name: Connection pool name
-            close_reason: Reason for closing (e.g., 'idle_timeout', 'error', 'shutdown')
+            close_reason: Reason for closing (e.g., 'error', 'application_close')
             error_type: Error type if closed due to error
         """
         if not hasattr(self, "connection_closed"):
             return
 
-        attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
+        attrs = self.attr_builder.build_connection_attributes()
         if close_reason:
-            attrs[REDIS_CLIENT_CONNECTION_CLOSE_REASON] = close_reason
+            attrs[REDIS_CLIENT_CONNECTION_CLOSE_REASON] = close_reason.value
 
         attrs.update(
             self.attr_builder.build_error_attributes(
