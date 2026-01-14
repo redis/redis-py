@@ -7,7 +7,7 @@ import types
 from errno import ECONNREFUSED
 from typing import Any
 from unittest import mock
-from unittest.mock import call, patch
+from unittest.mock import call, patch, MagicMock, Mock
 
 import pytest
 import redis
@@ -31,6 +31,12 @@ from redis.connection import (
     parse_url,
 )
 from redis.credentials import UsernamePasswordCredentialProvider
+from redis.event import (
+    EventDispatcher,
+    EventListenerInterface,
+    OnCacheHitEvent,
+    OnCacheMissEvent,
+)
 from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
@@ -446,7 +452,9 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.db = 0
         mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = EventDispatcher()
 
         proxy_connection = CacheProxyConnection(
             mock_connection, cache, threading.RLock()
@@ -463,7 +471,9 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.db = 0
         mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = EventDispatcher()
 
         mock_cache.is_cachable.return_value = True
         mock_cache.get.side_effect = [
@@ -573,7 +583,9 @@ class TestUnitCacheProxyConnection:
         mock_connection.retry = "mock"
         mock_connection.host = "mock"
         mock_connection.port = "mock"
+        mock_connection.db = 0
         mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection._event_dispatcher = Mock(spec=EventDispatcher)
 
         another_conn = copy.deepcopy(mock_connection)
         another_conn.can_read.side_effect = [True, False]
@@ -598,3 +610,171 @@ class TestUnitCacheProxyConnection:
         assert proxy_connection.read_response() == b"bar"
         assert another_conn.can_read.call_count == 2
         another_conn.read_response.assert_called_once()
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
+    def test_cache_hit_event_emitted_on_cached_response(self, mock_connection):
+        """Test that OnCacheHitEvent is emitted when returning a cached response."""
+        cache = DefaultCache(CacheConfig(max_size=10))
+        event_dispatcher = EventDispatcher()
+        cache_hit_listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            OnCacheHitEvent: [cache_hit_listener],
+        })
+
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.can_read.return_value = False
+        mock_connection._event_dispatcher = event_dispatcher
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=b"bar",
+                status=CacheEntryStatus.VALID,
+                connection_ref=mock_connection,
+            )
+        )
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+        # Manually set the cache key to simulate send_command having been called
+        proxy_connection._current_command_cache_key = cache_key
+
+        result = proxy_connection.read_response()
+
+        assert result == b"bar"
+        cache_hit_listener.listen.assert_called_once()
+        event = cache_hit_listener.listen.call_args[0][0]
+        assert isinstance(event, OnCacheHitEvent)
+        assert event.bytes_saved == len(b"bar")
+        assert event.db_namespace == 0
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
+    def test_cache_miss_event_emitted_on_uncached_response(self, mock_connection):
+        """Test that OnCacheMissEvent is emitted when cache miss occurs."""
+        cache = DefaultCache(CacheConfig(max_size=10))
+        event_dispatcher = EventDispatcher()
+        cache_miss_listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            OnCacheMissEvent: [cache_miss_listener],
+        })
+
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.can_read.return_value = False
+        mock_connection.send_command.return_value = None
+        mock_connection.read_response.return_value = b"bar"
+        mock_connection._event_dispatcher = event_dispatcher
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+        proxy_connection.send_command(*["GET", "foo"], **{"keys": ["foo"]})
+        result = proxy_connection.read_response()
+
+        assert result == b"bar"
+        cache_miss_listener.listen.assert_called_once()
+        event = cache_miss_listener.listen.call_args[0][0]
+        assert isinstance(event, OnCacheMissEvent)
+        assert event.db_namespace == 0
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
+    def test_cache_miss_event_emitted_for_non_cachable_command(self, mock_connection):
+        """Test that OnCacheMissEvent is emitted for non-cachable commands."""
+        cache = DefaultCache(CacheConfig(max_size=10))
+        event_dispatcher = EventDispatcher()
+        cache_miss_listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            OnCacheMissEvent: [cache_miss_listener],
+        })
+
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.can_read.return_value = False
+        mock_connection.send_command.return_value = None
+        mock_connection.read_response.return_value = b"OK"
+        mock_connection._event_dispatcher = event_dispatcher
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+        # SET is not cachable
+        proxy_connection.send_command(*["SET", "foo", "bar"])
+        result = proxy_connection.read_response()
+
+        assert result == b"OK"
+        cache_miss_listener.listen.assert_called_once()
+        event = cache_miss_listener.listen.call_args[0][0]
+        assert isinstance(event, OnCacheMissEvent)
+
+    @pytest.mark.skipif(
+        platform.python_implementation() == "PyPy",
+        reason="Pypy doesn't support side_effect",
+    )
+    def test_cache_hit_not_emitted_for_in_progress_entry(self, mock_connection):
+        """Test that OnCacheHitEvent is NOT emitted when cache entry is IN_PROGRESS."""
+        cache = DefaultCache(CacheConfig(max_size=10))
+        event_dispatcher = EventDispatcher()
+        cache_hit_listener = MagicMock(spec=EventListenerInterface)
+        cache_miss_listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners({
+            OnCacheHitEvent: [cache_hit_listener],
+            OnCacheMissEvent: [cache_miss_listener],
+        })
+
+        mock_connection.retry = "mock"
+        mock_connection.host = "mock"
+        mock_connection.port = "mock"
+        mock_connection.db = 0
+        mock_connection.credential_provider = UsernamePasswordCredentialProvider()
+        mock_connection.can_read.return_value = False
+        mock_connection.read_response.return_value = b"bar"
+        mock_connection._event_dispatcher = event_dispatcher
+
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
+        # Set entry with IN_PROGRESS status
+        cache.set(
+            CacheEntry(
+                cache_key=cache_key,
+                cache_value=CacheProxyConnection.DUMMY_CACHE_VALUE,
+                status=CacheEntryStatus.IN_PROGRESS,
+                connection_ref=mock_connection,
+            )
+        )
+
+        proxy_connection = CacheProxyConnection(
+            mock_connection, cache, threading.RLock()
+        )
+        proxy_connection._current_command_cache_key = cache_key
+
+        result = proxy_connection.read_response()
+
+        assert result == b"bar"
+        # Cache hit should NOT be emitted for IN_PROGRESS entry
+        cache_hit_listener.listen.assert_not_called()
+        # Cache miss should be emitted instead
+        cache_miss_listener.listen.assert_called_once()

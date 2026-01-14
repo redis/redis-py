@@ -22,7 +22,7 @@ Usage in Redis core code:
 import time
 from typing import Optional, Callable
 
-from redis.observability.attributes import PubSubDirection, ConnectionState
+from redis.observability.attributes import PubSubDirection, ConnectionState, CSCResult, CSCReason, AttributeBuilder
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
 from redis.observability.providers import get_observability_instance
 
@@ -486,6 +486,103 @@ def record_maint_notification_count(
     # except Exception:
     #     pass
 
+def record_csc_request(
+        db_namespace: Optional[int] = None,
+        result: Optional[CSCResult] = None,
+):
+    """
+    Record a Client Side Caching (CSC) request.
+
+    Args:
+        db_namespace: Redis database index
+        result: CSC result ('hit' or 'miss')
+    """
+    global _metrics_collector
+
+    if _metrics_collector is None:
+        _metrics_collector = _get_or_create_collector()
+        if _metrics_collector is None:
+            return
+
+    _metrics_collector.record_csc_request(
+        db_namespace=db_namespace,
+        result=result,
+    )
+
+def init_csc_items(
+        callback: Callable
+) -> None:
+    """
+    Initialize observable gauge for CSC items metric.
+
+    Args:
+        callback: Callback function to retrieve CSC items count
+    """
+    global _metrics_collector
+
+    if _metrics_collector is None:
+        _metrics_collector = _get_or_create_collector()
+        if _metrics_collector is None:
+            return
+
+    # Lazy import
+    from opentelemetry.metrics import Observation
+
+    def observation_wrapper(__):
+        return [Observation(callback(), attributes=AttributeBuilder.build_csc_attributes())]
+
+    _metrics_collector.init_csc_items(
+        callback=observation_wrapper,
+    )
+
+def record_csc_eviction(
+        count: int,
+        db_namespace: Optional[int] = None,
+        reason: Optional[CSCReason] = None,
+) -> None:
+    """
+    Record a Client Side Caching (CSC) eviction.
+
+    Args:
+        count: Number of evictions
+        db_namespace: Redis database index
+        reason: Reason for eviction
+    """
+    global _metrics_collector
+
+    if _metrics_collector is None:
+        _metrics_collector = _get_or_create_collector()
+        if _metrics_collector is None:
+            return
+
+    _metrics_collector.record_csc_eviction(
+        count=count,
+        db_namespace=db_namespace,
+        reason=reason,
+    )
+
+def record_csc_network_saved(
+        bytes_saved: int,
+        db_namespace: Optional[int] = None,
+) -> None:
+    """
+    Record the number of bytes saved by using Client Side Caching (CSC).
+
+    Args:
+        bytes_saved: Number of bytes saved
+        db_namespace: Redis database index
+    """
+    global _metrics_collector
+
+    if _metrics_collector is None:
+        _metrics_collector = _get_or_create_collector()
+        if _metrics_collector is None:
+            return
+
+    _metrics_collector.record_csc_network_saved(
+        bytes_saved=bytes_saved,
+        db_namespace=db_namespace,
+    )
 
 def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
     """
