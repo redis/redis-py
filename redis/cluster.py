@@ -3559,7 +3559,7 @@ class PipelineStrategy(AbstractStrategy):
         finally:
             # release all the redis connections we allocated earlier
             # back into the connection pool.
-            # if we the connection is dirty (that is: we've written
+            # if the connection is dirty (that is: we've written
             # commands to it, but haven't read the responses), we need
             # to close the connection before returning it to the pool.
             # otherwise, the next caller to use this connection will
