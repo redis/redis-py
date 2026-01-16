@@ -1,10 +1,10 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from redis.asyncio.client import Pipeline, Redis
 
 
-def from_url(url, **kwargs):
+def from_url(url: str, **kwargs: Any) -> "Redis":
     """
     Returns an active Redis client generated from the given database URL.
 

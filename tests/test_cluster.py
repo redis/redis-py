@@ -207,7 +207,28 @@ def get_mocked_redis_client(
                         "first_key_pos": 1,
                         "last_key_pos": 1,
                         "step_count": 1,
-                    }
+                    },
+                    "cluster delslots": {
+                        "name": "cluster delslots",
+                        "flags": ["readonly", "fast"],
+                        "first_key_pos": 0,
+                        "last_key_pos": 0,
+                        "step_count": 0,
+                    },
+                    "cluster delslotsrange": {
+                        "name": "cluster delslotsrange",
+                        "flags": ["readonly", "fast"],
+                        "first_key_pos": 0,
+                        "last_key_pos": 0,
+                        "step_count": 0,
+                    },
+                    "cluster addslots": {
+                        "name": "cluster delslotsrange",
+                        "flags": ["readonly", "fast"],
+                        "first_key_pos": 0,
+                        "last_key_pos": 0,
+                        "step_count": 0,
+                    },
                 }
 
             cmd_parser_initialize.side_effect = cmd_init_mock
@@ -252,18 +273,22 @@ def find_node_ip_based_on_port(cluster_client, port):
             return node.host
 
 
-def moved_redirection_helper(request, failover=False):
+def moved_redirection_helper(request, failover=False, circular_moved=False):
     """
-    Test that the client handles MOVED response after a failover.
-    Redirection after a failover means that the redirection address is of a
-    replica that was promoted to a primary.
+    Test that the client correctly handles MOVED responses in the following scenarios:
+    1.	Slot migration to a different shard (failover=False, circular_moved=False) —
+        a standard slot move between shards.
+    2.	Failover event (failover=True, circular_moved=False) —
+        the redirect target is a replica that has just been promoted to primary.
+    3.	Circular MOVED (failover=False, circular_moved=True) —
+        the redirect points to a node already known to be the primary of its shard.
 
     At first call it should return a MOVED ResponseError that will point
     the client to the next server it should talk to.
 
     Verify that:
     1. it tries to talk to the redirected node
-    2. it updates the slot's primary to the redirected node
+    2. it updates the slot's primary to the redirected node, if required
 
     For a failover, also verify:
     3. the redirected node's server type updated to 'primary'
@@ -279,8 +304,10 @@ def moved_redirection_helper(request, failover=False):
             warnings.warn("Skipping this test since it requires to have a replica")
             return
         redirect_node = rc.nodes_manager.slots_cache[slot][1]
+    elif circular_moved:
+        redirect_node = prev_primary
     else:
-        # Use one of the primaries to be the redirected node
+        # Use one of the other primaries to be the redirected node
         redirect_node = rc.get_primaries()[0]
     r_host = redirect_node.host
     r_port = redirect_node.port
@@ -303,6 +330,10 @@ def moved_redirection_helper(request, failover=False):
         if failover:
             assert rc.get_node(host=r_host, port=r_port).server_type == PRIMARY
             assert prev_primary.server_type == REPLICA
+        elif circular_moved:
+            fetched_node = rc.get_node(host=r_host, port=r_port)
+            assert fetched_node == prev_primary
+            assert fetched_node.server_type == PRIMARY
 
 
 @pytest.mark.onlycluster
@@ -525,6 +556,13 @@ class TestRedisClusterObj:
         Test that the client handles MOVED response after a failover.
         """
         moved_redirection_helper(request, failover=True)
+
+    def test_moved_redirection_circular_moved(self, request):
+        """
+        Verify that the client does not update its slot map when receiving a circular MOVED response
+        (i.e., a MOVED redirect pointing back to the same node), and retries again the same node.
+        """
+        moved_redirection_helper(request, failover=False, circular_moved=True)
 
     def test_refresh_using_specific_nodes(self, request):
         """
@@ -1720,6 +1758,30 @@ class TestClusterRedisCommands:
         res = r.client_trackinginfo(target_nodes=node)
         assert len(res) > 2
         assert "prefixes" in res or b"prefixes" in res
+
+    @skip_if_server_version_lt("6.0.0")
+    @skip_if_redis_enterprise()
+    def test_client_tracking(self, r):
+        # simple case - will execute on all nodes
+        assert r.client_tracking_on()
+        assert r.client_tracking_off()
+
+        # id based
+        node = r.get_default_node()
+        # when id is provided - the command should be sent to the node that
+        # owns the connection with this id
+        client_id = node.redis_connection.client_id()
+        assert r.client_tracking_on(clientid=client_id, target_nodes=node)
+        assert r.client_tracking_off(clientid=client_id, target_nodes=node)
+
+        # execute with client id and prefixes and bcast
+        assert r.client_tracking_on(
+            clientid=client_id, prefix=["foo", "bar"], bcast=True, target_nodes=node
+        )
+
+        # now with some prefixes and without bcast
+        with pytest.raises(DataError):
+            assert r.client_tracking_on(prefix=["foo", "bar", "blee"])
 
     @skip_if_server_version_lt("2.9.50")
     def test_client_pause(self, r):

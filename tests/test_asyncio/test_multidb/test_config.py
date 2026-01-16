@@ -19,7 +19,7 @@ from redis.asyncio.multidb.failure_detector import (
     FailureDetectorAsyncWrapper,
     AsyncFailureDetector,
 )
-from redis.asyncio.multidb.healthcheck import EchoHealthCheck, HealthCheck
+from redis.asyncio.multidb.healthcheck import PingHealthCheck, HealthCheck
 from redis.asyncio.retry import Retry
 from redis.multidb.circuit import CircuitBreaker
 
@@ -58,7 +58,7 @@ class TestMultiDbConfig:
             config.default_failure_detectors()[0], FailureDetectorAsyncWrapper
         )
         assert len(config.default_health_checks()) == 1
-        assert isinstance(config.default_health_checks()[0], EchoHealthCheck)
+        assert isinstance(config.default_health_checks()[0], PingHealthCheck)
         assert config.health_check_interval == DEFAULT_HEALTH_CHECK_INTERVAL
         assert isinstance(
             config.default_failover_strategy(), WeightBasedFailoverStrategy

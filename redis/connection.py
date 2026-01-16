@@ -35,6 +35,7 @@ from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from .driver_info import DriverInfo, resolve_driver_info
 from .event import AfterConnectionReleasedEvent, EventDispatcher
 from .exceptions import (
     AuthenticationError,
@@ -62,7 +63,6 @@ from .utils import (
     deprecated_args,
     ensure_string,
     format_error_message,
-    get_lib_version,
     str_if_bytes,
 )
 
@@ -539,7 +539,7 @@ class MaintNotificationsAbstractConnection:
                 import logging
 
                 logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to enable maintenance notifications: {e}")
+                logger.debug(f"Failed to enable maintenance notifications: {e}")
             else:
                 raise
 
@@ -655,6 +655,11 @@ class MaintNotificationsAbstractConnection:
 class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterface):
     "Manages communication to and from a Redis server"
 
+    @deprecated_args(
+        args_to_warn=["lib_name", "lib_version"],
+        reason="Use 'driver_info' parameter instead. "
+        "lib_name and lib_version will be removed in a future version.",
+    )
     def __init__(
         self,
         db: int = 0,
@@ -670,8 +675,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         socket_read_size: int = 65536,
         health_check_interval: int = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = "redis-py",
-        lib_version: Optional[str] = get_lib_version(),
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
+        driver_info: Optional[DriverInfo] = None,
         username: Optional[str] = None,
         retry: Union[Any, None] = None,
         redis_connect_func: Optional[Callable[[], None]] = None,
@@ -691,10 +697,22 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
     ):
         """
         Initialize a new Connection.
+
         To specify a retry policy for specific errors, first set
         `retry_on_error` to a list of the error/s to retry on, then set
         `retry` to a valid `Retry` object.
         To retry on TimeoutError, `retry_on_timeout` can also be set to `True`.
+
+        Parameters
+        ----------
+        driver_info : DriverInfo, optional
+            Driver metadata for CLIENT SETINFO. If provided, lib_name and lib_version
+            are ignored. If not provided, a DriverInfo will be created from lib_name
+            and lib_version (or defaults if those are also None).
+        lib_name : str, optional
+            **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
+        lib_version : str, optional
+            **Deprecated.** Use driver_info instead. Library version for CLIENT SETINFO.
         """
         if (username or password) and credential_provider is not None:
             raise DataError(
@@ -710,8 +728,10 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         self.pid = os.getpid()
         self.db = db
         self.client_name = client_name
-        self.lib_name = lib_name
-        self.lib_version = lib_version
+
+        # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+        self.driver_info = resolve_driver_info(driver_info, lib_name, lib_version)
+
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
@@ -843,7 +863,14 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
     def connect(self):
         "Connects to the Redis server if not already connected"
-        self.connect_check_health(check_health=True)
+        # try once the socket connect with the handshake, retry the whole
+        # connect/handshake flow based on retry policy
+        self.retry.call_with_retry(
+            lambda: self.connect_check_health(
+                check_health=True, retry_socket_connect=False
+            ),
+            lambda error: self.disconnect(error),
+        )
 
     def connect_check_health(
         self, check_health: bool = True, retry_socket_connect: bool = True
@@ -981,14 +1008,14 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
+        # Set the library name and version from driver_info
         try:
-            # set the library name and version
-            if self.lib_name:
+            if self.driver_info and self.driver_info.formatted_name:
                 self.send_command(
                     "CLIENT",
                     "SETINFO",
                     "LIB-NAME",
-                    self.lib_name,
+                    self.driver_info.formatted_name,
                     check_health=check_health,
                 )
                 self.read_response()
@@ -996,12 +1023,12 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             pass
 
         try:
-            if self.lib_version:
+            if self.driver_info and self.driver_info.lib_version:
                 self.send_command(
                     "CLIENT",
                     "SETINFO",
                     "LIB-VER",
-                    self.lib_version,
+                    self.driver_info.lib_version,
                     check_health=check_health,
                 )
                 self.read_response()
@@ -1423,7 +1450,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         with self._cache_lock:
             # Command is write command or not allowed
             # to be cached.
-            if not self._cache.is_cachable(CacheKey(command=args[0], redis_keys=())):
+            if not self._cache.is_cachable(
+                CacheKey(command=args[0], redis_keys=(), redis_args=())
+            ):
                 self._current_command_cache_key = None
                 self._conn.send_command(*args, **kwargs)
                 return
@@ -1433,7 +1462,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
 
         # Creates cache key.
         self._current_command_cache_key = CacheKey(
-            command=args[0], redis_keys=tuple(kwargs.get("keys"))
+            command=args[0], redis_keys=tuple(kwargs.get("keys")), redis_args=args
         )
 
         with self._cache_lock:
@@ -2954,14 +2983,18 @@ class BlockingConnectionPool(ConnectionPool):
                     pass
                 self._locked = False
 
-    def disconnect(self):
-        "Disconnects all connections in the pool."
+    def disconnect(self, inuse_connections: bool = True):
+        "Disconnects either all connections in the pool or just the free connections."
         self._checkpid()
         try:
             if self._in_maintenance:
                 self._lock.acquire()
                 self._locked = True
-            for connection in self._connections:
+            if inuse_connections:
+                connections = self._connections
+            else:
+                connections = self._get_free_connections()
+            for connection in connections:
                 connection.disconnect()
         finally:
             if self._locked:
