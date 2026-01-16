@@ -1275,7 +1275,7 @@ class TestRedisCommands:
 
         res_server = await r.digest(key)
 
-        # Caution! This one is not executing execute_command and it not async
+        # Caution! This one is not executing execute_command and it is not async
         res_local = r.digest_local(value)
 
         # got is str if decode_responses=True; ensure bytes->str for comparison
