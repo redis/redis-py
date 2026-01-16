@@ -38,7 +38,7 @@ hiredis = [
 ]
 
 xxhash = [
-   'xxhash~=3.6.0',
+    'xxhash~=3.6.0',
 ]
 
 ocsp = [
