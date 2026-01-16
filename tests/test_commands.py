@@ -1807,6 +1807,7 @@ class TestRedisCommands:
         r.set(key, value)
 
         res = r.digest(key)
+
         # got is str if decode_responses=True; ensure bytes->str for comparison
         if isinstance(res, bytes):
             res = res.decode()
@@ -1814,6 +1815,28 @@ class TestRedisCommands:
         assert all(c in "0123456789abcdefABCDEF" for c in res)
 
         assert len(res) == 16
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize(
+        "value", [b"", b"abc", b"The quick brown fox jumps over the lazy dog"]
+    )
+    def test_local_digest_matches_server(self, r, value):
+        key = "k:digest"
+        r.delete(key)
+        r.set(key, value)
+
+        res_server = r.digest(key)
+        res_local = r.digest_local(value)
+
+        # got is str if decode_responses=True; ensure bytes->str for comparison
+        if isinstance(res_server, bytes):
+            assert isinstance(res_local, bytes)
+
+        assert res_server is not None
+        assert len(res_server) == 16
+        assert res_local is not None
+        assert len(res_local) == 16
+        assert res_server == res_local
 
     @skip_if_server_version_lt("8.3.224")
     def test_pipeline_digest(self, r):
@@ -2587,6 +2610,9 @@ class TestRedisCommands:
         r.set("k", val)
         d = self._server_xxh3_digest(r, "k")
         assert d is not None
+
+        # sanity check: local digest matches server's
+        assert d == self._ensure_str(r.digest_local(val))
 
         # IFDEQ must match to set; if key missing => won't create
         assert r.set("k", b"X", ifdeq=d) is True
