@@ -1918,8 +1918,9 @@ class BasicKeyCommands(CommandsProtocol):
         """
         if not HAS_XXHASH:
             raise NotImplementedError(
-                "XXHASH library not installed. Install with: "
-                "'pip install xxhash' or 'pip install redis[xxhash]' to use this feature."
+                "XXHASH support requires the optional 'xxhash' library. "
+                "Install it with 'pip install xxhash' or use this package's extra with "
+                "'pip install redis[xxhash]' to enable this feature."
             )
 
         local_digest = xxhash.xxh3_64(value).hexdigest()
