@@ -3904,10 +3904,19 @@ class TestClusterPipeline:
             else:
                 raise RuntimeError("Simulated write error")
 
-        with patch.object(redis.cluster.NodeCommands, "write", mock_write):
-            with pytest.raises(RuntimeError):
-                r.pipeline().get("a").get("b").execute()
+        # Patch Connection.disconnect so we can assert that at least one
+        # connection was disconnected when the write error occurred.
+        with patch.object(Connection, "disconnect", wraps=Connection.disconnect) as mock_disconnect:
+            with patch.object(redis.cluster.NodeCommands, "write", mock_write):
+                with pytest.raises(RuntimeError):
+                    r.pipeline().get("a").get("b").execute()
 
+            # Ensure that at least one connection was disconnected as part of
+            # handling the dirty connection created by the write failure.
+            assert mock_disconnect.called, (
+                "Expected at least one connection to be disconnected when "
+                "handling a dirty connection, but disconnect() was not called."
+            )
         # After the error, verify that no connections are in the available pool
         # with dirty state (unread responses). If a connection is dirty, it should
         # have been disconnected before being returned to the pool.
