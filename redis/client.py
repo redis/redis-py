@@ -9,11 +9,13 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Mapping,
     Optional,
     Set,
     Type,
     Union,
+    overload,
 )
 
 from redis._parsers.encoders import Encoder
@@ -61,6 +63,15 @@ from redis.maint_notifications import (
     MaintNotificationsConfig,
 )
 from redis.retry import Retry
+from redis.typing import (
+    ResponseTypeAnyString,
+    ResponseTypeListOfAnyOptionalStrings,
+    ResponseTypeListOfAnyStrings,
+    ResponseTypeLPopRPop,
+    ResponseTypeOptionalAnyString,
+    ResponseTypeOptionalListOfAnyStrings,
+    ResponseTypeOptionalLMPop,
+)
 from redis.utils import (
     _set_info_logger,
     deprecated_args,
@@ -73,6 +84,12 @@ if TYPE_CHECKING:
     import ssl
 
     import OpenSSL
+
+    from redis.typing import (
+        RedisDecoded,
+        RedisEncoded,
+        RedisEncodedOrDecoded,
+    )
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
@@ -112,7 +129,19 @@ class AbstractRedis:
     pass
 
 
-class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
+class Redis(
+    RedisModuleCommands,
+    CoreCommands[
+        ResponseTypeAnyString,
+        ResponseTypeOptionalAnyString,
+        ResponseTypeListOfAnyStrings,
+        ResponseTypeListOfAnyOptionalStrings,
+        ResponseTypeOptionalListOfAnyStrings,
+        ResponseTypeOptionalLMPop,
+        ResponseTypeLPopRPop,
+    ],
+    SentinelCommands,
+):
     """
     Implementation of the Redis protocol.
 
@@ -127,8 +156,56 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
     It is not safe to pass PubSub or Pipeline objects between threads.
     """
 
+    # Overload for decode_responses=True
+    @overload
     @classmethod
-    def from_url(cls, url: str, **kwargs) -> "Redis":
+    def from_url(
+        cls,
+        url: str,
+        *,
+        decode_responses: Literal[True],
+        **kwargs: Any,
+    ) -> "RedisDecoded": ...
+
+    # Overload for decode_responses=False
+    @overload
+    @classmethod
+    def from_url(
+        cls,
+        url: str,
+        *,
+        decode_responses: Literal[False],
+        **kwargs: Any,
+    ) -> "RedisEncoded": ...
+
+    # Runtime bool decode_responses=some_bool_var
+    @overload
+    @classmethod
+    def from_url(
+        cls,
+        url: str,
+        *,
+        decode_responses: bool,
+        **kwargs: Any,
+    ) -> "RedisEncodedOrDecoded": ...
+
+    # Overload for no decode_responses passed - by default False
+    @overload
+    @classmethod
+    def from_url(
+        cls,
+        url: str,
+        **kwargs: Any,
+    ) -> "RedisEncoded": ...
+
+    @classmethod
+    def from_url(
+        cls: Type["RedisEncoded"]
+        | Type["RedisDecoded"]
+        | Type["RedisEncodedOrDecoded"],
+        url: str,
+        **kwargs: Any,
+    ) -> "RedisEncoded | RedisDecoded | RedisEncodedOrDecoded":
         """
         Return a Redis client object configured from the given URL
 
@@ -180,9 +257,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
     @classmethod
     def from_pool(
-        cls: Type["Redis"],
+        cls,
         connection_pool: ConnectionPool,
-    ) -> "Redis":
+    ) -> "RedisEncoded | RedisDecoded | RedisEncodedOrDecoded":
         """
         Return a Redis client from the given connection pool.
         The Redis client will take ownership of the connection pool and
@@ -193,6 +270,174 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         )
         client.auto_close_connection_pool = True
         return client
+
+    # Default case - decode_responses=False
+    @overload
+    def __init__(
+        self: "RedisEncoded",
+        host: str = "localhost",
+        port: int = 6379,
+        db: int = 0,
+        password: Optional[str] = None,
+        socket_timeout: Optional[float] = None,
+        socket_connect_timeout: Optional[float] = None,
+        socket_keepalive: Optional[bool] = None,
+        socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
+        connection_pool: Optional[ConnectionPool] = None,
+        unix_socket_path: Optional[str] = None,
+        encoding: str = "utf-8",
+        encoding_errors: str = "strict",
+        decode_responses: Literal[False] = False,
+        retry_on_timeout: bool = False,
+        retry: Retry = Retry(
+            backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+        ),
+        retry_on_error: Optional[List[Type[Exception]]] = None,
+        ssl: bool = False,
+        ssl_keyfile: Optional[str] = None,
+        ssl_certfile: Optional[str] = None,
+        ssl_cert_reqs: Union[str, "ssl.VerifyMode"] = "required",
+        ssl_include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_ca_certs: Optional[str] = None,
+        ssl_ca_path: Optional[str] = None,
+        ssl_ca_data: Optional[str] = None,
+        ssl_check_hostname: bool = True,
+        ssl_password: Optional[str] = None,
+        ssl_validate_ocsp: bool = False,
+        ssl_validate_ocsp_stapled: bool = False,
+        ssl_ocsp_context: Optional["OpenSSL.SSL.Context"] = None,
+        ssl_ocsp_expected_cert: Optional[str] = None,
+        ssl_min_version: Optional["ssl.TLSVersion"] = None,
+        ssl_ciphers: Optional[str] = None,
+        max_connections: Optional[int] = None,
+        single_connection_client: bool = False,
+        health_check_interval: int = 0,
+        client_name: Optional[str] = None,
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
+        driver_info: Optional["DriverInfo"] = None,
+        username: Optional[str] = None,
+        redis_connect_func: Optional[Callable[[], None]] = None,
+        credential_provider: Optional[CredentialProvider] = None,
+        protocol: Optional[int] = 2,
+        cache: Optional[CacheInterface] = None,
+        cache_config: Optional[CacheConfig] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+    ) -> None: ...
+
+    # Overload for decode_responses=True
+    @overload
+    def __init__(
+        self: "RedisDecoded",
+        host: str = "localhost",
+        port: int = 6379,
+        db: int = 0,
+        password: Optional[str] = None,
+        socket_timeout: Optional[float] = None,
+        socket_connect_timeout: Optional[float] = None,
+        socket_keepalive: Optional[bool] = None,
+        socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
+        connection_pool: Optional[ConnectionPool] = None,
+        unix_socket_path: Optional[str] = None,
+        encoding: str = "utf-8",
+        encoding_errors: str = "strict",
+        decode_responses: Literal[True] = ...,
+        retry_on_timeout: bool = False,
+        retry: Retry = Retry(
+            backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+        ),
+        retry_on_error: Optional[List[Type[Exception]]] = None,
+        ssl: bool = False,
+        ssl_keyfile: Optional[str] = None,
+        ssl_certfile: Optional[str] = None,
+        ssl_cert_reqs: Union[str, "ssl.VerifyMode"] = "required",
+        ssl_include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_ca_certs: Optional[str] = None,
+        ssl_ca_path: Optional[str] = None,
+        ssl_ca_data: Optional[str] = None,
+        ssl_check_hostname: bool = True,
+        ssl_password: Optional[str] = None,
+        ssl_validate_ocsp: bool = False,
+        ssl_validate_ocsp_stapled: bool = False,
+        ssl_ocsp_context: Optional["OpenSSL.SSL.Context"] = None,
+        ssl_ocsp_expected_cert: Optional[str] = None,
+        ssl_min_version: Optional["ssl.TLSVersion"] = None,
+        ssl_ciphers: Optional[str] = None,
+        max_connections: Optional[int] = None,
+        single_connection_client: bool = False,
+        health_check_interval: int = 0,
+        client_name: Optional[str] = None,
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
+        driver_info: Optional["DriverInfo"] = None,
+        username: Optional[str] = None,
+        redis_connect_func: Optional[Callable[[], None]] = None,
+        credential_provider: Optional[CredentialProvider] = None,
+        protocol: Optional[int] = 2,
+        cache: Optional[CacheInterface] = None,
+        cache_config: Optional[CacheConfig] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+    ) -> None: ...
+
+    # Runtime bool decode_responses=some_bool_var
+    @overload
+    def __init__(
+        self: "RedisEncodedOrDecoded",
+        host: str = "localhost",
+        port: int = 6379,
+        db: int = 0,
+        password: Optional[str] = None,
+        socket_timeout: Optional[float] = None,
+        socket_connect_timeout: Optional[float] = None,
+        socket_keepalive: Optional[bool] = None,
+        socket_keepalive_options: Optional[Mapping[int, Union[int, bytes]]] = None,
+        connection_pool: Optional[ConnectionPool] = None,
+        unix_socket_path: Optional[str] = None,
+        encoding: str = "utf-8",
+        encoding_errors: str = "strict",
+        decode_responses: bool = False,
+        retry_on_timeout: bool = False,
+        retry: Retry = Retry(
+            backoff=ExponentialWithJitterBackoff(base=1, cap=10), retries=3
+        ),
+        retry_on_error: Optional[List[Type[Exception]]] = None,
+        ssl: bool = False,
+        ssl_keyfile: Optional[str] = None,
+        ssl_certfile: Optional[str] = None,
+        ssl_cert_reqs: Union[str, "ssl.VerifyMode"] = "required",
+        ssl_include_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
+        ssl_ca_certs: Optional[str] = None,
+        ssl_ca_path: Optional[str] = None,
+        ssl_ca_data: Optional[str] = None,
+        ssl_check_hostname: bool = True,
+        ssl_password: Optional[str] = None,
+        ssl_validate_ocsp: bool = False,
+        ssl_validate_ocsp_stapled: bool = False,
+        ssl_ocsp_context: Optional["OpenSSL.SSL.Context"] = None,
+        ssl_ocsp_expected_cert: Optional[str] = None,
+        ssl_min_version: Optional["ssl.TLSVersion"] = None,
+        ssl_ciphers: Optional[str] = None,
+        max_connections: Optional[int] = None,
+        single_connection_client: bool = False,
+        health_check_interval: int = 0,
+        client_name: Optional[str] = None,
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
+        driver_info: Optional["DriverInfo"] = None,
+        username: Optional[str] = None,
+        redis_connect_func: Optional[Callable[[], None]] = None,
+        credential_provider: Optional[CredentialProvider] = None,
+        protocol: Optional[int] = 2,
+        cache: Optional[CacheInterface] = None,
+        cache_config: Optional[CacheConfig] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+    ) -> None: ...
 
     @deprecated_args(
         args_to_warn=["retry_on_timeout"],
