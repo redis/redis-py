@@ -19,7 +19,7 @@ from redis.event import (
     EventDispatcher,
     EventListenerInterface,
     OnCacheEvictionEvent,
-    OnCacheInitialisationEvent,
+    OnCacheInitializationEvent,
 )
 from redis.observability.attributes import CSCReason
 from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
@@ -1534,14 +1534,14 @@ class TestUnitCacheProxy:
         event_dispatcher = EventDispatcher()
         listener = MagicMock(spec=EventListenerInterface)
         event_dispatcher.register_listeners({
-            OnCacheInitialisationEvent: [listener],
+            OnCacheInitializationEvent: [listener],
         })
 
         CacheProxy(mock_cache, event_dispatcher)
 
         listener.listen.assert_called_once()
         event = listener.listen.call_args[0][0]
-        assert isinstance(event, OnCacheInitialisationEvent)
+        assert isinstance(event, OnCacheInitializationEvent)
         assert callable(event.cache_items_callback)
 
     def test_initialization_event_callback_returns_cache_size(
@@ -1551,7 +1551,7 @@ class TestUnitCacheProxy:
         event_dispatcher = EventDispatcher()
         listener = MagicMock(spec=EventListenerInterface)
         event_dispatcher.register_listeners({
-            OnCacheInitialisationEvent: [listener],
+            OnCacheInitializationEvent: [listener],
         })
 
         proxy = CacheProxy(mock_cache, event_dispatcher)

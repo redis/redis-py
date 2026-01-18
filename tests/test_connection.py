@@ -699,7 +699,7 @@ class TestUnitCacheProxyConnection:
         platform.python_implementation() == "PyPy",
         reason="Pypy doesn't support side_effect",
     )
-    def test_cache_miss_event_emitted_for_non_cachable_command(self, mock_connection):
+    def test_cache_miss_event_not_emitted_for_non_cachable_command(self, mock_connection):
         """Test that OnCacheMissEvent is emitted for non-cachable commands."""
         cache = DefaultCache(CacheConfig(max_size=10))
         event_dispatcher = EventDispatcher()
@@ -726,9 +726,7 @@ class TestUnitCacheProxyConnection:
         result = proxy_connection.read_response()
 
         assert result == b"OK"
-        cache_miss_listener.listen.assert_called_once()
-        event = cache_miss_listener.listen.call_args[0][0]
-        assert isinstance(event, OnCacheMissEvent)
+        cache_miss_listener.listen.assert_not_called()
 
     @pytest.mark.skipif(
         platform.python_implementation() == "PyPy",

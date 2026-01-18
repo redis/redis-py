@@ -296,7 +296,7 @@ class AttributeBuilder:
         Args:
             db_namespace: Redis database index
             result: CSC result ('hit' or 'miss')
-            reason: Reason for CSC miss ('full' or 'invalidation')
+            reason: Reason for CSC eviction ('full' or 'invalidation')
 
         Returns:
             Dictionary of CSC attributes

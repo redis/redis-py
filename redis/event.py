@@ -127,7 +127,7 @@ class EventDispatcher(EventDispatcherInterface):
             OnMaintenanceNotificationEvent: [
                 ExportMaintenanceNotificationCountMetric(),
             ],
-            OnCacheInitialisationEvent: [InitialiseCSCItemsObservability()],
+            OnCacheInitializationEvent: [InitializeCSCItemsObservability()],
             OnCacheEvictionEvent: [ExportCSCEvictionMetric()],
             OnCacheHitEvent: [ExportCSCNetworkSavedMetric(), ExportCSCRequestMetric()],
             OnCacheMissEvent: [ExportCSCRequestMetric()],
@@ -441,7 +441,7 @@ class OnCacheMissEvent:
     db_namespace: Optional[int] = None
 
 @dataclass
-class OnCacheInitialisationEvent:
+class OnCacheInitializationEvent:
     """
     Event fired after cache is initialized.
     """
@@ -455,6 +455,7 @@ class OnCacheEvictionEvent:
     """
     count: int
     reason: CSCReason
+    db_namespace: Optional[int] = None
 
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
@@ -803,11 +804,11 @@ class ExportCSCRequestMetric(EventListenerInterface):
             result=result,
         )
 
-class InitialiseCSCItemsObservability(EventListenerInterface):
+class InitializeCSCItemsObservability(EventListenerInterface):
     """
     Listener that initializes CSC items observability.
     """
-    def listen(self, event: OnCacheInitialisationEvent):
+    def listen(self, event: OnCacheInitializationEvent):
         # Initialize gauge only once, subsequent calls won't have an affect.
         init_csc_items()
 
@@ -822,6 +823,7 @@ class ExportCSCEvictionMetric(EventListenerInterface):
         record_csc_eviction(
             count=event.count,
             reason=event.reason,
+            db_namespace=event.db_namespace,
         )
 
 class ExportCSCNetworkSavedMetric(EventListenerInterface):

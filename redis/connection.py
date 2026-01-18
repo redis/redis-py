@@ -37,7 +37,7 @@ from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from .event import AfterConnectionReleasedEvent, EventDispatcher, OnErrorEvent, OnMaintenanceNotificationEvent, \
     AfterConnectionCreatedEvent, AfterConnectionAcquiredEvent, AfterConnectionClosedEvent, OnCacheHitEvent, \
-    OnCacheMissEvent, OnCacheEvictionEvent, OnCacheInitialisationEvent
+    OnCacheMissEvent, OnCacheEvictionEvent, OnCacheInitializationEvent
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -1544,29 +1544,28 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     ):
         with self._cache_lock:
             # Check if command response exists in a cache and it's not in progress.
-            if (
-                self._current_command_cache_key is not None
-                and self._cache.get(self._current_command_cache_key) is not None
-                and self._cache.get(self._current_command_cache_key).status
-                != CacheEntryStatus.IN_PROGRESS
-            ):
-                res = copy.deepcopy(
-                    self._cache.get(self._current_command_cache_key).cache_value
-                )
-                self._current_command_cache_key = None
+            if self._current_command_cache_key is not None:
+                if (
+                    self._cache.get(self._current_command_cache_key) is not None
+                    and self._cache.get(self._current_command_cache_key).status
+                    != CacheEntryStatus.IN_PROGRESS
+                ):
+                    res = copy.deepcopy(
+                        self._cache.get(self._current_command_cache_key).cache_value
+                    )
+                    self._current_command_cache_key = None
+                    self._event_dispatcher.dispatch(
+                        OnCacheHitEvent(
+                            bytes_saved=len(res),
+                            db_namespace=self.db,
+                        )
+                    )
+                    return res
                 self._event_dispatcher.dispatch(
-                    OnCacheHitEvent(
-                        bytes_saved=len(res),
+                    OnCacheMissEvent(
                         db_namespace=self.db,
                     )
                 )
-                return res
-
-        self._event_dispatcher.dispatch(
-            OnCacheMissEvent(
-                db_namespace=self.db,
-            )
-        )
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
@@ -1730,13 +1729,16 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             if data[1] is None:
                 self._cache.flush()
             else:
-                self._cache.delete_by_redis_keys(data[1])
-                self._event_dispatcher.dispatch(
-                    OnCacheEvictionEvent(
-                        count=len(data[1]),
-                        reason=CSCReason.INVALIDATION,
+                keys_deleted = self._cache.delete_by_redis_keys(data[1])
+
+                if len(keys_deleted) > 0:
+                    self._event_dispatcher.dispatch(
+                        OnCacheEvictionEvent(
+                            count=len(data[1]),
+                            reason=CSCReason.INVALIDATION,
+                            db_namespace=self.db,
+                        )
                     )
-                )
 
 
 class SSLConnection(Connection):
@@ -2571,7 +2573,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                     ).get_cache()
 
             self._event_dispatcher.dispatch(
-                OnCacheInitialisationEvent(
+                OnCacheInitializationEvent(
                     cache_items_callback=lambda: self.cache.size,
                     db_namespace=self._connection_kwargs.get("db"),
                 )
