@@ -8,9 +8,10 @@ metrics are exported to OTel.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 
 from redis.observability import recorder
+from redis.observability.registry import ObservablesRegistry, get_observables_registry_instance
 from redis.observability.attributes import (
     ConnectionState,
     PubSubDirection,
@@ -998,3 +999,429 @@ class TestMetricGroupsDisabled:
         instruments.client_errors.add.assert_not_called()
         instruments.maintenance_notifications.add.assert_not_called()
         instruments.stream_lag.record.assert_not_called()
+
+
+class TestObservablesRegistry:
+    """Tests for ObservablesRegistry singleton and callback registration."""
+
+    def test_registry_singleton_returns_same_instance(self):
+        """Test that get_observables_registry_instance returns the same instance."""
+        registry1 = get_observables_registry_instance()
+        registry2 = get_observables_registry_instance()
+        assert registry1 is registry2
+
+    def test_registry_register_and_get_callbacks(self):
+        """Test registering and retrieving callbacks from the registry."""
+        registry = ObservablesRegistry()
+
+        callback1 = MagicMock(return_value=[])
+        callback2 = MagicMock(return_value=[])
+
+        registry.register("test_metric", callback1)
+        registry.register("test_metric", callback2)
+
+        callbacks = registry.get("test_metric")
+        assert len(callbacks) == 2
+        assert callback1 in callbacks
+        assert callback2 in callbacks
+
+    def test_registry_get_returns_empty_list_for_unknown_key(self):
+        """Test that get returns empty list for unknown metric key."""
+        registry = ObservablesRegistry()
+        callbacks = registry.get("unknown_metric")
+        assert callbacks == []
+
+    def test_registry_clear_removes_all_callbacks(self):
+        """Test that clear removes all registered callbacks."""
+        registry = ObservablesRegistry()
+
+        registry.register("metric1", MagicMock())
+        registry.register("metric2", MagicMock())
+
+        registry.clear()
+
+        assert registry.get("metric1") == []
+        assert registry.get("metric2") == []
+        assert len(registry) == 0
+
+
+class TestInitConnectionCount:
+    """Tests for init_connection_count and register_pools_connection_count."""
+
+    @pytest.fixture
+    def mock_observable_gauge(self):
+        """Create a mock observable gauge."""
+        return MagicMock()
+
+    @pytest.fixture
+    def mock_meter_with_observable(self, mock_observable_gauge):
+        """Create a mock meter that returns our mock observable gauge."""
+        meter = MagicMock()
+        meter.create_observable_gauge.return_value = mock_observable_gauge
+        return meter
+
+    @pytest.fixture
+    def mock_config_with_connection_basic(self):
+        """Create a config with CONNECTION_BASIC enabled."""
+        return OTelConfig(metric_groups=[MetricGroup.CONNECTION_BASIC])
+
+    @pytest.fixture
+    def setup_connection_count_recorder(
+        self, mock_meter_with_observable, mock_config_with_connection_basic
+    ):
+        """Setup recorder with mocked meter for connection count tests."""
+        recorder.reset_collector()
+        get_observables_registry_instance().clear()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(
+                mock_meter_with_observable, mock_config_with_connection_basic
+            )
+
+        with patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            yield mock_meter_with_observable
+
+        recorder.reset_collector()
+        get_observables_registry_instance().clear()
+
+    def test_init_connection_count_creates_observable_gauge(
+        self, setup_connection_count_recorder
+    ):
+        """Test that init_connection_count creates an observable gauge."""
+        mock_meter = setup_connection_count_recorder
+
+        recorder.init_connection_count()
+
+        mock_meter.create_observable_gauge.assert_called_once()
+        call_kwargs = mock_meter.create_observable_gauge.call_args[1]
+        assert call_kwargs['name'] == 'db.client.connection.count'
+
+    def test_init_connection_count_callback_aggregates_registry_callbacks(
+        self, setup_connection_count_recorder
+    ):
+        """Test that the observable callback aggregates all registered pool callbacks."""
+        mock_meter = setup_connection_count_recorder
+
+        recorder.init_connection_count()
+
+        # Get the callback that was passed to create_observable_gauge
+        call_args = mock_meter.create_observable_gauge.call_args
+        observable_callback = call_args[1]['callbacks'][0]
+
+        # Register some mock pool callbacks
+        from opentelemetry.metrics import Observation
+
+        mock_observation1 = Observation(5, attributes={"pool": "pool1"})
+        mock_observation2 = Observation(3, attributes={"pool": "pool2"})
+
+        pool_callback1 = MagicMock(return_value=[mock_observation1])
+        pool_callback2 = MagicMock(return_value=[mock_observation2])
+
+        registry = get_observables_registry_instance()
+        registry.register(recorder.CONNECTION_COUNT_REGISTRY_KEY, pool_callback1)
+        registry.register(recorder.CONNECTION_COUNT_REGISTRY_KEY, pool_callback2)
+
+        # Call the observable callback
+        observations = observable_callback(None)
+
+        # Verify both pool callbacks were called and observations aggregated
+        pool_callback1.assert_called_once()
+        pool_callback2.assert_called_once()
+        assert len(observations) == 2
+        assert mock_observation1 in observations
+        assert mock_observation2 in observations
+
+    def test_register_pools_connection_count_adds_callback_to_registry(
+        self, setup_connection_count_recorder
+    ):
+        """Test that register_pools_connection_count adds a callback to the registry."""
+        # Create mock connection pools
+        mock_pool1 = MagicMock()
+        mock_pool1.get_connection_count.return_value = [
+            (5, {"state": "idle"}),
+            (2, {"state": "used"}),
+        ]
+
+        mock_pool2 = MagicMock()
+        mock_pool2.get_connection_count.return_value = [
+            (3, {"state": "idle"}),
+        ]
+
+        recorder.register_pools_connection_count([mock_pool1, mock_pool2])
+
+        registry = get_observables_registry_instance()
+        callbacks = registry.get(recorder.CONNECTION_COUNT_REGISTRY_KEY)
+
+        assert len(callbacks) == 1
+
+        # Call the registered callback and verify it returns observations
+        observations = callbacks[0]()
+
+        assert len(observations) == 3
+        mock_pool1.get_connection_count.assert_called_once()
+        mock_pool2.get_connection_count.assert_called_once()
+
+
+class TestInitCSCItems:
+    """Tests for init_csc_items and register_csc_items_callback."""
+
+    @pytest.fixture
+    def mock_observable_gauge(self):
+        """Create a mock observable gauge."""
+        return MagicMock()
+
+    @pytest.fixture
+    def mock_meter_with_observable(self, mock_observable_gauge):
+        """Create a mock meter that returns our mock observable gauge."""
+        meter = MagicMock()
+        meter.create_observable_gauge.return_value = mock_observable_gauge
+        return meter
+
+    @pytest.fixture
+    def mock_config_with_csc(self):
+        """Create a config with CSC metric group enabled."""
+        return OTelConfig(metric_groups=[MetricGroup.CSC])
+
+    @pytest.fixture
+    def setup_csc_recorder(self, mock_meter_with_observable, mock_config_with_csc):
+        """Setup recorder with mocked meter for CSC tests."""
+        recorder.reset_collector()
+        get_observables_registry_instance().clear()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(
+                mock_meter_with_observable, mock_config_with_csc
+            )
+
+        with patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            yield mock_meter_with_observable
+
+        recorder.reset_collector()
+        get_observables_registry_instance().clear()
+
+    def test_init_csc_items_creates_observable_gauge(self, setup_csc_recorder):
+        """Test that init_csc_items creates an observable gauge."""
+        mock_meter = setup_csc_recorder
+
+        recorder.init_csc_items()
+
+        mock_meter.create_observable_gauge.assert_called_once()
+        call_args = mock_meter.create_observable_gauge.call_args
+        assert call_args[1]['name'] == 'redis.client.csc.items'
+
+    def test_init_csc_items_callback_aggregates_registry_callbacks(
+        self, setup_csc_recorder
+    ):
+        """Test that the CSC observable callback aggregates all registered callbacks."""
+        mock_meter = setup_csc_recorder
+
+        recorder.init_csc_items()
+
+        # Get the callback that was passed to create_observable_gauge
+        call_args = mock_meter.create_observable_gauge.call_args
+        observable_callback = call_args[1]['callbacks'][0]
+
+        # Register some mock CSC callbacks
+        from opentelemetry.metrics import Observation
+
+        mock_observation1 = Observation(100, attributes={"db": 0})
+        mock_observation2 = Observation(50, attributes={"db": 1})
+
+        csc_callback1 = MagicMock(return_value=[mock_observation1])
+        csc_callback2 = MagicMock(return_value=[mock_observation2])
+
+        registry = get_observables_registry_instance()
+        registry.register(recorder.CSC_ITEMS_REGISTRY_KEY, csc_callback1)
+        registry.register(recorder.CSC_ITEMS_REGISTRY_KEY, csc_callback2)
+
+        # Call the observable callback
+        observations = observable_callback(None)
+
+        # Verify both callbacks were called and observations aggregated
+        csc_callback1.assert_called_once()
+        csc_callback2.assert_called_once()
+        assert len(observations) == 2
+        assert mock_observation1 in observations
+        assert mock_observation2 in observations
+
+    def test_register_csc_items_callback_adds_callback_to_registry(
+        self, setup_csc_recorder
+    ):
+        """Test that register_csc_items_callback adds a callback to the registry."""
+        # Create a mock cache size callback
+        cache_size_callback = MagicMock(return_value=42)
+
+        recorder.register_csc_items_callback(cache_size_callback, db_namespace=0)
+
+        registry = get_observables_registry_instance()
+        callbacks = registry.get(recorder.CSC_ITEMS_REGISTRY_KEY)
+
+        assert len(callbacks) == 1
+
+        # Call the registered callback and verify it returns an observation
+        observations = callbacks[0]()
+
+        assert len(observations) == 1
+        assert observations[0].value == 42
+        cache_size_callback.assert_called_once()
+
+    def test_register_csc_items_callback_multiple_registrations(
+        self, setup_csc_recorder
+    ):
+        """Test registering multiple CSC callbacks."""
+        callback1 = MagicMock(return_value=10)
+        callback2 = MagicMock(return_value=20)
+
+        recorder.register_csc_items_callback(callback1, db_namespace=0)
+        recorder.register_csc_items_callback(callback2, db_namespace=1)
+
+        registry = get_observables_registry_instance()
+        callbacks = registry.get(recorder.CSC_ITEMS_REGISTRY_KEY)
+
+        assert len(callbacks) == 2
+
+        # Verify each callback returns correct observation
+        obs1 = callbacks[0]()
+        obs2 = callbacks[1]()
+
+        assert obs1[0].value == 10
+        assert obs2[0].value == 20
+
+
+class TestObservableGaugeIntegration:
+    """Integration tests for observable gauge pattern with registry."""
+
+    @pytest.fixture
+    def clean_registry(self):
+        """Ensure clean registry before and after test."""
+        get_observables_registry_instance().clear()
+        yield
+        get_observables_registry_instance().clear()
+
+    def test_full_observable_gauge_flow(self, clean_registry):
+        """Test the complete flow: init -> register -> callback invocation."""
+        from opentelemetry.metrics import Observation
+
+        # Create mock meter and collector
+        mock_meter = MagicMock()
+        captured_callback = None
+
+        def capture_callback(name, **kwargs):
+            nonlocal captured_callback
+            captured_callback = kwargs.get('callbacks', [None])[0]
+            return MagicMock()
+
+        mock_meter.create_observable_gauge.side_effect = capture_callback
+        mock_meter.create_counter.return_value = MagicMock()
+        mock_meter.create_histogram.return_value = MagicMock()
+        mock_meter.create_up_down_counter.return_value = MagicMock()
+
+        config = OTelConfig(metric_groups=[MetricGroup.CONNECTION_BASIC])
+
+        recorder.reset_collector()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            # Step 1: Initialize the observable gauge
+            recorder.init_connection_count()
+
+            # Step 2: Register pool callbacks
+            mock_pool = MagicMock()
+            mock_pool.get_connection_count.return_value = [
+                (5, {"state": "idle", "pool": "pool1"}),
+            ]
+            recorder.register_pools_connection_count([mock_pool])
+
+            # Step 3: Simulate OTel calling the observable callback
+            assert captured_callback is not None
+            observations = captured_callback(None)
+
+            # Verify the observation was created correctly
+            assert len(observations) == 1
+            assert observations[0].value == 5
+
+        recorder.reset_collector()
+
+    def test_observable_callback_handles_empty_registry(self, clean_registry):
+        """Test that observable callback handles empty registry gracefully."""
+        mock_meter = MagicMock()
+        captured_callback = None
+
+        def capture_callback(name, **kwargs):
+            nonlocal captured_callback
+            captured_callback = kwargs.get('callbacks', [None])[0]
+            return MagicMock()
+
+        mock_meter.create_observable_gauge.side_effect = capture_callback
+        mock_meter.create_counter.return_value = MagicMock()
+        mock_meter.create_histogram.return_value = MagicMock()
+        mock_meter.create_up_down_counter.return_value = MagicMock()
+
+        config = OTelConfig(metric_groups=[MetricGroup.CONNECTION_BASIC])
+
+        recorder.reset_collector()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            recorder.init_connection_count()
+
+            # Don't register any pools - registry is empty
+            assert captured_callback is not None
+            observations = captured_callback(None)
+
+            # Should return empty list, not raise an error
+            assert observations == []
+
+        recorder.reset_collector()
+
+    def test_multiple_pools_aggregated_correctly(self, clean_registry):
+        """Test that observations from multiple pools are aggregated correctly."""
+        mock_meter = MagicMock()
+        captured_callback = None
+
+        def capture_callback(name, **kwargs):
+            nonlocal captured_callback
+            captured_callback = kwargs.get('callbacks', [None])[0]
+            return MagicMock()
+
+        mock_meter.create_observable_gauge.side_effect = capture_callback
+        mock_meter.create_counter.return_value = MagicMock()
+        mock_meter.create_histogram.return_value = MagicMock()
+        mock_meter.create_up_down_counter.return_value = MagicMock()
+
+        config = OTelConfig(metric_groups=[MetricGroup.CONNECTION_BASIC])
+
+        recorder.reset_collector()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            recorder.init_connection_count()
+
+            # Register multiple pools in separate calls
+            mock_pool1 = MagicMock()
+            mock_pool1.get_connection_count.return_value = [
+                (5, {"state": "idle"}),
+                (2, {"state": "used"}),
+            ]
+
+            mock_pool2 = MagicMock()
+            mock_pool2.get_connection_count.return_value = [
+                (3, {"state": "idle"}),
+            ]
+
+            recorder.register_pools_connection_count([mock_pool1])
+            recorder.register_pools_connection_count([mock_pool2])
+
+            # Simulate OTel calling the observable callback
+            observations = captured_callback(None)
+
+            # Should have 3 observations total (2 from pool1, 1 from pool2)
+            assert len(observations) == 3
+
+        recorder.reset_collector()

@@ -8,11 +8,12 @@ from typing import Dict, List, Optional, Type, Union, Callable, Iterable
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
-from redis.observability.attributes import PubSubDirection
+from redis.observability.attributes import PubSubDirection, CSCResult, CSCReason
 from redis.observability.recorder import record_operation_duration, record_error_count, record_maint_notification_count, \
     record_connection_create_time, init_connection_count, record_connection_relaxed_timeout, record_connection_handoff, \
     record_pubsub_message, record_streaming_lag, record_connection_wait_time, record_connection_use_time, \
-    record_connection_closed
+    record_connection_closed, record_csc_request, init_csc_items, record_csc_eviction, record_csc_network_saved, \
+    register_pools_connection_count, register_csc_items_callback
 from redis.utils import str_if_bytes
 
 
@@ -103,10 +104,6 @@ class EventDispatcher(EventDispatcherInterface):
             AsyncAfterConnectionReleasedEvent: [
                 AsyncReAuthConnectionListener(),
             ],
-            OnErrorEvent: [ExportErrorCountMetric()],
-            OnMaintenanceNotificationEvent: [
-                ExportMaintenanceNotificationCountMetric(),
-            ],
             AfterConnectionCreatedEvent: [ExportConnectionCreateTimeMetric()],
             AfterConnectionTimeoutUpdatedEvent: [
                 ExportConnectionRelaxedTimeoutMetric(),
@@ -126,6 +123,14 @@ class EventDispatcher(EventDispatcherInterface):
             OnStreamMessageReceivedEvent: [
                 ExportStreamingLagMetric(),
             ],
+            OnErrorEvent: [ExportErrorCountMetric()],
+            OnMaintenanceNotificationEvent: [
+                ExportMaintenanceNotificationCountMetric(),
+            ],
+            OnCacheInitializationEvent: [InitializeCSCItemsObservability()],
+            OnCacheEvictionEvent: [ExportCSCEvictionMetric()],
+            OnCacheHitEvent: [ExportCSCNetworkSavedMetric(), ExportCSCRequestMetric()],
+            OnCacheMissEvent: [ExportCSCRequestMetric()],
         }
 
         self._lock = threading.Lock()
@@ -420,6 +425,38 @@ class AfterConnectionClosedEvent:
     close_reason: "CloseReason"
     error: Optional[Exception] = None
 
+@dataclass
+class OnCacheHitEvent:
+    """
+    Event fired whenever a cache hit occurs.
+    """
+    bytes_saved: int
+    db_namespace: Optional[int] = None
+
+@dataclass
+class OnCacheMissEvent:
+    """
+    Event fired whenever a cache miss occurs.
+    """
+    db_namespace: Optional[int] = None
+
+@dataclass
+class OnCacheInitializationEvent:
+    """
+    Event fired after cache is initialized.
+    """
+    cache_items_callback: Callable
+    db_namespace: Optional[int] = None
+
+@dataclass
+class OnCacheEvictionEvent:
+    """
+    Event fired after cache eviction.
+    """
+    count: int
+    reason: CSCReason
+    db_namespace: Optional[int] = None
+
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
 
@@ -651,7 +688,11 @@ class InitializeConnectionCountObservability(EventListenerInterface):
     Listener that initializes connection count observability.
     """
     def listen(self, event: AfterPooledConnectionsInstantiationEvent):
-        init_connection_count(event.connection_pools)
+        # Initialize gauge only once, subsequent calls won't have an affect.
+        init_connection_count()
+
+        # Register pools for connection count observability.
+        register_pools_connection_count(event.connection_pools)
 
 class ExportConnectionRelaxedTimeoutMetric(EventListenerInterface):
     """
@@ -746,4 +787,51 @@ class ExportConnectionClosedMetric(EventListenerInterface):
         record_connection_closed(
             close_reason=event.close_reason,
             error_type=event.error,
+        )
+
+class ExportCSCRequestMetric(EventListenerInterface):
+    """
+    Listener that exports CSC request metric.
+    """
+    def listen(self, event: Union[OnCacheHitEvent, OnCacheMissEvent]):
+        if isinstance(event, OnCacheHitEvent):
+            result = CSCResult.HIT
+        else:
+            result = CSCResult.MISS
+
+        record_csc_request(
+            db_namespace=event.db_namespace,
+            result=result,
+        )
+
+class InitializeCSCItemsObservability(EventListenerInterface):
+    """
+    Listener that initializes CSC items observability.
+    """
+    def listen(self, event: OnCacheInitializationEvent):
+        # Initialize gauge only once, subsequent calls won't have an affect.
+        init_csc_items()
+
+        # Register cache items callback for CSC items observability.
+        register_csc_items_callback(event.cache_items_callback, event.db_namespace)
+
+class ExportCSCEvictionMetric(EventListenerInterface):
+    """
+    Listener that exports CSC eviction metric.
+    """
+    def listen(self, event: OnCacheEvictionEvent):
+        record_csc_eviction(
+            count=event.count,
+            reason=event.reason,
+            db_namespace=event.db_namespace,
+        )
+
+class ExportCSCNetworkSavedMetric(EventListenerInterface):
+    """
+    Listener that exports CSC network saved metric.
+    """
+    def listen(self, event: OnCacheHitEvent):
+        record_csc_network_saved(
+            bytes_saved=event.bytes_saved,
+            db_namespace=event.db_namespace,
         )
