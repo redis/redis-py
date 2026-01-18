@@ -414,7 +414,7 @@ class RedisMetricsCollector:
         Record a connection closed event.
 
         Args:
-            close_reason: Reason for closing (e.g., 'error', 'application_close')
+            close_reason: Reason for closing (e.g. 'error', 'application_close')
             error_type: Error type if closed due to error
         """
         if not hasattr(self, "connection_closed"):

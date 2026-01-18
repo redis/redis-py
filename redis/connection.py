@@ -195,7 +195,7 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         pass
 
     @abstractmethod
@@ -386,7 +386,7 @@ class MaintNotificationsAbstractConnection:
         pass
 
     @abstractmethod
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         pass
 
     def _configure_maintenance_notifications(
@@ -866,7 +866,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if retry_socket_connect:
                 sock = self.retry.call_with_retry(
                     lambda: self._connect(),
-                    lambda error, failure_count: self.disconnect(error, failure_count),
+                    lambda error, failure_count: self.disconnect(error=error, failure_count=failure_count),
                     with_failure_count=True
                 )
             else:
@@ -1046,7 +1046,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
 
@@ -1068,8 +1068,12 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         except OSError:
             pass
 
-        if len(args) > 0 and isinstance(args[0], Exception):
-            if len(args) > 2 and args[2]:
+        error = kwargs.get('error')
+        failure_count = kwargs.get('failure_count')
+        health_check_failed = kwargs.get('health_check_failed')
+
+        if error:
+            if health_check_failed:
                 close_reason = CloseReason.HEALTHCHECK_FAILED
             else:
                 close_reason = CloseReason.ERROR
@@ -1080,14 +1084,14 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                         error=args[0],
                         server_address=self.host,
                         server_port=self.port,
-                        retry_attempts=args[1],
+                        retry_attempts=failure_count,
                     )
                 )
 
             self._event_dispatcher.dispatch(
                 AfterConnectionClosedEvent(
                     close_reason=close_reason,
-                    error=args[0],
+                    error=error,
                 )
             )
         else:
@@ -1114,7 +1118,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
     def _ping_failed(self, error, failure_count):
         """Function to call when PING fails"""
-        self.disconnect(error, failure_count, True)
+        self.disconnect(error=error, failure_count=failure_count, health_check_failed=True)
 
     def check_health(self):
         """Check the health of the connection with a PING/PONG"""
@@ -1470,10 +1474,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def on_connect(self):
         self._conn.on_connect()
 
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         with self._cache_lock:
             self._cache.flush()
-        self._conn.disconnect(*args)
+        self._conn.disconnect(*args, **kwargs)
 
     def check_health(self):
         self._conn.check_health()
