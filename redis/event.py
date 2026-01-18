@@ -11,7 +11,8 @@ from redis.credentials import CredentialProvider, StreamingCredentialProvider
 from redis.observability.attributes import PubSubDirection
 from redis.observability.recorder import record_operation_duration, record_error_count, record_maint_notification_count, \
     record_connection_create_time, init_connection_count, record_connection_relaxed_timeout, record_connection_handoff, \
-    record_pubsub_message, record_streaming_lag
+    record_pubsub_message, record_streaming_lag, record_connection_wait_time, record_connection_use_time, \
+    record_connection_closed
 from redis.utils import str_if_bytes
 
 
@@ -112,6 +113,12 @@ class EventDispatcher(EventDispatcherInterface):
             ],
             AfterConnectionHandoffEvent: [
                 ExportConnectionHandoffMetric(),
+            ],
+            AfterConnectionAcquiredEvent: [
+                ExportConnectionWaitTimeMetric(),
+            ],
+            AfterConnectionClosedEvent: [
+                ExportConnectionClosedMetric(),
             ],
             OnPubSubMessageEvent: [
                 ExportPubSubMessageMetric(),
@@ -396,6 +403,22 @@ class AfterConnectionHandoffEvent:
     Event fired after connection is handed off.
     """
     connection_pool: "ConnectionPoolInterface"
+
+@dataclass
+class AfterConnectionAcquiredEvent:
+    """
+    Event fired after connection is acquired from pool.
+    """
+    connection_pool: "ConnectionPoolInterface"
+    duration_seconds: float
+
+@dataclass
+class AfterConnectionClosedEvent:
+    """
+    Event fired after connection is closed.
+    """
+    close_reason: "CloseReason"
+    error: Optional[Exception] = None
 
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
@@ -704,3 +727,23 @@ class ExportStreamingLagMetric(EventListenerInterface):
                         consumer_group=event.consumer_group,
                         consumer_name=event.consumer_name,
                     )
+
+class ExportConnectionWaitTimeMetric(EventListenerInterface):
+    """
+    Listener that exports connection wait time metric.
+    """
+    def listen(self, event: AfterConnectionAcquiredEvent):
+        record_connection_wait_time(
+            pool_name=repr(event.connection_pool),
+            duration_seconds=event.duration_seconds,
+        )
+
+class ExportConnectionClosedMetric(EventListenerInterface):
+    """
+    Listener that exports connection closed metric.
+    """
+    def listen(self, event: AfterConnectionClosedEvent):
+        record_connection_closed(
+            close_reason=event.close_reason,
+            error_type=event.error,
+        )

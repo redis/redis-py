@@ -36,7 +36,7 @@ from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from .event import AfterConnectionReleasedEvent, EventDispatcher, OnErrorEvent, OnMaintenanceNotificationEvent, \
-    AfterConnectionCreatedEvent
+    AfterConnectionCreatedEvent, AfterConnectionAcquiredEvent, AfterConnectionClosedEvent
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -56,6 +56,7 @@ from .maint_notifications import (
 )
 from .observability.attributes import AttributeBuilder, DB_CLIENT_CONNECTION_STATE, ConnectionState, \
     DB_CLIENT_CONNECTION_POOL_NAME
+from .observability.metrics import CloseReason
 from .retry import Retry
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
@@ -194,7 +195,7 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         pass
 
     @abstractmethod
@@ -385,7 +386,7 @@ class MaintNotificationsAbstractConnection:
         pass
 
     @abstractmethod
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         pass
 
     def _configure_maintenance_notifications(
@@ -865,7 +866,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if retry_socket_connect:
                 sock = self.retry.call_with_retry(
                     lambda: self._connect(),
-                    lambda error, failure_count: self.disconnect(error, failure_count),
+                    lambda error, failure_count: self.disconnect(error=error, failure_count=failure_count),
                     with_failure_count=True
                 )
             else:
@@ -1045,7 +1046,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
 
@@ -1067,16 +1068,38 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         except OSError:
             pass
 
-        if len(args) > 0 and isinstance(args[0], Exception):
+        error = kwargs.get('error')
+        failure_count = kwargs.get('failure_count')
+        health_check_failed = kwargs.get('health_check_failed')
+
+        if error:
+            if health_check_failed:
+                close_reason = CloseReason.HEALTHCHECK_FAILED
+            else:
+                close_reason = CloseReason.ERROR
+
             if args[1] <= self.retry.get_retries():
                 self._event_dispatcher.dispatch(
                     OnErrorEvent(
                         error=args[0],
                         server_address=self.host,
                         server_port=self.port,
-                        retry_attempts=args[1],
+                        retry_attempts=failure_count,
                     )
                 )
+
+            self._event_dispatcher.dispatch(
+                AfterConnectionClosedEvent(
+                    close_reason=close_reason,
+                    error=error,
+                )
+            )
+        else:
+            self._event_dispatcher.dispatch(
+                AfterConnectionClosedEvent(
+                    close_reason=CloseReason.APPLICATION_CLOSE
+                )
+            )
 
     def mark_for_reconnect(self):
         self._should_reconnect = True
@@ -1095,7 +1118,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
     def _ping_failed(self, error, failure_count):
         """Function to call when PING fails"""
-        self.disconnect(error, failure_count)
+        self.disconnect(error=error, failure_count=failure_count, health_check_failed=True)
 
     def check_health(self):
         """Check the health of the connection with a PING/PONG"""
@@ -1451,10 +1474,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def on_connect(self):
         self._conn.on_connect()
 
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         with self._cache_lock:
             self._cache.flush()
-        self._conn.disconnect(*args)
+        self._conn.disconnect(*args, **kwargs)
 
     def check_health(self):
         self._conn.check_health()
@@ -2648,6 +2671,8 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     def get_connection(self, command_name=None, *keys, **options) -> "Connection":
         "Get a connection from the pool"
 
+        # Start timing for observability
+        start_time_acquired = time.monotonic()
         self._checkpid()
         is_created = False
 
@@ -2656,7 +2681,7 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 connection = self._available_connections.pop()
             except IndexError:
                 # Start timing for observability
-                start_time = time.monotonic()
+                start_time_created = time.monotonic()
 
                 connection = self.make_connection()
                 is_created = True
@@ -2691,9 +2716,16 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             self._event_dispatcher.dispatch(
                 AfterConnectionCreatedEvent(
                     connection_pool=self,
-                    duration_seconds=time.monotonic() - start_time,
+                    duration_seconds=time.monotonic() - start_time_created,
                 )
             )
+
+        self._event_dispatcher.dispatch(
+            AfterConnectionAcquiredEvent(
+                connection_pool=self,
+                duration_seconds=time.monotonic() - start_time_acquired,
+            )
+        )
         return connection
 
     def get_encoder(self) -> Encoder:
@@ -2957,6 +2989,7 @@ class BlockingConnectionPool(ConnectionPool):
         create new connections when we need to, i.e.: the actual number of
         connections will only increase in response to demand.
         """
+        start_time_acquired = time.monotonic()
         # Make sure we haven't changed process.
         self._checkpid()
         is_created = False
@@ -2979,7 +3012,7 @@ class BlockingConnectionPool(ConnectionPool):
             # a new connection to add to the pool.
             if connection is None:
                 # Start timing for observability
-                start_time = time.monotonic()
+                start_time_created = time.monotonic()
                 connection = self.make_connection()
                 is_created = True
         finally:
@@ -3014,9 +3047,16 @@ class BlockingConnectionPool(ConnectionPool):
             self._event_dispatcher.dispatch(
                 AfterConnectionCreatedEvent(
                     connection_pool=self,
-                    duration_seconds=time.monotonic() - start_time,
+                    duration_seconds=time.monotonic() - start_time_created,
                 )
             )
+
+        self._event_dispatcher.dispatch(
+            AfterConnectionAcquiredEvent(
+                connection_pool=self,
+                duration_seconds=time.monotonic() - start_time_acquired,
+            )
+        )
 
         return connection
 
