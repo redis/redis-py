@@ -12,7 +12,8 @@ from redis.observability.attributes import PubSubDirection, CSCResult, CSCReason
 from redis.observability.recorder import record_operation_duration, record_error_count, record_maint_notification_count, \
     record_connection_create_time, init_connection_count, record_connection_relaxed_timeout, record_connection_handoff, \
     record_pubsub_message, record_streaming_lag, record_connection_wait_time, record_connection_use_time, \
-    record_connection_closed, record_csc_request, init_csc_items, record_csc_eviction, record_csc_network_saved
+    record_connection_closed, record_csc_request, init_csc_items, record_csc_eviction, record_csc_network_saved, \
+    register_pools_connection_count, register_csc_items_callback
 from redis.utils import str_if_bytes
 
 
@@ -445,6 +446,7 @@ class OnCacheInitialisationEvent:
     Event fired after cache is initialized.
     """
     cache_items_callback: Callable
+    db_namespace: Optional[int] = None
 
 @dataclass
 class OnCacheEvictionEvent:
@@ -685,7 +687,11 @@ class InitializeConnectionCountObservability(EventListenerInterface):
     Listener that initializes connection count observability.
     """
     def listen(self, event: AfterPooledConnectionsInstantiationEvent):
-        init_connection_count(event.connection_pools)
+        # Initialize gauge only once, subsequent calls won't have an affect.
+        init_connection_count()
+
+        # Register pools for connection count observability.
+        register_pools_connection_count(event.connection_pools)
 
 class ExportConnectionRelaxedTimeoutMetric(EventListenerInterface):
     """
@@ -802,9 +808,11 @@ class InitialiseCSCItemsObservability(EventListenerInterface):
     Listener that initializes CSC items observability.
     """
     def listen(self, event: OnCacheInitialisationEvent):
-        init_csc_items(
-            callback=event.cache_items_callback,
-        )
+        # Initialize gauge only once, subsequent calls won't have an affect.
+        init_csc_items()
+
+        # Register cache items callback for CSC items observability.
+        register_csc_items_callback(event.cache_items_callback, event.db_namespace)
 
 class ExportCSCEvictionMetric(EventListenerInterface):
     """

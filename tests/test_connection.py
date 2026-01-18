@@ -28,7 +28,7 @@ from redis.connection import (
     Connection,
     SSLConnection,
     UnixDomainSocketConnection,
-    parse_url,
+    parse_url, BlockingConnectionPool,
 )
 from redis.credentials import UsernamePasswordCredentialProvider
 from redis.event import (
@@ -38,6 +38,7 @@ from redis.event import (
     OnCacheMissEvent,
 )
 from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
+from redis.observability.attributes import DB_CLIENT_CONNECTION_POOL_NAME, DB_CLIENT_CONNECTION_STATE, ConnectionState
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
 
@@ -778,3 +779,198 @@ class TestUnitCacheProxyConnection:
         cache_hit_listener.listen.assert_not_called()
         # Cache miss should be emitted instead
         cache_miss_listener.listen.assert_called_once()
+
+
+class TestConnectionPoolGetConnectionCount:
+    """Tests for ConnectionPool.get_connection_count() method."""
+
+    def test_get_connection_count_returns_idle_and_used_counts(self):
+        """Test that get_connection_count returns both idle and used connection counts."""
+        pool = ConnectionPool(max_connections=10)
+
+        # Initially, no connections exist
+        counts = pool.get_connection_count()
+        assert len(counts) == 2
+
+        # Check idle connections count
+        idle_count, idle_attrs = counts[0]
+        assert idle_count == 0
+        assert DB_CLIENT_CONNECTION_POOL_NAME in idle_attrs
+        assert idle_attrs[DB_CLIENT_CONNECTION_STATE] == ConnectionState.IDLE.value
+
+        # Check used connections count
+        used_count, used_attrs = counts[1]
+        assert used_count == 0
+        assert DB_CLIENT_CONNECTION_POOL_NAME in used_attrs
+        assert used_attrs[DB_CLIENT_CONNECTION_STATE] == ConnectionState.USED.value
+
+        pool.disconnect()
+
+    def test_get_connection_count_with_connections_in_use(self):
+        """Test get_connection_count when connections are in use."""
+
+        pool = ConnectionPool(max_connections=10)
+
+        # Create mock connections
+        mock_conn1 = MagicMock()
+        mock_conn1.pid = pool.pid
+
+        mock_conn2 = MagicMock()
+        mock_conn2.pid = pool.pid
+
+        # Simulate connections in use
+        pool._in_use_connections.add(mock_conn1)
+        pool._in_use_connections.add(mock_conn2)
+
+        counts = pool.get_connection_count()
+
+        idle_count, idle_attrs = counts[0]
+        used_count, used_attrs = counts[1]
+
+        assert idle_count == 0
+        assert used_count == 2
+        assert idle_attrs[DB_CLIENT_CONNECTION_STATE] == ConnectionState.IDLE.value
+        assert used_attrs[DB_CLIENT_CONNECTION_STATE] == ConnectionState.USED.value
+
+        pool.disconnect()
+
+    def test_get_connection_count_with_available_connections(self):
+        """Test get_connection_count when connections are available (idle)."""
+
+        pool = ConnectionPool(max_connections=10)
+
+        # Create mock connections
+        mock_conn1 = MagicMock()
+        mock_conn1.pid = pool.pid
+
+        mock_conn2 = MagicMock()
+        mock_conn2.pid = pool.pid
+
+        mock_conn3 = MagicMock()
+        mock_conn3.pid = pool.pid
+
+        # Simulate available connections
+        pool._available_connections.append(mock_conn1)
+        pool._available_connections.append(mock_conn2)
+        pool._available_connections.append(mock_conn3)
+
+        counts = pool.get_connection_count()
+
+        idle_count, idle_attrs = counts[0]
+        used_count, used_attrs = counts[1]
+
+        assert idle_count == 3
+        assert used_count == 0
+        assert idle_attrs[DB_CLIENT_CONNECTION_STATE] == ConnectionState.IDLE.value
+        assert used_attrs[DB_CLIENT_CONNECTION_STATE] == ConnectionState.USED.value
+
+        pool.disconnect()
+
+    def test_get_connection_count_mixed_connections(self):
+        """Test get_connection_count with both idle and used connections."""
+
+        pool = ConnectionPool(max_connections=10)
+
+        # Create mock connections
+        mock_idle = MagicMock()
+        mock_idle.pid = pool.pid
+
+        mock_used1 = MagicMock()
+        mock_used1.pid = pool.pid
+
+        mock_used2 = MagicMock()
+        mock_used2.pid = pool.pid
+
+        # Simulate mixed state
+        pool._available_connections.append(mock_idle)
+        pool._in_use_connections.add(mock_used1)
+        pool._in_use_connections.add(mock_used2)
+
+        counts = pool.get_connection_count()
+
+        idle_count, _ = counts[0]
+        used_count, _ = counts[1]
+
+        assert idle_count == 1
+        assert used_count == 2
+
+        pool.disconnect()
+
+    def test_get_connection_count_includes_pool_name_in_attributes(self):
+        """Test that get_connection_count includes pool name in attributes."""
+
+        pool = ConnectionPool(max_connections=10)
+
+        counts = pool.get_connection_count()
+
+        idle_count, idle_attrs = counts[0]
+        used_count, used_attrs = counts[1]
+
+        # Both should have the pool name
+        assert DB_CLIENT_CONNECTION_POOL_NAME in idle_attrs
+        assert DB_CLIENT_CONNECTION_POOL_NAME in used_attrs
+
+        # Pool name should be the repr of the pool
+        assert repr(pool) in idle_attrs[DB_CLIENT_CONNECTION_POOL_NAME]
+        assert repr(pool) in used_attrs[DB_CLIENT_CONNECTION_POOL_NAME]
+
+        pool.disconnect()
+
+
+class TestBlockingConnectionPoolGetConnectionCount:
+    """Tests for BlockingConnectionPool.get_connection_count() method."""
+
+    def test_get_connection_count_returns_idle_and_used_counts(self):
+        """Test that BlockingConnectionPool.get_connection_count returns both counts."""
+
+        pool = BlockingConnectionPool(max_connections=10)
+
+        # Initially, no connections exist
+        counts = pool.get_connection_count()
+        assert len(counts) == 2
+
+        idle_count, idle_attrs = counts[0]
+        used_count, used_attrs = counts[1]
+
+        assert idle_count == 0
+        assert used_count == 0
+        assert idle_attrs[DB_CLIENT_CONNECTION_STATE] == ConnectionState.IDLE.value
+        assert used_attrs[DB_CLIENT_CONNECTION_STATE] == ConnectionState.USED.value
+
+        pool.disconnect()
+
+    def test_get_connection_count_with_connections_in_queue(self):
+        """Test get_connection_count when connections are in the queue (idle)."""
+
+        pool = BlockingConnectionPool(max_connections=10)
+
+        # Create mock connections and add to queue
+        mock_conn1 = MagicMock()
+        mock_conn1.pid = pool.pid
+
+        mock_conn2 = MagicMock()
+        mock_conn2.pid = pool.pid
+
+        # Add connections to the pool's internal list and queue
+        pool._connections.append(mock_conn1)
+        pool._connections.append(mock_conn2)
+
+        # Clear the queue and add our connections
+        while not pool.pool.empty():
+            try:
+                pool.pool.get_nowait()
+            except Exception:
+                break
+
+        pool.pool.put_nowait(mock_conn1)
+        pool.pool.put_nowait(mock_conn2)
+
+        counts = pool.get_connection_count()
+
+        idle_count, _ = counts[0]
+        used_count, _ = counts[1]
+
+        assert idle_count == 2
+        assert used_count == 0
+
+        pool.disconnect()

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, List, Optional, Union
 
-from redis.event import EventDispatcherInterface, EventDispatcher, OnCacheInitialisationEvent, \
+from redis.event import EventDispatcherInterface, EventDispatcher, \
     OnCacheEvictionEvent, OnCacheHitEvent
 from redis.observability.attributes import CSCResult, CSCReason
 
@@ -259,12 +259,6 @@ class CacheProxy(CacheInterface):
             self._event_dispatcher = EventDispatcher()
         else:
             self._event_dispatcher = event_dispatcher
-
-        self._event_dispatcher.dispatch(
-            OnCacheInitialisationEvent(
-                cache_items_callback=lambda: self._cache.size,
-            )
-        )
 
     @property
     def collection(self) -> OrderedDict:

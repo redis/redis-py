@@ -20,14 +20,18 @@ Usage in Redis core code:
 """
 
 import time
-from typing import Optional, Callable
+from typing import Optional, Callable, List
 
 from redis.observability.attributes import PubSubDirection, ConnectionState, CSCResult, CSCReason, AttributeBuilder
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
 from redis.observability.providers import get_observability_instance
+from redis.observability.registry import get_observables_registry_instance
 
 # Global metrics collector instance (lazy-initialized)
 _metrics_collector: Optional[RedisMetricsCollector] = None
+
+CONNECTION_COUNT_REGISTRY_KEY = "connection_count"
+CSC_ITEMS_REGISTRY_KEY = "csc_items"
 
 
 def record_operation_duration(
@@ -125,14 +129,39 @@ def record_connection_create_time(
     #     pass
 
 
-def init_connection_count(
-        connection_pools: list,
-) -> None:
+def init_connection_count() -> None:
     """
     Initialize observable gauge for connection count metric.
+    """
+    global _metrics_collector
 
-    Args:
-        connection_pools: Connection pools to collect metrics from.
+    if _metrics_collector is None:
+        _metrics_collector = _get_or_create_collector()
+        if _metrics_collector is None:
+            return
+
+    def observable_callback(__):
+        observables_registry = get_observables_registry_instance()
+        callbacks = observables_registry.get(CONNECTION_COUNT_REGISTRY_KEY)
+        observations = []
+
+        for callback in callbacks:
+            observations.extend(callback())
+
+        return observations
+
+    # try:
+    _metrics_collector.init_connection_count(
+        callback=observable_callback,
+    )
+    # except Exception:
+    #     pass
+
+def register_pools_connection_count(
+        connection_pools: List["ConnectionPoolInterface"],
+) -> None:
+    """
+    Add connection pools to connection count observable registry.
     """
     global _metrics_collector
 
@@ -144,20 +173,15 @@ def init_connection_count(
     # Lazy import
     from opentelemetry.metrics import Observation
 
-    def connection_count_callback(__):
+    def connection_count_callback():
         observations = []
-        for pool in connection_pools:
-            for count, attributes in pool.get_connection_count():
-                observations.append(Observation(count, attributes))
+        for connection_pool in connection_pools:
+            for count, attributes in connection_pool.get_connection_count():
+                observations.append(Observation(count, attributes=attributes))
         return observations
 
-    # try:
-    _metrics_collector.init_connection_count(
-        callback=connection_count_callback,
-    )
-    # except Exception:
-    #     pass
-
+    observables_registry = get_observables_registry_instance()
+    observables_registry.register(CONNECTION_COUNT_REGISTRY_KEY, connection_count_callback)
 
 def record_connection_timeout(
         pool_name: str,
@@ -509,14 +533,37 @@ def record_csc_request(
         result=result,
     )
 
-def init_csc_items(
-        callback: Callable
-) -> None:
+def init_csc_items() -> None:
     """
     Initialize observable gauge for CSC items metric.
+    """
+    global _metrics_collector
 
-    Args:
-        callback: Callback function to retrieve CSC items count
+    if _metrics_collector is None:
+        _metrics_collector = _get_or_create_collector()
+        if _metrics_collector is None:
+            return
+
+    def observable_callback(__):
+        observables_registry = get_observables_registry_instance()
+        callbacks = observables_registry.get(CSC_ITEMS_REGISTRY_KEY)
+        observations = []
+
+        for callback in callbacks:
+            observations.extend(callback())
+
+        return observations
+
+    _metrics_collector.init_csc_items(
+        callback=observable_callback,
+    )
+
+def register_csc_items_callback(
+        callback: Callable,
+        db_namespace: Optional[int] = None,
+) -> None:
+    """
+    Adds given callback to CSC items observable registry.
     """
     global _metrics_collector
 
@@ -528,12 +575,11 @@ def init_csc_items(
     # Lazy import
     from opentelemetry.metrics import Observation
 
-    def observation_wrapper(__):
-        return [Observation(callback(), attributes=AttributeBuilder.build_csc_attributes())]
+    def csc_items_callback():
+        return [Observation(callback(), attributes=AttributeBuilder.build_csc_attributes(db_namespace=db_namespace))]
 
-    _metrics_collector.init_csc_items(
-        callback=observation_wrapper,
-    )
+    observables_registry = get_observables_registry_instance()
+    observables_registry.register(CSC_ITEMS_REGISTRY_KEY, csc_items_callback)
 
 def record_csc_eviction(
         count: int,

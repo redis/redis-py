@@ -286,7 +286,8 @@ class RedisMetricsCollector:
         Args:
             callback: Callback function to retrieve connection count
         """
-        if not MetricGroup.CONNECTION_BASIC in self.config.metric_groups:
+        if not MetricGroup.CONNECTION_BASIC in self.config.metric_groups \
+                and not self.connection_count:
             return
 
         self.connection_count = self.meter.create_observable_gauge(
@@ -306,7 +307,8 @@ class RedisMetricsCollector:
         Args:
             callback: Callback function to retrieve CSC items count
         """
-        if not MetricGroup.CSC in self.config.metric_groups:
+        if not MetricGroup.CSC in self.config.metric_groups \
+                and not self.csc_items:
             return
 
         self.csc_items = self.meter.create_observable_gauge(

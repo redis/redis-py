@@ -37,7 +37,7 @@ from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from .event import AfterConnectionReleasedEvent, EventDispatcher, OnErrorEvent, OnMaintenanceNotificationEvent, \
     AfterConnectionCreatedEvent, AfterConnectionAcquiredEvent, AfterConnectionClosedEvent, OnCacheHitEvent, \
-    OnCacheMissEvent, OnCacheEvictionEvent
+    OnCacheMissEvent, OnCacheEvictionEvent, OnCacheInitialisationEvent
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -2547,6 +2547,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self.cache = None
         self._cache_factory = cache_factory
 
+        self._event_dispatcher = self._connection_kwargs.get("event_dispatcher", None)
+        if self._event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+
         if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
             if self._connection_kwargs.get("protocol") not in [3, "3"]:
                 raise RedisError("Client caching is only supported with RESP version 3")
@@ -2566,12 +2570,15 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                         self._connection_kwargs.get("cache_config")
                     ).get_cache()
 
+            self._event_dispatcher.dispatch(
+                OnCacheInitialisationEvent(
+                    cache_items_callback=lambda: self.cache.size,
+                    db_namespace=self._connection_kwargs.get("db"),
+                )
+            )
+
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
-
-        self._event_dispatcher = self._connection_kwargs.get("event_dispatcher", None)
-        if self._event_dispatcher is None:
-            self._event_dispatcher = EventDispatcher()
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
