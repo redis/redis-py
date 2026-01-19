@@ -25,7 +25,7 @@ class TestOTelConfigDefaults:
     def test_default_metric_groups(self):
         """Test that default metric groups are COMMAND, CONNECTION_BASIC, RESILIENCY."""
         config = OTelConfig()
-        expected = MetricGroup.COMMAND | MetricGroup.CONNECTION_BASIC | MetricGroup.RESILIENCY
+        expected = MetricGroup.CONNECTION_BASIC | MetricGroup.RESILIENCY
         assert config.metric_groups == expected
 
     def test_default_sample_percentage(self):

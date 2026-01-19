@@ -23,7 +23,7 @@ import time
 from typing import Optional, Callable
 
 from redis.observability.attributes import PubSubDirection, ConnectionState
-from redis.observability.metrics import RedisMetricsCollector
+from redis.observability.metrics import RedisMetricsCollector, CloseReason
 from redis.observability.providers import get_observability_instance
 
 # Global metrics collector instance (lazy-initialized)
@@ -251,16 +251,14 @@ def record_connection_use_time(
 
 
 def record_connection_closed(
-        pool_name: str,
-        close_reason: Optional[str] = None,
+        close_reason: Optional[CloseReason] = None,
         error_type: Optional[Exception] = None,
 ) -> None:
     """
     Record a connection closed event.
 
     Args:
-        pool_name: Connection pool identifier
-        close_reason: Reason for closing (e.g., 'idle_timeout', 'error', 'shutdown')
+        close_reason: Reason for closing (e.g. 'error', 'application_close')
         error_type: Error type if closed due to error
 
     Example:
@@ -275,7 +273,6 @@ def record_connection_closed(
 
     # try:
     _metrics_collector.record_connection_closed(
-        pool_name=pool_name,
         close_reason=close_reason,
         error_type=error_type,
     )

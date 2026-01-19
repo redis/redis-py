@@ -44,7 +44,7 @@ from redis.observability.attributes import (
     REDIS_CLIENT_CONSUMER_NAME, DB_CLIENT_CONNECTION_NAME,
 )
 from redis.observability.config import OTelConfig, MetricGroup
-from redis.observability.metrics import RedisMetricsCollector
+from redis.observability.metrics import RedisMetricsCollector, CloseReason
 from redis.observability.recorder import record_operation_duration, record_connection_create_time, \
     record_connection_timeout, record_connection_wait_time, record_connection_use_time, \
     record_connection_closed, record_connection_relaxed_timeout, record_connection_handoff, record_error_count, \
@@ -328,8 +328,7 @@ class TestRecordConnectionClosed:
         instruments = setup_recorder
 
         record_connection_closed(
-            pool_name='ConnectionPool<localhost:6379>',
-            close_reason='idle_timeout',
+            close_reason=CloseReason.HEALTHCHECK_FAILED,
         )
 
         instruments.connection_closed.add.assert_called_once()
@@ -337,8 +336,7 @@ class TestRecordConnectionClosed:
 
         assert call_args[0][0] == 1
         attrs = call_args[1]['attributes']
-        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == 'ConnectionPool<localhost:6379>'
-        assert attrs[REDIS_CLIENT_CONNECTION_CLOSE_REASON] == 'idle_timeout'
+        assert attrs[REDIS_CLIENT_CONNECTION_CLOSE_REASON] == CloseReason.HEALTHCHECK_FAILED.value
 
     def test_record_connection_closed_with_error(self, setup_recorder):
         """Test recording connection closed with error type."""
@@ -347,8 +345,7 @@ class TestRecordConnectionClosed:
 
         error = ConnectionResetError("Connection reset by peer")
         record_connection_closed(
-            pool_name='ConnectionPool<localhost:6379>',
-            close_reason='error',
+            close_reason=CloseReason.ERROR,
             error_type=error,
         )
 
@@ -828,8 +825,7 @@ class TestMetricGroupsDisabled:
         recorder.reset_collector()
         with patch.object(recorder, '_get_or_create_collector', return_value=collector):
             record_connection_closed(
-                pool_name='test-pool',
-                close_reason='idle_timeout',
+                close_reason=CloseReason.APPLICATION_CLOSE,
             )
 
         # Verify no call to the counter's add method
