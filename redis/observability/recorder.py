@@ -22,7 +22,9 @@ Usage in Redis core code:
 import time
 from typing import Optional, Callable, List
 
+from redis.connection import ConnectionPoolInterface
 from redis.observability.attributes import PubSubDirection, ConnectionState, CSCResult, CSCReason, AttributeBuilder
+from redis.observability.attributes import PubSubDirection, ConnectionState
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
 from redis.observability.providers import get_observability_instance
 from redis.observability.registry import get_observables_registry_instance
@@ -282,7 +284,7 @@ def record_connection_closed(
     Record a connection closed event.
 
     Args:
-        close_reason: Reason for closing (e.g., 'idle_timeout', 'error', 'shutdown')
+        close_reason: Reason for closing (e.g. 'error', 'application_close')
         error_type: Error type if closed due to error
 
     Example:

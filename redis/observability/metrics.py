@@ -29,6 +29,17 @@ except ImportError:
     UpDownCounter = None
 
 class CloseReason(Enum):
+    """
+    Enum representing the reason why a Redis client connection was closed.
+
+    Values:
+        APPLICATION_CLOSE: The connection was closed intentionally by the application
+            (for example, during normal shutdown or explicit cleanup).
+        ERROR: The connection was closed due to an unexpected error
+            (for example, network failure or protocol error).
+        HEALTHCHECK_FAILED: The connection was closed because a health check
+            or liveness check for the connection failed.
+    """
     APPLICATION_CLOSE = "application_close"
     ERROR = "error"
     HEALTHCHECK_FAILED = "healthcheck_failed"
@@ -459,7 +470,7 @@ class RedisMetricsCollector:
         Record a connection closed event.
 
         Args:
-            close_reason: Reason for closing (e.g., 'error', 'application_close')
+            close_reason: Reason for closing (e.g. 'error', 'application_close')
             error_type: Error type if closed due to error
         """
         if not hasattr(self, "connection_closed"):
