@@ -1926,7 +1926,7 @@ class BasicKeyCommands(CommandsProtocol):
         local_digest = xxhash.xxh3_64(value).hexdigest()
 
         # To align with digest, we want to return bytes if decode_responses is False.
-        # The following should work because Python's mixin approach.
+        # The following works because of Python's mixin-based client class hierarchy.
         if not self.get_encoder().decode_responses:
             local_digest = local_digest.encode()
 
