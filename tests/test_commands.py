@@ -1818,7 +1818,15 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("8.3.224")
     @pytest.mark.parametrize(
-        "value", [b"", b"abc", b"The quick brown fox jumps over the lazy dog"]
+        "value",
+        [
+            b"",
+            b"abc",
+            b"The quick brown fox jumps over the lazy dog",
+            "",
+            "abc",
+            "The quick brown fox jumps over the lazy dog",
+        ],
     )
     def test_local_digest_matches_server(self, r, value):
         key = "k:digest"
@@ -1828,9 +1836,11 @@ class TestRedisCommands:
         res_server = r.digest(key)
         res_local = r.digest_local(value)
 
-        # got is str if decode_responses=True; ensure bytes->str for comparison
+        # Verify type consistency between server and local digest
         if isinstance(res_server, bytes):
             assert isinstance(res_local, bytes)
+        else:
+            assert isinstance(res_local, str)
 
         assert res_server is not None
         assert len(res_server) == 16

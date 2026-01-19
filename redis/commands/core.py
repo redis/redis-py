@@ -1910,9 +1910,12 @@ class BasicKeyCommands(CommandsProtocol):
 
         Arguments:
           - value: Union[bytes, str] - the value to compute the digest of.
+            If a string is provided, it will be encoded using UTF-8 before hashing,
+            which matches Redis's default encoding behavior.
 
         Returns:
-          - (str | bytes) the XXH3 digest of the value as a hex string (16 hex characters)
+          - (str | bytes) the XXH3 digest of the value as a hex string (16 hex characters).
+            Returns bytes if decode_responses is False, otherwise returns str.
 
         For more information, see https://redis.io/commands/digest
         """
