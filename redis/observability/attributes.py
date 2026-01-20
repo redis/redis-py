@@ -48,6 +48,8 @@ REDIS_CLIENT_ERROR_CATEGORY = "redis.client.errors.category"
 REDIS_CLIENT_STREAM_NAME = "redis.client.stream.name"
 REDIS_CLIENT_CONSUMER_GROUP = "redis.client.consumer_group"
 REDIS_CLIENT_CONSUMER_NAME = "redis.client.consumer_name"
+REDIS_CLIENT_CSC_RESULT = "redis.client.csc.result"
+REDIS_CLIENT_CSC_REASON = "redis.client.csc.reason"
 
 class ConnectionState(Enum):
     IDLE = "idle"
@@ -56,6 +58,14 @@ class ConnectionState(Enum):
 class PubSubDirection(Enum):
     PUBLISH = "publish"
     RECEIVE = "receive"
+
+class CSCResult(Enum):
+    HIT = "hit"
+    MISS = "miss"
+
+class CSCReason(Enum):
+    FULL = 'full'
+    INVALIDATION = 'invalidation'
 
 
 class AttributeBuilder:
@@ -271,6 +281,33 @@ class AttributeBuilder:
 
         if consumer_name is not None:
             attrs[REDIS_CLIENT_CONSUMER_NAME] = consumer_name
+
+        return attrs
+
+    @staticmethod
+    def build_csc_attributes(
+            db_namespace: Optional[int] = None,
+            result: Optional[CSCResult] = None,
+            reason: Optional[CSCReason] = None,
+    ) -> Dict[str, Any]:
+        """
+        Build attributes for a Client Side Caching (CSC) operation.
+
+        Args:
+            db_namespace: Redis database index
+            result: CSC result ('hit' or 'miss')
+            reason: Reason for CSC eviction ('full' or 'invalidation')
+
+        Returns:
+            Dictionary of CSC attributes
+        """
+        attrs: Dict[str, Any] = AttributeBuilder.build_base_attributes(db_namespace=db_namespace)
+
+        if result is not None:
+            attrs[REDIS_CLIENT_CSC_RESULT] = result.value
+
+        if reason is not None:
+            attrs[REDIS_CLIENT_CSC_REASON] = reason.value
 
         return attrs
 

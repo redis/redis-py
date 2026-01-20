@@ -19,7 +19,7 @@ from redis.event import (
     EventDispatcher,
     EventListenerInterface,
 )
-from redis.observability.metrics import CloseReason
+from redis.connection import CloseReason
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (

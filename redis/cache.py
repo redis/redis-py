@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, List, Optional, Union
 
+from redis.event import EventDispatcherInterface, EventDispatcher, \
+    OnCacheEvictionEvent, OnCacheHitEvent
+from redis.observability.attributes import CSCResult, CSCReason
+
 
 class CacheEntryStatus(Enum):
     VALID = "VALID"
@@ -186,9 +190,6 @@ class DefaultCache(CacheInterface):
         self._cache[entry.cache_key] = entry
         self._eviction_policy.touch(entry.cache_key)
 
-        if self._cache_config.is_exceeds_max_size(len(self._cache)):
-            self._eviction_policy.evict_next()
-
         return True
 
     def get(self, key: CacheKey) -> Union[CacheEntry, None]:
@@ -246,6 +247,63 @@ class DefaultCache(CacheInterface):
 
     def is_cachable(self, key: CacheKey) -> bool:
         return self._cache_config.is_allowed_to_cache(key.command)
+
+class CacheProxy(CacheInterface):
+    """
+    Proxy object that wraps cache implementations to enable additional logic on top
+    """
+    def __init__(self, cache: CacheInterface, event_dispatcher: Optional[EventDispatcherInterface] = None):
+        self._cache = cache
+
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
+
+    @property
+    def collection(self) -> OrderedDict:
+        return self._cache.collection
+
+    @property
+    def config(self) -> CacheConfigurationInterface:
+        return self._cache.config
+
+    @property
+    def eviction_policy(self) -> EvictionPolicyInterface:
+        return self._cache.eviction_policy
+
+    @property
+    def size(self) -> int:
+        return self._cache.size
+
+    def get(self, key: CacheKey) -> Union[CacheEntry, None]:
+        return self._cache.get(key)
+
+    def set(self, entry: CacheEntry) -> bool:
+        is_set = self._cache.set(entry)
+
+        if self.config.is_exceeds_max_size(self.size):
+            self._event_dispatcher.dispatch(
+                OnCacheEvictionEvent(
+                    count=1,
+                    reason=CSCReason.FULL,
+                )
+            )
+            self.eviction_policy.evict_next()
+
+        return is_set
+
+    def delete_by_cache_keys(self, cache_keys: List[CacheKey]) -> List[bool]:
+        return self._cache.delete_by_cache_keys(cache_keys)
+
+    def delete_by_redis_keys(self, redis_keys: List[bytes]) -> List[bool]:
+        return self._cache.delete_by_redis_keys(redis_keys)
+
+    def flush(self) -> int:
+        return self._cache.flush()
+
+    def is_cachable(self, key: CacheKey) -> bool:
+        return self._cache.is_cachable(key)
 
 
 class LRUPolicy(EvictionPolicyInterface):
@@ -422,4 +480,4 @@ class CacheFactory(CacheFactoryInterface):
 
     def get_cache(self) -> CacheInterface:
         cache_class = self._config.get_cache_class()
-        return cache_class(cache_config=self._config)
+        return CacheProxy(cache_class(cache_config=self._config))

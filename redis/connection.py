@@ -28,7 +28,7 @@ from redis.cache import (
     CacheFactory,
     CacheFactoryInterface,
     CacheInterface,
-    CacheKey,
+    CacheKey, CacheProxy,
 )
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
@@ -36,7 +36,8 @@ from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from .event import AfterConnectionReleasedEvent, EventDispatcher, OnErrorEvent, OnMaintenanceNotificationEvent, \
-    AfterConnectionCreatedEvent, AfterConnectionAcquiredEvent, AfterConnectionClosedEvent
+    AfterConnectionCreatedEvent, AfterConnectionAcquiredEvent, AfterConnectionClosedEvent, OnCacheHitEvent, \
+    OnCacheMissEvent, OnCacheEvictionEvent, OnCacheInitializationEvent
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -55,7 +56,7 @@ from .maint_notifications import (
     MaintNotificationsPoolHandler, MaintenanceNotification,
 )
 from .observability.attributes import AttributeBuilder, DB_CLIENT_CONNECTION_STATE, ConnectionState, \
-    DB_CLIENT_CONNECTION_POOL_NAME
+    DB_CLIENT_CONNECTION_POOL_NAME, CSCReason
 from .observability.metrics import CloseReason
 from .retry import Retry
 from .utils import (
@@ -1403,6 +1404,8 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self.retry = self._conn.retry
         self.host = self._conn.host
         self.port = self._conn.port
+        self.db = self._conn.db
+        self._event_dispatcher = self._conn._event_dispatcher
         self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
         self._cache = cache
@@ -1545,17 +1548,28 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     ):
         with self._cache_lock:
             # Check if command response exists in a cache and it's not in progress.
-            if (
-                self._current_command_cache_key is not None
-                and self._cache.get(self._current_command_cache_key) is not None
-                and self._cache.get(self._current_command_cache_key).status
-                != CacheEntryStatus.IN_PROGRESS
-            ):
-                res = copy.deepcopy(
-                    self._cache.get(self._current_command_cache_key).cache_value
+            if self._current_command_cache_key is not None:
+                if (
+                    self._cache.get(self._current_command_cache_key) is not None
+                    and self._cache.get(self._current_command_cache_key).status
+                    != CacheEntryStatus.IN_PROGRESS
+                ):
+                    res = copy.deepcopy(
+                        self._cache.get(self._current_command_cache_key).cache_value
+                    )
+                    self._current_command_cache_key = None
+                    self._event_dispatcher.dispatch(
+                        OnCacheHitEvent(
+                            bytes_saved=len(res),
+                            db_namespace=self.db,
+                        )
+                    )
+                    return res
+                self._event_dispatcher.dispatch(
+                    OnCacheMissEvent(
+                        db_namespace=self.db,
+                    )
                 )
-                self._current_command_cache_key = None
-                return res
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
@@ -1719,7 +1733,16 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             if data[1] is None:
                 self._cache.flush()
             else:
-                self._cache.delete_by_redis_keys(data[1])
+                keys_deleted = self._cache.delete_by_redis_keys(data[1])
+
+                if len(keys_deleted) > 0:
+                    self._event_dispatcher.dispatch(
+                        OnCacheEvictionEvent(
+                            count=len(keys_deleted),
+                            reason=CSCReason.INVALIDATION,
+                            db_namespace=self.db,
+                        )
+                    )
 
 
 class SSLConnection(Connection):
@@ -2530,6 +2553,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self.cache = None
         self._cache_factory = cache_factory
 
+        self._event_dispatcher = self._connection_kwargs.get("event_dispatcher", None)
+        if self._event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+
         if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
             if self._connection_kwargs.get("protocol") not in [3, "3"]:
                 raise RedisError("Client caching is only supported with RESP version 3")
@@ -2543,18 +2570,21 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 self.cache = cache
             else:
                 if self._cache_factory is not None:
-                    self.cache = self._cache_factory.get_cache()
+                    self.cache = CacheProxy(self._cache_factory.get_cache())
                 else:
                     self.cache = CacheFactory(
                         self._connection_kwargs.get("cache_config")
                     ).get_cache()
 
+            self._event_dispatcher.dispatch(
+                OnCacheInitializationEvent(
+                    cache_items_callback=lambda: self.cache.size,
+                    db_namespace=self._connection_kwargs.get("db"),
+                )
+            )
+
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
-
-        self._event_dispatcher = self._connection_kwargs.get("event_dispatcher", None)
-        if self._event_dispatcher is None:
-            self._event_dispatcher = EventDispatcher()
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as

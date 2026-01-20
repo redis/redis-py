@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any, Dict, Optional, Callable, List
 
 from redis.observability.attributes import AttributeBuilder, ConnectionState, REDIS_CLIENT_CONNECTION_NOTIFICATION, \
-    REDIS_CLIENT_CONNECTION_CLOSE_REASON, ERROR_TYPE, PubSubDirection
+    REDIS_CLIENT_CONNECTION_CLOSE_REASON, ERROR_TYPE, PubSubDirection, CSCResult, CSCReason
 from redis.observability.config import OTelConfig, MetricGroup
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,9 @@ class RedisMetricsCollector:
 
         if MetricGroup.STREAMING in self.config.metric_groups:
             self._init_streaming_metrics()
+
+        if MetricGroup.CSC in self.config.metric_groups:
+            self._init_csc_metrics()
 
         logger.info("RedisMetricsCollector initialized")
 
@@ -178,6 +181,26 @@ class RedisMetricsCollector:
             name="redis.client.stream.lag",
             unit="{seconds}",
             description="End-to-end lag per message, showing how stale are the messages when the application starts processing them."
+        )
+
+    def _init_csc_metrics(self) -> None:
+        """Initialize Client Side Caching (CSC) metric instruments."""
+        self.csc_requests = self.meter.create_counter(
+            name="redis.client.csc.requests",
+            unit="{request}",
+            description="The total number of requests to the cache",
+        )
+
+        self.csc_evictions = self.meter.create_counter(
+            name="redis.client.csc.evictions",
+            unit="{eviction}",
+            description="The total number of cache evictions",
+        )
+
+        self.csc_network_saved = self.meter.create_counter(
+            name="redis.client.csc.network_saved",
+            unit="{bytes}",
+            description="The total number of bytes saved by using CSC",
         )
 
     # Resiliency metric recording methods
@@ -274,13 +297,35 @@ class RedisMetricsCollector:
         Args:
             callback: Callback function to retrieve connection count
         """
-        if not MetricGroup.CONNECTION_BASIC in self.config.metric_groups:
+        if not MetricGroup.CONNECTION_BASIC in self.config.metric_groups \
+                and not self.connection_count:
             return
 
         self.connection_count = self.meter.create_observable_gauge(
             name="db.client.connection.count",
             unit="connections",
             description="Number of connections in the pool",
+            callbacks=[callback],
+        )
+
+    def init_csc_items(
+            self,
+            callback: Callable,
+    ) -> None:
+        """
+        Initialize observable gauge for CSC items metric.
+
+        Args:
+            callback: Callback function to retrieve CSC items count
+        """
+        if not MetricGroup.CSC in self.config.metric_groups \
+                and not self.csc_items:
+            return
+
+        self.csc_items = self.meter.create_observable_gauge(
+            name="redis.client.csc.items",
+            unit="{item}",
+            description="The total number of cached responses currently stored",
             callbacks=[callback],
         )
 
@@ -533,6 +578,64 @@ class RedisMetricsCollector:
             consumer_name=consumer_name,
         )
         self.stream_lag.record(lag_seconds, attributes=attrs)
+
+    # CSC metric recording methods
+
+    def record_csc_request(
+            self,
+            db_namespace: Optional[int] = None,
+            result: Optional[CSCResult] = None,
+    ) -> None:
+        """
+        Record a Client Side Caching (CSC) request.
+
+        Args:
+            db_namespace: Redis database index
+            result: CSC result ('hit' or 'miss')
+        """
+        if not hasattr(self, "csc_requests"):
+            return
+
+        attrs = self.attr_builder.build_csc_attributes(result=result, db_namespace=db_namespace)
+        self.csc_requests.add(1, attributes=attrs)
+
+    def record_csc_eviction(
+            self,
+            count: int,
+            db_namespace: Optional[int] = None,
+            reason: Optional[CSCReason] = None,
+    ) -> None:
+        """
+        Record a Client Side Caching (CSC) eviction.
+
+        Args:
+            count: Number of evictions
+            db_namespace: Redis database index
+            reason: Reason for eviction
+        """
+        if not hasattr(self, "csc_evictions"):
+            return
+
+        attrs = self.attr_builder.build_csc_attributes(reason=reason, db_namespace=db_namespace)
+        self.csc_evictions.add(count, attributes=attrs)
+
+    def record_csc_network_saved(
+            self,
+            bytes_saved: int,
+            db_namespace: Optional[int] = None,
+    ) -> None:
+        """
+        Record the number of bytes saved by using Client Side Caching (CSC).
+
+        Args:
+            db_namespace: Redis database index
+            bytes_saved: Number of bytes saved
+        """
+        if not hasattr(self, "csc_network_saved"):
+            return
+
+        attrs = self.attr_builder.build_csc_attributes(db_namespace=db_namespace)
+        self.csc_network_saved.add(bytes_saved, attributes=attrs)
 
     # Utility methods
 
