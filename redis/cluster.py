@@ -1429,11 +1429,23 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 if connection is not None:
                     connection.disconnect()
 
-                # Remove the failed node from the startup nodes before we try
-                # to reinitialize the cluster
-                self.nodes_manager.startup_nodes.pop(target_node.name, None)
-                # Reset the cluster node's connection
-                target_node.redis_connection = None
+                # Instead of setting to None, properly handle the pool
+                # Get the pool safely - redis_connection could be set to None
+                # by another thread between the check and access
+                redis_conn = target_node.redis_connection
+                if redis_conn is not None:
+                    pool = redis_conn.connection_pool
+                    if pool is not None:
+                        with pool._lock:
+                            # take care for the active connections in the pool
+                            pool.update_active_connections_for_reconnect()
+                            # disconnect all free connections
+                            pool.disconnect_free_connections()
+
+                # Move the failed node to the end of the cached nodes list
+                self.nodes_manager.move_node_to_end_of_cached_nodes(target_node.name)
+
+                # DON'T set redis_connection = None - keep the pool for reuse
                 self.nodes_manager.initialize()
                 raise e
             except MovedError as e:
@@ -1814,6 +1826,23 @@ class NodesManager:
             for n in nodes:
                 self.startup_nodes[n.name] = n
 
+    def move_node_to_end_of_cached_nodes(self, node_name: str) -> None:
+        """
+        Move a failing node to the end of startup_nodes and nodes_cache so it's
+        tried last during reinitialization and when selecting the default node.
+        If the node is not in the respective list, nothing is done.
+        """
+        # Move in startup_nodes
+        if node_name in self.startup_nodes and len(self.startup_nodes) > 1:
+            node = self.startup_nodes.pop(node_name)
+            self.startup_nodes[node_name] = node  # Re-insert at end
+
+        # Move in nodes_cache - this affects get_nodes_by_server_type ordering
+        # which is used to select the default_node during initialize()
+        if node_name in self.nodes_cache and len(self.nodes_cache) > 1:
+            node = self.nodes_cache.pop(node_name)
+            self.nodes_cache[node_name] = node  # Re-insert at end
+
     def check_slots_coverage(self, slots_cache):
         # Validate if all slots are covered or if we should try next
         # startup node
@@ -1941,10 +1970,16 @@ class NodesManager:
                             startup_node.host, startup_node.port, **kwargs
                         )
                         self.startup_nodes[startup_node.name].redis_connection = r
-                    # Make sure cluster mode is enabled on this node
                     try:
+                        # Make sure cluster mode is enabled on this node
                         cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
-                        r.connection_pool.disconnect()
+                        with r.connection_pool._lock:
+                            # take care to clear connections before we move on
+                            # mark all active connections for reconnect - they will be
+                            # reconnected on next use, but will allow current in flight commands to complete first
+                            r.connection_pool.update_active_connections_for_reconnect()
+                            # Needed to clear READONLY state when it is no longer applicable
+                            r.connection_pool.disconnect_free_connections()
                     except ResponseError:
                         raise RedisClusterException(
                             "Cluster mode is not enabled on this node"
@@ -3448,6 +3483,15 @@ class TransactionStrategy(AbstractStrategy):
             or type(error) in self.CONNECTION_ERRORS
         ):
             if self._transaction_connection:
+                # Disconnect and release back to pool
+                self._transaction_connection.disconnect()
+                node = self._nodes_manager.find_connection_owner(
+                    self._transaction_connection
+                )
+                if node:
+                    node.redis_connection.connection_pool.release(
+                        self._transaction_connection
+                    )
                 self._transaction_connection = None
 
             self._pipe.reinitialize_counter += 1
@@ -3601,14 +3645,23 @@ class TransactionStrategy(AbstractStrategy):
                 node = self._nodes_manager.find_connection_owner(
                     self._transaction_connection
                 )
-                node.redis_connection.connection_pool.release(
-                    self._transaction_connection
-                )
+                if node:
+                    node.redis_connection.connection_pool.release(
+                        self._transaction_connection
+                    )
                 self._transaction_connection = None
             except self.CONNECTION_ERRORS:
                 # disconnect will also remove any previous WATCHes
                 if self._transaction_connection:
                     self._transaction_connection.disconnect()
+                    node = self._nodes_manager.find_connection_owner(
+                        self._transaction_connection
+                    )
+                    if node:
+                        node.redis_connection.connection_pool.release(
+                            self._transaction_connection
+                        )
+                    self._transaction_connection = None
 
         # clean up the other instance attributes
         self._watching = False

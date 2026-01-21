@@ -933,15 +933,13 @@ class TestRedisClusterObj:
             parse_response.side_effect = moved_redirect_effect
             assert r.get("key") == b"value"
             for node_name, conn in node_conn_origin.items():
-                if node_name == node.name:
-                    # The old redis connection of the timed out node should have been
-                    # deleted and replaced
-                    assert conn != r.get_redis_connection(node)
-                else:
-                    # other nodes' redis connection should have been reused during the
-                    # topology refresh
-                    cur_node = r.get_node(node_name=node_name)
-                    assert conn == r.get_redis_connection(cur_node)
+                # all nodes' redis connection should have been reused during the
+                # topology refresh
+                # even the failing node doesn't need to establish a
+                # new Redis connection (which is actually a new Redis Client instance)
+                # but the connection pool is reused and all connections are reset and reconnected
+                cur_node = r.get_node(node_name=node_name)
+                assert conn == r.get_redis_connection(cur_node)
 
     def test_cluster_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
