@@ -34,6 +34,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Dict, List, Optional, Any
 
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
 
 @dataclass
 class BenchmarkResult:
@@ -50,6 +56,11 @@ class BenchmarkResult:
     max_latency_ms: float
     errors: int = 0
     first_error: Optional[str] = None
+    # Resource usage metrics
+    cpu_percent_avg: Optional[float] = None
+    cpu_percent_max: Optional[float] = None
+    memory_mb_avg: Optional[float] = None
+    memory_mb_max: Optional[float] = None
     metadata: Dict = field(default_factory=dict)
 
 
@@ -109,6 +120,11 @@ class ComprehensiveLoadGenerator:
 
         # CSC client (optional, requires RESP3)
         self.csc_client = None
+
+        # Resource tracking
+        self.cpu_samples: List[float] = []
+        self.memory_samples: List[float] = []
+        self._process = psutil.Process() if PSUTIL_AVAILABLE else None
 
     def _get_redis_module(self) -> Any:
         """Get the redis module to use."""
@@ -279,20 +295,55 @@ class ComprehensiveLoadGenerator:
         self._key_counter = 0
         self._message_counter = 0
 
+    def _sample_resources(self) -> None:
+        """Sample current CPU and memory usage."""
+        if self._process is None:
+            return
+        try:
+            # CPU percent since last call (non-blocking)
+            cpu = self._process.cpu_percent(interval=None)
+            if cpu > 0:  # Skip first sample which is always 0
+                self.cpu_samples.append(cpu)
+            # Memory in MB
+            mem_info = self._process.memory_info()
+            self.memory_samples.append(mem_info.rss / (1024 * 1024))
+        except Exception:
+            pass  # Ignore errors in resource sampling
+
     def run(self) -> BenchmarkResult:
         """Run the load generator for the configured duration."""
         self.latencies = []
         self.errors = 0
         self.first_error = None
+        self.cpu_samples = []
+        self.memory_samples = []
+
+        # Initialize CPU percent tracking
+        if self._process:
+            try:
+                self._process.cpu_percent(interval=None)
+            except Exception:
+                pass
 
         print(f"  Running load for {self.config.duration_seconds}s...")
         start_time = time.monotonic()
         end_time = start_time + self.config.duration_seconds
+        last_sample_time = start_time
+        sample_interval = 0.5  # Sample resources every 500ms
 
         while time.monotonic() < end_time:
             latency = self._run_operation()
             if latency > 0:
                 self.latencies.append(latency)
+
+            # Sample resources periodically
+            current_time = time.monotonic()
+            if current_time - last_sample_time >= sample_interval:
+                self._sample_resources()
+                last_sample_time = current_time
+
+        # Final resource sample
+        self._sample_resources()
 
         actual_duration = time.monotonic() - start_time
         return self._calculate_results(actual_duration)
@@ -316,6 +367,12 @@ class ComprehensiveLoadGenerator:
         ops_per_cycle = 7 + (3 if self.csc_client else 0)
         total_ops = len(self.latencies) * ops_per_cycle
 
+        # Calculate resource usage stats
+        cpu_avg = statistics.mean(self.cpu_samples) if self.cpu_samples else None
+        cpu_max = max(self.cpu_samples) if self.cpu_samples else None
+        mem_avg = statistics.mean(self.memory_samples) if self.memory_samples else None
+        mem_max = max(self.memory_samples) if self.memory_samples else None
+
         return BenchmarkResult(
             scenario="unknown",
             duration_seconds=duration,
@@ -329,6 +386,10 @@ class ComprehensiveLoadGenerator:
             max_latency_ms=max(self.latencies),
             errors=self.errors,
             first_error=self.first_error,
+            cpu_percent_avg=cpu_avg,
+            cpu_percent_max=cpu_max,
+            memory_mb_avg=mem_avg,
+            memory_mb_max=mem_max,
         )
 
 
@@ -351,6 +412,15 @@ def print_result(result: BenchmarkResult, iterations: int = 1) -> None:
     print(f"  Errors:       {result.errors}")
     if result.first_error:
         print(f"  First error:  {result.first_error}")
+    # Resource usage
+    if result.cpu_percent_avg is not None:
+        print(f"  CPU avg:      {result.cpu_percent_avg:.1f}%")
+    if result.cpu_percent_max is not None:
+        print(f"  CPU max:      {result.cpu_percent_max:.1f}%")
+    if result.memory_mb_avg is not None:
+        print(f"  Memory avg:   {result.memory_mb_avg:.1f} MB")
+    if result.memory_mb_max is not None:
+        print(f"  Memory max:   {result.memory_mb_max:.1f} MB")
     if result.metadata.get("description"):
         print(f"  Description:  {result.metadata['description']}")
     print("=" * 60)
@@ -371,6 +441,12 @@ def average_results(results: List[BenchmarkResult]) -> BenchmarkResult:
             first_error = r.first_error
             break
 
+    # Average CPU and memory (only from results that have them)
+    cpu_avgs = [r.cpu_percent_avg for r in results if r.cpu_percent_avg is not None]
+    cpu_maxs = [r.cpu_percent_max for r in results if r.cpu_percent_max is not None]
+    mem_avgs = [r.memory_mb_avg for r in results if r.memory_mb_avg is not None]
+    mem_maxs = [r.memory_mb_max for r in results if r.memory_mb_max is not None]
+
     return BenchmarkResult(
         scenario=results[0].scenario,
         duration_seconds=sum(r.duration_seconds for r in results) / n,
@@ -384,6 +460,10 @@ def average_results(results: List[BenchmarkResult]) -> BenchmarkResult:
         max_latency_ms=max(r.max_latency_ms for r in results),
         errors=sum(r.errors for r in results),
         first_error=first_error,
+        cpu_percent_avg=sum(cpu_avgs) / len(cpu_avgs) if cpu_avgs else None,
+        cpu_percent_max=max(cpu_maxs) if cpu_maxs else None,
+        memory_mb_avg=sum(mem_avgs) / len(mem_avgs) if mem_avgs else None,
+        memory_mb_max=max(mem_maxs) if mem_maxs else None,
         metadata=results[0].metadata,
     )
 
