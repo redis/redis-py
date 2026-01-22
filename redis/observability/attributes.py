@@ -9,6 +9,8 @@ Reference: https://opentelemetry.io/docs/specs/semconv/database/redis/
 from enum import Enum
 from typing import Any, Dict, Optional
 
+import redis
+
 # Database semantic convention attributes
 DB_SYSTEM = "db.system"
 DB_NAMESPACE = "db.namespace"
@@ -92,7 +94,7 @@ class AttributeBuilder:
         """
         attrs: Dict[str, Any] = {
             DB_SYSTEM: "redis",
-            REDIS_CLIENT_LIBRARY: "redis-py"
+            REDIS_CLIENT_LIBRARY: f"redis-py:{redis.__version__}"
         }
 
         if server_address is not None:

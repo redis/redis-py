@@ -743,7 +743,8 @@ class ExportStreamingLagMetric(EventListenerInterface):
                         message_id, message = message
                         message_id = str_if_bytes(message_id)
                         timestamp, _ = message_id.split("-")
-                        lag_seconds = now - int(timestamp) / 1000
+                        # Ensure lag is non-negative (clock skew can cause negative values)
+                        lag_seconds = max(0.0, now - int(timestamp) / 1000)
 
                         record_streaming_lag(
                             lag_seconds=lag_seconds,
@@ -760,7 +761,8 @@ class ExportStreamingLagMetric(EventListenerInterface):
                     message_id, message = message
                     message_id = str_if_bytes(message_id)
                     timestamp, _ = message_id.split("-")
-                    lag_seconds = now - int(timestamp) / 1000
+                    # Ensure lag is non-negative (clock skew can cause negative values)
+                    lag_seconds = max(0.0, now - int(timestamp) / 1000)
 
                     record_streaming_lag(
                         lag_seconds=lag_seconds,
