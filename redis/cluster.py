@@ -3488,7 +3488,7 @@ class TransactionStrategy(AbstractStrategy):
                 node = self._nodes_manager.find_connection_owner(
                     self._transaction_connection
                 )
-                if node:
+                if node and node.redis_connection:
                     node.redis_connection.connection_pool.release(
                         self._transaction_connection
                     )
@@ -3645,7 +3645,7 @@ class TransactionStrategy(AbstractStrategy):
                 node = self._nodes_manager.find_connection_owner(
                     self._transaction_connection
                 )
-                if node:
+                if node and node.redis_connection:
                     node.redis_connection.connection_pool.release(
                         self._transaction_connection
                     )
@@ -3657,7 +3657,7 @@ class TransactionStrategy(AbstractStrategy):
                     node = self._nodes_manager.find_connection_owner(
                         self._transaction_connection
                     )
-                    if node:
+                    if node and node.redis_connection:
                         node.redis_connection.connection_pool.release(
                             self._transaction_connection
                         )
