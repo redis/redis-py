@@ -3217,6 +3217,99 @@ class TestNodesManager:
                     # primary should be first
                     assert slot_nodes[0].server_type == PRIMARY
 
+    def test_move_node_to_end_of_cached_nodes(self):
+        """
+        Test that move_node_to_end_of_cached_nodes moves a node to the end of
+        startup_nodes and nodes_cache.
+        """
+        node1 = ClusterNode(default_host, 7000)
+        node2 = ClusterNode(default_host, 7001)
+        node3 = ClusterNode(default_host, 7002)
+
+        with patch.object(NodesManager, "initialize"):
+            nodes_manager = NodesManager(
+                startup_nodes=[node1, node2, node3],
+                require_full_coverage=False,
+            )
+            # Also populate nodes_cache with the same nodes
+            nodes_manager.nodes_cache = {
+                node1.name: node1,
+                node2.name: node2,
+                node3.name: node3,
+            }
+
+            # Verify initial order
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node1.name, node2.name, node3.name]
+            assert nodes_cache_names == [node1.name, node2.name, node3.name]
+
+            # Move first node to end
+            nodes_manager.move_node_to_end_of_cached_nodes(node1.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node2.name, node3.name, node1.name]
+            assert nodes_cache_names == [node2.name, node3.name, node1.name]
+
+            # Move middle node to end
+            nodes_manager.move_node_to_end_of_cached_nodes(node3.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node2.name, node1.name, node3.name]
+            assert nodes_cache_names == [node2.name, node1.name, node3.name]
+
+            # Moving last node should keep it at the end
+            nodes_manager.move_node_to_end_of_cached_nodes(node3.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node2.name, node1.name, node3.name]
+            assert nodes_cache_names == [node2.name, node1.name, node3.name]
+
+    def test_move_node_to_end_of_cached_nodes_nonexistent(self):
+        """
+        Test that move_node_to_end_of_cached_nodes does nothing for a
+        nonexistent node.
+        """
+        node1 = ClusterNode(default_host, 7000)
+        node2 = ClusterNode(default_host, 7001)
+
+        with patch.object(NodesManager, "initialize"):
+            nodes_manager = NodesManager(
+                startup_nodes=[node1, node2],
+                require_full_coverage=False,
+            )
+            # Also populate nodes_cache
+            nodes_manager.nodes_cache = {node1.name: node1, node2.name: node2}
+
+            # Try to move a non-existent node - should not raise
+            nodes_manager.move_node_to_end_of_cached_nodes("nonexistent:9999")
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node1.name, node2.name]
+            assert nodes_cache_names == [node1.name, node2.name]
+
+    def test_move_node_to_end_of_cached_nodes_single_node(self):
+        """
+        Test that move_node_to_end_of_cached_nodes does nothing when there's
+        only one node.
+        """
+        node1 = ClusterNode(default_host, 7000)
+
+        with patch.object(NodesManager, "initialize"):
+            nodes_manager = NodesManager(
+                startup_nodes=[node1],
+                require_full_coverage=False,
+            )
+            # Also populate nodes_cache
+            nodes_manager.nodes_cache = {node1.name: node1}
+
+            # Should not raise or change anything with single node
+            nodes_manager.move_node_to_end_of_cached_nodes(node1.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node1.name]
+            assert nodes_cache_names == [node1.name]
+
 
 @pytest.mark.onlycluster
 class TestClusterPubSubObject:
