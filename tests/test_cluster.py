@@ -3191,9 +3191,11 @@ class TestNodesManager:
                 """Move slots while initialize is running"""
                 for slot_id in range(10):
                     try:
-                        # move slot to a mix of :7001 & :7003, which simulates what we'd see in
-                        # both failovers & slot migrations.
-                        new_slot = 7001 if slot_id % 2 == 0 else 7003
+                        # move slot to a mix of :7000 & :7003, which simulates failovers
+                        # within the same shard. Using nodes from the same shard ensures
+                        # move_slot preserves the 2-node structure (primary + replica),
+                        # so both initialize() and move_slot() result in 2 nodes per slot.
+                        new_slot = 7000 if slot_id % 2 == 0 else 7003
                         moved_error = MovedError(f"{slot_id} 127.0.0.1:{new_slot}")
                         nm.move_slot(moved_error)
                     except Exception as e:
