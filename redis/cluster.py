@@ -1715,6 +1715,7 @@ class NodesManager:
                 # This is a new node, we will add it to the nodes cache
                 redirected_node = ClusterNode(e.host, e.port, PRIMARY)
                 self.nodes_cache[redirected_node.name] = redirected_node
+
             slot_nodes = self.slots_cache[e.slot_id]
             if redirected_node not in slot_nodes:
                 # The new slot owner is a new server, or a server from a different
@@ -1725,6 +1726,9 @@ class NodesManager:
                 # The MOVED error resulted from a failover, and the new slot owner
                 # had previously been a replica.
                 old_primary = slot_nodes[0]
+                # Update the old primary to be a replica and add it to the end of
+                # the slot's node list
+                old_primary.server_type = REPLICA
                 slot_nodes.append(old_primary)
                 # Remove the old replica, which is now a primary, from the slot's
                 # node list
@@ -1924,7 +1928,7 @@ class NodesManager:
                     # bother running again
                     return
 
-            for startup_node in self.startup_nodes:
+            for startup_node in tuple(self.startup_nodes.values()):
                 try:
                     if startup_node.redis_connection:
                         r = startup_node.redis_connection
