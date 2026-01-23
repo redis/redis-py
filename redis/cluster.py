@@ -66,6 +66,7 @@ from redis.maint_notifications import MaintNotificationsConfig
 from redis.retry import Retry
 from redis.utils import (
     deprecated_args,
+    deprecated_function,
     dict_merge,
     list_keys_to_dict,
     merge_result,
@@ -1626,6 +1627,7 @@ class NodesManager:
         startup_nodes: list[ClusterNode],
         from_url=False,
         require_full_coverage=False,
+        lock: Optional[threading.RLock] = None,
         dynamic_startup_nodes=True,
         connection_pool_class=ConnectionPool,
         address_remap: Optional[Callable[[Tuple[str, int]], Tuple[str, int]]] = None,
@@ -1638,14 +1640,14 @@ class NodesManager:
         self.nodes_cache: dict[str, ClusterNode] = {}
         self.slots_cache: dict[int, list[ClusterNode]] = {}
         self.startup_nodes: dict[str, ClusterNode] = {n.name: n for n in startup_nodes}
-        self.default_node: ClusterNode | None = None
+        self.default_node: Optional[ClusterNode] = None
         self._epoch: int = 0
         self.from_url = from_url
         self._require_full_coverage = require_full_coverage
         self._dynamic_startup_nodes = dynamic_startup_nodes
         self.connection_pool_class = connection_pool_class
         self.address_remap = address_remap
-        self._cache: CacheInterface | None = None
+        self._cache: Optional[CacheInterface] = None
         if cache:
             self._cache = cache
         elif cache_factory is not None:
@@ -1656,11 +1658,15 @@ class NodesManager:
         self.read_load_balancer = LoadBalancer()
 
         # nodes_cache / slots_cache / startup_nodes / default_node are protected by _lock
-        self._lock: threading.RLock = threading.RLock()
+        if lock is None:
+            self._lock = threading.RLock()
+        else:
+            self._lock = lock
+
         # initialize holds _initialization_lock to dedup multiple calls to reinitialize;
         # note that if we hold both _lock and _initialization_lock, we _must_ acquire
         # _initialization_lock first (ie: to have a consistent order) to avoid deadlock.
-        self._initialization_lock: threading.Lock = threading.Lock()
+        self._initialization_lock: threading.RLock = threading.RLock()
 
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -1673,10 +1679,10 @@ class NodesManager:
 
     def get_node(
         self,
-        host: str | None = None,
-        port: int | None = None,
-        node_name: str | None = None,
-    ) -> ClusterNode | None:
+        host: Optional[str] = None,
+        port: Optional[int] = None,
+        node_name: Optional[str] = None,
+    ) -> Optional[ClusterNode]:
         """
         Get the requested node from the cluster's nodes.
         nodes.
@@ -1694,7 +1700,7 @@ class NodesManager:
         else:
             return None
 
-    def move_slot(self, e: AskError | MovedError):
+    def move_slot(self, e: Union[AskError, MovedError]):
         """
         Update the slot's node with the redirected one
         """
@@ -1742,8 +1748,8 @@ class NodesManager:
         self,
         slot: int,
         read_from_replicas: bool = False,
-        load_balancing_strategy: LoadBalancingStrategy | None = None,
-        server_type: Literal["primary", "replica"] | None = None,
+        load_balancing_strategy: Optional[LoadBalancingStrategy] = None,
+        server_type: Optional[Literal["primary", "replica"]] = None,
     ) -> ClusterNode:
         """
         Gets a node that servers this hash slot
@@ -1758,6 +1764,7 @@ class NodesManager:
                     f'Slot "{slot}" not covered by the cluster. '
                     + f'"require_full_coverage={self._require_full_coverage}"'
                 )
+
             if len(self.slots_cache[slot]) > 1 and load_balancing_strategy:
                 # get the server index using the strategy defined in load_balancing_strategy
                 primary_name = self.slots_cache[slot][0].name
@@ -1790,6 +1797,18 @@ class NodesManager:
                 for node in self.nodes_cache.values()
                 if node.server_type == server_type
             ]
+
+    @deprecated_function(
+        reason="This method is not used anymore internally. The startup nodes are populated automatically.",
+        version="7.0.2",
+    )
+    def populate_startup_nodes(self, nodes):
+        """
+        Populate all startup nodes and filters out any duplicates
+        """
+        with self._lock:
+            for n in nodes:
+                self.startup_nodes[n.name] = n
 
     def check_slots_coverage(self, slots_cache):
         # Validate if all slots are covered or if we should try next
@@ -1861,7 +1880,7 @@ class NodesManager:
             # before creating a new cluster node, check if the cluster node already
             # exists in the current nodes cache and has a valid connection so we can
             # reuse it
-            redis_connection: Redis | None = None
+            redis_connection: Optional[Redis] = None
             with self._lock:
                 previous_node = self.nodes_cache.get(node_name)
                 if previous_node:
@@ -1905,13 +1924,7 @@ class NodesManager:
                     # bother running again
                     return
 
-                # randomly order the startup nodes to ensure multiple clients evenly
-                # distribute topology discovery requests across the cluster.
-                startup_nodes = random.sample(
-                    list(self.startup_nodes.values()), k=len(self.startup_nodes)
-                )
-
-            for startup_node in startup_nodes:
+            for startup_node in self.startup_nodes:
                 try:
                     if startup_node.redis_connection:
                         r = startup_node.redis_connection
@@ -1924,6 +1937,7 @@ class NodesManager:
                     # Make sure cluster mode is enabled on this node
                     try:
                         cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
+                        r.connection_pool.disconnect()
                     except ResponseError:
                         raise RedisClusterException(
                             "Cluster mode is not enabled on this node"
@@ -2054,7 +2068,7 @@ class NodesManager:
             return self.address_remap((host, port))
         return host, port
 
-    def find_connection_owner(self, connection: Connection) -> ClusterNode | None:
+    def find_connection_owner(self, connection: Connection) -> Optional[ClusterNode]:
         node_name = get_node_name(connection.host, connection.port)
         with self._lock:
             for node in tuple(self.nodes_cache.values()):
