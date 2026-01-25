@@ -1928,7 +1928,10 @@ class NodesManager:
                     # bother running again
                     return
 
-            for startup_node in tuple(self.startup_nodes.values()):
+            with self._lock:
+                startup_nodes = tuple(self.startup_nodes.values())
+
+            for startup_node in startup_nodes:
                 try:
                     if startup_node.redis_connection:
                         r = startup_node.redis_connection

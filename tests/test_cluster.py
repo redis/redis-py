@@ -3031,13 +3031,6 @@ class TestNodesManager:
 
             execute_command_mock.side_effect = execute_command
 
-            r = get_mocked_redis_client(
-                host=default_host,
-                port=default_port,
-                cluster_enabled=True,
-            )
-            nm = r.nodes_manager
-
             nm = NodesManager(
                 startup_nodes=[ClusterNode(host=default_host, port=default_port)],
                 from_url=False,
@@ -3109,7 +3102,7 @@ class TestNodesManager:
             cluster_enabled=True,
         )
         nm = r.nodes_manager
-        # Move slots 0-1000 to 127.0.0.1 in concurrent threads
+        # Move slots 0-999 to 127.0.0.1 in concurrent threads
         num_threads = 20
         slots_per_thread = 50  # 1000 slots / 20 threads = 50 slots per thread
         errors: list[Exception] = []
@@ -3140,7 +3133,7 @@ class TestNodesManager:
         # Check that no errors occurred
         assert len(errors) == 0, f"Errors occurred: {errors}"
 
-        # Verify that all slots 0-1000 are moved to 127.0.0.1:7000
+        # Verify that all slots 0-999 are moved to 127.0.0.1:7001
         for slot_id in range(num_threads * slots_per_thread):
             assert slot_id in nm.slots_cache, f"Slot {slot_id} missing"
             slot_nodes = nm.slots_cache[slot_id]
