@@ -8,6 +8,7 @@ import redis.sentinel
 from redis import exceptions
 from redis.sentinel import (
     MasterNotFoundError,
+    ReplicaNotFoundError,
     Sentinel,
     SentinelConnectionPool,
     SlaveNotFoundError,
@@ -373,3 +374,65 @@ def test_sentinel_commands_with_strict_redis_client(request):
     assert isinstance(client.sentinel_ckquorum("redis-py-test"), bool)
 
     client.close()
+
+
+# Tests for REPLICA aliases (Redis 5.0+ terminology)
+@pytest.mark.onlynoncluster
+def test_replica_not_found_error_alias():
+    """Test that ReplicaNotFoundError is an alias for SlaveNotFoundError"""
+    assert ReplicaNotFoundError is SlaveNotFoundError
+
+
+@pytest.mark.onlynoncluster
+def test_replica_for_alias(cluster, sentinel):
+    """Test that replica_for() is an alias for slave_for()"""
+    cluster.slaves = [
+        {"ip": "127.0.0.1", "port": 6379, "is_odown": False, "is_sdown": False}
+    ]
+    replica = sentinel.replica_for("mymaster", db=9)
+    assert replica.ping()
+
+
+@pytest.mark.onlynoncluster
+def test_discover_replicas_alias(cluster, sentinel):
+    """Test that discover_replicas() is an alias for discover_slaves()"""
+    cluster.slaves = [
+        {"ip": "slave0", "port": 1234, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 1234, "is_odown": False, "is_sdown": False},
+    ]
+    # discover_replicas should return the same result as discover_slaves
+    replicas = sentinel.discover_replicas("mymaster")
+    slaves = sentinel.discover_slaves("mymaster")
+    assert replicas == slaves
+    assert replicas == [("slave0", 1234), ("slave1", 1234)]
+
+
+@pytest.mark.onlynoncluster
+def test_filter_replicas_alias(cluster, sentinel):
+    """Test that filter_replicas() is an alias for filter_slaves()"""
+    replicas = [
+        {"ip": "replica0", "port": 1234, "is_odown": False, "is_sdown": False},
+        {"ip": "replica1", "port": 1234, "is_odown": True, "is_sdown": False},
+    ]
+    # filter_replicas should return the same result as filter_slaves
+    filtered_replicas = sentinel.filter_replicas(replicas)
+    filtered_slaves = sentinel.filter_slaves(replicas)
+    assert filtered_replicas == filtered_slaves
+    assert filtered_replicas == [("replica0", 1234)]
+
+
+@pytest.mark.onlynoncluster
+def test_rotate_replicas_alias(cluster, sentinel, master_ip):
+    """Test that rotate_replicas() is an alias for rotate_slaves()"""
+    cluster.slaves = [
+        {"ip": "slave0", "port": 6379, "is_odown": False, "is_sdown": False},
+        {"ip": "slave1", "port": 6379, "is_odown": False, "is_sdown": False},
+    ]
+    pool = SentinelConnectionPool("mymaster", sentinel)
+    rotator = pool.rotate_replicas()
+    assert next(rotator) in (("slave0", 6379), ("slave1", 6379))
+    assert next(rotator) in (("slave0", 6379), ("slave1", 6379))
+    # Fallback to master
+    assert next(rotator) == (master_ip, 6379)
+    with pytest.raises(SlaveNotFoundError):
+        next(rotator)
