@@ -65,7 +65,9 @@ from .helpers import at_most_one_value_set, list_or_args
 
 if TYPE_CHECKING:
     import redis.asyncio.client
+    import redis.asyncio.cluster
     import redis.client
+    import redis.cluster
 
 
 class ACLCommands(CommandsProtocol):
@@ -5961,7 +5963,11 @@ class Script:
     An executable Lua script object returned by ``register_script``
     """
 
-    def __init__(self, registered_client: "redis.client.Redis", script: ScriptTextT):
+    def __init__(
+        self,
+        registered_client: Union["redis.client.Redis", "redis.cluster.RedisCluster"],
+        script: ScriptTextT,
+    ):
         self.registered_client = registered_client
         self.script = script
         # Precalculate and store the SHA1 hex digest of the script.
@@ -5977,7 +5983,7 @@ class Script:
         self,
         keys: Union[Sequence[KeyT], None] = None,
         args: Union[Iterable[EncodableT], None] = None,
-        client: Union["redis.client.Redis", None] = None,
+        client: Union["redis.client.Redis", "redis.cluster.RedisCluster", None] = None,
     ):
         """Execute the script, passing any required ``args``"""
         keys = keys or []
@@ -6026,7 +6032,9 @@ class AsyncScript:
 
     def __init__(
         self,
-        registered_client: "redis.asyncio.client.Redis",
+        registered_client: Union[
+            "redis.asyncio.client.Redis", "redis.asyncio.cluster.RedisCluster"
+        ],
         script: ScriptTextT,
     ):
         self.registered_client = registered_client
@@ -6048,7 +6056,9 @@ class AsyncScript:
         self,
         keys: Union[Sequence[KeyT], None] = None,
         args: Union[Iterable[EncodableT], None] = None,
-        client: Union["redis.asyncio.client.Redis", None] = None,
+        client: Union[
+            "redis.asyncio.client.Redis", "redis.asyncio.cluster.RedisCluster", None
+        ] = None,
     ):
         """Execute the script, passing any required ``args``"""
         keys = keys or []
@@ -6281,7 +6291,10 @@ class ScriptCommands(CommandsProtocol):
         """
         return self.execute_command("SCRIPT LOAD", script)
 
-    def register_script(self: "redis.client.Redis", script: ScriptTextT) -> Script:
+    def register_script(
+        self: Union["redis.client.Redis", "redis.cluster.RedisCluster"],
+        script: ScriptTextT,
+    ) -> Script:
         """
         Register a Lua ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
@@ -6296,7 +6309,7 @@ class AsyncScriptCommands(ScriptCommands):
         return super().script_debug()
 
     def register_script(
-        self: "redis.asyncio.client.Redis",
+        self: Union["redis.asyncio.client.Redis", "redis.asyncio.cluster.RedisCluster"],
         script: ScriptTextT,
     ) -> AsyncScript:
         """

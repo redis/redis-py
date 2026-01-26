@@ -1,6 +1,7 @@
 import pytest
 import pytest_asyncio
 from redis import exceptions
+from redis.commands.core import AsyncScript
 from tests.conftest import skip_if_server_version_lt
 
 multiply_script = """
@@ -150,3 +151,27 @@ class TestScripting:
         with pytest.raises(exceptions.ResponseError) as excinfo:
             await pipe.execute()
         assert excinfo.type == exceptions.ResponseError
+
+
+@pytest.mark.onlycluster
+class TestAsyncScriptWithCluster:
+    """Tests for AsyncScript with RedisCluster support."""
+
+    @pytest_asyncio.fixture
+    async def r(self, create_redis):
+        redis = await create_redis()
+        yield redis
+        await redis.script_flush()
+
+    @pytest.mark.asyncio()
+    async def test_register_script_with_cluster_client(self, r):
+        """Test that register_script works with async RedisCluster client.
+
+        This verifies the type hints fix for register_script to support RedisCluster.
+        """
+        await r.set("a", 2)
+        multiply = r.register_script(multiply_script)
+        assert isinstance(multiply, AsyncScript)
+        assert multiply.registered_client is r
+        # Verify the script actually works
+        assert await multiply(keys=["a"], args=[3]) == 6
