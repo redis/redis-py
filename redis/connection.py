@@ -1414,7 +1414,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         server_ver = self._conn.handshake_metadata.get(b"version", None)
         if server_ver is None:
             server_ver = self._conn.handshake_metadata.get("version", None)
-        if server_ver is None or server_ver is None:
+        if server_ver is None or server_name is None:
             raise ConnectionError("Cannot retrieve information about server version")
 
         server_ver = ensure_string(server_ver)
