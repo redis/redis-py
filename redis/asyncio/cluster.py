@@ -1350,6 +1350,7 @@ class ClusterNode:
         try:
             return await self.parse_response(connection, args[0], **kwargs)
         finally:
+            await self.disconnect_if_needed(connection)
             # Release connection
             self._free.append(connection)
 
@@ -1376,6 +1377,7 @@ class ClusterNode:
                 ret = True
 
         # Release connection
+        await self.disconnect_if_needed(connection)
         self._free.append(connection)
 
         return ret
