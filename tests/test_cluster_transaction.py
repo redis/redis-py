@@ -8,7 +8,7 @@ import redis
 from redis import CrossSlotTransactionError, ConnectionPool, RedisClusterException
 from redis.backoff import NoBackoff
 from redis.client import Redis
-from redis.cluster import PRIMARY, ClusterNode, NodesManager, RedisCluster
+from redis.cluster import PRIMARY, ClusterNode, RedisCluster
 from redis.retry import Retry
 
 from .conftest import skip_if_server_version_lt
@@ -126,9 +126,6 @@ class TestClusterTransaction:
 
         with (
             patch.object(Redis, "parse_response") as parse_response,
-            patch.object(
-                NodesManager, "_update_moved_slots"
-            ) as manager_update_moved_slots,
         ):
 
             def ask_redirect_effect(connection, *args, **options):
@@ -151,8 +148,6 @@ class TestClusterTransaction:
                     f" {slot} {node_importing.name}"
                 )
 
-            manager_update_moved_slots.assert_called()
-
     @pytest.mark.onlycluster
     def test_retry_transaction_during_slot_migration_successful(self, r):
         """
@@ -166,9 +161,6 @@ class TestClusterTransaction:
 
         with (
             patch.object(Redis, "parse_response") as parse_response,
-            patch.object(
-                NodesManager, "_update_moved_slots"
-            ) as manager_update_moved_slots,
         ):
 
             def ask_redirect_effect(conn, *args, **options):
@@ -190,15 +182,7 @@ class TestClusterTransaction:
                 else:
                     assert False, f"unexpected node {conn.host}:{conn.port} was called"
 
-            def update_moved_slot():  # simulate slot table update
-                ask_error = r.nodes_manager._moved_exception
-                assert ask_error is not None, "No AskError was previously triggered"
-                assert f"{ask_error.host}:{ask_error.port}" == node_importing.name
-                r.nodes_manager._moved_exception = None
-                r.nodes_manager.slots_cache[slot] = [node_importing]
-
             parse_response.side_effect = ask_redirect_effect
-            manager_update_moved_slots.side_effect = update_moved_slot
 
             result = None
             with r.pipeline(transaction=True) as pipe:
@@ -311,6 +295,7 @@ class TestClusterTransaction:
         mock_pool.get_connection.return_value = mock_connection
         mock_pool._available_connections = [mock_connection]
         mock_pool._lock = threading.RLock()
+        mock_pool.connection_kwargs = {}
 
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
         node_importing.redis_connection.connection_pool = mock_pool

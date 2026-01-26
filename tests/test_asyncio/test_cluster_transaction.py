@@ -127,9 +127,7 @@ class TestClusterTransaction:
 
         with (
             patch.object(ClusterNode, "parse_response") as parse_response,
-            patch.object(
-                NodesManager, "_update_moved_slots"
-            ) as manager_update_moved_slots,
+            patch.object(NodesManager, "move_slot") as manager_move_slot,
         ):
 
             def ask_redirect_effect(connection, *args, **options):
@@ -152,7 +150,7 @@ class TestClusterTransaction:
                     f" {slot} {node_importing.name}"
                 )
 
-            manager_update_moved_slots.assert_called()
+            manager_move_slot.assert_called()
 
     @pytest.mark.onlycluster
     async def test_retry_transaction_during_slot_migration_successful(
@@ -170,9 +168,6 @@ class TestClusterTransaction:
 
         with (
             patch.object(ClusterNode, "parse_response") as parse_response,
-            patch.object(
-                NodesManager, "_update_moved_slots"
-            ) as manager_update_moved_slots,
         ):
 
             def ask_redirect_effect(conn, *args, **options):
@@ -192,15 +187,7 @@ class TestClusterTransaction:
                 else:
                     assert False, f"unexpected node {conn.host}:{conn.port} was called"
 
-            def update_moved_slot():  # simulate slot table update
-                ask_error = r.nodes_manager._moved_exception
-                assert ask_error is not None, "No AskError was previously triggered"
-                assert f"{ask_error.host}:{ask_error.port}" == node_importing.name
-                r.nodes_manager._moved_exception = None
-                r.nodes_manager.slots_cache[slot] = [node_importing]
-
             parse_response.side_effect = ask_redirect_effect
-            manager_update_moved_slots.side_effect = update_moved_slot
 
             result = None
             async with r.pipeline(transaction=True) as pipe:

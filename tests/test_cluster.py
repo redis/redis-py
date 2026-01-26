@@ -3009,6 +3009,216 @@ class TestNodesManager:
         for node in rc.nodes_manager.nodes_cache.values():
             assert node.redis_connection.connection_pool.queue_class == queue_class
 
+    def test_concurrent_initialize_exact_timing(self):
+        """
+        Test that exactly two concurrent initialize calls result in only
+        one actual cluster slots fetch by forcing them to start simultaneously
+        """
+        initialization_count = {"count": 0}
+        epoch_barrier = threading.Barrier(2)
+
+        with (
+            patch.object(Redis, "execute_command") as execute_command_mock,
+        ):
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    # Track how many times we actually fetch cluster slots
+                    initialization_count["count"] += 1
+                    return default_cluster_slots
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            nm = NodesManager(
+                startup_nodes=[ClusterNode(host=default_host, port=default_port)],
+                from_url=False,
+                require_full_coverage=False,
+                dynamic_startup_nodes=True,
+            )
+
+            # Reset the counter after initial setup
+            initialization_count["count"] = 0
+
+            # Store the original method
+            original_get_epoch = nm._get_epoch
+
+            def mocked_get_epoch():
+                """
+                Mock _get_epoch to control race timing:
+                1. First thread fetches epoch
+                2. Both threads sync at epoch_barrier (ensures 2nd thread also fetches epoch)
+                3. Both threads sync at proceed_barrier (ensures both have same epoch before lock)
+                4. Both threads proceed to try to acquire _initialization_lock
+                """
+                epoch = original_get_epoch()
+                # Signal that this thread has fetched the epoch
+                epoch_barrier.wait()
+                return epoch
+
+            # Patch the instance method directly
+            nm._get_epoch = mocked_get_epoch
+
+            errors: list[Exception] = []
+
+            def initialize_thread():
+                """Call initialize to test concurrent access"""
+                try:
+                    nm.initialize()
+                except Exception as e:
+                    errors.append(e)
+
+            # Create exactly 2 threads that will initialize at the same time
+            threads: list[threading.Thread] = []
+            for _ in range(2):
+                threads.append(threading.Thread(target=initialize_thread))
+
+            # Start both threads
+            for t in threads:
+                t.start()
+
+            # Wait for both threads to complete
+            for t in threads:
+                t.join()
+
+            # Check that no errors occurred
+            assert len(errors) == 0, f"Errors occurred: {errors}"
+
+            # Due to the _initialization_lock, only one thread should have
+            # actually fetched cluster slots
+            assert initialization_count["count"] == 1
+
+            # Verify that the nodes_cache is still consistent
+            assert len(nm.nodes_cache) > 0
+            assert len(nm.slots_cache) > 0
+
+    def test_concurrent_slot_moves(self):
+        # ensure multiple concurrently moved slots are processed correctly,
+        # eg: not dropping updates
+        r = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_enabled=True,
+        )
+        nm = r.nodes_manager
+        # Move slots 0-999 to 127.0.0.1 in concurrent threads
+        num_threads = 20
+        slots_per_thread = 50  # 1000 slots / 20 threads = 50 slots per thread
+        errors: list[Exception] = []
+
+        def move_slots_worker(thread_id: int):
+            """Each thread moves a subset of slots to 127.0.0.1"""
+            try:
+                for i in range(slots_per_thread):
+                    moved_error = MovedError(
+                        f"{thread_id * slots_per_thread + i} 127.0.0.1:7001"
+                    )
+                    nm.move_slot(moved_error)
+            except Exception as e:
+                errors.append(e)
+
+        # Start all threads
+        threads: list[threading.Thread] = []
+        for i in range(num_threads):
+            threads.append(threading.Thread(target=move_slots_worker, args=(i,)))
+
+        for t in threads:
+            t.start()
+
+        # Wait for all threads to complete
+        for t in threads:
+            t.join()
+
+        # Check that no errors occurred
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+
+        # Verify that all slots 0-999 are moved to 127.0.0.1:7001
+        for slot_id in range(num_threads * slots_per_thread):
+            assert slot_id in nm.slots_cache, f"Slot {slot_id} missing"
+            slot_nodes = nm.slots_cache[slot_id]
+            assert len(slot_nodes) >= 1, f"Slot {slot_id} has no nodes"
+            primary_node = slot_nodes[0]
+            assert primary_node.host == "127.0.0.1", (
+                f"Slot {slot_id} not moved to 127.0.0.1, "
+                f"current host: {primary_node.host}"
+            )
+            assert primary_node.port == 7001, (
+                f"Slot {slot_id} not moved to port 7001, "
+                f"current port: {primary_node.port}"
+            )
+            assert primary_node.server_type == PRIMARY
+
+    def test_concurrent_initialize_and_move_slot(self):
+        # race initialize & move slot to ensure that the two operations
+        # don't conflict with each other.
+
+        with (
+            patch.object(Redis, "execute_command") as execute_command_mock,
+        ):
+            r = get_mocked_redis_client(
+                host=default_host,
+                port=default_port,
+                cluster_enabled=True,
+            )
+            nm = r.nodes_manager
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    return default_cluster_slots
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            errors: list[Exception] = []
+
+            def initialize_worker():
+                """Reinitialize the cluster"""
+                try:
+                    nm.initialize()
+                except Exception as e:
+                    errors.append(e)
+
+            def move_slots_worker():
+                """Move slots while initialize is running"""
+                for slot_id in range(10):
+                    try:
+                        # move slot to a mix of :7000 & :7003, which simulates failovers
+                        # within the same shard. Using nodes from the same shard ensures
+                        # move_slot preserves the 2-node structure (primary + replica),
+                        # so both initialize() and move_slot() result in 2 nodes per slot.
+                        new_slot = 7000 if slot_id % 2 == 0 else 7003
+                        moved_error = MovedError(f"{slot_id} 127.0.0.1:{new_slot}")
+                        nm.move_slot(moved_error)
+                    except Exception as e:
+                        errors.append(e)
+
+            for _ in range(100):
+                t1 = threading.Thread(target=initialize_worker)
+                t2 = threading.Thread(target=move_slots_worker)
+
+                t1.start()
+                t2.start()
+
+                t1.join()
+                t2.join()
+
+                # check that no errors occurred
+                assert len(errors) == 0, f"Errors occurred: {errors}"
+
+                # verify data consistency
+                for slot_id in range(REDIS_CLUSTER_HASH_SLOTS):
+                    assert slot_id in nm.slots_cache, f"Slot {slot_id} missing"
+                    slot_nodes = nm.slots_cache[slot_id]
+                    assert len(slot_nodes) == 2
+
+                    for node in slot_nodes:
+                        assert node.name in nm.nodes_cache
+
+                    # primary should be first
+                    assert slot_nodes[0].server_type == PRIMARY
+
 
 @pytest.mark.onlycluster
 class TestClusterPubSubObject:
