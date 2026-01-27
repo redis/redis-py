@@ -489,7 +489,7 @@ class TestRedisClusterObj:
         with mock.patch.object(Connection, "read_response") as read_response:
 
             async def read_response_mocked(*args: Any, **kwargs: Any) -> None:
-                await asyncio.sleep(10)
+                await asyncio.sleep(0.1)
 
             read_response.side_effect = read_response_mocked
 
@@ -501,14 +501,13 @@ class TestRedisClusterObj:
                     )
                 )
 
-        # Explicitly disconnect all nodes to release connections that are still
-        # in use by the background tasks. When asyncio.gather() raises
-        # MaxConnectionsError, the other 10 tasks continue running in the
-        # background (blocked in the mocked read_response). Without this cleanup,
-        # the test teardown will fail with MaxConnectionsError when trying to
-        # call flushdb() because all connections are still in use.
-        for node in rc.get_nodes():
-            await node.disconnect()
+        # Wait for background tasks to complete and release their connections.
+        # When asyncio.gather() raises MaxConnectionsError, the other 10 tasks
+        # continue running in the background. Since commit f6bbfb45 added
+        # 'await disconnect_if_needed()' to the finally block, we must wait
+        # for tasks to complete naturally before teardown, otherwise we get
+        # race conditions with connections being disconnected while still in use.
+        await asyncio.sleep(0.2)
 
         await rc.aclose()
 
