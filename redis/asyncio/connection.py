@@ -381,6 +381,9 @@ class AbstractConnection:
     def should_reconnect(self):
         return self._should_reconnect
 
+    def reset_should_reconnect(self):
+        self._should_reconnect = False
+
     @abstractmethod
     async def _connect(self):
         pass
@@ -519,6 +522,8 @@ class AbstractConnection:
         try:
             async with async_timeout(self.socket_connect_timeout):
                 self._parser.on_disconnect()
+                # Reset the reconnect flag
+                self.reset_should_reconnect()
                 if not self.is_connected:
                     return
                 try:
