@@ -501,6 +501,15 @@ class TestRedisClusterObj:
                     )
                 )
 
+        # Explicitly disconnect all nodes to release connections that are still
+        # in use by the background tasks. When asyncio.gather() raises
+        # MaxConnectionsError, the other 10 tasks continue running in the
+        # background (blocked in the mocked read_response). Without this cleanup,
+        # the test teardown will fail with MaxConnectionsError when trying to
+        # call flushdb() because all connections are still in use.
+        for node in rc.get_nodes():
+            await node.disconnect()
+
         await rc.aclose()
 
     async def test_execute_command_errors(self, r: RedisCluster) -> None:
