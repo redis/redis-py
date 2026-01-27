@@ -273,18 +273,22 @@ def find_node_ip_based_on_port(cluster_client, port):
             return node.host
 
 
-def moved_redirection_helper(request, failover=False):
+def moved_redirection_helper(request, failover=False, circular_moved=False):
     """
-    Test that the client handles MOVED response after a failover.
-    Redirection after a failover means that the redirection address is of a
-    replica that was promoted to a primary.
+    Test that the client correctly handles MOVED responses in the following scenarios:
+    1.	Slot migration to a different shard (failover=False, circular_moved=False) —
+        a standard slot move between shards.
+    2.	Failover event (failover=True, circular_moved=False) —
+        the redirect target is a replica that has just been promoted to primary.
+    3.	Circular MOVED (failover=False, circular_moved=True) —
+        the redirect points to a node already known to be the primary of its shard.
 
     At first call it should return a MOVED ResponseError that will point
     the client to the next server it should talk to.
 
     Verify that:
     1. it tries to talk to the redirected node
-    2. it updates the slot's primary to the redirected node
+    2. it updates the slot's primary to the redirected node, if required
 
     For a failover, also verify:
     3. the redirected node's server type updated to 'primary'
@@ -300,8 +304,10 @@ def moved_redirection_helper(request, failover=False):
             warnings.warn("Skipping this test since it requires to have a replica")
             return
         redirect_node = rc.nodes_manager.slots_cache[slot][1]
+    elif circular_moved:
+        redirect_node = prev_primary
     else:
-        # Use one of the primaries to be the redirected node
+        # Use one of the other primaries to be the redirected node
         redirect_node = rc.get_primaries()[0]
     r_host = redirect_node.host
     r_port = redirect_node.port
@@ -324,6 +330,10 @@ def moved_redirection_helper(request, failover=False):
         if failover:
             assert rc.get_node(host=r_host, port=r_port).server_type == PRIMARY
             assert prev_primary.server_type == REPLICA
+        elif circular_moved:
+            fetched_node = rc.get_node(host=r_host, port=r_port)
+            assert fetched_node == prev_primary
+            assert fetched_node.server_type == PRIMARY
 
 
 @pytest.mark.onlycluster
@@ -546,6 +556,13 @@ class TestRedisClusterObj:
         Test that the client handles MOVED response after a failover.
         """
         moved_redirection_helper(request, failover=True)
+
+    def test_moved_redirection_circular_moved(self, request):
+        """
+        Verify that the client does not update its slot map when receiving a circular MOVED response
+        (i.e., a MOVED redirect pointing back to the same node), and retries again the same node.
+        """
+        moved_redirection_helper(request, failover=False, circular_moved=True)
 
     def test_refresh_using_specific_nodes(self, request):
         """
@@ -916,15 +933,13 @@ class TestRedisClusterObj:
             parse_response.side_effect = moved_redirect_effect
             assert r.get("key") == b"value"
             for node_name, conn in node_conn_origin.items():
-                if node_name == node.name:
-                    # The old redis connection of the timed out node should have been
-                    # deleted and replaced
-                    assert conn != r.get_redis_connection(node)
-                else:
-                    # other nodes' redis connection should have been reused during the
-                    # topology refresh
-                    cur_node = r.get_node(node_name=node_name)
-                    assert conn == r.get_redis_connection(cur_node)
+                # all nodes' redis connection should have been reused during the
+                # topology refresh
+                # even the failing node doesn't need to establish a
+                # new Redis connection (which is actually a new Redis Client instance)
+                # but the connection pool is reused and all connections are reset and reconnected
+                cur_node = r.get_node(node_name=node_name)
+                assert conn == r.get_redis_connection(cur_node)
 
     def test_cluster_get_set_retry_object(self, request):
         retry = Retry(NoBackoff(), 2)
@@ -2991,6 +3006,309 @@ class TestNodesManager:
 
         for node in rc.nodes_manager.nodes_cache.values():
             assert node.redis_connection.connection_pool.queue_class == queue_class
+
+    def test_concurrent_initialize_exact_timing(self):
+        """
+        Test that exactly two concurrent initialize calls result in only
+        one actual cluster slots fetch by forcing them to start simultaneously
+        """
+        initialization_count = {"count": 0}
+        epoch_barrier = threading.Barrier(2)
+
+        with (
+            patch.object(Redis, "execute_command") as execute_command_mock,
+        ):
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    # Track how many times we actually fetch cluster slots
+                    initialization_count["count"] += 1
+                    return default_cluster_slots
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            nm = NodesManager(
+                startup_nodes=[ClusterNode(host=default_host, port=default_port)],
+                from_url=False,
+                require_full_coverage=False,
+                dynamic_startup_nodes=True,
+            )
+
+            # Reset the counter after initial setup
+            initialization_count["count"] = 0
+
+            # Store the original method
+            original_get_epoch = nm._get_epoch
+
+            def mocked_get_epoch():
+                """
+                Mock _get_epoch to control race timing:
+                1. First thread fetches epoch
+                2. Both threads sync at epoch_barrier (ensures 2nd thread also fetches epoch)
+                3. Both threads sync at proceed_barrier (ensures both have same epoch before lock)
+                4. Both threads proceed to try to acquire _initialization_lock
+                """
+                epoch = original_get_epoch()
+                # Signal that this thread has fetched the epoch
+                epoch_barrier.wait()
+                return epoch
+
+            # Patch the instance method directly
+            nm._get_epoch = mocked_get_epoch
+
+            errors: list[Exception] = []
+
+            def initialize_thread():
+                """Call initialize to test concurrent access"""
+                try:
+                    nm.initialize()
+                except Exception as e:
+                    errors.append(e)
+
+            # Create exactly 2 threads that will initialize at the same time
+            threads: list[threading.Thread] = []
+            for _ in range(2):
+                threads.append(threading.Thread(target=initialize_thread))
+
+            # Start both threads
+            for t in threads:
+                t.start()
+
+            # Wait for both threads to complete
+            for t in threads:
+                t.join()
+
+            # Check that no errors occurred
+            assert len(errors) == 0, f"Errors occurred: {errors}"
+
+            # Due to the _initialization_lock, only one thread should have
+            # actually fetched cluster slots
+            assert initialization_count["count"] == 1
+
+            # Verify that the nodes_cache is still consistent
+            assert len(nm.nodes_cache) > 0
+            assert len(nm.slots_cache) > 0
+
+    def test_concurrent_slot_moves(self):
+        # ensure multiple concurrently moved slots are processed correctly,
+        # eg: not dropping updates
+        r = get_mocked_redis_client(
+            host=default_host,
+            port=default_port,
+            cluster_enabled=True,
+        )
+        nm = r.nodes_manager
+        # Move slots 0-999 to 127.0.0.1 in concurrent threads
+        num_threads = 20
+        slots_per_thread = 50  # 1000 slots / 20 threads = 50 slots per thread
+        errors: list[Exception] = []
+
+        def move_slots_worker(thread_id: int):
+            """Each thread moves a subset of slots to 127.0.0.1"""
+            try:
+                for i in range(slots_per_thread):
+                    moved_error = MovedError(
+                        f"{thread_id * slots_per_thread + i} 127.0.0.1:7001"
+                    )
+                    nm.move_slot(moved_error)
+            except Exception as e:
+                errors.append(e)
+
+        # Start all threads
+        threads: list[threading.Thread] = []
+        for i in range(num_threads):
+            threads.append(threading.Thread(target=move_slots_worker, args=(i,)))
+
+        for t in threads:
+            t.start()
+
+        # Wait for all threads to complete
+        for t in threads:
+            t.join()
+
+        # Check that no errors occurred
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+
+        # Verify that all slots 0-999 are moved to 127.0.0.1:7001
+        for slot_id in range(num_threads * slots_per_thread):
+            assert slot_id in nm.slots_cache, f"Slot {slot_id} missing"
+            slot_nodes = nm.slots_cache[slot_id]
+            assert len(slot_nodes) >= 1, f"Slot {slot_id} has no nodes"
+            primary_node = slot_nodes[0]
+            assert primary_node.host == "127.0.0.1", (
+                f"Slot {slot_id} not moved to 127.0.0.1, "
+                f"current host: {primary_node.host}"
+            )
+            assert primary_node.port == 7001, (
+                f"Slot {slot_id} not moved to port 7001, "
+                f"current port: {primary_node.port}"
+            )
+            assert primary_node.server_type == PRIMARY
+
+    def test_concurrent_initialize_and_move_slot(self):
+        # race initialize & move slot to ensure that the two operations
+        # don't conflict with each other.
+
+        with (
+            patch.object(Redis, "execute_command") as execute_command_mock,
+        ):
+            r = get_mocked_redis_client(
+                host=default_host,
+                port=default_port,
+                cluster_enabled=True,
+            )
+            nm = r.nodes_manager
+
+            def execute_command(*_args, **_kwargs):
+                if _args[0] == "CLUSTER SLOTS":
+                    return default_cluster_slots
+                else:
+                    return execute_command_mock(*_args, **_kwargs)
+
+            execute_command_mock.side_effect = execute_command
+
+            errors: list[Exception] = []
+
+            def initialize_worker():
+                """Reinitialize the cluster"""
+                try:
+                    nm.initialize()
+                except Exception as e:
+                    errors.append(e)
+
+            def move_slots_worker():
+                """Move slots while initialize is running"""
+                for slot_id in range(10):
+                    try:
+                        # move slot to a mix of :7000 & :7003, which simulates failovers
+                        # within the same shard. Using nodes from the same shard ensures
+                        # move_slot preserves the 2-node structure (primary + replica),
+                        # so both initialize() and move_slot() result in 2 nodes per slot.
+                        new_slot = 7000 if slot_id % 2 == 0 else 7003
+                        moved_error = MovedError(f"{slot_id} 127.0.0.1:{new_slot}")
+                        nm.move_slot(moved_error)
+                    except Exception as e:
+                        errors.append(e)
+
+            for _ in range(100):
+                t1 = threading.Thread(target=initialize_worker)
+                t2 = threading.Thread(target=move_slots_worker)
+
+                t1.start()
+                t2.start()
+
+                t1.join()
+                t2.join()
+
+                # check that no errors occurred
+                assert len(errors) == 0, f"Errors occurred: {errors}"
+
+                # verify data consistency
+                for slot_id in range(REDIS_CLUSTER_HASH_SLOTS):
+                    assert slot_id in nm.slots_cache, f"Slot {slot_id} missing"
+                    slot_nodes = nm.slots_cache[slot_id]
+                    assert len(slot_nodes) == 2
+
+                    for node in slot_nodes:
+                        assert node.name in nm.nodes_cache
+
+                    # primary should be first
+                    assert slot_nodes[0].server_type == PRIMARY
+
+    def test_move_node_to_end_of_cached_nodes(self):
+        """
+        Test that move_node_to_end_of_cached_nodes moves a node to the end of
+        startup_nodes and nodes_cache.
+        """
+        node1 = ClusterNode(default_host, 7000)
+        node2 = ClusterNode(default_host, 7001)
+        node3 = ClusterNode(default_host, 7002)
+
+        with patch.object(NodesManager, "initialize"):
+            nodes_manager = NodesManager(
+                startup_nodes=[node1, node2, node3],
+                require_full_coverage=False,
+            )
+            # Also populate nodes_cache with the same nodes
+            nodes_manager.nodes_cache = {
+                node1.name: node1,
+                node2.name: node2,
+                node3.name: node3,
+            }
+
+            # Verify initial order
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node1.name, node2.name, node3.name]
+            assert nodes_cache_names == [node1.name, node2.name, node3.name]
+
+            # Move first node to end
+            nodes_manager.move_node_to_end_of_cached_nodes(node1.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node2.name, node3.name, node1.name]
+            assert nodes_cache_names == [node2.name, node3.name, node1.name]
+
+            # Move middle node to end
+            nodes_manager.move_node_to_end_of_cached_nodes(node3.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node2.name, node1.name, node3.name]
+            assert nodes_cache_names == [node2.name, node1.name, node3.name]
+
+            # Moving last node should keep it at the end
+            nodes_manager.move_node_to_end_of_cached_nodes(node3.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node2.name, node1.name, node3.name]
+            assert nodes_cache_names == [node2.name, node1.name, node3.name]
+
+    def test_move_node_to_end_of_cached_nodes_nonexistent(self):
+        """
+        Test that move_node_to_end_of_cached_nodes does nothing for a
+        nonexistent node.
+        """
+        node1 = ClusterNode(default_host, 7000)
+        node2 = ClusterNode(default_host, 7001)
+
+        with patch.object(NodesManager, "initialize"):
+            nodes_manager = NodesManager(
+                startup_nodes=[node1, node2],
+                require_full_coverage=False,
+            )
+            # Also populate nodes_cache
+            nodes_manager.nodes_cache = {node1.name: node1, node2.name: node2}
+
+            # Try to move a non-existent node - should not raise
+            nodes_manager.move_node_to_end_of_cached_nodes("nonexistent:9999")
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node1.name, node2.name]
+            assert nodes_cache_names == [node1.name, node2.name]
+
+    def test_move_node_to_end_of_cached_nodes_single_node(self):
+        """
+        Test that move_node_to_end_of_cached_nodes does nothing when there's
+        only one node.
+        """
+        node1 = ClusterNode(default_host, 7000)
+
+        with patch.object(NodesManager, "initialize"):
+            nodes_manager = NodesManager(
+                startup_nodes=[node1],
+                require_full_coverage=False,
+            )
+            # Also populate nodes_cache
+            nodes_manager.nodes_cache = {node1.name: node1}
+
+            # Should not raise or change anything with single node
+            nodes_manager.move_node_to_end_of_cached_nodes(node1.name)
+            startup_node_names = list(nodes_manager.startup_nodes.keys())
+            nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+            assert startup_node_names == [node1.name]
+            assert nodes_cache_names == [node1.name]
 
 
 @pytest.mark.onlycluster

@@ -233,19 +233,25 @@ def mock_all_nodes_resp(rc: RedisCluster, response: Any) -> RedisCluster:
 
 
 async def moved_redirection_helper(
-    create_redis: Callable[..., RedisCluster], failover: bool = False
+    create_redis: Callable[..., RedisCluster],
+    failover: bool = False,
+    circular_moved=False,
 ) -> None:
     """
-    Test that the client handles MOVED response after a failover.
-    Redirection after a failover means that the redirection address is of a
-    replica that was promoted to a primary.
+    Test that the client correctly handles MOVED responses in the following scenarios:
+    1.	Slot migration to a different shard (failover=False, circular_moved=False) —
+        a standard slot move between shards.
+    2.	Failover event (failover=True, circular_moved=False) —
+        the redirect target is a replica that has just been promoted to primary.
+    3.	Circular MOVED (failover=False, circular_moved=True) —
+        the redirect points to a node already known to be the primary of its shard.
 
     At first call it should return a MOVED ResponseError that will point
     the client to the next server it should talk to.
 
     Verify that:
     1. it tries to talk to the redirected node
-    2. it updates the slot's primary to the redirected node
+    2. it updates the slot's primary to the redirected node, if required
 
     For a failover, also verify:
     3. the redirected node's server type updated to 'primary'
@@ -261,6 +267,8 @@ async def moved_redirection_helper(
             warnings.warn("Skipping this test since it requires to have a replica")
             return
         redirect_node = rc.nodes_manager.slots_cache[slot][1]
+    elif circular_moved:
+        redirect_node = prev_primary
     else:
         # Use one of the primaries to be the redirected node
         redirect_node = rc.get_primaries()[0]
@@ -287,6 +295,10 @@ async def moved_redirection_helper(
         if failover:
             assert rc.get_node(host=r_host, port=r_port).server_type == PRIMARY
             assert prev_primary.server_type == REPLICA
+        elif circular_moved:
+            fetched_node = rc.get_node(host=r_host, port=r_port)
+            assert fetched_node == prev_primary
+            assert fetched_node.server_type == PRIMARY
 
 
 class TestRedisClusterObj:
@@ -477,7 +489,7 @@ class TestRedisClusterObj:
         with mock.patch.object(Connection, "read_response") as read_response:
 
             async def read_response_mocked(*args: Any, **kwargs: Any) -> None:
-                await asyncio.sleep(10)
+                await asyncio.sleep(0.1)
 
             read_response.side_effect = read_response_mocked
 
@@ -488,6 +500,14 @@ class TestRedisClusterObj:
                         for _ in range(11)
                     )
                 )
+
+        # Wait for background tasks to complete and release their connections.
+        # When asyncio.gather() raises MaxConnectionsError, the other 10 tasks
+        # continue running in the background. Since commit f6bbfb45 added
+        # 'await disconnect_if_needed()' to the finally block, we must wait
+        # for tasks to complete naturally before teardown, otherwise we get
+        # race conditions with connections being disconnected while still in use.
+        await asyncio.sleep(0.2)
 
         await rc.aclose()
 
@@ -612,6 +632,17 @@ class TestRedisClusterObj:
         Test that the client handles MOVED response after a failover.
         """
         await moved_redirection_helper(create_redis, failover=True)
+
+    async def test_moved_redirection_circular_moved(
+        self, create_redis: Callable[..., RedisCluster]
+    ) -> None:
+        """
+        Verify that the client does not update its slot map when receiving a circular MOVED response
+        (i.e., a MOVED redirect pointing back to the same node), and retries again the same node.
+        """
+        await moved_redirection_helper(
+            create_redis, failover=False, circular_moved=True
+        )
 
     async def test_refresh_using_specific_nodes(
         self, create_redis: Callable[..., RedisCluster]
@@ -950,14 +981,23 @@ class TestRedisClusterObj:
         # CLUSTER NODES command is being executed on the default node
         nodes = await r.cluster_nodes()
         assert "myself" in nodes.get(curr_default_node.name).get("flags")
-        # Mock connection error for the default node
-        mock_node_resp_exc(curr_default_node, ConnectionError("error"))
-        # Test that the command succeed from a different node
-        nodes = await r.cluster_nodes()
-        assert "myself" not in nodes.get(curr_default_node.name).get("flags")
-        assert r.get_default_node() != curr_default_node
-        # Rollback to the old default node
-        r.replace_default_node(curr_default_node)
+        # Save original free connections to restore later
+        original_free = list(curr_default_node._free)
+        try:
+            # Mock connection error for the default node
+            mock_node_resp_exc(curr_default_node, ConnectionError("error"))
+            # Test that the command succeed from a different node
+            nodes = await r.cluster_nodes()
+            assert "myself" not in nodes.get(curr_default_node.name).get("flags")
+            assert r.get_default_node() != curr_default_node
+        finally:
+            # Restore original connections so teardown can work
+            while curr_default_node._free:
+                curr_default_node._free.pop()
+            for conn in original_free:
+                curr_default_node._free.append(conn)
+            # Rollback to the old default node
+            r.replace_default_node(curr_default_node)
 
     async def test_address_remap(self, create_redis, master_host):
         """Test that we can create a rediscluster object with
@@ -2744,6 +2784,359 @@ class TestNodesManager:
             assert sorted(startup_nodes) == sorted(discovered_nodes)
         else:
             assert startup_nodes == ["my@DNS.com:7000"]
+
+    async def test_move_node_to_end_of_cached_nodes(self) -> None:
+        """
+        Test that move_node_to_end_of_cached_nodes moves a node to the end of
+        startup_nodes and nodes_cache.
+        """
+        node1 = ClusterNode(default_host, 7000)
+        node2 = ClusterNode(default_host, 7001)
+        node3 = ClusterNode(default_host, 7002)
+
+        nodes_manager = NodesManager(
+            startup_nodes=[node1, node2, node3],
+            require_full_coverage=False,
+            connection_kwargs={},
+        )
+        # Also populate nodes_cache with the same nodes
+        nodes_manager.nodes_cache = {
+            node1.name: node1,
+            node2.name: node2,
+            node3.name: node3,
+        }
+
+        # Verify initial order
+        startup_node_names = list(nodes_manager.startup_nodes.keys())
+        nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+        assert startup_node_names == [node1.name, node2.name, node3.name]
+        assert nodes_cache_names == [node1.name, node2.name, node3.name]
+
+        # Move first node to end
+        nodes_manager.move_node_to_end_of_cached_nodes(node1.name)
+        startup_node_names = list(nodes_manager.startup_nodes.keys())
+        nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+        assert startup_node_names == [node2.name, node3.name, node1.name]
+        assert nodes_cache_names == [node2.name, node3.name, node1.name]
+
+        # Move middle node to end
+        nodes_manager.move_node_to_end_of_cached_nodes(node3.name)
+        startup_node_names = list(nodes_manager.startup_nodes.keys())
+        nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+        assert startup_node_names == [node2.name, node1.name, node3.name]
+        assert nodes_cache_names == [node2.name, node1.name, node3.name]
+
+        # Moving last node should keep it at the end
+        nodes_manager.move_node_to_end_of_cached_nodes(node3.name)
+        startup_node_names = list(nodes_manager.startup_nodes.keys())
+        nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+        assert startup_node_names == [node2.name, node1.name, node3.name]
+        assert nodes_cache_names == [node2.name, node1.name, node3.name]
+
+    async def test_move_node_to_end_of_cached_nodes_nonexistent(self) -> None:
+        """
+        Test that move_node_to_end_of_cached_nodes does nothing for a
+        nonexistent node.
+        """
+        node1 = ClusterNode(default_host, 7000)
+        node2 = ClusterNode(default_host, 7001)
+
+        nodes_manager = NodesManager(
+            startup_nodes=[node1, node2],
+            require_full_coverage=False,
+            connection_kwargs={},
+        )
+        # Also populate nodes_cache
+        nodes_manager.nodes_cache = {node1.name: node1, node2.name: node2}
+
+        # Try to move a non-existent node - should not raise
+        nodes_manager.move_node_to_end_of_cached_nodes("nonexistent:9999")
+        startup_node_names = list(nodes_manager.startup_nodes.keys())
+        nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+        assert startup_node_names == [node1.name, node2.name]
+        assert nodes_cache_names == [node1.name, node2.name]
+
+    async def test_move_node_to_end_of_cached_nodes_single_node(self) -> None:
+        """
+        Test that move_node_to_end_of_cached_nodes does nothing when there's
+        only one node.
+        """
+        node1 = ClusterNode(default_host, 7000)
+
+        nodes_manager = NodesManager(
+            startup_nodes=[node1],
+            require_full_coverage=False,
+            connection_kwargs={},
+        )
+        # Also populate nodes_cache
+        nodes_manager.nodes_cache = {node1.name: node1}
+
+        # Should not raise or change anything with single node
+        nodes_manager.move_node_to_end_of_cached_nodes(node1.name)
+        startup_node_names = list(nodes_manager.startup_nodes.keys())
+        nodes_cache_names = list(nodes_manager.nodes_cache.keys())
+        assert startup_node_names == [node1.name]
+        assert nodes_cache_names == [node1.name]
+
+
+class TestClusterNodeConnectionHandling:
+    """Tests for ClusterNode connection handling methods."""
+
+    async def test_update_active_connections_for_reconnect(self) -> None:
+        """
+        Test that update_active_connections_for_reconnect marks in-use connections.
+        """
+        node = ClusterNode(default_host, 7000)
+
+        # Create mock connections
+        conn1 = mock.AsyncMock(spec=Connection)
+        conn2 = mock.AsyncMock(spec=Connection)
+        conn3 = mock.AsyncMock(spec=Connection)
+
+        # Add all connections to _connections
+        node._connections = [conn1, conn2, conn3]
+        # Only conn1 is free, conn2 and conn3 are "in-use"
+        node._free.append(conn1)
+
+        # Mark active connections for reconnect
+        node.update_active_connections_for_reconnect()
+
+        # conn1 is free, should NOT be marked
+        conn1.mark_for_reconnect.assert_not_called()
+        # conn2 and conn3 are in-use, should be marked
+        conn2.mark_for_reconnect.assert_called_once()
+        conn3.mark_for_reconnect.assert_called_once()
+
+    async def test_disconnect_free_connections(self) -> None:
+        """
+        Test that disconnect_free_connections disconnects all free connections.
+        """
+        node = ClusterNode(default_host, 7000)
+
+        # Create mock connections
+        conn1 = mock.AsyncMock(spec=Connection)
+        conn2 = mock.AsyncMock(spec=Connection)
+        conn3 = mock.AsyncMock(spec=Connection)
+
+        # Add all connections to _connections
+        node._connections = [conn1, conn2, conn3]
+        # conn1 and conn2 are free, conn3 is "in-use"
+        node._free.append(conn1)
+        node._free.append(conn2)
+
+        # Disconnect free connections
+        await node.disconnect_free_connections()
+
+        # conn1 and conn2 should be disconnected
+        conn1.disconnect.assert_called_once()
+        conn2.disconnect.assert_called_once()
+        # conn3 is in-use, should NOT be disconnected
+        conn3.disconnect.assert_not_called()
+
+        # Connections should still be in _free (not removed)
+        assert conn1 in node._free
+        assert conn2 in node._free
+
+    async def test_disconnect_free_connections_empty(self) -> None:
+        """
+        Test that disconnect_free_connections handles empty _free gracefully.
+        """
+        node = ClusterNode(default_host, 7000)
+
+        # No free connections
+        assert len(node._free) == 0
+
+        # Should not raise
+        await node.disconnect_free_connections()
+
+    async def test_release_with_reconnect_flag(self) -> None:
+        """
+        Test that release() adds connection to _free even if marked for reconnect.
+        Disconnect happens lazily via disconnect_if_needed() when next acquired.
+        """
+        node = ClusterNode(default_host, 7000)
+
+        # Create a mock connection marked for reconnect
+        conn = mock.AsyncMock(spec=Connection)
+        conn.should_reconnect.return_value = True
+
+        node._connections = [conn]
+
+        # Release the connection - sync, just adds to _free
+        node.release(conn)
+
+        # Connection should be in _free, disconnect happens lazily on acquire
+        assert conn in node._free
+        conn.disconnect.assert_not_called()
+
+    async def test_release_without_reconnect_flag(self) -> None:
+        """
+        Test that release() adds connection to _free without disconnect.
+        """
+        node = ClusterNode(default_host, 7000)
+
+        # Create a mock connection NOT marked for reconnect
+        conn = mock.AsyncMock(spec=Connection)
+        conn.should_reconnect.return_value = False
+
+        node._connections = [conn]
+
+        # Release the connection
+        node.release(conn)
+
+        # Connection should NOT be disconnected but added to _free
+        conn.disconnect.assert_not_called()
+        assert conn in node._free
+
+    async def test_disconnect_if_needed_disconnects_when_reconnect_needed(
+        self,
+    ) -> None:
+        """
+        Test that disconnect_if_needed() disconnects a connection marked for reconnect.
+        This implements lazy disconnect to avoid race conditions.
+        """
+        node = ClusterNode(default_host, 7000)
+
+        # Create a mock connection marked for reconnect
+        conn = mock.AsyncMock(spec=Connection)
+        conn.should_reconnect.return_value = True
+
+        # disconnect_if_needed should disconnect the connection
+        await node.disconnect_if_needed(conn)
+
+        conn.disconnect.assert_called_once()
+
+    async def test_disconnect_if_needed_skips_when_no_reconnect_needed(self) -> None:
+        """
+        Test that disconnect_if_needed() does not disconnect if no reconnect needed.
+        """
+        node = ClusterNode(default_host, 7000)
+
+        # Create a mock connection NOT marked for reconnect
+        conn = mock.AsyncMock(spec=Connection)
+        conn.should_reconnect.return_value = False
+
+        # disconnect_if_needed should not disconnect
+        await node.disconnect_if_needed(conn)
+
+        conn.disconnect.assert_not_called()
+
+
+class TestClusterConnectionErrorHandling:
+    """Tests for cluster connection error handling behavior."""
+
+    async def test_connection_error_calls_move_node_to_end_of_cached_nodes(
+        self,
+    ) -> None:
+        """
+        Test that ConnectionError triggers move_node_to_end_of_cached_nodes
+        instead of pop.
+        """
+        with mock.patch.object(
+            NodesManager, "move_node_to_end_of_cached_nodes", autospec=True
+        ) as move_node_to_end_of_cached_nodes:
+            with mock.patch.object(ClusterNode, "execute_command") as execute_command:
+
+                async def execute_command_mock(*args, **kwargs):
+                    if args[0] == "CLUSTER SLOTS":
+                        return default_cluster_slots
+                    elif args[0] == "COMMAND":
+                        return {"get": [], "set": []}
+                    elif args[0] == "INFO":
+                        return {"cluster_enabled": True}
+                    elif len(args) > 1 and args[1] == "cluster-require-full-coverage":
+                        return {"cluster-require-full-coverage": "yes"}
+                    elif args[0] == "GET":
+                        raise ConnectionError("Connection failed")
+                    return None
+
+                execute_command.side_effect = execute_command_mock
+
+                with mock.patch.object(
+                    AsyncCommandsParser, "initialize", autospec=True
+                ) as cmd_parser_initialize:
+
+                    def cmd_init_mock(self, node: Optional[ClusterNode] = None) -> None:
+                        self.commands = {
+                            "get": {
+                                "name": "get",
+                                "arity": 2,
+                                "flags": ["readonly", "fast"],
+                                "first_key_pos": 1,
+                                "last_key_pos": 1,
+                                "step_count": 1,
+                            }
+                        }
+
+                    cmd_parser_initialize.side_effect = cmd_init_mock
+
+                    rc = await RedisCluster(host=default_host, port=7000)
+                    with pytest.raises(ConnectionError):
+                        await rc.get("foo")
+
+                    # Verify move_node_to_end_of_cached_nodes was called
+                    move_node_to_end_of_cached_nodes.assert_called()
+
+    async def test_connection_error_handles_node_connections(self) -> None:
+        """
+        Test that ConnectionError triggers proper connection handling on the node.
+        """
+        with mock.patch.object(
+            ClusterNode,
+            "update_active_connections_for_reconnect",
+            autospec=True,
+        ) as update_active:
+            with mock.patch.object(
+                ClusterNode, "disconnect_free_connections", autospec=True
+            ) as disconnect_free:
+                with mock.patch.object(
+                    ClusterNode, "execute_command"
+                ) as execute_command:
+
+                    async def execute_command_mock(*args, **kwargs):
+                        if args[0] == "CLUSTER SLOTS":
+                            return default_cluster_slots
+                        elif args[0] == "COMMAND":
+                            return {"get": [], "set": []}
+                        elif args[0] == "INFO":
+                            return {"cluster_enabled": True}
+                        elif (
+                            len(args) > 1 and args[1] == "cluster-require-full-coverage"
+                        ):
+                            return {"cluster-require-full-coverage": "yes"}
+                        elif args[0] == "GET":
+                            raise ConnectionError("Connection failed")
+                        return None
+
+                    execute_command.side_effect = execute_command_mock
+
+                    with mock.patch.object(
+                        AsyncCommandsParser, "initialize", autospec=True
+                    ) as cmd_parser_initialize:
+
+                        def cmd_init_mock(
+                            self, node: Optional[ClusterNode] = None
+                        ) -> None:
+                            self.commands = {
+                                "get": {
+                                    "name": "get",
+                                    "arity": 2,
+                                    "flags": ["readonly", "fast"],
+                                    "first_key_pos": 1,
+                                    "last_key_pos": 1,
+                                    "step_count": 1,
+                                }
+                            }
+
+                        cmd_parser_initialize.side_effect = cmd_init_mock
+
+                        rc = await RedisCluster(host=default_host, port=7000)
+                        with pytest.raises(ConnectionError):
+                            await rc.get("foo")
+
+                        # Verify connection handling methods were called
+                        update_active.assert_called()
+                        disconnect_free.assert_called()
 
 
 class TestClusterPipeline:

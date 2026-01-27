@@ -528,25 +528,38 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.2.0")
     async def test_client_setinfo(self, r: redis.Redis):
+        from redis.utils import get_lib_version
+
         await r.ping()
         info = await r.client_info()
         assert info["lib-name"] == "redis-py"
-        assert info["lib-ver"] == redis.__version__
+        assert info["lib-ver"] == get_lib_version()
         assert await r.client_setinfo("lib-name", "test")
         assert await r.client_setinfo("lib-ver", "123")
         info = await r.client_info()
         assert info["lib-name"] == "test"
         assert info["lib-ver"] == "123"
-        r2 = redis.asyncio.Redis(lib_name="test2", lib_version="1234")
+
+        # Test deprecated lib_name/lib_version parameters
+        with pytest.warns(DeprecationWarning):
+            r2 = redis.asyncio.Redis(lib_name="test2", lib_version="1234")
         info = await r2.client_info()
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
         await r2.aclose()
-        r3 = redis.asyncio.Redis(lib_name=None, lib_version=None)
-        info = await r3.client_info()
-        assert info["lib-name"] == ""
-        assert info["lib-ver"] == ""
-        await r3.aclose()
+
+    @skip_if_server_version_lt("7.2.0")
+    async def test_client_setinfo_with_driver_info(self, r: redis.Redis):
+        from redis import DriverInfo
+        from redis.utils import get_lib_version
+
+        info = DriverInfo().add_upstream_driver("celery", "5.4.1")
+        r2 = redis.asyncio.Redis(driver_info=info)
+        await r2.ping()
+        client_info = await r2.client_info()
+        assert client_info["lib-name"] == "redis-py(celery_v5.4.1)"
+        assert client_info["lib-ver"] == get_lib_version()
+        await r2.aclose()
 
     @skip_if_server_version_lt("2.6.9")
     @pytest.mark.onlynoncluster
@@ -1250,6 +1263,40 @@ class TestRedisCommands:
         assert all(c in "0123456789abcdefABCDEF" for c in res)
 
         assert len(res) == 16
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize(
+        "value",
+        [
+            b"",
+            b"abc",
+            b"The quick brown fox jumps over the lazy dog",
+            "",
+            "abc",
+            "The quick brown fox jumps over the lazy dog",
+        ],
+    )
+    async def test_local_digest_matches_server(self, r, value):
+        key = "k:digest"
+        await r.delete(key)
+        await r.set(key, value)
+
+        res_server = await r.digest(key)
+
+        # Caution! This one is not executing execute_command and it is not async
+        res_local = r.digest_local(value)
+
+        # Verify type consistency between server and local digest
+        if isinstance(res_server, bytes):
+            assert isinstance(res_local, bytes)
+        else:
+            assert isinstance(res_local, str)
+
+        assert res_server is not None
+        assert len(res_server) == 16
+        assert res_local is not None
+        assert len(res_local) == 16
+        assert res_server == res_local
 
     @skip_if_server_version_lt("8.3.224")
     async def test_pipeline_digest(self, r):

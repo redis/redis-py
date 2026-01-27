@@ -2,6 +2,15 @@
 
 import datetime
 import hashlib
+
+# Try to import the xxhash library as an optional dependency
+try:
+    import xxhash
+
+    HAS_XXHASH = True
+except ImportError:
+    HAS_XXHASH = False
+
 import warnings
 from enum import Enum
 from typing import (
@@ -1889,7 +1898,45 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("EXPIRETIME", key)
 
     @experimental_method()
-    def digest(self, name: KeyT) -> Optional[str]:
+    def digest_local(self, value: Union[bytes, str]) -> Union[bytes, str]:
+        """
+        Compute the hexadecimal digest of the value locally, without sending it to the server.
+
+        This is useful for conditional operations like IFDEQ/IFDNE where you need to
+        compute the digest client-side before sending a command.
+
+        Warning:
+        **Experimental** - This API may change or be removed without notice.
+
+        Arguments:
+          - value: Union[bytes, str] - the value to compute the digest of.
+            If a string is provided, it will be encoded using UTF-8 before hashing,
+            which matches Redis's default encoding behavior.
+
+        Returns:
+          - (str | bytes) the XXH3 digest of the value as a hex string (16 hex characters).
+            Returns bytes if decode_responses is False, otherwise returns str.
+
+        For more information, see https://redis.io/commands/digest
+        """
+        if not HAS_XXHASH:
+            raise NotImplementedError(
+                "XXHASH support requires the optional 'xxhash' library. "
+                "Install it with 'pip install xxhash' or use this package's extra with "
+                "'pip install redis[xxhash]' to enable this feature."
+            )
+
+        local_digest = xxhash.xxh3_64(value).hexdigest()
+
+        # To align with digest, we want to return bytes if decode_responses is False.
+        # The following works because of Python's mixin-based client class hierarchy.
+        if not self.get_encoder().decode_responses:
+            local_digest = local_digest.encode()
+
+        return local_digest
+
+    @experimental_method()
+    def digest(self, name: KeyT) -> Union[str, bytes, None]:
         """
         Return the digest of the value stored at the specified key.
 
@@ -4699,8 +4746,8 @@ class SortedSetCommands(CommandsProtocol):
         command,
         dest: Union[KeyT, None],
         name: KeyT,
-        start: int,
-        end: int,
+        start: EncodableT,
+        end: EncodableT,
         desc: bool = False,
         byscore: bool = False,
         bylex: bool = False,
@@ -4738,8 +4785,8 @@ class SortedSetCommands(CommandsProtocol):
     def zrange(
         self,
         name: KeyT,
-        start: int,
-        end: int,
+        start: EncodableT,
+        end: EncodableT,
         desc: bool = False,
         withscores: bool = False,
         score_cast_func: Union[type, Callable] = float,
@@ -4828,8 +4875,8 @@ class SortedSetCommands(CommandsProtocol):
         self,
         dest: KeyT,
         name: KeyT,
-        start: int,
-        end: int,
+        start: EncodableT,
+        end: EncodableT,
         byscore: bool = False,
         bylex: bool = False,
         desc: bool = False,

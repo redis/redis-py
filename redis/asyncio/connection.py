@@ -38,6 +38,7 @@ else:
     VerifyFlags = None
 
 from ..auth.token import TokenInterface
+from ..driver_info import DriverInfo, resolve_driver_info
 from ..event import AsyncAfterConnectionReleasedEvent, EventDispatcher
 from ..utils import deprecated_args, format_error_message
 
@@ -63,7 +64,7 @@ from redis.exceptions import (
     TimeoutError,
 )
 from redis.typing import EncodableT
-from redis.utils import HIREDIS_AVAILABLE, get_lib_version, str_if_bytes
+from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
 from .._parsers import (
     BaseParser,
@@ -137,6 +138,11 @@ class AbstractConnection:
         "__dict__",
     )
 
+    @deprecated_args(
+        args_to_warn=["lib_name", "lib_version"],
+        reason="Use 'driver_info' parameter instead. "
+        "lib_name and lib_version will be removed in a future version.",
+    )
     def __init__(
         self,
         *,
@@ -153,8 +159,9 @@ class AbstractConnection:
         socket_read_size: int = 65536,
         health_check_interval: float = 0,
         client_name: Optional[str] = None,
-        lib_name: Optional[str] = "redis-py",
-        lib_version: Optional[str] = get_lib_version(),
+        lib_name: Optional[str] = None,
+        lib_version: Optional[str] = None,
+        driver_info: Optional[DriverInfo] = None,
         username: Optional[str] = None,
         retry: Optional[Retry] = None,
         redis_connect_func: Optional[ConnectCallbackT] = None,
@@ -163,6 +170,20 @@ class AbstractConnection:
         protocol: Optional[int] = 2,
         event_dispatcher: Optional[EventDispatcher] = None,
     ):
+        """
+        Initialize a new async Connection.
+
+        Parameters
+        ----------
+        driver_info : DriverInfo, optional
+            Driver metadata for CLIENT SETINFO. If provided, lib_name and lib_version
+            are ignored. If not provided, a DriverInfo will be created from lib_name
+            and lib_version (or defaults if those are also None).
+        lib_name : str, optional
+            **Deprecated.** Use driver_info instead. Library name for CLIENT SETINFO.
+        lib_version : str, optional
+            **Deprecated.** Use driver_info instead. Library version for CLIENT SETINFO.
+        """
         if (username or password) and credential_provider is not None:
             raise DataError(
                 "'username' and 'password' cannot be passed along with 'credential_"
@@ -176,8 +197,10 @@ class AbstractConnection:
             self._event_dispatcher = event_dispatcher
         self.db = db
         self.client_name = client_name
-        self.lib_name = lib_name
-        self.lib_version = lib_version
+
+        # Handle driver_info: if provided, use it; otherwise create from lib_name/lib_version
+        self.driver_info = resolve_driver_info(driver_info, lib_name, lib_version)
+
         self.credential_provider = credential_provider
         self.password = password
         self.username = username
@@ -296,7 +319,14 @@ class AbstractConnection:
 
     async def connect(self):
         """Connects to the Redis server if not already connected"""
-        await self.connect_check_health(check_health=True)
+        # try once the socket connect with the handshake, retry the whole
+        # connect/handshake flow based on retry policy
+        await self.retry.call_with_retry(
+            lambda: self.connect_check_health(
+                check_health=True, retry_socket_connect=False
+            ),
+            lambda error: self.disconnect(),
+        )
 
     async def connect_check_health(
         self, check_health: bool = True, retry_socket_connect: bool = True
@@ -350,6 +380,9 @@ class AbstractConnection:
 
     def should_reconnect(self):
         return self._should_reconnect
+
+    def reset_should_reconnect(self):
+        self._should_reconnect = False
 
     @abstractmethod
     async def _connect(self):
@@ -445,29 +478,36 @@ class AbstractConnection:
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Error setting client name")
 
-        # set the library name and version, pipeline for lower startup latency
-        if self.lib_name:
+        # Set the library name and version from driver_info, pipeline for lower startup latency
+        lib_name_sent = False
+        lib_version_sent = False
+
+        if self.driver_info and self.driver_info.formatted_name:
             await self.send_command(
                 "CLIENT",
                 "SETINFO",
                 "LIB-NAME",
-                self.lib_name,
+                self.driver_info.formatted_name,
                 check_health=check_health,
             )
-        if self.lib_version:
+            lib_name_sent = True
+
+        if self.driver_info and self.driver_info.lib_version:
             await self.send_command(
                 "CLIENT",
                 "SETINFO",
                 "LIB-VER",
-                self.lib_version,
+                self.driver_info.lib_version,
                 check_health=check_health,
             )
+            lib_version_sent = True
+
         # if a database is specified, switch to it. Also pipeline this
         if self.db:
             await self.send_command("SELECT", self.db, check_health=check_health)
 
         # read responses from pipeline
-        for _ in (sent for sent in (self.lib_name, self.lib_version) if sent):
+        for _ in range(sum([lib_name_sent, lib_version_sent])):
             try:
                 await self.read_response()
             except ResponseError:
@@ -482,6 +522,8 @@ class AbstractConnection:
         try:
             async with async_timeout(self.socket_connect_timeout):
                 self._parser.on_disconnect()
+                # Reset the reconnect flag
+                self.reset_should_reconnect()
                 if not self.is_connected:
                     return
                 try:
@@ -806,9 +848,11 @@ class SSLConnection(Connection):
         ssl_exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ssl_ca_certs: Optional[str] = None,
         ssl_ca_data: Optional[str] = None,
+        ssl_ca_path: Optional[str] = None,
         ssl_check_hostname: bool = True,
         ssl_min_version: Optional[TLSVersion] = None,
         ssl_ciphers: Optional[str] = None,
+        ssl_password: Optional[str] = None,
         **kwargs,
     ):
         if not SSL_AVAILABLE:
@@ -822,9 +866,11 @@ class SSLConnection(Connection):
             exclude_verify_flags=ssl_exclude_verify_flags,
             ca_certs=ssl_ca_certs,
             ca_data=ssl_ca_data,
+            ca_path=ssl_ca_path,
             check_hostname=ssl_check_hostname,
             min_version=ssl_min_version,
             ciphers=ssl_ciphers,
+            password=ssl_password,
         )
         super().__init__(**kwargs)
 
@@ -879,10 +925,12 @@ class RedisSSLContext:
         "exclude_verify_flags",
         "ca_certs",
         "ca_data",
+        "ca_path",
         "context",
         "check_hostname",
         "min_version",
         "ciphers",
+        "password",
     )
 
     def __init__(
@@ -894,9 +942,11 @@ class RedisSSLContext:
         exclude_verify_flags: Optional[List["ssl.VerifyFlags"]] = None,
         ca_certs: Optional[str] = None,
         ca_data: Optional[str] = None,
+        ca_path: Optional[str] = None,
         check_hostname: bool = False,
         min_version: Optional[TLSVersion] = None,
         ciphers: Optional[str] = None,
+        password: Optional[str] = None,
     ):
         if not SSL_AVAILABLE:
             raise RedisError("Python wasn't built with SSL support")
@@ -921,11 +971,13 @@ class RedisSSLContext:
         self.exclude_verify_flags = exclude_verify_flags
         self.ca_certs = ca_certs
         self.ca_data = ca_data
+        self.ca_path = ca_path
         self.check_hostname = (
             check_hostname if self.cert_reqs != ssl.CERT_NONE else False
         )
         self.min_version = min_version
         self.ciphers = ciphers
+        self.password = password
         self.context: Optional[SSLContext] = None
 
     def get(self) -> SSLContext:
@@ -939,10 +991,16 @@ class RedisSSLContext:
             if self.exclude_verify_flags:
                 for flag in self.exclude_verify_flags:
                     context.verify_flags &= ~flag
-            if self.certfile and self.keyfile:
-                context.load_cert_chain(certfile=self.certfile, keyfile=self.keyfile)
-            if self.ca_certs or self.ca_data:
-                context.load_verify_locations(cafile=self.ca_certs, cadata=self.ca_data)
+            if self.certfile or self.keyfile:
+                context.load_cert_chain(
+                    certfile=self.certfile,
+                    keyfile=self.keyfile,
+                    password=self.password,
+                )
+            if self.ca_certs or self.ca_data or self.ca_path:
+                context.load_verify_locations(
+                    cafile=self.ca_certs, capath=self.ca_path, cadata=self.ca_data
+                )
             if self.min_version is not None:
                 context.minimum_version = self.min_version
             if self.ciphers is not None:
@@ -1192,16 +1250,17 @@ class ConnectionPool:
         version="5.3.0",
     )
     async def get_connection(self, command_name=None, *keys, **options):
+        """Get a connected connection from the pool"""
         async with self._lock:
-            """Get a connected connection from the pool"""
             connection = self.get_available_connection()
-            try:
-                await self.ensure_connection(connection)
-            except BaseException:
-                await self.release(connection)
-                raise
 
-        return connection
+        # We now perform the connection check outside of the lock.
+        try:
+            await self.ensure_connection(connection)
+            return connection
+        except BaseException:
+            await self.release(connection)
+            raise
 
     def get_available_connection(self):
         """Get a connection from the pool, without making sure it is connected"""

@@ -5,16 +5,27 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from typing import Any, Callable, List, Optional
 
 from redis.background import BackgroundScheduler
+from redis.backoff import NoBackoff
 from redis.client import PubSubWorkerThread
 from redis.commands import CoreCommands, RedisModuleCommands
 from redis.multidb.circuit import CircuitBreaker
 from redis.multidb.circuit import State as CBState
 from redis.multidb.command_executor import DefaultCommandExecutor
-from redis.multidb.config import DEFAULT_GRACE_PERIOD, MultiDbConfig
+from redis.multidb.config import (
+    DEFAULT_GRACE_PERIOD,
+    DatabaseConfig,
+    InitialHealthCheck,
+    MultiDbConfig,
+)
 from redis.multidb.database import Database, Databases, SyncDatabase
-from redis.multidb.exception import NoValidDatabaseException, UnhealthyDatabaseException
+from redis.multidb.exception import (
+    InitialHealthCheckFailedError,
+    NoValidDatabaseException,
+    UnhealthyDatabaseException,
+)
 from redis.multidb.failure_detector import FailureDetector
 from redis.multidb.healthcheck import HealthCheck, HealthCheckPolicy
+from redis.retry import Retry
 from redis.utils import experimental
 
 logger = logging.getLogger(__name__)
@@ -24,7 +35,7 @@ logger = logging.getLogger(__name__)
 class MultiDBClient(RedisModuleCommands, CoreCommands):
     """
     Client that operates on multiple logical Redis databases.
-    Should be used in Active-Active database setups.
+    Should be used in Client-side geographic failover database setups.
     """
 
     def __init__(self, config: MultiDbConfig):
@@ -74,11 +85,8 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         Perform initialization of databases to define their initial state.
         """
 
-        def raise_exception_on_failed_hc(error):
-            raise error
-
         # Initial databases check to define initial state
-        self._check_databases_health(on_error=raise_exception_on_failed_hc)
+        self._perform_initial_health_check()
 
         # Starts recurring health checks on the background.
         self._bg_scheduler.run_recurring(
@@ -135,15 +143,44 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             "Cannot set active database, database is unhealthy"
         )
 
-    def add_database(self, database: SyncDatabase):
+    def add_database(self, config: DatabaseConfig, skip_unhealthy: bool = True):
         """
         Adds a new database to the database list.
         """
-        for existing_db, _ in self._databases:
-            if existing_db == database:
-                raise ValueError("Given database already exists")
+        # The retry object is not used in the lower level clients, so we can safely remove it.
+        # We rely on command_retry in terms of global retries.
+        config.client_kwargs.update({"retry": Retry(retries=0, backoff=NoBackoff())})
 
-        self._check_db_health(database)
+        if config.from_url:
+            client = self._config.client_class.from_url(
+                config.from_url, **config.client_kwargs
+            )
+        elif config.from_pool:
+            config.from_pool.set_retry(Retry(retries=0, backoff=NoBackoff()))
+            client = self._config.client_class.from_pool(
+                connection_pool=config.from_pool
+            )
+        else:
+            client = self._config.client_class(**config.client_kwargs)
+
+        circuit = (
+            config.default_circuit_breaker()
+            if config.circuit is None
+            else config.circuit
+        )
+
+        database = Database(
+            client=client,
+            circuit=circuit,
+            weight=config.weight,
+            health_check_url=config.health_check_url,
+        )
+
+        try:
+            self._check_db_health(database)
+        except UnhealthyDatabaseException:
+            if not skip_unhealthy:
+                raise
 
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
         self._databases.add(database, database.weight)
@@ -254,7 +291,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
 
         return is_healthy
 
-    def _check_databases_health(self, on_error: Callable[[Exception], None] = None):
+    def _check_databases_health(self) -> dict[Database, bool]:
         """
         Runs health checks as a recurring task.
         Runs health checks against all databases.
@@ -262,31 +299,56 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         with ThreadPoolExecutor(max_workers=len(self._databases)) as executor:
             # Submit all health checks
             futures = {
-                executor.submit(self._check_db_health, database)
+                executor.submit(self._check_db_health, database): database
                 for database, _ in self._databases
             }
+
+            results = {}
 
             try:
                 for future in as_completed(
                     futures, timeout=self._health_check_interval
                 ):
                     try:
-                        future.result()
+                        database = futures[future]
+                        results[database] = future.result()
                     except UnhealthyDatabaseException as e:
                         unhealthy_db = e.database
                         unhealthy_db.circuit.state = CBState.OPEN
 
-                        logger.exception(
+                        logger.debug(
                             "Health check failed, due to exception",
                             exc_info=e.original_exception,
                         )
 
-                        if on_error:
-                            on_error(e.original_exception)
+                        results[unhealthy_db] = False
             except TimeoutError:
                 raise TimeoutError(
                     "Health check execution exceeds health_check_interval"
                 )
+        return results
+
+    def _perform_initial_health_check(self):
+        """
+        Runs initial health check and evaluate healthiness based on initial_health_check_policy.
+        """
+        results = self._check_databases_health()
+        is_healthy = True
+
+        if self._config.initial_health_check_policy == InitialHealthCheck.ALL_HEALTHY:
+            is_healthy = False not in results.values()
+        elif (
+            self._config.initial_health_check_policy
+            == InitialHealthCheck.MAJORITY_HEALTHY
+        ):
+            is_healthy = sum(results.values()) > len(results) / 2
+        elif self._config.initial_health_check_policy == InitialHealthCheck.ANY_HEALTHY:
+            is_healthy = True in results.values()
+
+        if not is_healthy:
+            raise InitialHealthCheckFailedError(
+                f"Initial health check failed. Initial health check policy: {self._config.initial_health_check_policy}"
+            )
 
     def _on_circuit_state_change_callback(
         self, circuit: CircuitBreaker, old_state: CBState, new_state: CBState
@@ -296,9 +358,16 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             return
 
         if old_state == CBState.CLOSED and new_state == CBState.OPEN:
+            logger.warning(
+                f"Database {circuit.database} is unreachable. Failover has been initiated."
+            )
+
             self._bg_scheduler.run_once(
                 DEFAULT_GRACE_PERIOD, _half_open_circuit, circuit
             )
+
+        if old_state != CBState.CLOSED and new_state == CBState.CLOSED:
+            logger.info(f"Database {circuit.database} is reachable again.")
 
     def close(self):
         """

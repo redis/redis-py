@@ -731,23 +731,36 @@ class TestRedisCommands:
 
     @skip_if_server_version_lt("7.2.0")
     def test_client_setinfo(self, r: redis.Redis):
+        from redis.utils import get_lib_version
+
         r.ping()
         info = r.client_info()
         assert info["lib-name"] == "redis-py"
-        assert info["lib-ver"] == redis.__version__
+        assert info["lib-ver"] == get_lib_version()
         assert r.client_setinfo("lib-name", "test")
         assert r.client_setinfo("lib-ver", "123")
         info = r.client_info()
         assert info["lib-name"] == "test"
         assert info["lib-ver"] == "123"
-        r2 = redis.Redis(lib_name="test2", lib_version="1234")
+
+        # Test deprecated lib_name/lib_version parameters
+        with pytest.warns(DeprecationWarning):
+            r2 = redis.Redis(lib_name="test2", lib_version="1234")
         info = r2.client_info()
         assert info["lib-name"] == "test2"
         assert info["lib-ver"] == "1234"
-        r3 = redis.Redis(lib_name=None, lib_version=None)
-        info = r3.client_info()
-        assert info["lib-name"] == ""
-        assert info["lib-ver"] == ""
+
+    @skip_if_server_version_lt("7.2.0")
+    def test_client_setinfo_with_driver_info(self, r: redis.Redis):
+        from redis import DriverInfo
+        from redis.utils import get_lib_version
+
+        info = DriverInfo().add_upstream_driver("django-redis", "5.4.0")
+        r2 = redis.Redis(driver_info=info)
+        r2.ping()
+        client_info = r2.client_info()
+        assert client_info["lib-name"] == "redis-py(django-redis_v5.4.0)"
+        assert client_info["lib-ver"] == get_lib_version()
 
     @pytest.mark.onlynoncluster
     @skip_if_server_version_lt("2.6.9")
@@ -1794,6 +1807,7 @@ class TestRedisCommands:
         r.set(key, value)
 
         res = r.digest(key)
+
         # got is str if decode_responses=True; ensure bytes->str for comparison
         if isinstance(res, bytes):
             res = res.decode()
@@ -1801,6 +1815,38 @@ class TestRedisCommands:
         assert all(c in "0123456789abcdefABCDEF" for c in res)
 
         assert len(res) == 16
+
+    @skip_if_server_version_lt("8.3.224")
+    @pytest.mark.parametrize(
+        "value",
+        [
+            b"",
+            b"abc",
+            b"The quick brown fox jumps over the lazy dog",
+            "",
+            "abc",
+            "The quick brown fox jumps over the lazy dog",
+        ],
+    )
+    def test_local_digest_matches_server(self, r, value):
+        key = "k:digest"
+        r.delete(key)
+        r.set(key, value)
+
+        res_server = r.digest(key)
+        res_local = r.digest_local(value)
+
+        # Verify type consistency between server and local digest
+        if isinstance(res_server, bytes):
+            assert isinstance(res_local, bytes)
+        else:
+            assert isinstance(res_local, str)
+
+        assert res_server is not None
+        assert len(res_server) == 16
+        assert res_local is not None
+        assert len(res_local) == 16
+        assert res_server == res_local
 
     @skip_if_server_version_lt("8.3.224")
     def test_pipeline_digest(self, r):
@@ -2574,6 +2620,9 @@ class TestRedisCommands:
         r.set("k", val)
         d = self._server_xxh3_digest(r, "k")
         assert d is not None
+
+        # sanity check: local digest matches server's
+        assert d == self._ensure_str(r.digest_local(val))
 
         # IFDEQ must match to set; if key missing => won't create
         assert r.set("k", b"X", ifdeq=d) is True
