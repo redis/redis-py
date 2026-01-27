@@ -724,6 +724,11 @@ class MaintNotificationsPoolHandler:
                 return
 
             with self.pool._lock:
+                logging.debug(
+                    f"Handling node MOVING notification: {notification}, "
+                    f"with connection: {self.connection}, connected to ip "
+                    f"{self.connection.get_resolved_ip() if self.connection else None}"
+                )
                 if (
                     self.config.proactive_reconnect
                     or self.config.is_relaxed_timeouts_enabled()
@@ -827,6 +832,11 @@ class MaintNotificationsPoolHandler:
         notification_hash = hash(notification)
 
         with self._lock:
+            logging.debug(
+                f"Reverting temporary changes related to notification: {notification}, "
+                f"with connection: {self.connection}, connected to ip "
+                f"{self.connection.get_resolved_ip() if self.connection else None}"
+            )
             # if the current maintenance_notification_hash in kwargs is not matching the notification
             # it means there has been a new moving notification after this one
             # and we don't need to revert the kwargs yet
@@ -903,6 +913,10 @@ class MaintNotificationsConnectionHandler:
     def handle_maintenance_start_notification(
         self, maintenance_state: MaintenanceState, notification: MaintenanceNotification
     ):
+        logging.debug(
+            f"Handling start maintenance notification: {notification}, "
+            f"with connection: {self.connection}, connected to ip {self.connection.get_resolved_ip()}"
+        )
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING
             or not self.config.is_relaxed_timeouts_enabled()
@@ -928,6 +942,10 @@ class MaintNotificationsConnectionHandler:
             or not self.config.is_relaxed_timeouts_enabled()
         ):
             return
+        logging.debug(
+            f"Handling end maintenance notification with connection: {self.connection}, "
+            f"connected to ip {self.connection.get_resolved_ip()}"
+        )
         self.connection.reset_tmp_settings(reset_relaxed_timeout=True)
         # Maintenance completed - reset the connection
         # timeouts by providing -1 as the relaxed timeout
@@ -993,7 +1011,16 @@ class OSSMaintNotificationsHandler:
                 # that has also has the notification and we don't want to
                 # process the same notification twice
                 return
+            if self.connection is None:
+                logging.error(
+                    "Connection is not set for OSSMaintNotificationsHandler. "
+                    f"Failed to handle notification: {notification}"
+                )
+                return
 
+            logging.debug(
+                f"Handling SMIGRATED notification: {notification} with connection: {self.connection}, connected to ip {self.connection.get_resolved_ip()}"
+            )
             self._in_progress.add(notification)
 
             # get the node to which the connection is connected
@@ -1010,10 +1037,12 @@ class OSSMaintNotificationsHandler:
                 additional_startup_nodes_info.append(
                     (new_node_host, int(new_node_port))
                 )
+
             self.cluster_client.nodes_manager.initialize(
                 disconnect_startup_nodes_pools=False,
                 additional_startup_nodes_info=additional_startup_nodes_info,
             )
+
             with current_node.redis_connection.connection_pool._lock:
                 # mark for reconnect all in use connections to the node - this will force them to
                 # disconnect after they complete their current commands

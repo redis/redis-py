@@ -619,109 +619,89 @@ class RedisCluster(
         **kwargs,
     ):
         """
-                         Initialize a new RedisCluster client.
+        Initialize a new RedisCluster client.
 
-                         :param startup_nodes:
-                             List of nodes from which initial bootstrapping can be done
-                         :param host:
-                             Can be used to point to a startup node
-                         :param port:
-                             Can be used to point to a startup node
-                         :param require_full_coverage:
-                            When set to False (default value): the client will not require a
-                            full coverage of the slots. However, if not all slots are covered,
-                            and at least one node has 'cluster-require-full-coverage' set to
-                            'yes,' the server will throw a ClusterDownError for some key-based
-                            commands. See -
-                            https://redis.io/topics/cluster-tutorial#redis-cluster-configuration-parameters
-                            When set to True: all slots must be covered to construct the
-                            cluster client. If not all slots are covered, RedisClusterException
-                            will be thrown.
-                        :param read_from_replicas:
-                             @deprecated - please use load_balancing_strategy instead
-                             Enable read from replicas in READONLY mode. You can read possibly
-                             stale data.
-                             When set to true, read commands will be assigned between the
-                             primary and its replications in a Round-Robin manner.
-                        :param load_balancing_strategy:
-                             Enable read from replicas in READONLY mode and defines the load balancing
-                             strategy that will be used for cluster node selection.
-                             The data read from replicas is eventually consistent with the data in primary nodes.
-                        :param dynamic_startup_nodes:
-                             Set the RedisCluster's startup nodes to all of the discovered nodes.
-                             If true (default value), the cluster's discovered nodes will be used to
-                             determine the cluster nodes-slots mapping in the next topology refresh.
-                             It will remove the initial passed startup nodes if their endpoints aren't
-                             listed in the CLUSTER SLOTS output.
-                             If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
-                             specific IP addresses, it is best to set it to false.
-                        :param cluster_error_retry_attempts:
-                             @deprecated - Please configure the 'retry' object instead
-                             In case 'retry' object is set - this argument is ignored!
+        :param startup_nodes:
+            List of nodes from which initial bootstrapping can be done
+        :param host:
+            Can be used to point to a startup node
+        :param port:
+            Can be used to point to a startup node
+        :param require_full_coverage:
+            When set to False (default value): the client will not require a
+            full coverage of the slots. However, if not all slots are covered,
+            and at least one node has 'cluster-require-full-coverage' set to
+            'yes,' the server will throw a ClusterDownError for some key-based
+            commands. See -
+            https://redis.io/topics/cluster-tutorial#redis-cluster-configuration-parameters
+            When set to True: all slots must be covered to construct the
+            cluster client. If not all slots are covered, RedisClusterException
+            will be thrown.
+        :param read_from_replicas:
+            @deprecated - please use load_balancing_strategy instead
+            Enable read from replicas in READONLY mode. You can read possibly
+            stale data.
+            When set to true, read commands will be assigned between the
+            primary and its replications in a Round-Robin manner.
+        :param load_balancing_strategy:
+            Enable read from replicas in READONLY mode and defines the load balancing
+            strategy that will be used for cluster node selection.
+            The data read from replicas is eventually consistent with the data in primary nodes.
+        :param dynamic_startup_nodes:
+            Set the RedisCluster's startup nodes to all of the discovered nodes.
+            If true (default value), the cluster's discovered nodes will be used to
+            determine the cluster nodes-slots mapping in the next topology refresh.
+            It will remove the initial passed startup nodes if their endpoints aren't
+            listed in the CLUSTER SLOTS output.
+            If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
+            specific IP addresses, it is best to set it to false.
+        :param cluster_error_retry_attempts:
+            @deprecated - Please configure the 'retry' object instead
+            In case 'retry' object is set - this argument is ignored!
 
-                             Number of times to retry before raising an error when
-                             :class:`~.TimeoutError` or :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError` or
-                             :class:`~.ClusterDownError` are encountered
-                        :param retry:
-                            A retry object that defines the retry strategy and the number of
-                            retries for the cluster client.
-                            In current implementation for the cluster client (starting form redis-py version 6.0.0)
-                            the retry object is not yet fully utilized, instead it is used just to determine
-                            the number of retries for the cluster client.
-                            In the future releases the retry object will be used to handle the cluster client retries!
-                        :param reinitialize_steps:
-                            Specifies the number of MOVED errors that need to occur before
-                            reinitializing the whole cluster topology. If a MOVED error occurs
-                            and the cluster does not need to be reinitialized on this current
-                            error handling, only the MOVED slot will be patched with the
-                            redirected node.
-                            To reinitialize the cluster on every MOVED error, set
-                            reinitialize_steps to 1.
-                            To avoid reinitializing the cluster on moved errors, set
-                            reinitialize_steps to 0.
-                        :param address_remap:
-                            An optional callable which, when provided with an internal network
-                            address of a node, e.g. a `(host, port)` tuple, will return the address
-                            where the node is reachable.  This can be used to map the addresses at
-                            which the nodes _think_ they are, to addresses at which a client may
-                            reach them, such as when they sit behind a proxy.
+            Number of times to retry before raising an error when
+            :class:`~.TimeoutError` or :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError` or
+            :class:`~.ClusterDownError` are encountered
+        :param retry:
+            A retry object that defines the retry strategy and the number of
+            retries for the cluster client.
+            In current implementation for the cluster client (starting form redis-py version 6.0.0)
+            the retry object is not yet fully utilized, instead it is used just to determine
+            the number of retries for the cluster client.
+            In the future releases the retry object will be used to handle the cluster client retries!
+        :param reinitialize_steps:
+            Specifies the number of MOVED errors that need to occur before
+            reinitializing the whole cluster topology. If a MOVED error occurs
+            and the cluster does not need to be reinitialized on this current
+            error handling, only the MOVED slot will be patched with the
+            redirected node.
+            To reinitialize the cluster on every MOVED error, set
+            reinitialize_steps to 1.
+            To avoid reinitializing the cluster on moved errors, set
+            reinitialize_steps to 0.
+        :param address_remap:
+            An optional callable which, when provided with an internal network
+            address of a node, e.g. a `(host, port)` tuple, will return the address
+            where the node is reachable.  This can be used to map the addresses at
+            which the nodes _think_ they are, to addresses at which a client may
+            reach them, such as when they sit behind a proxy.
 
-        <<<<<<< HEAD
-                        :param maint_notifications_config:
-                            Configures the nodes connections to support maintenance notifications - see
-                            `redis.maint_notifications.MaintNotificationsConfig` for details.
-                            Only supported with RESP3.
-                            If not provided and protocol is RESP3, the maintenance notifications
-                <<<<<<< HEAD
-                            will be enabled by default.
-                =======
-                            will be enabled by default (logic is included in the NodesManager
-                            initialization).
-                >>>>>>> 7c9fcd8a (Adding maintenance notification configuration to cluster client. Integration with testing helper proxy server. (#3844))
-                         :**kwargs:
-                             Extra arguments that will be sent into Redis instance when created
-                             (See Official redis-py doc for supported kwargs - the only limitation
-                              is that you can't provide 'retry' object as part of kwargs.
-                         [https://github.com/andymccurdy/redis-py/blob/master/redis/client.py])
-                             Some kwargs are not supported and will raise a
-                             RedisClusterException:
-                                 - db (Redis do not support database SELECT in cluster mode)
-        =======
-                :param maint_notifications_config:
-                    Configures the nodes connections to support maintenance notifications - see
-                    `redis.maint_notifications.MaintNotificationsConfig` for details.
-                    Only supported with RESP3.
-                    If not provided and protocol is RESP3, the maintenance notifications
-                    will be enabled by default.
-                 :**kwargs:
-                     Extra arguments that will be sent into Redis instance when created
-                     (See Official redis-py doc for supported kwargs - the only limitation
-                      is that you can't provide 'retry' object as part of kwargs.
-                 [https://github.com/andymccurdy/redis-py/blob/master/redis/client.py])
-                     Some kwargs are not supported and will raise a
-                     RedisClusterException:
-                         - db (Redis do not support database SELECT in cluster mode)
-        >>>>>>> 5258e0c7 (Adding handling of SMIGRATED push notifications (#3857))
+        :param maint_notifications_config:
+            Configures the nodes connections to support maintenance notifications - see
+            `redis.maint_notifications.MaintNotificationsConfig` for details.
+            Only supported with RESP3.
+            If not provided and protocol is RESP3, the maintenance notifications
+            will be enabled by default (logic is included in the NodesManager
+            initialization).
+        :**kwargs:
+            Extra arguments that will be sent into Redis instance when created
+            (See Official redis-py doc for supported kwargs - the only limitation
+            is that you can't provide 'retry' object as part of kwargs.
+            [https://github.com/andymccurdy/redis-py/blob/master/redis/client.py])
+            Some kwargs are not supported and will raise a
+            RedisClusterException:
+                - db (Redis do not support database SELECT in cluster mode)
+
         """
         if startup_nodes is None:
             startup_nodes = []
@@ -1404,7 +1384,7 @@ class RedisCluster(
                     slot = None
                 else:
                     slot = self.determine_slot(*args)
-                if not slot:
+                if slot is None:
                     command_policies = CommandPolicies()
                 else:
                     command_policies = CommandPolicies(
@@ -1442,6 +1422,7 @@ class RedisCluster(
                         request_policy=command_policies.request_policy,
                         nodes_flag=passed_targets,
                     )
+
                     if not target_nodes:
                         raise RedisClusterException(
                             f"No targets were found to execute {args} command on"
@@ -1569,7 +1550,11 @@ class RedisCluster(
                 # RedisCluster constructor.
                 self.reinitialize_counter += 1
                 if self._should_reinitialized():
-                    self.nodes_manager.initialize()
+                    # during this call all connections are closed or marked for disconnect,
+                    # so we don't need to disconnect the changed node's connections
+                    self.nodes_manager.initialize(
+                        additional_startup_nodes_info=[(e.host, e.port)]
+                    )
                     # Reset the counter
                     self.reinitialize_counter = 0
                 else:
@@ -1799,6 +1784,7 @@ class NodesManager:
             "credential_provider", None
         )
         self.maint_notifications_config = maint_notifications_config
+
         self.initialize()
 
     def get_node(

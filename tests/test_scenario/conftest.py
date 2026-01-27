@@ -32,7 +32,7 @@ RELAXED_TIMEOUT = 30
 CLIENT_TIMEOUT = 5
 
 DEFAULT_ENDPOINT_NAME = "m-standard"
-DEFAULT_OSS_API_ENDPOINT_NAME = "oss-api"
+DEFAULT_OSS_API_ENDPOINT_NAME = "maint-notifications-oss-api"
 
 
 class CheckActiveDatabaseChangedListener(EventListenerInterface):
@@ -78,14 +78,37 @@ def get_endpoints_config(endpoint_name: str):
         ) from e
 
 
+def get_bdbs_config(endpoint_name: str):
+    bdbs_config = os.getenv("REDIS_BDBS_CONFIG_PATH", None)
+
+    if not (bdbs_config and os.path.exists(bdbs_config)):
+        raise FileNotFoundError(f"BDBs config file not found: {bdbs_config}")
+
+    try:
+        with open(bdbs_config, "r") as f:
+            data = json.load(f)
+            dbs = data["databases"]
+            for db in dbs:
+                if db["name"] == endpoint_name:
+                    return db
+            pytest.fail(f"Failed to find bdb config for {endpoint_name}")
+    except Exception as e:
+        raise ValueError(f"Failed to load bdbs config file: {bdbs_config}") from e
+
+
 @pytest.fixture()
 def endpoints_config(endpoint_name: str):
     return get_endpoints_config(endpoint_name)
 
 
 @pytest.fixture()
-def cluster_endpoints_config(cluster_endpoint_name: str):
-    return get_endpoints_config(cluster_endpoint_name)
+def maint_notifications_cluster_bdb_config(cluster_endpoint_name: str):
+    """
+    Get the bdb config for the cluster used in the maint notifications tests.
+    This will be used to create the test database for each test.
+    The bdb config is the same for all tests, but the database is created with a random name.
+    """
+    return get_bdbs_config(cluster_endpoint_name)
 
 
 @pytest.fixture()
@@ -270,12 +293,7 @@ def _get_client_maint_notifications(
     return client
 
 
-@pytest.fixture()
-def cluster_client_maint_notifications(cluster_endpoints_config):
-    return _get_cluster_client_maint_notifications(cluster_endpoints_config)
-
-
-def _get_cluster_client_maint_notifications(
+def get_cluster_client_maint_notifications(
     endpoints_config,
     protocol: int = 3,
     enable_maintenance_notifications: bool = True,
