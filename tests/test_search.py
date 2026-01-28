@@ -3020,7 +3020,7 @@ class TestPipeline(SearchTestsBase):
             )
 
     @pytest.mark.redismod
-    @skip_if_server_version_lt("8.3.224")
+    @skip_if_server_version_lt("8.4.0")
     def test_hybrid_search_query_with_pipeline(self, client):
         p = client.ft().pipeline()
         p.create_index(
@@ -3054,12 +3054,20 @@ class TestPipeline(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([2, 2, 3, 3], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
-        hybrid_query = HybridQuery(search_query, vsim_query)
+        hybrid_query = HybridQuery(
+            search_query,
+            vsim_query,
+        )
 
-        p.hybrid_search(query=hybrid_query)
+        p.hybrid_search(
+            query=hybrid_query,
+            params_substitution={
+                "vec": np.array([2, 2, 3, 3], dtype=np.float32).tobytes()
+            },
+        )
         res = p.execute()
 
         # the default results count limit is 10
@@ -4096,7 +4104,7 @@ class TestHybridSearch(SearchTestsBase):
                 )
 
     @pytest.mark.redismod
-    @skip_if_server_version_lt("8.3.224")
+    @skip_if_server_version_lt("8.4.0")
     def test_basic_hybrid_search(self, client):
         # Create index and add data
         self._create_hybrid_search_index(client)
@@ -4107,12 +4115,17 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([-100, -200, -200, -300], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        res = client.ft().hybrid_search(query=hybrid_query)
+        res = client.ft().hybrid_search(
+            query=hybrid_query,
+            params_substitution={
+                "vec": np.array([-100, -200, -200, -300], dtype=np.float32).tobytes()
+            },
+        )
 
         # the default results count limit is 10
         if is_resp2_connection(client):
@@ -4143,7 +4156,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 2, 3], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
@@ -4162,6 +4175,9 @@ class TestHybridSearch(SearchTestsBase):
             query=hybrid_query,
             combine_method=combine_config,
             post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 2, 3], dtype=np.float32).tobytes()
+            },
             timeout=10,
         )
 
@@ -4200,6 +4216,9 @@ class TestHybridSearch(SearchTestsBase):
             query=hybrid_query,
             combine_method=combine_config,
             post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 2, 3], dtype=np.float32).tobytes()
+            },
             timeout=10,
         )
         expected_results_bm25 = [
@@ -4242,14 +4261,18 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding-hnsw",
-            vector_data="abcd1234efgh5678",
+            vector_data="$vec",
             vsim_search_method=VectorSearchMethods.KNN,
             vsim_search_method_params={"K": 3, "EF_RUNTIME": 1},
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        res = client.ft().hybrid_search(query=hybrid_query, timeout=10)
+        res = client.ft().hybrid_search(
+            query=hybrid_query,
+            params_substitution={"vec": "abcd1234efgh5678"},
+            timeout=10,
+        )
         if is_resp2_connection(client):
             assert len(res.results) > 0
             assert res.warnings == []
@@ -4268,7 +4291,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data="abcd1234efgh5678",
+            vector_data="$vec",
         )
         vsim_query.filter(HybridFilter("@price:[15 16] @size:[10 11]"))
 
@@ -4278,7 +4301,12 @@ class TestHybridSearch(SearchTestsBase):
         postprocessing_config.load("@price", "@size")
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=postprocessing_config, timeout=10
+            query=hybrid_query,
+            post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 2, 3], dtype=np.float32).tobytes()
+            },
+            timeout=10,
         )
         if is_resp2_connection(client):
             assert len(res.results) > 0
@@ -4305,12 +4333,16 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data="abcd1234efgh5678",
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        res = client.ft().hybrid_search(query=hybrid_query, timeout=10)
+        res = client.ft().hybrid_search(
+            query=hybrid_query,
+            params_substitution={"vec": "abcd1234efgh5678"},
+            timeout=10,
+        )
 
         if is_resp2_connection(client):
             assert len(res.results) > 0
@@ -4345,7 +4377,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding-hnsw",
-            vector_data="abcd1234efgh5678",
+            vector_data="$vec",
             vsim_search_method=VectorSearchMethods.KNN,
             vsim_search_method_params={"K": 3, "EF_RUNTIME": 1},
             yield_score_as="vsim_score",
@@ -4353,7 +4385,11 @@ class TestHybridSearch(SearchTestsBase):
 
         hybrid_query = HybridQuery(search_query, vsim_query)
 
-        res = client.ft().hybrid_search(query=hybrid_query, timeout=10)
+        res = client.ft().hybrid_search(
+            query=hybrid_query,
+            params_substitution={"vec": "abcd1234efgh5678"},
+            timeout=10,
+        )
 
         if is_resp2_connection(client):
             assert len(res.results) > 0
@@ -4387,7 +4423,7 @@ class TestHybridSearch(SearchTestsBase):
         search_query = HybridSearchQuery("shoes")
 
         vsim_query = HybridVsimQuery(
-            vector_field_name="@embedding-hnsw", vector_data="abcd1234efgh5678"
+            vector_field_name="@embedding-hnsw", vector_data="$vec"
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
@@ -4399,7 +4435,10 @@ class TestHybridSearch(SearchTestsBase):
         )
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, combine_method=combine_method, timeout=10
+            query=hybrid_query,
+            combine_method=combine_method,
+            params_substitution={"vec": "abcd1234efgh5678"},
+            timeout=10,
         )
 
         if is_resp2_connection(client):
@@ -4428,7 +4467,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding-hnsw",
-            vector_data="abcd1234efgh5678",
+            vector_data="$vec",
             vsim_search_method=VectorSearchMethods.KNN,
             vsim_search_method_params={"K": 3, "EF_RUNTIME": 1},
             yield_score_as="vsim_score",
@@ -4444,7 +4483,10 @@ class TestHybridSearch(SearchTestsBase):
         )
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, combine_method=combine_method, timeout=10
+            query=hybrid_query,
+            combine_method=combine_method,
+            params_substitution={"vec": "abcd1234efgh5678"},
+            timeout=10,
         )
 
         if is_resp2_connection(client):
@@ -4490,7 +4532,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 2, 3], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         vsim_query.vsim_method_params(VectorSearchMethods.KNN, K=3)
@@ -4500,7 +4542,12 @@ class TestHybridSearch(SearchTestsBase):
         postprocessing_config = HybridPostProcessingConfig()
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=postprocessing_config, timeout=10
+            query=hybrid_query,
+            post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 2, 3], dtype=np.float32).tobytes()
+            },
+            timeout=10,
         )
         expected_results = [
             {"__key": b"item:2", "__score": b"0.016393442623"},
@@ -4522,14 +4569,20 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query_with_hnsw = HybridVsimQuery(
             vector_field_name="@embedding-hnsw",
-            vector_data=np.array([1, 2, 2, 3], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
         vsim_query_with_hnsw.vsim_method_params(
             VectorSearchMethods.KNN, K=3, EF_RUNTIME=1
         )
         hybrid_query_with_hnsw = HybridQuery(search_query, vsim_query_with_hnsw)
 
-        res2 = client.ft().hybrid_search(query=hybrid_query_with_hnsw, timeout=10)
+        res2 = client.ft().hybrid_search(
+            query=hybrid_query_with_hnsw,
+            params_substitution={
+                "vec": np.array([1, 2, 2, 3], dtype=np.float32).tobytes()
+            },
+            timeout=10,
+        )
 
         expected_results2 = [
             {"__key": b"item:12", "__score": b"0.016393442623"},
@@ -4564,7 +4617,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         vsim_query.vsim_method_params(VectorSearchMethods.RANGE, RADIUS=2)
@@ -4575,7 +4628,12 @@ class TestHybridSearch(SearchTestsBase):
         postprocessing_config.limit(0, 3)
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=postprocessing_config, timeout=10
+            query=hybrid_query,
+            post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
+            timeout=10,
         )
 
         expected_results = [
@@ -4598,7 +4656,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query_with_hnsw = HybridVsimQuery(
             vector_field_name="@embedding-hnsw",
-            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         vsim_query_with_hnsw.vsim_method_params(
@@ -4610,6 +4668,9 @@ class TestHybridSearch(SearchTestsBase):
         res = client.ft().hybrid_search(
             query=hybrid_query_with_hnsw,
             post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
             timeout=10,
         )
 
@@ -4646,7 +4707,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
@@ -4662,6 +4723,9 @@ class TestHybridSearch(SearchTestsBase):
             query=hybrid_query,
             combine_method=combine_method_linear,
             post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
             timeout=10,
         )
 
@@ -4691,6 +4755,9 @@ class TestHybridSearch(SearchTestsBase):
             query=hybrid_query,
             combine_method=combine_method_rrf,
             post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
             timeout=10,
         )
 
@@ -4718,6 +4785,9 @@ class TestHybridSearch(SearchTestsBase):
             query=hybrid_query,
             combine_method=combine_method_rrf_2,
             post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
             timeout=10,
         )
 
@@ -4751,7 +4821,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
@@ -4770,6 +4840,9 @@ class TestHybridSearch(SearchTestsBase):
             query=hybrid_query,
             combine_method=combine_method,
             post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
             timeout=10,
         )
 
@@ -4810,7 +4883,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
@@ -4824,7 +4897,12 @@ class TestHybridSearch(SearchTestsBase):
         postprocessing_config.limit(0, 3)
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=postprocessing_config, timeout=10
+            query=hybrid_query,
+            post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
+            timeout=10,
         )
 
         expected_results = [
@@ -4875,7 +4953,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
@@ -4889,7 +4967,12 @@ class TestHybridSearch(SearchTestsBase):
         postprocessing_config.limit(0, 3)
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=postprocessing_config, timeout=10
+            query=hybrid_query,
+            post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
+            timeout=10,
         )
 
         if is_resp2_connection(client):
@@ -4982,7 +5065,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
@@ -4991,7 +5074,12 @@ class TestHybridSearch(SearchTestsBase):
         postprocessing_config.limit(0, 3)
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=postprocessing_config, timeout=10
+            query=hybrid_query,
+            post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
+            timeout=10,
         )
 
         if is_resp2_connection(client):
@@ -5013,7 +5101,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
@@ -5027,7 +5115,12 @@ class TestHybridSearch(SearchTestsBase):
         postprocessing_config.limit(0, 5)
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=postprocessing_config, timeout=10
+            query=hybrid_query,
+            post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
+            timeout=10,
         )
 
         expected_results = [
@@ -5070,7 +5163,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding-hnsw",
-            vector_data="abcd" * dim,
+            vector_data="$vec",
         )
         vsim_query.vsim_method_params(VectorSearchMethods.KNN, K=1000)
         vsim_query.filter(
@@ -5085,7 +5178,10 @@ class TestHybridSearch(SearchTestsBase):
 
         timeout = 5000  # 5 second timeout
         res = client.ft().hybrid_search(
-            query=hybrid_query, combine_method=combine_method, timeout=timeout
+            query=hybrid_query,
+            combine_method=combine_method,
+            params_substitution={"vec": "abcd" * dim},
+            timeout=timeout,
         )
 
         if is_resp2_connection(client):
@@ -5097,7 +5193,11 @@ class TestHybridSearch(SearchTestsBase):
             assert res["warnings"] == []
             assert res["execution_time"] > 0 and res["execution_time"] < timeout
 
-        res = client.ft().hybrid_search(query=hybrid_query, timeout=1)  # 1 ms timeout
+        res = client.ft().hybrid_search(
+            query=hybrid_query,
+            params_substitution={"vec": "abcd" * dim},
+            timeout=1,
+        )  # 1 ms timeout
         if is_resp2_connection(client):
             assert (
                 b"Timeout limit was reached (VSIM)" in res.warnings
@@ -5121,7 +5221,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
@@ -5139,7 +5239,12 @@ class TestHybridSearch(SearchTestsBase):
         postprocessing_config.sort_by(SortbyField("@price", asc=True))
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=postprocessing_config, timeout=10
+            query=hybrid_query,
+            post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
+            timeout=10,
         )
 
         expected_results = [
@@ -5192,7 +5297,12 @@ class TestHybridSearch(SearchTestsBase):
         )
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=postprocessing_config, timeout=1000
+            query=hybrid_query,
+            post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
+            timeout=1000,
         )
 
         expected_results = [
@@ -5224,7 +5334,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
@@ -5232,6 +5342,9 @@ class TestHybridSearch(SearchTestsBase):
         res = client.ft().hybrid_search(
             query=hybrid_query,
             cursor=HybridCursorQuery(count=5, max_idle=100),
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
             timeout=10,
         )
         if is_resp2_connection(client):
@@ -5270,7 +5383,7 @@ class TestHybridSearch(SearchTestsBase):
 
         vsim_query = HybridVsimQuery(
             vector_field_name="@embedding",
-            vector_data=np.array([1, 2, 7, 6], dtype=np.float32).tobytes(),
+            vector_data="$vec",
         )
 
         hybrid_query = HybridQuery(search_query, vsim_query)
@@ -5291,7 +5404,12 @@ class TestHybridSearch(SearchTestsBase):
         postprocessing_config.limit(0, 5)
 
         res = client.ft().hybrid_search(
-            query=hybrid_query, post_processing=postprocessing_config, timeout=10
+            query=hybrid_query,
+            post_processing=postprocessing_config,
+            params_substitution={
+                "vec": np.array([1, 2, 7, 6], dtype=np.float32).tobytes()
+            },
+            timeout=10,
         )
         print(res)
         if is_resp2_connection(client):
