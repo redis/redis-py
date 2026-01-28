@@ -973,12 +973,18 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             except (ConnectionError, TimeoutError):
                 # Connection retries are being handled in the node's
                 # Retry object.
-                # Remove the failed node from the startup nodes before we try
-                # to reinitialize the cluster
-                self.nodes_manager.startup_nodes.pop(target_node.name, None)
-                # Hard force of reinitialize of the node/slots setup
-                # and try again with the new setup
-                await self.aclose()
+                # Mark active connections for reconnect and disconnect free ones
+                # This handles connection state (like READONLY) that may be stale
+                target_node.update_active_connections_for_reconnect()
+                await target_node.disconnect_free_connections()
+
+                # Move the failed node to the end of the cached nodes list
+                # so it's tried last during reinitialization
+                self.nodes_manager.move_node_to_end_of_cached_nodes(target_node.name)
+
+                # Signal that reinitialization is needed
+                # The retry loop will handle initialize() AND replace_default_node()
+                self._initialize = True
                 raise
             except (ClusterDownError, SlotNotCoveredError):
                 # ClusterDownError can occur during a failover and to get
@@ -1263,11 +1269,47 @@ class ClusterNode:
 
             raise MaxConnectionsError()
 
+    async def disconnect_if_needed(self, connection: Connection) -> None:
+        """
+        Disconnect a connection if it's marked for reconnect.
+        This implements lazy disconnection to avoid race conditions.
+        The connection will auto-reconnect on next use.
+        """
+        if connection.should_reconnect():
+            await connection.disconnect()
+
     def release(self, connection: Connection) -> None:
         """
         Release connection back to free queue.
+        If the connection is marked for reconnect, it will be disconnected
+        lazily when next acquired via disconnect_if_needed().
         """
         self._free.append(connection)
+
+    def update_active_connections_for_reconnect(self) -> None:
+        """
+        Mark all in-use (active) connections for reconnect.
+        In-use connections are those in _connections but not currently in _free.
+        They will be disconnected when released back to the pool.
+        """
+        free_set = set(self._free)
+        for connection in self._connections:
+            if connection not in free_set:
+                connection.mark_for_reconnect()
+
+    async def disconnect_free_connections(self) -> None:
+        """
+        Disconnect all free/idle connections in the pool.
+        This is useful after topology changes (e.g., failover) to clear
+        stale connection state like READONLY mode.
+        The connections remain in the pool and will reconnect on next use.
+        """
+        if self._free:
+            # Take a snapshot to avoid issues if _free changes during await
+            await asyncio.gather(
+                *(connection.disconnect() for connection in tuple(self._free)),
+                return_exceptions=True,
+            )
 
     async def parse_response(
         self, connection: Connection, command: str, **kwargs: Any
@@ -1298,6 +1340,8 @@ class ClusterNode:
     async def execute_command(self, *args: Any, **kwargs: Any) -> Any:
         # Acquire connection
         connection = self.acquire_connection()
+        # Handle lazy disconnect for connections marked for reconnect
+        await self.disconnect_if_needed(connection)
 
         # Execute command
         await connection.send_packed_command(connection.pack_command(*args), False)
@@ -1306,12 +1350,15 @@ class ClusterNode:
         try:
             return await self.parse_response(connection, args[0], **kwargs)
         finally:
+            await self.disconnect_if_needed(connection)
             # Release connection
             self._free.append(connection)
 
     async def execute_pipeline(self, commands: List["PipelineCommand"]) -> bool:
         # Acquire connection
         connection = self.acquire_connection()
+        # Handle lazy disconnect for connections marked for reconnect
+        await self.disconnect_if_needed(connection)
 
         # Execute command
         await connection.send_packed_command(
@@ -1330,6 +1377,7 @@ class ClusterNode:
                 ret = True
 
         # Release connection
+        await self.disconnect_if_needed(connection)
         self._free.append(connection)
 
         return ret
@@ -1432,14 +1480,49 @@ class NodesManager:
         if remove_old:
             for name in list(old.keys()):
                 if name not in new:
-                    task = asyncio.create_task(old.pop(name).disconnect())  # noqa
+                    # Node is removed from cache before disconnect starts,
+                    # so it won't be found in lookups during disconnect
+                    # Mark active connections for reconnect so they get disconnected after current command completes
+                    # and disconnect free connections immediately
+                    # the node is removed from the cache before the connections changes so it won't be used and should be safe
+                    # not to wait for the disconnects
+                    removed_node = old.pop(name)
+                    removed_node.update_active_connections_for_reconnect()
+                    asyncio.create_task(removed_node.disconnect_free_connections())  # noqa
 
         for name, node in new.items():
             if name in old:
-                if old[name] is node:
-                    continue
-                task = asyncio.create_task(old[name].disconnect())  # noqa
+                # Preserve the existing node but mark connections for reconnect.
+                # This method is sync so we can't call disconnect_free_connections()
+                # which is async. Instead, we mark free connections for reconnect
+                # and they will be lazily disconnected when acquired via
+                # disconnect_if_needed() to avoid race conditions.
+                # TODO: Make this method async in the next major release to allow
+                # immediate disconnection of free connections.
+                existing_node = old[name]
+                existing_node.update_active_connections_for_reconnect()
+                for conn in existing_node._free:
+                    conn.mark_for_reconnect()
+                continue
+            # New node is detected and should be added to the pool
             old[name] = node
+
+    def move_node_to_end_of_cached_nodes(self, node_name: str) -> None:
+        """
+        Move a failing node to the end of startup_nodes and nodes_cache so it's
+        tried last during reinitialization and when selecting the default node.
+        If the node is not in the respective list, nothing is done.
+        """
+        # Move in startup_nodes
+        if node_name in self.startup_nodes and len(self.startup_nodes) > 1:
+            node = self.startup_nodes.pop(node_name)
+            self.startup_nodes[node_name] = node  # Re-insert at end
+
+        # Move in nodes_cache - this affects get_nodes_by_server_type ordering
+        # which is used to select the default_node during initialize()
+        if node_name in self.nodes_cache and len(self.nodes_cache) > 1:
+            node = self.nodes_cache.pop(node_name)
+            self.nodes_cache[node_name] = node  # Re-insert at end
 
     def move_slot(self, e: AskError | MovedError):
         redirected_node = self.get_node(host=e.host, port=e.port)
@@ -2351,6 +2434,9 @@ class TransactionStrategy(AbstractStrategy):
 
     async def _get_connection_and_send_command(self, *args, **options):
         redis_node, connection = self._get_client_and_connection_for_transaction()
+        # Only disconnect if not watching - disconnecting would lose WATCH state
+        if not self._watching:
+            await redis_node.disconnect_if_needed(connection)
         return await self._send_command_parse_response(
             connection, redis_node, args[0], *args, **options
         )
@@ -2383,7 +2469,10 @@ class TransactionStrategy(AbstractStrategy):
             type(error) in self.SLOT_REDIRECT_ERRORS
             or type(error) in self.CONNECTION_ERRORS
         ):
-            if self._transaction_connection:
+            if self._transaction_connection and self._transaction_node:
+                # Disconnect and release back to pool
+                await self._transaction_connection.disconnect()
+                self._transaction_node.release(self._transaction_connection)
                 self._transaction_connection = None
 
             self._pipe.cluster_client.reinitialize_counter += 1
@@ -2443,6 +2532,9 @@ class TransactionStrategy(AbstractStrategy):
         self._executing = True
 
         redis_node, connection = self._get_client_and_connection_for_transaction()
+        # Only disconnect if not watching - disconnecting would lose WATCH state
+        if not self._watching:
+            await redis_node.disconnect_if_needed(connection)
 
         stack = chain(
             [PipelineCommand(0, "MULTI")],
@@ -2550,8 +2642,10 @@ class TransactionStrategy(AbstractStrategy):
                 self._transaction_connection = None
             except self.CONNECTION_ERRORS:
                 # disconnect will also remove any previous WATCHes
-                if self._transaction_connection:
+                if self._transaction_connection and self._transaction_node:
                     await self._transaction_connection.disconnect()
+                    self._transaction_node.release(self._transaction_connection)
+                    self._transaction_connection = None
 
         # clean up the other instance attributes
         self._transaction_node = None

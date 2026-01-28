@@ -272,13 +272,24 @@ class TestClusterTransaction:
         mock_pool._lock = threading.RLock()
 
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
-        node_importing.redis_connection.connection_pool = mock_pool
-        r.nodes_manager.slots_cache[slot] = [node_importing]
-        r.reinitialize_steps = 1
+        # Set mock connection's host/port to match the node for find_connection_owner
+        mock_connection.host = node_importing.host
+        mock_connection.port = node_importing.port
+        # Save original pool to restore later
+        original_pool = node_importing.redis_connection.connection_pool
+        original_slots_cache = r.nodes_manager.slots_cache[slot]
+        try:
+            node_importing.redis_connection.connection_pool = mock_pool
+            r.nodes_manager.slots_cache[slot] = [node_importing]
+            r.reinitialize_steps = 1
 
-        with r.pipeline(transaction=True) as pipe:
-            pipe.set(key, "val")
-            assert pipe.execute() == [b"OK"]
+            with r.pipeline(transaction=True) as pipe:
+                pipe.set(key, "val")
+                assert pipe.execute() == [b"OK"]
+        finally:
+            # Restore original pool so teardown can work
+            node_importing.redis_connection.connection_pool = original_pool
+            r.nodes_manager.slots_cache[slot] = original_slots_cache
 
     @pytest.mark.onlycluster
     def test_retry_transaction_on_connection_error_with_watched_keys(
@@ -298,15 +309,26 @@ class TestClusterTransaction:
         mock_pool.connection_kwargs = {}
 
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
-        node_importing.redis_connection.connection_pool = mock_pool
-        r.nodes_manager.slots_cache[slot] = [node_importing]
-        r.reinitialize_steps = 1
+        # Set mock connection's host/port to match the node for find_connection_owner
+        mock_connection.host = node_importing.host
+        mock_connection.port = node_importing.port
+        # Save original pool to restore later
+        original_pool = node_importing.redis_connection.connection_pool
+        original_slots_cache = r.nodes_manager.slots_cache[slot]
+        try:
+            node_importing.redis_connection.connection_pool = mock_pool
+            r.nodes_manager.slots_cache[slot] = [node_importing]
+            r.reinitialize_steps = 1
 
-        with r.pipeline(transaction=True) as pipe:
-            pipe.watch(key)
-            pipe.multi()
-            pipe.set(key, "val")
-            assert pipe.execute() == [b"OK"]
+            with r.pipeline(transaction=True) as pipe:
+                pipe.watch(key)
+                pipe.multi()
+                pipe.set(key, "val")
+                assert pipe.execute() == [b"OK"]
+        finally:
+            # Restore original pool so teardown can work
+            node_importing.redis_connection.connection_pool = original_pool
+            r.nodes_manager.slots_cache[slot] = original_slots_cache
 
     @pytest.mark.onlycluster
     def test_exec_error_raised(self, r):
