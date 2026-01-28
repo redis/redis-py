@@ -2,6 +2,8 @@ import logging
 from time import sleep
 from typing import Callable
 
+from redis._parsers.commands import RequestPolicy, ResponsePolicy
+
 
 def wait_for_condition(
     predicate: Callable[[], bool],
@@ -45,3 +47,143 @@ def wait_for_condition(
         sleep(check_interval)
 
     raise AssertionError(error_message)
+
+
+def get_expected_command_policies(changes_in_defaults={}):
+    default_cmd_policies = {
+        "core": {
+            "keys": [
+                "keys",
+                RequestPolicy.ALL_SHARDS,
+                ResponsePolicy.DEFAULT_KEYLESS,
+            ],
+            "acl setuser": [
+                "acl setuser",
+                RequestPolicy.ALL_NODES,
+                ResponsePolicy.ALL_SUCCEEDED,
+            ],
+            "exists": ["exists", RequestPolicy.MULTI_SHARD, ResponsePolicy.AGG_SUM],
+            "config resetstat": [
+                "config resetstat",
+                RequestPolicy.ALL_NODES,
+                ResponsePolicy.ALL_SUCCEEDED,
+            ],
+            "slowlog len": [
+                "slowlog len",
+                RequestPolicy.ALL_NODES,
+                ResponsePolicy.AGG_SUM,
+            ],
+            "scan": ["scan", RequestPolicy.SPECIAL, ResponsePolicy.SPECIAL],
+            "latency history": [
+                "latency history",
+                RequestPolicy.ALL_NODES,
+                ResponsePolicy.SPECIAL,
+            ],
+            "memory doctor": [
+                "memory doctor",
+                RequestPolicy.ALL_SHARDS,
+                ResponsePolicy.SPECIAL,
+            ],
+            "randomkey": [
+                "randomkey",
+                RequestPolicy.ALL_SHARDS,
+                ResponsePolicy.SPECIAL,
+            ],
+            "mget": [
+                "mget",
+                RequestPolicy.MULTI_SHARD,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+            "function restore": [
+                "function restore",
+                RequestPolicy.ALL_SHARDS,
+                ResponsePolicy.ALL_SUCCEEDED,
+            ],
+        },
+        "json": {
+            "debug": [
+                "debug",
+                RequestPolicy.DEFAULT_KEYED,
+                RequestPolicy.DEFAULT_KEYED,
+            ],
+            "get": [
+                "get",
+                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+        },
+        "ft": {
+            "search": [
+                "search",
+                RequestPolicy.DEFAULT_KEYLESS,
+                ResponsePolicy.DEFAULT_KEYLESS,
+            ],
+            "create": [
+                "create",
+                RequestPolicy.DEFAULT_KEYLESS,
+                ResponsePolicy.DEFAULT_KEYLESS,
+            ],
+        },
+        "bf": {
+            "add": [
+                "add",
+                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+            "madd": [
+                "madd",
+                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+        },
+        "cf": {
+            "add": [
+                "add",
+                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+            "mexists": [
+                "mexists",
+                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+        },
+        "tdigest": {
+            "add": [
+                "add",
+                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+            "min": [
+                "min",
+                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+        },
+        "ts": {
+            "create": [
+                "create",
+                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+            "info": [
+                "info",
+                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+        },
+        "topk": {
+            "list": [
+                "list",
+                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+            "query": [
+                "query",
+                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
+            ],
+        },
+    }
+    default_cmd_policies.update(changes_in_defaults)
+    return default_cmd_policies
