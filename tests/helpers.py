@@ -104,7 +104,7 @@ def get_expected_command_policies(changes_in_defaults={}):
             "debug": [
                 "debug",
                 RequestPolicy.DEFAULT_KEYED,
-                RequestPolicy.DEFAULT_KEYED,
+                ResponsePolicy.DEFAULT_KEYED,
             ],
             "get": [
                 "get",
