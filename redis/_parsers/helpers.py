@@ -805,6 +805,7 @@ _RedisCallbacks = {
     "FUNCTION RESTORE": bool_ok,
     "GEODIST": float_or_none,
     "HSCAN": parse_hscan,
+    "HOTKEYS GET": lambda r: pairs_to_dict(r, decode_keys=True),
     "INFO": parse_info,
     "LASTSAVE": timestamp_to_datetime,
     "MEMORY PURGE": bool_ok,

@@ -405,6 +405,11 @@ class ACLCommands(CommandsProtocol):
 AsyncACLCommands = ACLCommands
 
 
+class HotkeysMetricsTypes(Enum):
+    CPU = "CPU"
+    NET = "NET"
+
+
 class ManagementCommands(CommandsProtocol):
     """
     Redis management commands
@@ -1405,6 +1410,85 @@ class ManagementCommands(CommandsProtocol):
         raise NotImplementedError(
             "FAILOVER is intentionally not implemented in the client."
         )
+
+    def hotkeys_start(
+        self,
+        count: Optional[int] = None,
+        metrics: Optional[List[HotkeysMetricsTypes]] = None,
+        duration: Optional[int] = None,
+        sample_ratio: Optional[int] = None,
+        slots: Optional[List[int]] = None,
+        **kwargs,
+    ) -> ResponseT:
+        """
+        Start collecting hotkeys data.
+        Returns an error if there is an ongoing collection session.
+
+        Args:
+            count: The number of keys to collect in each criteria (CPU and network consumption)
+            metrics: List of metrics to track. Supported values: [HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
+            duration: Automatically stop the collection after `duration` seconds
+            sample_ratio: Commands are sampled with probability 1/ratio (1 means no sampling)
+            slots: Only track keys on the specified hash slots
+
+        For more information, see https://redis.io/commands/hotkeys-start
+        """
+        args: List[Union[str, int]] = ["HOTKEYS", "START"]
+
+        # Add METRICS
+        if metrics:
+            args.append("METRICS")
+            args.append(len(metrics))
+            args.extend([str(m.value) for m in metrics])
+
+        # Add COUNT
+        if count is not None:
+            args.extend(["COUNT", count])
+
+        # Add optional DURATION
+        if duration is not None:
+            args.extend(["DURATION", duration])
+
+        # Add optional SAMPLE ratio
+        if sample_ratio is not None:
+            args.extend(["SAMPLE", sample_ratio])
+
+        # Add optional SLOTS
+        if slots is not None:
+            args.append("SLOTS")
+            args.append(len(slots))
+            args.extend(slots)
+
+        return self.execute_command(*args, **kwargs)
+
+    def hotkeys_stop(self, **kwargs) -> ResponseT:
+        """
+        Stop the ongoing hotkeys collection session (if any).
+        The results of the last collection session are kept for consumption with HOTKEYS GET.
+
+        For more information, see https://redis.io/commands/hotkeys-stop
+        """
+        return self.execute_command("HOTKEYS STOP", **kwargs)
+
+    def hotkeys_reset(self, **kwargs) -> ResponseT:
+        """
+        Discard the last hotkeys collection session results (in order to save memory).
+        Error if there is an ongoing collection session.
+
+        For more information, see https://redis.io/commands/hotkeys-reset
+        """
+        return self.execute_command("HOTKEYS RESET", **kwargs)
+
+    def hotkeys_get(self, **kwargs) -> ResponseT:
+        """
+        Retrieve the result of the ongoing collection session (if any),
+        or the last collection session (if any).
+
+        Returns a dictionary with the returned fields detailed in the Redis documentation.
+
+        For more information, see https://redis.io/commands/hotkeys-get
+        """
+        return self.execute_command("HOTKEYS GET", **kwargs)
 
 
 class AsyncManagementCommands(ManagementCommands):

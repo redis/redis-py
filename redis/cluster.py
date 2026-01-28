@@ -1189,6 +1189,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             if len(eval_keys) == 0:
                 return random.randrange(0, REDIS_CLUSTER_HASH_SLOTS)
             keys = eval_keys
+        elif command.upper().startswith("HOTKEYS"):
+            # HOTKEYS commands don't have keys
+            # so we can just return a random slot
+            return None
         else:
             keys = self._get_command_keys(*args)
             if keys is None or len(keys) == 0:
