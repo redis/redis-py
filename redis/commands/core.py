@@ -3831,7 +3831,9 @@ class StreamCommands(CommandsProtocol):
             pieces.extend([b"IDMPAUTO", idmpauto])
         if idmp is not None:
             if not isinstance(idmp, tuple) or len(idmp) != 2:
-                raise DataError("XADD idmp must be a tuple of (producer_id, idempotent_id)")
+                raise DataError(
+                    "XADD idmp must be a tuple of (producer_id, idempotent_id)"
+                )
             pieces.extend([b"IDMP", idmp[0], idmp[1]])
         if maxlen is not None:
             if not isinstance(maxlen, int) or maxlen < 0:
@@ -3895,14 +3897,22 @@ class StreamCommands(CommandsProtocol):
         pieces: list[EncodableT] = []
 
         if idmp_duration is not None:
-            if not isinstance(idmp_duration, int) or idmp_duration < 1 or idmp_duration > 300:
+            if (
+                not isinstance(idmp_duration, int)
+                or idmp_duration < 1
+                or idmp_duration > 300
+            ):
                 raise DataError(
                     "XCFGSET idmp_duration must be an integer between 1 and 300"
                 )
             pieces.extend([b"IDMP-DURATION", idmp_duration])
 
         if idmp_maxsize is not None:
-            if not isinstance(idmp_maxsize, int) or idmp_maxsize < 1 or idmp_maxsize > 1000000:
+            if (
+                not isinstance(idmp_maxsize, int)
+                or idmp_maxsize < 1
+                or idmp_maxsize > 1000000
+            ):
                 raise DataError(
                     "XCFGSET idmp_maxsize must be an integer between 1 and 1,000,000"
                 )

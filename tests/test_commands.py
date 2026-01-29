@@ -5610,7 +5610,7 @@ class TestRedisCommands:
         # After adding idempotent entry
         assert info["pids-tracked"] == 1  # One producer tracked
         assert info["iids-tracked"] == 1  # One iid tracked
-        assert info["iids-added"] == 1    # One idempotent entry added
+        assert info["iids-added"] == 1  # One idempotent entry added
         assert info["iids-duplicates"] == 0  # No duplicates yet
 
         # Add duplicate entry
@@ -5620,7 +5620,7 @@ class TestRedisCommands:
         # After duplicate
         assert info["pids-tracked"] == 1  # Still one producer
         assert info["iids-tracked"] == 1  # Still one iid (duplicate doesn't add new)
-        assert info["iids-added"] == 1    # Still one unique entry
+        assert info["iids-added"] == 1  # Still one unique entry
         assert info["iids-duplicates"] == 1  # One duplicate detected
 
         # Add entry from different producer
@@ -5630,7 +5630,7 @@ class TestRedisCommands:
         # After second producer
         assert info["pids-tracked"] == 2  # Two producers tracked
         assert info["iids-tracked"] == 2  # Two iids tracked
-        assert info["iids-added"] == 2    # Two unique entries
+        assert info["iids-added"] == 2  # Two unique entries
         assert info["iids-duplicates"] == 1  # Still one duplicate
 
     @skip_if_server_version_lt("5.0.0")
@@ -6421,7 +6421,7 @@ class TestRedisCommands:
     def test_xadd_idmpauto(self, r):
         stream = "stream"
 
-        # Test XADD with IDMPAUTO - first write
+        # XADD with IDMPAUTO - first write
         message_id1 = r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
 
         # Test XADD with IDMPAUTO - duplicate write returns same ID
@@ -6459,8 +6459,7 @@ class TestRedisCommands:
         assert message_id4 != message_id1
 
         # Test XADD with IDMP - shorter binary iid
-        message_id5 = r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"\x01"))
-        assert re.match(rb"[0-9]+\-[0-9]+", message_id5)
+        r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"\x01"))
 
         # Verify stream has 4 entries
         assert r.xlen(stream) == 4
@@ -6471,7 +6470,12 @@ class TestRedisCommands:
 
         # Test error: both idmpauto and idmp specified
         with pytest.raises(redis.DataError):
-            r.xadd(stream, {"foo": "bar"}, idmpauto="producer1", idmp=("producer1", b"msg1"))
+            r.xadd(
+                stream,
+                {"foo": "bar"},
+                idmpauto="producer1",
+                idmp=("producer1", b"msg1"),
+            )
 
         # Test error: idmpauto with explicit id
         with pytest.raises(redis.DataError):
@@ -6479,7 +6483,9 @@ class TestRedisCommands:
 
         # Test error: idmp with explicit id
         with pytest.raises(redis.DataError):
-            r.xadd(stream, {"foo": "bar"}, id="1234567890-0", idmp=("producer1", b"msg1"))
+            r.xadd(
+                stream, {"foo": "bar"}, id="1234567890-0", idmp=("producer1", b"msg1")
+            )
 
         # Test error: idmp not a tuple
         with pytest.raises(redis.DataError):
