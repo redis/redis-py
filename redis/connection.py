@@ -440,22 +440,16 @@ class MaintNotificationsAbstractConnection:
         else:
             self._maint_notifications_pool_handler = None
 
-        if oss_cluster_maint_notifications_handler:
-            # Extract a reference to a new handler that copies all properties
-            # of the original one and has a different connection reference
-            # This is needed because when we attach the handler to the parser
-            # we need to make sure that the handler has a reference to the
-            # connection that the parser is attached to.
-            self._oss_cluster_maint_notifications_handler = (
-                oss_cluster_maint_notifications_handler.get_handler_for_connection()
-            )
-            self._oss_cluster_maint_notifications_handler.set_connection(self)
-        else:
-            self._oss_cluster_maint_notifications_handler = None
-
         self._maint_notifications_connection_handler = (
             MaintNotificationsConnectionHandler(self, self.maint_notifications_config)
         )
+
+        if oss_cluster_maint_notifications_handler:
+            self._oss_cluster_maint_notifications_handler = (
+                oss_cluster_maint_notifications_handler
+            )
+        else:
+            self._oss_cluster_maint_notifications_handler = None
 
         # Set up OSS cluster handler to parser if available
         if self._oss_cluster_maint_notifications_handler:
@@ -521,21 +515,12 @@ class MaintNotificationsAbstractConnection:
     def set_maint_notifications_cluster_handler_for_connection(
         self, oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
     ):
-        # Deep copy the cluster handler to avoid sharing the same handler
-        # between multiple connections, because otherwise each connection will override
-        # the connection reference and the handler will only hold a reference
-        # to the last connection that was set.
-        maint_notifications_cluster_handler_copy = (
-            oss_cluster_maint_notifications_handler.get_handler_for_connection()
-        )
-
-        maint_notifications_cluster_handler_copy.set_connection(self)
         self._get_parser().set_oss_cluster_maint_push_handler(
-            maint_notifications_cluster_handler_copy.handle_notification
+            oss_cluster_maint_notifications_handler.handle_notification
         )
 
         self._oss_cluster_maint_notifications_handler = (
-            maint_notifications_cluster_handler_copy
+            oss_cluster_maint_notifications_handler
         )
 
         # Update maintenance notification connection handler if it doesn't exist
