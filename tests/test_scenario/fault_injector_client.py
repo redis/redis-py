@@ -165,6 +165,13 @@ class FaultInjectorClient(ABC):
         pass
 
     @abstractmethod
+    def get_slot_migrate_triggers(
+        self,
+        effect_name: SlotMigrateEffects,
+    ) -> Dict[str, Any]:
+        pass
+
+    @abstractmethod
     def trigger_effect(
         self,
         endpoint_config: Dict[str, Any],
@@ -313,16 +320,18 @@ class REFaultInjector(FaultInjectorClient):
     ) -> Dict[str, Any]:
         logging.debug(f"Deleting database with id: {bdb_id}")
         params = {"bdb_id": bdb_id}
-        create_db_action = ActionRequest(
+        delete_db_action = ActionRequest(
             action_type=ActionType.DELETE_DATABASE,
             parameters=params,
         )
-        result = self.trigger_action(create_db_action)
+        result = self.trigger_action(delete_db_action)
         action_id = result.get("action_id")
         if not action_id:
             raise Exception(f"Failed to trigger delete database action: {result}")
 
         action_status_check_response = self.get_operation_result(action_id)
+
+        self._current_db_id = None
 
         if action_status_check_response.get("status") != TaskStatuses.SUCCESS:
             raise Exception(
@@ -675,6 +684,15 @@ class REFaultInjector(FaultInjectorClient):
         except Exception as e:
             raise Exception(f"Failed to execute rladmin bind endpoint: {e}")
 
+    def get_slot_migrate_triggers(
+        self,
+        effect_name: SlotMigrateEffects,
+    ) -> Dict[str, Any]:
+        """Get available triggers(trigger name + db example config) for a slot migration effect."""
+        return self._make_request(
+            "GET", f"/slot-migrate?effect={effect_name.value}&cluster_index=0"
+        )
+
     def trigger_effect(
         self,
         endpoint_config: Dict[str, Any],
@@ -696,7 +714,7 @@ class REFaultInjector(FaultInjectorClient):
                 "bdb_id": bdb_id,
                 "cluster_index": cluster_index,
                 "effect": effect_name,
-                "variant": trigger_name,  # will be renamed to trigger
+                "trigger": trigger_name,
             }
             if source_node:
                 parameters["source_node"] = source_node
@@ -890,7 +908,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
                 f"FAILING_OVER {self._get_seq_id()} 2 [1]"
             )
 
-        self.proxy_helper.send_notification(self.NODE_PORT_1, start_maint_notif)
+        self.proxy_helper.send_notification(start_maint_notif)
 
         # sleep to allow the client to receive the notification
         time.sleep(self.SLEEP_TIME_BETWEEN_START_END_NOTIFICATIONS)
@@ -913,7 +931,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
             end_maint_notif = RespTranslator.re_cluster_maint_notification_to_resp(
                 f"FAILED_OVER {self._get_seq_id()} [1]"
             )
-        self.proxy_helper.send_notification(self.NODE_PORT_1, end_maint_notif)
+        self.proxy_helper.send_notification(end_maint_notif)
 
         return {"status": "done"}
 
@@ -944,7 +962,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
                 f"MIGRATING {self._get_seq_id()} 2 [1]"
             )
 
-        self.proxy_helper.send_notification(self.NODE_PORT_1, start_maint_notif)
+        self.proxy_helper.send_notification(start_maint_notif)
 
         # sleep to allow the client to receive the notification
         time.sleep(self.SLEEP_TIME_BETWEEN_START_END_NOTIFICATIONS)
@@ -964,13 +982,13 @@ class ProxyServerFaultInjector(FaultInjectorClient):
                 end_maint_notif = RespTranslator.oss_maint_notification_to_resp(
                     f"SMIGRATED {self._get_seq_id()} 127.0.0.1:{self.NODE_PORT_2} 0-200"
                 )
-                self.proxy_helper.send_notification(self.NODE_PORT_1, end_maint_notif)
+                self.proxy_helper.send_notification(end_maint_notif)
         else:
             # send migrated
             end_maint_notif = RespTranslator.re_cluster_maint_notification_to_resp(
                 f"MIGRATED {self._get_seq_id()} [1]"
             )
-            self.proxy_helper.send_notification(self.NODE_PORT_1, end_maint_notif)
+            self.proxy_helper.send_notification(end_maint_notif)
 
         return "done"
 
@@ -994,7 +1012,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
             maint_start_notif = RespTranslator.re_cluster_maint_notification_to_resp(
                 f"MOVING {self._get_seq_id()} {sleep_time} 127.0.0.1:{self.NODE_PORT_3}"
             )
-            self.proxy_helper.send_notification(self.NODE_PORT_1, maint_start_notif)
+            self.proxy_helper.send_notification(maint_start_notif)
 
         # sleep to allow the client to receive the notification
         time.sleep(sleep_time)
@@ -1012,7 +1030,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
             smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
                 f"SMIGRATED {self._get_seq_id()} 127.0.0.1:{self.NODE_PORT_3} 0-8191"
             )
-            self.proxy_helper.send_notification(self.NODE_PORT_1, smigrated_node_1)
+            self.proxy_helper.send_notification(smigrated_node_1)
         else:
             # TODO drop connections to node 1 to simulate that the node is removed
             pass
@@ -1021,6 +1039,12 @@ class ProxyServerFaultInjector(FaultInjectorClient):
 
     def get_moving_ttl(self) -> int:
         return self.MOVING_TTL
+
+    def get_slot_migrate_triggers(
+        self,
+        effect_name: SlotMigrateEffects,
+    ) -> Dict[str, Any]:
+        raise NotImplementedError("Not implemented for proxy server")
 
     def trigger_effect(
         self,

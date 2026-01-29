@@ -2076,10 +2076,8 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
         )
         # validate free connections for ip1
         changed_free_connections = 0
-        if isinstance(pool, BlockingConnectionPool):
-            free_connections = [conn for conn in pool.pool.queue if conn is not None]
-        elif isinstance(pool, ConnectionPool):
-            free_connections = pool._available_connections
+        free_connections = pool._get_free_connections()
+
         for conn in free_connections:
             if conn.host == new_ip:
                 changed_free_connections += 1
@@ -2126,10 +2124,8 @@ class TestMaintenanceNotificationsHandlingMultipleProxies(
         )
         # validate free connections for ip2
         changed_free_connections = 0
-        if isinstance(pool, BlockingConnectionPool):
-            free_connections = [conn for conn in pool.pool.queue if conn is not None]
-        elif isinstance(pool, ConnectionPool):
-            free_connections = pool._available_connections
+        free_connections = pool._get_free_connections()
+
         for conn in free_connections:
             if conn.host == new_ip_2:
                 changed_free_connections += 1

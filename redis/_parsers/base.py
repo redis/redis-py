@@ -11,6 +11,7 @@ from redis.maint_notifications import (
     NodeMigratedNotification,
     NodeMigratingNotification,
     NodeMovingNotification,
+    NodesToSlotsMapping,
     OSSNodeMigratedNotification,
     OSSNodeMigratingNotification,
 )
@@ -195,9 +196,20 @@ class MaintenanceNotificationsParser:
         # SMIGRATED <seq_number> [<host:port> <slot, range1-range2,...>, ...]
         id = response[1]
         nodes_to_slots_mapping_data = response[2]
-        nodes_to_slots_mapping = {}
-        for node, slots in nodes_to_slots_mapping_data:
-            nodes_to_slots_mapping[safe_str(node)] = safe_str(slots)
+        nodes_to_slots_mapping = []
+        for src_node, node, slots in nodes_to_slots_mapping_data:
+            # Parse the node address to extract host and port
+            src_node_str = safe_str(src_node)
+            node_str = safe_str(node)
+            slots_str = safe_str(slots)
+            # The src_node_address is not provided in the SMIGRATED message,
+            # so we use an empty string as a placeholder
+            mapping = NodesToSlotsMapping(
+                src_node_address=src_node_str,
+                dest_node_address=node_str,
+                slots=slots_str,
+            )
+            nodes_to_slots_mapping.append(mapping)
 
         return OSSNodeMigratedNotification(id, nodes_to_slots_mapping)
 
@@ -341,9 +353,9 @@ class PushNotificationsParser(Protocol):
 
                 if notification is not None:
                     return self.maintenance_push_handler_func(notification)
-            if (
-                msg_type == _SMIGRATED_MESSAGE
-                and self.oss_cluster_maint_push_handler_func
+            if msg_type == _SMIGRATED_MESSAGE and (
+                self.oss_cluster_maint_push_handler_func
+                or self.maintenance_push_handler_func
             ):
                 parser_function = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
                     msg_type
@@ -351,7 +363,10 @@ class PushNotificationsParser(Protocol):
                 notification = parser_function(response)
 
                 if notification is not None:
-                    return self.oss_cluster_maint_push_handler_func(notification)
+                    if self.maintenance_push_handler_func:
+                        self.maintenance_push_handler_func(notification)
+                    if self.oss_cluster_maint_push_handler_func:
+                        self.oss_cluster_maint_push_handler_func(notification)
         except Exception as e:
             logger.error(
                 "Error handling {} message ({}): {}".format(msg_type, response, e)
