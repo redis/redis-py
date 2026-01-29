@@ -4735,6 +4735,83 @@ class TestRedisCommands:
         with pytest.raises(redis.DataError):
             await r.xadd(stream, {"foo": "bar"}, idmp=("producer1", b"msg1", "extra"))
 
+    @skip_if_server_version_lt("8.6.0")
+    async def test_xcfgset_idmp_duration(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream first
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with IDMP-DURATION only
+        assert await r.xcfgset(stream, idmp_duration=120) is True
+
+        # Test with minimum value
+        assert await r.xcfgset(stream, idmp_duration=1) is True
+
+        # Test with maximum value
+        assert await r.xcfgset(stream, idmp_duration=300) is True
+
+    @skip_if_server_version_lt("8.6.0")
+    async def test_xcfgset_idmp_maxsize(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream first
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with IDMP-MAXSIZE only
+        assert await r.xcfgset(stream, idmp_maxsize=5000) is True
+
+        # Test with minimum value
+        assert await r.xcfgset(stream, idmp_maxsize=1) is True
+
+        # Test with maximum value
+        assert await r.xcfgset(stream, idmp_maxsize=1000000) is True
+
+    @skip_if_server_version_lt("8.6.0")
+    async def test_xcfgset_both_parameters(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream first
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with both IDMP-DURATION and IDMP-MAXSIZE
+        assert await r.xcfgset(stream, idmp_duration=120, idmp_maxsize=5000) is True
+
+        # Test with different values
+        assert await r.xcfgset(stream, idmp_duration=60, idmp_maxsize=10000) is True
+
+    @skip_if_server_version_lt("8.6.0")
+    async def test_xcfgset_validation(self, r: redis.Redis):
+        stream = "stream"
+
+        # Test error: no parameters provided
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream)
+
+        # Test error: idmp_duration too small
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_duration=0)
+
+        # Test error: idmp_duration too large
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_duration=301)
+
+        # Test error: idmp_duration not an integer
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_duration="invalid")
+
+        # Test error: idmp_maxsize too small
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_maxsize=0)
+
+        # Test error: idmp_maxsize too large
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_maxsize=1000001)
+
+        # Test error: idmp_maxsize not an integer
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_maxsize="invalid")
+
     @pytest.mark.onlynoncluster
     async def test_bitfield_operations(self, r: redis.Redis):
         # comments show affected bits

@@ -3854,6 +3854,62 @@ class StreamCommands(CommandsProtocol):
             pieces.extend(pair)
         return self.execute_command("XADD", name, *pieces)
 
+    def xcfgset(
+        self,
+        name: KeyT,
+        idmp_duration: Optional[int] = None,
+        idmp_maxsize: Optional[int] = None,
+    ) -> ResponseT:
+        """
+        Configure the idempotency parameters for a stream's IDMP map.
+
+        Sets how long Redis remembers each idempotent ID (iid) and the maximum
+        number of iids to track. This command clears the existing IDMP map
+        (Redis forgets all previously stored iids), but only if the configuration
+        value actually changes.
+
+        Args:
+            name: The name of the stream.
+            idmp_duration: How long Redis remembers each iid in seconds.
+                Default: 100 seconds (or value set by stream-idmp-duration config).
+                Minimum: 1 second, Maximum: 300 seconds.
+                Redis won't forget an iid for this duration (unless maxsize is reached).
+                Should accommodate application crash recovery time.
+            idmp_maxsize: Maximum number of iids Redis remembers per producer ID (pid).
+                Default: 100 iids (or value set by stream-idmp-maxsize config).
+                Minimum: 1 iid, Maximum: 1,000,000 (1M) iids.
+                Should be set to: mark-delay [in msec] × (messages/msec) + margin.
+                Example: 10K msgs/sec (10 msgs/msec), 80 msec mark-delay
+                → maxsize = 10 × 80 + margin = 1000 iids.
+
+        Returns:
+            OK on success.
+
+        For more information, see https://redis.io/commands/xcfgset
+        """
+        if idmp_duration is None and idmp_maxsize is None:
+            raise DataError(
+                "XCFGSET requires at least one of idmp_duration or idmp_maxsize"
+            )
+
+        pieces: list[EncodableT] = []
+
+        if idmp_duration is not None:
+            if not isinstance(idmp_duration, int) or idmp_duration < 1 or idmp_duration > 300:
+                raise DataError(
+                    "XCFGSET idmp_duration must be an integer between 1 and 300"
+                )
+            pieces.extend([b"IDMP-DURATION", idmp_duration])
+
+        if idmp_maxsize is not None:
+            if not isinstance(idmp_maxsize, int) or idmp_maxsize < 1 or idmp_maxsize > 1000000:
+                raise DataError(
+                    "XCFGSET idmp_maxsize must be an integer between 1 and 1,000,000"
+                )
+            pieces.extend([b"IDMP-MAXSIZE", idmp_maxsize])
+
+        return self.execute_command("XCFGSET", name, *pieces)
+
     def xautoclaim(
         self,
         name: KeyT,
