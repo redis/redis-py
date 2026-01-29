@@ -3777,6 +3777,8 @@ class StreamCommands(CommandsProtocol):
         minid: Union[StreamIdT, None] = None,
         limit: Optional[int] = None,
         ref_policy: Optional[Literal["KEEPREF", "DELREF", "ACKED"]] = None,
+        idmpauto: Optional[str] = None,
+        idmp: Optional[tuple[str, bytes]] = None,
     ) -> ResponseT:
         """
         Add to a stream.
@@ -3794,6 +3796,17 @@ class StreamCommands(CommandsProtocol):
             - KEEPREF (default): When trimming, preserves references in consumer groups' PEL
             - DELREF: When trimming, removes all references from consumer groups' PEL
             - ACKED: When trimming, only removes entries acknowledged by all consumer groups
+        idmpauto: Producer ID for automatic idempotent ID calculation.
+            Automatically calculates an idempotent ID based on entry content to prevent
+            duplicate entries. Can only be used with id='*'. Creates an IDMP map if it
+            doesn't exist yet. The producer ID must be unique per producer and consistent
+            across restarts.
+        idmp: Tuple of (producer_id, idempotent_id) for explicit idempotent ID.
+            Uses a specific idempotent ID to prevent duplicate entries. Can only be used
+            with id='*'. The producer ID must be unique per producer and consistent across
+            restarts. The idempotent ID must be unique per message and per producer.
+            Shorter idempotent IDs require less memory and allow faster processing.
+            Creates an IDMP map if it doesn't exist yet.
 
         For more information, see https://redis.io/commands/xadd
         """
@@ -3801,9 +3814,25 @@ class StreamCommands(CommandsProtocol):
         if maxlen is not None and minid is not None:
             raise DataError("Only one of ```maxlen``` or ```minid``` may be specified")
 
+        if idmpauto is not None and idmp is not None:
+            raise DataError("Only one of ```idmpauto``` or ```idmp``` may be specified")
+
+        if (idmpauto is not None or idmp is not None) and id != "*":
+            raise DataError("IDMPAUTO and IDMP can only be used with id='*'")
+
         if ref_policy is not None and ref_policy not in {"KEEPREF", "DELREF", "ACKED"}:
             raise DataError("XADD ref_policy must be one of: KEEPREF, DELREF, ACKED")
 
+        if nomkstream:
+            pieces.append(b"NOMKSTREAM")
+        if ref_policy is not None:
+            pieces.append(ref_policy)
+        if idmpauto is not None:
+            pieces.extend([b"IDMPAUTO", idmpauto])
+        if idmp is not None:
+            if not isinstance(idmp, tuple) or len(idmp) != 2:
+                raise DataError("XADD idmp must be a tuple of (producer_id, idempotent_id)")
+            pieces.extend([b"IDMP", idmp[0], idmp[1]])
         if maxlen is not None:
             if not isinstance(maxlen, int) or maxlen < 0:
                 raise DataError("XADD maxlen must be non-negative integer")
@@ -3818,10 +3847,6 @@ class StreamCommands(CommandsProtocol):
             pieces.append(minid)
         if limit is not None:
             pieces.extend([b"LIMIT", limit])
-        if nomkstream:
-            pieces.append(b"NOMKSTREAM")
-        if ref_policy is not None:
-            pieces.append(ref_policy)
         pieces.append(id)
         if not isinstance(fields, dict) or len(fields) == 0:
             raise DataError("XADD fields must be a non-empty dict")

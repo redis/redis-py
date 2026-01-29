@@ -4660,6 +4660,81 @@ class TestRedisCommands:
         with pytest.raises(redis.DataError):
             await r.xadd(stream, {"foo": "bar"}, ref_policy="INVALID")
 
+    @skip_if_server_version_lt("8.6.0")
+    async def test_xadd_idmpauto(self, r: redis.Redis):
+        stream = "stream"
+
+        # XADD with IDMPAUTO - first write
+        message_id1 = await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+
+        # Test XADD with IDMPAUTO - duplicate write returns same ID
+        message_id2 = await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        assert message_id1 == message_id2
+
+        # Test XADD with IDMPAUTO - different content creates new entry
+        message_id3 = await r.xadd(stream, {"field1": "value2"}, idmpauto="producer1")
+        assert message_id3 != message_id1
+
+        # Test XADD with IDMPAUTO - different producer creates new entry
+        message_id4 = await r.xadd(stream, {"field1": "value1"}, idmpauto="producer2")
+        assert message_id4 != message_id1
+
+        # Verify stream has 3 entries (2 unique from producer1, 1 from producer2)
+        assert await r.xlen(stream) == 3
+
+    @skip_if_server_version_lt("8.6.0")
+    async def test_xadd_idmp(self, r: redis.Redis):
+        stream = "stream"
+
+        # Test XADD with IDMP - first write
+        message_id1 = await r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"msg1"))
+
+        # Test XADD with IDMP - duplicate write returns same ID
+        message_id2 = await r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"msg1"))
+        assert message_id1 == message_id2
+
+        # Test XADD with IDMP - different iid creates new entry
+        message_id3 = await r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"msg2"))
+        assert message_id3 != message_id1
+
+        # Test XADD with IDMP - different producer creates new entry
+        message_id4 = await r.xadd(stream, {"field1": "value1"}, idmp=("producer2", b"msg1"))
+        assert message_id4 != message_id1
+
+        # Test XADD with IDMP - shorter binary iid
+        message_id5 = await r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"\x01"))
+
+        # Verify stream has 4 entries
+        assert await r.xlen(stream) == 4
+
+    @skip_if_server_version_lt("8.6.0")
+    async def test_xadd_idmp_validation(self, r: redis.Redis):
+        stream = "stream"
+
+        # Test error: both idmpauto and idmp specified
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, idmpauto="producer1", idmp=("producer1", b"msg1"))
+
+        # Test error: idmpauto with explicit id
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, id="1234567890-0", idmpauto="producer1")
+
+        # Test error: idmp with explicit id
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, id="1234567890-0", idmp=("producer1", b"msg1"))
+
+        # Test error: idmp not a tuple
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, idmp="invalid")
+
+        # Test error: idmp tuple with wrong number of elements
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, idmp=("producer1",))
+
+        # Test error: idmp tuple with wrong number of elements
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, idmp=("producer1", b"msg1", "extra"))
+
     @pytest.mark.onlynoncluster
     async def test_bitfield_operations(self, r: redis.Redis):
         # comments show affected bits
