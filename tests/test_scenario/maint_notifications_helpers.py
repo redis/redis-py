@@ -1,3 +1,4 @@
+import binascii
 import logging
 import time
 from typing import Any, Dict, Optional, Tuple, Union
@@ -9,6 +10,7 @@ from redis.connection import Connection
 from tests.test_scenario.fault_injector_client import (
     FaultInjectorClient,
     NodeInfo,
+    SlotMigrateEffects,
 )
 
 
@@ -48,7 +50,7 @@ class ClientValidations:
         connection: Optional[Connection] = None,
     ):
         """Wait for a push notification to be received."""
-        start_time = time.time()
+        start_time = time.time()  # returns the time in seconds
         check_interval = 0.2  # Check more frequently during operations
         test_conn = (
             connection
@@ -74,7 +76,9 @@ class ClientValidations:
                     break
                 time.sleep(check_interval)
             if fail_on_timeout:
-                pytest.fail("Timeout waiting for push notification")
+                pytest.fail(
+                    f"Timeout waiting for push notification: waiting > {time.time() - start_time} seconds."
+                )
         finally:
             # Release the connection back to the pool
             try:
@@ -86,9 +90,21 @@ class ClientValidations:
 
 class ClusterOperations:
     @staticmethod
+    def find_database_id_by_name(
+        fault_injector: FaultInjectorClient,
+        database_name: str,
+        force_cluster_info_refresh: bool = True,
+    ) -> Optional[int]:
+        """Find the database ID by name."""
+        return fault_injector.find_database_id_by_name(
+            database_name, force_cluster_info_refresh
+        )
+
+    @staticmethod
     def find_target_node_and_empty_node(
         fault_injector: FaultInjectorClient,
         endpoint_config: Dict[str, Any],
+        force_cluster_info_refresh: bool = True,
     ) -> Tuple[NodeInfo, NodeInfo]:
         """Find the node with master shards and the node with no shards.
 
@@ -96,21 +112,24 @@ class ClusterOperations:
             tuple: (target_node, empty_node) where target_node has master shards
                    and empty_node has no shards
         """
-        return fault_injector.find_target_node_and_empty_node(endpoint_config)
+        return fault_injector.find_target_node_and_empty_node(
+            endpoint_config, force_cluster_info_refresh
+        )
 
     @staticmethod
     def find_endpoint_for_bind(
         fault_injector: FaultInjectorClient,
-        endpoint_config: Dict[str, Any],
         endpoint_name: str,
-        timeout: int = 60,
+        force_cluster_info_refresh: bool = True,
     ) -> str:
         """Find the endpoint ID from cluster status.
 
         Returns:
             str: The endpoint ID (e.g., "1:1")
         """
-        return fault_injector.find_endpoint_for_bind(endpoint_config, endpoint_name)
+        return fault_injector.find_endpoint_for_bind(
+            endpoint_name, force_cluster_info_refresh
+        )
 
     @staticmethod
     def execute_failover(
@@ -142,3 +161,118 @@ class ClusterOperations:
     ) -> str:
         """Execute rladmin bind endpoint command and wait for completion."""
         return fault_injector.execute_rebind(endpoint_config, endpoint_id)
+
+    @staticmethod
+    def trigger_effect(
+        fault_injector: FaultInjectorClient,
+        endpoint_config: Dict[str, Any],
+        effect_name: SlotMigrateEffects,
+        trigger_name: Optional[str] = None,
+        source_node: Optional[str] = None,
+        target_node: Optional[str] = None,
+        skip_end_notification: bool = False,
+    ) -> str:
+        """Execute fault injector action that will trigger the desired effect.
+
+        Args:
+            fault_injector: The fault injector client to use
+            endpoint_config: Endpoint configuration dictionary
+            effect_name: The effect to trigger (e.g., SlotMigrateEffects enum value)
+            trigger_name: Optional trigger/variant name
+            source_node: Optional source node ID
+            target_node: Optional target node ID
+            skip_end_notification: Whether to skip end notification
+
+        Returns:
+            str: Action ID for tracking the operation
+        """
+        return fault_injector.trigger_effect(
+            endpoint_config=endpoint_config,
+            effect_name=effect_name,
+            trigger_name=trigger_name,
+            source_node=source_node,
+            target_node=target_node,
+            skip_end_notification=skip_end_notification,
+        )
+
+
+class KeyGenerationHelpers:
+    TOTAL_SLOTS = 16384
+
+    @staticmethod
+    def redis_crc16(data: bytes) -> int:
+        """
+        Redis-compatible CRC16 (CRC-CCITT)
+        """
+        return binascii.crc_hqx(data, 0)
+
+    @staticmethod
+    def redis_slot(key: str) -> int:
+        """
+        Compute Redis Cluster hash slot for a key
+        """
+        start = key.find("{")
+        if start != -1:
+            end = key.find("}", start + 1)
+            if end != -1 and end > start + 1:
+                key = key[start + 1 : end]
+
+        return (
+            KeyGenerationHelpers.redis_crc16(key.encode("utf-8"))
+            % KeyGenerationHelpers.TOTAL_SLOTS
+        )
+
+    @staticmethod
+    def generate_key(slot_number: int, prefix: str = "key") -> str:
+        """
+        Generate a Redis key that hashes to the given slot
+        """
+        if not (0 <= slot_number < KeyGenerationHelpers.TOTAL_SLOTS):
+            raise ValueError("slot_number must be between 0 and 16383")
+
+        i = 0
+        while True:
+            hashtag = f"{slot_number}-{i}"
+            candidate = f"{prefix}:{{{hashtag}}}"
+            if KeyGenerationHelpers.redis_slot(candidate) == slot_number:
+                return candidate
+            i += 1
+
+    @staticmethod
+    def generate_keys_for_all_shards(
+        shards_count: int, prefix: str = "key", keys_per_shard: int = 1
+    ) -> list:
+        """
+        Generate keys for all shards based on slot ranges.
+
+        Divides the total slots (16384) evenly across shards and generates
+        keys for each shard range.
+
+        Args:
+            shards_count: Number of shards in the cluster
+            prefix: Prefix for generated keys
+            keys_per_shard: Number of keys to generate per shard
+
+        Returns:
+            List of generated keys distributed across all shards
+        """
+        keys = []
+        slots_per_shard = KeyGenerationHelpers.TOTAL_SLOTS // shards_count
+
+        for shard_index in range(shards_count):
+            # Calculate slot range for this shard
+            start_slot = shard_index * slots_per_shard
+
+            # Last shard gets any remaining slots
+            if shard_index == shards_count - 1:
+                end_slot = KeyGenerationHelpers.TOTAL_SLOTS - 1
+            else:
+                end_slot = start_slot + slots_per_shard - 1
+
+            # Generate keys for this shard's slot range
+            for i in range(keys_per_shard):
+                # Pick a slot within this shard's range
+                slot_number = start_slot + (i % (end_slot - start_slot + 1))
+                keys.append(KeyGenerationHelpers.generate_key(slot_number, prefix))
+
+        return keys
