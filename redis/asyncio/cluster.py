@@ -856,7 +856,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     slot = None
                 else:
                     slot = await self._determine_slot(*args)
-                if not slot:
+                if slot is None:
                     command_policies = CommandPolicies()
                 else:
                     command_policies = CommandPolicies(
@@ -2188,7 +2188,7 @@ class PipelineStrategy(AbstractStrategy):
                             slot = None
                         else:
                             slot = await client._determine_slot(*cmd.args)
-                        if not slot:
+                        if slot is None:
                             command_policies = CommandPolicies()
                         else:
                             command_policies = CommandPolicies(

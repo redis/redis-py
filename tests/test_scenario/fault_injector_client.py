@@ -17,6 +17,8 @@ from tests.maint_notifications.proxy_server_helpers import (
     SlotsRange,
 )
 
+DEFAULT_BDB_ID = 1
+
 
 class TaskStatuses:
     """Class to hold completed statuses constants."""
@@ -33,10 +35,20 @@ class ActionType(str, Enum):
     DMC_RESTART = "dmc_restart"
     FAILOVER = "failover"
     RESHARD = "reshard"
+    CREATE_DATABASE = "create_database"
+    DELETE_DATABASE = "delete_database"
     SEQUENCE_OF_ACTIONS = "sequence_of_actions"
     NETWORK_FAILURE = "network_failure"
     EXECUTE_RLUTIL_COMMAND = "execute_rlutil_command"
     EXECUTE_RLADMIN_COMMAND = "execute_rladmin_command"
+    SLOT_MIGRATE = "slot_migrate"
+
+
+class SlotMigrateEffects(str, Enum):
+    REMOVE_ADD = "remove-add"
+    REMOVE = "remove"
+    ADD = "add"
+    SLOT_SHUFFLE = "slot-shuffle"
 
 
 class RestartDmcParams:
@@ -85,17 +97,40 @@ class FaultInjectorClient(ABC):
         pass
 
     @abstractmethod
+    def create_database(
+        self,
+        bdb_config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        pass
+
+    @abstractmethod
+    def delete_database(
+        self,
+        bdb_id: int,
+    ) -> Dict[str, Any]:
+        pass
+
+    @abstractmethod
+    def find_database_id_by_name(
+        self,
+        database_name: str,
+        force_cluster_info_refresh: bool = True,
+    ) -> Optional[int]:
+        pass
+
+    @abstractmethod
     def find_target_node_and_empty_node(
         self,
         endpoint_config: Dict[str, Any],
+        force_cluster_info_refresh: bool = True,
     ) -> Tuple[NodeInfo, NodeInfo]:
         pass
 
     @abstractmethod
     def find_endpoint_for_bind(
         self,
-        endpoint_config: Dict[str, Any],
         endpoint_name: str,
+        force_cluster_info_refresh: bool = True,
     ) -> str:
         pass
 
@@ -129,6 +164,18 @@ class FaultInjectorClient(ABC):
     def get_moving_ttl(self) -> int:
         pass
 
+    @abstractmethod
+    def trigger_effect(
+        self,
+        endpoint_config: Dict[str, Any],
+        effect_name: SlotMigrateEffects,
+        trigger_name: Optional[str] = None,
+        source_node: Optional[str] = None,
+        target_node: Optional[str] = None,
+        skip_end_notification: bool = False,
+    ) -> str:
+        pass
+
 
 class REFaultInjector(FaultInjectorClient):
     """Fault injector client for Redis Enterprise cluster setup."""
@@ -137,6 +184,8 @@ class REFaultInjector(FaultInjectorClient):
 
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
+        self._cluster_nodes_info = None
+        self._current_db_id = None
 
     def _make_request(
         self, method: str, path: str, data: Optional[Dict] = None
@@ -204,8 +253,9 @@ class REFaultInjector(FaultInjectorClient):
         timeout: int = 60,
     ) -> Dict[str, Any]:
         """Get the result of a specific action"""
-        start_time = time.time()
-        check_interval = 3
+        start_time = time.time()  # returns the time in seconds
+        check_interval = 0.3
+
         while time.time() - start_time < timeout:
             try:
                 status_result = self.get_action_status(action_id)
@@ -225,45 +275,131 @@ class REFaultInjector(FaultInjectorClient):
                 logging.warning(f"Error checking operation status: {e}")
                 time.sleep(check_interval)
         else:
-            pytest.fail(f"Timeout waiting for operation {action_id}")
+            pytest.fail(
+                f"Timeout waiting for operation {action_id}. Start time: {start_time}, current time: {time.time()}"
+            )
 
-    def get_cluster_nodes_info(
+    def create_database(
         self,
-        endpoint_config: Dict[str, Any],
-        timeout: int = 60,
+        bdb_config: Dict[str, Any],
     ) -> Dict[str, Any]:
+        """Create a new database."""
+        # Please provide the config just for the db that will be created
+        logging.debug(f"Creating database with config: {bdb_config}")
+        params = {"database_config": bdb_config}
+        create_db_action = ActionRequest(
+            action_type=ActionType.CREATE_DATABASE,
+            parameters=params,
+        )
+        result = self.trigger_action(create_db_action)
+        action_id = result.get("action_id")
+        if not action_id:
+            raise Exception(f"Failed to trigger create database action: {result}")
+
+        action_status_check_response = self.get_operation_result(action_id)
+        logging.debug(f"Create database action result: {action_status_check_response}")
+
+        if action_status_check_response.get("status") != TaskStatuses.SUCCESS:
+            raise Exception(
+                f"Create database action failed: {action_status_check_response}"
+            )
+
+        self._current_db_id = action_status_check_response["output"]["bdb_id"]
+        return action_status_check_response["output"]
+
+    def delete_database(
+        self,
+        bdb_id: int,
+    ) -> Dict[str, Any]:
+        logging.debug(f"Deleting database with id: {bdb_id}")
+        params = {"bdb_id": bdb_id}
+        create_db_action = ActionRequest(
+            action_type=ActionType.DELETE_DATABASE,
+            parameters=params,
+        )
+        result = self.trigger_action(create_db_action)
+        action_id = result.get("action_id")
+        if not action_id:
+            raise Exception(f"Failed to trigger delete database action: {result}")
+
+        action_status_check_response = self.get_operation_result(action_id)
+
+        if action_status_check_response.get("status") != TaskStatuses.SUCCESS:
+            raise Exception(
+                f"Delete database action failed: {action_status_check_response}"
+            )
+        logging.debug(f"Delete database action result: {action_status_check_response}")
+        return action_status_check_response
+
+    def get_cluster_nodes_info(self) -> None:
         """Get cluster nodes information from Redis Enterprise."""
         try:
             # Use rladmin status to get node information
-            bdb_id = endpoint_config.get("bdb_id")
             get_status_action = ActionRequest(
                 action_type=ActionType.EXECUTE_RLADMIN_COMMAND,
                 parameters={
                     "rladmin_command": "status",
-                    "bdb_id": bdb_id,
+                    "bdb_id": DEFAULT_BDB_ID
+                    if self._current_db_id is None
+                    else self._current_db_id,  # Any database id will do - it just only needs to exist
                 },
             )
             trigger_action_result = self.trigger_action(get_status_action)
             action_id = trigger_action_result.get("action_id")
             if not action_id:
                 raise ValueError(
-                    f"Failed to trigger get cluster status action for bdb_id {bdb_id}: {trigger_action_result}"
+                    f"Failed to trigger get cluster status action: {trigger_action_result}"
                 )
 
-            action_status_check_response = self.get_operation_result(
-                action_id, timeout=timeout
-            )
-            logging.info(
-                f"Completed cluster nodes info reading: {action_status_check_response}"
-            )
-            return action_status_check_response
+            action_status_check_response = self.get_operation_result(action_id)
+
+            if action_status_check_response.get("status") != TaskStatuses.SUCCESS:
+                raise Exception(
+                    f"Get cluster status action failed: {action_status_check_response}"
+                )
+            self._cluster_nodes_info = action_status_check_response.get(
+                "output", {}
+            ).get("output", "")
 
         except Exception as e:
             pytest.fail(f"Failed to get cluster nodes info: {e}")
 
+    def find_database_id_by_name(
+        self,
+        database_name: str,
+        force_cluster_info_refresh: bool = True,
+    ) -> Optional[int]:
+        """Find the database ID by name."""
+        if self._cluster_nodes_info is None or force_cluster_info_refresh:
+            self.get_cluster_nodes_info()
+
+        if not self._cluster_nodes_info:
+            raise ValueError("No cluster status info found")
+
+        # Parse the DATABASES section to find the database ID
+        lines = self._cluster_nodes_info.split("\n")
+        databases_section_started = False
+
+        for line in lines:
+            line = line.strip()
+
+            # Start of DATABASES section
+            if line.startswith("DATABASES:"):
+                databases_section_started = True
+                continue
+            elif databases_section_started and line and not line.startswith("DB:ID"):
+                # Parse database line: db:3 m-standard redis:5 node:3 master 8192-16383 1.79MB OK
+
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] == database_name:
+                    return int(parts[0].replace("db:", ""))
+
+        raise ValueError(f"Database {database_name} not found")
+
     def find_target_node_and_empty_node(
         self,
         endpoint_config: Dict[str, Any],
+        force_cluster_info_refresh: bool = True,
     ) -> Tuple[NodeInfo, NodeInfo]:
         """Find the node with master shards and the node with no shards.
 
@@ -272,14 +408,15 @@ class REFaultInjector(FaultInjectorClient):
                 and empty_node has no shards
         """
         db_port = int(endpoint_config.get("port", 0))
-        cluster_info = self.get_cluster_nodes_info(endpoint_config)
-        output = cluster_info.get("output", {}).get("output", "")
 
-        if not output:
+        if self._cluster_nodes_info is None or force_cluster_info_refresh:
+            self.get_cluster_nodes_info()
+
+        if not self._cluster_nodes_info:
             raise ValueError("No cluster status output found")
 
         # Parse the sections to find nodes with master shards and nodes with no shards
-        lines = output.split("\n")
+        lines = self._cluster_nodes_info.split("\n")
         shards_section_started = False
         nodes_section_started = False
 
@@ -376,23 +513,25 @@ class REFaultInjector(FaultInjectorClient):
 
     def find_endpoint_for_bind(
         self,
-        endpoint_config: Dict[str, Any],
         endpoint_name: str,
-        timeout: int = 60,
+        force_cluster_info_refresh: bool = True,
     ) -> str:
         """Find the endpoint ID from cluster status.
 
         Returns:
             str: The endpoint ID (e.g., "1:1")
         """
-        cluster_info = self.get_cluster_nodes_info(endpoint_config, timeout)
-        output = cluster_info.get("output", {}).get("output", "")
+        if self._cluster_nodes_info is None or force_cluster_info_refresh:
+            self.get_cluster_nodes_info()
 
-        if not output:
+        if not self._cluster_nodes_info:
+            raise ValueError("No cluster status output found")
+
+        if not self._cluster_nodes_info:
             raise ValueError("No cluster status output found")
 
         # Parse the ENDPOINTS section to find endpoint ID
-        lines = output.split("\n")
+        lines = self._cluster_nodes_info.split("\n")
         endpoints_section_started = False
 
         for line in lines:
@@ -423,30 +562,43 @@ class REFaultInjector(FaultInjectorClient):
         """Execute failover command and wait for completion."""
 
         try:
-            bdb_id = endpoint_config.get("bdb_id")
-            failover_action = ActionRequest(
-                action_type=ActionType.FAILOVER,
-                parameters={
-                    "bdb_id": bdb_id,
-                },
+            # Refresh cluster info before getting the shard - we want to be sure
+            # that we have the current state
+            shard = self._get_first_master_shard(
+                endpoint_config,
+                force_cluster_info_refresh=True,
             )
-            trigger_action_result = self.trigger_action(failover_action)
-            action_id = trigger_action_result.get("action_id")
+            bdb_id = endpoint_config.get("bdb_id")
+            command = f"failover db db:{bdb_id} shard {shard}"
+
+            parameters = {
+                "bdb_id": bdb_id,
+                "rladmin_command": command,  # Just the command without "rladmin" prefix
+            }
+            logging.debug(f"Executing rladmin_command with parameter: {parameters}")
+
+            failover_action = ActionRequest(
+                action_type=ActionType.EXECUTE_RLADMIN_COMMAND,
+                parameters=parameters,
+            )
+            result = self.trigger_action(failover_action)
+
+            logging.debug(f"Failover command action result: {result}")
+
+            action_id = result.get("action_id")
             if not action_id:
-                raise ValueError(
-                    f"Failed to trigger fail over action for bdb_id {bdb_id}: {trigger_action_result}"
-                )
+                raise Exception(f"Failed to trigger failover action: {result}")
 
             action_status_check_response = self.get_operation_result(
                 action_id, timeout=timeout
             )
             logging.info(
-                f"Completed cluster nodes info reading: {action_status_check_response}"
+                f"Completed failover execution: {action_status_check_response}"
             )
             return action_status_check_response
 
         except Exception as e:
-            pytest.fail(f"Failed to get cluster nodes info: {e}")
+            pytest.fail(f"Failed to execute failover: {e}")
 
     def execute_migrate(
         self,
@@ -491,7 +643,12 @@ class REFaultInjector(FaultInjectorClient):
         endpoint_id: str,
     ) -> str:
         """Execute rladmin bind endpoint command and wait for completion."""
-        command = f"bind endpoint {endpoint_id} policy single"
+
+        endpoint_policy = endpoint_config["raw_endpoints"][0]["proxy_policy"]
+        logging.info(
+            f"Executing rladmin bind endpoint {endpoint_id} policy {endpoint_policy}"
+        )
+        command = f"bind endpoint {endpoint_id} policy {endpoint_policy}"
 
         bdb_id = endpoint_config.get("bdb_id")
 
@@ -518,8 +675,91 @@ class REFaultInjector(FaultInjectorClient):
         except Exception as e:
             raise Exception(f"Failed to execute rladmin bind endpoint: {e}")
 
+    def trigger_effect(
+        self,
+        endpoint_config: Dict[str, Any],
+        effect_name: SlotMigrateEffects,
+        trigger_name: str,
+        source_node: Optional[str] = None,
+        target_node: Optional[str] = None,
+        skip_end_notification: bool = False,
+    ) -> str:
+        """Execute FI action that will trigger the desired effect."""
+
+        # Get bdb_id from endpoint configuration
+        bdb_id = endpoint_config.get("bdb_id")
+        cluster_index = 0
+
+        try:
+            # Correct parameter format for fault injector
+            parameters = {
+                "bdb_id": bdb_id,
+                "cluster_index": cluster_index,
+                "effect": effect_name,
+                "variant": trigger_name,  # will be renamed to trigger
+            }
+            if source_node:
+                parameters["source_node"] = source_node
+            if target_node:
+                parameters["target_node"] = target_node
+
+            logging.debug(f"Executing slot migrate with parameters: {parameters}")
+
+            action = ActionRequest(
+                action_type=ActionType.SLOT_MIGRATE, parameters=parameters
+            )
+            result = self.trigger_action(action)
+
+            logging.debug(f"Trigger effect action result: {result}")
+
+            action_id = result.get("action_id")
+
+            if not action_id:
+                raise Exception(f"Failed to trigger slot migrate action: {result}")
+            return action_id
+        except Exception as e:
+            raise Exception(f"Failed to execute slot migrate: {e}")
+
     def get_moving_ttl(self) -> int:
         return self.MOVING_TTL
+
+    def _get_first_master_shard(
+        self,
+        endpoint_config: Dict[str, Any],
+        force_cluster_info_refresh: bool = True,
+    ) -> str:
+        """Get the first master shard from the endpoint configuration."""
+        bdb_id = endpoint_config.get("bdb_id")
+
+        if self._cluster_nodes_info is None or force_cluster_info_refresh:
+            self.get_cluster_nodes_info()
+
+        if not self._cluster_nodes_info:
+            raise ValueError("No cluster status output found")
+
+        # Parse the SHARDS section to find the shard id covering slot 0
+        lines = self._cluster_nodes_info.split("\n")
+        shards_section_started = False
+
+        for line in lines:
+            line = line.strip()
+
+            # Start of SHARDS section
+            if line.startswith("SHARDS:"):
+                shards_section_started = True
+                continue
+            elif shards_section_started and line and not line.startswith("DB:ID"):
+                # Parse shard line: db:3 m-standard redis:3 node:3 master 0-8191 1.79MB OK
+                parts = line.split()
+                if (
+                    len(parts) >= 8
+                    and parts[0] == f"db:{bdb_id}"
+                    and parts[4] == "master"
+                    and parts[5].startswith("0-")
+                ):
+                    return parts[2].replace("redis:", "")  # redis:3 --> 3
+
+        raise ValueError("No master shard found")
 
 
 class ProxyServerFaultInjector(FaultInjectorClient):
@@ -570,9 +810,47 @@ class ProxyServerFaultInjector(FaultInjectorClient):
     ) -> Dict[str, Any]:
         return {"status": "done"}
 
+    def create_database(
+        self,
+        bdb_config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {
+            "bdb_id": 1,
+            "username": "default",
+            "password": "",
+            "tls": False,
+            "raw_endpoints": [
+                {
+                    "addr": ["127.0.0.1"],
+                    "addr_type": "external",
+                    "dns_name": "localhost",
+                    "oss_cluster_api_preferred_endpoint_type": "ip",
+                    "oss_cluster_api_preferred_ip_type": "internal",
+                    "port": 15379,
+                    "proxy_policy": "all-master-shards",
+                    "uid": "1:1",
+                }
+            ],
+            "endpoints": ["redis://127.0.0.1:15379"],
+        }
+
+    def delete_database(
+        self,
+        endpoint_config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {}
+
+    def find_database_id_by_name(
+        self,
+        database_name: str,
+        force_cluster_info_refresh: bool = True,
+    ) -> Optional[int]:
+        return 1
+
     def find_target_node_and_empty_node(
         self,
         endpoint_config: Dict[str, Any],
+        force_cluster_info_refresh: bool = True,
     ) -> Tuple[NodeInfo, NodeInfo]:
         target_node = NodeInfo(
             "1", "master", "0.0.0.0", "127.0.0.1", "localhost", self.NODE_PORT_1
@@ -584,8 +862,8 @@ class ProxyServerFaultInjector(FaultInjectorClient):
 
     def find_endpoint_for_bind(
         self,
-        endpoint_config: Dict[str, Any],
         endpoint_name: str,
+        force_cluster_info_refresh: bool = True,
     ) -> str:
         return "1:1"
 
@@ -743,3 +1021,18 @@ class ProxyServerFaultInjector(FaultInjectorClient):
 
     def get_moving_ttl(self) -> int:
         return self.MOVING_TTL
+
+    def trigger_effect(
+        self,
+        endpoint_config: Dict[str, Any],
+        effect_name: SlotMigrateEffects,
+        trigger_name: Optional[str] = None,
+        source_node: Optional[str] = None,
+        target_node: Optional[str] = None,
+        skip_end_notification: bool = False,
+    ) -> str:
+        """
+        Trigger the desired effect. For the proxy server,
+        this will need to be implemented in next iterations.
+        """
+        raise NotImplementedError("Not implemented for proxy server")

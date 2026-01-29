@@ -250,7 +250,8 @@ class ProxyInterceptorHelper:
 
         if not conn_ids:
             raise RuntimeError(
-                f"No connections found for node {connected_to_port}. \nStats: {stats}"
+                f"No connections found for node {node_port}. "
+                f"Available nodes: {list(set(c.get('node') for c in stats.get('connections', {}).values()))}"
             )
 
         # Send notification to each connection
