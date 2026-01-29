@@ -3932,6 +3932,58 @@ class TestRedisCommands:
         consumer = info["groups"][0]["consumers"][0]
         assert isinstance(consumer, dict)
 
+    @skip_if_server_version_lt("8.6.0")
+    async def test_xinfo_stream_idempotent_fields(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream with regular entry
+        await r.xadd(stream, {"foo": "bar"})
+        info = await r.xinfo_stream(stream)
+
+        # Verify new idempotent producer fields are present with default values
+        assert "idmp-duration" in info
+        assert "idmp-maxsize" in info
+        assert "pids-tracked" in info
+        assert "iids-tracked" in info
+        assert "iids-added" in info
+        assert "iids-duplicates" in info
+
+        # Default values (before any idempotent entries)
+        assert info["pids-tracked"] == 0
+        assert info["iids-tracked"] == 0
+        assert info["iids-added"] == 0
+        assert info["iids-duplicates"] == 0
+
+        # Add idempotent entry
+        await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        info = await r.xinfo_stream(stream)
+
+        # After adding idempotent entry
+        assert info["pids-tracked"] == 1  # One producer tracked
+        assert info["iids-tracked"] == 1  # One iid tracked
+        assert info["iids-added"] == 1    # One idempotent entry added
+        assert info["iids-duplicates"] == 0  # No duplicates yet
+
+        # Add duplicate entry
+        await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        info = await r.xinfo_stream(stream)
+
+        # After duplicate
+        assert info["pids-tracked"] == 1  # Still one producer
+        assert info["iids-tracked"] == 1  # Still one iid (duplicate doesn't add new)
+        assert info["iids-added"] == 1    # Still one unique entry
+        assert info["iids-duplicates"] == 1  # One duplicate detected
+
+        # Add entry from different producer
+        await r.xadd(stream, {"field2": "value2"}, idmpauto="producer2")
+        info = await r.xinfo_stream(stream)
+
+        # After second producer
+        assert info["pids-tracked"] == 2  # Two producers tracked
+        assert info["iids-tracked"] == 2  # Two iids tracked
+        assert info["iids-added"] == 2    # Two unique entries
+        assert info["iids-duplicates"] == 1  # Still one duplicate
+
     @skip_if_server_version_lt("5.0.0")
     async def test_xlen(self, r: redis.Redis):
         stream = "stream"
