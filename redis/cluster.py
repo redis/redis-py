@@ -2037,7 +2037,7 @@ class NodesManager:
 
     def initialize(
         self,
-        additional_startup_nodes_info: List[Tuple[str, int]] = [],
+        additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
         disconnect_startup_nodes_pools: bool = True,
     ):
         """
@@ -2068,6 +2068,8 @@ class NodesManager:
         kwargs = self.connection_kwargs
         exception = None
         epoch = self._get_epoch()
+        if additional_startup_nodes_info is None:
+            additional_startup_nodes_info = []
 
         with self._initialization_lock:
             with self._lock:
@@ -2100,7 +2102,10 @@ class NodesManager:
                             maint_notifications_config=self.maint_notifications_config,
                             **kwargs,
                         )
-                        self.startup_nodes[startup_node.name].redis_connection = r
+                        if startup_node in self.startup_nodes.values():
+                            self.startup_nodes[startup_node.name].redis_connection = r
+                        else:
+                            startup_node.redis_connection = r
                     try:
                         # Make sure cluster mode is enabled on this node
                         cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))

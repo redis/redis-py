@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from redis import Redis, RedisCluster
+from redis import Redis
 from redis.connection import ConnectionInterface
 from redis.maint_notifications import (
     EndpointType,
