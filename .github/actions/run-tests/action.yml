@@ -22,10 +22,22 @@ inputs:
     description: 'Event loop to use'
     required: false
     default: 'asyncio'
+  repository:
+    description: 'Repository to checkout'
+    required: false
+  ref:
+    description: 'Branch to checkout'
+    required: false
+  client-libs-test-image:
+    description: 'Client libs test image tag'
+    required: false
 runs:
   using: "composite"
   steps:
     - uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.repository }}
+        ref: ${{ inputs.ref }}
 
     - uses: actions/setup-python@v5
       with:
@@ -43,7 +55,8 @@ runs:
     - name: Setup Test environment
       env:
         REDIS_VERSION: ${{ inputs.redis-version }}
-        CLIENT_LIBS_TEST_IMAGE_TAG: ${{ inputs.redis-version }}
+        CLIENT_LIBS_TEST_IMAGE_TAG: ${{ inputs.client-libs-test-image || inputs.redis-version }}
+        CLIENT_LIBS_TEST_STACK_IMAGE_TAG: ${{ inputs.client-libs-test-image }}
       run: |
         set -e
 
@@ -78,7 +91,9 @@ runs:
           )
 
           if [[ -v redis_stack_version_mapping[$REDIS_VERSION] ]]; then
-            export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=${redis_stack_version_mapping[$REDIS_VERSION]}
+            if [[ -z "${CLIENT_LIBS_TEST_STACK_IMAGE_TAG}" ]]; then
+              export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=${redis_stack_version_mapping[$REDIS_VERSION]}
+            fi
             echo "REDIS_MOD_URL=redis://127.0.0.1:6479/0" >> $GITHUB_ENV
           else
             echo "Version not found in the mapping."
@@ -94,7 +109,9 @@ runs:
 
         else
           echo "Using redis CE for module tests"
-          export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=$REDIS_VERSION
+          if [[ -z "${CLIENT_LIBS_TEST_STACK_IMAGE_TAG}" ]]; then
+            export CLIENT_LIBS_TEST_STACK_IMAGE_TAG=$REDIS_VERSION
+          fi
           echo "REDIS_MOD_URL=redis://127.0.0.1:6379" >> $GITHUB_ENV
           invoke devenv --endpoints all
         fi
