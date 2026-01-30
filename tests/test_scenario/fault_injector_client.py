@@ -890,7 +890,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
                 f"FAILING_OVER {self._get_seq_id()} 2 [1]"
             )
 
-        self.proxy_helper.send_notification(self.NODE_PORT_1, start_maint_notif)
+        self.proxy_helper.send_notification(start_maint_notif)
 
         # sleep to allow the client to receive the notification
         time.sleep(self.SLEEP_TIME_BETWEEN_START_END_NOTIFICATIONS)
@@ -913,7 +913,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
             end_maint_notif = RespTranslator.re_cluster_maint_notification_to_resp(
                 f"FAILED_OVER {self._get_seq_id()} [1]"
             )
-        self.proxy_helper.send_notification(self.NODE_PORT_1, end_maint_notif)
+        self.proxy_helper.send_notification(end_maint_notif)
 
         return {"status": "done"}
 
@@ -944,7 +944,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
                 f"MIGRATING {self._get_seq_id()} 2 [1]"
             )
 
-        self.proxy_helper.send_notification(self.NODE_PORT_1, start_maint_notif)
+        self.proxy_helper.send_notification(start_maint_notif)
 
         # sleep to allow the client to receive the notification
         time.sleep(self.SLEEP_TIME_BETWEEN_START_END_NOTIFICATIONS)
@@ -964,13 +964,13 @@ class ProxyServerFaultInjector(FaultInjectorClient):
                 end_maint_notif = RespTranslator.oss_maint_notification_to_resp(
                     f"SMIGRATED {self._get_seq_id()} 127.0.0.1:{self.NODE_PORT_2} 0-200"
                 )
-                self.proxy_helper.send_notification(self.NODE_PORT_1, end_maint_notif)
+                self.proxy_helper.send_notification(end_maint_notif)
         else:
             # send migrated
             end_maint_notif = RespTranslator.re_cluster_maint_notification_to_resp(
                 f"MIGRATED {self._get_seq_id()} [1]"
             )
-            self.proxy_helper.send_notification(self.NODE_PORT_1, end_maint_notif)
+            self.proxy_helper.send_notification(end_maint_notif)
 
         return "done"
 
@@ -994,7 +994,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
             maint_start_notif = RespTranslator.re_cluster_maint_notification_to_resp(
                 f"MOVING {self._get_seq_id()} {sleep_time} 127.0.0.1:{self.NODE_PORT_3}"
             )
-            self.proxy_helper.send_notification(self.NODE_PORT_1, maint_start_notif)
+            self.proxy_helper.send_notification(maint_start_notif)
 
         # sleep to allow the client to receive the notification
         time.sleep(sleep_time)
@@ -1012,7 +1012,7 @@ class ProxyServerFaultInjector(FaultInjectorClient):
             smigrated_node_1 = RespTranslator.oss_maint_notification_to_resp(
                 f"SMIGRATED {self._get_seq_id()} 127.0.0.1:{self.NODE_PORT_3} 0-8191"
             )
-            self.proxy_helper.send_notification(self.NODE_PORT_1, smigrated_node_1)
+            self.proxy_helper.send_notification(smigrated_node_1)
         else:
             # TODO drop connections to node 1 to simulate that the node is removed
             pass
