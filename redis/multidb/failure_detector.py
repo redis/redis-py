@@ -4,7 +4,10 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import List, Type
 
-from typing_extensions import Optional
+try:
+    from typing import Optional  # Py 3.11+
+except ImportError:
+    from typing_extensions import Optional
 
 from redis.multidb.circuit import State as CBState
 
