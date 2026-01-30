@@ -21,7 +21,7 @@ from redis._parsers.helpers import (
     parse_info,
 )
 from redis.client import EMPTY_RESPONSE, NEVER_DECODE
-from redis.commands.core import DataPersistOptions
+from redis.commands.core import DataPersistOptions, HotkeysMetricsTypes
 from redis.commands.json.path import Path
 from redis.commands.search.field import TextField
 from redis.commands.search.query import Query
@@ -809,6 +809,261 @@ class TestRedisCommands:
         assert len(t) == 2
         assert isinstance(t[0], int)
         assert isinstance(t[1], int)
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_basic(self, r: redis.Redis):
+        """Test basic HOTKEYS START command with CPU metric"""
+        # Reset any previous session
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start collection with CPU metric
+        result = await r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_with_all_metrics(self, r: redis.Redis):
+        """Test HOTKEYS START with both CPU and NET metrics"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = await r.hotkeys_start(
+            count=5, metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_with_duration(self, r: redis.Redis):
+        """Test HOTKEYS START with duration parameter"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = await r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU], duration=60
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_with_sample_ratio(self, r: redis.Redis):
+        """Test HOTKEYS START with sample ratio"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = await r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU], sample_ratio=10
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_with_slots(self, r: redis.Redis):
+        """Test HOTKEYS START with specific hash slots"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = await r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU], slots=[0, 100, 200]
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_start_with_all_parameters(self, r: redis.Redis):
+        """Test HOTKEYS START with all optional parameters"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        result = await r.hotkeys_start(
+            count=5,
+            metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET],
+            duration=30,
+            sample_ratio=5,
+            slots=[0, 100, 200, 300],
+        )
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_stop(self, r: redis.Redis):
+        """Test HOTKEYS STOP command"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        await r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Stop the session
+        result = await r.hotkeys_stop()
+        assert result == b"OK"
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_reset(self, r: redis.Redis):
+        """Test HOTKEYS RESET command"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a session and generate some data
+        await r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Perform some operations to generate hotkeys data
+        for i in range(5):
+            await r.set(f"resetkey{i}", f"value{i}")
+            await r.get(f"resetkey{i}")
+
+        # Stop the session
+        await r.hotkeys_stop()
+
+        # Get results before reset - should have data
+        result_before = await r.hotkeys_get()
+        assert isinstance(result_before, dict)
+        assert "tracking-active" in result_before
+
+        # Reset the results
+        result = await r.hotkeys_reset()
+        assert result == b"OK"
+
+        # Try to get results after reset - should fail or return empty
+        try:
+            result_after = await r.hotkeys_get()
+            # If it doesn't fail, verify the data is cleared
+            # The response might indicate no session exists
+            assert result_after != result_before
+        except Exception:
+            # Expected - no session exists after reset
+            pass
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_get_ongoing_session(self, r: redis.Redis):
+        """Test HOTKEYS GET during an ongoing collection session"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        await r.hotkeys_start(
+            count=10, metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
+        )
+
+        # Perform some operations to generate hotkeys data
+        for i in range(10):
+            await r.set(f"key{i}", f"value{i}")
+            await r.get(f"key{i}")
+
+        # Get the results
+        result = await r.hotkeys_get()
+
+        # Verify the response structure
+        assert isinstance(result, dict)
+
+        # Check tracking-active is 1 (ongoing session)
+        assert result["tracking-active"] == 1
+
+        # Stop the session
+        await r.hotkeys_stop()
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_get_terminated_session(self, r: redis.Redis):
+        """Test HOTKEYS GET after stopping a collection session"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session
+        await r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+
+        # Perform some operations
+        for i in range(5):
+            await r.set(f"testkey{i}", f"testvalue{i}")
+
+        # Stop the session
+        await r.hotkeys_stop()
+
+        # Get the results
+        result = await r.hotkeys_get()
+
+        # Verify the response structure
+        assert isinstance(result, dict)
+
+        # Check tracking-active is 0 (terminated session)
+        assert result["tracking-active"] == 0
+
+    @pytest.mark.onlynoncluster
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_get_all_fields(self, r: redis.Redis):
+        """Test HOTKEYS GET returns all documented fields"""
+        try:
+            await r.hotkeys_stop()
+        except Exception:
+            pass
+
+        # Start a collection session with all parameters
+        await r.hotkeys_start(
+            count=5,
+            metrics=[HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET],
+            sample_ratio=1,
+            slots=[1, 1584, 9842],
+        )
+
+        # Perform operations to generate data
+        for i in range(20):
+            await r.set("anyprefix:{3}:key", f"value{i}")
+            await r.get(f"anyprefix:{3}:key")
+            await r.set("anyprefix:{1}:key", f"value{i}")
+            await r.get(f"anyprefix:{1}:key")
+
+        # Stop the session
+        await r.hotkeys_stop()
+
+        # Get the results
+        result = await r.hotkeys_get()
+
+        # Verify all documented fields are present
+        expected_fields = [
+            "tracking-active",
+            "sample-ratio",
+            "selected-slots",
+            "all-commands-selected-slots-ms",
+            "all-commands-all-slots-ms",
+            "net-bytes-all-commands-selected-slots",
+            "net-bytes-all-commands-all-slots",
+            "collection-start-time-unix-ms",
+            "collection-duration-ms",
+            "total-cpu-time-user-ms",
+            "total-cpu-time-sys-ms",
+            "total-net-bytes",
+            "by-cpu-time",
+            "by-net-bytes",
+        ]
+
+        for field in expected_fields:
+            assert field in result, (
+                f"Field '{field}' is missing from HOTKEYS GET response"
+            )
 
     async def test_never_decode_option(self, r: redis.Redis):
         opts = {NEVER_DECODE: []}
