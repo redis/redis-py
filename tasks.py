@@ -31,6 +31,11 @@ def linters(c):
     run("ruff format --check --diff tests redis")
     run("vulture redis whitelist.py --min-confidence 80")
 
+@task
+def linters_fix(c):
+    """Run code linters and fix issues"""
+    run("ruff check --fix tests redis")
+    run("ruff format tests redis")
 
 @task
 def all_tests(c):
