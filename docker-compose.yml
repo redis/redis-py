@@ -4,7 +4,7 @@ x-client-libs-stack-image: &client-libs-stack-image
   image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_STACK_IMAGE_TAG:-8.4.0}"
 
 x-client-libs-image: &client-libs-image
-  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-8.6-rc1-21356658603-debian-amd64}"
+  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-8.4.0}"
 
 services:
 
