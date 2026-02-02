@@ -17,6 +17,7 @@ class CertificateType(str, enum.Enum):
     server = "server"
     client_cn = "client-cn"
 
+
 TLSFiles = namedtuple("TLSFiles", ["certfile", "keyfile", "ca_certfile"])
 
 

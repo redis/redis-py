@@ -6,7 +6,11 @@ import pytest
 import redis
 from redis.exceptions import ConnectionError, RedisError
 
-from .conftest import skip_if_cryptography, skip_if_nocryptography, skip_if_server_version_lt
+from .conftest import (
+    skip_if_cryptography,
+    skip_if_nocryptography,
+    skip_if_server_version_lt,
+)
 from .ssl_utils import CertificateType, get_tls_certificates, CN_USERNAME
 
 
@@ -438,17 +442,17 @@ class TestSSL:
                 enabled=True,
                 reset=True,
                 passwords=["+clientpass"],
-                keys=['*'],
-                commands=[
-                    "+acl"
-                ],
+                keys=["*"],
+                commands=["+acl"],
             )
         finally:
             r.close()
 
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
-        client_cn_cert, client_cn_key, ca_cert = get_tls_certificates(self.tls_cert_subdir, CertificateType.client_cn)
+        client_cn_cert, client_cn_key, ca_cert = get_tls_certificates(
+            self.tls_cert_subdir, CertificateType.client_cn
+        )
         r = redis.Redis(
             host=p[0],
             port=p[1],

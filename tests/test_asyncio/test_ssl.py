@@ -208,10 +208,8 @@ class TestSSL:
                 enabled=True,
                 reset=True,
                 passwords=["+clientpass"],
-                keys=['*'],
-                commands=[
-                    "+acl"
-                ],
+                keys=["*"],
+                commands=["+acl"],
             )
         finally:
             await r.close()
@@ -219,7 +217,8 @@ class TestSSL:
         ssl_url = request.config.option.redis_ssl_url
         p = urlparse(ssl_url)[1].split(":")
         client_cn_cert, client_cn_key, ca_cert = get_tls_certificates(
-            request.session.config.REDIS_INFO["tls_cert_subdir"], CertificateType.client_cn
+            request.session.config.REDIS_INFO["tls_cert_subdir"],
+            CertificateType.client_cn,
         )
         r = redis.Redis(
             host=p[0],
