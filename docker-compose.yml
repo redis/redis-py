@@ -4,7 +4,7 @@ x-client-libs-stack-image: &client-libs-stack-image
   image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_STACK_IMAGE_TAG:-8.4.0}"
 
 x-client-libs-image: &client-libs-image
-  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-8.4.0}"
+  image: "redislabs/client-libs-test:${CLIENT_LIBS_TEST_IMAGE_TAG:-8.6-rc1-21356658603-debian-amd64}"
 
 services:
 
@@ -13,6 +13,7 @@ services:
     container_name: redis-standalone
     environment:
       - TLS_ENABLED=yes
+      - TLS_CLIENT_CNS=test_user
       - REDIS_CLUSTER=no
       - PORT=6379
       - TLS_PORT=6666
@@ -56,6 +57,7 @@ services:
       - NODES=6
       - REPLICAS=1
       - TLS_ENABLED=yes
+      - TLS_CLIENT_CNS=test_user
       - PORT=16379
       - TLS_PORT=27379
     command: ${REDIS_EXTRA_ARGS:---enable-debug-command yes --enable-module-command yes --tls-auth-clients optional --save "" --tls-cluster yes}

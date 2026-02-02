@@ -4,6 +4,8 @@ from urllib.parse import urlparse
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
+from tests.conftest import skip_if_server_version_lt
+from tests.ssl_utils import get_tls_certificates, CertificateType, CN_USERNAME
 
 # Skip test or not based on cryptography installation
 try:
@@ -193,3 +195,42 @@ class TestSSL:
             assert conn.ssl_context.password == test_password
         finally:
             await r.aclose()
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_ssl_authenticate_with_client_cert(self, request, r):
+        """Test that when client certificate is used for authentication,
+        the connection is created successfully"""
+
+        try:
+            # Non SSL client, to setup ACL
+            assert await r.acl_setuser(
+                "test_user",
+                enabled=True,
+                reset=True,
+                passwords=["+clientpass"],
+                keys=['*'],
+                commands=[
+                    "+acl"
+                ],
+            )
+        finally:
+            await r.close()
+
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        client_cn_cert, client_cn_key, ca_cert = get_tls_certificates(
+            request.session.config.REDIS_INFO["tls_cert_subdir"], CertificateType.client_cn
+        )
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_certfile=client_cn_cert,
+            ssl_keyfile=client_cn_key,
+            ssl_cert_reqs="required",
+            ssl_ca_certs=ca_cert,
+        )
+        try:
+            assert await r.acl_whoami() == CN_USERNAME
+        finally:
+            await r.close()
