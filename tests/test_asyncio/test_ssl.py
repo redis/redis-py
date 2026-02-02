@@ -204,7 +204,7 @@ class TestSSL:
         try:
             # Non SSL client, to setup ACL
             assert await r.acl_setuser(
-                "test_user",
+                CN_USERNAME,
                 enabled=True,
                 reset=True,
                 passwords=["+clientpass"],
