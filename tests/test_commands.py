@@ -5581,7 +5581,7 @@ class TestRedisCommands:
         consumer = info["groups"][0]["consumers"][0]
         assert isinstance(consumer, dict)
 
-    @skip_if_server_version_lt("8.6.0")
+    @skip_if_server_version_lt("8.5.0")
     def test_xinfo_stream_idempotent_fields(self, r):
         stream = "stream"
 
@@ -6417,7 +6417,7 @@ class TestRedisCommands:
         with pytest.raises(redis.DataError):
             r.xadd(stream, {"foo": "bar"}, ref_policy="INVALID")
 
-    @skip_if_server_version_lt("8.6.0")
+    @skip_if_server_version_lt("8.5.0")
     def test_xadd_idmpauto(self, r):
         stream = "stream"
 
@@ -6439,7 +6439,7 @@ class TestRedisCommands:
         # Verify stream has 3 entries (2 unique from producer1, 1 from producer2)
         assert r.xlen(stream) == 3
 
-    @skip_if_server_version_lt("8.6.0")
+    @skip_if_server_version_lt("8.5.0")
     def test_xadd_idmp(self, r):
         stream = "stream"
 
@@ -6464,7 +6464,7 @@ class TestRedisCommands:
         # Verify stream has 4 entries
         assert r.xlen(stream) == 4
 
-    @skip_if_server_version_lt("8.6.0")
+    @skip_if_server_version_lt("8.5.0")
     def test_xadd_idmp_validation(self, r):
         stream = "stream"
 
@@ -6499,7 +6499,7 @@ class TestRedisCommands:
         with pytest.raises(redis.DataError):
             r.xadd(stream, {"foo": "bar"}, idmp=("producer1", b"msg1", "extra"))
 
-    @skip_if_server_version_lt("8.6.0")
+    @skip_if_server_version_lt("8.5.0")
     def test_xcfgset_idmp_duration(self, r):
         stream = "stream"
 
@@ -6515,7 +6515,7 @@ class TestRedisCommands:
         # Test with maximum value
         assert r.xcfgset(stream, idmp_duration=300) == b"OK"
 
-    @skip_if_server_version_lt("8.6.0")
+    @skip_if_server_version_lt("8.5.0")
     def test_xcfgset_idmp_maxsize(self, r):
         stream = "stream"
 
@@ -6531,7 +6531,7 @@ class TestRedisCommands:
         # Test with maximum value
         assert r.xcfgset(stream, idmp_maxsize=1000000) == b"OK"
 
-    @skip_if_server_version_lt("8.6.0")
+    @skip_if_server_version_lt("8.5.0")
     def test_xcfgset_both_parameters(self, r):
         stream = "stream"
 
@@ -6544,7 +6544,7 @@ class TestRedisCommands:
         # Test with different values
         assert r.xcfgset(stream, idmp_duration=60, idmp_maxsize=10000) == b"OK"
 
-    @skip_if_server_version_lt("8.6.0")
+    @skip_if_server_version_lt("8.5.0")
     def test_xcfgset_validation(self, r):
         stream = "stream"
 
