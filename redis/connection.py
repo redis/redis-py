@@ -35,9 +35,7 @@ from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
 from .auth.token import TokenInterface
 from .backoff import NoBackoff
 from .credentials import CredentialProvider, UsernamePasswordCredentialProvider
-from .event import AfterConnectionReleasedEvent, EventDispatcher, OnErrorEvent, OnMaintenanceNotificationEvent, \
-    AfterConnectionCreatedEvent, AfterConnectionAcquiredEvent, AfterConnectionClosedEvent, OnCacheHitEvent, \
-    OnCacheMissEvent, OnCacheEvictionEvent, OnCacheInitializationEvent
+from .event import AfterConnectionReleasedEvent, EventDispatcher
 from .exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -56,8 +54,19 @@ from .maint_notifications import (
     MaintNotificationsPoolHandler, MaintenanceNotification,
 )
 from .observability.attributes import AttributeBuilder, DB_CLIENT_CONNECTION_STATE, ConnectionState, \
-    DB_CLIENT_CONNECTION_POOL_NAME, CSCReason
+    DB_CLIENT_CONNECTION_POOL_NAME, CSCReason, CSCResult, get_pool_name
 from .observability.metrics import CloseReason
+from .observability.recorder import (
+    record_error_count,
+    record_connection_create_time,
+    record_connection_wait_time,
+    record_connection_closed,
+    record_csc_request,
+    record_csc_eviction,
+    record_csc_network_saved,
+    init_csc_items,
+    register_csc_items_callback,
+)
 from .retry import Retry
 from .utils import (
     CRYPTOGRAPHY_AVAILABLE,
@@ -874,24 +883,26 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 sock = self._connect()
         except socket.timeout:
             e = TimeoutError("Timeout connecting to server")
-            self._event_dispatcher.dispatch(
-                OnErrorEvent(
-                    error=e,
-                    server_address=self.host,
-                    server_port=self.port,
-                    is_internal=False,
-                )
+            record_error_count(
+                server_address=self.host,
+                server_port=self.port,
+                network_peer_address=self.host,
+                network_peer_port=self.port,
+                error_type=e,
+                retry_attempts=0,
+                is_internal=False,
             )
             raise e
         except OSError as e:
             e = ConnectionError(self._error_message(e))
-            self._event_dispatcher.dispatch(
-                OnErrorEvent(
-                    error=e,
-                    server_address=self.host,
-                    server_port=self.port,
-                    is_internal=False,
-                )
+            record_error_count(
+                server_address=getattr(self, "host", None),
+                server_port=getattr(self, "port", None),
+                network_peer_address=getattr(self, "host", None),
+                network_peer_port=getattr(self, "port", None),
+                error_type=e,
+                retry_attempts=0,
+                is_internal=False,
             )
             raise e
 
@@ -1079,27 +1090,23 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             else:
                 close_reason = CloseReason.ERROR
 
-            if args[1] <= self.retry.get_retries():
-                self._event_dispatcher.dispatch(
-                    OnErrorEvent(
-                        error=args[0],
-                        server_address=self.host,
-                        server_port=self.port,
-                        retry_attempts=failure_count,
-                    )
+            if args[1] == self.retry.get_retries():
+                record_error_count(
+                    server_address=self.host,
+                    server_port=self.port,
+                    network_peer_address=self.host,
+                    network_peer_port=self.port,
+                    error_type=args[0],
+                    retry_attempts=failure_count,
                 )
 
-            self._event_dispatcher.dispatch(
-                AfterConnectionClosedEvent(
-                    close_reason=close_reason,
-                    error=error,
-                )
+            record_connection_closed(
+                close_reason=close_reason,
+                error_type=error,
             )
         else:
-            self._event_dispatcher.dispatch(
-                AfterConnectionClosedEvent(
-                    close_reason=CloseReason.APPLICATION_CLOSE
-                )
+            record_connection_closed(
+                close_reason=CloseReason.APPLICATION_CLOSE,
             )
 
     def mark_for_reconnect(self):
@@ -1558,17 +1565,15 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                         self._cache.get(self._current_command_cache_key).cache_value
                     )
                     self._current_command_cache_key = None
-                    self._event_dispatcher.dispatch(
-                        OnCacheHitEvent(
-                            bytes_saved=len(res),
-                            db_namespace=self.db,
-                        )
+                    record_csc_request(
+                        result=CSCResult.HIT,
+                    )
+                    record_csc_network_saved(
+                        bytes_saved=len(res),
                     )
                     return res
-                self._event_dispatcher.dispatch(
-                    OnCacheMissEvent(
-                        db_namespace=self.db,
-                    )
+                record_csc_request(
+                    result=CSCResult.MISS,
                 )
 
         response = self._conn.read_response(
@@ -1736,12 +1741,9 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 keys_deleted = self._cache.delete_by_redis_keys(data[1])
 
                 if len(keys_deleted) > 0:
-                    self._event_dispatcher.dispatch(
-                        OnCacheEvictionEvent(
-                            count=len(keys_deleted),
-                            reason=CSCReason.INVALIDATION,
-                            db_namespace=self.db,
-                        )
+                    record_csc_eviction(
+                        count=len(keys_deleted),
+                        reason=CSCReason.INVALIDATION,
                     )
 
 
@@ -2576,11 +2578,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                         self._connection_kwargs.get("cache_config")
                     ).get_cache()
 
-            self._event_dispatcher.dispatch(
-                OnCacheInitializationEvent(
-                    cache_items_callback=lambda: self.cache.size,
-                    db_namespace=self._connection_kwargs.get("db"),
-                )
+            init_csc_items()
+            register_csc_items_callback(
+                callback=lambda: self.cache.size,
+                pool_name=get_pool_name(self),
             )
 
         connection_kwargs.pop("cache", None)
@@ -2743,19 +2744,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             raise
 
         if is_created:
-            self._event_dispatcher.dispatch(
-                AfterConnectionCreatedEvent(
-                    connection_pool=self,
-                    duration_seconds=time.monotonic() - start_time_created,
-                )
-            )
-
-        self._event_dispatcher.dispatch(
-            AfterConnectionAcquiredEvent(
+            record_connection_create_time(
                 connection_pool=self,
-                duration_seconds=time.monotonic() - start_time_acquired,
+                duration_seconds=time.monotonic() - start_time_created,
             )
-        )
         return connection
 
     def get_encoder(self) -> Encoder:
@@ -3074,18 +3066,14 @@ class BlockingConnectionPool(ConnectionPool):
             raise
 
         if is_created:
-            self._event_dispatcher.dispatch(
-                AfterConnectionCreatedEvent(
-                    connection_pool=self,
-                    duration_seconds=time.monotonic() - start_time_created,
-                )
+            record_connection_create_time(
+                connection_pool=self,
+                duration_seconds=time.monotonic() - start_time_created,
             )
 
-        self._event_dispatcher.dispatch(
-            AfterConnectionAcquiredEvent(
-                connection_pool=self,
-                duration_seconds=time.monotonic() - start_time_acquired,
-            )
+        record_connection_wait_time(
+            pool_name=get_pool_name(self),
+            duration_seconds=time.monotonic() - start_time_acquired,
         )
 
         return connection

@@ -1,20 +1,13 @@
 import asyncio
 import threading
 from abc import ABC, abstractmethod
-from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Type, Union, Callable, Iterable
+from typing import Dict, List, Optional, Type, Union
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
-from redis.observability.attributes import PubSubDirection, CSCResult, CSCReason
-from redis.observability.recorder import record_operation_duration, record_error_count, record_maint_notification_count, \
-    record_connection_create_time, init_connection_count, record_connection_relaxed_timeout, record_connection_handoff, \
-    record_pubsub_message, record_streaming_lag, record_connection_wait_time, record_connection_use_time, \
-    record_connection_closed, record_csc_request, init_csc_items, record_csc_eviction, record_csc_network_saved, \
-    register_pools_connection_count, register_csc_items_callback
-from redis.utils import str_if_bytes
+from redis.observability.recorder import init_connection_count, register_pools_connection_count
 
 
 class EventListenerInterface(ABC):
@@ -85,6 +78,9 @@ class EventDispatcher(EventDispatcherInterface):
         """
         Dispatcher that dispatches events to listeners associated with given event.
         """
+        # Note: Metric-related event listeners have been removed.
+        # Metrics are now recorded directly via record_* functions in
+        # redis.observability.recorder to eliminate EventDispatcher lock contention.
         self._event_listeners_mapping: Dict[
             Type[object], List[EventListenerInterface]
         ] = {
@@ -100,37 +96,9 @@ class EventDispatcher(EventDispatcherInterface):
             ],
             AfterPubSubConnectionInstantiationEvent: [RegisterReAuthForPubSub()],
             AfterAsyncClusterInstantiationEvent: [RegisterReAuthForAsyncClusterNodes()],
-            AfterCommandExecutionEvent: [ExportOperationDurationMetric()],
             AsyncAfterConnectionReleasedEvent: [
                 AsyncReAuthConnectionListener(),
             ],
-            AfterConnectionCreatedEvent: [ExportConnectionCreateTimeMetric()],
-            AfterConnectionTimeoutUpdatedEvent: [
-                ExportConnectionRelaxedTimeoutMetric(),
-            ],
-            AfterConnectionHandoffEvent: [
-                ExportConnectionHandoffMetric(),
-            ],
-            AfterConnectionAcquiredEvent: [
-                ExportConnectionWaitTimeMetric(),
-            ],
-            AfterConnectionClosedEvent: [
-                ExportConnectionClosedMetric(),
-            ],
-            OnPubSubMessageEvent: [
-                ExportPubSubMessageMetric(),
-            ],
-            OnStreamMessageReceivedEvent: [
-                ExportStreamingLagMetric(),
-            ],
-            OnErrorEvent: [ExportErrorCountMetric()],
-            OnMaintenanceNotificationEvent: [
-                ExportMaintenanceNotificationCountMetric(),
-            ],
-            OnCacheInitializationEvent: [InitializeCSCItemsObservability()],
-            OnCacheEvictionEvent: [ExportCSCEvictionMetric()],
-            OnCacheHitEvent: [ExportCSCNetworkSavedMetric(), ExportCSCRequestMetric()],
-            OnCacheMissEvent: [ExportCSCRequestMetric()],
         }
 
         self._lock = threading.Lock()
@@ -333,130 +301,6 @@ class OnCommandsFailEvent:
     def exception(self) -> Exception:
         return self._exception
 
-@dataclass
-class AfterCommandExecutionEvent:
-    """
-    Event fired after command execution.
-    """
-    command_name: str
-    duration_seconds: float
-    server_address: Optional[str] = None
-    server_port: Optional[int] = None
-    db_namespace: Optional[str] = None
-    error: Optional[Exception] = None
-    is_blocking: Optional[bool] = None
-    batch_size: Optional[int] = None
-    retry_attempts: Optional[int] = None
-
-@dataclass
-class OnErrorEvent:
-    """
-    Event fired whenever an error occurs.
-    """
-    error: Exception
-    server_address: Optional[str] = None
-    server_port: Optional[int] = None
-    is_internal: bool = True
-    retry_attempts: Optional[int] = None
-
-@dataclass
-class OnPubSubMessageEvent:
-    """
-    Event fired whenever a pub/sub message is published/received.
-    """
-    direction: PubSubDirection
-    channel: str
-    sharded: bool = False
-
-@dataclass
-class OnStreamMessageReceivedEvent:
-    """
-    Event fired whenever a stream message is received.
-    """
-    response: Union[list, dict]
-    consumer_group: Optional[str] = None
-    consumer_name: Optional[str] = None
-
-@dataclass
-class OnMaintenanceNotificationEvent:
-    """
-    Event fired whenever a maintenance notification is received.
-    """
-    notification: "MaintenanceNotification"
-    connection: "MaintNotificationsAbstractConnection"
-
-@dataclass
-class AfterConnectionCreatedEvent:
-    """
-    Event fired after connection is created in pool.
-    """
-    connection_pool: "ConnectionPoolInterface"
-    duration_seconds: float
-
-@dataclass
-class AfterConnectionTimeoutUpdatedEvent:
-    """
-    Event fired after connection timeout is updated.
-    """
-    connection: "MaintNotificationsAbstractConnection"
-    notification: "MaintenanceNotification"
-    relaxed: bool
-
-@dataclass
-class AfterConnectionHandoffEvent:
-    """
-    Event fired after connection is handed off.
-    """
-    connection_pool: "ConnectionPoolInterface"
-
-@dataclass
-class AfterConnectionAcquiredEvent:
-    """
-    Event fired after connection is acquired from pool.
-    """
-    connection_pool: "ConnectionPoolInterface"
-    duration_seconds: float
-
-@dataclass
-class AfterConnectionClosedEvent:
-    """
-    Event fired after connection is closed.
-    """
-    close_reason: "CloseReason"
-    error: Optional[Exception] = None
-
-@dataclass
-class OnCacheHitEvent:
-    """
-    Event fired whenever a cache hit occurs.
-    """
-    bytes_saved: int
-    db_namespace: Optional[int] = None
-
-@dataclass
-class OnCacheMissEvent:
-    """
-    Event fired whenever a cache miss occurs.
-    """
-    db_namespace: Optional[int] = None
-
-@dataclass
-class OnCacheInitializationEvent:
-    """
-    Event fired after cache is initialized.
-    """
-    cache_items_callback: Callable
-    db_namespace: Optional[int] = None
-
-@dataclass
-class OnCacheEvictionEvent:
-    """
-    Event fired after cache eviction.
-    """
-    count: int
-    reason: CSCReason
-    db_namespace: Optional[int] = None
-
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
 
@@ -628,61 +472,6 @@ class RegisterReAuthForPubSub(EventListenerInterface):
     async def _raise_on_error_async(self, error: Exception):
         raise EventException(error, self._event)
 
-class ExportOperationDurationMetric(EventListenerInterface):
-    """
-    Listener that exports operation duration metric after command execution.
-    """
-    def listen(self, event: AfterCommandExecutionEvent):
-        record_operation_duration(
-            command_name=event.command_name,
-            duration_seconds=event.duration_seconds,
-            server_address=event.server_address,
-            server_port=event.server_port,
-            db_namespace=event.db_namespace,
-            error=event.error,
-            is_blocking=event.is_blocking,
-            batch_size=event.batch_size,
-            retry_attempts=event.retry_attempts,
-        )
-
-class ExportErrorCountMetric(EventListenerInterface):
-    """
-    Listener that exports error count metric.
-    """
-    def listen(self, event: OnErrorEvent):
-        record_error_count(
-            server_address=event.server_address,
-            server_port=event.server_port,
-            network_peer_address=event.server_address,
-            network_peer_port=event.server_port,
-            error_type=event.error,
-            retry_attempts=event.retry_attempts,
-            is_internal=event.is_internal,
-        )
-
-class ExportMaintenanceNotificationCountMetric(EventListenerInterface):
-    """
-    Listener that exports maintenance notification count metric.
-    """
-    def listen(self, event: OnMaintenanceNotificationEvent):
-        record_maint_notification_count(
-            server_address=event.connection.host,
-            server_port=event.connection.port,
-            network_peer_address=event.connection.host,
-            network_peer_port=event.connection.port,
-            maint_notification=repr(event.notification),
-        )
-
-class ExportConnectionCreateTimeMetric(EventListenerInterface):
-    """
-    Listener that exports connection create time metric.
-    """
-    def listen(self, event: AfterConnectionCreatedEvent):
-        record_connection_create_time(
-            connection_pool=event.connection_pool,
-            duration_seconds=event.duration_seconds,
-        )
-
 class InitializeConnectionCountObservability(EventListenerInterface):
     """
     Listener that initializes connection count observability.
@@ -693,145 +482,3 @@ class InitializeConnectionCountObservability(EventListenerInterface):
 
         # Register pools for connection count observability.
         register_pools_connection_count(event.connection_pools)
-
-class ExportConnectionRelaxedTimeoutMetric(EventListenerInterface):
-    """
-    Listener that exports connection relaxed timeout metric.
-    """
-    def listen(self, event: AfterConnectionTimeoutUpdatedEvent):
-        record_connection_relaxed_timeout(
-            connection_name=repr(event.connection),
-            maint_notification=repr(event.notification),
-            relaxed=event.relaxed,
-        )
-
-class ExportConnectionHandoffMetric(EventListenerInterface):
-    """
-    Listener that exports connection handoff metric.
-    """
-    def listen(self, event: AfterConnectionHandoffEvent):
-        record_connection_handoff(
-            pool_name=repr(event.connection_pool),
-        )
-
-class ExportPubSubMessageMetric(EventListenerInterface):
-    """
-    Listener that exports pubsub message metric.
-    """
-    def listen(self, event: OnPubSubMessageEvent):
-        record_pubsub_message(
-            direction=event.direction,
-            channel=event.channel,
-            sharded=event.sharded,
-        )
-
-class ExportStreamingLagMetric(EventListenerInterface):
-    """
-    Listener that exports streaming lag metric per stream message.
-    """
-    def listen(self, event: OnStreamMessageReceivedEvent):
-        now = datetime.now().timestamp()
-
-        if not event.response:
-            return
-
-        # RESP3
-        if isinstance(event.response, dict):
-            for stream_name, stream_messages in event.response.items():
-                for messages in stream_messages:
-                    for message in messages:
-                        message_id, message = message
-                        message_id = str_if_bytes(message_id)
-                        timestamp, _ = message_id.split("-")
-                        lag_seconds = now - int(timestamp) / 1000
-
-                        record_streaming_lag(
-                            lag_seconds=lag_seconds,
-                            stream_name=str_if_bytes(stream_name),
-                            consumer_group=event.consumer_group,
-                            consumer_name=event.consumer_name,
-                        )
-        else:
-            # RESP 2
-            for stream_entry in event.response:
-                stream_name = str_if_bytes(stream_entry[0])
-
-                for message in stream_entry[1]:
-                    message_id, message = message
-                    message_id = str_if_bytes(message_id)
-                    timestamp, _ = message_id.split("-")
-                    lag_seconds = now - int(timestamp) / 1000
-
-                    record_streaming_lag(
-                        lag_seconds=lag_seconds,
-                        stream_name=stream_name,
-                        consumer_group=event.consumer_group,
-                        consumer_name=event.consumer_name,
-                    )
-
-class ExportConnectionWaitTimeMetric(EventListenerInterface):
-    """
-    Listener that exports connection wait time metric.
-    """
-    def listen(self, event: AfterConnectionAcquiredEvent):
-        record_connection_wait_time(
-            pool_name=repr(event.connection_pool),
-            duration_seconds=event.duration_seconds,
-        )
-
-class ExportConnectionClosedMetric(EventListenerInterface):
-    """
-    Listener that exports connection closed metric.
-    """
-    def listen(self, event: AfterConnectionClosedEvent):
-        record_connection_closed(
-            close_reason=event.close_reason,
-            error_type=event.error,
-        )
-
-class ExportCSCRequestMetric(EventListenerInterface):
-    """
-    Listener that exports CSC request metric.
-    """
-    def listen(self, event: Union[OnCacheHitEvent, OnCacheMissEvent]):
-        if isinstance(event, OnCacheHitEvent):
-            result = CSCResult.HIT
-        else:
-            result = CSCResult.MISS
-
-        record_csc_request(
-            db_namespace=event.db_namespace,
-            result=result,
-        )
-
-class InitializeCSCItemsObservability(EventListenerInterface):
-    """
-    Listener that initializes CSC items observability.
-    """
-    def listen(self, event: OnCacheInitializationEvent):
-        # Initialize gauge only once, subsequent calls won't have an affect.
-        init_csc_items()
-
-        # Register cache items callback for CSC items observability.
-        register_csc_items_callback(event.cache_items_callback, event.db_namespace)
-
-class ExportCSCEvictionMetric(EventListenerInterface):
-    """
-    Listener that exports CSC eviction metric.
-    """
-    def listen(self, event: OnCacheEvictionEvent):
-        record_csc_eviction(
-            count=event.count,
-            reason=event.reason,
-            db_namespace=event.db_namespace,
-        )
-
-class ExportCSCNetworkSavedMetric(EventListenerInterface):
-    """
-    Listener that exports CSC network saved metric.
-    """
-    def listen(self, event: OnCacheHitEvent):
-        record_csc_network_saved(
-            bytes_saved=event.bytes_saved,
-            db_namespace=event.db_namespace,
-        )

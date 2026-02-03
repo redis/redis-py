@@ -53,8 +53,11 @@ from redis.utils import (
 )
 
 from .helpers import at_most_one_value_set, list_or_args
-from ..event import OnPubSubMessageEvent, OnStreamMessageReceivedEvent
 from ..observability.attributes import PubSubDirection
+from ..observability.recorder import (
+    record_streaming_lag_from_response,
+    record_pubsub_message,
+)
 
 if TYPE_CHECKING:
     import redis.asyncio.client
@@ -4215,11 +4218,7 @@ class StreamCommands(CommandsProtocol):
         pieces.extend(values)
         response = self.execute_command("XREAD", *pieces, keys=keys)
 
-        self._event_dispatcher.dispatch(
-            OnStreamMessageReceivedEvent(
-                response=response
-            )
-        )
+        record_streaming_lag_from_response(response=response)
 
         return response
 
@@ -4283,12 +4282,10 @@ class StreamCommands(CommandsProtocol):
         pieces.extend(streams.values())
         response = self.execute_command("XREADGROUP", *pieces, **options)
 
-        self._event_dispatcher.dispatch(
-            OnStreamMessageReceivedEvent(
-                response=response,
-                consumer_group=groupname,
-                consumer_name=consumername,
-            )
+        record_streaming_lag_from_response(
+            response=response,
+            consumer_group=groupname,
+            consumer_name=consumername,
         )
 
         return response
@@ -6059,11 +6056,9 @@ class PubSubCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/publish
         """
         response = self.execute_command("PUBLISH", channel, message, **kwargs)
-        self._event_dispatcher.dispatch(
-            OnPubSubMessageEvent(
-                direction=PubSubDirection.PUBLISH,
-                channel=str_if_bytes(channel),
-            )
+        record_pubsub_message(
+            direction=PubSubDirection.PUBLISH,
+            channel=str_if_bytes(channel),
         )
         return response
 
@@ -6075,12 +6070,10 @@ class PubSubCommands(CommandsProtocol):
         For more information, see https://redis.io/commands/spublish
         """
         response = self.execute_command("SPUBLISH", shard_channel, message)
-        self._event_dispatcher.dispatch(
-            OnPubSubMessageEvent(
-                direction=PubSubDirection.PUBLISH,
-                channel=str_if_bytes(shard_channel),
-                sharded=True,
-            )
+        record_pubsub_message(
+            direction=PubSubDirection.PUBLISH,
+            channel=str_if_bytes(shard_channel),
+            sharded=True,
         )
         return response
 

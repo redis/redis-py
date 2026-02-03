@@ -7,8 +7,13 @@ import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
-from redis.event import OnMaintenanceNotificationEvent, EventDispatcherInterface, EventDispatcher, \
-    AfterConnectionTimeoutUpdatedEvent, AfterConnectionHandoffEvent
+from redis.event import EventDispatcherInterface, EventDispatcher
+from redis.observability.attributes import get_pool_name
+from redis.observability.recorder import (
+    record_maint_notification_count,
+    record_connection_relaxed_timeout,
+    record_connection_handoff,
+)
 from redis.typing import Number
 
 
@@ -690,10 +695,8 @@ class MaintNotificationsPoolHandler:
                 args=(notification,),
             ).start()
 
-            self.event_dispatcher.dispatch(
-                AfterConnectionHandoffEvent(
-                    connection_pool=self.pool,
-                )
+            record_connection_handoff(
+                pool_name=get_pool_name(self.pool),
             )
 
             self._processed_notifications.add(notification)
@@ -785,11 +788,12 @@ class MaintNotificationsConnectionHandler:
         # get the notification type by checking its class in the _NOTIFICATION_TYPES dict
         notification_type = self._NOTIFICATION_TYPES.get(notification.__class__, None)
 
-        self.connection.event_dispatcher.dispatch(
-            OnMaintenanceNotificationEvent(
-                notification=notification,
-                connection=self.connection,
-            )
+        record_maint_notification_count(
+            server_address=self.connection.host,
+            server_port=self.connection.port,
+            network_peer_address=self.connection.host,
+            network_peer_port=self.connection.port,
+            maint_notification=notification.__class__.__name__,
         )
 
         if notification_type is None:
@@ -818,12 +822,11 @@ class MaintNotificationsConnectionHandler:
         self.connection.update_current_socket_timeout(self.config.relaxed_timeout)
 
         if kwargs.get('notification'):
-            self.connection.event_dispatcher.dispatch(
-                AfterConnectionTimeoutUpdatedEvent(
-                    connection=self.connection,
-                    notification=kwargs.get('notification'),
-                    relaxed=True,
-                )
+            notification = kwargs.get('notification')
+            record_connection_relaxed_timeout(
+                connection_name=repr(self.connection),
+                maint_notification=notification.__class__.__name__,
+                relaxed=True,
             )
 
     def handle_maintenance_completed_notification(self, **kwargs):
@@ -840,10 +843,9 @@ class MaintNotificationsConnectionHandler:
         self.connection.maintenance_state = MaintenanceState.NONE
 
         if kwargs.get('notification'):
-            self.connection.event_dispatcher.dispatch(
-                AfterConnectionTimeoutUpdatedEvent(
-                    connection=self.connection,
-                    notification=kwargs.get('notification'),
-                    relaxed=False,
-                )
+            notification = kwargs.get('notification')
+            record_connection_relaxed_timeout(
+                connection_name=repr(self.connection),
+                maint_notification=notification.__class__.__name__,
+                relaxed=False,
             )

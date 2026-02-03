@@ -20,14 +20,18 @@ Usage in Redis core code:
 """
 
 import time
-from typing import Optional, Callable, List
+from datetime import datetime
+from typing import Optional, Callable, List, TYPE_CHECKING
 
-from redis.connection import ConnectionPoolInterface
 from redis.observability.attributes import PubSubDirection, ConnectionState, CSCResult, CSCReason, AttributeBuilder
-from redis.observability.attributes import PubSubDirection, ConnectionState
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
 from redis.observability.providers import get_observability_instance
 from redis.observability.registry import get_observables_registry_instance
+from redis.utils import str_if_bytes
+
+if TYPE_CHECKING:
+    from redis.connection import ConnectionPoolInterface
+    from redis.observability.config import OTelConfig
 
 # Global metrics collector instance (lazy-initialized)
 _metrics_collector: Optional[RedisMetricsCollector] = None
@@ -434,9 +438,16 @@ def record_pubsub_message(
         if _metrics_collector is None:
             return
 
+    # Check if channel names should be hidden
+    effective_channel = channel
+    if channel is not None:
+        config = _get_config()
+        if config is not None and config.hide_pubsub_channel_names:
+            effective_channel = None
+
     _metrics_collector.record_pubsub_message(
         direction=direction,
-        channel=channel,
+        channel=effective_channel,
         sharded=sharded,
     )
 
@@ -463,15 +474,93 @@ def record_streaming_lag(
         if _metrics_collector is None:
             return
 
+    # Check if stream names should be hidden
+    effective_stream_name = stream_name
+    if stream_name is not None:
+        config = _get_config()
+        if config is not None and config.hide_stream_names:
+            effective_stream_name = None
+
     # try:
     _metrics_collector.record_streaming_lag(
         lag_seconds=lag_seconds,
-        stream_name=stream_name,
+        stream_name=effective_stream_name,
         consumer_group=consumer_group,
         consumer_name=consumer_name,
     )
     # except Exception:
     #     pass
+
+
+def record_streaming_lag_from_response(
+        response,
+        consumer_group: Optional[str] = None,
+        consumer_name: Optional[str] = None,
+) -> None:
+    """
+    Record streaming lag from XREAD/XREADGROUP response.
+
+    Parses the response and calculates lag for each message based on message ID timestamp.
+
+    Args:
+        response: Response from XREAD/XREADGROUP command
+        consumer_group: Consumer group name (for XREADGROUP)
+        consumer_name: Consumer name (for XREADGROUP)
+    """
+
+    global _metrics_collector
+
+    if _metrics_collector is None:
+        _metrics_collector = _get_or_create_collector()
+        if _metrics_collector is None:
+            return
+
+    if not response:
+        return
+
+    now = datetime.now().timestamp()
+
+    # Check if stream names should be hidden
+    config = _get_config()
+    hide_stream_names = config is not None and config.hide_stream_names
+
+    # RESP3 format: dict
+    if isinstance(response, dict):
+        for stream_name, stream_messages in response.items():
+            effective_stream_name = None if hide_stream_names else str_if_bytes(stream_name)
+            for messages in stream_messages:
+                for message in messages:
+                    message_id, _ = message
+                    message_id = str_if_bytes(message_id)
+                    timestamp, _ = message_id.split("-")
+                    # Ensure lag is non-negative (clock skew can cause negative values)
+                    lag_seconds = max(0.0, now - int(timestamp) / 1000)
+
+                    _metrics_collector.record_streaming_lag(
+                        lag_seconds=lag_seconds,
+                        stream_name=effective_stream_name,
+                        consumer_group=consumer_group,
+                        consumer_name=consumer_name,
+                    )
+    else:
+        # RESP2 format: list
+        for stream_entry in response:
+            stream_name = str_if_bytes(stream_entry[0])
+            effective_stream_name = None if hide_stream_names else stream_name
+
+            for message in stream_entry[1]:
+                message_id, _ = message
+                message_id = str_if_bytes(message_id)
+                timestamp, _ = message_id.split("-")
+                # Ensure lag is non-negative (clock skew can cause negative values)
+                lag_seconds = max(0.0, now - int(timestamp) / 1000)
+
+                _metrics_collector.record_streaming_lag(
+                    lag_seconds=lag_seconds,
+                    stream_name=effective_stream_name,
+                    consumer_group=consumer_group,
+                    consumer_name=consumer_name,
+                )
 
 
 def record_maint_notification_count(
@@ -513,14 +602,12 @@ def record_maint_notification_count(
     #     pass
 
 def record_csc_request(
-        db_namespace: Optional[int] = None,
         result: Optional[CSCResult] = None,
 ):
     """
     Record a Client Side Caching (CSC) request.
 
     Args:
-        db_namespace: Redis database index
         result: CSC result ('hit' or 'miss')
     """
     global _metrics_collector
@@ -531,7 +618,6 @@ def record_csc_request(
             return
 
     _metrics_collector.record_csc_request(
-        db_namespace=db_namespace,
         result=result,
     )
 
@@ -562,10 +648,14 @@ def init_csc_items() -> None:
 
 def register_csc_items_callback(
         callback: Callable,
-        db_namespace: Optional[int] = None,
+        pool_name: Optional[str] = None,
 ) -> None:
     """
     Adds given callback to CSC items observable registry.
+
+    Args:
+        callback: Callback function that returns the cache size
+        pool_name: Connection pool name for observability
     """
     global _metrics_collector
 
@@ -578,14 +668,13 @@ def register_csc_items_callback(
     from opentelemetry.metrics import Observation
 
     def csc_items_callback():
-        return [Observation(callback(), attributes=AttributeBuilder.build_csc_attributes(db_namespace=db_namespace))]
+        return [Observation(callback(), attributes=AttributeBuilder.build_csc_attributes(pool_name=pool_name))]
 
     observables_registry = get_observables_registry_instance()
     observables_registry.register(CSC_ITEMS_REGISTRY_KEY, csc_items_callback)
 
 def record_csc_eviction(
         count: int,
-        db_namespace: Optional[int] = None,
         reason: Optional[CSCReason] = None,
 ) -> None:
     """
@@ -593,7 +682,6 @@ def record_csc_eviction(
 
     Args:
         count: Number of evictions
-        db_namespace: Redis database index
         reason: Reason for eviction
     """
     global _metrics_collector
@@ -605,20 +693,17 @@ def record_csc_eviction(
 
     _metrics_collector.record_csc_eviction(
         count=count,
-        db_namespace=db_namespace,
         reason=reason,
     )
 
 def record_csc_network_saved(
         bytes_saved: int,
-        db_namespace: Optional[int] = None,
 ) -> None:
     """
     Record the number of bytes saved by using Client Side Caching (CSC).
 
     Args:
         bytes_saved: Number of bytes saved
-        db_namespace: Redis database index
     """
     global _metrics_collector
 
@@ -629,7 +714,6 @@ def record_csc_network_saved(
 
     _metrics_collector.record_csc_network_saved(
         bytes_saved=bytes_saved,
-        db_namespace=db_namespace,
     )
 
 def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
@@ -657,6 +741,22 @@ def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
         return None
     except Exception:
         # Any other error - don't break Redis operations
+        return None
+
+
+def _get_config() -> Optional["OTelConfig"]:
+    """
+    Get the OTel configuration from the observability manager.
+
+    Returns:
+        OTelConfig instance if observability is enabled, None otherwise
+    """
+    try:
+        manager = get_observability_instance().get_provider_manager()
+        if manager is None:
+            return None
+        return manager.config
+    except Exception:
         return None
 
 

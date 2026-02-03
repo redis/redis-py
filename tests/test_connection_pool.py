@@ -11,11 +11,7 @@ import redis
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
 from redis.event import (
-    AfterConnectionCreatedEvent,
-    AfterConnectionAcquiredEvent,
     AfterConnectionReleasedEvent,
-    AfterConnectionClosedEvent,
-    OnErrorEvent,
     EventDispatcher,
     EventListenerInterface,
 )

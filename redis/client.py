@@ -45,7 +45,7 @@ from redis.event import (
     AfterPubSubConnectionInstantiationEvent,
     AfterSingleConnectionInstantiationEvent,
     ClientType,
-    EventDispatcher, AfterCommandExecutionEvent, OnErrorEvent, OnPubSubMessageEvent,
+    EventDispatcher,
 )
 from redis.exceptions import (
     ConnectionError,
@@ -60,6 +60,11 @@ from redis.maint_notifications import (
     MaintNotificationsConfig,
 )
 from redis.observability.attributes import PubSubDirection
+from redis.observability.recorder import (
+    record_operation_duration,
+    record_error_count,
+    record_pubsub_message,
+)
 from redis.retry import Retry
 from redis.utils import (
     _set_info_logger,
@@ -659,26 +664,16 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         do a health check as part of the send_command logic(on connection level).
         """
         if error and failure_count <= conn.retry.get_retries():
-            self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=command_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                    error=error,
-                    retry_attempts=failure_count,
-                )
+            record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
+                error=error,
+                retry_attempts=failure_count,
             )
 
-            self._event_dispatcher.dispatch(
-                OnErrorEvent(
-                    error=error,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    retry_attempts=failure_count,
-                )
-            )
         conn.disconnect()
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
@@ -711,34 +706,23 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 with_failure_count=True
             )
 
-            self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=command_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                )
+            record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
             )
             return result
         except Exception as e:
-            self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=command_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                    error=e,
-                )
-            )
-            self._event_dispatcher.dispatch(
-                OnErrorEvent(
-                    error=e,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    is_internal=False,
-                )
+            record_error_count(
+                server_address=conn.host,
+                server_port=conn.port,
+                network_peer_address=conn.host,
+                network_peer_port=conn.port,
+                error_type=e,
+                retry_attempts=conn.retry.get_retries(),
+                is_internal=False,
             )
             raise
 
@@ -1033,26 +1017,15 @@ class PubSub:
         """
         if error and failure_count <= conn.retry.get_retries():
             if command_name:
-                self._event_dispatcher.dispatch(
-                    AfterCommandExecutionEvent(
-                        command_name=command_name,
-                        duration_seconds=time.monotonic() - start_time,
-                        server_address=conn.host,
-                        server_port=conn.port,
-                        db_namespace=str(conn.db),
-                        error=error,
-                        retry_attempts=failure_count,
-                    )
-                )
-
-            self._event_dispatcher.dispatch(
-                OnErrorEvent(
-                    error=error,
+                record_operation_duration(
+                    command_name=command_name,
+                    duration_seconds=time.monotonic() - start_time,
                     server_address=conn.host,
                     server_port=conn.port,
+                    db_namespace=str(conn.db),
+                    error=error,
                     retry_attempts=failure_count,
                 )
-            )
         conn.disconnect()
         conn.connect()
 
@@ -1090,36 +1063,24 @@ class PubSub:
             )
 
             if command_name:
-                self._event_dispatcher.dispatch(
-                    AfterCommandExecutionEvent(
-                        command_name=command_name,
-                        duration_seconds=time.monotonic() - start_time,
-                        server_address=conn.host,
-                        server_port=conn.port,
-                        db_namespace=str(conn.db),
-                    )
+                record_operation_duration(
+                    command_name=command_name,
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=conn.host,
+                    server_port=conn.port,
+                    db_namespace=str(conn.db),
                 )
 
             return response
         except Exception as e:
-            if command_name:
-                self._event_dispatcher.dispatch(
-                    AfterCommandExecutionEvent(
-                        command_name=command_name,
-                        duration_seconds=time.monotonic() - start_time,
-                        server_address=conn.host,
-                        server_port=conn.port,
-                        db_namespace=str(conn.db),
-                        error=e,
-                    )
-                )
-            self._event_dispatcher.dispatch(
-                OnErrorEvent(
-                    error=e,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    is_internal=False,
-                )
+            record_error_count(
+                server_address=conn.host,
+                server_port=conn.port,
+                network_peer_address=conn.host,
+                network_peer_port=conn.port,
+                error_type=e,
+                retry_attempts=conn.retry.get_retries(),
+                is_internal=False,
             )
             raise
 
@@ -1385,20 +1346,16 @@ class PubSub:
 
         if message_type in ["message", "pmessage"]:
             channel = str_if_bytes(message["channel"])
-            self._event_dispatcher.dispatch(
-                OnPubSubMessageEvent(
-                    direction=PubSubDirection.RECEIVE,
-                    channel=channel,
-                )
+            record_pubsub_message(
+                direction=PubSubDirection.RECEIVE,
+                channel=channel,
             )
         elif message_type == "smessage":
             channel = str_if_bytes(message["channel"])
-            self._event_dispatcher.dispatch(
-                OnPubSubMessageEvent(
-                    direction=PubSubDirection.RECEIVE,
-                    channel=channel,
-                    sharded=True,
-                )
+            record_pubsub_message(
+                direction=PubSubDirection.RECEIVE,
+                channel=channel,
+                sharded=True,
             )
 
         # if this is an unsubscribe message, remove it from memory
@@ -1647,25 +1604,14 @@ class Pipeline(Redis):
         do a health check as part of the send_command logic(on connection level).
         """
         if error and failure_count <= conn.retry.get_retries():
-            self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=command_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                    error=error,
-                    retry_attempts=failure_count,
-                )
-            )
-
-            self._event_dispatcher.dispatch(
-                OnErrorEvent(
-                    error=error,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    retry_attempts=failure_count,
-                )
+            record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
+                error=error,
+                retry_attempts=failure_count,
             )
         conn.disconnect()
 
@@ -1710,35 +1656,24 @@ class Pipeline(Redis):
                 with_failure_count=True
             )
 
-            self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=command_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                )
+            record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
             )
 
             return response
         except Exception as e:
-            self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=command_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                    error=e,
-                )
-            )
-            self._event_dispatcher.dispatch(
-                OnErrorEvent(
-                    error=e,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    is_internal=False
-                )
+            record_error_count(
+                server_address=conn.host,
+                server_port=conn.port,
+                network_peer_address=conn.host,
+                network_peer_port=conn.port,
+                error_type=e,
+                retry_attempts=conn.retry.get_retries(),
+                is_internal=False,
             )
             raise
 
@@ -1901,26 +1836,15 @@ class Pipeline(Redis):
         do a health check as part of the send_command logic(on connection level).
         """
         if error and failure_count <= conn.retry.get_retries():
-            self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=command_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                    error=error,
-                    retry_attempts=failure_count,
-                    batch_size=batch_size,
-                )
-            )
-
-            self._event_dispatcher.dispatch(
-                OnErrorEvent(
-                    error=error,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    retry_attempts=failure_count
-                )
+            record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
+                error=error,
+                retry_attempts=failure_count,
+                batch_size=batch_size,
             )
         conn.disconnect()
         # if we were watching a variable, the watch is no longer valid
@@ -1969,36 +1893,24 @@ class Pipeline(Redis):
                 with_failure_count=True
             )
 
-            self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=operation_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                    batch_size=len(stack),
-                )
+            record_operation_duration(
+                command_name=operation_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
+                batch_size=len(stack),
             )
             return response
         except Exception as e:
-            self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=operation_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                    error=e,
-                    batch_size=len(stack),
-                )
-            )
-            self._event_dispatcher.dispatch(
-                OnErrorEvent(
-                    error=e,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    is_internal=False
-                )
+            record_error_count(
+                server_address=conn.host,
+                server_port=conn.port,
+                network_peer_address=conn.host,
+                network_peer_port=conn.port,
+                error_type=e,
+                retry_attempts=conn.retry.get_retries(),
+                is_internal=False,
             )
             raise
 

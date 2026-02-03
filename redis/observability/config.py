@@ -39,10 +39,11 @@ class OTelConfig:
     Args:
         enabled_telemetry: Enabled telemetry options to export (default: metrics). Traces and logs will be added
                            in future phases.
-        metrics_sample_percentage: Percentage of commands to sample (default: 100.0, range: 0.0-100.0)
         metric_groups: Group of metrics that should be exported.
         include_commands: Explicit allowlist of commands to track
         exclude_commands: Blocklist of commands to track
+        hide_pubsub_channel_names: If True, hide PubSub channel names in metrics (default: False)
+        hide_stream_names: If True, hide stream names in streaming metrics (default: False)
 
     Note:
         Redis-py uses the global MeterProvider set by your application.
@@ -82,11 +83,13 @@ class OTelConfig:
             # Core enablement
             enabled_telemetry: Optional[List[TelemetryOption]] = None,
             # Metrics-specific
-            metrics_sample_percentage: float = 100.0,
             metric_groups: Optional[List[MetricGroup]] = None,
             # Redis-specific telemetry controls
             include_commands: Optional[List[str]] = None,
             exclude_commands: Optional[List[str]] = None,
+            # Privacy controls
+            hide_pubsub_channel_names: bool = False,
+            hide_stream_names: bool = False,
     ):
         # Core enablement
         if enabled_telemetry is None:
@@ -104,43 +107,17 @@ class OTelConfig:
             for metric_group in metric_groups:
                 self.metric_groups |= metric_group
 
-        # Metrics configuration
-        if not 0.0 <= metrics_sample_percentage <= 100.0:
-            raise ValueError(
-                f"metrics_sample_percentage must be between 0.0 and 100.0, "
-                f"got {metrics_sample_percentage}"
-            )
-        self.metrics_sample_percentage = metrics_sample_percentage
-
         # Redis-specific controls
         self.include_commands = set(include_commands) if include_commands else None
         self.exclude_commands = set(exclude_commands) if exclude_commands else set()
 
+        # Privacy controls for hiding sensitive names in metrics
+        self.hide_pubsub_channel_names = hide_pubsub_channel_names
+        self.hide_stream_names = hide_stream_names
+
     def is_enabled(self) -> bool:
         """Check if any observability feature is enabled."""
         return bool(self.enabled_telemetry)
-
-    def set_sample_percentage(self, percentage: float) -> None:
-        """
-        Set the metrics sample percentage at runtime.
-
-        This allows dynamic adjustment of sampling rate for high-throughput deployments.
-
-        Args:
-            percentage: Percentage of commands to sample (0.0-100.0)
-
-        Raises:
-            ValueError: If percentage is not in valid range
-
-        Example:
-            >>> config.set_sample_percentage(10.0)  # Sample 10% of commands
-        """
-        if not 0.0 <= percentage <= 100.0:
-            raise ValueError(
-                f"metrics_sample_percentage must be between 0.0 and 100.0, "
-                f"got {percentage}"
-            )
-        self.metrics_sample_percentage = percentage
 
     def should_track_command(self, command_name: str) -> bool:
         """

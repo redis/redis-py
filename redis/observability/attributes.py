@@ -7,7 +7,12 @@ according to the semantic conventions for database clients.
 Reference: https://opentelemetry.io/docs/specs/semconv/database/redis/
 """
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+import redis
+
+if TYPE_CHECKING:
+    from redis.connection import ConnectionPoolInterface
 
 # Database semantic convention attributes
 DB_SYSTEM = "db.system"
@@ -92,7 +97,7 @@ class AttributeBuilder:
         """
         attrs: Dict[str, Any] = {
             DB_SYSTEM: "redis",
-            REDIS_CLIENT_LIBRARY: "redis-py"
+            REDIS_CLIENT_LIBRARY: f"redis-py:v{redis.__version__}"
         }
 
         if server_address is not None:
@@ -286,7 +291,7 @@ class AttributeBuilder:
 
     @staticmethod
     def build_csc_attributes(
-            db_namespace: Optional[int] = None,
+            pool_name: Optional[str] = None,
             result: Optional[CSCResult] = None,
             reason: Optional[CSCReason] = None,
     ) -> Dict[str, Any]:
@@ -294,14 +299,17 @@ class AttributeBuilder:
         Build attributes for a Client Side Caching (CSC) operation.
 
         Args:
-            db_namespace: Redis database index
+            pool_name: Connection pool name (used only for csc_items metric)
             result: CSC result ('hit' or 'miss')
             reason: Reason for CSC eviction ('full' or 'invalidation')
 
         Returns:
             Dictionary of CSC attributes
         """
-        attrs: Dict[str, Any] = AttributeBuilder.build_base_attributes(db_namespace=db_namespace)
+        attrs: Dict[str, Any] = AttributeBuilder.build_base_attributes()
+
+        if pool_name is not None:
+            attrs[DB_CLIENT_CONNECTION_POOL_NAME] = pool_name
 
         if result is not None:
             attrs[REDIS_CLIENT_CSC_RESULT] = result.value
@@ -329,3 +337,29 @@ class AttributeBuilder:
             Unique pool name in format "address:port/db"
         """
         return f"{server_address}:{server_port}/{db_namespace}"
+
+
+def get_pool_name(pool: "ConnectionPoolInterface") -> str:
+    """
+    Get a short string representation of a connection pool for observability.
+
+    This provides a concise pool identifier suitable for use as a metric attribute,
+    in the format: ClassName(host:port/db)
+
+    Args:
+        pool: Connection pool instance
+
+    Returns:
+        Short pool name in format "ClassName(host:port/db)"
+
+    Example:
+        >>> pool = ConnectionPool(host='localhost', port=6379, db=0)
+        >>> get_pool_name(pool)
+        'ConnectionPool(localhost:6379/0)'
+    """
+    host = pool.connection_kwargs.get("host", "unknown")
+    port = pool.connection_kwargs.get("port", 6379)
+    db = pool.connection_kwargs.get("db", 0)
+    class_name = pool.__class__.__name__
+
+    return f"{class_name}({host}:{port}/{db})"

@@ -31,7 +31,7 @@ from redis.cluster import (
 )
 from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.crc import key_slot
-from redis.event import EventDispatcher, OnErrorEvent, EventListenerInterface
+from redis.event import EventDispatcher, EventListenerInterface
 from redis.exceptions import (
     AskError,
     ClusterDownError,

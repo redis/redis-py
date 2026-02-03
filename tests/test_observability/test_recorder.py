@@ -237,11 +237,17 @@ class TestRecordConnectionCreateTime:
 
     def test_record_connection_create_time(self, setup_recorder):
         """Test that connection creation time is recorded with pool name."""
+        from unittest.mock import MagicMock
 
         instruments = setup_recorder
 
+        # Create a mock connection pool
+        mock_pool = MagicMock()
+        mock_pool.__class__.__name__ = "ConnectionPool"
+        mock_pool.connection_kwargs = {"host": "localhost", "port": 6379, "db": 0}
+
         record_connection_create_time(
-            connection_pool='ConnectionPool<localhost:6379>',
+            connection_pool=mock_pool,
             duration_seconds=0.025,
         )
 
@@ -253,7 +259,7 @@ class TestRecordConnectionCreateTime:
 
         # Verify attributes
         attrs = call_args[1]['attributes']
-        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "'ConnectionPool<localhost:6379>'"
+        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "ConnectionPool(localhost:6379/0)"
 
 
 class TestRecordConnectionTimeout:
@@ -621,6 +627,177 @@ class TestRecordStreamingLag:
         instruments.stream_lag.record.assert_called_once()
         attrs = instruments.stream_lag.record.call_args[1]['attributes']
         assert attrs[REDIS_CLIENT_STREAM_NAME] == 'events-stream'
+
+
+class TestHidePubSubChannelNames:
+    """Tests for hide_pubsub_channel_names configuration option."""
+
+    @pytest.fixture
+    def setup_recorder_with_hidden_channels(self, mock_meter, mock_instruments):
+        """Setup recorder with hide_pubsub_channel_names=True."""
+        config = OTelConfig(
+            metric_groups=[MetricGroup.PUBSUB],
+            hide_pubsub_channel_names=True,
+        )
+
+        recorder.reset_collector()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            with patch.object(recorder, '_get_config', return_value=config):
+                yield mock_instruments
+
+        recorder.reset_collector()
+
+    def test_channel_name_hidden_when_configured(self, setup_recorder_with_hidden_channels):
+        """Test that channel name is hidden when hide_pubsub_channel_names=True."""
+        instruments = setup_recorder_with_hidden_channels
+
+        record_pubsub_message(
+            direction=PubSubDirection.PUBLISH,
+            channel='secret-channel',
+            sharded=False,
+        )
+
+        instruments.pubsub_messages.add.assert_called_once()
+        attrs = instruments.pubsub_messages.add.call_args[1]['attributes']
+        assert attrs[REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION] == PubSubDirection.PUBLISH.value
+        # Channel should NOT be in attributes when hidden
+        assert REDIS_CLIENT_PUBSUB_CHANNEL not in attrs
+        assert attrs[REDIS_CLIENT_PUBSUB_SHARDED] is False
+
+    def test_channel_name_visible_when_not_configured(self, setup_recorder):
+        """Test that channel name is visible when hide_pubsub_channel_names=False (default)."""
+        instruments = setup_recorder
+
+        record_pubsub_message(
+            direction=PubSubDirection.PUBLISH,
+            channel='visible-channel',
+            sharded=False,
+        )
+
+        instruments.pubsub_messages.add.assert_called_once()
+        attrs = instruments.pubsub_messages.add.call_args[1]['attributes']
+        assert attrs[REDIS_CLIENT_PUBSUB_CHANNEL] == 'visible-channel'
+
+
+class TestHideStreamNames:
+    """Tests for hide_stream_names configuration option."""
+
+    @pytest.fixture
+    def setup_recorder_with_hidden_streams(self, mock_meter, mock_instruments):
+        """Setup recorder with hide_stream_names=True."""
+        config = OTelConfig(
+            metric_groups=[MetricGroup.STREAMING],
+            hide_stream_names=True,
+        )
+
+        recorder.reset_collector()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with patch.object(recorder, '_get_or_create_collector', return_value=collector):
+            with patch.object(recorder, '_get_config', return_value=config):
+                yield mock_instruments
+
+        recorder.reset_collector()
+
+    def test_stream_name_hidden_when_configured(self, setup_recorder_with_hidden_streams):
+        """Test that stream name is hidden when hide_stream_names=True."""
+        instruments = setup_recorder_with_hidden_streams
+
+        record_streaming_lag(
+            lag_seconds=0.150,
+            stream_name='secret-stream',
+            consumer_group='my-group',
+            consumer_name='consumer-1',
+        )
+
+        instruments.stream_lag.record.assert_called_once()
+        attrs = instruments.stream_lag.record.call_args[1]['attributes']
+        # Stream name should NOT be in attributes when hidden
+        assert REDIS_CLIENT_STREAM_NAME not in attrs
+        assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == 'my-group'
+        assert attrs[REDIS_CLIENT_CONSUMER_NAME] == 'consumer-1'
+
+    def test_stream_name_visible_when_not_configured(self, setup_recorder):
+        """Test that stream name is visible when hide_stream_names=False (default)."""
+        instruments = setup_recorder
+
+        record_streaming_lag(
+            lag_seconds=0.150,
+            stream_name='visible-stream',
+            consumer_group='my-group',
+            consumer_name='consumer-1',
+        )
+
+        instruments.stream_lag.record.assert_called_once()
+        attrs = instruments.stream_lag.record.call_args[1]['attributes']
+        assert attrs[REDIS_CLIENT_STREAM_NAME] == 'visible-stream'
+
+    def test_stream_name_hidden_in_record_streaming_lag_from_response_resp3(
+        self, setup_recorder_with_hidden_streams
+    ):
+        """Test that stream names are hidden in record_streaming_lag_from_response for RESP3 format."""
+        instruments = setup_recorder_with_hidden_streams
+
+        # RESP3 format: dict with stream name as key
+        # Message ID format: timestamp-sequence (e.g., "1234567890123-0")
+        import time
+        current_time_ms = int(time.time() * 1000)
+        message_id = f"{current_time_ms}-0"
+
+        response = {
+            'secret-stream': [
+                [
+                    (message_id, {'field': 'value'}),
+                ]
+            ]
+        }
+
+        from redis.observability.recorder import record_streaming_lag_from_response
+        record_streaming_lag_from_response(
+            response=response,
+            consumer_group='my-group',
+            consumer_name='consumer-1',
+        )
+
+        instruments.stream_lag.record.assert_called_once()
+        attrs = instruments.stream_lag.record.call_args[1]['attributes']
+        # Stream name should NOT be in attributes when hidden
+        assert REDIS_CLIENT_STREAM_NAME not in attrs
+
+    def test_stream_name_hidden_in_record_streaming_lag_from_response_resp2(
+        self, setup_recorder_with_hidden_streams
+    ):
+        """Test that stream names are hidden in record_streaming_lag_from_response for RESP2 format."""
+        instruments = setup_recorder_with_hidden_streams
+
+        # RESP2 format: list of [stream_name, messages]
+        import time
+        current_time_ms = int(time.time() * 1000)
+        message_id = f"{current_time_ms}-0"
+
+        response = [
+            [b'secret-stream', [
+                (message_id, {'field': 'value'}),
+            ]]
+        ]
+
+        from redis.observability.recorder import record_streaming_lag_from_response
+        record_streaming_lag_from_response(
+            response=response,
+            consumer_group='my-group',
+            consumer_name='consumer-1',
+        )
+
+        instruments.stream_lag.record.assert_called_once()
+        attrs = instruments.stream_lag.record.call_args[1]['attributes']
+        # Stream name should NOT be in attributes when hidden
+        assert REDIS_CLIENT_STREAM_NAME not in attrs
 
 
 class TestRecorderDisabled:
@@ -1251,7 +1428,7 @@ class TestInitCSCItems:
         # Create a mock cache size callback
         cache_size_callback = MagicMock(return_value=42)
 
-        recorder.register_csc_items_callback(cache_size_callback, db_namespace=0)
+        recorder.register_csc_items_callback(cache_size_callback, pool_name="TestPool(localhost:6379/0)")
 
         registry = get_observables_registry_instance()
         callbacks = registry.get(recorder.CSC_ITEMS_REGISTRY_KEY)
@@ -1272,8 +1449,8 @@ class TestInitCSCItems:
         callback1 = MagicMock(return_value=10)
         callback2 = MagicMock(return_value=20)
 
-        recorder.register_csc_items_callback(callback1, db_namespace=0)
-        recorder.register_csc_items_callback(callback2, db_namespace=1)
+        recorder.register_csc_items_callback(callback1, pool_name="TestPool(localhost:6379/0)")
+        recorder.register_csc_items_callback(callback2, pool_name="TestPool(localhost:6379/1)")
 
         registry = get_observables_registry_instance()
         callbacks = registry.get(recorder.CSC_ITEMS_REGISTRY_KEY)
