@@ -990,3 +990,149 @@ def _validate_quantization(original, quantized, tolerance=0.1):
         return False
     else:
         return True
+
+
+@skip_if_server_version_lt("8.4.0")
+def test_vrange_basic(d_client):
+    """Test basic VRANGE functionality with lexicographical ordering."""
+    # Add elements with different names
+    elements = ["apple", "banana", "cherry", "date", "elderberry"]
+    for elem in elements:
+        d_client.vset().vadd("myset", [1.0, 2.0, 3.0], elem)
+
+    # Test full range
+    result = d_client.vset().vrange("myset", "-", "+")
+    assert result == elements
+    assert len(result) == 5
+
+    # Test inclusive range
+    result = d_client.vset().vrange("myset", "[banana", "[date")
+    assert result == ["banana", "cherry", "date"]
+
+    # Test exclusive range
+    result = d_client.vset().vrange("myset", "(banana", "(date")
+    assert result == ["cherry"]
+
+
+@skip_if_server_version_lt("8.4.0")
+def test_vrange_with_count(d_client):
+    """Test VRANGE with count parameter."""
+    # Add elements
+    elements = ["a", "b", "c", "d", "e", "f", "g"]
+    for elem in elements:
+        d_client.vset().vadd("myset", [1.0, 2.0], elem)
+
+    # Test with positive count
+    result = d_client.vset().vrange("myset", "-", "+", count=3)
+    assert len(result) == 3
+    assert result == ["a", "b", "c"]
+
+    # Test with count larger than set size
+    result = d_client.vset().vrange("myset", "-", "+", count=100)
+    assert len(result) == 7
+    assert result == elements
+
+    # Test with count = 0
+    result = d_client.vset().vrange("myset", "-", "+", count=0)
+    assert result == []
+
+    # Test with negative count (should return all)
+    result = d_client.vset().vrange("myset", "-", "+", count=-1)
+    assert len(result) == 7
+    assert result == elements
+
+
+@skip_if_server_version_lt("8.4.0")
+def test_vrange_iteration(d_client):
+    """Test VRANGE for stateless iteration."""
+    # Add elements
+    elements = [f"elem{i:03d}" for i in range(20)]
+    for elem in elements:
+        d_client.vset().vadd("myset", [1.0, 2.0], elem)
+
+    # Iterate through all elements, 5 at a time
+    all_results = []
+    start = "-"
+    while True:
+        result = d_client.vset().vrange("myset", start, "+", count=5)
+        if not result:
+            break
+        all_results.extend(result)
+        # Continue from the last element (exclusive)
+        start = f"({result[-1]}"
+
+    assert len(all_results) == 20
+    assert all_results == elements
+
+
+@skip_if_server_version_lt("8.4.0")
+def test_vrange_empty_key(d_client):
+    """Test VRANGE on non-existent key."""
+    result = d_client.vset().vrange("nonexistent", "-", "+")
+    assert result == []
+
+    result = d_client.vset().vrange("nonexistent", "[a", "[z", count=10)
+    assert result == []
+
+
+@skip_if_server_version_lt("8.4.0")
+def test_vrange_special_characters(d_client):
+    """Test VRANGE with elements containing special characters."""
+    # Add elements with special characters
+    elements = ["a:1", "a:2", "b:1", "b:2", "c:1"]
+    for elem in elements:
+        d_client.vset().vadd("myset", [1.0, 2.0], elem)
+
+    # Test range with prefix
+    result = d_client.vset().vrange("myset", "[a:", "[a:9")
+    assert result == ["a:1", "a:2"]
+
+    result = d_client.vset().vrange("myset", "[b:", "[b:9")
+    assert result == ["b:1", "b:2"]
+
+
+@skip_if_server_version_lt("8.4.0")
+def test_vrange_single_element(d_client):
+    """Test VRANGE with a single element."""
+    d_client.vset().vadd("myset", [1.0, 2.0], "single")
+
+    result = d_client.vset().vrange("myset", "-", "+")
+    assert result == ["single"]
+
+    result = d_client.vset().vrange("myset", "[single", "[single")
+    assert result == ["single"]
+
+    result = d_client.vset().vrange("myset", "(single", "+")
+    assert result == []
+
+
+@skip_if_server_version_lt("8.4.0")
+def test_vrange_lexicographical_order(d_client):
+    """Test that VRANGE returns elements in correct lexicographical order."""
+    # Add elements in random order
+    elements = ["zebra", "apple", "mango", "banana", "cherry"]
+    for elem in elements:
+        d_client.vset().vadd("myset", [1.0, 2.0], elem)
+
+    # Should return in sorted order
+    result = d_client.vset().vrange("myset", "-", "+")
+    expected = sorted(elements)
+    assert result == expected
+
+
+@skip_if_server_version_lt("8.4.0")
+def test_vrange_numeric_strings(d_client):
+    """Test VRANGE with numeric string elements."""
+    # Add numeric strings (lexicographical order, not numeric)
+    elements = ["1", "10", "2", "20", "3"]
+    for elem in elements:
+        d_client.vset().vadd("myset", [1.0, 2.0], elem)
+
+    # Lexicographical order: "1", "10", "2", "20", "3"
+    result = d_client.vset().vrange("myset", "-", "+")
+    expected = sorted(elements)  # ["1", "10", "2", "20", "3"]
+    assert result == expected
+
+    # Range from "1" to "2" (inclusive)
+    result = d_client.vset().vrange("myset", "[1", "[2")
+    assert result == ["1", "10", "2"]
