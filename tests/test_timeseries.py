@@ -1222,3 +1222,217 @@ def test_madd_with_insertion_filters(client):
         [(1010, 1.0), (1020, 2.0), (1021, 22.0)],
         [[1010, 1.0], [1020, 2.0], [1021, 22.0]],
     )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.5.0")
+def test_range_with_count_nan_count_all_aggregators(client):
+    client.ts().create(
+        "temperature:2:32",
+    )
+
+    # Fill with values
+    assert client.ts().add("temperature:2:32", 1000, "NaN") == 1000
+    assert client.ts().add("temperature:2:32", 1003, 25) == 1003
+    assert client.ts().add("temperature:2:32", 1005, "NaN") == 1005
+    assert client.ts().add("temperature:2:32", 1006, "NaN") == 1006
+
+    # Ensure we count only NaN values
+    data_points = client.ts().range(
+        "temperature:2:32",
+        1000,
+        1006,
+        aggregation_type="countNan",
+        bucket_size_msec=1000,
+    )
+    assert_resp_response(
+        client,
+        data_points,
+        [(1000, 3)],
+        [[1000, 3]],
+    )
+
+    # Ensure we count ALL values
+    data_points = client.ts().range(
+        "temperature:2:32",
+        1000,
+        1006,
+        aggregation_type="countAll",
+        bucket_size_msec=1000,
+    )
+    assert_resp_response(
+        client,
+        data_points,
+        [(1000, 4)],
+        [[1000, 4]],
+    )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.5.0")
+def test_rev_range_with_count_nan_count_all_aggregators(client):
+    client.ts().create(
+        "temperature:2:32",
+    )
+
+    # Fill with values
+    assert client.ts().add("temperature:2:32", 1000, "NaN") == 1000
+    assert client.ts().add("temperature:2:32", 1003, 25) == 1003
+    assert client.ts().add("temperature:2:32", 1005, "NaN") == 1005
+    assert client.ts().add("temperature:2:32", 1006, "NaN") == 1006
+
+    # Ensure we count only NaN values
+    data_points = client.ts().revrange(
+        "temperature:2:32",
+        1000,
+        1006,
+        aggregation_type="countNan",
+        bucket_size_msec=1000,
+    )
+    assert_resp_response(
+        client,
+        data_points,
+        [(1000, 3)],
+        [[1000, 3]],
+    )
+
+    # Ensure we count ALL values
+    data_points = client.ts().revrange(
+        "temperature:2:32",
+        1000,
+        1006,
+        aggregation_type="countAll",
+        bucket_size_msec=1000,
+    )
+    assert_resp_response(
+        client,
+        data_points,
+        [(1000, 4)],
+        [[1000, 4]],
+    )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.5.0")
+def test_mrange_with_count_nan_count_all_aggregators(client):
+    client.ts().create(
+        "temperature:A",
+        labels={"type": "temperature", "name": "A"},
+    )
+    client.ts().create(
+        "temperature:B",
+        labels={"type": "temperature", "name": "B"},
+    )
+
+    # Fill with values
+    assert client.ts().madd(
+        [("temperature:A", 1000, "NaN"), ("temperature:A", 1001, 27)]
+    )
+    assert client.ts().madd(
+        [("temperature:B", 1000, "NaN"), ("temperature:B", 1001, 28)]
+    )
+
+    # Ensure we count only NaN values
+    data_points = client.ts().mrange(
+        1000,
+        1001,
+        aggregation_type="countNan",
+        bucket_size_msec=1000,
+        filters=["type=temperature"],
+    )
+    assert_resp_response(
+        client,
+        data_points,
+        [
+            {"temperature:A": [{}, [(1000, 1.0)]]},
+            {"temperature:B": [{}, [(1000, 1.0)]]},
+        ],
+        {
+            "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
+            "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
+        },
+    )
+
+    # Ensure we count ALL values
+    data_points = client.ts().mrange(
+        1000,
+        1001,
+        aggregation_type="countAll",
+        bucket_size_msec=1000,
+        filters=["type=temperature"],
+    )
+    assert_resp_response(
+        client,
+        data_points,
+        [
+            {"temperature:A": [{}, [(1000, 2.0)]]},
+            {"temperature:B": [{}, [(1000, 2.0)]]},
+        ],
+        {
+            "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
+            "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
+        },
+    )
+
+
+@pytest.mark.redismod
+@skip_if_server_version_lt("8.5.0")
+def test_mrevrange_with_count_nan_count_all_aggregators(client):
+    client.ts().create(
+        "temperature:A",
+        labels={"type": "temperature", "name": "A"},
+    )
+    client.ts().create(
+        "temperature:B",
+        labels={"type": "temperature", "name": "B"},
+    )
+
+    # Fill with values
+    assert client.ts().madd(
+        [("temperature:A", 1000, "NaN"), ("temperature:A", 1001, 27)]
+    )
+    assert client.ts().madd(
+        [("temperature:B", 1000, "NaN"), ("temperature:B", 1001, 28)]
+    )
+
+    # Ensure we count only NaN values
+    data_points = client.ts().mrevrange(
+        1000,
+        1001,
+        aggregation_type="countNan",
+        bucket_size_msec=1000,
+        filters=["type=temperature"],
+    )
+    assert_resp_response(
+        client,
+        data_points,
+        [
+            {"temperature:A": [{}, [(1000, 1.0)]]},
+            {"temperature:B": [{}, [(1000, 1.0)]]},
+        ],
+        {
+            "temperature:A": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
+            "temperature:B": [{}, {"aggregators": ["countnan"]}, [[1000, 1.0]]],
+        },
+    )
+
+    # Ensure we count ALL values
+    data_points = client.ts().mrevrange(
+        1000,
+        1001,
+        aggregation_type="countAll",
+        bucket_size_msec=1000,
+        filters=["type=temperature"],
+    )
+    assert_resp_response(
+        client,
+        data_points,
+        [
+            {"temperature:A": [{}, [(1000, 2.0)]]},
+            {"temperature:B": [{}, [(1000, 2.0)]]},
+        ],
+        {
+            "temperature:A": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
+            "temperature:B": [{}, {"aggregators": ["countall"]}, [[1000, 2.0]]],
+        },
+    )
