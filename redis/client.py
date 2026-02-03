@@ -723,16 +723,6 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             return result
         except Exception as e:
             self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=command_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                    error=e,
-                )
-            )
-            self._event_dispatcher.dispatch(
                 OnErrorEvent(
                     error=e,
                     server_address=conn.host,
@@ -1102,17 +1092,6 @@ class PubSub:
 
             return response
         except Exception as e:
-            if command_name:
-                self._event_dispatcher.dispatch(
-                    AfterCommandExecutionEvent(
-                        command_name=command_name,
-                        duration_seconds=time.monotonic() - start_time,
-                        server_address=conn.host,
-                        server_port=conn.port,
-                        db_namespace=str(conn.db),
-                        error=e,
-                    )
-                )
             self._event_dispatcher.dispatch(
                 OnErrorEvent(
                     error=e,
@@ -1723,16 +1702,6 @@ class Pipeline(Redis):
             return response
         except Exception as e:
             self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=command_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                    error=e,
-                )
-            )
-            self._event_dispatcher.dispatch(
                 OnErrorEvent(
                     error=e,
                     server_address=conn.host,
@@ -1981,17 +1950,6 @@ class Pipeline(Redis):
             )
             return response
         except Exception as e:
-            self._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=operation_name,
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
-                    db_namespace=str(conn.db),
-                    error=e,
-                    batch_size=len(stack),
-                )
-            )
             self._event_dispatcher.dispatch(
                 OnErrorEvent(
                     error=e,

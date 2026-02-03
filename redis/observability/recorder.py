@@ -22,7 +22,6 @@ Usage in Redis core code:
 import time
 from typing import Optional, Callable, List
 
-from redis.connection import ConnectionPoolInterface
 from redis.observability.attributes import PubSubDirection, ConnectionState, CSCResult, CSCReason, AttributeBuilder
 from redis.observability.attributes import PubSubDirection, ConnectionState
 from redis.observability.metrics import RedisMetricsCollector, CloseReason

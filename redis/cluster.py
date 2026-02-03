@@ -1375,13 +1375,6 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 else:
                     # raise the exception
                     if hasattr(e, "connection"):
-                        self._emit_after_command_execution_event(
-                            command_name=args[0],
-                            duration_seconds=time.monotonic() - start_time,
-                            connection=e.connection,
-                            error=e,
-                        )
-
                         self._emit_on_error_event(
                             error=e,
                             connection=e.connection,

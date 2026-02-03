@@ -5,6 +5,10 @@ OpenTelemetry Benchmark for redis-py.
 This module provides benchmarking infrastructure to measure the performance impact
 of OpenTelemetry instrumentation on redis-py operations.
 
+The benchmark uses a comprehensive load generator that exercises all Redis operations
+(commands, pubsub, streaming, CSC, connections) in each iteration. This ensures
+consistent test conditions when comparing different OTel configurations.
+
 Run one scenario at a time:
     python -m benchmarks.otel_benchmark --scenario baseline --baseline-tag v5.2.1
     python -m benchmarks.otel_benchmark --scenario otel_disabled
@@ -12,6 +16,10 @@ Run one scenario at a time:
     python -m benchmarks.otel_benchmark --scenario otel_inmemory
     python -m benchmarks.otel_benchmark --scenario otel_enabled_http
     python -m benchmarks.otel_benchmark --scenario otel_enabled_grpc
+
+Specify which OTel metric groups to enable:
+    python -m benchmarks.otel_benchmark --scenario otel_enabled_http --metric-groups command,pubsub
+    python -m benchmarks.otel_benchmark --scenario otel_enabled_http --metric-groups all
 """
 
 import argparse
@@ -25,6 +33,12 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Dict, List, Optional, Any
+
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
 
 
 @dataclass
@@ -42,6 +56,11 @@ class BenchmarkResult:
     max_latency_ms: float
     errors: int = 0
     first_error: Optional[str] = None
+    # Resource usage metrics
+    cpu_percent_avg: Optional[float] = None
+    cpu_percent_max: Optional[float] = None
+    memory_mb_avg: Optional[float] = None
+    memory_mb_max: Optional[float] = None
     metadata: Dict = field(default_factory=dict)
 
 
@@ -56,20 +75,63 @@ class LoadGeneratorConfig:
     redis_port: int = 6379
 
 
-class LoadGenerator:
+class ComprehensiveLoadGenerator:
     """
-    Generates SET/GET load against Redis for benchmarking.
-    Performs alternating SET and GET operations and collects latency metrics.
+    Comprehensive load generator that exercises all Redis operations.
+
+    Each iteration performs:
+    - Command operations (SET/GET) - triggers COMMAND metrics
+    - PubSub operations (PUBLISH) - triggers PUBSUB metrics
+    - Streaming operations (XADD/XREAD) - triggers STREAMING metrics
+    - Connection pool operations - triggers CONNECTION metrics
+
+    CSC (Client-Side Caching) requires RESP3 protocol and is tested separately
+    when available.
+
+    This ensures consistent test conditions across all OTel configurations.
     """
 
-    def __init__(self, client: Any, config: LoadGeneratorConfig):
-        self.client = client
+    def __init__(self, config: LoadGeneratorConfig, redis_module: Any = None):
+        """
+        Initialize the comprehensive load generator.
+
+        Args:
+            config: Load generator configuration
+            redis_module: Optional redis module to use (for baseline testing with
+                         a different redis-py version). If None, imports redis normally.
+        """
         self.config = config
+        self.redis_module = redis_module
         self.latencies: List[float] = []
         self.errors: int = 0
         self.first_error: Optional[str] = None
         self._value = "x" * config.value_size_bytes
         self._key_counter = 0
+        self._message_counter = 0
+
+        # Resources (initialized in setup)
+        self.client = None
+        self.pubsub_publisher = None
+        self.pubsub = None
+        self.stream_name = f"{config.key_prefix}:stream"
+        self.pubsub_channel = f"{config.key_prefix}:channel"
+        self.consumer_group = "benchmark_group"
+        self.consumer_name = "benchmark_consumer"
+
+        # CSC client (optional, requires RESP3)
+        self.csc_client = None
+
+        # Resource tracking
+        self.cpu_samples: List[float] = []
+        self.memory_samples: List[float] = []
+        self._process = psutil.Process() if PSUTIL_AVAILABLE else None
+
+    def _get_redis_module(self) -> Any:
+        """Get the redis module to use."""
+        if self.redis_module is not None:
+            return self.redis_module
+        import redis
+        return redis
 
     def _get_key(self) -> str:
         """Generate a key for the current operation."""
@@ -77,17 +139,147 @@ class LoadGenerator:
         self._key_counter += 1
         return key
 
+    def setup(self) -> None:
+        """Set up all Redis resources."""
+        redis = self._get_redis_module()
+
+        # Main client for commands
+        self.client = redis.Redis(
+            host=self.config.redis_host,
+            port=self.config.redis_port,
+            decode_responses=True
+        )
+
+        # PubSub publisher (separate connection)
+        self.pubsub_publisher = redis.Redis(
+            host=self.config.redis_host,
+            port=self.config.redis_port,
+            decode_responses=True
+        )
+
+        # PubSub subscriber
+        subscriber = redis.Redis(
+            host=self.config.redis_host,
+            port=self.config.redis_port,
+            decode_responses=True
+        )
+        self.pubsub = subscriber.pubsub()
+        self.pubsub.subscribe(self.pubsub_channel)
+        # Consume subscription confirmation
+        self.pubsub.get_message(timeout=1.0)
+
+        # Create stream and consumer group
+        try:
+            self.client.xgroup_create(
+                self.stream_name,
+                self.consumer_group,
+                id="0",
+                mkstream=True
+            )
+        except Exception:
+            # Group may already exist
+            pass
+
+        # Try to set up CSC client (requires RESP3, may not be available)
+        try:
+            from redis.cache import CacheConfig
+            self.csc_client = redis.Redis(
+                host=self.config.redis_host,
+                port=self.config.redis_port,
+                decode_responses=True,
+                protocol=3,
+                cache_config=CacheConfig(max_size=1000)
+            )
+            # Test that CSC works
+            self.csc_client.ping()
+        except Exception:
+            # CSC not available (old redis-py version or server doesn't support RESP3)
+            self.csc_client = None
+
+    def teardown(self) -> None:
+        """Clean up all Redis resources."""
+        if self.pubsub:
+            try:
+                self.pubsub.unsubscribe()
+                self.pubsub.close()
+            except Exception:
+                pass
+
+        if self.pubsub_publisher:
+            try:
+                self.pubsub_publisher.close()
+            except Exception:
+                pass
+
+        if self.client:
+            try:
+                self.client.delete(self.stream_name)
+            except Exception:
+                pass
+            try:
+                self.client.close()
+            except Exception:
+                pass
+
+        if self.csc_client:
+            try:
+                self.csc_client.close()
+            except Exception:
+                pass
+
     def _run_operation(self) -> float:
-        """Run a single SET+GET operation pair and return latency in ms."""
+        """
+        Run a comprehensive operation cycle and return latency in ms.
+
+        Each cycle includes:
+        1. SET + GET (command metrics)
+        2. PUBLISH + get_message (pubsub metrics)
+        3. XADD + XREADGROUP + XACK (streaming metrics)
+        4. CSC GET operations if available (csc metrics)
+        """
         key = self._get_key()
         start = time.perf_counter()
+
         try:
+            # 1. Command operations (SET/GET)
             self.client.set(key, self._value)
             self.client.get(key)
+
+            # 2. PubSub operations
+            self._message_counter += 1
+            self.pubsub_publisher.publish(self.pubsub_channel, f"msg:{self._message_counter}")
+            self.pubsub.get_message(timeout=0.001)  # Non-blocking receive
+
+            # 3. Streaming operations
+            entry_id = self.client.xadd(
+                self.stream_name,
+                {"data": self._value[:50]},  # Smaller payload for streams
+                maxlen=1000
+            )
+            messages = self.client.xreadgroup(
+                self.consumer_group,
+                self.consumer_name,
+                {self.stream_name: ">"},
+                count=1,
+                block=1  # 1ms timeout
+            )
+            if messages:
+                for stream_name, entries in messages:
+                    for eid, _ in entries:
+                        self.client.xack(self.stream_name, self.consumer_group, eid)
+
+            # 4. CSC operations (if available)
+            if self.csc_client:
+                csc_key = f"{self.config.key_prefix}:csc:{self._key_counter % 100}"
+                self.csc_client.set(csc_key, self._value)
+                self.csc_client.get(csc_key)  # Cache miss
+                self.csc_client.get(csc_key)  # Cache hit
+
         except Exception as e:
             if self.first_error is None:
                 self.first_error = str(e)
             self.errors += 1
+
         end = time.perf_counter()
         return (end - start) * 1000  # Convert to milliseconds
 
@@ -101,21 +293,57 @@ class LoadGenerator:
         self.errors = 0
         self.first_error = None
         self._key_counter = 0
+        self._message_counter = 0
+
+    def _sample_resources(self) -> None:
+        """Sample current CPU and memory usage."""
+        if self._process is None:
+            return
+        try:
+            # CPU percent since last call (non-blocking)
+            cpu = self._process.cpu_percent(interval=None)
+            if cpu > 0:  # Skip first sample which is always 0
+                self.cpu_samples.append(cpu)
+            # Memory in MB
+            mem_info = self._process.memory_info()
+            self.memory_samples.append(mem_info.rss / (1024 * 1024))
+        except Exception:
+            pass  # Ignore errors in resource sampling
 
     def run(self) -> BenchmarkResult:
         """Run the load generator for the configured duration."""
         self.latencies = []
         self.errors = 0
         self.first_error = None
+        self.cpu_samples = []
+        self.memory_samples = []
+
+        # Initialize CPU percent tracking
+        if self._process:
+            try:
+                self._process.cpu_percent(interval=None)
+            except Exception:
+                pass
 
         print(f"  Running load for {self.config.duration_seconds}s...")
         start_time = time.monotonic()
         end_time = start_time + self.config.duration_seconds
+        last_sample_time = start_time
+        sample_interval = 0.5  # Sample resources every 500ms
 
         while time.monotonic() < end_time:
             latency = self._run_operation()
             if latency > 0:
                 self.latencies.append(latency)
+
+            # Sample resources periodically
+            current_time = time.monotonic()
+            if current_time - last_sample_time >= sample_interval:
+                self._sample_resources()
+                last_sample_time = current_time
+
+        # Final resource sample
+        self._sample_resources()
 
         actual_duration = time.monotonic() - start_time
         return self._calculate_results(actual_duration)
@@ -131,7 +359,19 @@ class LoadGenerator:
             )
 
         sorted_latencies = sorted(self.latencies)
-        total_ops = len(self.latencies) * 2  # Each iteration does SET + GET
+        # Count operations per cycle:
+        # - 2 command ops (SET + GET)
+        # - 2 pubsub ops (PUBLISH + get_message)
+        # - 3 stream ops (XADD + XREADGROUP + XACK)
+        # - 3 CSC ops if available (SET + 2x GET)
+        ops_per_cycle = 7 + (3 if self.csc_client else 0)
+        total_ops = len(self.latencies) * ops_per_cycle
+
+        # Calculate resource usage stats
+        cpu_avg = statistics.mean(self.cpu_samples) if self.cpu_samples else None
+        cpu_max = max(self.cpu_samples) if self.cpu_samples else None
+        mem_avg = statistics.mean(self.memory_samples) if self.memory_samples else None
+        mem_max = max(self.memory_samples) if self.memory_samples else None
 
         return BenchmarkResult(
             scenario="unknown",
@@ -146,6 +386,10 @@ class LoadGenerator:
             max_latency_ms=max(self.latencies),
             errors=self.errors,
             first_error=self.first_error,
+            cpu_percent_avg=cpu_avg,
+            cpu_percent_max=cpu_max,
+            memory_mb_avg=mem_avg,
+            memory_mb_max=mem_max,
         )
 
 
@@ -168,6 +412,15 @@ def print_result(result: BenchmarkResult, iterations: int = 1) -> None:
     print(f"  Errors:       {result.errors}")
     if result.first_error:
         print(f"  First error:  {result.first_error}")
+    # Resource usage
+    if result.cpu_percent_avg is not None:
+        print(f"  CPU avg:      {result.cpu_percent_avg:.1f}%")
+    if result.cpu_percent_max is not None:
+        print(f"  CPU max:      {result.cpu_percent_max:.1f}%")
+    if result.memory_mb_avg is not None:
+        print(f"  Memory avg:   {result.memory_mb_avg:.1f} MB")
+    if result.memory_mb_max is not None:
+        print(f"  Memory max:   {result.memory_mb_max:.1f} MB")
     if result.metadata.get("description"):
         print(f"  Description:  {result.metadata['description']}")
     print("=" * 60)
@@ -188,6 +441,12 @@ def average_results(results: List[BenchmarkResult]) -> BenchmarkResult:
             first_error = r.first_error
             break
 
+    # Average CPU and memory (only from results that have them)
+    cpu_avgs = [r.cpu_percent_avg for r in results if r.cpu_percent_avg is not None]
+    cpu_maxs = [r.cpu_percent_max for r in results if r.cpu_percent_max is not None]
+    mem_avgs = [r.memory_mb_avg for r in results if r.memory_mb_avg is not None]
+    mem_maxs = [r.memory_mb_max for r in results if r.memory_mb_max is not None]
+
     return BenchmarkResult(
         scenario=results[0].scenario,
         duration_seconds=sum(r.duration_seconds for r in results) / n,
@@ -201,6 +460,10 @@ def average_results(results: List[BenchmarkResult]) -> BenchmarkResult:
         max_latency_ms=max(r.max_latency_ms for r in results),
         errors=sum(r.errors for r in results),
         first_error=first_error,
+        cpu_percent_avg=sum(cpu_avgs) / len(cpu_avgs) if cpu_avgs else None,
+        cpu_percent_max=max(cpu_maxs) if cpu_maxs else None,
+        memory_mb_avg=sum(mem_avgs) / len(mem_avgs) if mem_avgs else None,
+        memory_mb_max=max(mem_maxs) if mem_maxs else None,
         metadata=results[0].metadata,
     )
 
@@ -248,8 +511,17 @@ def parse_args() -> argparse.Namespace:
         help="Number of iterations to run (default: 5). Final result is averaged."
     )
     parser.add_argument(
-        "--with-command-metrics", action="store_true",
-        help="Include COMMAND metric group (for otel_enabled_http/grpc scenarios)"
+        "--metric-groups", type=str, default=None,
+        help=(
+            "Comma-separated list of metric groups to enable. "
+            "Options: command, pubsub, streaming, csc, connection_basic, connection_advanced, resiliency, all. "
+            "Default: resiliency,connection_basic. "
+            "Example: --metric-groups command,pubsub,connection_basic"
+        )
+    )
+    parser.add_argument(
+        "--export-interval", type=int, default=10000,
+        help="OTel metric export interval in milliseconds (default: 10000)"
     )
     return parser.parse_args()
 
@@ -263,10 +535,14 @@ def _clear_redis_modules() -> None:
 
 def run_baseline_scenario(tag: str, config: LoadGeneratorConfig) -> Optional[BenchmarkResult]:
     """
-    Run benchmark against a baseline git tag.
+    Run benchmark against a baseline git tag using ComprehensiveLoadGenerator.
 
     This clones the repo at the specified tag, manipulates sys.path to import
-    the old redis-py version, and runs the benchmark in the same process.
+    the old redis-py version, and runs the benchmark using the same comprehensive
+    load generator for consistent comparison with other scenarios.
+
+    Returns:
+        BenchmarkResult or None on failure
     """
     repo_root = Path(__file__).parent.parent
 
@@ -294,9 +570,10 @@ def run_baseline_scenario(tag: str, config: LoadGeneratorConfig) -> Optional[Ben
 
             print(f"  Using redis from: {baseline_redis.__file__}")
 
-            client = baseline_redis.Redis(host=config.redis_host, port=config.redis_port, decode_responses=True)
+            # Create comprehensive generator with baseline redis module
+            generator = ComprehensiveLoadGenerator(config, redis_module=baseline_redis)
+            generator.setup()
             try:
-                generator = LoadGenerator(client, config)
                 generator.warmup()
                 result = generator.run()
                 result.scenario = "baseline"
@@ -304,7 +581,7 @@ def run_baseline_scenario(tag: str, config: LoadGeneratorConfig) -> Optional[Ben
                 result.metadata["description"] = "Baseline without OTel code"
                 return result
             finally:
-                client.close()
+                generator.teardown()
 
         finally:
             # Restore original sys.path and clear redis modules again
@@ -312,20 +589,68 @@ def run_baseline_scenario(tag: str, config: LoadGeneratorConfig) -> Optional[Ben
             _clear_redis_modules()
 
 
-def setup_scenario(scenario: str, with_command_metrics: bool = False) -> str:
+def _get_metric_groups_for_benchmark(metric_group_names: Optional[List[str]]) -> Optional[List[Any]]:
+    """
+    Convert metric group names to MetricGroup enum values.
+
+    Args:
+        metric_group_names: List of metric group names (command, pubsub, streaming, csc,
+                           connection_basic, connection_advanced, resiliency, all)
+
+    Returns:
+        List of MetricGroup enum values, or None for defaults
+    """
+    if not metric_group_names:
+        return None
+
+    from redis.observability.config import MetricGroup
+
+    name_to_group = {
+        "command": MetricGroup.COMMAND,
+        "pubsub": MetricGroup.PUBSUB,
+        "streaming": MetricGroup.STREAMING,
+        "csc": MetricGroup.CSC,
+        "connection_basic": MetricGroup.CONNECTION_BASIC,
+        "connection_advanced": MetricGroup.CONNECTION_ADVANCED,
+        "resiliency": MetricGroup.RESILIENCY,
+    }
+
+    # Handle "all" - return all metric groups
+    if "all" in metric_group_names:
+        return list(name_to_group.values())
+
+    groups = []
+    for name in metric_group_names:
+        if name in name_to_group:
+            groups.append(name_to_group[name])
+
+    return groups if groups else None
+
+
+def setup_scenario(
+    scenario: str,
+    metric_group_names: Optional[List[str]] = None,
+    export_interval_millis: int = 10000
+) -> str:
     """
     Set up OTel for a scenario. Returns the description.
     This should only be called once per process.
 
     Args:
         scenario: The scenario name
-        with_command_metrics: If True, include MetricGroup.COMMAND along with defaults
-                              (only applies to otel_enabled_http and otel_enabled_grpc)
+        metric_group_names: List of metric group names to enable
+        export_interval_millis: Export interval in milliseconds for PeriodicExportingMetricReader
     """
     if scenario == "otel_disabled":
         return "OTel not initialized"
 
-    elif scenario == "otel_noop":
+    # Determine which metric groups to enable
+    metric_groups = _get_metric_groups_for_benchmark(metric_group_names)
+    groups_desc = ""
+    if metric_group_names:
+        groups_desc = f" [groups: {', '.join(metric_group_names)}]"
+
+    if scenario == "otel_noop":
         from opentelemetry import metrics
         from opentelemetry.metrics import NoOpMeterProvider
         metrics.set_meter_provider(NoOpMeterProvider())
@@ -333,8 +658,11 @@ def setup_scenario(scenario: str, with_command_metrics: bool = False) -> str:
         from redis.observability.providers import get_observability_instance
         from redis.observability.config import OTelConfig
         otel = get_observability_instance()
-        otel.init(OTelConfig())
-        return "OTel with NoOpMeterProvider"
+        if metric_groups:
+            otel.init(OTelConfig(metric_groups=metric_groups))
+        else:
+            otel.init(OTelConfig())
+        return f"OTel with NoOpMeterProvider{groups_desc}"
 
     elif scenario == "otel_inmemory":
         from opentelemetry import metrics
@@ -348,8 +676,11 @@ def setup_scenario(scenario: str, with_command_metrics: bool = False) -> str:
         from redis.observability.providers import get_observability_instance
         from redis.observability.config import OTelConfig
         otel = get_observability_instance()
-        otel.init(OTelConfig())
-        return "OTel with InMemoryMetricReader"
+        if metric_groups:
+            otel.init(OTelConfig(metric_groups=metric_groups))
+        else:
+            otel.init(OTelConfig())
+        return f"OTel with InMemoryMetricReader{groups_desc}"
 
     elif scenario == "otel_enabled_http":
         from opentelemetry import metrics
@@ -362,20 +693,18 @@ def setup_scenario(scenario: str, with_command_metrics: bool = False) -> str:
         host = os.environ.get("OTEL_COLLECTOR_HOST", "localhost")
         endpoint = f"http://{host}:4318/v1/metrics"
         exporter = OTLPMetricExporter(endpoint=endpoint)
-        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=10000)
+        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=export_interval_millis)
         provider = MeterProvider(metric_readers=[reader])
         metrics.set_meter_provider(provider)
 
         from redis.observability.providers import get_observability_instance
-        from redis.observability.config import OTelConfig, MetricGroup
+        from redis.observability.config import OTelConfig
         otel = get_observability_instance()
-        if with_command_metrics:
-            metric_groups = [MetricGroup.RESILIENCY, MetricGroup.CONNECTION_BASIC, MetricGroup.COMMAND]
+        if metric_groups:
             otel.init(OTelConfig(metric_groups=metric_groups))
-            return f"OTel with PeriodicExportingMetricReader (HTTP) -> {endpoint} [+COMMAND metrics]"
         else:
             otel.init(OTelConfig())
-            return f"OTel with PeriodicExportingMetricReader (HTTP) -> {endpoint}"
+        return f"OTel with PeriodicExportingMetricReader (HTTP) -> {endpoint} [export: {export_interval_millis}ms]{groups_desc}"
 
     elif scenario == "otel_enabled_grpc":
         from opentelemetry import metrics
@@ -388,20 +717,18 @@ def setup_scenario(scenario: str, with_command_metrics: bool = False) -> str:
         host = os.environ.get("OTEL_COLLECTOR_HOST", "localhost")
         endpoint = f"{host}:4317"
         exporter = OTLPMetricExporter(endpoint=endpoint, insecure=True)
-        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=10000)
+        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=export_interval_millis)
         provider = MeterProvider(metric_readers=[reader])
         metrics.set_meter_provider(provider)
 
         from redis.observability.providers import get_observability_instance
-        from redis.observability.config import OTelConfig, MetricGroup
+        from redis.observability.config import OTelConfig
         otel = get_observability_instance()
-        if with_command_metrics:
-            metric_groups = [MetricGroup.RESILIENCY, MetricGroup.CONNECTION_BASIC, MetricGroup.COMMAND]
+        if metric_groups:
             otel.init(OTelConfig(metric_groups=metric_groups))
-            return f"OTel with PeriodicExportingMetricReader (gRPC) -> {endpoint} [+COMMAND metrics]"
         else:
             otel.init(OTelConfig())
-            return f"OTel with PeriodicExportingMetricReader (gRPC) -> {endpoint}"
+        return f"OTel with PeriodicExportingMetricReader (gRPC) -> {endpoint} [export: {export_interval_millis}ms]{groups_desc}"
 
     else:
         raise ValueError(f"Unknown scenario: {scenario}")
@@ -409,21 +736,26 @@ def setup_scenario(scenario: str, with_command_metrics: bool = False) -> str:
 
 def run_iteration(scenario: str, config: LoadGeneratorConfig, description: str) -> BenchmarkResult:
     """
-    Run a single benchmark iteration (without OTel setup).
-    """
-    import redis
-    client = redis.Redis(host=config.redis_host, port=config.redis_port, decode_responses=True)
+    Run a single benchmark iteration using the ComprehensiveLoadGenerator.
 
+    Args:
+        scenario: The scenario name
+        config: Load generator configuration
+        description: Description of the scenario
+
+    Returns:
+        BenchmarkResult from the comprehensive load generator
+    """
+    generator = ComprehensiveLoadGenerator(config)
+    generator.setup()
     try:
-        generator = LoadGenerator(client, config)
         generator.warmup()
         result = generator.run()
         result.scenario = scenario
         result.metadata["description"] = description
         return result
-
     finally:
-        client.close()
+        generator.teardown()
 
 
 def main() -> int:
@@ -435,10 +767,24 @@ def main() -> int:
         print("ERROR: --baseline-tag is required when --scenario baseline")
         return 1
 
+    # Parse metric groups
+    metric_group_names: Optional[List[str]] = None
+    if args.metric_groups:
+        metric_group_names = [g.strip().lower() for g in args.metric_groups.split(",")]
+        # Validate metric group names
+        valid_groups = {"command", "pubsub", "streaming", "csc", "connection_basic", "connection_advanced", "resiliency", "all"}
+        invalid_groups = [g for g in metric_group_names if g not in valid_groups]
+        if invalid_groups:
+            print(f"ERROR: Invalid metric groups: {', '.join(invalid_groups)}")
+            print(f"Valid options: {', '.join(sorted(valid_groups))}")
+            return 1
+
     print("=" * 60)
     print(f"OTel Benchmark: {args.scenario}")
     if args.baseline_tag:
         print(f"Baseline tag: {args.baseline_tag}")
+    if metric_group_names:
+        print(f"Metric groups: {', '.join(metric_group_names)}")
     print("=" * 60)
     print(f"Duration: {args.duration}s per iteration")
     print(f"Warmup: {args.warmup}s per iteration")
@@ -458,12 +804,18 @@ def main() -> int:
     description = ""
     if args.scenario != "baseline":
         print("\nSetting up OTel...")
-        description = setup_scenario(args.scenario, with_command_metrics=args.with_command_metrics)
+        description = setup_scenario(
+            args.scenario,
+            metric_group_names=metric_group_names,
+            export_interval_millis=args.export_interval
+        )
         print(f"  {description}")
 
+    # Run benchmark iterations
     results: List[BenchmarkResult] = []
     for i in range(args.iterations):
         print(f"\n--- Iteration {i + 1}/{args.iterations} ---")
+
         if args.scenario == "baseline":
             result = run_baseline_scenario(tag=args.baseline_tag, config=config)
             if result is None:
@@ -471,12 +823,14 @@ def main() -> int:
                 return 1
         else:
             result = run_iteration(args.scenario, config, description)
+
         results.append(result)
         print(f"  Ops/sec: {result.operations_per_second:,.0f}")
 
     # Average results across all iterations
     final_result = average_results(results)
 
+    # Output results
     if args.json:
         print(json.dumps(asdict(final_result), indent=2))
     else:
