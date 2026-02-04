@@ -57,7 +57,10 @@ class ClientValidations:
             if connection
             else ClientValidations.get_default_connection(redis_client)
         )
-        logging.info(f"Waiting for push notification on connection: {test_conn}")
+        logging.info(
+            f"Waiting for push notification on connection: {test_conn}, "
+            f"local socket port: {test_conn._sock.getsockname()[1] if test_conn._sock else None}"
+        )
 
         try:
             while time.time() - start_time < timeout:

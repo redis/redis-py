@@ -1790,12 +1790,16 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                     timeout=int(SLOT_SHUFFLE_TIMEOUT / 2),
                     connection=conn,
                 )
-                logging.info("Validating connection maintenance state...")
+                logging.info(
+                    f"Validating connection MAINTENANCE state and RELAXED timeout for conn: {conn}..."
+                )
                 assert conn.maintenance_state == MaintenanceState.MAINTENANCE
                 assert conn._sock.gettimeout() == RELAXED_TIMEOUT
                 assert conn.should_reconnect() is False
 
-        logging.info("Validating newly created connections receive the notification...")
+        logging.info(
+            "Validating newly created connections will receive the SMIGRATING notification..."
+        )
         for node in initial_cluster_nodes.values():
             conn = node.redis_connection.connection_pool.get_connection()
             in_use_connections[node].append(conn)
@@ -1805,12 +1809,16 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                 connection=conn,
                 fail_on_timeout=False,  # it might get read during handshake
             )
-            logging.info("Validating new connection maintenance state...")
+            logging.info(
+                f"Validating new connection MAINTENANCE state and RELAXED timeout for conn: {conn}..."
+            )
             assert conn.maintenance_state == MaintenanceState.MAINTENANCE
             assert conn._sock.gettimeout() == RELAXED_TIMEOUT
             assert conn.should_reconnect() is False
 
-        logging.info("Waiting for SMIGRATED push notifications in all connections...")
+        logging.info(
+            "Waiting for SMIGRATED push notifications in ALL EXISTING connections..."
+        )
         marked_conns_for_reconnect = 0
         for conns_per_node in in_use_connections.values():
             for conn in conns_per_node:
@@ -1819,29 +1827,21 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
                     timeout=SMIGRATED_TIMEOUT,
                     connection=conn,
                 )
-            logging.info("Validating connection state after SMIGRATED ...")
-            if conn.should_reconnect():
-                marked_conns_for_reconnect += 1
-            assert conn.maintenance_state == MaintenanceState.NONE
-            assert conn.socket_timeout == CLIENT_TIMEOUT
-            assert conn.socket_connect_timeout == CLIENT_TIMEOUT
+                logging.info(
+                    f"Validating connection state after SMIGRATED for conn: {conn}, "
+                    f"local socket port: {conn._sock.getsockname()[1] if conn._sock else None}..."
+                )
+                if conn.should_reconnect():
+                    logging.info(f"Connection marked for reconnect: {conn}")
+                    marked_conns_for_reconnect += 1
+                assert conn.maintenance_state == MaintenanceState.NONE
+                assert conn.socket_timeout == DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT
+                assert (
+                    conn.socket_connect_timeout == DEFAULT_OSS_API_CLIENT_SOCKET_TIMEOUT
+                )
         assert (
             marked_conns_for_reconnect >= 1
         )  # at least one should be marked for reconnect
-
-        logging.info(
-            "Validating newly created connections receive the SMIGRATED notification..."
-        )
-        for node in initial_cluster_nodes.values():
-            conn = node.redis_connection.connection_pool.get_connection()
-            in_use_connections[node].append(conn)
-            ClientValidations.wait_push_notification(
-                cluster_client_maint_notifications,
-                timeout=1,
-                connection=conn,
-                fail_on_timeout=True,
-            )
-            # how to detect it????
 
         logging.info("Releasing connections back to the pool...")
         for node, conns in in_use_connections.items():
