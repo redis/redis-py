@@ -1676,6 +1676,9 @@ class ClusterNode:
     def __eq__(self, obj):
         return isinstance(obj, ClusterNode) and obj.name == self.name
 
+    def __hash__(self):
+        return hash(self.name)
+
 
 class LoadBalancingStrategy(Enum):
     ROUND_ROBIN = "round_robin"

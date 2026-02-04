@@ -47,6 +47,15 @@ def use_mock_proxy():
     return os.getenv("REDIS_ENTERPRISE_TESTS", "true").lower() == "false"
 
 
+# Module-level singleton for fault injector client used in parametrize
+# This ensures we create only ONE instance that's shared between parametrize and fixture
+_FAULT_INJECTOR_CLIENT_OSS_API = (
+    ProxyServerFaultInjector(oss_cluster=True)
+    if use_mock_proxy()
+    else REFaultInjector(os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324"))
+)
+
+
 @pytest.fixture()
 def endpoint_name(request):
     return request.config.getoption("--endpoint-name") or os.getenv(
@@ -122,11 +131,8 @@ def fault_injector_client():
 
 @pytest.fixture()
 def fault_injector_client_oss_api():
-    if use_mock_proxy():
-        return ProxyServerFaultInjector(oss_cluster=True)
-    else:
-        url = os.getenv("FAULT_INJECTION_API_URL", "http://127.0.0.1:20324")
-        return REFaultInjector(url)
+    """Return the singleton instance to ensure parametrize and tests use the same client."""
+    return _FAULT_INJECTOR_CLIENT_OSS_API
 
 
 @pytest.fixture()
