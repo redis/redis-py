@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any, Dict, Optional, Callable, List
 
 from redis.observability.attributes import AttributeBuilder, ConnectionState, REDIS_CLIENT_CONNECTION_NOTIFICATION, \
-    REDIS_CLIENT_CONNECTION_CLOSE_REASON, ERROR_TYPE, PubSubDirection, CSCResult, CSCReason
+    REDIS_CLIENT_CONNECTION_CLOSE_REASON, ERROR_TYPE, PubSubDirection, CSCResult, CSCReason, get_pool_name
 from redis.observability.config import OTelConfig, MetricGroup
 
 logger = logging.getLogger(__name__)
@@ -357,7 +357,7 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_create_time"):
             return
 
-        attrs = self.attr_builder.build_connection_attributes(pool_name=repr(connection_pool))
+        attrs = self.attr_builder.build_connection_attributes(pool_name=get_pool_name(connection_pool))
         self.connection_create_time.record(duration_seconds, attributes=attrs)
 
     def record_connection_wait_time(
@@ -583,26 +583,23 @@ class RedisMetricsCollector:
 
     def record_csc_request(
             self,
-            db_namespace: Optional[int] = None,
             result: Optional[CSCResult] = None,
     ) -> None:
         """
         Record a Client Side Caching (CSC) request.
 
         Args:
-            db_namespace: Redis database index
             result: CSC result ('hit' or 'miss')
         """
         if not hasattr(self, "csc_requests"):
             return
 
-        attrs = self.attr_builder.build_csc_attributes(result=result, db_namespace=db_namespace)
+        attrs = self.attr_builder.build_csc_attributes(result=result)
         self.csc_requests.add(1, attributes=attrs)
 
     def record_csc_eviction(
             self,
             count: int,
-            db_namespace: Optional[int] = None,
             reason: Optional[CSCReason] = None,
     ) -> None:
         """
@@ -610,31 +607,28 @@ class RedisMetricsCollector:
 
         Args:
             count: Number of evictions
-            db_namespace: Redis database index
             reason: Reason for eviction
         """
         if not hasattr(self, "csc_evictions"):
             return
 
-        attrs = self.attr_builder.build_csc_attributes(reason=reason, db_namespace=db_namespace)
+        attrs = self.attr_builder.build_csc_attributes(reason=reason)
         self.csc_evictions.add(count, attributes=attrs)
 
     def record_csc_network_saved(
             self,
             bytes_saved: int,
-            db_namespace: Optional[int] = None,
     ) -> None:
         """
         Record the number of bytes saved by using Client Side Caching (CSC).
 
         Args:
-            db_namespace: Redis database index
             bytes_saved: Number of bytes saved
         """
         if not hasattr(self, "csc_network_saved"):
             return
 
-        attrs = self.attr_builder.build_csc_attributes(db_namespace=db_namespace)
+        attrs = self.attr_builder.build_csc_attributes()
         self.csc_network_saved.add(bytes_saved, attributes=attrs)
 
     # Utility methods

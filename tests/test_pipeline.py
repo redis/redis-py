@@ -5,7 +5,7 @@ import pytest
 from redis import RedisClusterException
 import redis
 from redis.client import Pipeline
-from redis.event import EventDispatcher, EventListenerInterface, OnErrorEvent
+from redis.event import EventDispatcher, EventListenerInterface
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector

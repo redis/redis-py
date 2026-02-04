@@ -29,7 +29,11 @@ from redis.event import (
     AfterPooledConnectionsInstantiationEvent,
     AfterPubSubConnectionInstantiationEvent,
     ClientType,
-    EventDispatcher, AfterCommandExecutionEvent, OnErrorEvent,
+    EventDispatcher,
+)
+from redis.observability.recorder import (
+    record_operation_duration,
+    record_error_count,
 )
 from redis.exceptions import (
     AskError,
@@ -1559,17 +1563,15 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             error=None
     ):
         """
-        Triggers AfterCommandExecutionEvent emit.
+        Records operation duration metric directly.
         """
-        self._event_dispatcher.dispatch(
-            AfterCommandExecutionEvent(
-                command_name=command_name,
-                duration_seconds=duration_seconds,
-                server_address=connection.host,
-                server_port=connection.port,
-                db_namespace=str(connection.db),
-                error=error,
-            )
+        record_operation_duration(
+            command_name=command_name,
+            duration_seconds=duration_seconds,
+            server_address=connection.host,
+            server_port=connection.port,
+            db_namespace=str(connection.db),
+            error=error,
         )
 
     def _emit_on_error_event(
@@ -1580,16 +1582,16 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             retry_attempts: Optional[int] = None,
     ):
         """
-        Triggers OnErrorEvent emit.
+        Records error count metric directly.
         """
-        self._event_dispatcher.dispatch(
-            OnErrorEvent(
-                error=error,
-                server_address=connection.host,
-                server_port=connection.port,
-                is_internal=is_internal,
-                retry_attempts=retry_attempts,
-            )
+        record_error_count(
+            server_address=connection.host,
+            server_port=connection.port,
+            network_peer_address=connection.host,
+            network_peer_port=connection.port,
+            error_type=error,
+            retry_attempts=retry_attempts if retry_attempts is not None else 0,
+            is_internal=is_internal,
         )
 
     def close(self) -> None:
@@ -3024,13 +3026,11 @@ class PipelineStrategy(AbstractStrategy):
             if isinstance(r, Exception):
                 self.annotate_exception(r, c.position + 1, c.args)
 
-                self._pipe._event_dispatcher.dispatch(
-                    AfterCommandExecutionEvent(
-                        command_name="PIPELINE",
-                        duration_seconds=time.monotonic() - start_time,
-                        batch_size=len(stack),
-                        error=r,
-                    )
+                record_operation_duration(
+                    command_name="PIPELINE",
+                    duration_seconds=time.monotonic() - start_time,
+                    batch_size=len(stack),
+                    error=r,
                 )
 
                 raise r
@@ -3224,15 +3224,13 @@ class PipelineStrategy(AbstractStrategy):
             for n in node_commands:
                 n.read()
 
-                self._pipe._event_dispatcher.dispatch(
-                    AfterCommandExecutionEvent(
-                        command_name="PIPELINE",
-                        duration_seconds=time.monotonic() - start_time,
-                        server_address=n.connection.host,
-                        server_port=n.connection.port,
-                        db_namespace=str(n.connection.db),
-                        batch_size=len(n.commands),
-                    )
+                record_operation_duration(
+                    command_name="PIPELINE",
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=n.connection.host,
+                    server_port=n.connection.port,
+                    db_namespace=str(n.connection.db),
+                    batch_size=len(n.commands),
                 )
         finally:
             # release all of the redis connections we allocated earlier
@@ -3534,28 +3532,24 @@ class TransactionStrategy(AbstractStrategy):
                 connection, redis_node, args[0], *args, **options
             )
 
-            self._pipe._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=args[0],
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=connection.host,
-                    server_port=connection.port,
-                    db_namespace=str(connection.db),
-                )
+            record_operation_duration(
+                command_name=args[0],
+                duration_seconds=time.monotonic() - start_time,
+                server_address=connection.host,
+                server_port=connection.port,
+                db_namespace=str(connection.db),
             )
 
             return response
         except Exception as e:
             e.connection = connection
-            self._pipe._event_dispatcher.dispatch(
-                AfterCommandExecutionEvent(
-                    command_name=args[0],
-                    duration_seconds=time.monotonic() - start_time,
-                    server_address=connection.host,
-                    server_port=connection.port,
-                    db_namespace=str(connection.db),
-                    error=e,
-                )
+            record_operation_duration(
+                command_name=args[0],
+                duration_seconds=time.monotonic() - start_time,
+                server_address=connection.host,
+                server_port=connection.port,
+                db_namespace=str(connection.db),
+                error=e,
             )
             raise
 
@@ -3575,14 +3569,14 @@ class TransactionStrategy(AbstractStrategy):
 
     def _reinitialize_on_error(self, error, failure_count):
         if hasattr(error, "connection"):
-            self._pipe._event_dispatcher.dispatch(
-                OnErrorEvent(
-                    error=error,
-                    server_address=error.conn.host,
-                    server_port=error.conn.port,
-                    is_internal=False,
-                    retry_attempts=failure_count,
-                )
+            record_error_count(
+                server_address=error.connection.host,
+                server_port=error.connection.port,
+                network_peer_address=error.connection.host,
+                network_peer_port=error.connection.port,
+                error_type=error,
+                retry_attempts=failure_count,
+                is_internal=False,
             )
 
         if self._watching:
@@ -3614,14 +3608,12 @@ class TransactionStrategy(AbstractStrategy):
             if isinstance(r, Exception):
                 self.annotate_exception(r, cmd.position + 1, cmd.args)
 
-                self._pipe._event_dispatcher.dispatch(
-                    AfterCommandExecutionEvent(
-                        command_name='TRANSACTION',
-                        duration_seconds=time.monotonic() - start_time,
-                        server_address=self._transaction_connection.host,
-                        server_port=self._transaction_connection.port,
-                        db_namespace=str(self._transaction_connection.db),
-                    )
+                record_operation_duration(
+                    command_name='TRANSACTION',
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=self._transaction_connection.host,
+                    server_port=self._transaction_connection.port,
+                    db_namespace=str(self._transaction_connection.db),
                 )
 
                 raise r
@@ -3709,15 +3701,13 @@ class TransactionStrategy(AbstractStrategy):
 
         self._executing = False
 
-        self._pipe._event_dispatcher.dispatch(
-            AfterCommandExecutionEvent(
-                command_name='TRANSACTION',
-                duration_seconds=time.monotonic() - start_time,
-                server_address=connection.host,
-                server_port=connection.port,
-                db_namespace=str(connection.db),
-                batch_size=len(self._command_queue),
-            )
+        record_operation_duration(
+            command_name='TRANSACTION',
+            duration_seconds=time.monotonic() - start_time,
+            server_address=connection.host,
+            server_port=connection.port,
+            db_namespace=str(connection.db),
+            batch_size=len(self._command_queue),
         )
 
         # EXEC clears any watched keys

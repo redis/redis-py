@@ -28,11 +28,6 @@ class TestOTelConfigDefaults:
         expected = MetricGroup.CONNECTION_BASIC | MetricGroup.RESILIENCY
         assert config.metric_groups == expected
 
-    def test_default_sample_percentage(self):
-        """Test that default sample percentage is 100.0."""
-        config = OTelConfig()
-        assert config.metrics_sample_percentage == 100.0
-
     def test_default_include_commands_is_none(self):
         """Test that include_commands is None by default."""
         config = OTelConfig()
@@ -105,73 +100,6 @@ class TestOTelConfigMetricGroups:
         """Test that empty metric groups list results in no groups enabled."""
         config = OTelConfig(metric_groups=[])
         assert config.metric_groups == MetricGroup(0)
-
-
-class TestOTelConfigSamplePercentage:
-    """Tests for metrics_sample_percentage configuration."""
-
-    def test_valid_sample_percentage_zero(self):
-        """Test that 0.0 sample percentage is valid."""
-        config = OTelConfig(metrics_sample_percentage=0.0)
-        assert config.metrics_sample_percentage == 0.0
-
-    def test_valid_sample_percentage_hundred(self):
-        """Test that 100.0 sample percentage is valid."""
-        config = OTelConfig(metrics_sample_percentage=100.0)
-        assert config.metrics_sample_percentage == 100.0
-
-    def test_valid_sample_percentage_middle(self):
-        """Test that middle value sample percentage is valid."""
-        config = OTelConfig(metrics_sample_percentage=50.5)
-        assert config.metrics_sample_percentage == 50.5
-
-    def test_invalid_sample_percentage_negative(self):
-        """Test that negative sample percentage raises ValueError."""
-        with pytest.raises(ValueError) as exc_info:
-            OTelConfig(metrics_sample_percentage=-1.0)
-        assert "metrics_sample_percentage must be between 0.0 and 100.0" in str(exc_info.value)
-
-    def test_invalid_sample_percentage_over_hundred(self):
-        """Test that sample percentage over 100 raises ValueError."""
-        with pytest.raises(ValueError) as exc_info:
-            OTelConfig(metrics_sample_percentage=100.1)
-        assert "metrics_sample_percentage must be between 0.0 and 100.0" in str(exc_info.value)
-
-
-class TestOTelConfigSetSamplePercentage:
-    """Tests for set_sample_percentage method."""
-
-    def test_set_sample_percentage_valid(self):
-        """Test setting valid sample percentage at runtime."""
-        config = OTelConfig()
-        config.set_sample_percentage(25.0)
-        assert config.metrics_sample_percentage == 25.0
-
-    def test_set_sample_percentage_zero(self):
-        """Test setting sample percentage to zero."""
-        config = OTelConfig()
-        config.set_sample_percentage(0.0)
-        assert config.metrics_sample_percentage == 0.0
-
-    def test_set_sample_percentage_hundred(self):
-        """Test setting sample percentage to 100."""
-        config = OTelConfig(metrics_sample_percentage=50.0)
-        config.set_sample_percentage(100.0)
-        assert config.metrics_sample_percentage == 100.0
-
-    def test_set_sample_percentage_invalid_negative(self):
-        """Test that setting negative sample percentage raises ValueError."""
-        config = OTelConfig()
-        with pytest.raises(ValueError) as exc_info:
-            config.set_sample_percentage(-5.0)
-        assert "metrics_sample_percentage must be between 0.0 and 100.0" in str(exc_info.value)
-
-    def test_set_sample_percentage_invalid_over_hundred(self):
-        """Test that setting sample percentage over 100 raises ValueError."""
-        config = OTelConfig()
-        with pytest.raises(ValueError) as exc_info:
-            config.set_sample_percentage(150.0)
-        assert "metrics_sample_percentage must be between 0.0 and 100.0" in str(exc_info.value)
 
 
 class TestOTelConfigIncludeCommands:

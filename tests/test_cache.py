@@ -18,8 +18,6 @@ from redis.cache import (
 from redis.event import (
     EventDispatcher,
     EventListenerInterface,
-    OnCacheEvictionEvent,
-    OnCacheInitializationEvent,
 )
 from redis.observability.attributes import CSCReason
 from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
@@ -1529,130 +1527,77 @@ class TestUnitCacheProxy:
         """Create a sample cache key."""
         return CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
 
-    def test_initialization_emits_cache_initialisation_event(self, mock_cache):
-        """Test that CacheProxy emits OnCacheInitialisationEvent on initialization."""
-        event_dispatcher = EventDispatcher()
-        listener = MagicMock(spec=EventListenerInterface)
-        event_dispatcher.register_listeners({
-            OnCacheInitializationEvent: [listener],
-        })
-
-        CacheProxy(mock_cache, event_dispatcher)
-
-        listener.listen.assert_called_once()
-        event = listener.listen.call_args[0][0]
-        assert isinstance(event, OnCacheInitializationEvent)
-        assert callable(event.cache_items_callback)
-
-    def test_initialization_event_callback_returns_cache_size(
-        self, mock_cache, mock_connection
-    ):
-        """Test that the cache_items_callback returns the current cache size."""
-        event_dispatcher = EventDispatcher()
-        listener = MagicMock(spec=EventListenerInterface)
-        event_dispatcher.register_listeners({
-            OnCacheInitializationEvent: [listener],
-        })
-
-        proxy = CacheProxy(mock_cache, event_dispatcher)
-
-        event = listener.listen.call_args[0][0]
-        assert event.cache_items_callback() == 0
-
-        # Add an entry and verify callback reflects new size
-        cache_key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
-        proxy.set(
-            CacheEntry(
-                cache_key=cache_key,
-                cache_value=b"bar",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
-            )
-        )
-        assert event.cache_items_callback() == 1
-
-    def test_initialization_creates_default_event_dispatcher_when_none_provided(
-        self, mock_cache
-    ):
-        """Test that CacheProxy creates a default EventDispatcher when none is provided."""
+    def test_initialization_creates_cache_proxy(self, mock_cache):
+        """Test that CacheProxy can be initialized with a cache."""
         # Should not raise an error
         proxy = CacheProxy(mock_cache)
         assert proxy is not None
 
-    def test_set_emits_eviction_event_when_cache_exceeds_max_size(
+    def test_set_calls_record_csc_eviction_when_cache_exceeds_max_size(
         self, mock_connection
     ):
-        """Test that OnCacheEvictionEvent is emitted when cache exceeds max size."""
+        """Test that record_csc_eviction is called when cache exceeds max size."""
+        from unittest.mock import patch
         # Create a cache with max_size=2
         cache = DefaultCache(CacheConfig(max_size=2))
-        event_dispatcher = EventDispatcher()
-        eviction_listener = MagicMock(spec=EventListenerInterface)
-        event_dispatcher.register_listeners({
-            OnCacheEvictionEvent: [eviction_listener],
-        })
+        proxy = CacheProxy(cache)
 
-        proxy = CacheProxy(cache, event_dispatcher)
+        with patch('redis.observability.recorder.record_csc_eviction') as mock_record:
+            # Add 2 entries (at max capacity)
+            for i in range(2):
+                cache_key = CacheKey(
+                    command="GET", redis_keys=(f"key{i}",), redis_args=("GET", f"key{i}")
+                )
+                proxy.set(
+                    CacheEntry(
+                        cache_key=cache_key,
+                        cache_value=f"value{i}".encode(),
+                        status=CacheEntryStatus.VALID,
+                        connection_ref=mock_connection,
+                    )
+                )
 
-        # Add 2 entries (at max capacity)
-        for i in range(2):
+            # No eviction yet
+            mock_record.assert_not_called()
+
+            # Add a 3rd entry, which should trigger eviction
             cache_key = CacheKey(
-                command="GET", redis_keys=(f"key{i}",), redis_args=("GET", f"key{i}")
+                command="GET", redis_keys=("key3",), redis_args=("GET", "key3")
             )
             proxy.set(
                 CacheEntry(
                     cache_key=cache_key,
-                    cache_value=f"value{i}".encode(),
+                    cache_value=b"value3",
                     status=CacheEntryStatus.VALID,
                     connection_ref=mock_connection,
                 )
             )
 
-        # No eviction event yet
-        eviction_listener.listen.assert_not_called()
-
-        # Add a 3rd entry, which should trigger eviction
-        cache_key = CacheKey(
-            command="GET", redis_keys=("key3",), redis_args=("GET", "key3")
-        )
-        proxy.set(
-            CacheEntry(
-                cache_key=cache_key,
-                cache_value=b"value3",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
+            # record_csc_eviction should be called
+            mock_record.assert_called_once_with(
+                count=1,
+                reason=CSCReason.FULL,
             )
-        )
 
-        # Eviction event should be emitted
-        eviction_listener.listen.assert_called_once()
-        event = eviction_listener.listen.call_args[0][0]
-        assert isinstance(event, OnCacheEvictionEvent)
-        assert event.count == 1
-        assert event.reason == CSCReason.FULL
-
-    def test_set_does_not_emit_eviction_event_when_under_max_size(
+    def test_set_does_not_call_record_csc_eviction_when_under_max_size(
         self, mock_cache, mock_connection
     ):
-        """Test that OnCacheEvictionEvent is NOT emitted when cache is under max size."""
-        event_dispatcher = EventDispatcher()
-        eviction_listener = MagicMock(spec=EventListenerInterface)
-        event_dispatcher.register_listeners({
-            OnCacheEvictionEvent: [eviction_listener],
-        })
+        """Test that record_csc_eviction is NOT called when cache is under max size."""
+        from unittest.mock import patch
+        proxy = CacheProxy(mock_cache)
 
-        proxy = CacheProxy(mock_cache, event_dispatcher)
-
-        cache_key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
-        proxy.set(
-            CacheEntry(
-                cache_key=cache_key,
-                cache_value=b"bar",
-                status=CacheEntryStatus.VALID,
-                connection_ref=mock_connection,
+        with patch('redis.observability.recorder.record_csc_eviction') as mock_record:
+            cache_key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+            proxy.set(
+                CacheEntry(
+                    cache_key=cache_key,
+                    cache_value=b"bar",
+                    status=CacheEntryStatus.VALID,
+                    connection_ref=mock_connection,
+                )
             )
-        )
 
-        eviction_listener.listen.assert_not_called()
+            mock_record.assert_not_called()
 
     def test_collection_property_delegates_to_underlying_cache(self, mock_cache):
         """Test that collection property returns the underlying cache's collection."""

@@ -4,8 +4,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, List, Optional, Union
 
-from redis.event import EventDispatcherInterface, EventDispatcher, \
-    OnCacheEvictionEvent, OnCacheHitEvent
 from redis.observability.attributes import CSCResult, CSCReason
 
 
@@ -252,13 +250,8 @@ class CacheProxy(CacheInterface):
     """
     Proxy object that wraps cache implementations to enable additional logic on top
     """
-    def __init__(self, cache: CacheInterface, event_dispatcher: Optional[EventDispatcherInterface] = None):
+    def __init__(self, cache: CacheInterface):
         self._cache = cache
-
-        if event_dispatcher is None:
-            self._event_dispatcher = EventDispatcher()
-        else:
-            self._event_dispatcher = event_dispatcher
 
     @property
     def collection(self) -> OrderedDict:
@@ -283,11 +276,11 @@ class CacheProxy(CacheInterface):
         is_set = self._cache.set(entry)
 
         if self.config.is_exceeds_max_size(self.size):
-            self._event_dispatcher.dispatch(
-                OnCacheEvictionEvent(
-                    count=1,
-                    reason=CSCReason.FULL,
-                )
+            # Lazy import to avoid circular dependency
+            from redis.observability.recorder import record_csc_eviction
+            record_csc_eviction(
+                count=1,
+                reason=CSCReason.FULL,
             )
             self.eviction_policy.evict_next()
 

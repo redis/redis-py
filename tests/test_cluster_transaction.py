@@ -10,7 +10,7 @@ from redis import CrossSlotTransactionError, ConnectionPool, RedisClusterExcepti
 from redis.backoff import NoBackoff
 from redis.client import Redis
 from redis.cluster import PRIMARY, ClusterNode, NodesManager, RedisCluster
-from redis.event import EventDispatcher, OnErrorEvent, EventListenerInterface
+from redis.event import EventDispatcher, EventListenerInterface
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector

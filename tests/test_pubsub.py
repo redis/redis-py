@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 import redis
 from redis.client import PubSub
-from redis.event import EventDispatcher, EventListenerInterface, OnErrorEvent
+from redis.event import EventDispatcher, EventListenerInterface
 from redis.exceptions import ConnectionError
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup

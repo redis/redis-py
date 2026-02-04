@@ -35,11 +35,11 @@ class TestOTelProviderManagerInit:
         """Test initialization with custom config."""
         config = OTelConfig(
             enabled_telemetry=[TelemetryOption.METRICS],
-            metrics_sample_percentage=50.0,
+            exclude_commands=['DEBUG'],
         )
         manager = OTelProviderManager(config)
 
-        assert manager.config.metrics_sample_percentage == 50.0
+        assert 'DEBUG' in manager.config.exclude_commands
 
 
 class TestOTelProviderManagerGetMeterProvider:
@@ -236,8 +236,8 @@ class TestObservabilityInstanceInit:
     def test_init_method_replaces_existing_manager(self):
         """Test that init() replaces existing provider manager."""
         instance = ObservabilityInstance()
-        config1 = OTelConfig(metrics_sample_percentage=50.0)
-        config2 = OTelConfig(metrics_sample_percentage=75.0)
+        config1 = OTelConfig(exclude_commands=['DEBUG'])
+        config2 = OTelConfig(exclude_commands=['SLOWLOG'])
 
         instance.init(config1)
         old_manager = instance._provider_manager
@@ -246,7 +246,7 @@ class TestObservabilityInstanceInit:
             instance.init(config2)
 
         mock_shutdown.assert_called_once()
-        assert instance._provider_manager.config.metrics_sample_percentage == 75.0
+        assert 'SLOWLOG' in instance._provider_manager.config.exclude_commands
 
 
 class TestObservabilityInstanceIsEnabled:
@@ -442,8 +442,8 @@ class TestObservabilityInstanceIntegration:
     def test_reinitialize_after_shutdown(self):
         """Test that instance can be reinitialized after shutdown."""
         instance = ObservabilityInstance()
-        config1 = OTelConfig(metrics_sample_percentage=50.0)
-        config2 = OTelConfig(metrics_sample_percentage=75.0)
+        config1 = OTelConfig(exclude_commands=['DEBUG'])
+        config2 = OTelConfig(exclude_commands=['SLOWLOG'])
 
         # First initialization
         instance.init(config1)
@@ -454,4 +454,4 @@ class TestObservabilityInstanceIntegration:
         instance.init(config2)
 
         assert instance.is_enabled() is True
-        assert instance._provider_manager.config.metrics_sample_percentage == 75.0
+        assert 'SLOWLOG' in instance._provider_manager.config.exclude_commands
