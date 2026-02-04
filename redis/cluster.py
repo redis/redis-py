@@ -3570,10 +3570,10 @@ class TransactionStrategy(AbstractStrategy):
     def _reinitialize_on_error(self, error, failure_count):
         if hasattr(error, "connection"):
             record_error_count(
-                server_address=error.conn.host,
-                server_port=error.conn.port,
-                network_peer_address=error.conn.host,
-                network_peer_port=error.conn.port,
+                server_address=error.connection.host,
+                server_port=error.connection.port,
+                network_peer_address=error.connection.host,
+                network_peer_port=error.connection.port,
                 error_type=error,
                 retry_attempts=failure_count,
                 is_internal=False,
