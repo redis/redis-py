@@ -1235,185 +1235,11 @@ class TestStandaloneClientPushNotifications(TestPushNotificationsBase):
         assert errors.empty(), f"Errors occurred in threads: {errors.queue}"
 
 
-class TestClusterClientPushNotifications(TestPushNotificationsBase):
-    def extract_target_node_and_empty_node(
-        self, fault_injector_client, endpoints_config
-    ):
-        target_node, empty_node = ClusterOperations.find_target_node_and_empty_node(
-            fault_injector_client, endpoints_config
-        )
-        logging.info(f"Using target_node: {target_node}, empty_node: {empty_node}")
-        return target_node, empty_node
-
-    @pytest.fixture(autouse=True)
-    def setup_and_cleanup(
-        self,
-        fault_injector_client_oss_api: FaultInjectorClient,
-        maint_notifications_cluster_bdb_config: Dict[str, Any],
-    ):
-        # Initialize cleanup flags first to ensure they exist even if setup fails
-        self.cluster_endpoint_config = None
-        self.maintenance_ops_threads = []
-
-        self._bdb_config = maint_notifications_cluster_bdb_config.copy()
-        self._bdb_name = self._bdb_config["name"]
-
-        try:
-            logging.info(f"Test Setup: Deleting database if exists: {self._bdb_name}")
-            existing_db_id = None
-            existing_db_id = ClusterOperations.find_database_id_by_name(
-                fault_injector_client_oss_api, self._bdb_name
-            )
-
-            if existing_db_id:
-                fault_injector_client_oss_api.delete_database(existing_db_id)
-                logging.info(f"Deleting database if exists: {self._bdb_name}")
-            else:
-                logging.info(f"Database {self._bdb_name} does not exist.")
-        except Exception as e:
-            logging.error(f"Failed to delete database {self._bdb_name}: {e}")
-
-        try:
-            self.cluster_endpoint_config = (
-                fault_injector_client_oss_api.create_database(self._bdb_config)
-            )
-            logging.info(f"Test Setup: Created database: {self._bdb_name}")
-        except Exception as e:
-            pytest.fail(f"Failed to create database: {e}")
-
-        self.cluster_client_maint_notifications = (
-            get_cluster_client_maint_notifications(self.cluster_endpoint_config)
-        )
-
-        # Yield control to the test
-        yield
-
-        # Cleanup code - this will run even if the test fails
-        logging.info("Starting cleanup...")
-        try:
-            self.cluster_client_maint_notifications.close()
-        except Exception as e:
-            logging.error(f"Failed to close client: {e}")
-
-        logging.info("Waiting for maintenance operations threads to finish...")
-        for thread in self.maintenance_ops_threads:
-            thread.join()
-
-        logging.info("Cleanup finished")
-
-    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
-    @pytest.mark.skipif(
-        use_mock_proxy(),
-        reason="Mock proxy doesn't support sending notifications to new connections.",
-    )
-    def test_new_connections_receive_last_notification_with_migrating(
-        self,
-        fault_injector_client_oss_api: FaultInjectorClient,
-    ):
-        """
-        Test the push notifications are sent to the newly created connections.
-
-        """
-        cluster_op_target_node, cluster_op_empty_node = (
-            self.extract_target_node_and_empty_node(
-                fault_injector_client_oss_api, self.cluster_endpoint_config
-            )
-        )
-        db_port = (
-            self.cluster_endpoint_config["raw_endpoints"][0]["port"]
-            if self.cluster_endpoint_config
-            else None
-        )
-        # get the node that will be migrated
-        target_node = self.cluster_client_maint_notifications.nodes_manager.get_node(
-            host=cluster_op_target_node.external_address,
-            port=db_port,
-        )
-        logging.info(
-            f"Creating one connection in the pool using node {target_node.name}."
-        )
-        conn = target_node.redis_connection.connection_pool.get_connection()
-
-        logging.info("Executing migrate all data from one node to another ...")
-        migrate_thread = Thread(
-            target=self._execute_migration,
-            name="migrate_thread",
-            args=(
-                fault_injector_client_oss_api,
-                self.cluster_endpoint_config,
-                cluster_op_target_node.node_id,
-                cluster_op_empty_node.node_id,
-            ),
-        )
-
-        self.maintenance_ops_threads.append(migrate_thread)
-        migrate_thread.start()
-
-        logging.info(
-            f"Waiting for SMIGRATING push notifications with the existing connection: {conn}..."
-        )
-        ClientValidations.wait_push_notification(
-            self.cluster_client_maint_notifications,
-            timeout=SMIGRATING_TIMEOUT,
-            connection=conn,
-        )
-
-        new_conn = target_node.redis_connection.connection_pool.get_connection()
-        logging.info(
-            f"Validating newly created connection will also receive the notification: {new_conn}..."
-        )
-        ClientValidations.wait_push_notification(
-            self.cluster_client_maint_notifications,
-            timeout=1,  # the notification should have already been sent once, so new conn should receive it almost immediately
-            connection=new_conn,
-            fail_on_timeout=False,
-        )
-
-        logging.info("Validating connections maintenance state...")
-        assert conn.maintenance_state == MaintenanceState.MAINTENANCE
-        assert conn._sock.gettimeout() == RELAXED_TIMEOUT
-        assert conn.should_reconnect() is False
-
-        assert new_conn.maintenance_state == MaintenanceState.MAINTENANCE
-        assert new_conn._sock.gettimeout() == RELAXED_TIMEOUT
-        assert new_conn.should_reconnect() is False
-
-        logging.info(f"Waiting for SMIGRATED push notifications with {conn}...")
-        ClientValidations.wait_push_notification(
-            self.cluster_client_maint_notifications,
-            timeout=SMIGRATED_TIMEOUT,
-            connection=conn,
-        )
-
-        logging.info("Validating connection state after SMIGRATED ...")
-
-        assert conn.should_reconnect() is True
-        assert new_conn.should_reconnect() is True
-
-        new_conn_after_smigrated = (
-            target_node.redis_connection.connection_pool.get_connection()
-        )
-        assert new_conn_after_smigrated.maintenance_state == MaintenanceState.NONE
-        assert new_conn_after_smigrated._sock.gettimeout() == CLIENT_TIMEOUT
-        assert not new_conn_after_smigrated.should_reconnect()
-
-        logging.info(
-            f"Waiting for SMIGRATED push notifications with another new connection: {new_conn_after_smigrated}..."
-        )
-        ClientValidations.wait_push_notification(
-            self.cluster_client_maint_notifications,
-            timeout=1,
-            connection=new_conn_after_smigrated,
-            fail_on_timeout=False,
-        )
-
-        logging.info("Releasing connections back to the pool...")
-        target_node.redis_connection.connection_pool.release(conn)
-        target_node.redis_connection.connection_pool.release(new_conn)
-        target_node.redis_connection.connection_pool.release(new_conn_after_smigrated)
-
-        migrate_thread.join()
-        self.maintenance_ops_threads.remove(migrate_thread)
+# 5 minutes timeout for this test
+# @pytest.mark.skipif(
+#     use_mock_proxy(),
+#     reason="Mock proxy doesn't support sending notifications to new connections.",
+# )
 
 
 def generate_params(
@@ -1892,6 +1718,137 @@ class TestClusterClientPushNotificationsHandlingWithEffectTrigger(
             if node.redis_connection is None:
                 continue
             node.redis_connection.connection_pool.release(conn)
+
+        trigger_effect_thread.join()
+        self.maintenance_ops_threads.remove(trigger_effect_thread)
+
+    @pytest.mark.timeout(300)  # 5 minutes timeout for this test
+    @pytest.mark.skipif(
+        use_mock_proxy(),
+        reason="Mock proxy doesn't support sending notifications to new connections.",
+    )
+    @pytest.mark.parametrize(
+        "effect_name, trigger, db_config, db_name",
+        generate_params(
+            _FAULT_INJECTOR_CLIENT_OSS_API,
+            [
+                SlotMigrateEffects.SLOT_SHUFFLE,
+                SlotMigrateEffects.REMOVE_ADD,
+                SlotMigrateEffects.REMOVE,
+                SlotMigrateEffects.ADD,
+            ],
+        ),
+    )
+    def test_new_connections_receive_last_notification_with_migrating(
+        self,
+        fault_injector_client_oss_api: FaultInjectorClient,
+        effect_name: SlotMigrateEffects,
+        trigger: str,
+        db_config: dict[str, Any],
+        db_name: str,
+    ):
+        """
+        Test the push notifications are sent to the newly created connections.
+
+        """
+        logging.info(f"DB name: {db_name}")
+
+        cluster_client_maint_notifications, cluster_endpoint_config = self.setup_env(
+            fault_injector_client_oss_api, db_config
+        )
+
+        logging.info("Creating one connection in each node's pool.")
+        initial_cluster_nodes = (
+            cluster_client_maint_notifications.nodes_manager.nodes_cache.copy()
+        )
+        in_use_connections = {}
+        for node in initial_cluster_nodes.values():
+            in_use_connections[node] = [
+                node.redis_connection.connection_pool.get_connection()
+            ]
+
+        logging.info("Executing FI command that triggers the desired effect...")
+        trigger_effect_thread = Thread(
+            target=self._trigger_effect,
+            name="trigger_effect_thread",
+            args=(
+                fault_injector_client_oss_api,
+                cluster_endpoint_config,
+                effect_name,
+                trigger,
+            ),
+        )
+
+        self.maintenance_ops_threads.append(trigger_effect_thread)
+        trigger_effect_thread.start()
+
+        logging.info("Waiting for SMIGRATING push notifications in all connections...")
+        for conns_per_node in in_use_connections.values():
+            for conn in conns_per_node:
+                ClientValidations.wait_push_notification(
+                    cluster_client_maint_notifications,
+                    timeout=int(SLOT_SHUFFLE_TIMEOUT / 2),
+                    connection=conn,
+                )
+                logging.info("Validating connection maintenance state...")
+                assert conn.maintenance_state == MaintenanceState.MAINTENANCE
+                assert conn._sock.gettimeout() == RELAXED_TIMEOUT
+                assert conn.should_reconnect() is False
+
+        logging.info("Validating newly created connections receive the notification...")
+        for node in initial_cluster_nodes.values():
+            conn = node.redis_connection.connection_pool.get_connection()
+            in_use_connections[node].append(conn)
+            ClientValidations.wait_push_notification(
+                cluster_client_maint_notifications,
+                timeout=1,
+                connection=conn,
+                fail_on_timeout=False,  # it might get read during handshake
+            )
+            logging.info("Validating new connection maintenance state...")
+            assert conn.maintenance_state == MaintenanceState.MAINTENANCE
+            assert conn._sock.gettimeout() == RELAXED_TIMEOUT
+            assert conn.should_reconnect() is False
+
+        logging.info("Waiting for SMIGRATED push notifications in all connections...")
+        marked_conns_for_reconnect = 0
+        for conns_per_node in in_use_connections.values():
+            for conn in conns_per_node:
+                ClientValidations.wait_push_notification(
+                    cluster_client_maint_notifications,
+                    timeout=SMIGRATED_TIMEOUT,
+                    connection=conn,
+                )
+            logging.info("Validating connection state after SMIGRATED ...")
+            if conn.should_reconnect():
+                marked_conns_for_reconnect += 1
+            assert conn.maintenance_state == MaintenanceState.NONE
+            assert conn.socket_timeout == CLIENT_TIMEOUT
+            assert conn.socket_connect_timeout == CLIENT_TIMEOUT
+        assert (
+            marked_conns_for_reconnect >= 1
+        )  # at least one should be marked for reconnect
+
+        logging.info(
+            "Validating newly created connections receive the SMIGRATED notification..."
+        )
+        for node in initial_cluster_nodes.values():
+            conn = node.redis_connection.connection_pool.get_connection()
+            in_use_connections[node].append(conn)
+            ClientValidations.wait_push_notification(
+                cluster_client_maint_notifications,
+                timeout=1,
+                connection=conn,
+                fail_on_timeout=True,
+            )
+            # how to detect it????
+
+        logging.info("Releasing connections back to the pool...")
+        for node, conns in in_use_connections.items():
+            if node.redis_connection is None:
+                continue
+            for conn in conns:
+                node.redis_connection.connection_pool.release(conn)
 
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
