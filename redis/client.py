@@ -688,6 +688,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
 
         # Start timing for observability
         start_time = time.monotonic()
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = [0]
+
+        def failure_callback(error, failure_count):
+            actual_retry_attempts[0] = failure_count
+            self._close_connection(conn, error, failure_count, start_time, command_name)
 
         if self._single_connection_client:
             self.single_connection_lock.acquire()
@@ -696,13 +702,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 lambda: self._send_command_parse_response(
                     conn, command_name, *args, **options
                 ),
-                lambda error, failure_count: self._close_connection(
-                    conn,
-                    error,
-                    failure_count,
-                    start_time,
-                    command_name,
-                ),
+                failure_callback,
                 with_failure_count=True
             )
 
@@ -721,7 +721,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 network_peer_address=conn.host,
                 network_peer_port=conn.port,
                 error_type=e,
-                retry_attempts=conn.retry.get_retries(),
+                retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
             )
             raise
@@ -1048,17 +1048,17 @@ class PubSub:
 
         # Start timing for observability
         start_time = time.monotonic()
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = [0]
+
+        def failure_callback(error, failure_count):
+            actual_retry_attempts[0] = failure_count
+            self._reconnect(conn, error, failure_count, start_time, command_name)
 
         try:
             response = conn.retry.call_with_retry(
                 lambda: command(*args, **kwargs),
-                lambda error, failure_count: self._reconnect(
-                    conn,
-                    error,
-                    failure_count,
-                    start_time,
-                    command_name,
-                ),
+                failure_callback,
                 with_failure_count=True
             )
 
@@ -1079,7 +1079,7 @@ class PubSub:
                 network_peer_address=conn.host,
                 network_peer_port=conn.port,
                 error_type=e,
-                retry_attempts=conn.retry.get_retries(),
+                retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
             )
             raise
@@ -1640,19 +1640,21 @@ class Pipeline(Redis):
 
         # Start timing for observability
         start_time = time.monotonic()
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = [0]
+
+        def failure_callback(error, failure_count):
+            actual_retry_attempts[0] = failure_count
+            self._disconnect_reset_raise_on_watching(
+                conn, error, failure_count, start_time, command_name
+            )
 
         try:
             response = conn.retry.call_with_retry(
                 lambda: self._send_command_parse_response(
                     conn, command_name, *args, **options
                 ),
-                lambda error, failure_count: self._disconnect_reset_raise_on_watching(
-                    conn,
-                    error,
-                    failure_count,
-                    start_time,
-                    command_name,
-                ),
+                failure_callback,
                 with_failure_count=True
             )
 
@@ -1672,7 +1674,7 @@ class Pipeline(Redis):
                 network_peer_address=conn.host,
                 network_peer_port=conn.port,
                 error_type=e,
-                retry_attempts=conn.retry.get_retries(),
+                retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
             )
             raise
@@ -1878,18 +1880,20 @@ class Pipeline(Redis):
 
         # Start timing for observability
         start_time = time.monotonic()
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = [0]
+        stack_len = len(stack)
+
+        def failure_callback(error, failure_count):
+            actual_retry_attempts[0] = failure_count
+            self._disconnect_raise_on_watching(
+                conn, error, failure_count, start_time, operation_name, stack_len
+            )
 
         try:
             response = conn.retry.call_with_retry(
                 lambda: execute(conn, stack, raise_on_error),
-                lambda error, failure_count: self._disconnect_raise_on_watching(
-                    conn,
-                    error,
-                    failure_count,
-                    start_time,
-                    operation_name,
-                    len(stack),
-                ),
+                failure_callback,
                 with_failure_count=True
             )
 
@@ -1899,7 +1903,7 @@ class Pipeline(Redis):
                 server_address=conn.host,
                 server_port=conn.port,
                 db_namespace=str(conn.db),
-                batch_size=len(stack),
+                batch_size=stack_len,
             )
             return response
         except Exception as e:
@@ -1909,7 +1913,7 @@ class Pipeline(Redis):
                 network_peer_address=conn.host,
                 network_peer_port=conn.port,
                 error_type=e,
-                retry_attempts=conn.retry.get_retries(),
+                retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
             )
             raise

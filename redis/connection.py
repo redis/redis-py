@@ -1090,13 +1090,13 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             else:
                 close_reason = CloseReason.ERROR
 
-            if args[1] == self.retry.get_retries():
+            if failure_count is not None and failure_count == self.retry.get_retries():
                 record_error_count(
                     server_address=self.host,
                     server_port=self.port,
                     network_peer_address=self.host,
                     network_peer_port=self.port,
-                    error_type=args[0],
+                    error_type=error,
                     retry_attempts=failure_count,
                 )
 
