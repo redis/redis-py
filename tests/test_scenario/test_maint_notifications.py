@@ -1422,28 +1422,31 @@ def generate_params(
 ):
     # params should produce list of tuples: (effect_name, trigger_name, bdb_config, bdb_name)
     params = []
-    logging.info(f"Extracting params for test with effect_names: {effect_names}")
-    for effect_name in effect_names:
-        triggers_data = ClusterOperations.get_slot_migrate_triggers(
-            fault_injector_client, effect_name
-        )
+    try:
+        logging.info(f"Extracting params for test with effect_names: {effect_names}")
+        for effect_name in effect_names:
+            triggers_data = ClusterOperations.get_slot_migrate_triggers(
+                fault_injector_client, effect_name
+            )
 
-        for trigger_info in triggers_data["triggers"]:
-            trigger = trigger_info["name"]
-            if trigger == "maintenance_mode":
-                continue
-            trigger_requirements = trigger_info["requirements"]
-            for requirement in trigger_requirements:
-                dbconfig = requirement["dbconfig"]
-                ip_type = requirement["oss_cluster_api"]["ip_type"]
-                if ip_type == "internal":
+            for trigger_info in triggers_data["triggers"]:
+                trigger = trigger_info["name"]
+                if trigger == "maintenance_mode":
                     continue
-                db_name_pattern = dbconfig.get("name").rsplit("-", 1)[0]
-                dbconfig["name"] = (
-                    db_name_pattern  # this will ensure dbs will be deleted
-                )
+                trigger_requirements = trigger_info["requirements"]
+                for requirement in trigger_requirements:
+                    dbconfig = requirement["dbconfig"]
+                    ip_type = requirement["oss_cluster_api"]["ip_type"]
+                    if ip_type == "internal":
+                        continue
+                    db_name_pattern = dbconfig.get("name").rsplit("-", 1)[0]
+                    dbconfig["name"] = (
+                        db_name_pattern  # this will ensure dbs will be deleted
+                    )
 
-                params.append((effect_name, trigger, dbconfig, db_name_pattern))
+                    params.append((effect_name, trigger, dbconfig, db_name_pattern))
+    except Exception as e:
+        logging.error(f"Failed to extract params for test: {e}")
 
     return params
 
@@ -2000,6 +2003,23 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
 
         trigger_effect_thread.join()
         self.maintenance_ops_threads.remove(trigger_effect_thread)
+
+        # go through all nodes and all their connections and consume the buffers - to validate no
+        # notifications were left unconsumed
+        logging.info(
+            "Consuming all buffers to validate no notifications were left unconsumed..."
+        )
+        for (
+            node
+        ) in cluster_client_maint_notifications.nodes_manager.nodes_cache.values():
+            if node.redis_connection is None:
+                continue
+            for conn in self._get_all_connections_in_pool(node.redis_connection):
+                if conn._sock:
+                    while conn.can_read(timeout=0.2):
+                        conn.read_response(push_request=True)
+            logging.info(f"Consumed all buffers for node: {node.name}")
+        logging.info("All buffers consumed.")
 
         for (
             node

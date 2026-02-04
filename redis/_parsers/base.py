@@ -202,8 +202,7 @@ class MaintenanceNotificationsParser:
             src_node_str = safe_str(src_node)
             node_str = safe_str(node)
             slots_str = safe_str(slots)
-            # The src_node_address is not provided in the SMIGRATED message,
-            # so we use an empty string as a placeholder
+
             mapping = NodesToSlotsMapping(
                 src_node_address=src_node_str,
                 dest_node_address=node_str,

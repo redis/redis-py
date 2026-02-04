@@ -45,7 +45,7 @@ class ClientValidations:
     @staticmethod
     def wait_push_notification(
         redis_client: Union[Redis, RedisCluster],
-        timeout: int = 120,
+        timeout: float = 120,
         fail_on_timeout: bool = True,
         connection: Optional[Connection] = None,
     ):
