@@ -4187,6 +4187,58 @@ class TestRedisCommands:
         consumer = info["groups"][0]["consumers"][0]
         assert isinstance(consumer, dict)
 
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xinfo_stream_idempotent_fields(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream with regular entry
+        await r.xadd(stream, {"foo": "bar"})
+        info = await r.xinfo_stream(stream)
+
+        # Verify new idempotent producer fields are present with default values
+        assert "idmp-duration" in info
+        assert "idmp-maxsize" in info
+        assert "pids-tracked" in info
+        assert "iids-tracked" in info
+        assert "iids-added" in info
+        assert "iids-duplicates" in info
+
+        # Default values (before any idempotent entries)
+        assert info["pids-tracked"] == 0
+        assert info["iids-tracked"] == 0
+        assert info["iids-added"] == 0
+        assert info["iids-duplicates"] == 0
+
+        # Add idempotent entry
+        await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        info = await r.xinfo_stream(stream)
+
+        # After adding idempotent entry
+        assert info["pids-tracked"] == 1  # One producer tracked
+        assert info["iids-tracked"] == 1  # One iid tracked
+        assert info["iids-added"] == 1  # One idempotent entry added
+        assert info["iids-duplicates"] == 0  # No duplicates yet
+
+        # Add duplicate entry
+        await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        info = await r.xinfo_stream(stream)
+
+        # After duplicate
+        assert info["pids-tracked"] == 1  # Still one producer
+        assert info["iids-tracked"] == 1  # Still one iid (duplicate doesn't add new)
+        assert info["iids-added"] == 1  # Still one unique entry
+        assert info["iids-duplicates"] == 1  # One duplicate detected
+
+        # Add entry from different producer
+        await r.xadd(stream, {"field2": "value2"}, idmpauto="producer2")
+        info = await r.xinfo_stream(stream)
+
+        # After second producer
+        assert info["pids-tracked"] == 2  # Two producers tracked
+        assert info["iids-tracked"] == 2  # Two iids tracked
+        assert info["iids-added"] == 2  # Two unique entries
+        assert info["iids-duplicates"] == 1  # Still one duplicate
+
     @skip_if_server_version_lt("5.0.0")
     async def test_xlen(self, r: redis.Redis):
         stream = "stream"
@@ -4914,6 +4966,175 @@ class TestRedisCommands:
         # Test error case
         with pytest.raises(redis.DataError):
             await r.xadd(stream, {"foo": "bar"}, ref_policy="INVALID")
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xadd_idmpauto(self, r: redis.Redis):
+        stream = "stream"
+
+        # XADD with IDMPAUTO - first write
+        message_id1 = await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+
+        # Test XADD with IDMPAUTO - duplicate write returns same ID
+        message_id2 = await r.xadd(stream, {"field1": "value1"}, idmpauto="producer1")
+        assert message_id1 == message_id2
+
+        # Test XADD with IDMPAUTO - different content creates new entry
+        message_id3 = await r.xadd(stream, {"field1": "value2"}, idmpauto="producer1")
+        assert message_id3 != message_id1
+
+        # Test XADD with IDMPAUTO - different producer creates new entry
+        message_id4 = await r.xadd(stream, {"field1": "value1"}, idmpauto="producer2")
+        assert message_id4 != message_id1
+
+        # Verify stream has 3 entries (2 unique from producer1, 1 from producer2)
+        assert await r.xlen(stream) == 3
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xadd_idmp(self, r: redis.Redis):
+        stream = "stream"
+
+        # Test XADD with IDMP - first write
+        message_id1 = await r.xadd(
+            stream, {"field1": "value1"}, idmp=("producer1", b"msg1")
+        )
+
+        # Test XADD with IDMP - duplicate write returns same ID
+        message_id2 = await r.xadd(
+            stream, {"field1": "value1"}, idmp=("producer1", b"msg1")
+        )
+        assert message_id1 == message_id2
+
+        # Test XADD with IDMP - different iid creates new entry
+        message_id3 = await r.xadd(
+            stream, {"field1": "value1"}, idmp=("producer1", b"msg2")
+        )
+        assert message_id3 != message_id1
+
+        # Test XADD with IDMP - different producer creates new entry
+        message_id4 = await r.xadd(
+            stream, {"field1": "value1"}, idmp=("producer2", b"msg1")
+        )
+        assert message_id4 != message_id1
+
+        # Test XADD with IDMP - shorter binary iid
+        await r.xadd(stream, {"field1": "value1"}, idmp=("producer1", b"\x01"))
+
+        # Verify stream has 4 entries
+        assert await r.xlen(stream) == 4
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xadd_idmp_validation(self, r: redis.Redis):
+        stream = "stream"
+
+        # Test error: both idmpauto and idmp specified
+        with pytest.raises(redis.DataError):
+            await r.xadd(
+                stream,
+                {"foo": "bar"},
+                idmpauto="producer1",
+                idmp=("producer1", b"msg1"),
+            )
+
+        # Test error: idmpauto with explicit id
+        with pytest.raises(redis.DataError):
+            await r.xadd(
+                stream, {"foo": "bar"}, id="1234567890-0", idmpauto="producer1"
+            )
+
+        # Test error: idmp with explicit id
+        with pytest.raises(redis.DataError):
+            await r.xadd(
+                stream, {"foo": "bar"}, id="1234567890-0", idmp=("producer1", b"msg1")
+            )
+
+        # Test error: idmp not a tuple
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, idmp="invalid")
+
+        # Test error: idmp tuple with wrong number of elements
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, idmp=("producer1",))
+
+        # Test error: idmp tuple with wrong number of elements
+        with pytest.raises(redis.DataError):
+            await r.xadd(stream, {"foo": "bar"}, idmp=("producer1", b"msg1", "extra"))
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xcfgset_idmp_duration(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream first
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with IDMP-DURATION only
+        assert await r.xcfgset(stream, idmp_duration=120) == b"OK"
+
+        # Test with minimum value
+        assert await r.xcfgset(stream, idmp_duration=1) == b"OK"
+
+        # Test with maximum value
+        assert await r.xcfgset(stream, idmp_duration=300) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xcfgset_idmp_maxsize(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream first
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with IDMP-MAXSIZE only
+        assert await r.xcfgset(stream, idmp_maxsize=5000) == b"OK"
+
+        # Test with minimum value
+        assert await r.xcfgset(stream, idmp_maxsize=1) == b"OK"
+
+        # Test with maximum value
+        assert await r.xcfgset(stream, idmp_maxsize=10000) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xcfgset_both_parameters(self, r: redis.Redis):
+        stream = "stream"
+
+        # Create stream first
+        await r.xadd(stream, {"foo": "bar"})
+
+        # Test XCFGSET with both IDMP-DURATION and IDMP-MAXSIZE
+        assert await r.xcfgset(stream, idmp_duration=120, idmp_maxsize=5000) == b"OK"
+
+        # Test with different values
+        assert await r.xcfgset(stream, idmp_duration=60, idmp_maxsize=10000) == b"OK"
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_xcfgset_validation(self, r: redis.Redis):
+        stream = "stream"
+
+        # Test error: no parameters provided
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream)
+
+        # Test error: idmp_duration too small
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_duration=0)
+
+        # Test error: idmp_duration too large
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_duration=301)
+
+        # Test error: idmp_duration not an integer
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_duration="invalid")
+
+        # Test error: idmp_maxsize too small
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_maxsize=0)
+
+        # Test error: idmp_maxsize too large
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_maxsize=1000001)
+
+        # Test error: idmp_maxsize not an integer
+        with pytest.raises(redis.DataError):
+            await r.xcfgset(stream, idmp_maxsize="invalid")
 
     @pytest.mark.onlynoncluster
     async def test_bitfield_operations(self, r: redis.Redis):
