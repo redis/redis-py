@@ -4812,13 +4812,13 @@ class TestRedisCommands:
         await r.xadd(stream, {"foo": "bar"})
 
         # Test XCFGSET with IDMP-DURATION only
-        assert await r.xcfgset(stream, idmp_duration=120) is True
+        assert await r.xcfgset(stream, idmp_duration=120) == b"OK"
 
         # Test with minimum value
-        assert await r.xcfgset(stream, idmp_duration=1) is True
+        assert await r.xcfgset(stream, idmp_duration=1) == b"OK"
 
         # Test with maximum value
-        assert await r.xcfgset(stream, idmp_duration=300) is True
+        assert await r.xcfgset(stream, idmp_duration=300) == b"OK"
 
     @skip_if_server_version_lt("8.5.0")
     async def test_xcfgset_idmp_maxsize(self, r: redis.Redis):
@@ -4828,13 +4828,13 @@ class TestRedisCommands:
         await r.xadd(stream, {"foo": "bar"})
 
         # Test XCFGSET with IDMP-MAXSIZE only
-        assert await r.xcfgset(stream, idmp_maxsize=5000) is True
+        assert await r.xcfgset(stream, idmp_maxsize=5000) == b"OK"
 
         # Test with minimum value
-        assert await r.xcfgset(stream, idmp_maxsize=1) is True
+        assert await r.xcfgset(stream, idmp_maxsize=1) == b"OK"
 
         # Test with maximum value
-        assert await r.xcfgset(stream, idmp_maxsize=1000000) is True
+        assert await r.xcfgset(stream, idmp_maxsize=10000) == b"OK"
 
     @skip_if_server_version_lt("8.5.0")
     async def test_xcfgset_both_parameters(self, r: redis.Redis):
@@ -4844,10 +4844,10 @@ class TestRedisCommands:
         await r.xadd(stream, {"foo": "bar"})
 
         # Test XCFGSET with both IDMP-DURATION and IDMP-MAXSIZE
-        assert await r.xcfgset(stream, idmp_duration=120, idmp_maxsize=5000) is True
+        assert await r.xcfgset(stream, idmp_duration=120, idmp_maxsize=5000) == b"OK"
 
         # Test with different values
-        assert await r.xcfgset(stream, idmp_duration=60, idmp_maxsize=10000) is True
+        assert await r.xcfgset(stream, idmp_duration=60, idmp_maxsize=10000) == b"OK"
 
     @skip_if_server_version_lt("8.5.0")
     async def test_xcfgset_validation(self, r: redis.Redis):

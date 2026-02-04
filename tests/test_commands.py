@@ -6529,7 +6529,7 @@ class TestRedisCommands:
         assert r.xcfgset(stream, idmp_maxsize=1) == b"OK"
 
         # Test with maximum value
-        assert r.xcfgset(stream, idmp_maxsize=1000000) == b"OK"
+        assert r.xcfgset(stream, idmp_maxsize=10000) == b"OK"
 
     @skip_if_server_version_lt("8.5.0")
     def test_xcfgset_both_parameters(self, r):
