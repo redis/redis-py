@@ -2468,39 +2468,16 @@ class TestClusterRedisCommands:
 
     @skip_if_server_version_lt("8.5.240")
     async def test_hotkeys_cluster(self, r: RedisCluster) -> None:
-        """Test all HOTKEYS commands in cluster mode targeting a specific node"""
-        # Get a primary node to target
-        node = r.get_primaries()[0]
+        """Test all HOTKEYS commands in cluster are raising an error"""
 
-        # Clean up any existing session
-        try:
-            await r.hotkeys_stop(target_nodes=node)
-        except Exception:
-            pass
-
-        # Test HOTKEYS START
-        result = await r.hotkeys_start(
-            count=10, metrics=[HotkeysMetricsTypes.CPU], target_nodes=node
-        )
-        assert result == b"OK"
-
-        # Test HOTKEYS GET during ongoing session
-        result = await r.hotkeys_get(target_nodes=node)
-        assert isinstance(result, dict)
-        assert result["tracking-active"] == 1
-
-        # Test HOTKEYS STOP
-        result = await r.hotkeys_stop(target_nodes=node)
-        assert result == b"OK"
-
-        # Test HOTKEYS GET after stopping
-        result = await r.hotkeys_get(target_nodes=node)
-        assert isinstance(result, dict)
-        assert result["tracking-active"] == 0
-
-        # Test HOTKEYS RESET
-        result = await r.hotkeys_reset(target_nodes=node)
-        assert result == b"OK"
+        with pytest.raises(NotImplementedError):
+            await r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+        with pytest.raises(NotImplementedError):
+            await r.hotkeys_get()
+        with pytest.raises(NotImplementedError):
+            await r.hotkeys_reset()
+        with pytest.raises(NotImplementedError):
+            await r.hotkeys_stop()
 
 
 class TestNodesManager:

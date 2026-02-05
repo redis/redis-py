@@ -38,6 +38,7 @@ from .core import (
     AsyncScriptCommands,
     DataAccessCommands,
     FunctionCommands,
+    HotkeysMetricsTypes,
     ManagementCommands,
     ModuleCommands,
     PubSubCommands,
@@ -827,6 +828,58 @@ class ClusterManagementCommands(ManagementCommands):
             target_nodes=target_nodes,
         )
 
+    def hotkeys_start(
+        self,
+        metrics: List[HotkeysMetricsTypes],
+        count: Optional[int] = None,
+        duration: Optional[int] = None,
+        sample_ratio: Optional[int] = None,
+        slots: Optional[List[int]] = None,
+        **kwargs,
+    ) -> ResponseT:
+        """
+        Start collecting hotkeys data on the specified node(s).
+        The command will be sent to the specified target_nodes.
+
+        For more information see https://redis.io/commands/hotkeys-start
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    def hotkeys_stop(self, **kwargs) -> ResponseT:
+        """
+        Stop the ongoing hotkeys collection session (if any) on the specified node(s).
+        The command will be sent to the specified target_nodes.
+
+        For more information see https://redis.io/commands/hotkeys-stop
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    def hotkeys_reset(self, **kwargs) -> ResponseT:
+        """
+        Discard the last hotkeys collection session results on the specified node(s).
+        The command will be sent to the specified target_nodes.
+
+        For more information see https://redis.io/commands/hotkeys-reset
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    def hotkeys_get(self, **kwargs) -> ResponseT:
+        """
+        Retrieve the result of the collection session from the specified node(s).
+        The command will be sent to the specified target_nodes.
+
+        For more information see https://redis.io/commands/hotkeys-get
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
 
 class AsyncClusterManagementCommands(
     ClusterManagementCommands, AsyncManagementCommands
@@ -922,6 +975,58 @@ class AsyncClusterManagementCommands(
             optout,
             noloop,
             target_nodes=target_nodes,
+        )
+
+    async def hotkeys_start(
+        self,
+        metrics: List[HotkeysMetricsTypes],
+        count: Optional[int] = None,
+        duration: Optional[int] = None,
+        sample_ratio: Optional[int] = None,
+        slots: Optional[List[int]] = None,
+        **kwargs,
+    ) -> ResponseT:
+        """
+        Start collecting hotkeys data on the specified node(s).
+        The command will be sent to the specified target_nodes.
+
+        For more information see https://redis.io/commands/hotkeys-start
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    async def hotkeys_stop(self, **kwargs) -> ResponseT:
+        """
+        Stop the ongoing hotkeys collection session (if any) on the specified node(s).
+        The command will be sent to the specified target_nodes.
+
+        For more information see https://redis.io/commands/hotkeys-stop
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    async def hotkeys_reset(self, **kwargs) -> ResponseT:
+        """
+        Discard the last hotkeys collection session results on the specified node(s).
+        The command will be sent to the specified target_nodes.
+
+        For more information see https://redis.io/commands/hotkeys-reset
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    async def hotkeys_get(self, **kwargs) -> ResponseT:
+        """
+        Retrieve the result of the collection session from the specified node(s).
+        The command will be sent to the specified target_nodes.
+
+        For more information see https://redis.io/commands/hotkeys-get
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
 

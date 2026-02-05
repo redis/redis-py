@@ -1413,8 +1413,8 @@ class ManagementCommands(CommandsProtocol):
 
     def hotkeys_start(
         self,
+        metrics: List[HotkeysMetricsTypes],
         count: Optional[int] = None,
-        metrics: Optional[List[HotkeysMetricsTypes]] = None,
         duration: Optional[int] = None,
         sample_ratio: Optional[int] = None,
         slots: Optional[List[int]] = None,
@@ -1436,10 +1436,8 @@ class ManagementCommands(CommandsProtocol):
         args: List[Union[str, int]] = ["HOTKEYS", "START"]
 
         # Add METRICS
-        if metrics:
-            args.append("METRICS")
-            args.append(len(metrics))
-            args.extend([str(m.value) for m in metrics])
+        args.extend(["METRICS", len(metrics)])
+        args.extend([str(m.value) for m in metrics])
 
         # Add COUNT
         if count is not None:
@@ -1484,7 +1482,9 @@ class ManagementCommands(CommandsProtocol):
         Retrieve the result of the ongoing collection session (if any),
         or the last collection session (if any).
 
-        Returns a dictionary with the returned fields detailed in the Redis documentation.
+        HOTKEYS GET response is wrapped in an array for aggregation support.
+        Each node returns a single-element array, allowing multiple node
+        responses to be concatenated by DMC or other aggregators.
 
         For more information, see https://redis.io/commands/hotkeys-get
         """
