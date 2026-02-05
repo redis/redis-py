@@ -7,6 +7,7 @@ from typing_extensions import Optional
 
 from redis import ConnectionPool, Redis, RedisCluster
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.data_structure import WeightedList
 from redis.event import EventDispatcher, EventDispatcherInterface
 from redis.multidb.circuit import (
@@ -164,8 +165,13 @@ class MultiDbConfig:
         for database_config in self.databases_config:
             # The retry object is not used in the lower level clients, so we can safely remove it.
             # We rely on command_retry in terms of global retries.
+            #
+            # Maintenance notifications are temporarily disabled in underlying clients.
             database_config.client_kwargs.update(
-                {"retry": Retry(retries=0, backoff=NoBackoff())}
+                {
+                    "retry": Retry(retries=0, backoff=NoBackoff()),
+                    "maint_notifications_config": MaintNotificationsConfig(enabled=False),
+                }
             )
 
             if database_config.from_url:

@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from redis.connection import ConnectionPool
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.multidb.circuit import (
     PBCircuitBreakerAdapter,
     CircuitBreaker,
@@ -133,6 +134,38 @@ class TestMultiDbConfig:
         assert config.health_check_interval == health_check_interval
         assert config.failover_strategy == mock_failover_strategy
         assert config.auto_fallback_interval == auto_fallback_interval
+
+    def test_underlying_clients_have_disabled_retry_and_maint_notifications(self):
+        """
+        Test that underlying clients have retry disabled (0 retries)
+        and maintenance notifications disabled.
+        """
+        db_configs = [
+            DatabaseConfig(
+                client_kwargs={"host": "host1", "port": "port1"},
+                weight=1.0,
+            ),
+            DatabaseConfig(
+                client_kwargs={"host": "host2", "port": "port2"},
+                weight=0.9,
+            ),
+        ]
+
+        config = MultiDbConfig(databases_config=db_configs)
+        databases = config.databases()
+
+        assert len(databases) == 2
+
+        for db, weight in databases:
+            # Verify retry is disabled (0 retries)
+            retry = db.client.get_retry()
+            assert retry is not None
+            assert retry.get_retries() == 0
+
+            # Verify maint_notifications_config is disabled
+            # When maint_notifications_config.enabled is False, the pool handler is None
+            pool = db.client.connection_pool
+            assert pool._maint_notifications_pool_handler is None
 
 
 @pytest.mark.onlynoncluster
