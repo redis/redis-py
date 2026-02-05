@@ -42,7 +42,7 @@ class HybridSearchQuery:
         Allowed values are "TFIDF", "TFIDF.DOCNORM", "DISMAX", "DOCSCORE", "BM25",
         "BM25STD", "BM25STD.TANH", "HAMMING", etc.
 
-        For more information about supported scroring algorithms,
+        For more information about supported scoring algorithms,
         see https://redis.io/docs/latest/develop/ai/search-and-query/advanced-concepts/scoring/
         """
         self._scorer = scorer
