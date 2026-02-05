@@ -78,7 +78,6 @@ runs:
         echo "::endgroup::"
 
         echo "::group::Starting Redis servers"
-        set -x
         # Check if REDIS_VERSION is in the custom map
         mapped_version=""
         if [[ -n "${REDIS_VERSION_CUSTOM_MAP:-}" ]]; then
@@ -133,7 +132,6 @@ runs:
         fi
 
         sleep 10 # time to settle
-        set +x
         echo "::endgroup::"
       shell: bash
 

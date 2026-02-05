@@ -838,8 +838,7 @@ class ClusterManagementCommands(ManagementCommands):
         **kwargs,
     ) -> ResponseT:
         """
-        Start collecting hotkeys data on the specified node(s).
-        The command will be sent to the specified target_nodes.
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
 
         For more information see https://redis.io/commands/hotkeys-start
         """
@@ -849,8 +848,7 @@ class ClusterManagementCommands(ManagementCommands):
 
     def hotkeys_stop(self, **kwargs) -> ResponseT:
         """
-        Stop the ongoing hotkeys collection session (if any) on the specified node(s).
-        The command will be sent to the specified target_nodes.
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
 
         For more information see https://redis.io/commands/hotkeys-stop
         """
@@ -860,8 +858,7 @@ class ClusterManagementCommands(ManagementCommands):
 
     def hotkeys_reset(self, **kwargs) -> ResponseT:
         """
-        Discard the last hotkeys collection session results on the specified node(s).
-        The command will be sent to the specified target_nodes.
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
 
         For more information see https://redis.io/commands/hotkeys-reset
         """
@@ -871,8 +868,7 @@ class ClusterManagementCommands(ManagementCommands):
 
     def hotkeys_get(self, **kwargs) -> ResponseT:
         """
-        Retrieve the result of the collection session from the specified node(s).
-        The command will be sent to the specified target_nodes.
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
 
         For more information see https://redis.io/commands/hotkeys-get
         """
@@ -987,8 +983,7 @@ class AsyncClusterManagementCommands(
         **kwargs,
     ) -> ResponseT:
         """
-        Start collecting hotkeys data on the specified node(s).
-        The command will be sent to the specified target_nodes.
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
 
         For more information see https://redis.io/commands/hotkeys-start
         """
@@ -998,8 +993,7 @@ class AsyncClusterManagementCommands(
 
     async def hotkeys_stop(self, **kwargs) -> ResponseT:
         """
-        Stop the ongoing hotkeys collection session (if any) on the specified node(s).
-        The command will be sent to the specified target_nodes.
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
 
         For more information see https://redis.io/commands/hotkeys-stop
         """
@@ -1009,8 +1003,7 @@ class AsyncClusterManagementCommands(
 
     async def hotkeys_reset(self, **kwargs) -> ResponseT:
         """
-        Discard the last hotkeys collection session results on the specified node(s).
-        The command will be sent to the specified target_nodes.
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
 
         For more information see https://redis.io/commands/hotkeys-reset
         """
@@ -1020,10 +1013,9 @@ class AsyncClusterManagementCommands(
 
     async def hotkeys_get(self, **kwargs) -> ResponseT:
         """
-        Retrieve the result of the collection session from the specified node(s).
-        The command will be sent to the specified target_nodes.
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
 
-        For more information see https://redis.io/commands/hotkeys-get
+         For more information see https://redis.io/commands/hotkeys-get
         """
         raise NotImplementedError(
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
