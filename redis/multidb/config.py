@@ -7,9 +7,9 @@ from typing_extensions import Optional
 
 from redis import ConnectionPool, Redis, RedisCluster
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
-from redis.maint_notifications import MaintNotificationsConfig
 from redis.data_structure import WeightedList
 from redis.event import EventDispatcher, EventDispatcherInterface
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.multidb.circuit import (
     DEFAULT_GRACE_PERIOD,
     CircuitBreaker,

@@ -7,8 +7,8 @@ from typing import Any, Callable, List, Optional
 from redis.background import BackgroundScheduler
 from redis.backoff import NoBackoff
 from redis.client import PubSubWorkerThread
-from redis.maint_notifications import MaintNotificationsConfig
 from redis.commands import CoreCommands, RedisModuleCommands
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.multidb.circuit import CircuitBreaker
 from redis.multidb.circuit import State as CBState
 from redis.multidb.command_executor import DefaultCommandExecutor

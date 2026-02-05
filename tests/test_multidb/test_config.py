@@ -3,7 +3,6 @@ from unittest.mock import Mock
 import pytest
 
 from redis.connection import ConnectionPool
-from redis.maint_notifications import MaintNotificationsConfig
 from redis.multidb.circuit import (
     PBCircuitBreakerAdapter,
     CircuitBreaker,
