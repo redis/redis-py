@@ -4252,6 +4252,45 @@ class TestHybridSearch(SearchTestsBase):
 
     @pytest.mark.redismod
     @skip_if_server_version_lt("8.3.224")
+    def test_hybrid_search_query_with_supported_scorer(self, client):
+        # Create index and add data
+        self._create_hybrid_search_index(client)
+        self._add_data_for_hybrid_search(client, items_sets=10)
+
+        # set search query
+        search_query = HybridSearchQuery("shoes")
+
+        vsim_query = HybridVsimQuery(
+            vector_field_name="@embedding",
+            vector_data="$vec",
+        )
+
+        hybrid_query = HybridQuery(search_query, vsim_query)
+
+        supported_scorers = [
+            "TFIDF",
+            "TFIDF.DOCNORM",
+            "BM25",
+            "BM25STD",
+            "BM25STD.TANH",
+            "DISMAX",
+            "DOCSCORE",
+            "HAMMING",
+        ]
+        for scorer in supported_scorers:
+            search_query.scorer(scorer)
+
+            res = client.ft().hybrid_search(
+                query=hybrid_query,
+                params_substitution={
+                    "vec": np.array([1, 2, 2, 3], dtype=np.float32).tobytes()
+                },
+                timeout=10,
+            )
+            assert res is not None
+
+    @pytest.mark.redismod
+    @skip_if_server_version_lt("8.3.224")
     def test_hybrid_search_query_with_vsim_method_defined_query_init(self, client):
         # Create index and add data
         self._create_hybrid_search_index(client)
