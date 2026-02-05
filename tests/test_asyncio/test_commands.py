@@ -1035,9 +1035,9 @@ class TestRedisCommands:
         # Perform operations to generate data
         for i in range(20):
             await r.set("anyprefix:{3}:key", f"value{i}")
-            await r.get(f"anyprefix:{3}:key")
+            await r.get("anyprefix:{3}:key")
             await r.set("anyprefix:{1}:key", f"value{i}")
-            await r.get(f"anyprefix:{1}:key")
+            await r.get("anyprefix:{1}:key")
 
         # Stop the session
         await r.hotkeys_stop()
