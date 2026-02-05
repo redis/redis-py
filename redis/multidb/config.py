@@ -170,7 +170,9 @@ class MultiDbConfig:
             database_config.client_kwargs.update(
                 {
                     "retry": Retry(retries=0, backoff=NoBackoff()),
-                    "maint_notifications_config": MaintNotificationsConfig(enabled=False),
+                    "maint_notifications_config": MaintNotificationsConfig(
+                        enabled=False
+                    ),
                 }
             )
 
