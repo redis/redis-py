@@ -150,7 +150,8 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         """
         # The retry object is not used in the lower level clients, so we can safely remove it.
         # We rely on command_retry in terms of global retries.
-        # Maintenance notifications are also disabled in underlying clients.
+        #
+        # Maintenance notifications are temporarily disabled in underlying clients.
         config.client_kwargs.update(
             {
                 "retry": Retry(retries=0, backoff=NoBackoff()),
