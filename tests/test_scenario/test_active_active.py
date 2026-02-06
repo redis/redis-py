@@ -2,6 +2,8 @@ import json
 import logging
 import os
 import threading
+import time
+from queue import Queue
 from time import sleep
 from typing import Optional
 
@@ -15,7 +17,15 @@ from redis.multidb.failover import DEFAULT_FAILOVER_ATTEMPTS, DEFAULT_FAILOVER_D
 from redis.multidb.healthcheck import LagAwareHealthCheck
 from redis.retry import Retry
 from redis.utils import dummy_fail
-from tests.test_scenario.fault_injector_client import ActionRequest, ActionType
+from tests.test_scenario.fault_injector_client import (
+    ActionRequest,
+    ActionType,
+    SlotMigrateEffects,
+)
+from tests.test_scenario.maint_notifications_helpers import (
+    ClusterOperations,
+    KeyGenerationHelpers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -460,3 +470,266 @@ class TestActiveActive:
 
         pubsub_thread.stop()
         assert messages_count > 2
+
+
+NETWORK_LATENCY_DELAY_MS = 3000
+NETWORK_LATENCY_DURATION = 60
+SOCKET_TIMEOUT = 2
+SLOT_SHUFFLE_TIMEOUT = 120
+
+
+class TestActiveActiveWithHitless:
+    """
+    Two mirror tests proving hitless timeout relaxation is the decisive factor
+    in preventing (or allowing) CB trips during network latency on an OSS
+    cluster with Active-Active MultiDBClient.
+
+    Both tests share the same setup:
+      - socket_timeout = 2s
+      - network_latency = 3s (exceeds socket_timeout)
+      - min_num_failures = 2, failure_rate_threshold = 0.51
+
+    The ONLY difference is relaxed_timeout:
+      - Test 1: relaxed_timeout=10 -> timeout relaxed to 10s during SMIGRATING,
+        commands succeed (3s < 10s), CB stays closed, NO AA failover.
+      - Test 2: relaxed_timeout=-1 -> timeout stays at 2s,
+        commands timeout (3s > 2s), CB trips, AA failover occurs.
+    """
+
+    def teardown_method(self, method):
+        sleep(10)
+
+    @pytest.mark.parametrize(
+        "r_multi_db_with_hitless",
+        [
+            {
+                "relaxed_timeout": 10,
+                "socket_timeout": SOCKET_TIMEOUT,
+                "min_num_failures": 2,
+                "failure_rate_threshold": 0.51,
+            },
+        ],
+        ids=["hitless_relaxation_enabled"],
+        indirect=True,
+    )
+    @pytest.mark.timeout(300)
+    def test_hitless_relaxation_prevents_cb_trip_during_network_latency(
+        self,
+        r_multi_db_with_hitless,
+        fault_injector_client_oss_api,
+    ):
+        """
+        With relaxed_timeout=10, SMIGRATING relaxes socket timeout to 10s.
+        Despite 3s network latency (> 2s socket_timeout), commands succeed
+        because 3s < 10s relaxed timeout. CB stays closed, no AA failover.
+        """
+        multi_db_client, listener, endpoint_config = r_multi_db_with_hitless
+
+        retry = Retry(
+            supported_errors=(TemporaryUnavailableException,),
+            retries=DEFAULT_FAILOVER_ATTEMPTS,
+            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
+        )
+
+        logging.info("Initializing MultiDBClient with warm-up commands")
+        retry.call_with_retry(
+            lambda: multi_db_client.set("warmup_key", "warmup_value"),
+            lambda _: dummy_fail(),
+        )
+
+        bdb_id = endpoint_config.get("bdb_id")
+
+        logging.info(
+            "Triggering network latency (%dms, %ds duration) on active DB (bdb_id=%s)",
+            NETWORK_LATENCY_DELAY_MS,
+            NETWORK_LATENCY_DURATION,
+            bdb_id,
+        )
+        latency_thread = threading.Thread(
+            target=fault_injector_client_oss_api.trigger_network_latency,
+            daemon=True,
+            args=(bdb_id, NETWORK_LATENCY_DELAY_MS, NETWORK_LATENCY_DURATION),
+            kwargs={"cluster_index": 0},
+        )
+        latency_thread.start()
+
+        logging.info("Triggering SLOT_SHUFFLE on active DB")
+        trigger_effect_thread = threading.Thread(
+            target=self._trigger_slot_shuffle,
+            daemon=True,
+            args=(fault_injector_client_oss_api, endpoint_config),
+        )
+        trigger_effect_thread.start()
+
+        errors = Queue()
+        logging.info("Executing commands during network latency + slot migration")
+        cmd_thread = threading.Thread(
+            target=self._execute_commands_for_duration,
+            daemon=True,
+            args=(multi_db_client, errors, NETWORK_LATENCY_DURATION),
+        )
+        cmd_thread.start()
+        cmd_thread.join()
+
+        trigger_effect_thread.join()
+        latency_thread.join()
+
+        logging.info(
+            "Verifying CB did NOT trip (is_changed_flag=%s)", listener.is_changed_flag
+        )
+        assert not listener.is_changed_flag, (
+            "AA failover should NOT have occurred -- hitless relaxation "
+            "should have prevented the CB from tripping"
+        )
+        assert errors.empty(), (
+            f"Commands should not have failed, but got errors: {list(errors.queue)}"
+        )
+
+    @pytest.mark.parametrize(
+        "r_multi_db_with_hitless",
+        [
+            {
+                "relaxed_timeout": -1,
+                "socket_timeout": SOCKET_TIMEOUT,
+                "min_num_failures": 2,
+                "failure_rate_threshold": 0.51,
+            },
+        ],
+        ids=["hitless_relaxation_disabled"],
+        indirect=True,
+    )
+    @pytest.mark.timeout(300)
+    def test_cb_trips_without_hitless_relaxation_during_network_latency(
+        self,
+        r_multi_db_with_hitless,
+        fault_injector_client_oss_api,
+    ):
+        """
+        With relaxed_timeout=-1, SMIGRATING is received but socket timeout
+        stays at 2s. With 3s network latency, commands timeout. CB trips
+        after 2 failures, triggering AA failover to the standby DB.
+        """
+        multi_db_client, listener, endpoint_config = r_multi_db_with_hitless
+
+        retry = Retry(
+            supported_errors=(TemporaryUnavailableException,),
+            retries=DEFAULT_FAILOVER_ATTEMPTS,
+            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
+        )
+
+        logging.info("Initializing MultiDBClient with warm-up commands")
+        retry.call_with_retry(
+            lambda: multi_db_client.set("warmup_key", "warmup_value"),
+            lambda _: dummy_fail(),
+        )
+
+        bdb_id = endpoint_config.get("bdb_id")
+
+        logging.info(
+            "Triggering network latency (%dms, %ds duration) on active DB (bdb_id=%s)",
+            NETWORK_LATENCY_DELAY_MS,
+            NETWORK_LATENCY_DURATION,
+            bdb_id,
+        )
+        latency_thread = threading.Thread(
+            target=fault_injector_client_oss_api.trigger_network_latency,
+            daemon=True,
+            args=(bdb_id, NETWORK_LATENCY_DELAY_MS, NETWORK_LATENCY_DURATION),
+            kwargs={"cluster_index": 0},
+        )
+        latency_thread.start()
+
+        logging.info("Triggering SLOT_SHUFFLE on active DB")
+        trigger_effect_thread = threading.Thread(
+            target=self._trigger_slot_shuffle,
+            daemon=True,
+            args=(fault_injector_client_oss_api, endpoint_config),
+        )
+        trigger_effect_thread.start()
+
+        errors = Queue()
+        logging.info(
+            "Executing commands -- expecting timeouts and CB trip"
+        )
+        cmd_thread = threading.Thread(
+            target=self._execute_commands_until_failover_or_timeout,
+            daemon=True,
+            args=(multi_db_client, listener, errors, NETWORK_LATENCY_DURATION),
+        )
+        cmd_thread.start()
+        cmd_thread.join()
+
+        trigger_effect_thread.join()
+        latency_thread.join()
+
+        logging.info(
+            "Verifying CB DID trip (is_changed_flag=%s)", listener.is_changed_flag
+        )
+        assert listener.is_changed_flag, (
+            "AA failover SHOULD have occurred -- without hitless relaxation "
+            "the CB should have tripped due to command timeouts"
+        )
+        assert not errors.empty(), (
+            "Expected command failures before failover, but none were recorded"
+        )
+
+    @staticmethod
+    def _trigger_slot_shuffle(fault_injector_client, endpoint_config):
+        logging.info("Starting SLOT_SHUFFLE trigger effect")
+        action_id = ClusterOperations.trigger_effect(
+            fault_injector=fault_injector_client,
+            endpoint_config=endpoint_config,
+            effect_name=SlotMigrateEffects.SLOT_SHUFFLE,
+        )
+        fault_injector_client.get_operation_result(
+            action_id, timeout=SLOT_SHUFFLE_TIMEOUT
+        )
+        logging.info("SLOT_SHUFFLE trigger effect completed")
+
+    @staticmethod
+    def _execute_commands_for_duration(
+        multi_db_client, errors: Queue, duration: int
+    ):
+        start = time.time()
+        executed = 0
+        while time.time() - start < duration:
+            key = f"aa_hitless_test_key_{executed}"
+            try:
+                multi_db_client.set(key, "value")
+                result = multi_db_client.get(key)
+                if result != "value":
+                    errors.put(f"Unexpected GET result for {key}: {result}")
+                executed += 2
+            except Exception as e:
+                logging.info("Command failed: %s", e)
+                errors.put(str(e))
+            if executed % 100 == 0:
+                logging.info("Executed %d commands so far", executed)
+            sleep(0.1)
+        logging.info("Command execution finished. Total commands: %d", executed)
+
+    @staticmethod
+    def _execute_commands_until_failover_or_timeout(
+        multi_db_client, listener, errors: Queue, max_duration: int
+    ):
+        start = time.time()
+        executed = 0
+        while time.time() - start < max_duration:
+            key = f"aa_hitless_test_key_{executed}"
+            try:
+                multi_db_client.set(key, "value")
+                multi_db_client.get(key)
+                executed += 2
+            except Exception as e:
+                logging.info("Command failed (expected): %s", e)
+                errors.put(str(e))
+            if listener.is_changed_flag:
+                logging.info(
+                    "AA failover detected after %d commands", executed
+                )
+                return
+            sleep(0.1)
+        logging.info(
+            "Max duration reached without failover. Total commands: %d",
+            executed,
+        )
