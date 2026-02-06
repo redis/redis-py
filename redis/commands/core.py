@@ -1419,7 +1419,7 @@ class ManagementCommands(CommandsProtocol):
         sample_ratio: Optional[int] = None,
         slots: Optional[List[int]] = None,
         **kwargs,
-    ) -> ResponseT:
+    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
         """
         Start collecting hotkeys data.
         Returns an error if there is an ongoing collection session.
@@ -1459,7 +1459,9 @@ class ManagementCommands(CommandsProtocol):
 
         return self.execute_command(*args, **kwargs)
 
-    def hotkeys_stop(self, **kwargs) -> ResponseT:
+    def hotkeys_stop(
+        self, **kwargs
+    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
         """
         Stop the ongoing hotkeys collection session (if any).
         The results of the last collection session are kept for consumption with HOTKEYS GET.
@@ -1468,7 +1470,9 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("HOTKEYS STOP", **kwargs)
 
-    def hotkeys_reset(self, **kwargs) -> ResponseT:
+    def hotkeys_reset(
+        self, **kwargs
+    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
         """
         Discard the last hotkeys collection session results (in order to save memory).
         Error if there is an ongoing collection session.
@@ -1477,7 +1481,12 @@ class ManagementCommands(CommandsProtocol):
         """
         return self.execute_command("HOTKEYS RESET", **kwargs)
 
-    def hotkeys_get(self, **kwargs) -> ResponseT:
+    def hotkeys_get(
+        self, **kwargs
+    ) -> Union[
+        Awaitable[list[dict[Union[str, bytes], Any]]],
+        list[dict[Union[str, bytes], Any]],
+    ]:
         """
         Retrieve the result of the ongoing collection session (if any),
         or the last collection session (if any).

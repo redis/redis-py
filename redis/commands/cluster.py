@@ -3,6 +3,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncIterator,
+    Awaitable,
     Dict,
     Iterable,
     Iterator,
@@ -836,7 +837,7 @@ class ClusterManagementCommands(ManagementCommands):
         sample_ratio: Optional[int] = None,
         slots: Optional[List[int]] = None,
         **kwargs,
-    ) -> ResponseT:
+    ) -> Union[str, bytes]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -846,7 +847,7 @@ class ClusterManagementCommands(ManagementCommands):
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    def hotkeys_stop(self, **kwargs) -> ResponseT:
+    def hotkeys_stop(self, **kwargs) -> Union[str, bytes]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -856,7 +857,7 @@ class ClusterManagementCommands(ManagementCommands):
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    def hotkeys_reset(self, **kwargs) -> ResponseT:
+    def hotkeys_reset(self, **kwargs) -> Union[str, bytes]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -866,7 +867,7 @@ class ClusterManagementCommands(ManagementCommands):
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    def hotkeys_get(self, **kwargs) -> ResponseT:
+    def hotkeys_get(self, **kwargs) -> list[dict[Union[str, bytes], Any]]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -981,7 +982,7 @@ class AsyncClusterManagementCommands(
         sample_ratio: Optional[int] = None,
         slots: Optional[List[int]] = None,
         **kwargs,
-    ) -> ResponseT:
+    ) -> Awaitable[Union[str, bytes]]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -991,7 +992,7 @@ class AsyncClusterManagementCommands(
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    async def hotkeys_stop(self, **kwargs) -> ResponseT:
+    async def hotkeys_stop(self, **kwargs) -> Awaitable[Union[str, bytes]]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -1001,7 +1002,7 @@ class AsyncClusterManagementCommands(
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    async def hotkeys_reset(self, **kwargs) -> ResponseT:
+    async def hotkeys_reset(self, **kwargs) -> Awaitable[Union[str, bytes]]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
@@ -1011,11 +1012,13 @@ class AsyncClusterManagementCommands(
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
-    async def hotkeys_get(self, **kwargs) -> ResponseT:
+    async def hotkeys_get(
+        self, **kwargs
+    ) -> Awaitable[list[dict[Union[str, bytes], Any]]]:
         """
         Cluster client does not support hotkeys command. Please use the non-cluster client.
 
-         For more information see https://redis.io/commands/hotkeys-get
+        For more information see https://redis.io/commands/hotkeys-get
         """
         raise NotImplementedError(
             "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
