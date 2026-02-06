@@ -1,4 +1,5 @@
 import datetime
+import inspect
 import logging
 import textwrap
 import warnings
@@ -125,12 +126,22 @@ def deprecated_function(reason="", version="", name=None):
     """
 
     def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            warn_deprecated(name or func.__name__, reason, version, stacklevel=3)
-            return func(*args, **kwargs)
+        if inspect.iscoroutinefunction(func):
+            # Create async wrapper for async functions
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                warn_deprecated(name or func.__name__, reason, version, stacklevel=3)
+                return await func(*args, **kwargs)
 
-        return wrapper
+            return async_wrapper
+        else:
+            # Create regular wrapper for sync functions
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                warn_deprecated(name or func.__name__, reason, version, stacklevel=3)
+                return func(*args, **kwargs)
+
+            return wrapper
 
     return decorator
 
@@ -158,9 +169,26 @@ def warn_deprecated_arg_usage(
 C = TypeVar("C", bound=Callable)
 
 
+def _get_filterable_args(
+    func: Callable, args: tuple, kwargs: dict, allowed_args: Optional[List[str]] = None
+) -> dict:
+    """
+    Extract arguments from function call that should be checked for deprecation/experimental warnings.
+    Excludes 'self' and any explicitly allowed args.
+    """
+    arg_names = func.__code__.co_varnames[: func.__code__.co_argcount]
+    filterable_args = dict(zip(arg_names, args))
+    filterable_args.update(kwargs)
+    filterable_args.pop("self", None)
+    if allowed_args:
+        for allowed_arg in allowed_args:
+            filterable_args.pop(allowed_arg, None)
+    return filterable_args
+
+
 def deprecated_args(
-    args_to_warn: list = ["*"],
-    allowed_args: list = [],
+    args_to_warn: Optional[List[str]] = None,
+    allowed_args: Optional[List[str]] = None,
     reason: str = "",
     version: str = "",
 ) -> Callable[[C], C]:
@@ -168,37 +196,46 @@ def deprecated_args(
     Decorator to mark specified args of a function as deprecated.
     If '*' is in args_to_warn, all arguments will be marked as deprecated.
     """
+    if args_to_warn is None:
+        args_to_warn = ["*"]
+    if allowed_args is None:
+        allowed_args = []
+
+    def _check_deprecated_args(func, filterable_args):
+        """Check and warn about deprecated arguments."""
+        for arg in args_to_warn:
+            if arg == "*" and len(filterable_args) > 0:
+                warn_deprecated_arg_usage(
+                    list(filterable_args.keys()),
+                    func.__name__,
+                    reason,
+                    version,
+                    stacklevel=4,
+                )
+            elif arg in filterable_args:
+                warn_deprecated_arg_usage(
+                    arg, func.__name__, reason, version, stacklevel=4
+                )
 
     def decorator(func: C) -> C:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            # Get function argument names
-            arg_names = func.__code__.co_varnames[: func.__code__.co_argcount]
+        if inspect.iscoroutinefunction(func):
 
-            provided_args = dict(zip(arg_names, args))
-            provided_args.update(kwargs)
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                filterable_args = _get_filterable_args(func, args, kwargs, allowed_args)
+                _check_deprecated_args(func, filterable_args)
+                return await func(*args, **kwargs)
 
-            provided_args.pop("self", None)
-            for allowed_arg in allowed_args:
-                provided_args.pop(allowed_arg, None)
+            return async_wrapper
+        else:
 
-            for arg in args_to_warn:
-                if arg == "*" and len(provided_args) > 0:
-                    warn_deprecated_arg_usage(
-                        list(provided_args.keys()),
-                        func.__name__,
-                        reason,
-                        version,
-                        stacklevel=3,
-                    )
-                elif arg in provided_args:
-                    warn_deprecated_arg_usage(
-                        arg, func.__name__, reason, version, stacklevel=3
-                    )
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                filterable_args = _get_filterable_args(func, args, kwargs, allowed_args)
+                _check_deprecated_args(func, filterable_args)
+                return func(*args, **kwargs)
 
-            return func(*args, **kwargs)
-
-        return wrapper
+            return wrapper
 
     return decorator
 
@@ -368,12 +405,22 @@ def experimental_method() -> Callable[[C], C]:
     """
 
     def decorator(func: C) -> C:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            warn_experimental(func.__name__, stacklevel=2)
-            return func(*args, **kwargs)
+        if inspect.iscoroutinefunction(func):
+            # Create async wrapper for async functions
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                warn_experimental(func.__name__, stacklevel=2)
+                return await func(*args, **kwargs)
 
-        return wrapper
+            return async_wrapper
+        else:
+            # Create regular wrapper for sync functions
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                warn_experimental(func.__name__, stacklevel=2)
+                return func(*args, **kwargs)
+
+            return wrapper
 
     return decorator
 
@@ -393,32 +440,40 @@ def warn_experimental_arg_usage(
 
 
 def experimental_args(
-    args_to_warn: list = ["*"],
+    args_to_warn: Optional[List[str]] = None,
 ) -> Callable[[C], C]:
     """
     Decorator to mark specified args of a function as experimental.
     """
+    if args_to_warn is None:
+        args_to_warn = ["*"]
+
+    def _check_experimental_args(func, filterable_args):
+        """Check and warn about experimental arguments."""
+        for arg in args_to_warn:
+            if arg in filterable_args:
+                warn_experimental_arg_usage(arg, func.__name__, stacklevel=4)
 
     def decorator(func: C) -> C:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            # Get function argument names
-            arg_names = func.__code__.co_varnames[: func.__code__.co_argcount]
+        if inspect.iscoroutinefunction(func):
 
-            provided_args = dict(zip(arg_names, args))
-            provided_args.update(kwargs)
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                filterable_args = _get_filterable_args(func, args, kwargs)
+                if len(filterable_args) > 0:
+                    _check_experimental_args(func, filterable_args)
+                return await func(*args, **kwargs)
 
-            provided_args.pop("self", None)
+            return async_wrapper
+        else:
 
-            if len(provided_args) == 0:
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                filterable_args = _get_filterable_args(func, args, kwargs)
+                if len(filterable_args) > 0:
+                    _check_experimental_args(func, filterable_args)
                 return func(*args, **kwargs)
 
-            for arg in args_to_warn:
-                if arg in provided_args:
-                    warn_experimental_arg_usage(arg, func.__name__, stacklevel=3)
-
-            return func(*args, **kwargs)
-
-        return wrapper
+            return wrapper
 
     return decorator
