@@ -165,7 +165,9 @@ class MultiDbConfig:
         for database_config in self.databases_config:
             # The retry object is not used in the lower level clients, so we can safely remove it.
             # We rely on command_retry in terms of global retries.
-            database_config.client_kwargs["retry"] = Retry(retries=0, backoff=NoBackoff())
+            database_config.client_kwargs["retry"] = Retry(
+                retries=0, backoff=NoBackoff()
+            )
 
             # Maintenance notifications are disabled by default in underlying clients,
             # but user can override this by providing their own config.
