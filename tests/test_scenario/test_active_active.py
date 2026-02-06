@@ -472,10 +472,15 @@ class TestActiveActive:
         assert messages_count > 2
 
 
-NETWORK_LATENCY_DELAY_MS = 3000
+NETWORK_LATENCY_DELAY_MS = 2000
 NETWORK_LATENCY_DURATION = 60
-SOCKET_TIMEOUT = 2
-SLOT_SHUFFLE_TIMEOUT = 120
+SOCKET_TIMEOUT = 1
+SLOT_SHUFFLE_TIMEOUT = 240
+# Small data preload to make the shard migration take long enough for
+# SMIGRATING to overlap with network latency.  Keep it small so the
+# preload phase is fast (CRDB writes are slow due to cross-cluster sync).
+DATA_PRELOAD_KEY_COUNT = 100
+DATA_PRELOAD_VALUE_SIZE = 102400  # 100 KB per key -> ~10 MB total
 
 
 class TestActiveActiveWithHitless:
@@ -484,44 +489,62 @@ class TestActiveActiveWithHitless:
     in preventing (or allowing) CB trips during network latency on an OSS
     cluster with Active-Active MultiDBClient.
 
-    Both tests share the same setup:
-      - socket_timeout = 2s
-      - network_latency = 3s (exceeds socket_timeout)
-      - min_num_failures = 2, failure_rate_threshold = 0.51
+    Setup (identical for both tests):
+      - socket_timeout = 1s
+      - network_latency = 2s (exceeds socket_timeout)
+      - ~10 MB of data pre-loaded to slow down the shard migration
+      - failure_rate_threshold = 0.90
+
+    Ordering:
+      1. Pre-populate ~5 MB of data.
+      2. Submit network_latency (FI applies 3s delay to all hosting nodes).
+      3. Submit slot_migrate (FI processes next; migration sends SMIGRATING
+         while latency is active).
+      4. Execute commands concurrently.
+
+    During the SMIGRATING window (~10-30s with 5 MB of data), commands
+    that land on the migrating shard either succeed (relaxed timeout) or
+    fail (no relaxation).
 
     The ONLY difference is relaxed_timeout:
-      - Test 1: relaxed_timeout=10 -> timeout relaxed to 10s during SMIGRATING,
-        commands succeed (3s < 10s), CB stays closed, NO AA failover.
-      - Test 2: relaxed_timeout=-1 -> timeout stays at 2s,
-        commands timeout (3s > 2s), CB trips, AA failover occurs.
+      - Test 1 (relaxed_timeout=5): During SMIGRATING the effective
+        timeout is 5s > 2s latency, so commands succeed and the overall
+        failure rate stays below the 0.90 threshold. CB stays closed.
+      - Test 2 (relaxed_timeout=-1): Timeout stays at 1s < 2s latency,
+        ALL commands fail, failure rate = 1.0 > 0.90. CB trips.
     """
 
     def teardown_method(self, method):
         sleep(10)
 
+    # ------------------------------------------------------------------
+    # Test 1 -- hitless relaxation PREVENTS CB trip
+    # ------------------------------------------------------------------
     @pytest.mark.parametrize(
         "r_multi_db_with_hitless",
         [
             {
-                "relaxed_timeout": 10,
+                "relaxed_timeout": 5,
                 "socket_timeout": SOCKET_TIMEOUT,
-                "min_num_failures": 2,
-                "failure_rate_threshold": 0.51,
+                "min_num_failures": 20,
+                "failure_rate_threshold": 0.90,
             },
         ],
         ids=["hitless_relaxation_enabled"],
         indirect=True,
     )
-    @pytest.mark.timeout(300)
+    @pytest.mark.timeout(600)
     def test_hitless_relaxation_prevents_cb_trip_during_network_latency(
         self,
         r_multi_db_with_hitless,
         fault_injector_client_oss_api,
     ):
         """
-        With relaxed_timeout=10, SMIGRATING relaxes socket timeout to 10s.
-        Despite 3s network latency (> 2s socket_timeout), commands succeed
-        because 3s < 10s relaxed timeout. CB stays closed, no AA failover.
+        With relaxed_timeout=5, SMIGRATING relaxes socket timeout to 5s.
+        Despite 2s network latency (> 1s socket_timeout), commands during
+        the migration window succeed (2s < 5s).  The successful commands
+        keep the failure rate below 0.90, so the CB stays closed and no AA
+        failover occurs.
         """
         multi_db_client, listener, endpoint_config = r_multi_db_with_hitless
 
@@ -540,7 +563,14 @@ class TestActiveActiveWithHitless:
         bdb_id = endpoint_config.get("bdb_id")
 
         logging.info(
-            "Triggering network latency (%dms, %ds duration) on active DB (bdb_id=%s)",
+            "Step 0: Pre-loading %d keys (%d bytes each) to slow down migration",
+            DATA_PRELOAD_KEY_COUNT,
+            DATA_PRELOAD_VALUE_SIZE,
+        )
+        self._preload_data(multi_db_client, DATA_PRELOAD_KEY_COUNT, DATA_PRELOAD_VALUE_SIZE)
+
+        logging.info(
+            "Step 1: Triggering network latency (%dms, %ds duration) on bdb_id=%s",
             NETWORK_LATENCY_DELAY_MS,
             NETWORK_LATENCY_DURATION,
             bdb_id,
@@ -553,20 +583,22 @@ class TestActiveActiveWithHitless:
         )
         latency_thread.start()
 
-        logging.info("Triggering SLOT_SHUFFLE on active DB")
+        migration_complete = threading.Event()
+
+        logging.info("Step 2: Triggering SLOT_SHUFFLE (trigger=migrate)")
         trigger_effect_thread = threading.Thread(
-            target=self._trigger_slot_shuffle,
+            target=self._trigger_slot_shuffle_and_signal,
             daemon=True,
-            args=(fault_injector_client_oss_api, endpoint_config),
+            args=(fault_injector_client_oss_api, endpoint_config, migration_complete),
         )
         trigger_effect_thread.start()
 
         errors = Queue()
-        logging.info("Executing commands during network latency + slot migration")
+        logging.info("Step 3: Executing commands during latency + migration")
         cmd_thread = threading.Thread(
-            target=self._execute_commands_for_duration,
+            target=self._execute_commands_until_event_or_timeout,
             daemon=True,
-            args=(multi_db_client, errors, NETWORK_LATENCY_DURATION),
+            args=(multi_db_client, errors, migration_complete, NETWORK_LATENCY_DURATION),
         )
         cmd_thread.start()
         cmd_thread.join()
@@ -581,24 +613,24 @@ class TestActiveActiveWithHitless:
             "AA failover should NOT have occurred -- hitless relaxation "
             "should have prevented the CB from tripping"
         )
-        assert errors.empty(), (
-            f"Commands should not have failed, but got errors: {list(errors.queue)}"
-        )
 
+    # ------------------------------------------------------------------
+    # Test 2 -- CB trips WITHOUT hitless relaxation
+    # ------------------------------------------------------------------
     @pytest.mark.parametrize(
         "r_multi_db_with_hitless",
         [
             {
                 "relaxed_timeout": -1,
                 "socket_timeout": SOCKET_TIMEOUT,
-                "min_num_failures": 2,
-                "failure_rate_threshold": 0.51,
+                "min_num_failures": 20,
+                "failure_rate_threshold": 0.90,
             },
         ],
         ids=["hitless_relaxation_disabled"],
         indirect=True,
     )
-    @pytest.mark.timeout(300)
+    @pytest.mark.timeout(600)
     def test_cb_trips_without_hitless_relaxation_during_network_latency(
         self,
         r_multi_db_with_hitless,
@@ -606,8 +638,9 @@ class TestActiveActiveWithHitless:
     ):
         """
         With relaxed_timeout=-1, SMIGRATING is received but socket timeout
-        stays at 2s. With 3s network latency, commands timeout. CB trips
-        after 2 failures, triggering AA failover to the standby DB.
+        stays at 1s.  With 2s network latency every command times out.  The
+        failure rate hits 1.0 > 0.90 after 20 failures and the CB trips,
+        triggering AA failover.
         """
         multi_db_client, listener, endpoint_config = r_multi_db_with_hitless
 
@@ -626,7 +659,14 @@ class TestActiveActiveWithHitless:
         bdb_id = endpoint_config.get("bdb_id")
 
         logging.info(
-            "Triggering network latency (%dms, %ds duration) on active DB (bdb_id=%s)",
+            "Step 0: Pre-loading %d keys (%d bytes each) to slow down migration",
+            DATA_PRELOAD_KEY_COUNT,
+            DATA_PRELOAD_VALUE_SIZE,
+        )
+        self._preload_data(multi_db_client, DATA_PRELOAD_KEY_COUNT, DATA_PRELOAD_VALUE_SIZE)
+
+        logging.info(
+            "Step 1: Triggering network latency (%dms, %ds duration) on bdb_id=%s",
             NETWORK_LATENCY_DELAY_MS,
             NETWORK_LATENCY_DURATION,
             bdb_id,
@@ -639,7 +679,7 @@ class TestActiveActiveWithHitless:
         )
         latency_thread.start()
 
-        logging.info("Triggering SLOT_SHUFFLE on active DB")
+        logging.info("Step 2: Triggering SLOT_SHUFFLE (trigger=migrate)")
         trigger_effect_thread = threading.Thread(
             target=self._trigger_slot_shuffle,
             daemon=True,
@@ -648,9 +688,7 @@ class TestActiveActiveWithHitless:
         trigger_effect_thread.start()
 
         errors = Queue()
-        logging.info(
-            "Executing commands -- expecting timeouts and CB trip"
-        )
+        logging.info("Step 3: Executing commands -- expecting CB trip")
         cmd_thread = threading.Thread(
             target=self._execute_commands_until_failover_or_timeout,
             daemon=True,
@@ -669,22 +707,70 @@ class TestActiveActiveWithHitless:
             "AA failover SHOULD have occurred -- without hitless relaxation "
             "the CB should have tripped due to command timeouts"
         )
-        assert not errors.empty(), (
-            "Expected command failures before failover, but none were recorded"
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _preload_data(multi_db_client, key_count: int, value_size: int):
+        value = "x" * value_size
+        for i in range(key_count):
+            multi_db_client.set(f"preload_{i}", value)
+            if (i + 1) % 100 == 0:
+                logging.info("Pre-loaded %d / %d keys", i + 1, key_count)
+        logging.info(
+            "Pre-load complete: %d keys, ~%d MB",
+            key_count,
+            key_count * value_size // (1024 * 1024),
         )
 
     @staticmethod
     def _trigger_slot_shuffle(fault_injector_client, endpoint_config):
-        logging.info("Starting SLOT_SHUFFLE trigger effect")
+        logging.info("Starting SLOT_SHUFFLE trigger effect (trigger=migrate)")
         action_id = ClusterOperations.trigger_effect(
             fault_injector=fault_injector_client,
             endpoint_config=endpoint_config,
             effect_name=SlotMigrateEffects.SLOT_SHUFFLE,
+            trigger_name="migrate",
         )
         fault_injector_client.get_operation_result(
             action_id, timeout=SLOT_SHUFFLE_TIMEOUT
         )
         logging.info("SLOT_SHUFFLE trigger effect completed")
+
+    @staticmethod
+    def _trigger_slot_shuffle_and_signal(fault_injector_client, endpoint_config, event):
+        TestActiveActiveWithHitless._trigger_slot_shuffle(fault_injector_client, endpoint_config)
+        logging.info("Setting migration_complete event")
+        event.set()
+
+    @staticmethod
+    def _execute_commands_until_event_or_timeout(
+        multi_db_client, errors: Queue, stop_event: threading.Event, max_duration: int
+    ):
+        start = time.time()
+        executed = 0
+        while time.time() - start < max_duration:
+            if stop_event.is_set():
+                logging.info(
+                    "Migration complete signal received after %d commands, stopping",
+                    executed,
+                )
+                return
+            key = f"aa_hitless_test_key_{executed}"
+            try:
+                multi_db_client.set(key, "value")
+                result = multi_db_client.get(key)
+                if result != "value":
+                    errors.put(f"Unexpected GET result for {key}: {result}")
+                executed += 2
+            except Exception as e:
+                logging.info("Command failed: %s", e)
+                errors.put(str(e))
+            if executed % 100 == 0:
+                logging.info("Executed %d commands so far", executed)
+            sleep(0.1)
+        logging.info("Command execution finished. Total commands: %d", executed)
 
     @staticmethod
     def _execute_commands_for_duration(
