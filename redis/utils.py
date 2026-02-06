@@ -210,11 +210,11 @@ def deprecated_args(
                     func.__name__,
                     reason,
                     version,
-                    stacklevel=4,
+                    stacklevel=5,
                 )
             elif arg in filterable_args:
                 warn_deprecated_arg_usage(
-                    arg, func.__name__, reason, version, stacklevel=4
+                    arg, func.__name__, reason, version, stacklevel=5
                 )
 
     def decorator(func: C) -> C:
@@ -444,6 +444,7 @@ def experimental_args(
 ) -> Callable[[C], C]:
     """
     Decorator to mark specified args of a function as experimental.
+    If '*' is in args_to_warn, all arguments will be marked as experimental.
     """
     if args_to_warn is None:
         args_to_warn = ["*"]
@@ -451,7 +452,11 @@ def experimental_args(
     def _check_experimental_args(func, filterable_args):
         """Check and warn about experimental arguments."""
         for arg in args_to_warn:
-            if arg in filterable_args:
+            if arg == "*" and len(filterable_args) > 0:
+                warn_experimental_arg_usage(
+                    list(filterable_args.keys()), func.__name__, stacklevel=4
+                )
+            elif arg in filterable_args:
                 warn_experimental_arg_usage(arg, func.__name__, stacklevel=4)
 
     def decorator(func: C) -> C:
