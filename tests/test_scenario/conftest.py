@@ -208,6 +208,81 @@ def r_multi_db(
     return MultiDBClient(config), listener, endpoint_config
 
 
+@pytest.fixture()
+def r_multi_db_with_hitless(
+    request,
+    fault_injector_client_oss_api,
+) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListener, dict]:
+    """
+    Creates a MultiDBClient with two OSS cluster databases on separate clusters,
+    both configured with maint_notifications.
+
+    Parametrized via request.param with:
+        - relaxed_timeout: int (e.g. 10 to enable relaxation, -1 to disable)
+        - socket_timeout: float (e.g. 2)
+        - min_num_failures: int (e.g. 2)
+        - failure_rate_threshold: float (e.g. 0.51)
+
+    Returns:
+        (multi_db_client, listener, endpoint_config)
+    """
+    relaxed_timeout = request.param.get("relaxed_timeout", 10)
+    socket_timeout = request.param.get("socket_timeout", 2)
+    min_num_failures = request.param.get("min_num_failures", 2)
+    failure_rate_threshold = request.param.get("failure_rate_threshold", 0.51)
+
+    endpoint_config = get_endpoints_config("re-active-active-oss-cluster")
+    username = endpoint_config.get("username", None)
+    password = endpoint_config.get("password", None)
+
+    maint_config = MaintNotificationsConfig(
+        enabled=True,
+        relaxed_timeout=relaxed_timeout,
+    )
+
+    event_dispatcher = EventDispatcher()
+    listener = CheckActiveDatabaseChangedListener()
+    event_dispatcher.register_listeners(
+        {
+            ActiveDatabaseChanged: [listener],
+        }
+    )
+
+    db_configs = []
+    for idx, (endpoint_url, weight) in enumerate(
+        zip(endpoint_config["endpoints"][:2], [1.0, 0.9])
+    ):
+        db_config = DatabaseConfig(
+            weight=weight,
+            from_url=endpoint_url,
+            client_kwargs={
+                "username": username,
+                "password": password,
+                "decode_responses": True,
+                "protocol": 3,
+                "socket_timeout": socket_timeout,
+                "maint_notifications_config": maint_config,
+            },
+            health_check_url=extract_cluster_fqdn(endpoint_url),
+        )
+        db_configs.append(db_config)
+
+    config = MultiDbConfig(
+        client_class=RedisCluster,
+        databases_config=db_configs,
+        command_retry=Retry(ExponentialBackoff(cap=0.1, base=0.01), retries=10),
+        min_num_failures=min_num_failures,
+        failure_rate_threshold=failure_rate_threshold,
+        health_check_probes=3,
+        health_check_interval=DEFAULT_HEALTH_CHECK_INTERVAL,
+        event_dispatcher=event_dispatcher,
+        health_check_probes_delay=DEFAULT_HEALTH_CHECK_DELAY,
+    )
+
+    multi_db_client = MultiDBClient(config)
+    return multi_db_client, listener, endpoint_config
+
+
 def extract_cluster_fqdn(url):
     """
     Extract Cluster FQDN from Redis URL
