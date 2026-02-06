@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from redis.connection import ConnectionPool
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.multidb.circuit import (
     PBCircuitBreakerAdapter,
     CircuitBreaker,
@@ -165,6 +166,34 @@ class TestMultiDbConfig:
             # When maint_notifications_config.enabled is False, the pool handler is None
             pool = db.client.connection_pool
             assert pool._maint_notifications_pool_handler is None
+
+    def test_user_provided_maint_notifications_config_is_respected(self):
+        """
+        Test that user-provided maint_notifications_config is not overwritten.
+        """
+        user_maint_config = MaintNotificationsConfig(enabled=True)
+        db_configs = [
+            DatabaseConfig(
+                client_kwargs={
+                    "host": "host1",
+                    "port": "port1",
+                    "protocol": 3,  # Required for maint notifications
+                    "maint_notifications_config": user_maint_config,
+                },
+                weight=1.0,
+            ),
+        ]
+
+        config = MultiDbConfig(databases_config=db_configs)
+        databases = config.databases()
+
+        assert len(databases) == 1
+
+        db, weight = databases[0]
+        # Verify user-provided maint_notifications_config is respected
+        pool = db.client.connection_pool
+        assert pool._maint_notifications_pool_handler is not None
+        assert pool._maint_notifications_pool_handler.config.enabled is True
 
 
 @pytest.mark.onlynoncluster
