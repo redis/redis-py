@@ -78,7 +78,22 @@ runs:
         echo "::endgroup::"
 
         echo "::group::Starting Redis servers"
-        redis_major_version=$(echo "$REDIS_VERSION" | grep -oP '^\d+')
+        # Check if REDIS_VERSION is in the custom map
+        mapped_version=""
+        if [[ -n "${REDIS_VERSION_CUSTOM_MAP:-}" ]]; then
+          for mapping in $REDIS_VERSION_CUSTOM_MAP; do
+            tag="${mapping%%:*}"
+            version="${mapping##*:}"
+            if [[ "$REDIS_VERSION" == "$tag" ]]; then
+              mapped_version="$version"
+              echo "Found custom mapping: $REDIS_VERSION -> $mapped_version"
+              break
+            fi
+          done
+        fi
+        # Use mapped version if found, otherwise use REDIS_VERSION
+        version_to_parse="${mapped_version:-$REDIS_VERSION}"
+        redis_major_version=$(echo "$version_to_parse" | grep -oP '^\d+')
         echo "REDIS_MAJOR_VERSION=${redis_major_version}" >> $GITHUB_ENV
 
         if (( redis_major_version < 8 )); then

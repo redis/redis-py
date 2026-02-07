@@ -26,6 +26,7 @@ from redis.cluster import (
     LoadBalancingStrategy,
     get_node_name,
 )
+from redis.commands.core import HotkeysMetricsTypes
 from redis.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
 from redis.exceptions import (
     AskError,
@@ -2464,6 +2465,19 @@ class TestClusterRedisCommands:
         await r.acl_deluser(username, target_nodes="primaries")
 
         await user_client.aclose()
+
+    @skip_if_server_version_lt("8.5.240")
+    async def test_hotkeys_cluster(self, r: RedisCluster) -> None:
+        """Test all HOTKEYS commands in cluster are raising an error"""
+
+        with pytest.raises(NotImplementedError):
+            await r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+        with pytest.raises(NotImplementedError):
+            await r.hotkeys_get()
+        with pytest.raises(NotImplementedError):
+            await r.hotkeys_reset()
+        with pytest.raises(NotImplementedError):
+            await r.hotkeys_stop()
 
 
 class TestNodesManager:

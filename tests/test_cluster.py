@@ -29,6 +29,7 @@ from redis.cluster import (
     RedisCluster,
     get_node_name,
 )
+from redis.commands.core import HotkeysMetricsTypes
 from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.crc import key_slot
 from redis.exceptions import (
@@ -2607,6 +2608,19 @@ class TestClusterRedisCommands:
                 r.tfunction_delete(lib_name)
             except Exception:
                 pass
+
+    @skip_if_server_version_lt("8.5.240")
+    def test_hotkeys_cluster(self, r):
+        """Test all HOTKEYS commands in cluster mode are raising an error"""
+
+        with pytest.raises(NotImplementedError):
+            r.hotkeys_start(count=10, metrics=[HotkeysMetricsTypes.CPU])
+        with pytest.raises(NotImplementedError):
+            r.hotkeys_get()
+        with pytest.raises(NotImplementedError):
+            r.hotkeys_reset()
+        with pytest.raises(NotImplementedError):
+            r.hotkeys_stop()
 
 
 @pytest.mark.onlycluster
