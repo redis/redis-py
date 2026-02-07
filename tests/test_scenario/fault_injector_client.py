@@ -39,6 +39,7 @@ class ActionType(str, Enum):
     DELETE_DATABASE = "delete_database"
     SEQUENCE_OF_ACTIONS = "sequence_of_actions"
     NETWORK_FAILURE = "network_failure"
+    NETWORK_LATENCY = "network_latency"
     EXECUTE_RLUTIL_COMMAND = "execute_rlutil_command"
     EXECUTE_RLADMIN_COMMAND = "execute_rladmin_command"
     SLOT_MIGRATE = "slot_migrate"
@@ -289,11 +290,15 @@ class REFaultInjector(FaultInjectorClient):
     def create_database(
         self,
         bdb_config: Dict[str, Any],
+        cluster_index: int = 0,
     ) -> Dict[str, Any]:
         """Create a new database."""
         # Please provide the config just for the db that will be created
         logging.debug(f"Creating database with config: {bdb_config}")
-        params = {"database_config": bdb_config}
+        params = {
+            "database_config": bdb_config,
+            "cluster_index": cluster_index,
+        }
         create_db_action = ActionRequest(
             action_type=ActionType.CREATE_DATABASE,
             parameters=params,
@@ -740,6 +745,38 @@ class REFaultInjector(FaultInjectorClient):
 
     def get_moving_ttl(self) -> int:
         return self.MOVING_TTL
+
+    def trigger_network_latency(
+        self,
+        bdb_id: int,
+        delay_ms: int,
+        duration: int,
+        cluster_index: int = 0,
+    ) -> Dict[str, Any]:
+        """Trigger network latency on database hosting nodes.
+
+        Args:
+            bdb_id: Database ID to affect
+            delay_ms: Latency in milliseconds
+            duration: How long to maintain the latency in seconds
+            cluster_index: Cluster index
+        """
+        action_request = ActionRequest(
+            action_type=ActionType.NETWORK_LATENCY,
+            parameters={
+                "bdb_id": bdb_id,
+                "delay_ms": delay_ms,
+                "duration": duration,
+                "cluster_index": cluster_index,
+            },
+        )
+        result = self.trigger_action(action_request)
+        action_id = result.get("action_id")
+        if not action_id:
+            raise Exception(
+                f"Failed to trigger network latency action: {result}"
+            )
+        return self.get_operation_result(action_id)
 
     def _get_first_master_shard(
         self,

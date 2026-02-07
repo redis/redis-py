@@ -35,6 +35,62 @@ DEFAULT_ENDPOINT_NAME = "m-standard"
 DEFAULT_OSS_API_ENDPOINT_NAME = "maint-notifications-oss-api"
 
 
+def _wait_for_cluster_healthy_in_fixture(
+    host, port, username, password, timeout=120, ping_threshold_ms=1500, required_streak=3, use_ssl=False
+):
+    """
+    Poll cluster until PINGs respond within a reasonable time.
+    Used by fixtures to ensure cluster is healthy before creating clients.
+    """
+    from time import sleep, time
+
+    logging.info("Waiting for cluster to become healthy (timeout=%ds, ssl=%s)", timeout, use_ssl)
+    start = time()
+    healthy_streak = 0
+
+    while time() - start < timeout:
+        try:
+            kwargs = {
+                "host": host,
+                "port": port,
+                "username": username,
+                "password": password,
+                "socket_timeout": 5,
+                "protocol": 3,
+            }
+            if use_ssl:
+                kwargs["ssl"] = True
+                kwargs["ssl_cert_reqs"] = "none"
+                kwargs["ssl_check_hostname"] = False
+            cluster = RedisCluster(**kwargs)
+            ping_start = time()
+            cluster.ping()
+            ping_ms = (time() - ping_start) * 1000
+            cluster.close()
+
+            if ping_ms < ping_threshold_ms:
+                healthy_streak += 1
+                logging.info(
+                    "Cluster PING: %.0fms (streak %d/%d)",
+                    ping_ms,
+                    healthy_streak,
+                    required_streak,
+                )
+                if healthy_streak >= required_streak:
+                    logging.info("Cluster is healthy")
+                    return
+            else:
+                healthy_streak = 0
+                logging.info("Cluster PING: %.0fms (too slow, resetting streak)", ping_ms)
+        except Exception as e:
+            healthy_streak = 0
+            logging.info("Cluster health check failed: %s", e)
+
+        sleep(2)
+
+    logging.warning("Cluster did not become healthy within %ds, proceeding anyway", timeout)
+
+
 class CheckActiveDatabaseChangedListener(EventListenerInterface):
     def __init__(self):
         self.is_changed_flag = False
@@ -206,6 +262,104 @@ def r_multi_db(
     )
 
     return MultiDBClient(config), listener, endpoint_config
+
+
+@pytest.fixture()
+def r_multi_db_with_hitless(
+    request,
+    fault_injector_client_oss_api,
+) -> tuple[MultiDBClient, CheckActiveDatabaseChangedListener, dict]:
+    """
+    Creates a MultiDBClient with two OSS cluster databases on separate clusters,
+    both configured with maint_notifications.
+
+    Parametrized via request.param with:
+        - relaxed_timeout: int (e.g. 10 to enable relaxation, -1 to disable)
+        - socket_timeout: float (e.g. 2)
+        - min_num_failures: int (e.g. 2)
+        - failure_rate_threshold: float (e.g. 0.51)
+        - health_check_interval: float (default DEFAULT_HEALTH_CHECK_INTERVAL)
+        - auto_fallback_interval: float (default 120)
+
+    Returns:
+        (multi_db_client, listener, endpoint_config)
+    """
+    relaxed_timeout = request.param.get("relaxed_timeout", 10)
+    socket_timeout = request.param.get("socket_timeout", 2)
+    min_num_failures = request.param.get("min_num_failures", 2)
+    failure_rate_threshold = request.param.get("failure_rate_threshold", 0.51)
+    health_check_interval = request.param.get(
+        "health_check_interval", DEFAULT_HEALTH_CHECK_INTERVAL
+    )
+    auto_fallback_interval = request.param.get("auto_fallback_interval", 120)
+
+    endpoint_config = get_endpoints_config("re-active-active-oss-cluster")
+
+    # Wait for cluster to be healthy before creating MultiDBClient
+    # This prevents fixture failures due to residual latency from previous tests
+    from urllib.parse import urlparse
+    endpoint_url = endpoint_config["endpoints"][0]
+    parsed = urlparse(endpoint_url)
+    host = parsed.hostname
+    port = parsed.port or 6379
+    username_for_health = endpoint_config.get("username", "default")
+    password_for_health = endpoint_config.get("password")
+    use_ssl = parsed.scheme == "rediss"
+
+    logging.info("Fixture: Waiting for cluster to become healthy before creating MultiDBClient")
+    _wait_for_cluster_healthy_in_fixture(
+        host, port, username_for_health, password_for_health, timeout=120, use_ssl=use_ssl
+    )
+    username = endpoint_config.get("username", None)
+    password = endpoint_config.get("password", None)
+
+    maint_config = MaintNotificationsConfig(
+        enabled=True,
+        relaxed_timeout=relaxed_timeout,
+    )
+
+    event_dispatcher = EventDispatcher()
+    listener = CheckActiveDatabaseChangedListener()
+    event_dispatcher.register_listeners(
+        {
+            ActiveDatabaseChanged: [listener],
+        }
+    )
+
+    db_configs = []
+    for idx, (endpoint_url, weight) in enumerate(
+        zip(endpoint_config["endpoints"][:2], [1.0, 0.9])
+    ):
+        db_config = DatabaseConfig(
+            weight=weight,
+            from_url=endpoint_url,
+            client_kwargs={
+                "username": username,
+                "password": password,
+                "decode_responses": True,
+                "protocol": 3,
+                "socket_timeout": socket_timeout,
+                "maint_notifications_config": maint_config,
+            },
+            health_check_url=extract_cluster_fqdn(endpoint_url),
+        )
+        db_configs.append(db_config)
+
+    config = MultiDbConfig(
+        client_class=RedisCluster,
+        databases_config=db_configs,
+        command_retry=Retry(ExponentialBackoff(cap=0.1, base=0.01), retries=10),
+        min_num_failures=min_num_failures,
+        failure_rate_threshold=failure_rate_threshold,
+        health_check_probes=3,
+        health_check_interval=health_check_interval,
+        event_dispatcher=event_dispatcher,
+        health_check_probes_delay=DEFAULT_HEALTH_CHECK_DELAY,
+        auto_fallback_interval=auto_fallback_interval,
+    )
+
+    multi_db_client = MultiDBClient(config)
+    return multi_db_client, listener, endpoint_config
 
 
 def extract_cluster_fqdn(url):
