@@ -184,8 +184,8 @@ class TestPushNotifications:
     def _get_all_connections_in_pool(self, client: Redis) -> List[ConnectionInterface]:
         connections = []
         if hasattr(client.connection_pool, "_available_connections"):
-            for conn in client.connection_pool._available_connections:
-                connections.append(conn)
+            for pooled_conn in client.connection_pool._available_connections:
+                connections.append(pooled_conn.connection)
         if hasattr(client.connection_pool, "_in_use_connections"):
             for conn in client.connection_pool._in_use_connections:
                 connections.append(conn)
