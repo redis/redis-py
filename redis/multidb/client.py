@@ -8,6 +8,7 @@ from redis.background import BackgroundScheduler
 from redis.backoff import NoBackoff
 from redis.client import PubSubWorkerThread
 from redis.commands import CoreCommands, RedisModuleCommands
+from redis.maint_notifications import MaintNotificationsConfig
 from redis.multidb.circuit import CircuitBreaker
 from redis.multidb.circuit import State as CBState
 from redis.multidb.command_executor import DefaultCommandExecutor
@@ -149,7 +150,14 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         """
         # The retry object is not used in the lower level clients, so we can safely remove it.
         # We rely on command_retry in terms of global retries.
-        config.client_kwargs.update({"retry": Retry(retries=0, backoff=NoBackoff())})
+        config.client_kwargs["retry"] = Retry(retries=0, backoff=NoBackoff())
+
+        # Maintenance notifications are disabled by default in underlying clients,
+        # but user can override this by providing their own config.
+        if "maint_notifications_config" not in config.client_kwargs:
+            config.client_kwargs["maint_notifications_config"] = (
+                MaintNotificationsConfig(enabled=False)
+            )
 
         if config.from_url:
             client = self._config.client_class.from_url(
