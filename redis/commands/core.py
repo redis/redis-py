@@ -1513,6 +1513,17 @@ class AsyncManagementCommands(ManagementCommands):
     async def memory_help(self, **kwargs) -> None:
         return super().memory_help(**kwargs)
 
+    async def ping(self, **kwargs) -> bool:
+        """
+        Ping the Redis server to test connectivity.
+
+        Sends a PING command to the Redis server and returns True if the server
+        responds with "PONG".
+
+        For more information, see https://redis.io/commands/ping
+        """
+        return await self.execute_command("PING", **kwargs)
+
     async def shutdown(
         self,
         save: bool = False,
