@@ -1176,7 +1176,7 @@ class PubSub:
             return await self.handle_message(response, ignore_subscribe_messages)
         return None
 
-    def ping(self, message=None) -> Awaitable[bool]:
+    def ping(self, message: Union[str, None] = None) -> Awaitable[bool]:
         """
         Ping the Redis server to test connectivity.
 
