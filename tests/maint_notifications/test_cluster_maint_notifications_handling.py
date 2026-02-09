@@ -9,6 +9,7 @@ from redis.connection import (
 )
 from redis.maint_notifications import MaintNotificationsConfig, MaintenanceState
 from redis.cache import CacheConfig
+from tests.conftest import skip_if_server_version_lt
 from tests.maint_notifications.proxy_server_helpers import (
     ProxyInterceptorHelper,
     RespTranslator,
@@ -223,6 +224,7 @@ class TestClusterMaintNotificationsConfig(TestClusterMaintNotificationsBase):
         finally:
             cluster.close()
 
+    @skip_if_server_version_lt("7.4.0")
     def test_config_with_cache_enabled(self):
         """
         Test that maint_notifications_config works with caching enabled.
