@@ -11,7 +11,6 @@ from redis.maint_notifications import (
     NodeMigratedNotification,
     NodeMigratingNotification,
     NodeMovingNotification,
-    NodesToSlotsMapping,
     OSSNodeMigratedNotification,
     OSSNodeMigratingNotification,
 )
@@ -193,22 +192,26 @@ class MaintenanceNotificationsParser:
     @staticmethod
     def parse_oss_maintenance_completed_msg(response):
         # Expected message format is:
-        # SMIGRATED <seq_number> [<host:port> <slot, range1-range2,...>, ...]
+        # SMIGRATED <seq_number> [[<src_host:port> <dest_host:port> <slot_range>], ...]
         id = response[1]
         nodes_to_slots_mapping_data = response[2]
-        nodes_to_slots_mapping = []
-        for src_node, node, slots in nodes_to_slots_mapping_data:
-            # Parse the node address to extract host and port
+        # Build the nodes_to_slots_mapping dict structure:
+        # {
+        #     "src_host:port": [
+        #         {"dest_host:port": "slot_range"},
+        #         ...
+        #     ],
+        #     ...
+        # }
+        nodes_to_slots_mapping = {}
+        for src_node, dest_node, slots in nodes_to_slots_mapping_data:
             src_node_str = safe_str(src_node)
-            node_str = safe_str(node)
+            dest_node_str = safe_str(dest_node)
             slots_str = safe_str(slots)
 
-            mapping = NodesToSlotsMapping(
-                src_node_address=src_node_str,
-                dest_node_address=node_str,
-                slots=slots_str,
-            )
-            nodes_to_slots_mapping.append(mapping)
+            if src_node_str not in nodes_to_slots_mapping:
+                nodes_to_slots_mapping[src_node_str] = []
+            nodes_to_slots_mapping[src_node_str].append({dest_node_str: slots_str})
 
         return OSSNodeMigratedNotification(id, nodes_to_slots_mapping)
 

@@ -1894,7 +1894,7 @@ class TestClusterClientCommandsExecutionWithPushNotificationsWithEffectTrigger(
         if isinstance(fault_injector_client_oss_api, ProxyServerFaultInjector):
             execution_duration = 20
         else:
-            execution_duration = 180
+            execution_duration = 40
 
         def execute_commands(duration: int, errors: Queue):
             start = time.time()

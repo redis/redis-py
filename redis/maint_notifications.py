@@ -5,8 +5,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Union
 
 from redis.typing import Number
 
@@ -455,13 +454,6 @@ class OSSNodeMigratingNotification(MaintenanceNotification):
         return hash((self.__class__.__name__, int(self.id)))
 
 
-@dataclass
-class NodesToSlotsMapping:
-    src_node_address: str
-    dest_node_address: str
-    slots: str
-
-
 class OSSNodeMigratedNotification(MaintenanceNotification):
     """
     Notification for when a Redis OSS API client is used and a node has completed migrating slots.
@@ -471,7 +463,25 @@ class OSSNodeMigratedNotification(MaintenanceNotification):
 
     Args:
         id (int): Unique identifier for this notification
-        nodes_to_slots_mapping (List[NodesToSlotsMapping]): List of node-to-slots mappings
+        nodes_to_slots_mapping (Dict[str, List[Dict[str, str]]]): Map of source node address
+            to list of destination mappings. Each destination mapping is a dict with
+            the destination node address as key and the slot range as value.
+
+            Structure example:
+            {
+                "127.0.0.1:6379": [
+                    {"127.0.0.1:6380": "1-100"},
+                    {"127.0.0.1:6381": "101-200"}
+                ],
+                "127.0.0.1:6382": [
+                    {"127.0.0.1:6383": "201-300"}
+                ]
+            }
+
+            Where:
+            - Key (str): Source node address in "host:port" format
+            - Value (List[Dict[str, str]]): List of destination mappings where each dict
+              contains destination node address as key and slot range as value
     """
 
     DEFAULT_TTL = 120
@@ -479,7 +489,7 @@ class OSSNodeMigratedNotification(MaintenanceNotification):
     def __init__(
         self,
         id: int,
-        nodes_to_slots_mapping: List[NodesToSlotsMapping],
+        nodes_to_slots_mapping: Dict[str, List[Dict[str, str]]],
     ):
         super().__init__(id, OSSNodeMigratedNotification.DEFAULT_TTL)
         self.nodes_to_slots_mapping = nodes_to_slots_mapping
@@ -1035,21 +1045,34 @@ class OSSMaintNotificationsHandler:
             logging.debug(f"Handling SMIGRATED notification: {notification}")
             self._in_progress.add(notification)
 
-            # Extract the information about the src and destination nodes that are affected by the maintenance
+            # Extract the information about the src and destination nodes that are affected
+            # by the maintenance. nodes_to_slots_mapping structure:
+            # {
+            #     "src_host:port": [
+            #         {"dest_host:port": "slot_range"},
+            #         ...
+            #     ],
+            #     ...
+            # }
             additional_startup_nodes_info = []
             affected_nodes = set()
-            for mapping in notification.nodes_to_slots_mapping:
-                new_node_host, new_node_port = mapping.dest_node_address.split(":")
-                src_host, src_port = mapping.src_node_address.split(":")
+            for (
+                src_address,
+                dest_mappings,
+            ) in notification.nodes_to_slots_mapping.items():
+                src_host, src_port = src_address.split(":")
                 src_node = self.cluster_client.nodes_manager.get_node(
                     host=src_host, port=src_port
                 )
                 if src_node is not None:
                     affected_nodes.add(src_node)
 
-                additional_startup_nodes_info.append(
-                    (new_node_host, int(new_node_port))
-                )
+                for dest_mapping in dest_mappings:
+                    for dest_address in dest_mapping.keys():
+                        dest_host, dest_port = dest_address.split(":")
+                        additional_startup_nodes_info.append(
+                            (dest_host, int(dest_port))
+                        )
 
             # Updates the cluster slots cache with the new slots mapping
             # This will also update the nodes cache with the new nodes mapping
