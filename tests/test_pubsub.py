@@ -196,6 +196,52 @@ class TestPubSubSubscribeUnsubscribe:
         kwargs = make_subscribe_test_data(r.pubsub(), "shard_channel")
         self._test_resubscribe_on_reconnection(**kwargs)
 
+    @pytest.mark.onlynoncluster
+    def test_resubscribe_binary_channel_on_reconnection(self, r):
+        """Binary channel names that are not valid UTF-8 must survive
+        reconnection without raising ``UnicodeDecodeError``.
+        See https://github.com/redis/redis-py/issues/3912
+        """
+        # b'\x80\x81\x82' is deliberately invalid UTF-8
+        binary_channel = b"\x80\x81\x82"
+        p = r.pubsub()
+        p.subscribe(binary_channel)
+        assert wait_for_message(p) is not None  # consume subscribe ack
+
+        # force reconnect
+        p.connection.disconnect()
+
+        # get_message triggers on_connect → re-subscribe; must not raise
+        messages = []
+        for _ in range(1):
+            messages.append(wait_for_message(p))
+
+        assert len(messages) == 1
+        assert messages[0]["type"] == "subscribe"
+        assert messages[0]["channel"] == binary_channel
+
+    @pytest.mark.onlynoncluster
+    def test_resubscribe_binary_pattern_on_reconnection(self, r):
+        """Binary pattern names that are not valid UTF-8 must survive
+        reconnection without raising ``UnicodeDecodeError``.
+        See https://github.com/redis/redis-py/issues/3912
+        """
+        binary_pattern = b"\x80\x81*"
+        p = r.pubsub()
+        p.psubscribe(binary_pattern)
+        assert wait_for_message(p) is not None  # consume psubscribe ack
+
+        # force reconnect
+        p.connection.disconnect()
+
+        messages = []
+        for _ in range(1):
+            messages.append(wait_for_message(p))
+
+        assert len(messages) == 1
+        assert messages[0]["type"] == "psubscribe"
+        assert messages[0]["channel"] == binary_pattern
+
     def _test_subscribed_property(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
     ):
@@ -1122,9 +1168,9 @@ class TestPubSubTimeouts:
         # Ensure p has the event attribute your wait_for_message would call:
         ev = getattr(p, "subscribed_event", None)
 
-        assert ev is not None, (
-            "PubSub event attribute not found (check redis-py version)"
-        )
+        assert (
+            ev is not None
+        ), "PubSub event attribute not found (check redis-py version)"
 
         with patch.object(ev, "wait") as mock:
             assert wait_for_message(p) == make_message("subscribe", "foo", 1)

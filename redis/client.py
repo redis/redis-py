@@ -898,25 +898,45 @@ class PubSub:
         # NOTE: for python3, we can't pass bytestrings as keyword arguments
         # so we need to decode channel/pattern names back to unicode strings
         # before passing them to [p]subscribe.
+        #
+        # However, channels subscribed without a callback (positional args) may
+        # have binary names that are not valid in the current encoding (e.g.
+        # arbitrary bytes that are not valid UTF-8).  These channels are stored
+        # with a ``None`` handler.  We re-subscribe them as positional args so
+        # that no decoding is required.
         self.pending_unsubscribe_channels.clear()
         self.pending_unsubscribe_patterns.clear()
         self.pending_unsubscribe_shard_channels.clear()
         if self.channels:
-            channels = {
-                self.encoder.decode(k, force=True): v for k, v in self.channels.items()
-            }
-            self.subscribe(**channels)
+            channels_with_handlers = {}
+            channels_without_handlers = []
+            for k, v in self.channels.items():
+                if v is not None:
+                    channels_with_handlers[self.encoder.decode(k, force=True)] = v
+                else:
+                    channels_without_handlers.append(k)
+            if channels_with_handlers or channels_without_handlers:
+                self.subscribe(*channels_without_handlers, **channels_with_handlers)
         if self.patterns:
-            patterns = {
-                self.encoder.decode(k, force=True): v for k, v in self.patterns.items()
-            }
-            self.psubscribe(**patterns)
+            patterns_with_handlers = {}
+            patterns_without_handlers = []
+            for k, v in self.patterns.items():
+                if v is not None:
+                    patterns_with_handlers[self.encoder.decode(k, force=True)] = v
+                else:
+                    patterns_without_handlers.append(k)
+            if patterns_with_handlers or patterns_without_handlers:
+                self.psubscribe(*patterns_without_handlers, **patterns_with_handlers)
         if self.shard_channels:
-            shard_channels = {
-                self.encoder.decode(k, force=True): v
-                for k, v in self.shard_channels.items()
-            }
-            self.ssubscribe(**shard_channels)
+            shard_with_handlers = {}
+            shard_without_handlers = []
+            for k, v in self.shard_channels.items():
+                if v is not None:
+                    shard_with_handlers[self.encoder.decode(k, force=True)] = v
+                else:
+                    shard_without_handlers.append(k)
+            if shard_with_handlers or shard_without_handlers:
+                self.ssubscribe(*shard_without_handlers, **shard_with_handlers)
 
     @property
     def subscribed(self) -> bool:
