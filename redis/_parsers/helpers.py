@@ -880,6 +880,7 @@ _RedisCallbacksRESP2 = {
         map(lambda ll: (float(ll[0]), float(ll[1])) if ll is not None else None, r)
     ),
     "HGETALL": lambda r: r and pairs_to_dict(r) or {},
+    "HOTKEYS GET": lambda r: [pairs_to_dict(m) for m in r],
     "MEMORY STATS": parse_memory_stats,
     "MODULE LIST": lambda r: [pairs_to_dict(m) for m in r],
     "RESET": str_if_bytes,

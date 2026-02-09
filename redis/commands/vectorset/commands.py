@@ -18,6 +18,7 @@ VINFO_CMD = "VINFO"
 VSETATTR_CMD = "VSETATTR"
 VGETATTR_CMD = "VGETATTR"
 VRANDMEMBER_CMD = "VRANDMEMBER"
+VRANGE_CMD = "VRANGE"
 
 # Return type for vsim command
 VSimResult = Optional[
@@ -390,3 +391,33 @@ class VectorSetCommands(CommandsProtocol):
         if count is not None:
             pieces.append(count)
         return self.execute_command(VRANDMEMBER_CMD, *pieces)
+
+    def vrange(
+        self, key: KeyT, start: str, end: str, count: Optional[int] = None
+    ) -> Union[Awaitable[List[str]], List[str]]:
+        """
+        Return elements in a lexicographical range from a vector set ``key``.
+
+        ``start`` is the starting point of the lexicographical range. Can be:
+                - A string prefixed with '[' for inclusive range (e.g., '[Redis')
+                - A string prefixed with '(' for exclusive range (e.g., '(a7')
+                - The special symbol '-' to indicate the minimum element
+
+        ``end`` is the ending point of the lexicographical range. Can be:
+                - A string prefixed with '[' for inclusive range
+                - A string prefixed with '(' for exclusive range
+                - The special symbol '+' to indicate the maximum element
+
+        ``count`` is the maximum number of elements to return.
+                If ``count`` is not provided or negative, all elements in the range are returned.
+                If ``count`` is positive, at most ``count`` elements are returned.
+
+        Returns an array of elements in lexicographical order within the specified range.
+        Returns an empty array if the key doesn't exist.
+
+        For more information, see https://redis.io/commands/vrange.
+        """
+        pieces = [key, start, end]
+        if count is not None:
+            pieces.append(count)
+        return self.execute_command(VRANGE_CMD, *pieces)
