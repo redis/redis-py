@@ -1212,6 +1212,9 @@ class ClusterNode:
     def __eq__(self, obj: Any) -> bool:
         return isinstance(obj, ClusterNode) and obj.name == self.name
 
+    def __hash__(self) -> int:
+        return hash(self.name)
+
     _DEL_MESSAGE = "Unclosed ClusterNode object"
 
     def __del__(

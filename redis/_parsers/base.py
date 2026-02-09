@@ -192,12 +192,26 @@ class MaintenanceNotificationsParser:
     @staticmethod
     def parse_oss_maintenance_completed_msg(response):
         # Expected message format is:
-        # SMIGRATED <seq_number> [<host:port> <slot, range1-range2,...>, ...]
+        # SMIGRATED <seq_number> [[<src_host:port> <dest_host:port> <slot_range>], ...]
         id = response[1]
         nodes_to_slots_mapping_data = response[2]
+        # Build the nodes_to_slots_mapping dict structure:
+        # {
+        #     "src_host:port": [
+        #         {"dest_host:port": "slot_range"},
+        #         ...
+        #     ],
+        #     ...
+        # }
         nodes_to_slots_mapping = {}
-        for node, slots in nodes_to_slots_mapping_data:
-            nodes_to_slots_mapping[safe_str(node)] = safe_str(slots)
+        for src_node, dest_node, slots in nodes_to_slots_mapping_data:
+            src_node_str = safe_str(src_node)
+            dest_node_str = safe_str(dest_node)
+            slots_str = safe_str(slots)
+
+            if src_node_str not in nodes_to_slots_mapping:
+                nodes_to_slots_mapping[src_node_str] = []
+            nodes_to_slots_mapping[src_node_str].append({dest_node_str: slots_str})
 
         return OSSNodeMigratedNotification(id, nodes_to_slots_mapping)
 
@@ -341,9 +355,9 @@ class PushNotificationsParser(Protocol):
 
                 if notification is not None:
                     return self.maintenance_push_handler_func(notification)
-            if (
-                msg_type == _SMIGRATED_MESSAGE
-                and self.oss_cluster_maint_push_handler_func
+            if msg_type == _SMIGRATED_MESSAGE and (
+                self.oss_cluster_maint_push_handler_func
+                or self.maintenance_push_handler_func
             ):
                 parser_function = MSG_TYPE_TO_MAINT_NOTIFICATION_PARSER_MAPPING[
                     msg_type
@@ -351,7 +365,10 @@ class PushNotificationsParser(Protocol):
                 notification = parser_function(response)
 
                 if notification is not None:
-                    return self.oss_cluster_maint_push_handler_func(notification)
+                    if self.maintenance_push_handler_func:
+                        self.maintenance_push_handler_func(notification)
+                    if self.oss_cluster_maint_push_handler_func:
+                        self.oss_cluster_maint_push_handler_func(notification)
         except Exception as e:
             logger.error(
                 "Error handling {} message ({}): {}".format(msg_type, response, e)

@@ -1,7 +1,5 @@
 import base64
 from dataclasses import dataclass
-import logging
-from typing import Union
 
 from redis.http.http_client import HttpClient, HttpError
 
@@ -48,12 +46,13 @@ class RespTranslator:
                 ">3\r\n"  # Push message with 3 elements
                 f"+{notification}\r\n"  # Element 1: Command
                 f":{seq_id}\r\n"  # Element 2: SeqID
-                f"*{len(hosts_and_slots) // 2}\r\n"  # Element 3: Array of host:port, slots pairs
+                f"*{len(hosts_and_slots) // 3}\r\n"  # Element 3: Array of src_host:src_port, dest_host:dest_port, slots pairs
             )
-            for i in range(0, len(hosts_and_slots), 2):
-                resp += "*2\r\n"
+            for i in range(0, len(hosts_and_slots), 3):
+                resp += "*3\r\n"
                 resp += f"+{hosts_and_slots[i]}\r\n"
                 resp += f"+{hosts_and_slots[i + 1]}\r\n"
+                resp += f"+{hosts_and_slots[i + 2]}\r\n"
         else:
             # SMIGRATING
             # Format: SMIGRATING SeqID slot,range1-range2
@@ -211,20 +210,12 @@ class ProxyInterceptorHelper:
 
     def send_notification(
         self,
-        connected_to_port: Union[int, str],
         notification: str,
     ) -> dict:
         """
-        Send a notification to all connections connected to
-        a specific node(identified by port number).
-
-        This method:
-        1. Fetches stats from the interceptor server
-        2. Finds all connection IDs connected to the specified node
-        3. Sends the notification to each connection
+        Send a notification to all connections.
 
         Args:
-            connected_to_port: Port number of the node to send the notification to
             notification: The notification message to send (in RESP format)
 
         Returns:
@@ -233,32 +224,12 @@ class ProxyInterceptorHelper:
         Example:
             interceptor = ProxyInterceptorHelper(None, "http://localhost:4000")
             result = interceptor.send_notification(
-                "6379",
                 "KjENCiQ0DQpQSU5HDQo="  # PING command in base64
             )
         """
-        # Get stats to find connection IDs for the node
-        stats = self.get_stats()
-
-        # Extract connection IDs for the specified node
-        conn_ids = []
-        for node_key, node_info in stats.items():
-            node_port = node_key.split("@")[1]
-            if int(node_port) == int(connected_to_port):
-                for conn in node_info.get("connections", []):
-                    conn_ids.append(conn["id"])
-
-        if not conn_ids:
-            raise RuntimeError(
-                f"No connections found for node {node_port}. "
-                f"Available nodes: {list(set(c.get('node') for c in stats.get('connections', {}).values()))}"
-            )
-
-        # Send notification to each connection
+        # Send notification to all connections
         results = {}
-        logging.info(f"Sending notification to {len(conn_ids)} connections: {conn_ids}")
-        connections_query = f"connectionIds={','.join(conn_ids)}"
-        url = f"{self.server_url}/send-to-clients?{connections_query}&encoding=base64"
+        url = f"{self.server_url}/send-to-all-clients?encoding=base64"
         # Encode notification to base64
         data = base64.b64encode(notification.encode("utf-8"))
 
@@ -271,8 +242,6 @@ class ProxyInterceptorHelper:
             results = {"error": str(e)}
 
         return {
-            "node_address": node_port,
-            "connection_ids": conn_ids,
             "results": results,
         }
 

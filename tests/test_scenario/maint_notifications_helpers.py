@@ -45,7 +45,7 @@ class ClientValidations:
     @staticmethod
     def wait_push_notification(
         redis_client: Union[Redis, RedisCluster],
-        timeout: int = 120,
+        timeout: float = 120,
         fail_on_timeout: bool = True,
         connection: Optional[Connection] = None,
     ):
@@ -57,7 +57,10 @@ class ClientValidations:
             if connection
             else ClientValidations.get_default_connection(redis_client)
         )
-        logging.info(f"Waiting for push notification on connection: {test_conn}")
+        logging.info(
+            f"Waiting for push notification on connection: {test_conn}, "
+            f"local socket port: {test_conn._sock.getsockname()[1] if test_conn._sock else None}"
+        )
 
         try:
             while time.time() - start_time < timeout:
@@ -161,6 +164,14 @@ class ClusterOperations:
     ) -> str:
         """Execute rladmin bind endpoint command and wait for completion."""
         return fault_injector.execute_rebind(endpoint_config, endpoint_id)
+
+    @staticmethod
+    def get_slot_migrate_triggers(
+        fault_injector: FaultInjectorClient,
+        effect_name: SlotMigrateEffects,
+    ) -> Dict[str, Any]:
+        """Get available triggers(trigger name + db example config) for a slot migration effect."""
+        return fault_injector.get_slot_migrate_triggers(effect_name)
 
     @staticmethod
     def trigger_effect(

@@ -493,7 +493,7 @@ class TestOSSNodeMigratedNotification:
     def test_init_with_defaults(self):
         """Test OSSNodeMigratedNotification initialization with default values."""
         with patch("time.monotonic", return_value=1000):
-            nodes_to_slots_mapping = {"127.0.0.1:6380": "1-100"}
+            nodes_to_slots_mapping = {"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]}
             notification = OSSNodeMigratedNotification(
                 id=1, nodes_to_slots_mapping=nodes_to_slots_mapping
             )
@@ -506,8 +506,10 @@ class TestOSSNodeMigratedNotification:
         """Test OSSNodeMigratedNotification initialization with all parameters."""
         with patch("time.monotonic", return_value=1000):
             nodes_to_slots_mapping = {
-                "127.0.0.1:6380": "1-100",
-                "127.0.0.1:6381": "101-200",
+                "127.0.0.1:6379": [
+                    {"127.0.0.1:6380": "1-100"},
+                    {"127.0.0.1:6381": "101-200"},
+                ]
             }
             notification = OSSNodeMigratedNotification(
                 id=1,
@@ -520,16 +522,17 @@ class TestOSSNodeMigratedNotification:
 
     def test_default_ttl(self):
         """Test that DEFAULT_TTL is used correctly."""
-        assert OSSNodeMigratedNotification.DEFAULT_TTL == 30
+        assert OSSNodeMigratedNotification.DEFAULT_TTL == 120
         notification = OSSNodeMigratedNotification(
-            id=1, nodes_to_slots_mapping={"127.0.0.1:6380": "1-100"}
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
         )
-        assert notification.ttl == 30
+        assert notification.ttl == 120
 
     def test_repr(self):
         """Test OSSNodeMigratedNotification string representation."""
         with patch("time.monotonic", return_value=1000):
-            nodes_to_slots_mapping = {"127.0.0.1:6380": "1-100"}
+            nodes_to_slots_mapping = {"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]}
             notification = OSSNodeMigratedNotification(
                 id=1,
                 nodes_to_slots_mapping=nodes_to_slots_mapping,
@@ -539,19 +542,19 @@ class TestOSSNodeMigratedNotification:
             repr_str = repr(notification)
             assert "OSSNodeMigratedNotification" in repr_str
             assert "id=1" in repr_str
-            assert "ttl=30" in repr_str
-            assert "remaining=20.0s" in repr_str
+            assert "ttl=120" in repr_str
+            assert "remaining=110.0s" in repr_str
             assert "expired=False" in repr_str
 
     def test_equality_same_id_and_type(self):
         """Test equality for notifications with same id and type."""
         notification1 = OSSNodeMigratedNotification(
             id=1,
-            nodes_to_slots_mapping={"127.0.0.1:6380": "1-100"},
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
         )
         notification2 = OSSNodeMigratedNotification(
             id=1,
-            nodes_to_slots_mapping={"127.0.0.1:6381": "101-200"},
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6381": "101-200"}]},
         )
         # Should be equal because id and type are the same
         assert notification1 == notification2
@@ -559,17 +562,20 @@ class TestOSSNodeMigratedNotification:
     def test_equality_different_id(self):
         """Test inequality for notifications with different id."""
         notification1 = OSSNodeMigratedNotification(
-            id=1, nodes_to_slots_mapping={"127.0.0.1:6380": "1-100"}
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
         )
         notification2 = OSSNodeMigratedNotification(
-            id=2, nodes_to_slots_mapping={"127.0.0.1:6380": "1-100"}
+            id=2,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
         )
         assert notification1 != notification2
 
     def test_equality_different_type(self):
         """Test inequality for notifications of different types."""
         notification1 = OSSNodeMigratedNotification(
-            id=1, nodes_to_slots_mapping={"127.0.0.1:6380": "1-100"}
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
         )
         notification2 = NodeMigratedNotification(id=1)
         assert notification1 != notification2
@@ -578,11 +584,11 @@ class TestOSSNodeMigratedNotification:
         """Test hash for notifications with same id and type."""
         notification1 = OSSNodeMigratedNotification(
             id=1,
-            nodes_to_slots_mapping={"127.0.0.1:6380": "1-100"},
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
         )
         notification2 = OSSNodeMigratedNotification(
             id=1,
-            nodes_to_slots_mapping={"127.0.0.1:6381": "101-200"},
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6381": "101-200"}]},
         )
         # Should have same hash because id and type are the same
         assert hash(notification1) == hash(notification2)
@@ -590,26 +596,32 @@ class TestOSSNodeMigratedNotification:
     def test_hash_different_id(self):
         """Test hash for notifications with different id."""
         notification1 = OSSNodeMigratedNotification(
-            id=1, nodes_to_slots_mapping={"127.0.0.1:6380": "1-100"}
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
         )
         notification2 = OSSNodeMigratedNotification(
-            id=2, nodes_to_slots_mapping={"127.0.0.1:6380": "1-100"}
+            id=2,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
         )
         assert hash(notification1) != hash(notification2)
 
     def test_in_set(self):
         """Test that notifications can be used in sets."""
         notification1 = OSSNodeMigratedNotification(
-            id=1, nodes_to_slots_mapping={"127.0.0.1:6380": "1-100"}
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
         )
         notification2 = OSSNodeMigratedNotification(
-            id=1, nodes_to_slots_mapping={"127.0.0.1:6380": "1-100"}
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
         )
         notification3 = OSSNodeMigratedNotification(
-            id=2, nodes_to_slots_mapping={"127.0.0.1:6381": "101-200"}
+            id=2,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6381": "101-200"}]},
         )
         notification4 = OSSNodeMigratedNotification(
-            id=2, nodes_to_slots_mapping={"127.0.0.1:6381": "101-200"}
+            id=2,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6381": "101-200"}]},
         )
 
         notification_set = {notification1, notification2, notification3, notification4}
@@ -846,6 +858,8 @@ class TestMaintNotificationsConnectionHandler:
     def setup_method(self):
         """Set up test fixtures."""
         self.mock_connection = Mock()
+        # Configure _sock.getsockname() to return a proper tuple (host, port)
+        self.mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
         self.config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
         self.handler = MaintNotificationsConnectionHandler(
             self.mock_connection, self.config
