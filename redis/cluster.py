@@ -1,3 +1,4 @@
+import logging
 import random
 import socket
 import sys
@@ -78,6 +79,8 @@ from redis.utils import (
     str_if_bytes,
     truncate_text,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def get_node_name(host: str, port: Union[str, int]) -> str:
@@ -262,6 +265,13 @@ class MaintNotificationsAbstractRedisCluster:
         self.maint_notifications_config = maint_notifications_config
 
         if self.maint_notifications_config and self.maint_notifications_config.enabled:
+            logger.debug(
+                "Initializing OSS cluster maintenance notifications handler "
+                "with config: enabled=%s, relaxed_timeout=%s, proactive_reconnect=%s",
+                self.maint_notifications_config.enabled,
+                self.maint_notifications_config.relaxed_timeout,
+                self.maint_notifications_config.proactive_reconnect,
+            )
             self._oss_cluster_maint_notifications_handler = (
                 OSSMaintNotificationsHandler(self, self.maint_notifications_config)
             )
@@ -273,6 +283,10 @@ class MaintNotificationsAbstractRedisCluster:
             for node in self.get_nodes():
                 if node.redis_connection is None:
                     continue
+                logger.debug(
+                    "Updating maintenance notifications config for node %s",
+                    node.name,
+                )
                 node.redis_connection.connection_pool.update_maint_notifications_config(
                     self.maint_notifications_config,
                     oss_cluster_maint_notifications_handler=self._oss_cluster_maint_notifications_handler,

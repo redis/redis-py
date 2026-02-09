@@ -1,4 +1,5 @@
 import copy
+import logging
 import os
 import socket
 import sys
@@ -77,6 +78,8 @@ else:
 
 if HIREDIS_AVAILABLE:
     import hiredis
+
+logger = logging.getLogger(__name__)
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"
@@ -552,6 +555,11 @@ class MaintNotificationsAbstractConnection:
             and self._maint_notifications_connection_handler
             and hasattr(self, "host")
         ):
+            logger.debug(
+                "Activating maintenance notifications for connection %s:%s",
+                getattr(self, "host", None),
+                getattr(self, "port", None),
+            )
             self._enable_maintenance_notifications(
                 maint_notifications_config=self.maint_notifications_config,
                 check_health=check_health,
@@ -582,16 +590,23 @@ class MaintNotificationsAbstractConnection:
                     raise ResponseError(
                         "The server doesn't support maintenance notifications"
                     )
+                logger.debug(
+                    "Successfully enabled maintenance notifications on %s:%s "
+                    "with endpoint_type=%s",
+                    host,
+                    getattr(self, "port", None),
+                    endpoint_type.value,
+                )
         except Exception as e:
             if (
                 isinstance(e, ResponseError)
                 and maint_notifications_config.enabled == "auto"
             ):
                 # Log warning but don't fail the connection
-                import logging
-
-                logger = logging.getLogger(__name__)
-                logger.debug(f"Failed to enable maintenance notifications: {e}")
+                logger.debug(
+                    "Failed to enable maintenance notifications: %s",
+                    e,
+                )
             else:
                 raise
 
@@ -1147,6 +1162,11 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             # and the connection was closed.
             # The state change won't be applied on connections that are in Moving state
             # because their state and configurations will be handled when the moving ttl expires.
+            logger.debug(
+                "Resetting maintenance state on disconnect for connection %s:%s",
+                getattr(self, "host", None),
+                getattr(self, "port", None),
+            )
             self.reset_tmp_settings(reset_relaxed_timeout=True)
             self.maintenance_state = MaintenanceState.NONE
             # reset the sets that keep track of received start maint

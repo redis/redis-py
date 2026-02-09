@@ -326,6 +326,12 @@ class PushNotificationsParser(Protocol):
         ):
             return self.pubsub_push_handler_func(response)
 
+        logger.debug(
+            "Received maintenance push notification of type '%s': %s",
+            msg_type,
+            response,
+        )
+
         try:
             if (
                 msg_type == _INVALIDATION_MESSAGE
@@ -339,6 +345,9 @@ class PushNotificationsParser(Protocol):
                 ][1]
 
                 notification = parser_function(response)
+                logger.debug(
+                    "Parsed MOVING notification: %s", notification
+                )
                 return self.node_moving_push_handler_func(notification)
 
             if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
@@ -353,6 +362,9 @@ class PushNotificationsParser(Protocol):
                     ][0]
                     notification = parser_function(response, notification_type)
 
+                logger.debug(
+                    "Parsed %s notification: %s", msg_type, notification
+                )
                 if notification is not None:
                     return self.maintenance_push_handler_func(notification)
             if msg_type == _SMIGRATED_MESSAGE and (
@@ -363,6 +375,9 @@ class PushNotificationsParser(Protocol):
                     msg_type
                 ][1]
                 notification = parser_function(response)
+                logger.debug(
+                    "Parsed SMIGRATED notification: %s", notification
+                )
 
                 if notification is not None:
                     if self.maintenance_push_handler_func:
@@ -371,7 +386,11 @@ class PushNotificationsParser(Protocol):
                         self.oss_cluster_maint_push_handler_func(notification)
         except Exception as e:
             logger.error(
-                "Error handling {} message ({}): {}".format(msg_type, response, e)
+                "Error handling %s message (%s): %s",
+                msg_type,
+                response,
+                e,
+                exc_info=True,
             )
 
         return None
@@ -420,6 +439,12 @@ class AsyncPushNotificationsParser(Protocol):
         ):
             return await self.pubsub_push_handler_func(response)
 
+        logger.debug(
+            "Received maintenance push notification of type '%s': %s",
+            msg_type,
+            response,
+        )
+
         try:
             if (
                 msg_type == _INVALIDATION_MESSAGE
@@ -435,6 +460,9 @@ class AsyncPushNotificationsParser(Protocol):
                     msg_type
                 ][1]
                 notification = parser_function(response)
+                logger.debug(
+                    "Parsed MOVING notification: %s", notification
+                )
                 return await self.node_moving_push_handler_func(notification)
 
             if msg_type in _MAINTENANCE_MESSAGES and self.maintenance_push_handler_func:
@@ -449,6 +477,9 @@ class AsyncPushNotificationsParser(Protocol):
                     ][0]
                     notification = parser_function(response, notification_type)
 
+                logger.debug(
+                    "Parsed %s notification: %s", msg_type, notification
+                )
                 if notification is not None:
                     return await self.maintenance_push_handler_func(notification)
             if (
@@ -459,11 +490,18 @@ class AsyncPushNotificationsParser(Protocol):
                     msg_type
                 ][1]
                 notification = parser_function(response)
+                logger.debug(
+                    "Parsed SMIGRATED notification: %s", notification
+                )
                 if notification is not None:
                     return await self.oss_cluster_maint_push_handler_func(notification)
         except Exception as e:
             logger.error(
-                "Error handling {} message ({}): {}".format(msg_type, response, e)
+                "Error handling %s message (%s): %s",
+                msg_type,
+                response,
+                e,
+                exc_info=True,
             )
 
         return None

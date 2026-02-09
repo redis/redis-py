@@ -744,6 +744,14 @@ class MaintNotificationsPoolHandler:
     def handle_notification(self, notification: MaintenanceNotification):
         self.remove_expired_notifications()
 
+        logging.debug(
+            "MaintNotificationsPoolHandler received notification: %s, "
+            "type=%s, connection=%s",
+            notification,
+            notification.__class__.__name__,
+            self.connection,
+        )
+
         if isinstance(notification, NodeMovingNotification):
             return self.handle_node_moving_notification(notification)
         else:
@@ -754,12 +762,22 @@ class MaintNotificationsPoolHandler:
             not self.config.proactive_reconnect
             and not self.config.is_relaxed_timeouts_enabled()
         ):
+            logging.debug(
+                "Skipping MOVING notification handling: "
+                "proactive_reconnect=%s, relaxed_timeouts_enabled=%s",
+                self.config.proactive_reconnect,
+                self.config.is_relaxed_timeouts_enabled(),
+            )
             return
         with self._lock:
             if notification in self._processed_notifications:
                 # nothing to do in the connection pool handling
                 # the notification has already been handled or is expired
                 # just return
+                logging.debug(
+                    "Skipping already processed MOVING notification: %s",
+                    notification,
+                )
                 return
 
             with self.pool._lock:
@@ -939,6 +957,14 @@ class MaintNotificationsConnectionHandler:
         # get the notification type by checking its class in the _NOTIFICATION_TYPES dict
         notification_type = self._NOTIFICATION_TYPES.get(notification.__class__, None)
 
+        logging.debug(
+            "MaintNotificationsConnectionHandler received notification: %s, "
+            "type=%s, connection=%s",
+            notification,
+            notification.__class__.__name__,
+            self.connection,
+        )
+
         if notification_type is None:
             logging.error(f"Unhandled notification type: {notification}")
             return
@@ -959,6 +985,14 @@ class MaintNotificationsConnectionHandler:
             self.connection.maintenance_state == MaintenanceState.MOVING
             or not self.config.is_relaxed_timeouts_enabled()
         ):
+            logging.debug(
+                "Skipping maintenance start notification handling: "
+                "connection state=%s, relaxed_timeouts_enabled=%s, "
+                "connection=%s",
+                self.connection.maintenance_state,
+                self.config.is_relaxed_timeouts_enabled(),
+                self.connection,
+            )
             return
 
         self.connection.maintenance_state = maintenance_state
@@ -979,6 +1013,14 @@ class MaintNotificationsConnectionHandler:
             self.connection.maintenance_state == MaintenanceState.MOVING
             or not self.config.is_relaxed_timeouts_enabled()
         ):
+            logging.debug(
+                "Skipping maintenance completed notification handling: "
+                "connection state=%s, relaxed_timeouts_enabled=%s, "
+                "connection=%s",
+                self.connection.maintenance_state,
+                self.config.is_relaxed_timeouts_enabled(),
+                self.connection,
+            )
             return
         add_debug_log_for_notification(self.connection, "MAINTENANCE_COMPLETED")
         self.connection.reset_tmp_settings(reset_relaxed_timeout=True)
@@ -1020,6 +1062,12 @@ class OSSMaintNotificationsHandler:
                     self._processed_notifications.remove(notification)
 
     def handle_notification(self, notification: MaintenanceNotification):
+        logging.debug(
+            "OSSMaintNotificationsHandler received notification: %s, type=%s",
+            notification,
+            notification.__class__.__name__,
+        )
+
         if isinstance(notification, OSSNodeMigratedNotification):
             self.handle_oss_maintenance_completed_notification(notification)
         else:
@@ -1040,73 +1088,119 @@ class OSSMaintNotificationsHandler:
                 # we execute a CLUSTER SLOTS command that can use a different connection
                 # that has also has the notification and we don't want to
                 # process the same notification twice
+                logging.debug(
+                    "Skipping SMIGRATED notification (already %s): %s",
+                    "in progress"
+                    if notification in self._in_progress
+                    else "processed",
+                    notification,
+                )
                 return
 
             logging.debug(f"Handling SMIGRATED notification: {notification}")
             self._in_progress.add(notification)
 
-            # Extract the information about the src and destination nodes that are affected
-            # by the maintenance. nodes_to_slots_mapping structure:
-            # {
-            #     "src_host:port": [
-            #         {"dest_host:port": "slot_range"},
-            #         ...
-            #     ],
-            #     ...
-            # }
-            additional_startup_nodes_info = []
-            affected_nodes = set()
-            for (
-                src_address,
-                dest_mappings,
-            ) in notification.nodes_to_slots_mapping.items():
-                src_host, src_port = src_address.split(":")
-                src_node = self.cluster_client.nodes_manager.get_node(
-                    host=src_host, port=src_port
+            try:
+                # Extract the information about the src and destination nodes that are affected
+                # by the maintenance. nodes_to_slots_mapping structure:
+                # {
+                #     "src_host:port": [
+                #         {"dest_host:port": "slot_range"},
+                #         ...
+                #     ],
+                #     ...
+                # }
+                additional_startup_nodes_info = []
+                affected_nodes = set()
+                for (
+                    src_address,
+                    dest_mappings,
+                ) in notification.nodes_to_slots_mapping.items():
+                    src_host, src_port = src_address.split(":")
+                    src_node = self.cluster_client.nodes_manager.get_node(
+                        host=src_host, port=src_port
+                    )
+                    if src_node is not None:
+                        affected_nodes.add(src_node)
+
+                    for dest_mapping in dest_mappings:
+                        for dest_address in dest_mapping.keys():
+                            dest_host, dest_port = dest_address.split(":")
+                            additional_startup_nodes_info.append(
+                                (dest_host, int(dest_port))
+                            )
+
+                logging.debug(
+                    "SMIGRATED notification details - affected source nodes: %s, "
+                    "additional startup nodes (destinations): %s",
+                    [node.name for node in affected_nodes],
+                    additional_startup_nodes_info,
                 )
-                if src_node is not None:
-                    affected_nodes.add(src_node)
 
-                for dest_mapping in dest_mappings:
-                    for dest_address in dest_mapping.keys():
-                        dest_host, dest_port = dest_address.split(":")
-                        additional_startup_nodes_info.append(
-                            (dest_host, int(dest_port))
-                        )
+                # Updates the cluster slots cache with the new slots mapping
+                # This will also update the nodes cache with the new nodes mapping
+                logging.debug(
+                    "Triggering cluster re-initialization due to SMIGRATED notification"
+                )
+                self.cluster_client.nodes_manager.initialize(
+                    disconnect_startup_nodes_pools=False,
+                    additional_startup_nodes_info=additional_startup_nodes_info,
+                )
 
-            # Updates the cluster slots cache with the new slots mapping
-            # This will also update the nodes cache with the new nodes mapping
-            self.cluster_client.nodes_manager.initialize(
-                disconnect_startup_nodes_pools=False,
-                additional_startup_nodes_info=additional_startup_nodes_info,
-            )
+                all_nodes = set(affected_nodes)
+                all_nodes = all_nodes.union(
+                    self.cluster_client.nodes_manager.nodes_cache.values()
+                )
 
-            all_nodes = set(affected_nodes)
-            all_nodes = all_nodes.union(
-                self.cluster_client.nodes_manager.nodes_cache.values()
-            )
+                for current_node in all_nodes:
+                    if current_node.redis_connection is None:
+                        continue
+                    with current_node.redis_connection.connection_pool._lock:
+                        if current_node in affected_nodes:
+                            # mark for reconnect all in use connections to the node - this will force them to
+                            # disconnect after they complete their current commands
+                            # Some of them might be used by sub sub and we don't know which ones - so we disconnect
+                            # all in flight connections after they are done with current command execution
+                            in_use_count = len(
+                                current_node.redis_connection.connection_pool._get_in_use_connections()
+                            )
+                            logging.debug(
+                                "Marking %d in-use connections for reconnect on "
+                                "affected node %s",
+                                in_use_count,
+                                current_node.name,
+                            )
+                            for conn in current_node.redis_connection.connection_pool._get_in_use_connections():
+                                conn.mark_for_reconnect()
 
-            for current_node in all_nodes:
-                if current_node.redis_connection is None:
-                    continue
-                with current_node.redis_connection.connection_pool._lock:
-                    if current_node in affected_nodes:
-                        # mark for reconnect all in use connections to the node - this will force them to
-                        # disconnect after they complete their current commands
-                        # Some of them might be used by sub sub and we don't know which ones - so we disconnect
-                        # all in flight connections after they are done with current command execution
-                        for conn in current_node.redis_connection.connection_pool._get_in_use_connections():
-                            conn.mark_for_reconnect()
+                        if (
+                            current_node
+                            not in self.cluster_client.nodes_manager.nodes_cache.values()
+                        ):
+                            # disconnect all free connections to the node - this node will be dropped
+                            # from the cluster, so we don't need to revert the timeouts
+                            free_count = len(
+                                current_node.redis_connection.connection_pool._get_free_connections()
+                            )
+                            logging.debug(
+                                "Disconnecting %d free connections on removed node %s",
+                                free_count,
+                                current_node.name,
+                            )
+                            for conn in current_node.redis_connection.connection_pool._get_free_connections():
+                                conn.disconnect()
 
-                    if (
-                        current_node
-                        not in self.cluster_client.nodes_manager.nodes_cache.values()
-                    ):
-                        # disconnect all free connections to the node - this node will be dropped
-                        # from the cluster, so we don't need to revert the timeouts
-                        for conn in current_node.redis_connection.connection_pool._get_free_connections():
-                            conn.disconnect()
-
-            # mark the notification as processed
-            self._processed_notifications.add(notification)
-            self._in_progress.remove(notification)
+                # mark the notification as processed
+                self._processed_notifications.add(notification)
+                self._in_progress.remove(notification)
+                logging.debug(
+                    "SMIGRATED notification processing completed: %s", notification
+                )
+            except Exception:
+                logging.error(
+                    "Error handling SMIGRATED notification: %s",
+                    notification,
+                    exc_info=True,
+                )
+                self._in_progress.discard(notification)
+                raise
