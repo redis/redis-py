@@ -271,6 +271,8 @@ class MaintNotificationsAbstractRedisCluster:
             )
             # Update existing nodes connections - they are created as part of the RedisCluster constructor
             for node in self.get_nodes():
+                if node.redis_connection is None:
+                    continue
                 node.redis_connection.connection_pool.update_maint_notifications_config(
                     self.maint_notifications_config,
                     oss_cluster_maint_notifications_handler=self._oss_cluster_maint_notifications_handler,
@@ -2080,10 +2082,6 @@ class NodesManager:
                     # another thread has already re-initialized the nodes; don't
                     # bother running again
                     return
-
-            additional_startup_nodes = [
-                ClusterNode(host, port) for host, port in additional_startup_nodes_info
-            ]
 
             with self._lock:
                 startup_nodes = tuple(self.startup_nodes.values())

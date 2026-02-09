@@ -258,7 +258,12 @@ def check_protocol_version(
 ) -> bool:
     if protocol is None:
         return False
-    return int(protocol) == expected_version
+    if isinstance(protocol, str):
+        try:
+            protocol = int(protocol)
+        except ValueError:
+            return False
+    return protocol == expected_version
 
 
 def get_lib_version():

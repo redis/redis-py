@@ -186,7 +186,7 @@ class MaintenanceNotificationsParser:
         # Expected message format is:
         # SMIGRATING <seq_number> <slot, range1-range2,...>
         id = response[1]
-        slots = response[2]
+        slots = safe_str(response[2])
         return OSSNodeMigratingNotification(id, slots)
 
     @staticmethod

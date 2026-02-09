@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 from time import sleep
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from redis.auth.err import RequestTokenErr, TokenRenewalErr
@@ -63,6 +63,7 @@ class TestTokenManager:
 
         mock_listener = Mock(spec=CredentialsListener)
         mock_listener.on_next = on_next
+        mock_listener.on_error = AsyncMock()  # Add this line
 
         retry_policy = RetryPolicy(1, 10)
         config = TokenManagerConfig(exp_refresh_ratio, 0, 1000, retry_policy)

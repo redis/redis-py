@@ -414,7 +414,7 @@ class OSSNodeMigratingNotification(MaintenanceNotification):
     def __init__(
         self,
         id: int,
-        slots: Optional[List[int]] = None,
+        slots: Optional[str] = None,
     ):
         super().__init__(id, OSSNodeMigratingNotification.DEFAULT_TTL)
         self.slots = slots

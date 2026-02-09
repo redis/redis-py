@@ -398,7 +398,7 @@ class TestOSSNodeMigratingNotification:
     def test_init_with_all_parameters(self):
         """Test OSSNodeMigratingNotification initialization with all parameters."""
         with patch("time.monotonic", return_value=1000):
-            slots = [1, 2, 3, 4, 5]
+            slots = "1,2,3,4,5"
             notification = OSSNodeMigratingNotification(
                 id=1,
                 slots=slots,
@@ -419,7 +419,7 @@ class TestOSSNodeMigratingNotification:
         with patch("time.monotonic", return_value=1000):
             notification = OSSNodeMigratingNotification(
                 id=1,
-                slots=[1, 2, 3],
+                slots="1,2,3",
             )
 
         with patch("time.monotonic", return_value=1005):  # 5 seconds later
@@ -434,11 +434,11 @@ class TestOSSNodeMigratingNotification:
         """Test equality for notifications with same id and type."""
         notification1 = OSSNodeMigratingNotification(
             id=1,
-            slots=[1, 2, 3],
+            slots="1,2,3",
         )
         notification2 = OSSNodeMigratingNotification(
             id=1,
-            slots=[4, 5, 6],
+            slots="4,5,6",
         )
         # Should be equal because id and type are the same
         assert notification1 == notification2
@@ -459,11 +459,11 @@ class TestOSSNodeMigratingNotification:
         """Test hash for notifications with same id and type."""
         notification1 = OSSNodeMigratingNotification(
             id=1,
-            slots=[1, 2, 3],
+            slots="1,2,3",
         )
         notification2 = OSSNodeMigratingNotification(
             id=1,
-            slots=[4, 5, 6],
+            slots="4,5,6",
         )
         # Should have same hash because id and type are the same
         assert hash(notification1) == hash(notification2)
