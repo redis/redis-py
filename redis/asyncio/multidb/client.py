@@ -161,7 +161,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
             "Cannot set active database, database is unhealthy"
         )
 
-    async def add_database(self, config: DatabaseConfig, skip_initial_health_check: bool = True):
+    async def add_database(
+        self, config: DatabaseConfig, skip_initial_health_check: bool = True
+    ):
         """
         Adds a new database to the database list.
 
