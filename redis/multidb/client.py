@@ -147,6 +147,10 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
     def add_database(self, config: DatabaseConfig, allow_unhealthy: bool = True):
         """
         Adds a new database to the database list.
+
+        Args:
+            config: DatabaseConfig object that contains the database configuration.
+            allow_unhealthy: If True, adds the database even if it is unhealthy.
         """
         # The retry object is not used in the lower level clients, so we can safely remove it.
         # We rely on command_retry in terms of global retries.
