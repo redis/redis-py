@@ -31,7 +31,7 @@ env:
   # for example after 8.2.1 is published, 8.2 image contains 8.2.1 content
   CURRENT_CLIENT_LIBS_TEST_STACK_IMAGE_TAG: '8.4.0'
   CURRENT_REDIS_VERSION: '8.4.0'
-  REDIS_VERSION_CUSTOM_MAP: 'custom-21651605017-debian-amd64:8.6'
+  REDIS_VERSION_CUSTOM_MAP: 'custom-21860421418-debian-amd64:8.6'
 
 jobs:
   dependency-audit:
@@ -77,7 +77,7 @@ jobs:
       max-parallel: 15
       fail-fast: false
       matrix:
-        redis-version: ['custom-21651605017-debian-amd64', '${{ needs.redis_version.outputs.CURRENT }}', '8.2', '8.0.2' ,'7.4.4', '7.2.9']
+        redis-version: ['custom-21860421418-debian-amd64', '${{ needs.redis_version.outputs.CURRENT }}', '8.2', '8.0.2' ,'7.4.4', '7.2.9']
         python-version: ['3.10', '3.14']
         parser-backend: ['plain']
         event-loop: ['asyncio']
