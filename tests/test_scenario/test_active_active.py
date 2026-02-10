@@ -24,8 +24,8 @@ from tests.test_scenario.fault_injector_client import (
 )
 from tests.test_scenario.maint_notifications_helpers import (
     ClusterOperations,
-    KeyGenerationHelpers,
 )
+from tests.test_scenario.conftest import _wait_for_cluster_healthy_in_fixture
 
 logger = logging.getLogger(__name__)
 
@@ -472,20 +472,26 @@ class TestActiveActive:
         assert messages_count > 2
 
 
+# TestActiveActiveWithHitless constants
 NETWORK_LATENCY_DELAY_MS = 2000
 NETWORK_LATENCY_DURATION = 60
 SOCKET_TIMEOUT = 1
 SLOT_SHUFFLE_TIMEOUT = 240
-# Small data preload to make the shard migration take long enough for
-# SMIGRATING to overlap with network latency.  Keep it small so the
-# preload phase is fast (CRDB writes are slow due to cross-cluster sync).
 DATA_PRELOAD_KEY_COUNT = 100
-DATA_PRELOAD_VALUE_SIZE = 102400  # 100 KB per key -> ~10 MB total
+DATA_PRELOAD_VALUE_SIZE = 102400
 RECOVERY_LATENCY_DURATION = 60
 RECOVERY_POLL_TIMEOUT = 120
 SUCCESSIVE_LATENCY_DURATION = 120
 DATA_INTEGRITY_PRELOAD_COUNT = 50
 DATA_INTEGRITY_MIGRATION_WRITES = 50
+CLUSTER_HEALTH_TIMEOUT = 90
+TEARDOWN_LATENCY_WAIT = 70
+LATENCY_BUFFER_SECONDS = 5
+COMMAND_POLL_INTERVAL = 0.1
+CIRCUIT_RECOVERY_POLL_INTERVAL = 2.0
+NUMBERED_SET_INTERVAL = 0.05
+BOUNDARY_LATENCY_MS = 3000
+DEFAULT_PORT = 6379
 
 
 class TestActiveActiveWithHitless:
@@ -510,80 +516,69 @@ class TestActiveActiveWithHitless:
     """
 
     @staticmethod
-    def _wait_for_cluster_healthy(host, port, username, password, timeout=90):
-        """
-        Poll cluster until PINGs respond within a reasonable time.
-        Ensures no residual latency from previous test.
-        """
-        from redis import RedisCluster
-
-        logging.info("Waiting for cluster to become healthy (timeout=%ds)", timeout)
-        start = time.time()
-        healthy_streak = 0
-        required_streak = 3
-
-        while time.time() - start < timeout:
-            try:
-                c = RedisCluster(
-                    host=host,
-                    port=port,
-                    username=username,
-                    password=password,
-                    decode_responses=True,
-                    protocol=3,
-                    socket_timeout=2,
-                )
-                ping_start = time.time()
-                c.ping()
-                ping_ms = (time.time() - ping_start) * 1000
-                c.close()
-
-                if ping_ms < 1500:
-                    healthy_streak += 1
-                    logging.info(
-                        "Cluster PING: %.0fms (streak %d/%d)",
-                        ping_ms,
-                        healthy_streak,
-                        required_streak,
-                    )
-                    if healthy_streak >= required_streak:
-                        logging.info("Cluster is healthy")
-                        return
-                else:
-                    healthy_streak = 0
-                    logging.info("Cluster PING: %.0fms (too slow, resetting streak)", ping_ms)
-            except Exception as e:
-                healthy_streak = 0
-                logging.info("Cluster health check failed: %s", e)
-
-            sleep(2)
-
-        logging.warning("Cluster did not become healthy within %ds, proceeding anyway", timeout)
-
-    @staticmethod
-    def _ensure_cluster_healthy(endpoint_config, timeout=90):
-        """
-        Extract connection info from endpoint_config and wait for healthy cluster.
-        """
+    def _ensure_cluster_healthy(endpoint_config, timeout=CLUSTER_HEALTH_TIMEOUT):
         from urllib.parse import urlparse
 
         endpoint_url = endpoint_config["endpoints"][0]
         parsed = urlparse(endpoint_url)
         host = parsed.hostname
-        port = parsed.port or 6379
+        port = parsed.port or DEFAULT_PORT
         username = endpoint_config.get("username", "default")
         password = endpoint_config.get("password")
+        use_ssl = parsed.scheme == "rediss"
 
-        TestActiveActiveWithHitless._wait_for_cluster_healthy(
-            host, port, username, password, timeout
+        _wait_for_cluster_healthy_in_fixture(
+            host, port, username, password, timeout=timeout, use_ssl=use_ssl
         )
 
     def teardown_method(self, method):
-        sleep(70)  # Wait for network latency (60s) to fully expire
+        sleep(TEARDOWN_LATENCY_WAIT)
 
-    # ------------------------------------------------------------------
-    # Test 1 -- hitless relaxation PREVENTS CB trip
-    # ------------------------------------------------------------------
+    @staticmethod
+    def _create_retry():
+        return Retry(
+            supported_errors=(TemporaryUnavailableException,),
+            retries=DEFAULT_FAILOVER_ATTEMPTS,
+            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
+        )
+
+    @staticmethod
+    def _warmup_client(multi_db_client, retry):
+        logging.info("Initializing MultiDBClient with warm-up commands")
+        retry.call_with_retry(
+            lambda: multi_db_client.set("warmup_key", "warmup_value"),
+            lambda _: dummy_fail(),
+        )
+
+    @staticmethod
+    def _preload_with_logging(multi_db_client):
+        logging.info(
+            "Step 0: Pre-loading %d keys (%d bytes each) to slow down migration",
+            DATA_PRELOAD_KEY_COUNT,
+            DATA_PRELOAD_VALUE_SIZE,
+        )
+        TestActiveActiveWithHitless._preload_data(
+            multi_db_client, DATA_PRELOAD_KEY_COUNT, DATA_PRELOAD_VALUE_SIZE
+        )
+
+    @staticmethod
+    def _create_latency_thread(fault_injector_client, bdb_id, delay_ms=NETWORK_LATENCY_DELAY_MS, duration=NETWORK_LATENCY_DURATION):
+        return threading.Thread(
+            target=fault_injector_client.trigger_network_latency,
+            daemon=True,
+            args=(bdb_id, delay_ms, duration),
+            kwargs={"cluster_index": 0},
+        )
+
+    @staticmethod
+    def _log_latency_trigger(bdb_id, delay_ms=NETWORK_LATENCY_DELAY_MS, duration=NETWORK_LATENCY_DURATION):
+        logging.info(
+            "Step 1: Triggering network latency (%dms, %ds duration) on bdb_id=%s",
+            delay_ms,
+            duration,
+            bdb_id,
+        )
+
     @pytest.mark.parametrize(
         "r_multi_db_with_hitless",
         [
@@ -604,50 +599,17 @@ class TestActiveActiveWithHitless:
         r_multi_db_with_hitless,
         fault_injector_client_oss_api,
     ):
-        """
-        With relaxed_timeout=5, SMIGRATING relaxes socket timeout to 5s.
-        Despite 2s network latency (> 1s socket_timeout), commands during
-        the migration window succeed (2s < 5s).  The successful commands
-        keep the failure rate below 0.90, so the CB stays closed and no AA
-        failover occurs.
-        """
         multi_db_client, listener, endpoint_config = r_multi_db_with_hitless
-
         self._ensure_cluster_healthy(endpoint_config)
 
-        retry = Retry(
-            supported_errors=(TemporaryUnavailableException,),
-            retries=DEFAULT_FAILOVER_ATTEMPTS,
-            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
-        )
-
-        logging.info("Initializing MultiDBClient with warm-up commands")
-        retry.call_with_retry(
-            lambda: multi_db_client.set("warmup_key", "warmup_value"),
-            lambda _: dummy_fail(),
-        )
+        retry = self._create_retry()
+        self._warmup_client(multi_db_client, retry)
 
         bdb_id = endpoint_config.get("bdb_id")
+        self._preload_with_logging(multi_db_client)
 
-        logging.info(
-            "Step 0: Pre-loading %d keys (%d bytes each) to slow down migration",
-            DATA_PRELOAD_KEY_COUNT,
-            DATA_PRELOAD_VALUE_SIZE,
-        )
-        self._preload_data(multi_db_client, DATA_PRELOAD_KEY_COUNT, DATA_PRELOAD_VALUE_SIZE)
-
-        logging.info(
-            "Step 1: Triggering network latency (%dms, %ds duration) on bdb_id=%s",
-            NETWORK_LATENCY_DELAY_MS,
-            NETWORK_LATENCY_DURATION,
-            bdb_id,
-        )
-        latency_thread = threading.Thread(
-            target=fault_injector_client_oss_api.trigger_network_latency,
-            daemon=True,
-            args=(bdb_id, NETWORK_LATENCY_DELAY_MS, NETWORK_LATENCY_DURATION),
-            kwargs={"cluster_index": 0},
-        )
+        self._log_latency_trigger(bdb_id)
+        latency_thread = self._create_latency_thread(fault_injector_client_oss_api, bdb_id)
         latency_thread.start()
 
         migration_complete = threading.Event()
@@ -681,9 +643,6 @@ class TestActiveActiveWithHitless:
             "should have prevented the CB from tripping"
         )
 
-    # ------------------------------------------------------------------
-    # Test 2 -- CB trips when latency EXCEEDS relaxed_timeout
-    # ------------------------------------------------------------------
     @pytest.mark.parametrize(
         "r_multi_db_with_hitless",
         [
@@ -704,50 +663,18 @@ class TestActiveActiveWithHitless:
         r_multi_db_with_hitless,
         fault_injector_client_oss_api,
     ):
-        """
-        With relaxed_timeout=2, SMIGRATING relaxes socket timeout to 2s.
-        But network latency is 3s, which exceeds the relaxed timeout.
-        Commands timeout (3s > 2s), failures accumulate, and CB trips.
-        This proves hitless works correctly but has limits.
-        """
         multi_db_client, listener, endpoint_config = r_multi_db_with_hitless
-
         self._ensure_cluster_healthy(endpoint_config)
 
-        retry = Retry(
-            supported_errors=(TemporaryUnavailableException,),
-            retries=DEFAULT_FAILOVER_ATTEMPTS,
-            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
-        )
-
-        logging.info("Initializing MultiDBClient with warm-up commands")
-        retry.call_with_retry(
-            lambda: multi_db_client.set("warmup_key", "warmup_value"),
-            lambda _: dummy_fail(),
-        )
+        retry = self._create_retry()
+        self._warmup_client(multi_db_client, retry)
 
         bdb_id = endpoint_config.get("bdb_id")
+        self._preload_with_logging(multi_db_client)
 
-        logging.info(
-            "Step 0: Pre-loading %d keys (%d bytes each) to slow down migration",
-            DATA_PRELOAD_KEY_COUNT,
-            DATA_PRELOAD_VALUE_SIZE,
-        )
-        self._preload_data(multi_db_client, DATA_PRELOAD_KEY_COUNT, DATA_PRELOAD_VALUE_SIZE)
-
-        # Use 3s latency which exceeds the 2s relaxed_timeout
-        boundary_latency_ms = 3000
-        logging.info(
-            "Step 1: Triggering network latency (%dms, %ds duration) on bdb_id=%s",
-            boundary_latency_ms,
-            NETWORK_LATENCY_DURATION,
-            bdb_id,
-        )
-        latency_thread = threading.Thread(
-            target=fault_injector_client_oss_api.trigger_network_latency,
-            daemon=True,
-            args=(bdb_id, boundary_latency_ms, NETWORK_LATENCY_DURATION),
-            kwargs={"cluster_index": 0},
+        self._log_latency_trigger(bdb_id, BOUNDARY_LATENCY_MS, NETWORK_LATENCY_DURATION)
+        latency_thread = self._create_latency_thread(
+            fault_injector_client_oss_api, bdb_id, BOUNDARY_LATENCY_MS
         )
         latency_thread.start()
 
@@ -780,9 +707,6 @@ class TestActiveActiveWithHitless:
             "relaxed_timeout (2s), so commands should have timed out"
         )
 
-    # ------------------------------------------------------------------
-    # Test 3 -- CB trips WITHOUT hitless relaxation (control)
-    # ------------------------------------------------------------------
     @pytest.mark.parametrize(
         "r_multi_db_with_hitless",
         [
@@ -791,7 +715,7 @@ class TestActiveActiveWithHitless:
                 "socket_timeout": SOCKET_TIMEOUT,
                 "min_num_failures": 2,
                 "failure_rate_threshold": 0.90,
-                "health_check_interval": 5,  # Short interval so CB trips quickly
+                "health_check_interval": 5,
             },
         ],
         ids=["hitless_relaxation_disabled"],
@@ -803,49 +727,17 @@ class TestActiveActiveWithHitless:
         r_multi_db_with_hitless,
         fault_injector_client_oss_api,
     ):
-        """
-        With relaxed_timeout=-1, SMIGRATING is received but socket timeout
-        stays at 1s.  With 2s network latency every command times out.  The
-        failure rate hits 1.0 > 0.90 after 5 failures and the CB trips,
-        triggering AA failover.
-        """
         multi_db_client, listener, endpoint_config = r_multi_db_with_hitless
-
         self._ensure_cluster_healthy(endpoint_config)
 
-        retry = Retry(
-            supported_errors=(TemporaryUnavailableException,),
-            retries=DEFAULT_FAILOVER_ATTEMPTS,
-            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
-        )
-
-        logging.info("Initializing MultiDBClient with warm-up commands")
-        retry.call_with_retry(
-            lambda: multi_db_client.set("warmup_key", "warmup_value"),
-            lambda _: dummy_fail(),
-        )
+        retry = self._create_retry()
+        self._warmup_client(multi_db_client, retry)
 
         bdb_id = endpoint_config.get("bdb_id")
+        self._preload_with_logging(multi_db_client)
 
-        logging.info(
-            "Step 0: Pre-loading %d keys (%d bytes each) to slow down migration",
-            DATA_PRELOAD_KEY_COUNT,
-            DATA_PRELOAD_VALUE_SIZE,
-        )
-        self._preload_data(multi_db_client, DATA_PRELOAD_KEY_COUNT, DATA_PRELOAD_VALUE_SIZE)
-
-        logging.info(
-            "Step 1: Triggering network latency (%dms, %ds duration) on bdb_id=%s",
-            NETWORK_LATENCY_DELAY_MS,
-            NETWORK_LATENCY_DURATION,
-            bdb_id,
-        )
-        latency_thread = threading.Thread(
-            target=fault_injector_client_oss_api.trigger_network_latency,
-            daemon=True,
-            args=(bdb_id, NETWORK_LATENCY_DELAY_MS, NETWORK_LATENCY_DURATION),
-            kwargs={"cluster_index": 0},
-        )
+        self._log_latency_trigger(bdb_id)
+        latency_thread = self._create_latency_thread(fault_injector_client_oss_api, bdb_id)
         latency_thread.start()
         logging.info("Waiting for network latency to be applied...")
         latency_thread.join()
@@ -879,9 +771,6 @@ class TestActiveActiveWithHitless:
             "the CB should have tripped due to command timeouts"
         )
 
-    # ------------------------------------------------------------------
-    # Test 4 -- failover-triggered migration with hitless
-    # ------------------------------------------------------------------
     @pytest.mark.parametrize(
         "r_multi_db_with_hitless",
         [
@@ -902,58 +791,22 @@ class TestActiveActiveWithHitless:
         r_multi_db_with_hitless,
         fault_injector_client_oss_api,
     ):
-        """
-        Same as test_hitless_relaxation_prevents_cb_trip but uses
-        trigger_name="failover" instead of "migrate" for the
-        SLOT_SHUFFLE.  Verifies that SMIGRATING is sent regardless
-        of the trigger mechanism and hitless relaxation still works.
-        """
         multi_db_client, listener, endpoint_config = r_multi_db_with_hitless
-
         self._ensure_cluster_healthy(endpoint_config)
 
-        retry = Retry(
-            supported_errors=(TemporaryUnavailableException,),
-            retries=DEFAULT_FAILOVER_ATTEMPTS,
-            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
-        )
-
-        logging.info("Initializing MultiDBClient with warm-up commands")
-        retry.call_with_retry(
-            lambda: multi_db_client.set("warmup_key", "warmup_value"),
-            lambda _: dummy_fail(),
-        )
+        retry = self._create_retry()
+        self._warmup_client(multi_db_client, retry)
 
         bdb_id = endpoint_config.get("bdb_id")
+        self._preload_with_logging(multi_db_client)
 
-        logging.info(
-            "Step 0: Pre-loading %d keys (%d bytes each) to slow down migration",
-            DATA_PRELOAD_KEY_COUNT,
-            DATA_PRELOAD_VALUE_SIZE,
-        )
-        self._preload_data(
-            multi_db_client, DATA_PRELOAD_KEY_COUNT, DATA_PRELOAD_VALUE_SIZE
-        )
-
-        logging.info(
-            "Step 1: Triggering network latency (%dms, %ds duration) on bdb_id=%s",
-            NETWORK_LATENCY_DELAY_MS,
-            NETWORK_LATENCY_DURATION,
-            bdb_id,
-        )
-        latency_thread = threading.Thread(
-            target=fault_injector_client_oss_api.trigger_network_latency,
-            daemon=True,
-            args=(bdb_id, NETWORK_LATENCY_DELAY_MS, NETWORK_LATENCY_DURATION),
-            kwargs={"cluster_index": 0},
-        )
+        self._log_latency_trigger(bdb_id)
+        latency_thread = self._create_latency_thread(fault_injector_client_oss_api, bdb_id)
         latency_thread.start()
 
         migration_complete = threading.Event()
 
-        logging.info(
-            "Step 2: Triggering SLOT_SHUFFLE (trigger=failover)"
-        )
+        logging.info("Step 2: Triggering SLOT_SHUFFLE (trigger=failover)")
         trigger_effect_thread = threading.Thread(
             target=self._trigger_slot_shuffle_and_signal,
             daemon=True,
@@ -993,9 +846,6 @@ class TestActiveActiveWithHitless:
             "should work with trigger=failover just as with trigger=migrate"
         )
 
-    # ------------------------------------------------------------------
-    # Test 5 -- AA recovery after CB trip
-    # ------------------------------------------------------------------
     @pytest.mark.parametrize(
         "r_multi_db_with_hitless",
         [
@@ -1004,7 +854,7 @@ class TestActiveActiveWithHitless:
                 "socket_timeout": SOCKET_TIMEOUT,
                 "min_num_failures": 2,
                 "failure_rate_threshold": 0.90,
-                "health_check_interval": 5,  # Short interval so CB trips quickly
+                "health_check_interval": 5,
             },
         ],
         ids=["aa_recovery_after_cb_trip"],
@@ -1016,53 +866,18 @@ class TestActiveActiveWithHitless:
         r_multi_db_with_hitless,
         fault_injector_client_oss_api,
     ):
-        """
-        Forces CB trip (relaxed_timeout=-1, latency > socket_timeout).
-        After AA failover occurs, waits for network latency to expire.
-        Then polls the original DB's circuit state and verifies it
-        transitions back to CLOSED, proving the full lifecycle:
-        trip -> failover -> latency ends -> health check recovers -> CLOSED.
-        """
         multi_db_client, listener, endpoint_config = r_multi_db_with_hitless
-
         self._ensure_cluster_healthy(endpoint_config)
 
-        retry = Retry(
-            supported_errors=(TemporaryUnavailableException,),
-            retries=DEFAULT_FAILOVER_ATTEMPTS,
-            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
-        )
-
-        logging.info("Initializing MultiDBClient with warm-up commands")
-        retry.call_with_retry(
-            lambda: multi_db_client.set("warmup_key", "warmup_value"),
-            lambda _: dummy_fail(),
-        )
+        retry = self._create_retry()
+        self._warmup_client(multi_db_client, retry)
 
         bdb_id = endpoint_config.get("bdb_id")
+        self._preload_with_logging(multi_db_client)
 
-        logging.info(
-            "Step 0: Pre-loading %d keys (%d bytes each) to slow down migration",
-            DATA_PRELOAD_KEY_COUNT,
-            DATA_PRELOAD_VALUE_SIZE,
-        )
-        self._preload_data(
-            multi_db_client, DATA_PRELOAD_KEY_COUNT, DATA_PRELOAD_VALUE_SIZE
-        )
-
-        latency_duration = RECOVERY_LATENCY_DURATION
-
-        logging.info(
-            "Step 1: Triggering network latency (%dms, %ds duration) on bdb_id=%s",
-            NETWORK_LATENCY_DELAY_MS,
-            latency_duration,
-            bdb_id,
-        )
-        latency_thread = threading.Thread(
-            target=fault_injector_client_oss_api.trigger_network_latency,
-            daemon=True,
-            args=(bdb_id, NETWORK_LATENCY_DELAY_MS, latency_duration),
-            kwargs={"cluster_index": 0},
+        self._log_latency_trigger(bdb_id, NETWORK_LATENCY_DELAY_MS, RECOVERY_LATENCY_DURATION)
+        latency_thread = self._create_latency_thread(
+            fault_injector_client_oss_api, bdb_id, duration=RECOVERY_LATENCY_DURATION
         )
         latency_thread.start()
         logging.info("Waiting for network latency to be applied...")
@@ -1082,7 +897,7 @@ class TestActiveActiveWithHitless:
         cmd_thread = threading.Thread(
             target=self._execute_commands_until_failover_or_timeout,
             daemon=True,
-            args=(multi_db_client, listener, errors, latency_duration),
+            args=(multi_db_client, listener, errors, RECOVERY_LATENCY_DURATION),
         )
         cmd_thread.start()
         cmd_thread.join()
@@ -1113,9 +928,6 @@ class TestActiveActiveWithHitless:
             "network latency expired"
         )
 
-    # ------------------------------------------------------------------
-    # Test 6 -- successive slot shuffles (migration storm) with hitless
-    # ------------------------------------------------------------------
     @pytest.mark.parametrize(
         "r_multi_db_with_hitless",
         [
@@ -1136,52 +948,18 @@ class TestActiveActiveWithHitless:
         r_multi_db_with_hitless,
         fault_injector_client_oss_api,
     ):
-        """
-        Triggers two SLOT_SHUFFLE operations in succession while network
-        latency is active.  Commands execute throughout both migrations.
-        Verifies that hitless handles repeated SMIGRATING/SMIGRATED
-        cycles correctly without state leaks tripping the CB.
-        """
         multi_db_client, listener, endpoint_config = r_multi_db_with_hitless
-
         self._ensure_cluster_healthy(endpoint_config)
 
-        retry = Retry(
-            supported_errors=(TemporaryUnavailableException,),
-            retries=DEFAULT_FAILOVER_ATTEMPTS,
-            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
-        )
-
-        logging.info("Initializing MultiDBClient with warm-up commands")
-        retry.call_with_retry(
-            lambda: multi_db_client.set("warmup_key", "warmup_value"),
-            lambda _: dummy_fail(),
-        )
+        retry = self._create_retry()
+        self._warmup_client(multi_db_client, retry)
 
         bdb_id = endpoint_config.get("bdb_id")
+        self._preload_with_logging(multi_db_client)
 
-        logging.info(
-            "Step 0: Pre-loading %d keys (%d bytes each) to slow down migration",
-            DATA_PRELOAD_KEY_COUNT,
-            DATA_PRELOAD_VALUE_SIZE,
-        )
-        self._preload_data(
-            multi_db_client, DATA_PRELOAD_KEY_COUNT, DATA_PRELOAD_VALUE_SIZE
-        )
-
-        successive_latency_duration = SUCCESSIVE_LATENCY_DURATION
-
-        logging.info(
-            "Step 1: Triggering network latency (%dms, %ds duration) on bdb_id=%s",
-            NETWORK_LATENCY_DELAY_MS,
-            successive_latency_duration,
-            bdb_id,
-        )
-        latency_thread = threading.Thread(
-            target=fault_injector_client_oss_api.trigger_network_latency,
-            daemon=True,
-            args=(bdb_id, NETWORK_LATENCY_DELAY_MS, successive_latency_duration),
-            kwargs={"cluster_index": 0},
+        self._log_latency_trigger(bdb_id, NETWORK_LATENCY_DELAY_MS, SUCCESSIVE_LATENCY_DURATION)
+        latency_thread = self._create_latency_thread(
+            fault_injector_client_oss_api, bdb_id, duration=SUCCESSIVE_LATENCY_DURATION
         )
         latency_thread.start()
 
@@ -1189,20 +967,14 @@ class TestActiveActiveWithHitless:
 
         def _run_two_shuffles():
             logging.info("Starting SLOT_SHUFFLE #1")
-            self._trigger_slot_shuffle(
-                fault_injector_client_oss_api, endpoint_config
-            )
+            self._trigger_slot_shuffle(fault_injector_client_oss_api, endpoint_config)
             logging.info("SLOT_SHUFFLE #1 done, starting SLOT_SHUFFLE #2")
-            self._trigger_slot_shuffle(
-                fault_injector_client_oss_api, endpoint_config
-            )
+            self._trigger_slot_shuffle(fault_injector_client_oss_api, endpoint_config)
             logging.info("SLOT_SHUFFLE #2 done, signalling completion")
             both_migrations_complete.set()
 
         logging.info("Step 2: Triggering two successive SLOT_SHUFFLEs")
-        migration_thread = threading.Thread(
-            target=_run_two_shuffles, daemon=True
-        )
+        migration_thread = threading.Thread(target=_run_two_shuffles, daemon=True)
         migration_thread.start()
 
         errors = Queue()
@@ -1214,7 +986,7 @@ class TestActiveActiveWithHitless:
                 multi_db_client,
                 errors,
                 both_migrations_complete,
-                successive_latency_duration,
+                SUCCESSIVE_LATENCY_DURATION,
             ),
         )
         cmd_thread.start()
@@ -1234,9 +1006,6 @@ class TestActiveActiveWithHitless:
             "without accumulating failures"
         )
 
-    # ------------------------------------------------------------------
-    # Test 7 -- data integrity during hitless + AA migration
-    # ------------------------------------------------------------------
     @pytest.mark.parametrize(
         "r_multi_db_with_hitless",
         [
@@ -1257,66 +1026,33 @@ class TestActiveActiveWithHitless:
         r_multi_db_with_hitless,
         fault_injector_client_oss_api,
     ):
-        """
-        Writes numbered keys during a hitless migration with network
-        latency, then verifies all keys (pre-loaded + written during
-        migration) are readable with correct values after migration
-        completes and latency clears.  Proves hitless relaxation
-        guarantees data integrity under stress.
-        """
         multi_db_client, listener, endpoint_config = r_multi_db_with_hitless
-
         self._ensure_cluster_healthy(endpoint_config)
 
-        retry = Retry(
-            supported_errors=(TemporaryUnavailableException,),
-            retries=DEFAULT_FAILOVER_ATTEMPTS,
-            backoff=ConstantBackoff(backoff=DEFAULT_FAILOVER_DELAY),
-        )
-
-        logging.info("Initializing MultiDBClient with warm-up commands")
-        retry.call_with_retry(
-            lambda: multi_db_client.set("warmup_key", "warmup_value"),
-            lambda _: dummy_fail(),
-        )
+        retry = self._create_retry()
+        self._warmup_client(multi_db_client, retry)
 
         bdb_id = endpoint_config.get("bdb_id")
 
-        preload_count = DATA_INTEGRITY_PRELOAD_COUNT
         logging.info(
             "Step 0: Pre-loading %d keys with deterministic values",
-            preload_count,
+            DATA_INTEGRITY_PRELOAD_COUNT,
         )
         expected_data = {}
-        for i in range(preload_count):
+        for i in range(DATA_INTEGRITY_PRELOAD_COUNT):
             key = f"integrity_preload_{i}"
             value = f"preload_val_{i}"
             multi_db_client.set(key, value)
             expected_data[key] = value
-        logging.info("Pre-load complete: %d keys", preload_count)
+        logging.info("Pre-load complete: %d keys", DATA_INTEGRITY_PRELOAD_COUNT)
 
         migration_complete = threading.Event()
-
-        # Track when latency starts
         latency_start_time = time.time()
 
-        # Trigger latency FIRST, then immediately trigger slot shuffle
-        # Both run in parallel - migration happens while latency is active
-        logging.info(
-            "Step 1: Triggering network latency (%dms, %ds duration) on bdb_id=%s",
-            NETWORK_LATENCY_DELAY_MS,
-            NETWORK_LATENCY_DURATION,
-            bdb_id,
-        )
-        latency_thread = threading.Thread(
-            target=fault_injector_client_oss_api.trigger_network_latency,
-            daemon=True,
-            args=(bdb_id, NETWORK_LATENCY_DELAY_MS, NETWORK_LATENCY_DURATION),
-            kwargs={"cluster_index": 0},
-        )
+        self._log_latency_trigger(bdb_id)
+        latency_thread = self._create_latency_thread(fault_injector_client_oss_api, bdb_id)
         latency_thread.start()
 
-        # Immediately trigger slot shuffle - API call goes through before latency kicks in
         logging.info("Step 2: Triggering SLOT_SHUFFLE (trigger=migrate)")
         trigger_effect_thread = threading.Thread(
             target=self._trigger_slot_shuffle_and_signal,
@@ -1329,9 +1065,7 @@ class TestActiveActiveWithHitless:
         )
         trigger_effect_thread.start()
 
-        logging.info(
-            "Step 3: Writing numbered keys during migration"
-        )
+        logging.info("Step 3: Writing numbered keys during migration")
         migration_keys = self._execute_numbered_sets(
             multi_db_client,
             prefix="integrity_migration",
@@ -1342,19 +1076,16 @@ class TestActiveActiveWithHitless:
         expected_data.update(migration_keys)
 
         trigger_effect_thread.join()
-        # Join latency thread with timeout to avoid hanging on pytest.fail()
-        latency_thread.join(timeout=90)
+        latency_thread.join(timeout=CLUSTER_HEALTH_TIMEOUT)
 
-        # Wait for latency to be fully removed (60s from start)
         elapsed = time.time() - latency_start_time
-        remaining = NETWORK_LATENCY_DURATION - elapsed + 5  # +5s buffer
+        remaining = NETWORK_LATENCY_DURATION - elapsed + LATENCY_BUFFER_SECONDS
         if remaining > 0:
             logging.info(
                 "Waiting %.1fs for network latency to be removed...", remaining
             )
             sleep(remaining)
 
-        # Wait for cluster to become healthy (CB may have opened)
         logging.info("Waiting for cluster to become healthy after latency...")
         self._ensure_cluster_healthy(endpoint_config, timeout=120)
 
@@ -1368,19 +1099,12 @@ class TestActiveActiveWithHitless:
             + "\n".join(mismatches[:20])
         )
 
-        # Log CB state - CB may trip due to DNS resolution issues during
-        # SMIGRATED handling (RedisCluster topology refresh), which is
-        # separate from data integrity. The key assertion is that all data
-        # was written and read correctly.
         logging.info(
             "CB state after migration (is_changed_flag=%s) - CB trip during "
             "SMIGRATED handling is acceptable if data integrity passed",
             listener.is_changed_flag,
         )
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
     @staticmethod
     def _preload_data(multi_db_client, key_count: int, value_size: int):
         value = "x" * value_size
@@ -1447,7 +1171,7 @@ class TestActiveActiveWithHitless:
                 errors.put(str(e))
             if executed % 100 == 0:
                 logging.info("Executed %d commands so far", executed)
-            sleep(0.1)
+            sleep(COMMAND_POLL_INTERVAL)
         logging.info("Command execution finished. Total commands: %d", executed)
 
     @staticmethod
@@ -1469,7 +1193,7 @@ class TestActiveActiveWithHitless:
                 errors.put(str(e))
             if executed % 100 == 0:
                 logging.info("Executed %d commands so far", executed)
-            sleep(0.1)
+            sleep(COMMAND_POLL_INTERVAL)
         logging.info("Command execution finished. Total commands: %d", executed)
 
     @staticmethod
@@ -1492,7 +1216,7 @@ class TestActiveActiveWithHitless:
                     "AA failover detected after %d commands", executed
                 )
                 return
-            sleep(0.1)
+            sleep(COMMAND_POLL_INTERVAL)
         logging.info(
             "Max duration reached without failover. Total commands: %d",
             executed,
@@ -1500,7 +1224,7 @@ class TestActiveActiveWithHitless:
 
     @staticmethod
     def _wait_for_circuit_recovery(
-        multi_db_client, db_index: int, timeout: int, poll_interval: float = 2.0
+        multi_db_client, db_index: int, timeout: int, poll_interval: float = CIRCUIT_RECOVERY_POLL_INTERVAL
     ):
         from redis.multidb.circuit import State as CBState
 
@@ -1556,7 +1280,7 @@ class TestActiveActiveWithHitless:
                 i += 1
             except Exception as e:
                 logging.info("SET failed for %s: %s", key, e)
-            sleep(0.05)
+            sleep(NUMBERED_SET_INTERVAL)
         logging.info("Numbered SET complete: %d keys written", len(written_keys))
         return written_keys
 
