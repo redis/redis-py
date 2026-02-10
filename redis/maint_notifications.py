@@ -12,6 +12,8 @@ from redis.typing import Number
 if TYPE_CHECKING:
     from redis.cluster import MaintNotificationsAbstractRedisCluster
 
+logger = logging.getLogger(__name__)
+
 
 class MaintenanceState(enum.Enum):
     NONE = "none"
@@ -573,7 +575,7 @@ def add_debug_log_for_notification(
     connection: "MaintNotificationsAbstractConnection",
     notification: Union[str, MaintenanceNotification],
 ):
-    if logging.getLogger().isEnabledFor(logging.DEBUG):
+    if logger.isEnabledFor(logging.DEBUG):
         socket_address = None
         try:
             socket_address = (
@@ -583,7 +585,7 @@ def add_debug_log_for_notification(
         except (AttributeError, OSError):
             pass
 
-        logging.debug(
+        logger.debug(
             f"Handling maintenance notification: {notification}, "
             f"with connection: {connection}, connected to ip {connection.get_resolved_ip()}, "
             f"local socket port: {socket_address}",
@@ -747,7 +749,7 @@ class MaintNotificationsPoolHandler:
         if isinstance(notification, NodeMovingNotification):
             return self.handle_node_moving_notification(notification)
         else:
-            logging.error(f"Unhandled notification type: {notification}")
+            logger.error(f"Unhandled notification type: {notification}")
 
     def handle_node_moving_notification(self, notification: NodeMovingNotification):
         if (
@@ -763,7 +765,7 @@ class MaintNotificationsPoolHandler:
                 return
 
             with self.pool._lock:
-                logging.debug(
+                logger.debug(
                     f"Handling node MOVING notification: {notification}, "
                     f"with connection: {self.connection}, connected to ip "
                     f"{self.connection.get_resolved_ip() if self.connection else None}"
@@ -871,7 +873,7 @@ class MaintNotificationsPoolHandler:
         notification_hash = hash(notification)
 
         with self._lock:
-            logging.debug(
+            logger.debug(
                 f"Reverting temporary changes related to notification: {notification}, "
                 f"with connection: {self.connection}, connected to ip "
                 f"{self.connection.get_resolved_ip() if self.connection else None}"
@@ -940,7 +942,7 @@ class MaintNotificationsConnectionHandler:
         notification_type = self._NOTIFICATION_TYPES.get(notification.__class__, None)
 
         if notification_type is None:
-            logging.error(f"Unhandled notification type: {notification}")
+            logger.error(f"Unhandled notification type: {notification}")
             return
 
         if notification_type:
@@ -1023,7 +1025,7 @@ class OSSMaintNotificationsHandler:
         if isinstance(notification, OSSNodeMigratedNotification):
             self.handle_oss_maintenance_completed_notification(notification)
         else:
-            logging.error(f"Unhandled notification type: {notification}")
+            logger.error(f"Unhandled notification type: {notification}")
 
     def handle_oss_maintenance_completed_notification(
         self, notification: OSSNodeMigratedNotification
@@ -1042,7 +1044,7 @@ class OSSMaintNotificationsHandler:
                 # process the same notification twice
                 return
 
-            logging.debug(f"Handling SMIGRATED notification: {notification}")
+            logger.debug(f"Handling SMIGRATED notification: {notification}")
             self._in_progress.add(notification)
 
             # Extract the information about the src and destination nodes that are affected

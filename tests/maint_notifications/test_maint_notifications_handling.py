@@ -759,7 +759,7 @@ class TestMaintenanceNotificationsHandlingSingleProxy(TestMaintenanceNotificatio
                 patch.object(
                     pool_handler, "handle_node_moving_notification"
                 ) as mock_handle_moving,
-                patch("redis.maint_notifications.logging.error") as mock_logging_error,
+                patch("redis.maint_notifications.logger.error") as mock_logging_error,
             ):
                 # Pool handler should return None for migrating notifications (not its responsibility)
                 pool_handler.handle_notification(migrating_notification)
