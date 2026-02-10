@@ -22,6 +22,10 @@ inputs:
     description: 'Event loop to use'
     required: false
     default: 'asyncio'
+  protocol:
+    description: 'RESP protocol version to use'
+    required: false
+    default: 'all'
   repository:
     description: 'Repository to checkout'
     required: false
@@ -164,8 +168,12 @@ runs:
           echo "::endgroup::"
         }
 
-        run_tests 2 "${{inputs.event-loop}}"
-        run_tests 3 "${{inputs.event-loop}}"
+        if [ "${{inputs.protocol}}" == "all" ]; then
+          run_tests 2 "${{inputs.event-loop}}"
+          run_tests 3 "${{inputs.event-loop}}"
+        else
+          run_tests "${{inputs.protocol}}" "${{inputs.event-loop}}"
+        fi
       shell: bash
 
     - name: Debug
@@ -181,7 +189,7 @@ runs:
     - name: Upload test results and profiling data
       uses: actions/upload-artifact@v4
       with:
-        name: pytest-results-redis_${{inputs.redis-version}}-python_${{inputs.python-version}}-parser_${{env.PARSER_BACKEND}}-el_${{inputs.event-loop}}
+        name: pytest-results-redis_${{inputs.redis-version}}-python_${{inputs.python-version}}-parser_${{env.PARSER_BACKEND}}-el_${{inputs.event-loop}}-protocol_${{inputs.protocol}}
         path: |
           *-results.xml
           prof/**
