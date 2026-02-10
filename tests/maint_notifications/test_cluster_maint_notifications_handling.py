@@ -411,6 +411,7 @@ class TestClusterMaintNotificationsHandler(TestClusterMaintNotificationsBase):
                     conn, cluster, cluster.maint_notifications_config
                 )
 
+    @skip_if_server_version_lt("7.4.0")
     def test_oss_maint_handler_propagation_cache_enabled(self):
         """Test that OSSMaintNotificationsHandler is propagated to all connections."""
         cluster = self._create_cluster_client(enable_cache=True)

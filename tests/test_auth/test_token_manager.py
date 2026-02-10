@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 from time import sleep
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 
 import pytest
 from redis.auth.err import RequestTokenErr, TokenRenewalErr
@@ -29,41 +29,30 @@ class TestTokenManager:
     )
     def test_success_token_renewal(self, exp_refresh_ratio):
         tokens = []
+        errors = []
+
+        # Use a function to generate fresh tokens at request time
+        # to avoid timing issues on slow CI runners
+        def generate_token():
+            now = datetime.now(timezone.utc).timestamp() * 1000
+            return SimpleToken("value", now + 10000, now, {"oid": "test"})
+
         mock_provider = Mock(spec=IdentityProviderInterface)
-        mock_provider.request_token.side_effect = [
-            SimpleToken(
-                "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 100,
-                (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": "test"},
-            ),
-            SimpleToken(
-                "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 150,
-                (datetime.now(timezone.utc).timestamp() * 1000) + 50,
-                {"oid": "test"},
-            ),
-            SimpleToken(
-                "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 170,
-                (datetime.now(timezone.utc).timestamp() * 1000) + 70,
-                {"oid": "test"},
-            ),
-            SimpleToken(
-                "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 190,
-                (datetime.now(timezone.utc).timestamp() * 1000) + 90,
-                {"oid": "test"},
-            ),
-        ]
+        mock_provider.request_token.side_effect = (
+            lambda *args, **kwargs: generate_token()
+        )
 
         def on_next(token):
             nonlocal tokens
             tokens.append(token)
 
+        def on_error(err):
+            nonlocal errors
+            errors.append(err)
+
         mock_listener = Mock(spec=CredentialsListener)
         mock_listener.on_next = on_next
-        mock_listener.on_error = AsyncMock()  # Add this line
+        mock_listener.on_error = on_error
 
         retry_policy = RetryPolicy(1, 10)
         config = TokenManagerConfig(exp_refresh_ratio, 0, 1000, retry_policy)
@@ -71,6 +60,7 @@ class TestTokenManager:
         mgr.start(mock_listener)
         sleep(0.1)
 
+        assert len(errors) == 0, f"Unexpected errors: {errors}"
         assert len(tokens) > 0
 
     @pytest.mark.parametrize(
@@ -247,30 +237,32 @@ class TestTokenManager:
 
     def test_success_token_renewal_with_retry(self):
         tokens = []
+        errors = []
+        call_count = [0]
+
+        # Use a function to generate fresh tokens at request time
+        # to avoid timing issues on slow CI runners
+        def request_token_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                raise RequestTokenErr("Simulated failure")
+            now = datetime.now(timezone.utc).timestamp() * 1000
+            return SimpleToken("value", now + 10000, now, {"oid": "test"})
+
         mock_provider = Mock(spec=IdentityProviderInterface)
-        mock_provider.request_token.side_effect = [
-            RequestTokenErr,
-            RequestTokenErr,
-            SimpleToken(
-                "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 100,
-                (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": "test"},
-            ),
-            SimpleToken(
-                "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 100,
-                (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": "test"},
-            ),
-        ]
+        mock_provider.request_token.side_effect = request_token_side_effect
 
         def on_next(token):
             nonlocal tokens
             tokens.append(token)
 
+        def on_error(err):
+            nonlocal errors
+            errors.append(err)
+
         mock_listener = Mock(spec=CredentialsListener)
         mock_listener.on_next = on_next
+        mock_listener.on_error = on_error
 
         retry_policy = RetryPolicy(3, 10)
         config = TokenManagerConfig(1, 0, 1000, retry_policy)
@@ -280,37 +272,39 @@ class TestTokenManager:
         # due to additional token renewal.
         sleep(0.08)
 
+        assert len(errors) == 0, f"Unexpected errors: {errors}"
         assert mock_provider.request_token.call_count > 0
         assert len(tokens) > 0
 
     @pytest.mark.asyncio
     async def test_async_success_token_renewal_with_retry(self):
         tokens = []
+        errors = []
+        call_count = [0]
+
+        # Use a function to generate fresh tokens at request time
+        # to avoid timing issues on slow CI runners
+        def request_token_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                raise RequestTokenErr("Simulated failure")
+            now = datetime.now(timezone.utc).timestamp() * 1000
+            return SimpleToken("value", now + 10000, now, {"oid": "test"})
+
         mock_provider = Mock(spec=IdentityProviderInterface)
-        mock_provider.request_token.side_effect = [
-            RequestTokenErr,
-            RequestTokenErr,
-            SimpleToken(
-                "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 100,
-                (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": "test"},
-            ),
-            SimpleToken(
-                "value",
-                (datetime.now(timezone.utc).timestamp() * 1000) + 100,
-                (datetime.now(timezone.utc).timestamp() * 1000),
-                {"oid": "test"},
-            ),
-        ]
+        mock_provider.request_token.side_effect = request_token_side_effect
 
         async def on_next(token):
             nonlocal tokens
             tokens.append(token)
 
+        async def on_error(err):
+            nonlocal errors
+            errors.append(err)
+
         mock_listener = Mock(spec=CredentialsListener)
         mock_listener.on_next = on_next
-        mock_listener.on_error = None
+        mock_listener.on_error = on_error
 
         retry_policy = RetryPolicy(3, 10)
         config = TokenManagerConfig(1, 0, 1000, retry_policy)
@@ -320,6 +314,7 @@ class TestTokenManager:
         # due to additional token renewal.
         await asyncio.sleep(0.08)
 
+        assert len(errors) == 0, f"Unexpected errors: {errors}"
         assert mock_provider.request_token.call_count > 0
         assert len(tokens) > 0
 
