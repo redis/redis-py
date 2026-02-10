@@ -65,7 +65,7 @@ class TestMultiDbClient:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_HEALTHY},
+                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_AVAILABLE},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.OPEN}},
@@ -519,7 +519,7 @@ class TestMultiDbClient:
                 ):
                     # With skip_unhealthy=False, should raise exception
                     with pytest.raises(UnhealthyDatabaseException):
-                        client.add_database(new_db_config, skip_unhealthy=False)
+                        client.add_database(new_db_config, allow_unhealthy=False)
 
                 # Database list should remain unchanged
                 assert len(client.get_databases()) == 2
@@ -797,7 +797,7 @@ class TestInitialHealthCheckPolicy:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"initial_health_check_policy": InitialHealthCheck.ALL_HEALTHY},
+                {"initial_health_check_policy": InitialHealthCheck.ALL_AVAILABLE},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
@@ -837,7 +837,7 @@ class TestInitialHealthCheckPolicy:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_HEALTHY},
+                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_AVAILABLE},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
@@ -876,7 +876,7 @@ class TestInitialHealthCheckPolicy:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_HEALTHY},
+                {"initial_health_check_policy": InitialHealthCheck.MAJORITY_AVAILABLE},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
@@ -917,7 +917,7 @@ class TestInitialHealthCheckPolicy:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"initial_health_check_policy": InitialHealthCheck.ANY_HEALTHY},
+                {"initial_health_check_policy": InitialHealthCheck.ONE_AVAILABLE},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
@@ -955,7 +955,7 @@ class TestInitialHealthCheckPolicy:
         "mock_multi_db_config,mock_db, mock_db1, mock_db2",
         [
             (
-                {"initial_health_check_policy": InitialHealthCheck.ANY_HEALTHY},
+                {"initial_health_check_policy": InitialHealthCheck.ONE_AVAILABLE},
                 {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
                 {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
