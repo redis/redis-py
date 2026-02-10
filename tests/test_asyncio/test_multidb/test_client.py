@@ -486,7 +486,7 @@ class TestMultiDbClient:
                 ):
                     # With skip_unhealthy=False, should raise exception
                     with pytest.raises(UnhealthyDatabaseException):
-                        await client.add_database(new_db_config, allow_unhealthy=False)
+                        await client.add_database(new_db_config, skip_initial_health_check=False)
 
                 # Database list should remain unchanged
                 assert len(client.get_databases()) == 2
