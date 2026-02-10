@@ -47,7 +47,7 @@ from redis.observability.attributes import (
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
 from redis.observability.recorder import record_operation_duration, record_connection_create_time, \
-    record_connection_timeout, record_connection_wait_time, record_connection_use_time, \
+    record_connection_timeout, record_connection_wait_time, \
     record_connection_closed, record_connection_relaxed_timeout, record_connection_handoff, record_error_count, \
     record_pubsub_message, reset_collector, record_streaming_lag
 
@@ -301,27 +301,6 @@ class TestRecordConnectionWaitTime:
         call_args = instruments.connection_wait_time.record.call_args
 
         assert call_args[0][0] == 0.010
-        attrs = call_args[1]['attributes']
-        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == 'ConnectionPool<localhost:6379>'
-
-
-class TestRecordConnectionUseTime:
-    """Tests for record_connection_use_time - verifies Histogram.record() calls."""
-
-    def test_record_connection_use_time(self, setup_recorder):
-        """Test recording connection use time."""
-
-        instruments = setup_recorder
-
-        record_connection_use_time(
-            pool_name='ConnectionPool<localhost:6379>',
-            duration_seconds=0.050,
-        )
-
-        instruments.connection_use_time.record.assert_called_once()
-        call_args = instruments.connection_use_time.record.call_args
-
-        assert call_args[0][0] == 0.050
         attrs = call_args[1]['attributes']
         assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == 'ConnectionPool<localhost:6379>'
 
@@ -838,7 +817,6 @@ class TestRecorderDisabled:
             recorder.record_connection_create_time('pool', 0.1)
             recorder.record_connection_timeout('pool')
             recorder.record_connection_wait_time('pool', 0.1)
-            recorder.record_connection_use_time('pool', 0.1)
             recorder.record_connection_closed('pool')
             recorder.record_connection_relaxed_timeout('pool', 'MOVING', True)
             recorder.record_connection_handoff('pool')
@@ -974,24 +952,6 @@ class TestMetricGroupsDisabled:
         # Verify no call to the histogram's record method
         instruments.connection_wait_time.record.assert_not_called()
 
-    def test_record_connection_use_time_no_meter_call_when_connection_advanced_disabled(self):
-        """Test that record_connection_use_time makes no Meter calls when CONNECTION_ADVANCED is disabled."""
-        instruments = MockInstruments()
-        collector = self._create_collector_with_disabled_groups(
-            instruments,
-            [MetricGroup.COMMAND]  # No CONNECTION_ADVANCED
-        )
-
-        recorder.reset_collector()
-        with patch.object(recorder, '_get_or_create_collector', return_value=collector):
-            record_connection_use_time(
-                pool_name='test-pool',
-                duration_seconds=0.100,
-            )
-
-        # Verify no call to the histogram's record method
-        instruments.connection_use_time.record.assert_not_called()
-
     def test_record_connection_closed_no_meter_call_when_connection_advanced_disabled(self):
         """Test that record_connection_closed makes no Meter calls when CONNECTION_ADVANCED is disabled."""
         instruments = MockInstruments()
@@ -1124,7 +1084,6 @@ class TestMetricGroupsDisabled:
             record_connection_create_time('pool', 0.050)
             record_connection_timeout('pool')
             record_connection_wait_time('pool', 0.010)
-            record_connection_use_time('pool', 0.100)
             record_connection_closed('pool', 'shutdown')
             record_connection_relaxed_timeout('pool', 'MOVING', True)
             record_connection_handoff('pool')
@@ -1139,7 +1098,6 @@ class TestMetricGroupsDisabled:
         instruments.connection_count.set.assert_not_called()
         instruments.connection_timeouts.add.assert_not_called()
         instruments.connection_wait_time.record.assert_not_called()
-        instruments.connection_use_time.record.assert_not_called()
         instruments.connection_closed.add.assert_not_called()
         instruments.connection_relaxed_timeout.add.assert_not_called()
         instruments.connection_handoff.add.assert_not_called()
@@ -1602,3 +1560,115 @@ class TestObservableGaugeIntegration:
             assert len(observations) == 3
 
         recorder.reset_collector()
+
+
+class TestHistogramBucketBoundaries:
+    """Tests for custom histogram bucket boundaries configuration."""
+
+    def test_custom_operation_duration_buckets_passed_to_meter(self):
+        """Test that custom operation duration buckets are passed to create_histogram."""
+        custom_buckets = [0.001, 0.01, 0.1, 1.0]
+        config = OTelConfig(
+            metric_groups=[MetricGroup.COMMAND],
+            buckets_operation_duration=custom_buckets,
+        )
+
+        mock_meter = MagicMock()
+        mock_meter.create_histogram.return_value = MagicMock()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Verify create_histogram was called with the custom buckets
+        mock_meter.create_histogram.assert_called_once()
+        call_kwargs = mock_meter.create_histogram.call_args[1]
+        assert call_kwargs['name'] == 'db.client.operation.duration'
+        assert call_kwargs['explicit_bucket_boundaries_advisory'] == custom_buckets
+
+    def test_custom_connection_create_time_buckets_passed_to_meter(self):
+        """Test that custom connection create time buckets are passed to create_histogram."""
+        custom_buckets = [0.0001, 0.001, 0.01, 0.1]
+        config = OTelConfig(
+            metric_groups=[MetricGroup.CONNECTION_BASIC],
+            buckets_connection_create_time=custom_buckets,
+        )
+
+        mock_meter = MagicMock()
+        mock_meter.create_histogram.return_value = MagicMock()
+        mock_meter.create_up_down_counter.return_value = MagicMock()
+        mock_meter.create_counter.return_value = MagicMock()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Find the call for connection_create_time
+        histogram_calls = mock_meter.create_histogram.call_args_list
+        create_time_call = None
+        for c in histogram_calls:
+            if c[1].get('name') == 'db.client.connection.create_time':
+                create_time_call = c
+                break
+
+        assert create_time_call is not None
+        assert create_time_call[1]['explicit_bucket_boundaries_advisory'] == custom_buckets
+
+    def test_custom_connection_wait_time_buckets_passed_to_meter(self):
+        """Test that custom connection wait time buckets are passed to create_histogram."""
+        custom_buckets = [0.00001, 0.0001, 0.001, 0.01]
+        config = OTelConfig(
+            metric_groups=[MetricGroup.CONNECTION_ADVANCED],
+            buckets_connection_wait_time=custom_buckets,
+        )
+
+        mock_meter = MagicMock()
+        mock_meter.create_histogram.return_value = MagicMock()
+        mock_meter.create_counter.return_value = MagicMock()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Find the call for connection_wait_time
+        histogram_calls = mock_meter.create_histogram.call_args_list
+        wait_time_call = None
+        for c in histogram_calls:
+            if c[1].get('name') == 'db.client.connection.wait_time':
+                wait_time_call = c
+                break
+
+        assert wait_time_call is not None
+        assert wait_time_call[1]['explicit_bucket_boundaries_advisory'] == custom_buckets
+
+    def test_custom_stream_lag_buckets_passed_to_meter(self):
+        """Test that custom stream processing duration buckets are passed to create_histogram."""
+        custom_buckets = [0.01, 0.1, 1.0, 10.0]
+        config = OTelConfig(
+            metric_groups=[MetricGroup.STREAMING],
+            buckets_stream_processing_duration=custom_buckets,
+        )
+
+        mock_meter = MagicMock()
+        mock_meter.create_histogram.return_value = MagicMock()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Verify create_histogram was called with the custom buckets
+        mock_meter.create_histogram.assert_called_once()
+        call_kwargs = mock_meter.create_histogram.call_args[1]
+        assert call_kwargs['name'] == 'redis.client.stream.lag'
+        assert call_kwargs['explicit_bucket_boundaries_advisory'] == custom_buckets
+
+    def test_default_buckets_used_when_not_specified(self):
+        """Test that default bucket boundaries are used when not specified."""
+        from redis.observability.config import default_operation_duration_buckets
+
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        mock_meter = MagicMock()
+        mock_meter.create_histogram.return_value = MagicMock()
+
+        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        call_kwargs = mock_meter.create_histogram.call_args[1]
+        assert call_kwargs['explicit_bucket_boundaries_advisory'] == default_operation_duration_buckets()

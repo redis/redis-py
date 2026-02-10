@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Sequence
 from enum import IntFlag, auto
 
 
@@ -16,6 +16,12 @@ class MetricGroup(IntFlag):
 class TelemetryOption(IntFlag):
     """Telemetry options to export."""
     METRICS = auto()
+
+def default_operation_duration_buckets() -> Sequence[float]:
+    return [0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]
+
+def default_histogram_buckets() -> Sequence[float]:
+    return [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10]
 
 
 """
@@ -90,6 +96,11 @@ class OTelConfig:
             # Privacy controls
             hide_pubsub_channel_names: bool = False,
             hide_stream_names: bool = False,
+            # Bucket sizes
+            buckets_operation_duration: Sequence[float] = default_operation_duration_buckets(),
+            buckets_stream_processing_duration: Sequence[float] = default_histogram_buckets(),
+            buckets_connection_create_time: Sequence[float] = default_histogram_buckets(),
+            buckets_connection_wait_time: Sequence[float] = default_histogram_buckets(),
     ):
         # Core enablement
         if enabled_telemetry is None:
@@ -114,6 +125,12 @@ class OTelConfig:
         # Privacy controls for hiding sensitive names in metrics
         self.hide_pubsub_channel_names = hide_pubsub_channel_names
         self.hide_stream_names = hide_stream_names
+
+        # Bucket sizes
+        self.buckets_operation_duration = buckets_operation_duration
+        self.buckets_stream_processing_duration = buckets_stream_processing_duration
+        self.buckets_connection_create_time = buckets_connection_create_time
+        self.buckets_connection_wait_time = buckets_connection_wait_time
 
     def is_enabled(self) -> bool:
         """Check if any observability feature is enabled."""

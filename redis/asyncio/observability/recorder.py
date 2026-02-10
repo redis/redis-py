@@ -255,27 +255,6 @@ async def record_connection_wait_time(
     )
 
 
-async def record_connection_use_time(
-    pool_name: str,
-    duration_seconds: float,
-) -> None:
-    """
-    Record time a connection was in use (borrowed from pool).
-
-    Args:
-        pool_name: Connection pool identifier
-        duration_seconds: Use time in seconds
-    """
-    collector = await _get_or_create_collector()
-    if collector is None:
-        return
-
-    collector.record_connection_use_time(
-        pool_name=pool_name,
-        duration_seconds=duration_seconds,
-    )
-
-
 async def record_connection_closed(
     close_reason: Optional[CloseReason] = None,
     error_type: Optional[Exception] = None,

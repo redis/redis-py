@@ -118,6 +118,7 @@ class RedisMetricsCollector:
             name="db.client.connection.create_time",
             unit="{seconds}",
             description="Time to create a new connection",
+            explicit_bucket_boundaries_advisory=self.config.buckets_connection_create_time,
         )
 
         self.connection_relaxed_timeout = self.meter.create_up_down_counter(
@@ -144,12 +145,7 @@ class RedisMetricsCollector:
             name="db.client.connection.wait_time",
             unit="{seconds}",
             description="Time to obtain an open connection from the pool",
-        )
-
-        self.connection_use_time = self.meter.create_histogram(
-            name="db.client.connection.use_time",
-            unit="{seconds}",
-            description="Time between borrowing and returning a connection",
+            explicit_bucket_boundaries_advisory=self.config.buckets_connection_wait_time,
         )
 
         self.connection_closed = self.meter.create_counter(
@@ -165,6 +161,7 @@ class RedisMetricsCollector:
             name="db.client.operation.duration",
             unit="{seconds}",
             description="Command execution duration",
+            explicit_bucket_boundaries_advisory=self.config.buckets_operation_duration,
         )
 
     def _init_pubsub_metrics(self) -> None:
@@ -180,7 +177,8 @@ class RedisMetricsCollector:
         self.stream_lag = self.meter.create_histogram(
             name="redis.client.stream.lag",
             unit="{seconds}",
-            description="End-to-end lag per message, showing how stale are the messages when the application starts processing them."
+            description="End-to-end lag per message, showing how stale are the messages when the application starts processing them.",
+            explicit_bucket_boundaries_advisory=self.config.buckets_stream_processing_duration,
         )
 
     def _init_csc_metrics(self) -> None:
@@ -377,24 +375,6 @@ class RedisMetricsCollector:
 
         attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
         self.connection_wait_time.record(duration_seconds, attributes=attrs)
-
-    def record_connection_use_time(
-            self,
-            pool_name: str,
-            duration_seconds: float,
-    ) -> None:
-        """
-        Record time a connection was in use (borrowed from pool).
-
-        Args:
-            pool_name: Connection pool name
-            duration_seconds: Use time in seconds
-        """
-        if not hasattr(self, "connection_use_time"):
-            return
-
-        attrs = self.attr_builder.build_connection_attributes(pool_name=pool_name)
-        self.connection_use_time.record(duration_seconds, attributes=attrs)
 
     # Command execution metric recording methods
 
