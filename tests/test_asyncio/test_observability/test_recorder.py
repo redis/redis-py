@@ -11,10 +11,6 @@ import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
 from redis.asyncio.observability import recorder
-from redis.asyncio.observability.registry import (
-    get_async_observables_registry_instance,
-    reset_async_observables_registry,
-)
 from redis.observability.attributes import (
     PubSubDirection,
     SERVER_ADDRESS,
@@ -27,6 +23,7 @@ from redis.observability.attributes import (
 )
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
+from redis.observability.registry import get_observables_registry_instance
 
 
 class MockInstruments:
@@ -138,7 +135,7 @@ def setup_async_recorder(metrics_collector, mock_instruments):
     """
     # Reset the global collector before test
     recorder.reset_collector()
-    reset_async_observables_registry()
+    get_observables_registry_instance().clear()
 
     # Patch _get_or_create_collector to return our collector with mocked instruments
     with patch.object(
@@ -150,7 +147,7 @@ def setup_async_recorder(metrics_collector, mock_instruments):
 
     # Reset after test
     recorder.reset_collector()
-    reset_async_observables_registry()
+    get_observables_registry_instance().clear()
 
 
 @pytest.mark.asyncio
@@ -501,17 +498,16 @@ class TestRecorderDisabled:
 
 
 @pytest.mark.asyncio
-class TestAsyncObservableGaugeIntegration:
-    """Integration tests for async observable gauge pattern with registry."""
+class TestObservableGaugeIntegration:
+    """Integration tests for observable gauge pattern with registry."""
 
     @pytest.fixture
-    async def clean_registry(self):
+    def clean_registry(self):
         """Ensure clean registry before and after test."""
-        reset_async_observables_registry()
-        registry = await get_async_observables_registry_instance()
-        await registry.clear()
+        registry = get_observables_registry_instance()
+        registry.clear()
         yield
-        reset_async_observables_registry()
+        registry.clear()
 
     async def test_full_observable_gauge_flow(
         self, clean_registry, mock_meter, mock_config
@@ -546,10 +542,10 @@ class TestAsyncObservableGaugeIntegration:
             ]
             await recorder.register_pools_connection_count([mock_pool])
 
-            # Step 3: Simulate OTel calling the observable callback
+            # Step 3: Simulate OTel calling the observable callback (sync)
             assert captured_callback is not None
-            # The callback is async, so we need to await it
-            observations = await captured_callback(None)
+            # The callback is now sync, so we call it directly
+            observations = captured_callback(None)
 
             # Verify the observation was created correctly
             assert len(observations) == 1
@@ -582,7 +578,8 @@ class TestAsyncObservableGaugeIntegration:
 
             # Don't register any pools - registry is empty
             assert captured_callback is not None
-            observations = await captured_callback(None)
+            # The callback is now sync, so we call it directly
+            observations = captured_callback(None)
 
             # Should return empty list, not raise an error
             assert observations == []
