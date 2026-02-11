@@ -144,9 +144,15 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
             "Cannot set active database, database is unhealthy"
         )
 
-    def add_database(self, config: DatabaseConfig, skip_unhealthy: bool = True):
+    def add_database(
+        self, config: DatabaseConfig, skip_initial_health_check: bool = True
+    ):
         """
         Adds a new database to the database list.
+
+        Args:
+            config: DatabaseConfig object that contains the database configuration.
+            skip_initial_health_check: If True, adds the database even if it is unhealthy.
         """
         # The retry object is not used in the lower level clients, so we can safely remove it.
         # We rely on command_retry in terms of global retries.
@@ -187,7 +193,7 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         try:
             self._check_db_health(database)
         except UnhealthyDatabaseException:
-            if not skip_unhealthy:
+            if not skip_initial_health_check:
                 raise
 
         highest_weighted_db, highest_weight = self._databases.get_top_n(1)[0]
@@ -343,14 +349,16 @@ class MultiDBClient(RedisModuleCommands, CoreCommands):
         results = self._check_databases_health()
         is_healthy = True
 
-        if self._config.initial_health_check_policy == InitialHealthCheck.ALL_HEALTHY:
+        if self._config.initial_health_check_policy == InitialHealthCheck.ALL_AVAILABLE:
             is_healthy = False not in results.values()
         elif (
             self._config.initial_health_check_policy
-            == InitialHealthCheck.MAJORITY_HEALTHY
+            == InitialHealthCheck.MAJORITY_AVAILABLE
         ):
             is_healthy = sum(results.values()) > len(results) / 2
-        elif self._config.initial_health_check_policy == InitialHealthCheck.ANY_HEALTHY:
+        elif (
+            self._config.initial_health_check_policy == InitialHealthCheck.ONE_AVAILABLE
+        ):
             is_healthy = True in results.values()
 
         if not is_healthy:
