@@ -38,11 +38,8 @@ if TYPE_CHECKING:
 
 # Global metrics collector instance (lazy-initialized)
 _async_metrics_collector: Optional[RedisMetricsCollector] = None
-_collector_lock = asyncio.Lock()
 
 CONNECTION_COUNT_REGISTRY_KEY = "connection_count"
-CSC_ITEMS_REGISTRY_KEY = "csc_items"
-
 
 async def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
     """
@@ -56,30 +53,29 @@ async def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
     if _async_metrics_collector is not None:
         return _async_metrics_collector
 
-    async with _collector_lock:
-        # Double-check after acquiring lock
-        if _async_metrics_collector is not None:
-            return _async_metrics_collector
+    # Double-check after acquiring lock
+    if _async_metrics_collector is not None:
+        return _async_metrics_collector
 
-        try:
-            manager = get_observability_instance().get_provider_manager()
-            if manager is None or not manager.config.enabled_telemetry:
-                return None
-
-            # Get meter from the global MeterProvider
-            meter = manager.get_meter_provider().get_meter(
-                RedisMetricsCollector.METER_NAME, RedisMetricsCollector.METER_VERSION
-            )
-
-            _async_metrics_collector = RedisMetricsCollector(meter, manager.config)
-            return _async_metrics_collector
-
-        except ImportError:
-            # Observability module not available
+    try:
+        manager = get_observability_instance().get_provider_manager()
+        if manager is None or not manager.config.enabled_telemetry:
             return None
-        except Exception:
-            # Any other error - don't break Redis operations
-            return None
+
+        # Get meter from the global MeterProvider
+        meter = manager.get_meter_provider().get_meter(
+            RedisMetricsCollector.METER_NAME, RedisMetricsCollector.METER_VERSION
+        )
+
+        _async_metrics_collector = RedisMetricsCollector(meter, manager.config)
+        return _async_metrics_collector
+
+    except ImportError:
+        # Observability module not available
+        return None
+    except Exception:
+        # Any other error - don't break Redis operations
+        return None
 
 
 async def _get_config() -> Optional["OTelConfig"]:
@@ -400,6 +396,9 @@ async def record_pubsub_message(
         config = await _get_config()
         if config is not None and config.hide_pubsub_channel_names:
             effective_channel = None
+        else:
+            # Normalize bytes to str for OTel attributes
+            effective_channel = str_if_bytes(channel)
 
     collector.record_pubsub_message(
         direction=direction,
