@@ -11,10 +11,6 @@ import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 
 from redis.asyncio.observability import recorder
-from redis.asyncio.observability.registry import (
-    get_async_observables_registry_instance,
-    reset_async_observables_registry,
-)
 from redis.observability.attributes import (
     PubSubDirection,
     SERVER_ADDRESS,
@@ -24,9 +20,16 @@ from redis.observability.attributes import (
     DB_RESPONSE_STATUS_CODE,
     ERROR_TYPE,
     DB_CLIENT_CONNECTION_POOL_NAME,
+    REDIS_CLIENT_STREAM_NAME,
+    REDIS_CLIENT_CONSUMER_GROUP,
+    REDIS_CLIENT_CONSUMER_NAME,
+    REDIS_CLIENT_PUBSUB_CHANNEL,
+    REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION,
+    REDIS_CLIENT_PUBSUB_SHARDED,
 )
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
+from redis.observability.registry import get_observables_registry_instance
 
 
 class MockInstruments:
@@ -138,7 +141,7 @@ def setup_async_recorder(metrics_collector, mock_instruments):
     """
     # Reset the global collector before test
     recorder.reset_collector()
-    reset_async_observables_registry()
+    get_observables_registry_instance().clear()
 
     # Patch _get_or_create_collector to return our collector with mocked instruments
     with patch.object(
@@ -150,7 +153,7 @@ def setup_async_recorder(metrics_collector, mock_instruments):
 
     # Reset after test
     recorder.reset_collector()
-    reset_async_observables_registry()
+    get_observables_registry_instance().clear()
 
 
 @pytest.mark.asyncio
@@ -413,6 +416,88 @@ class TestRecordPubsubMessage:
 
 
 @pytest.mark.asyncio
+class TestHidePubSubChannelNames:
+    """Tests for hide_pubsub_channel_names configuration option."""
+
+    @pytest.fixture
+    def setup_async_recorder_with_hidden_channels(self, mock_meter, mock_instruments):
+        """Setup async recorder with hide_pubsub_channel_names=True."""
+        config = OTelConfig(
+            metric_groups=[MetricGroup.PUBSUB],
+            hide_pubsub_channel_names=True,
+        )
+
+        recorder.reset_collector()
+        get_observables_registry_instance().clear()
+
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with patch.object(
+            recorder,
+            "_get_or_create_collector",
+            new_callable=lambda: AsyncMock(return_value=collector),
+        ):
+            with patch.object(
+                recorder,
+                "_get_config",
+                new_callable=lambda: AsyncMock(return_value=config),
+            ):
+                yield mock_instruments
+
+        recorder.reset_collector()
+        get_observables_registry_instance().clear()
+
+    async def test_channel_name_hidden_when_configured(
+        self, setup_async_recorder_with_hidden_channels
+    ):
+        """Test that channel name is hidden when hide_pubsub_channel_names=True."""
+        instruments = setup_async_recorder_with_hidden_channels
+
+        await recorder.record_pubsub_message(
+            direction=PubSubDirection.PUBLISH,
+            channel="secret-channel",
+            sharded=False,
+        )
+
+        instruments.pubsub_messages.add.assert_called_once()
+        attrs = instruments.pubsub_messages.add.call_args[1]["attributes"]
+        assert attrs[REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION] == PubSubDirection.PUBLISH.value
+        # Channel should NOT be in attributes when hidden
+        assert REDIS_CLIENT_PUBSUB_CHANNEL not in attrs
+        assert attrs[REDIS_CLIENT_PUBSUB_SHARDED] is False
+
+    async def test_channel_name_visible_when_not_configured(self, setup_async_recorder):
+        """Test that channel name is visible when hide_pubsub_channel_names=False (default)."""
+        instruments = setup_async_recorder
+
+        await recorder.record_pubsub_message(
+            direction=PubSubDirection.PUBLISH,
+            channel="visible-channel",
+            sharded=False,
+        )
+
+        instruments.pubsub_messages.add.assert_called_once()
+        attrs = instruments.pubsub_messages.add.call_args[1]["attributes"]
+        assert attrs[REDIS_CLIENT_PUBSUB_CHANNEL] == "visible-channel"
+
+    async def test_bytes_channel_normalized_to_str(self, setup_async_recorder):
+        """Test that bytes channel names are normalized to str."""
+        instruments = setup_async_recorder
+
+        await recorder.record_pubsub_message(
+            direction=PubSubDirection.RECEIVE,
+            channel=b"bytes-channel",
+            sharded=True,
+        )
+
+        instruments.pubsub_messages.add.assert_called_once()
+        attrs = instruments.pubsub_messages.add.call_args[1]["attributes"]
+        # Channel should be normalized from bytes to str
+        assert attrs[REDIS_CLIENT_PUBSUB_CHANNEL] == "bytes-channel"
+
+
+@pytest.mark.asyncio
 class TestRecordStreamingLag:
     """Tests for record_streaming_lag - verifies Histogram.record() calls."""
 
@@ -430,6 +515,255 @@ class TestRecordStreamingLag:
         instruments.stream_lag.record.assert_called_once()
         call_args = instruments.stream_lag.record.call_args
         assert call_args[0][0] == 0.150
+
+
+@pytest.mark.asyncio
+class TestRecordStreamingLagFromResponse:
+    """Tests for record_streaming_lag_from_response - RESP2/RESP3 parsing and timestamp extraction."""
+
+    @pytest.fixture
+    def setup_async_recorder_with_hidden_streams(self, mock_meter, mock_instruments):
+        """Setup async recorder with hide_stream_names=True."""
+        config = OTelConfig(
+            metric_groups=[MetricGroup.STREAMING],
+            hide_stream_names=True,
+        )
+
+        recorder.reset_collector()
+        get_observables_registry_instance().clear()
+
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with patch.object(
+            recorder,
+            "_get_or_create_collector",
+            new_callable=lambda: AsyncMock(return_value=collector),
+        ):
+            with patch.object(
+                recorder,
+                "_get_config",
+                new_callable=lambda: AsyncMock(return_value=config),
+            ):
+                yield mock_instruments
+
+        recorder.reset_collector()
+        get_observables_registry_instance().clear()
+
+    async def test_record_streaming_lag_from_response_resp3_format(
+        self, setup_async_recorder
+    ):
+        """Test RESP3 format parsing (dict with stream name as key)."""
+        instruments = setup_async_recorder
+
+        import time
+        current_time_ms = int(time.time() * 1000)
+        message_id = f"{current_time_ms}-0"
+
+        # RESP3 format: dict with stream name as key
+        response = {
+            "test-stream": [
+                [
+                    (message_id, {"field": "value"}),
+                ]
+            ]
+        }
+
+        await recorder.record_streaming_lag_from_response(
+            response=response,
+            consumer_group="my-group",
+            consumer_name="consumer-1",
+        )
+
+        instruments.stream_lag.record.assert_called_once()
+        call_args = instruments.stream_lag.record.call_args
+        attrs = call_args[1]["attributes"]
+        assert attrs[REDIS_CLIENT_STREAM_NAME] == "test-stream"
+        assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
+        assert attrs[REDIS_CLIENT_CONSUMER_NAME] == "consumer-1"
+        # Lag should be non-negative and small (just created)
+        assert call_args[0][0] >= 0.0
+        assert call_args[0][0] < 1.0  # Should be less than 1 second
+
+    async def test_record_streaming_lag_from_response_resp2_format(
+        self, setup_async_recorder
+    ):
+        """Test RESP2 format parsing (list with bytes stream name)."""
+        instruments = setup_async_recorder
+
+        import time
+        current_time_ms = int(time.time() * 1000)
+        message_id = f"{current_time_ms}-0"
+
+        # RESP2 format: list of [stream_name, messages] with bytes stream name
+        response = [
+            [b"test-stream", [
+                (message_id, {"field": "value"}),
+            ]]
+        ]
+
+        await recorder.record_streaming_lag_from_response(
+            response=response,
+            consumer_group="my-group",
+            consumer_name="consumer-1",
+        )
+
+        instruments.stream_lag.record.assert_called_once()
+        call_args = instruments.stream_lag.record.call_args
+        attrs = call_args[1]["attributes"]
+        # Stream name should be normalized from bytes to str
+        assert attrs[REDIS_CLIENT_STREAM_NAME] == "test-stream"
+        assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
+        assert attrs[REDIS_CLIENT_CONSUMER_NAME] == "consumer-1"
+
+    async def test_record_streaming_lag_from_response_multiple_messages(
+        self, setup_async_recorder
+    ):
+        """Test that multiple messages are processed correctly."""
+        instruments = setup_async_recorder
+
+        import time
+        current_time_ms = int(time.time() * 1000)
+        message_id_1 = f"{current_time_ms}-0"
+        message_id_2 = f"{current_time_ms}-1"
+
+        response = {
+            "test-stream": [
+                [
+                    (message_id_1, {"field": "value1"}),
+                    (message_id_2, {"field": "value2"}),
+                ]
+            ]
+        }
+
+        await recorder.record_streaming_lag_from_response(
+            response=response,
+            consumer_group="my-group",
+            consumer_name="consumer-1",
+        )
+
+        # Should record lag for each message
+        assert instruments.stream_lag.record.call_count == 2
+
+    async def test_record_streaming_lag_from_response_multiple_streams(
+        self, setup_async_recorder
+    ):
+        """Test that multiple streams are processed correctly."""
+        instruments = setup_async_recorder
+
+        import time
+        current_time_ms = int(time.time() * 1000)
+        message_id = f"{current_time_ms}-0"
+
+        response = {
+            "stream-1": [[(message_id, {"field": "value1"})]],
+            "stream-2": [[(message_id, {"field": "value2"})]],
+        }
+
+        await recorder.record_streaming_lag_from_response(
+            response=response,
+            consumer_group="my-group",
+            consumer_name="consumer-1",
+        )
+
+        # Should record lag for each stream
+        assert instruments.stream_lag.record.call_count == 2
+
+    async def test_stream_name_hidden_in_record_streaming_lag_from_response_resp3(
+        self, setup_async_recorder_with_hidden_streams
+    ):
+        """Test that stream names are hidden in record_streaming_lag_from_response for RESP3 format."""
+        instruments = setup_async_recorder_with_hidden_streams
+
+        import time
+        current_time_ms = int(time.time() * 1000)
+        message_id = f"{current_time_ms}-0"
+
+        response = {
+            "secret-stream": [
+                [
+                    (message_id, {"field": "value"}),
+                ]
+            ]
+        }
+
+        await recorder.record_streaming_lag_from_response(
+            response=response,
+            consumer_group="my-group",
+            consumer_name="consumer-1",
+        )
+
+        instruments.stream_lag.record.assert_called_once()
+        attrs = instruments.stream_lag.record.call_args[1]["attributes"]
+        # Stream name should NOT be in attributes when hidden
+        assert REDIS_CLIENT_STREAM_NAME not in attrs
+
+    async def test_stream_name_hidden_in_record_streaming_lag_from_response_resp2(
+        self, setup_async_recorder_with_hidden_streams
+    ):
+        """Test that stream names are hidden in record_streaming_lag_from_response for RESP2 format."""
+        instruments = setup_async_recorder_with_hidden_streams
+
+        import time
+        current_time_ms = int(time.time() * 1000)
+        message_id = f"{current_time_ms}-0"
+
+        response = [
+            [b"secret-stream", [
+                (message_id, {"field": "value"}),
+            ]]
+        ]
+
+        await recorder.record_streaming_lag_from_response(
+            response=response,
+            consumer_group="my-group",
+            consumer_name="consumer-1",
+        )
+
+        instruments.stream_lag.record.assert_called_once()
+        attrs = instruments.stream_lag.record.call_args[1]["attributes"]
+        # Stream name should NOT be in attributes when hidden
+        assert REDIS_CLIENT_STREAM_NAME not in attrs
+
+    async def test_record_streaming_lag_from_response_empty_response(
+        self, setup_async_recorder
+    ):
+        """Test that empty response is handled gracefully."""
+        instruments = setup_async_recorder
+
+        await recorder.record_streaming_lag_from_response(
+            response=None,
+            consumer_group="my-group",
+            consumer_name="consumer-1",
+        )
+
+        # Should not record anything for empty response
+        instruments.stream_lag.record.assert_not_called()
+
+    async def test_record_streaming_lag_from_response_bytes_message_id(
+        self, setup_async_recorder
+    ):
+        """Test that bytes message IDs are handled correctly."""
+        instruments = setup_async_recorder
+
+        import time
+        current_time_ms = int(time.time() * 1000)
+        message_id = f"{current_time_ms}-0".encode()  # bytes message ID
+
+        response = [
+            [b"test-stream", [
+                (message_id, {"field": "value"}),
+            ]]
+        ]
+
+        await recorder.record_streaming_lag_from_response(
+            response=response,
+            consumer_group="my-group",
+            consumer_name="consumer-1",
+        )
+
+        instruments.stream_lag.record.assert_called_once()
+        # Should not raise - bytes message ID should be handled
 
 
 @pytest.mark.asyncio
@@ -501,17 +835,16 @@ class TestRecorderDisabled:
 
 
 @pytest.mark.asyncio
-class TestAsyncObservableGaugeIntegration:
-    """Integration tests for async observable gauge pattern with registry."""
+class TestObservableGaugeIntegration:
+    """Integration tests for observable gauge pattern with registry."""
 
     @pytest.fixture
-    async def clean_registry(self):
+    def clean_registry(self):
         """Ensure clean registry before and after test."""
-        reset_async_observables_registry()
-        registry = await get_async_observables_registry_instance()
-        await registry.clear()
+        registry = get_observables_registry_instance()
+        registry.clear()
         yield
-        reset_async_observables_registry()
+        registry.clear()
 
     async def test_full_observable_gauge_flow(
         self, clean_registry, mock_meter, mock_config
@@ -546,10 +879,10 @@ class TestAsyncObservableGaugeIntegration:
             ]
             await recorder.register_pools_connection_count([mock_pool])
 
-            # Step 3: Simulate OTel calling the observable callback
+            # Step 3: Simulate OTel calling the observable callback (sync)
             assert captured_callback is not None
-            # The callback is async, so we need to await it
-            observations = await captured_callback(None)
+            # The callback is now sync, so we call it directly
+            observations = captured_callback(None)
 
             # Verify the observation was created correctly
             assert len(observations) == 1
@@ -582,7 +915,8 @@ class TestAsyncObservableGaugeIntegration:
 
             # Don't register any pools - registry is empty
             assert captured_callback is not None
-            observations = await captured_callback(None)
+            # The callback is now sync, so we call it directly
+            observations = captured_callback(None)
 
             # Should return empty list, not raise an error
             assert observations == []
