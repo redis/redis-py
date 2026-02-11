@@ -41,8 +41,13 @@ xxhash = [
     'xxhash~=3.6.0',
 ]
 
+# Security: Require cryptography >= 46.0.5 due to CVE-2026-26007.
+# Earlier versions do not validate EC public keys against the expected
+# prime-order subgroup (affects SECT curves), which can enable
+# small-subgroup attacks (ECDH key leakage / ECDSA forgery).
+# See: https://github.com/advisories/GHSA-r6ph-v2qm-q3c2
 ocsp = [
-    "cryptography>=36.0.1",
+    "cryptography>=46.0.5",
     "pyopenssl>=20.0.1",
     "requests>=2.31.0",
 ]
