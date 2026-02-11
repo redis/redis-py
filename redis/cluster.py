@@ -1,3 +1,4 @@
+import logging
 import random
 import socket
 import sys
@@ -78,6 +79,8 @@ from redis.utils import (
     str_if_bytes,
     truncate_text,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def get_node_name(host: str, port: Union[str, int]) -> str:
@@ -1542,6 +1545,7 @@ class RedisCluster(
                 self.nodes_manager.initialize()
                 raise e
             except MovedError as e:
+                logger.debug(f"MOVED error received for command {args}: {e}")
                 # First, we will try to patch the slots/nodes cache with the
                 # redirected node output and try again. If MovedError exceeds
                 # 'reinitialize_steps' number of times, we will force
@@ -2089,6 +2093,10 @@ class NodesManager:
             additional_startup_nodes = [
                 ClusterNode(host, port) for host, port in additional_startup_nodes_info
             ]
+            logger.debug(
+                f"Topology refresh: using additional nodes: {[node.name for node in additional_startup_nodes]}; "
+                f"and startup nodes: {[node.name for node in startup_nodes]}"
+            )
 
             for startup_node in (*startup_nodes, *additional_startup_nodes):
                 try:
@@ -2097,6 +2105,12 @@ class NodesManager:
 
                     else:
                         # Create a new Redis connection
+                        logger.debug(
+                            "Topology refresh: Creating new Redis connection to "
+                            f"{startup_node.host}:{startup_node.port}; "
+                            f"with kwargs: {kwargs}, "
+                            f"and maint_notifications_config: {self.maint_notifications_config}"
+                        )
                         r = self.create_redis_node(
                             startup_node.host,
                             startup_node.port,
