@@ -46,9 +46,9 @@ circuit_breaker = [
     "pybreaker>=1.4.0"
 ]
 otel = [
-    "opentelemetry-api>=1.18.0",
-    "opentelemetry-sdk>=1.18.0",
-    "opentelemetry-exporter-otlp-http>=1.18.0",
+    "opentelemetry-api>=1.30.0",
+    "opentelemetry-sdk>=1.30.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0",
 ]
 
 [project.urls]

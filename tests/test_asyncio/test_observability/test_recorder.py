@@ -275,27 +275,6 @@ class TestRecordConnectionWaitTime:
 
 
 @pytest.mark.asyncio
-class TestRecordConnectionUseTime:
-    """Tests for record_connection_use_time - verifies Histogram.record() calls."""
-
-    async def test_record_connection_use_time(self, setup_async_recorder):
-        """Test that connection use time is recorded correctly."""
-        instruments = setup_async_recorder
-
-        await recorder.record_connection_use_time(
-            pool_name="test_pool",
-            duration_seconds=0.100,
-        )
-
-        instruments.connection_use_time.record.assert_called_once()
-        call_args = instruments.connection_use_time.record.call_args
-
-        assert call_args[0][0] == 0.100
-        attrs = call_args[1]["attributes"]
-        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "test_pool"
-
-
-@pytest.mark.asyncio
 class TestRecordConnectionClosed:
     """Tests for record_connection_closed - verifies Counter.add() calls."""
 
@@ -818,7 +797,6 @@ class TestRecorderDisabled:
             await recorder.record_connection_create_time(mock_pool, 0.1)
             await recorder.record_connection_timeout("pool")
             await recorder.record_connection_wait_time("pool", 0.1)
-            await recorder.record_connection_use_time("pool", 0.1)
             await recorder.record_connection_closed()
             await recorder.record_connection_relaxed_timeout("pool", "MOVING", True)
             await recorder.record_connection_handoff("pool")

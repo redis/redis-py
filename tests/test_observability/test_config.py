@@ -201,6 +201,162 @@ class TestOTelConfigRepr:
         assert 'enabled_telemetry' in repr_str
 
 
+class TestOTelConfigPrivacyControls:
+    """Tests for privacy control configuration options."""
+
+    def test_default_hide_pubsub_channel_names_is_false(self):
+        """Test that hide_pubsub_channel_names is False by default."""
+        config = OTelConfig()
+        assert config.hide_pubsub_channel_names is False
+
+    def test_default_hide_stream_names_is_false(self):
+        """Test that hide_stream_names is False by default."""
+        config = OTelConfig()
+        assert config.hide_stream_names is False
+
+    def test_hide_pubsub_channel_names_can_be_enabled(self):
+        """Test that hide_pubsub_channel_names can be set to True."""
+        config = OTelConfig(hide_pubsub_channel_names=True)
+        assert config.hide_pubsub_channel_names is True
+
+    def test_hide_stream_names_can_be_enabled(self):
+        """Test that hide_stream_names can be set to True."""
+        config = OTelConfig(hide_stream_names=True)
+        assert config.hide_stream_names is True
+
+    def test_both_privacy_controls_can_be_enabled(self):
+        """Test that both privacy controls can be enabled together."""
+        config = OTelConfig(
+            hide_pubsub_channel_names=True,
+            hide_stream_names=True,
+        )
+        assert config.hide_pubsub_channel_names is True
+        assert config.hide_stream_names is True
+
+
+class TestOTelConfigHistogramBuckets:
+    """Tests for custom histogram bucket boundary configuration."""
+
+    def test_default_operation_duration_buckets(self):
+        """Test that default operation duration buckets are set correctly."""
+        from redis.observability.config import default_operation_duration_buckets
+        config = OTelConfig()
+        assert config.buckets_operation_duration == default_operation_duration_buckets()
+
+    def test_default_stream_processing_duration_buckets(self):
+        """Test that default stream processing duration buckets are set correctly."""
+        from redis.observability.config import default_histogram_buckets
+        config = OTelConfig()
+        assert config.buckets_stream_processing_duration == default_histogram_buckets()
+
+    def test_default_connection_create_time_buckets(self):
+        """Test that default connection create time buckets are set correctly."""
+        from redis.observability.config import default_histogram_buckets
+        config = OTelConfig()
+        assert config.buckets_connection_create_time == default_histogram_buckets()
+
+    def test_default_connection_wait_time_buckets(self):
+        """Test that default connection wait time buckets are set correctly."""
+        from redis.observability.config import default_histogram_buckets
+        config = OTelConfig()
+        assert config.buckets_connection_wait_time == default_histogram_buckets()
+
+    def test_custom_operation_duration_buckets(self):
+        """Test that custom operation duration buckets can be set."""
+        custom_buckets = [0.001, 0.01, 0.1, 1.0, 10.0]
+        config = OTelConfig(buckets_operation_duration=custom_buckets)
+        assert config.buckets_operation_duration == custom_buckets
+
+    def test_custom_stream_processing_duration_buckets(self):
+        """Test that custom stream processing duration buckets can be set."""
+        custom_buckets = [0.01, 0.1, 1.0, 5.0]
+        config = OTelConfig(buckets_stream_processing_duration=custom_buckets)
+        assert config.buckets_stream_processing_duration == custom_buckets
+
+    def test_custom_connection_create_time_buckets(self):
+        """Test that custom connection create time buckets can be set."""
+        custom_buckets = [0.001, 0.005, 0.01, 0.05, 0.1]
+        config = OTelConfig(buckets_connection_create_time=custom_buckets)
+        assert config.buckets_connection_create_time == custom_buckets
+
+    def test_custom_connection_wait_time_buckets(self):
+        """Test that custom connection wait time buckets can be set."""
+        custom_buckets = [0.0001, 0.001, 0.01, 0.1]
+        config = OTelConfig(buckets_connection_wait_time=custom_buckets)
+        assert config.buckets_connection_wait_time == custom_buckets
+
+    def test_all_custom_buckets_can_be_set_together(self):
+        """Test that all custom bucket configurations can be set together."""
+        op_buckets = [0.001, 0.01, 0.1]
+        stream_buckets = [0.01, 0.1, 1.0]
+        create_buckets = [0.001, 0.005, 0.01]
+        wait_buckets = [0.0001, 0.001, 0.01]
+
+        config = OTelConfig(
+            buckets_operation_duration=op_buckets,
+            buckets_stream_processing_duration=stream_buckets,
+            buckets_connection_create_time=create_buckets,
+            buckets_connection_wait_time=wait_buckets,
+        )
+
+        assert config.buckets_operation_duration == op_buckets
+        assert config.buckets_stream_processing_duration == stream_buckets
+        assert config.buckets_connection_create_time == create_buckets
+        assert config.buckets_connection_wait_time == wait_buckets
+
+    def test_empty_buckets_list_is_allowed(self):
+        """Test that empty bucket lists are allowed (OTel SDK will use defaults)."""
+        config = OTelConfig(buckets_operation_duration=[])
+        assert config.buckets_operation_duration == []
+
+    def test_single_bucket_boundary_is_allowed(self):
+        """Test that a single bucket boundary is allowed."""
+        config = OTelConfig(buckets_operation_duration=[1.0])
+        assert config.buckets_operation_duration == [1.0]
+
+
+class TestDefaultBucketFunctions:
+    """Tests for default bucket boundary functions."""
+
+    def test_default_operation_duration_buckets_returns_sequence(self):
+        """Test that default_operation_duration_buckets returns a sequence."""
+        from redis.observability.config import default_operation_duration_buckets
+        buckets = default_operation_duration_buckets()
+        assert isinstance(buckets, (list, tuple))
+        assert len(buckets) > 0
+
+    def test_default_histogram_buckets_returns_sequence(self):
+        """Test that default_histogram_buckets returns a sequence."""
+        from redis.observability.config import default_histogram_buckets
+        buckets = default_histogram_buckets()
+        assert isinstance(buckets, (list, tuple))
+        assert len(buckets) > 0
+
+    def test_default_operation_duration_buckets_are_sorted(self):
+        """Test that default operation duration buckets are in ascending order."""
+        from redis.observability.config import default_operation_duration_buckets
+        buckets = list(default_operation_duration_buckets())
+        assert buckets == sorted(buckets)
+
+    def test_default_histogram_buckets_are_sorted(self):
+        """Test that default histogram buckets are in ascending order."""
+        from redis.observability.config import default_histogram_buckets
+        buckets = list(default_histogram_buckets())
+        assert buckets == sorted(buckets)
+
+    def test_default_operation_duration_buckets_are_positive(self):
+        """Test that all default operation duration bucket values are positive."""
+        from redis.observability.config import default_operation_duration_buckets
+        buckets = default_operation_duration_buckets()
+        assert all(b > 0 for b in buckets)
+
+    def test_default_histogram_buckets_are_positive(self):
+        """Test that all default histogram bucket values are positive."""
+        from redis.observability.config import default_histogram_buckets
+        buckets = default_histogram_buckets()
+        assert all(b > 0 for b in buckets)
+
+
 class TestMetricGroupEnum:
     """Tests for MetricGroup IntFlag enum."""
 
