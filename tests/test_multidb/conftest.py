@@ -108,7 +108,7 @@ def mock_multi_db_config(request, mock_fd, mock_fs, mock_hc, mock_ed) -> MultiDb
         "health_check_probes", DEFAULT_HEALTH_CHECK_PROBES
     )
     initial_health_check_policy = request.param.get(
-        "initial_health_check_policy", InitialHealthCheck.ALL_HEALTHY
+        "initial_health_check_policy", InitialHealthCheck.ALL_AVAILABLE
     )
 
     config = MultiDbConfig(
