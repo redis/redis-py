@@ -2108,7 +2108,8 @@ class NodesManager:
                         logger.debug(
                             "Topology refresh: Creating new Redis connection to "
                             f"{startup_node.host}:{startup_node.port}; "
-                            f"with kwargs: {kwargs}, "
+                            f"with socket_timeout: {kwargs.get('socket_timeout', 'not set')}, and "
+                            f"socket_connect_timeout: {kwargs.get('socket_connect_timeout', 'not set')}, "
                             f"and maint_notifications_config: {self.maint_notifications_config}"
                         )
                         r = self.create_redis_node(
