@@ -6,7 +6,7 @@ metrics without needing to know about OpenTelemetry internals. It reuses the sam
 RedisMetricsCollector and configuration as the sync recorder.
 
 Usage in Redis async client code:
-    from redis.observability.async_recorder import record_operation_duration
+    from redis.asyncio.observability.recorder import record_operation_duration
 
     start_time = time.monotonic()
     # ... execute Redis command ...
@@ -24,12 +24,12 @@ import asyncio
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from redis.asyncio.observability.registry import get_async_observables_registry_instance
 from redis.observability.attributes import (
     PubSubDirection,
 )
 from redis.observability.metrics import CloseReason, RedisMetricsCollector
 from redis.observability.providers import get_observability_instance
+from redis.observability.registry import get_observables_registry_instance
 from redis.utils import str_if_bytes
 
 if TYPE_CHECKING:
@@ -38,11 +38,8 @@ if TYPE_CHECKING:
 
 # Global metrics collector instance (lazy-initialized)
 _async_metrics_collector: Optional[RedisMetricsCollector] = None
-_collector_lock = asyncio.Lock()
 
 CONNECTION_COUNT_REGISTRY_KEY = "connection_count"
-CSC_ITEMS_REGISTRY_KEY = "csc_items"
-
 
 async def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
     """
@@ -56,30 +53,29 @@ async def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
     if _async_metrics_collector is not None:
         return _async_metrics_collector
 
-    async with _collector_lock:
-        # Double-check after acquiring lock
-        if _async_metrics_collector is not None:
-            return _async_metrics_collector
+    # Double-check after acquiring lock
+    if _async_metrics_collector is not None:
+        return _async_metrics_collector
 
-        try:
-            manager = get_observability_instance().get_provider_manager()
-            if manager is None or not manager.config.enabled_telemetry:
-                return None
-
-            # Get meter from the global MeterProvider
-            meter = manager.get_meter_provider().get_meter(
-                RedisMetricsCollector.METER_NAME, RedisMetricsCollector.METER_VERSION
-            )
-
-            _async_metrics_collector = RedisMetricsCollector(meter, manager.config)
-            return _async_metrics_collector
-
-        except ImportError:
-            # Observability module not available
+    try:
+        manager = get_observability_instance().get_provider_manager()
+        if manager is None or not manager.config.enabled_telemetry:
             return None
-        except Exception:
-            # Any other error - don't break Redis operations
-            return None
+
+        # Get meter from the global MeterProvider
+        meter = manager.get_meter_provider().get_meter(
+            RedisMetricsCollector.METER_NAME, RedisMetricsCollector.METER_VERSION
+        )
+
+        _async_metrics_collector = RedisMetricsCollector(meter, manager.config)
+        return _async_metrics_collector
+
+    except ImportError:
+        # Observability module not available
+        return None
+    except Exception:
+        # Any other error - don't break Redis operations
+        return None
 
 
 async def _get_config() -> Optional["OTelConfig"]:
@@ -179,12 +175,14 @@ async def init_connection_count() -> None:
     if collector is None:
         return
 
-    async def observable_callback(__):
-        registry = await get_async_observables_registry_instance()
-        callbacks = await registry.get(CONNECTION_COUNT_REGISTRY_KEY)
+    def observable_callback(__):
+        observables_registry = get_observables_registry_instance()
+        callbacks = observables_registry.get(CONNECTION_COUNT_REGISTRY_KEY)
         observations = []
+
         for callback in callbacks:
-            observations.extend(await callback())
+            observations.extend(callback())
+
         return observations
 
     collector.init_connection_count(
@@ -205,15 +203,15 @@ async def register_pools_connection_count(
     # Lazy import
     from opentelemetry.metrics import Observation
 
-    async def connection_count_callback():
+    def connection_count_callback():
         observations = []
         for connection_pool in connection_pools:
             for count, attributes in connection_pool.get_connection_count():
                 observations.append(Observation(count, attributes=attributes))
         return observations
 
-    registry = await get_async_observables_registry_instance()
-    await registry.register(CONNECTION_COUNT_REGISTRY_KEY, connection_count_callback)
+    observables_registry = get_observables_registry_instance()
+    observables_registry.register(CONNECTION_COUNT_REGISTRY_KEY, connection_count_callback)
 
 
 async def record_connection_timeout(
@@ -377,6 +375,9 @@ async def record_pubsub_message(
         config = await _get_config()
         if config is not None and config.hide_pubsub_channel_names:
             effective_channel = None
+        else:
+            # Normalize bytes to str for OTel attributes
+            effective_channel = str_if_bytes(channel)
 
     collector.record_pubsub_message(
         direction=direction,
