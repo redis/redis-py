@@ -1,25 +1,33 @@
 import threading
-from typing import Dict, List, Callable, Optional, Any
+from typing import TYPE_CHECKING, Dict, List, Callable, Optional, Any
 
-from opentelemetry.metrics import Observation
+# Optional import - OTel SDK may not be installed
+# Use Any as fallback type when OTel is not available
+if TYPE_CHECKING:
+    try:
+        from opentelemetry.metrics import Observation
+    except ImportError:
+        Observation = Any  # type: ignore[misc]
+else:
+    Observation = Any
 
 
 class ObservablesRegistry:
     """
     Global registry for storing callbacks for observable metrics.
     """
-    def __init__(self, registry: Dict[str, List[Callable[[], List[Observation]]]] = None):
+    def __init__(self, registry: Dict[str, List[Callable[[], List[Any]]]] = None):
         self._registry = registry or {}
         self._lock = threading.Lock()
 
-    def register(self, name: str, callback: Callable[[], List[Observation]]) -> None:
+    def register(self, name: str, callback: Callable[[], List[Any]]) -> None:
         """
         Register a callback for an observable metric.
         """
         with self._lock:
             self._registry.setdefault(name, []).append(callback)
 
-    def get(self, name: str) -> List[Callable[[], List[Observation]]]:
+    def get(self, name: str) -> List[Callable[[], List[Any]]]:
         """
         Get all callbacks for an observable metric.
         """
