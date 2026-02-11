@@ -2,6 +2,12 @@ import os
 from typing import Dict, List, Optional, Union, Sequence
 from enum import IntFlag, auto
 
+"""
+OpenTelemetry configuration for redis-py.
+
+This module handles configuration for OTel observability features,
+including parsing environment variables and validating settings.
+"""
 
 class MetricGroup(IntFlag):
     """Metric groups that can be enabled/disabled."""
@@ -22,14 +28,6 @@ def default_operation_duration_buckets() -> Sequence[float]:
 
 def default_histogram_buckets() -> Sequence[float]:
     return [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10]
-
-
-"""
-OpenTelemetry configuration for redis-py.
-
-This module handles configuration for OTel observability features,
-including parsing environment variables and validating settings.
-"""
 
 
 class OTelConfig:
