@@ -2145,13 +2145,22 @@ class NodesManager:
                     else:
                         # Create a new Redis connection
                         if is_debug_log_enabled():
+                            socket_timeout = kwargs.get("socket_timeout", "not set")
+                            socket_connect_timeout = kwargs.get(
+                                "socket_connect_timeout", "not set"
+                            )
+                            maint_enabled = (
+                                self.maint_notifications_config.enabled
+                                if self.maint_notifications_config
+                                else False
+                            )
                             logger.debug(
                                 "Topology refresh: Creating new Redis connection to "
                                 f"{startup_node.host}:{startup_node.port}; "
-                                f"with socket_timeout: {kwargs.get('socket_timeout', 'not set')}, and "
-                                f"socket_connect_timeout: {kwargs.get('socket_connect_timeout', 'not set')}, "
+                                f"with socket_timeout: {socket_timeout}, and "
+                                f"socket_connect_timeout: {socket_connect_timeout}, "
                                 "and maint_notifications enabled: "
-                                f"{self.maint_notifications_config.enabled if self.maint_notifications_config else False}"
+                                f"{maint_enabled}"
                             )
                         r = self.create_redis_node(
                             startup_node.host,
