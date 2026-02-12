@@ -6,6 +6,7 @@ according to the semantic conventions for database clients.
 
 Reference: https://opentelemetry.io/docs/specs/semconv/database/redis/
 """
+
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -56,21 +57,25 @@ REDIS_CLIENT_CONSUMER_NAME = "redis.client.consumer_name"
 REDIS_CLIENT_CSC_RESULT = "redis.client.csc.result"
 REDIS_CLIENT_CSC_REASON = "redis.client.csc.reason"
 
+
 class ConnectionState(Enum):
     IDLE = "idle"
     USED = "used"
+
 
 class PubSubDirection(Enum):
     PUBLISH = "publish"
     RECEIVE = "receive"
 
+
 class CSCResult(Enum):
     HIT = "hit"
     MISS = "miss"
 
+
 class CSCReason(Enum):
-    FULL = 'full'
-    INVALIDATION = 'invalidation'
+    FULL = "full"
+    INVALIDATION = "invalidation"
 
 
 class AttributeBuilder:
@@ -80,9 +85,9 @@ class AttributeBuilder:
 
     @staticmethod
     def build_base_attributes(
-            server_address: Optional[str] = None,
-            server_port: Optional[int] = None,
-            db_namespace: Optional[int] = None,
+        server_address: Optional[str] = None,
+        server_port: Optional[int] = None,
+        db_namespace: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Build base attributes common to all Redis operations.
@@ -97,7 +102,7 @@ class AttributeBuilder:
         """
         attrs: Dict[str, Any] = {
             DB_SYSTEM: "redis",
-            REDIS_CLIENT_LIBRARY: f"redis-py:v{redis.__version__}"
+            REDIS_CLIENT_LIBRARY: f"redis-py:v{redis.__version__}",
         }
 
         if server_address is not None:
@@ -113,13 +118,13 @@ class AttributeBuilder:
 
     @staticmethod
     def build_operation_attributes(
-            command_name: Optional[str] = None,
-            batch_size: Optional[int] = None,
-            network_peer_address: Optional[str] = None,
-            network_peer_port: Optional[int] = None,
-            stored_procedure_name: Optional[str] = None,
-            retry_attempts: Optional[int] = None,
-            is_blocking: Optional[bool] = None,
+        command_name: Optional[str] = None,
+        batch_size: Optional[int] = None,
+        network_peer_address: Optional[str] = None,
+        network_peer_port: Optional[int] = None,
+        stored_procedure_name: Optional[str] = None,
+        retry_attempts: Optional[int] = None,
+        is_blocking: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Build attributes for a Redis operation (command execution).
@@ -163,10 +168,10 @@ class AttributeBuilder:
 
     @staticmethod
     def build_connection_attributes(
-            pool_name: Optional[str] = None,
-            connection_state: Optional[ConnectionState] = None,
-            connection_name: Optional[str] = None,
-            is_pubsub: Optional[bool] = None,
+        pool_name: Optional[str] = None,
+        connection_state: Optional[ConnectionState] = None,
+        connection_name: Optional[str] = None,
+        is_pubsub: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Build attributes for connection pool metrics.
@@ -198,8 +203,8 @@ class AttributeBuilder:
 
     @staticmethod
     def build_error_attributes(
-            error_type: Optional[Exception] = None,
-            is_internal: Optional[bool] = None,
+        error_type: Optional[Exception] = None,
+        is_internal: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Build error attributes.
@@ -216,7 +221,10 @@ class AttributeBuilder:
         if error_type is not None:
             attrs[ERROR_TYPE] = error_type.__class__.__name__
 
-            if hasattr(error_type, "status_code") and error_type.status_code is not None:
+            if (
+                hasattr(error_type, "status_code")
+                and error_type.status_code is not None
+            ):
                 attrs[DB_RESPONSE_STATUS_CODE] = error_type.status_code
             else:
                 attrs[DB_RESPONSE_STATUS_CODE] = "error"
@@ -224,7 +232,7 @@ class AttributeBuilder:
             if hasattr(error_type, "error_type") and error_type.error_type is not None:
                 attrs[REDIS_CLIENT_ERROR_CATEGORY] = error_type.error_type.value
             else:
-                attrs[REDIS_CLIENT_ERROR_CATEGORY] = 'other'
+                attrs[REDIS_CLIENT_ERROR_CATEGORY] = "other"
 
         if is_internal is not None:
             attrs[REDIS_CLIENT_ERROR_INTERNAL] = is_internal
@@ -233,9 +241,9 @@ class AttributeBuilder:
 
     @staticmethod
     def build_pubsub_message_attributes(
-            direction: PubSubDirection,
-            channel: Optional[str] = None,
-            sharded: Optional[bool] = None,
+        direction: PubSubDirection,
+        channel: Optional[str] = None,
+        sharded: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Build attributes for a PubSub message.
@@ -261,9 +269,9 @@ class AttributeBuilder:
 
     @staticmethod
     def build_streaming_attributes(
-            stream_name: Optional[str] = None,
-            consumer_group: Optional[str] = None,
-            consumer_name: Optional[str] = None,
+        stream_name: Optional[str] = None,
+        consumer_group: Optional[str] = None,
+        consumer_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Build attributes for a streaming operation.
@@ -291,9 +299,9 @@ class AttributeBuilder:
 
     @staticmethod
     def build_csc_attributes(
-            pool_name: Optional[str] = None,
-            result: Optional[CSCResult] = None,
-            reason: Optional[CSCReason] = None,
+        pool_name: Optional[str] = None,
+        result: Optional[CSCResult] = None,
+        reason: Optional[CSCReason] = None,
     ) -> Dict[str, Any]:
         """
         Build attributes for a Client Side Caching (CSC) operation.
@@ -321,9 +329,9 @@ class AttributeBuilder:
 
     @staticmethod
     def build_pool_name(
-            server_address: str,
-            server_port: int,
-            db_namespace: int = 0,
+        server_address: str,
+        server_port: int,
+        db_namespace: int = 0,
     ) -> str:
         """
         Build a unique connection pool name.

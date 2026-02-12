@@ -15,6 +15,7 @@ from typing import (
 
 if TYPE_CHECKING:
     from redis._parsers import Encoder
+    from redis.event import EventDispatcherInterface
 
 
 Number = Union[int, float]
@@ -51,6 +52,7 @@ ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Except
 
 class CommandsProtocol(Protocol):
     _event_dispatcher: "EventDispatcherInterface"
+
     def execute_command(self, *args, **options) -> ResponseT: ...
 
 

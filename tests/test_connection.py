@@ -29,15 +29,19 @@ from redis.connection import (
     Connection,
     SSLConnection,
     UnixDomainSocketConnection,
-    parse_url, BlockingConnectionPool,
+    parse_url,
+    BlockingConnectionPool,
 )
 from redis.credentials import UsernamePasswordCredentialProvider
 from redis.event import (
     EventDispatcher,
-    EventListenerInterface,
 )
 from redis.exceptions import ConnectionError, InvalidResponse, RedisError, TimeoutError
-from redis.observability.attributes import DB_CLIENT_CONNECTION_POOL_NAME, DB_CLIENT_CONNECTION_STATE, ConnectionState
+from redis.observability.attributes import (
+    DB_CLIENT_CONNECTION_POOL_NAME,
+    DB_CLIENT_CONNECTION_STATE,
+    ConnectionState,
+)
 from redis.retry import Retry
 from redis.utils import HIREDIS_AVAILABLE
 

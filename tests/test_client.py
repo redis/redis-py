@@ -5,11 +5,7 @@ import pytest
 
 import redis
 from redis.event import (
-    AfterPooledConnectionsInstantiationEvent,
-    ClientType,
     EventDispatcher,
-    EventListenerInterface,
-    InitializeConnectionCountObservability,
 )
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
@@ -29,7 +25,7 @@ class TestRedisClientMetricsRecording:
     def mock_connection(self):
         """Create a mock connection with required attributes."""
         conn = mock.MagicMock()
-        conn.host = 'localhost'
+        conn.host = "localhost"
         conn.port = 6379
         conn.db = 0
         conn.should_reconnect.return_value = False
@@ -37,6 +33,7 @@ class TestRedisClientMetricsRecording:
         # Mock retry to just execute the function directly
         def mock_call_with_retry(do, fail, is_retryable=None, with_failure_count=False):
             return do()
+
         conn.retry.call_with_retry = mock_call_with_retry
 
         return conn
@@ -60,12 +57,12 @@ class TestRedisClientMetricsRecording:
         self.client_errors = mock.MagicMock()
 
         def create_histogram_side_effect(name, **kwargs):
-            if name == 'db.client.operation.duration':
+            if name == "db.client.operation.duration":
                 return self.operation_duration
             return mock.MagicMock()
 
         def create_counter_side_effect(name, **kwargs):
-            if name == 'redis.client.errors':
+            if name == "redis.client.errors":
                 return self.client_errors
             return mock.MagicMock()
 
@@ -91,14 +88,12 @@ class TestRedisClientMetricsRecording:
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
 
         # Create collector with mocked meter
-        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
         # Patch the recorder to use our collector
         with mock.patch.object(
-            recorder,
-            '_get_or_create_collector',
-            return_value=collector
+            recorder, "_get_or_create_collector", return_value=collector
         ):
             # Create Redis client with mocked connection pool
             client = redis.Redis(
@@ -121,7 +116,7 @@ class TestRedisClientMetricsRecording:
         client._send_command_parse_response = mock.MagicMock(return_value=True)
 
         # Execute a command
-        client.execute_command('SET', 'key1', 'value1')
+        client.execute_command("SET", "key1", "value1")
 
         # Verify the Meter's histogram.record() was called
         operation_duration_mock.record.assert_called_once()
@@ -135,11 +130,11 @@ class TestRedisClientMetricsRecording:
         assert duration >= 0
 
         # Verify attributes
-        attrs = call_args[1]['attributes']
-        assert attrs['db.operation.name'] == 'SET'
-        assert attrs['server.address'] == 'localhost'
-        assert attrs['server.port'] == 6379
-        assert attrs['db.namespace'] == '0'
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "SET"
+        assert attrs["server.address"] == "localhost"
+        assert attrs["server.port"] == 6379
+        assert attrs["db.namespace"] == "0"
 
     def test_get_command_records_metrics(
         self, mock_connection_pool, mock_connection, mock_meter
@@ -151,25 +146,25 @@ class TestRedisClientMetricsRecording:
         recorder.reset_collector()
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
 
-        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
         with mock.patch.object(
-            recorder, '_get_or_create_collector', return_value=collector
+            recorder, "_get_or_create_collector", return_value=collector
         ):
             client = redis.Redis(
                 connection_pool=mock_connection_pool,
             )
 
-            client._send_command_parse_response = mock.MagicMock(return_value=b'value1')
+            client._send_command_parse_response = mock.MagicMock(return_value=b"value1")
 
             # Execute GET command
-            client.execute_command('GET', 'key1')
+            client.execute_command("GET", "key1")
 
             # Verify command name is GET
             call_args = self.operation_duration.record.call_args
-            attrs = call_args[1]['attributes']
-            assert attrs['db.operation.name'] == 'GET'
+            attrs = call_args[1]["attributes"]
+            assert attrs["db.operation.name"] == "GET"
 
         recorder.reset_collector()
 
@@ -189,11 +184,11 @@ class TestRedisClientMetricsRecording:
         # Enable RESILIENCY metric group for error counting
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND, MetricGroup.RESILIENCY])
 
-        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
         with mock.patch.object(
-            recorder, '_get_or_create_collector', return_value=collector
+            recorder, "_get_or_create_collector", return_value=collector
         ):
             client = redis.Redis(
                 connection_pool=mock_connection_pool,
@@ -205,15 +200,15 @@ class TestRedisClientMetricsRecording:
 
             # Execute should raise the error
             with pytest.raises(redis.ResponseError):
-                client.execute_command('LPUSH', 'string_key', 'value')
+                client.execute_command("LPUSH", "string_key", "value")
 
             # Verify record_error_count was called (via client_errors counter)
             self.client_errors.add.assert_called_once()
 
             # Verify error type is recorded in attributes
             call_args = self.client_errors.add.call_args
-            attrs = call_args[1]['attributes']
-            assert 'error.type' in attrs
+            attrs = call_args[1]["attributes"]
+            assert "error.type" in attrs
 
             # Verify operation_duration was NOT called (no retries, direct failure)
             self.operation_duration.record.assert_not_called()
@@ -226,17 +221,17 @@ class TestRedisClientMetricsRecording:
         """
         client, operation_duration_mock = setup_redis_client_with_otel
 
-        client._send_command_parse_response = mock.MagicMock(return_value=b'PONG')
+        client._send_command_parse_response = mock.MagicMock(return_value=b"PONG")
 
-        client.execute_command('PING')
+        client.execute_command("PING")
 
         call_args = operation_duration_mock.record.call_args
-        attrs = call_args[1]['attributes']
+        attrs = call_args[1]["attributes"]
 
         # Verify server attributes match mock connection
-        assert attrs['server.address'] == 'localhost'
-        assert attrs['server.port'] == 6379
-        assert attrs['db.namespace'] == '0'
+        assert attrs["server.address"] == "localhost"
+        assert attrs["server.port"] == 6379
+        assert attrs["db.namespace"] == "0"
 
     def test_multiple_commands_record_multiple_metrics(
         self, mock_connection_pool, mock_connection, mock_meter
@@ -248,11 +243,11 @@ class TestRedisClientMetricsRecording:
         recorder.reset_collector()
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
 
-        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
         with mock.patch.object(
-            recorder, '_get_or_create_collector', return_value=collector
+            recorder, "_get_or_create_collector", return_value=collector
         ):
             client = redis.Redis(
                 connection_pool=mock_connection_pool,
@@ -261,36 +256,36 @@ class TestRedisClientMetricsRecording:
             client._send_command_parse_response = mock.MagicMock(return_value=True)
 
             # Execute multiple commands
-            client.execute_command('SET', 'key1', 'value1')
-            client.execute_command('SET', 'key2', 'value2')
-            client.execute_command('GET', 'key1')
+            client.execute_command("SET", "key1", "value1")
+            client.execute_command("SET", "key2", "value2")
+            client.execute_command("GET", "key1")
 
             # Verify histogram.record() was called three times
             assert self.operation_duration.record.call_count == 3
 
             # Verify command names in order
             calls = self.operation_duration.record.call_args_list
-            assert calls[0][1]['attributes']['db.operation.name'] == 'SET'
-            assert calls[1][1]['attributes']['db.operation.name'] == 'SET'
-            assert calls[2][1]['attributes']['db.operation.name'] == 'GET'
+            assert calls[0][1]["attributes"]["db.operation.name"] == "SET"
+            assert calls[1][1]["attributes"]["db.operation.name"] == "SET"
+            assert calls[2][1]["attributes"]["db.operation.name"] == "GET"
 
         recorder.reset_collector()
 
-    def test_different_db_namespace_recorded(
-        self, mock_connection_pool, mock_meter
-    ):
+    def test_different_db_namespace_recorded(self, mock_connection_pool, mock_meter):
         """
         Test that different db namespace values are correctly recorded.
         """
 
         # Create connection with different db
         mock_connection = mock.MagicMock()
-        mock_connection.host = 'redis.example.com'
+        mock_connection.host = "redis.example.com"
         mock_connection.port = 6380
         mock_connection.db = 5
         mock_connection.should_reconnect.return_value = False
+
         def mock_call_with_retry(do, fail, is_retryable=None, with_failure_count=False):
             return do()
+
         mock_connection.retry.call_with_retry = mock_call_with_retry
 
         mock_connection_pool.get_connection.return_value = mock_connection
@@ -298,11 +293,11 @@ class TestRedisClientMetricsRecording:
         recorder.reset_collector()
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
 
-        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
         with mock.patch.object(
-            recorder, '_get_or_create_collector', return_value=collector
+            recorder, "_get_or_create_collector", return_value=collector
         ):
             client = redis.Redis(
                 connection_pool=mock_connection_pool,
@@ -310,15 +305,15 @@ class TestRedisClientMetricsRecording:
 
             client._send_command_parse_response = mock.MagicMock(return_value=True)
 
-            client.execute_command('SET', 'key', 'value')
+            client.execute_command("SET", "key", "value")
 
             call_args = self.operation_duration.record.call_args
-            attrs = call_args[1]['attributes']
+            attrs = call_args[1]["attributes"]
 
             # Verify different server attributes
-            assert attrs['server.address'] == 'redis.example.com'
-            assert attrs['server.port'] == 6380
-            assert attrs['db.namespace'] == '5'
+            assert attrs["server.address"] == "redis.example.com"
+            assert attrs["server.port"] == 6380
+            assert attrs["db.namespace"] == "5"
 
         recorder.reset_collector()
 
@@ -330,7 +325,7 @@ class TestRedisClientMetricsRecording:
 
         client._send_command_parse_response = mock.MagicMock(return_value=True)
 
-        client.execute_command('SET', 'key', 'value')
+        client.execute_command("SET", "key", "value")
 
         call_args = operation_duration_mock.record.call_args
         duration = call_args[0][0]
@@ -347,13 +342,13 @@ class TestRedisClientMetricsRecording:
 
         client._send_command_parse_response = mock.MagicMock(return_value=True)
 
-        client.execute_command('SET', 'key', 'value')
+        client.execute_command("SET", "key", "value")
 
         call_args = operation_duration_mock.record.call_args
-        attrs = call_args[1]['attributes']
+        attrs = call_args[1]["attributes"]
 
         # batch_size should not be present for single commands
-        assert 'db.operation.batch_size' not in attrs
+        assert "db.operation.batch_size" not in attrs
 
     def test_retry_records_metrics_on_each_attempt(
         self, mock_connection_pool, mock_meter
@@ -364,7 +359,7 @@ class TestRedisClientMetricsRecording:
         """
         # Create connection with retry behavior
         mock_connection = mock.MagicMock()
-        mock_connection.host = 'localhost'
+        mock_connection.host = "localhost"
         mock_connection.port = 6379
         mock_connection.db = 0
         mock_connection.should_reconnect.return_value = False
@@ -396,11 +391,11 @@ class TestRedisClientMetricsRecording:
         recorder.reset_collector()
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
 
-        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
         with mock.patch.object(
-            recorder, '_get_or_create_collector', return_value=collector
+            recorder, "_get_or_create_collector", return_value=collector
         ):
             event_dispatcher = EventDispatcher()
 
@@ -423,7 +418,7 @@ class TestRedisClientMetricsRecording:
             )
 
             # Execute command - should retry twice then succeed
-            client.execute_command('SET', 'key', 'value')
+            client.execute_command("SET", "key", "value")
 
             # Verify histogram.record() was called 3 times:
             # 2 retry attempts + 1 final success
@@ -432,11 +427,11 @@ class TestRedisClientMetricsRecording:
             calls = self.operation_duration.record.call_args_list
 
             # First two calls should have error.type (retry attempts)
-            assert 'error.type' in calls[0][1]['attributes']
-            assert 'error.type' in calls[1][1]['attributes']
+            assert "error.type" in calls[0][1]["attributes"]
+            assert "error.type" in calls[1][1]["attributes"]
 
             # Last call should be success (no error.type)
-            assert 'error.type' not in calls[2][1]['attributes']
+            assert "error.type" not in calls[2][1]["attributes"]
 
         recorder.reset_collector()
 
@@ -449,7 +444,7 @@ class TestRedisClientMetricsRecording:
         - record_error_count is called for the final error (after all retries exhausted)
         """
         mock_connection = mock.MagicMock()
-        mock_connection.host = 'localhost'
+        mock_connection.host = "localhost"
         mock_connection.port = 6379
         mock_connection.db = 0
         mock_connection.should_reconnect.return_value = False
@@ -479,11 +474,11 @@ class TestRedisClientMetricsRecording:
         # Enable both COMMAND and RESILIENCY metric groups
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND, MetricGroup.RESILIENCY])
 
-        with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+        with mock.patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
         with mock.patch.object(
-            recorder, '_get_or_create_collector', return_value=collector
+            recorder, "_get_or_create_collector", return_value=collector
         ):
             event_dispatcher = EventDispatcher()
 
@@ -499,7 +494,7 @@ class TestRedisClientMetricsRecording:
 
             # Execute command - should fail after all retries
             with pytest.raises(redis.ConnectionError):
-                client.execute_command('SET', 'key', 'value')
+                client.execute_command("SET", "key", "value")
 
             # Verify histogram.record() was called 2 times (for retry attempts only)
             # Final error does NOT call record_operation_duration
@@ -509,14 +504,14 @@ class TestRedisClientMetricsRecording:
 
             # Both retry calls should have error.type
             for call in calls:
-                assert 'error.type' in call[1]['attributes']
-                assert call[1]['attributes']['db.operation.name'] == 'SET'
+                assert "error.type" in call[1]["attributes"]
+                assert call[1]["attributes"]["db.operation.name"] == "SET"
 
             # Verify record_error_count was called once for the final error
             self.client_errors.add.assert_called_once()
             error_call_args = self.client_errors.add.call_args
-            error_attrs = error_call_args[1]['attributes']
-            assert 'error.type' in error_attrs
+            error_attrs = error_call_args[1]["attributes"]
+            assert "error.type" in error_attrs
 
         recorder.reset_collector()
 
@@ -533,28 +528,35 @@ class TestInitializeConnectionCountObservabilityListener:
         mock_pool = MagicMock()
         mock_pool.get_protocol.return_value = 2
 
-        with mock.patch(
-            "redis.client.ConnectionPool", return_value=mock_pool
-        ), mock.patch(
-            "redis.event.init_connection_count"
-        ) as mock_init_connection_count, mock.patch(
-            "redis.event.register_pools_connection_count"
-        ) as mock_register_pools:
+        with (
+            mock.patch("redis.client.ConnectionPool", return_value=mock_pool),
+            mock.patch(
+                "redis.event.init_connection_count"
+            ) as mock_init_connection_count,
+            mock.patch(
+                "redis.event.register_pools_connection_count"
+            ) as mock_register_pools,
+        ):
             redis.Redis(host="localhost", port=6379)
 
             mock_init_connection_count.assert_called_once_with()
             mock_register_pools.assert_called_once_with([mock_pool])
 
-    def test_redis_client_with_external_pool_calls_init_connection_count_and_register_pools(self):
+    def test_redis_client_with_external_pool_calls_init_connection_count_and_register_pools(
+        self,
+    ):
         """Test that Redis with external pool triggers init_connection_count and register_pools_connection_count."""
         mock_pool = MagicMock()
         mock_pool.get_protocol.return_value = 2
 
-        with mock.patch(
-            "redis.event.init_connection_count"
-        ) as mock_init_connection_count, mock.patch(
-            "redis.event.register_pools_connection_count"
-        ) as mock_register_pools:
+        with (
+            mock.patch(
+                "redis.event.init_connection_count"
+            ) as mock_init_connection_count,
+            mock.patch(
+                "redis.event.register_pools_connection_count"
+            ) as mock_register_pools,
+        ):
             redis.Redis(connection_pool=mock_pool)
 
             mock_init_connection_count.assert_called_once_with()

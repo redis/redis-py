@@ -135,7 +135,9 @@ class OTelProviderManager:
         Returns:
             True if flush was successful, False otherwise
         """
-        logger.debug("Flushing metrics before shutdown (not shutting down global MeterProvider)")
+        logger.debug(
+            "Flushing metrics before shutdown (not shutting down global MeterProvider)"
+        )
         return self.force_flush(timeout_millis=timeout_millis)
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
@@ -177,6 +179,7 @@ class OTelProviderManager:
 
 
 # Singleton instance class
+
 
 class ObservabilityInstance:
     """
@@ -226,7 +229,9 @@ class ObservabilityInstance:
             >>> otel.init(OTelConfig())
         """
         if self._provider_manager is not None:
-            logger.warning("Observability already initialized. Shutting down previous instance.")
+            logger.warning(
+                "Observability already initialized. Shutting down previous instance."
+            )
             self._provider_manager.shutdown()
 
         self._provider_manager = OTelProviderManager(config)
@@ -247,7 +252,10 @@ class ObservabilityInstance:
             >>> if otel.is_enabled():
             ...     print("Metrics are being collected")
         """
-        return self._provider_manager is not None and self._provider_manager.config.is_enabled()
+        return (
+            self._provider_manager is not None
+            and self._provider_manager.config.is_enabled()
+        )
 
     def get_provider_manager(self) -> Optional[OTelProviderManager]:
         """

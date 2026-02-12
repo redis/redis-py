@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, List, Optional, Union
 
-from redis.observability.attributes import CSCResult, CSCReason
+from redis.observability.attributes import CSCReason
 
 
 class CacheEntryStatus(Enum):
@@ -246,10 +246,12 @@ class DefaultCache(CacheInterface):
     def is_cachable(self, key: CacheKey) -> bool:
         return self._cache_config.is_allowed_to_cache(key.command)
 
+
 class CacheProxy(CacheInterface):
     """
     Proxy object that wraps cache implementations to enable additional logic on top
     """
+
     def __init__(self, cache: CacheInterface):
         self._cache = cache
 
@@ -278,6 +280,7 @@ class CacheProxy(CacheInterface):
         if self.config.is_exceeds_max_size(self.size):
             # Lazy import to avoid circular dependency
             from redis.observability.recorder import record_csc_eviction
+
             record_csc_eviction(
                 count=1,
                 reason=CSCReason.FULL,

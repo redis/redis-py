@@ -15,7 +15,6 @@ from redis.event import (
     EventDispatcher,
     EventListenerInterface,
 )
-from redis.connection import CloseReason
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
@@ -966,6 +965,7 @@ class TestHealthCheck:
             m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)
 
+
 class TestConnectionPoolReleasedEventEmission:
     """Tests for AfterConnectionReleasedEvent emission from ConnectionPool."""
 
@@ -973,9 +973,11 @@ class TestConnectionPoolReleasedEventEmission:
         """Test that AfterConnectionReleasedEvent is emitted when releasing a connection."""
         event_dispatcher = EventDispatcher()
         listener = MagicMock(spec=EventListenerInterface)
-        event_dispatcher.register_listeners({
-            AfterConnectionReleasedEvent: [listener],
-        })
+        event_dispatcher.register_listeners(
+            {
+                AfterConnectionReleasedEvent: [listener],
+            }
+        )
 
         pool = redis.ConnectionPool(
             connection_class=DummyConnection,
@@ -993,9 +995,11 @@ class TestConnectionPoolReleasedEventEmission:
         """Test that AfterConnectionReleasedEvent is NOT emitted for connections not owned by pool."""
         event_dispatcher = EventDispatcher()
         listener = MagicMock(spec=EventListenerInterface)
-        event_dispatcher.register_listeners({
-            AfterConnectionReleasedEvent: [listener],
-        })
+        event_dispatcher.register_listeners(
+            {
+                AfterConnectionReleasedEvent: [listener],
+            }
+        )
 
         pool = redis.ConnectionPool(
             connection_class=DummyConnection,

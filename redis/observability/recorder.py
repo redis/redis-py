@@ -19,12 +19,16 @@ Usage in Redis core code:
     )
 """
 
-import time
 from datetime import datetime
-from typing import Optional, Callable, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, List, Optional
 
-from redis.observability.attributes import PubSubDirection, ConnectionState, CSCResult, CSCReason, AttributeBuilder
-from redis.observability.metrics import RedisMetricsCollector, CloseReason
+from redis.observability.attributes import (
+    AttributeBuilder,
+    CSCReason,
+    CSCResult,
+    PubSubDirection,
+)
+from redis.observability.metrics import CloseReason, RedisMetricsCollector
 from redis.observability.providers import get_observability_instance
 from redis.observability.registry import get_observables_registry_instance
 from redis.utils import str_if_bytes
@@ -41,15 +45,15 @@ CSC_ITEMS_REGISTRY_KEY = "csc_items"
 
 
 def record_operation_duration(
-        command_name: str,
-        duration_seconds: float,
-        server_address: Optional[str] = None,
-        server_port: Optional[int] = None,
-        db_namespace: Optional[str] = None,
-        error: Optional[Exception] = None,
-        is_blocking: Optional[bool] = None,
-        batch_size: Optional[int] = None,
-        retry_attempts: Optional[int] = None,
+    command_name: str,
+    duration_seconds: float,
+    server_address: Optional[str] = None,
+    server_port: Optional[int] = None,
+    db_namespace: Optional[str] = None,
+    error: Optional[Exception] = None,
+    is_blocking: Optional[bool] = None,
+    batch_size: Optional[int] = None,
+    retry_attempts: Optional[int] = None,
 ) -> None:
     """
     Record a Redis command execution duration.
@@ -103,8 +107,8 @@ def record_operation_duration(
 
 
 def record_connection_create_time(
-        connection_pool: "ConnectionPoolInterface",
-        duration_seconds: float,
+    connection_pool: "ConnectionPoolInterface",
+    duration_seconds: float,
 ) -> None:
     """
     Record connection creation time.
@@ -163,8 +167,9 @@ def init_connection_count() -> None:
     # except Exception:
     #     pass
 
+
 def register_pools_connection_count(
-        connection_pools: List["ConnectionPoolInterface"],
+    connection_pools: List["ConnectionPoolInterface"],
 ) -> None:
     """
     Add connection pools to connection count observable registry.
@@ -187,10 +192,13 @@ def register_pools_connection_count(
         return observations
 
     observables_registry = get_observables_registry_instance()
-    observables_registry.register(CONNECTION_COUNT_REGISTRY_KEY, connection_count_callback)
+    observables_registry.register(
+        CONNECTION_COUNT_REGISTRY_KEY, connection_count_callback
+    )
+
 
 def record_connection_timeout(
-        pool_name: str,
+    pool_name: str,
 ) -> None:
     """
     Record a connection timeout event.
@@ -217,8 +225,8 @@ def record_connection_timeout(
 
 
 def record_connection_wait_time(
-        pool_name: str,
-        duration_seconds: float,
+    pool_name: str,
+    duration_seconds: float,
 ) -> None:
     """
     Record time taken to obtain a connection from the pool.
@@ -247,9 +255,10 @@ def record_connection_wait_time(
     # except Exception:
     #     pass
 
+
 def record_connection_closed(
-        close_reason: Optional[CloseReason] = None,
-        error_type: Optional[Exception] = None,
+    close_reason: Optional[CloseReason] = None,
+    error_type: Optional[Exception] = None,
 ) -> None:
     """
     Record a connection closed event.
@@ -278,9 +287,9 @@ def record_connection_closed(
 
 
 def record_connection_relaxed_timeout(
-        connection_name: str,
-        maint_notification: str,
-        relaxed: bool,
+    connection_name: str,
+    maint_notification: str,
+    relaxed: bool,
 ) -> None:
     """
     Record a connection timeout relaxation event.
@@ -311,7 +320,7 @@ def record_connection_relaxed_timeout(
 
 
 def record_connection_handoff(
-        pool_name: str,
+    pool_name: str,
 ) -> None:
     """
     Record a connection handoff event (e.g., after MOVING notification).
@@ -338,13 +347,13 @@ def record_connection_handoff(
 
 
 def record_error_count(
-        server_address: str,
-        server_port: int,
-        network_peer_address: str,
-        network_peer_port: int,
-        error_type: Exception,
-        retry_attempts: int,
-        is_internal: bool = True,
+    server_address: str,
+    server_port: int,
+    network_peer_address: str,
+    network_peer_port: int,
+    error_type: Exception,
+    retry_attempts: int,
+    is_internal: bool = True,
 ) -> None:
     """
     Record error count.
@@ -383,9 +392,9 @@ def record_error_count(
 
 
 def record_pubsub_message(
-        direction: PubSubDirection,
-        channel: Optional[str] = None,
-        sharded: Optional[bool] = None,
+    direction: PubSubDirection,
+    channel: Optional[str] = None,
+    sharded: Optional[bool] = None,
 ) -> None:
     """
     Record a PubSub message (published or received).
@@ -420,10 +429,10 @@ def record_pubsub_message(
 
 
 def record_streaming_lag(
-        lag_seconds: float,
-        stream_name: Optional[str] = None,
-        consumer_group: Optional[str] = None,
-        consumer_name: Optional[str] = None,
+    lag_seconds: float,
+    stream_name: Optional[str] = None,
+    consumer_group: Optional[str] = None,
+    consumer_name: Optional[str] = None,
 ) -> None:
     """
     Record the lag of a streaming message.
@@ -460,9 +469,9 @@ def record_streaming_lag(
 
 
 def record_streaming_lag_from_response(
-        response,
-        consumer_group: Optional[str] = None,
-        consumer_name: Optional[str] = None,
+    response,
+    consumer_group: Optional[str] = None,
+    consumer_name: Optional[str] = None,
 ) -> None:
     """
     Record streaming lag from XREAD/XREADGROUP response.
@@ -494,7 +503,9 @@ def record_streaming_lag_from_response(
     # RESP3 format: dict
     if isinstance(response, dict):
         for stream_name, stream_messages in response.items():
-            effective_stream_name = None if hide_stream_names else str_if_bytes(stream_name)
+            effective_stream_name = (
+                None if hide_stream_names else str_if_bytes(stream_name)
+            )
             for messages in stream_messages:
                 for message in messages:
                     message_id, _ = message
@@ -531,11 +542,11 @@ def record_streaming_lag_from_response(
 
 
 def record_maint_notification_count(
-        server_address: str,
-        server_port: int,
-        network_peer_address: str,
-        network_peer_port: int,
-        maint_notification: str,
+    server_address: str,
+    server_port: int,
+    network_peer_address: str,
+    network_peer_port: int,
+    maint_notification: str,
 ) -> None:
     """
     Record a maintenance notification count.
@@ -568,8 +579,9 @@ def record_maint_notification_count(
     # except Exception:
     #     pass
 
+
 def record_csc_request(
-        result: Optional[CSCResult] = None,
+    result: Optional[CSCResult] = None,
 ):
     """
     Record a Client Side Caching (CSC) request.
@@ -587,6 +599,7 @@ def record_csc_request(
     _metrics_collector.record_csc_request(
         result=result,
     )
+
 
 def init_csc_items() -> None:
     """
@@ -613,9 +626,10 @@ def init_csc_items() -> None:
         callback=observable_callback,
     )
 
+
 def register_csc_items_callback(
-        callback: Callable,
-        pool_name: Optional[str] = None,
+    callback: Callable,
+    pool_name: Optional[str] = None,
 ) -> None:
     """
     Adds given callback to CSC items observable registry.
@@ -635,14 +649,20 @@ def register_csc_items_callback(
     from opentelemetry.metrics import Observation
 
     def csc_items_callback():
-        return [Observation(callback(), attributes=AttributeBuilder.build_csc_attributes(pool_name=pool_name))]
+        return [
+            Observation(
+                callback(),
+                attributes=AttributeBuilder.build_csc_attributes(pool_name=pool_name),
+            )
+        ]
 
     observables_registry = get_observables_registry_instance()
     observables_registry.register(CSC_ITEMS_REGISTRY_KEY, csc_items_callback)
 
+
 def record_csc_eviction(
-        count: int,
-        reason: Optional[CSCReason] = None,
+    count: int,
+    reason: Optional[CSCReason] = None,
 ) -> None:
     """
     Record a Client Side Caching (CSC) eviction.
@@ -663,8 +683,9 @@ def record_csc_eviction(
         reason=reason,
     )
 
+
 def record_csc_network_saved(
-        bytes_saved: int,
+    bytes_saved: int,
 ) -> None:
     """
     Record the number of bytes saved by using Client Side Caching (CSC).
@@ -683,6 +704,7 @@ def record_csc_network_saved(
         bytes_saved=bytes_saved,
     )
 
+
 def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
     """
     Get or create the global metrics collector.
@@ -697,8 +719,7 @@ def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
 
         # Get meter from the global MeterProvider
         meter = manager.get_meter_provider().get_meter(
-            RedisMetricsCollector.METER_NAME,
-            RedisMetricsCollector.METER_VERSION
+            RedisMetricsCollector.METER_NAME, RedisMetricsCollector.METER_VERSION
         )
 
         return RedisMetricsCollector(meter, manager.config)

@@ -1,13 +1,15 @@
 import asyncio
 import threading
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Type, Union
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
-from redis.observability.recorder import init_connection_count, register_pools_connection_count
+from redis.observability.recorder import (
+    init_connection_count,
+    register_pools_connection_count,
+)
 
 
 class EventListenerInterface(ABC):
@@ -89,7 +91,7 @@ class EventDispatcher(EventDispatcherInterface):
             ],
             AfterPooledConnectionsInstantiationEvent: [
                 RegisterReAuthForPooledConnections(),
-                InitializeConnectionCountObservability()
+                InitializeConnectionCountObservability(),
             ],
             AfterSingleConnectionInstantiationEvent: [
                 RegisterReAuthForSingleConnection()
@@ -301,6 +303,7 @@ class OnCommandsFailEvent:
     def exception(self) -> Exception:
         return self._exception
 
+
 class AsyncOnCommandsFailEvent(OnCommandsFailEvent):
     pass
 
@@ -472,10 +475,12 @@ class RegisterReAuthForPubSub(EventListenerInterface):
     async def _raise_on_error_async(self, error: Exception):
         raise EventException(error, self._event)
 
+
 class InitializeConnectionCountObservability(EventListenerInterface):
     """
     Listener that initializes connection count observability.
     """
+
     def listen(self, event: AfterPooledConnectionsInstantiationEvent):
         # Initialize gauge only once, subsequent calls won't have an affect.
         init_connection_count()

@@ -32,7 +32,7 @@ from redis.cluster import (
 from redis.commands.core import HotkeysMetricsTypes
 from redis.connection import BlockingConnectionPool, Connection, ConnectionPool
 from redis.crc import key_slot
-from redis.event import EventDispatcher, EventListenerInterface
+from redis.event import EventDispatcher
 from redis.exceptions import (
     AskError,
     ClusterDownError,
@@ -4044,7 +4044,7 @@ class TestClusterMetricsRecording:
         self.operation_duration = Mock()
 
         def create_histogram_side_effect(name, **kwargs):
-            if name == 'db.client.operation.duration':
+            if name == "db.client.operation.duration":
                 return self.operation_duration
             return Mock()
 
@@ -4068,15 +4068,11 @@ class TestClusterMetricsRecording:
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
 
         # Create collector with mocked meter
-        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
         # Patch the recorder to use our collector
-        with patch.object(
-            recorder,
-            '_get_or_create_collector',
-            return_value=collector
-        ):
+        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
             # Create a new event dispatcher and attach it to the cluster
             event_dispatcher = EventDispatcher()
             r._event_dispatcher = event_dispatcher
@@ -4093,7 +4089,7 @@ class TestClusterMetricsRecording:
         cluster, operation_duration_mock = cluster_with_otel
 
         # Execute a command
-        cluster.set('test_key', 'test_value')
+        cluster.set("test_key", "test_value")
 
         # Verify the Meter's histogram.record() was called
         operation_duration_mock.record.assert_called()
@@ -4107,11 +4103,11 @@ class TestClusterMetricsRecording:
         assert duration >= 0
 
         # Verify attributes
-        attrs = call_args[1]['attributes']
-        assert attrs['db.operation.name'] == 'SET'
-        assert 'server.address' in attrs
-        assert 'server.port' in attrs
-        assert 'db.namespace' in attrs
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "SET"
+        assert "server.address" in attrs
+        assert "server.port" in attrs
+        assert "db.namespace" in attrs
 
     def test_get_command_records_metric(self, cluster_with_otel):
         """
@@ -4120,12 +4116,12 @@ class TestClusterMetricsRecording:
         cluster, operation_duration_mock = cluster_with_otel
 
         # Execute GET command
-        cluster.get('test_key')
+        cluster.get("test_key")
 
         # Verify command name is GET
         call_args = operation_duration_mock.record.call_args
-        attrs = call_args[1]['attributes']
-        assert attrs['db.operation.name'] == 'GET'
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "GET"
 
     def test_multiple_commands_record_multiple_metrics(self, cluster_with_otel):
         """
@@ -4134,9 +4130,9 @@ class TestClusterMetricsRecording:
         cluster, operation_duration_mock = cluster_with_otel
 
         # Execute multiple commands
-        cluster.set('key1', 'value1')
-        cluster.get('key1')
-        cluster.delete('key1')
+        cluster.set("key1", "value1")
+        cluster.get("key1")
+        cluster.delete("key1")
 
         # Verify histogram.record() was called 3 times
         assert operation_duration_mock.record.call_count == 3
@@ -4150,18 +4146,18 @@ class TestClusterMetricsRecording:
         cluster.ping()
 
         call_args = operation_duration_mock.record.call_args
-        attrs = call_args[1]['attributes']
+        attrs = call_args[1]["attributes"]
 
         # Verify server attributes are present and have valid values
-        assert 'server.address' in attrs
-        assert isinstance(attrs['server.address'], str)
-        assert len(attrs['server.address']) > 0
+        assert "server.address" in attrs
+        assert isinstance(attrs["server.address"], str)
+        assert len(attrs["server.address"]) > 0
 
-        assert 'server.port' in attrs
-        assert isinstance(attrs['server.port'], int)
-        assert attrs['server.port'] > 0
+        assert "server.port" in attrs
+        assert isinstance(attrs["server.port"], int)
+        assert attrs["server.port"] > 0
 
-        assert 'db.namespace' in attrs
+        assert "db.namespace" in attrs
 
     def test_duration_is_positive(self, cluster_with_otel):
         """
@@ -4169,7 +4165,7 @@ class TestClusterMetricsRecording:
         """
         cluster, operation_duration_mock = cluster_with_otel
 
-        cluster.set('duration_test', 'value')
+        cluster.set("duration_test", "value")
 
         call_args = operation_duration_mock.record.call_args
         duration = call_args[0][0]
@@ -4183,13 +4179,13 @@ class TestClusterMetricsRecording:
         """
         cluster, operation_duration_mock = cluster_with_otel
 
-        cluster.get('single_command_key')
+        cluster.get("single_command_key")
 
         call_args = operation_duration_mock.record.call_args
-        attrs = call_args[1]['attributes']
+        attrs = call_args[1]["attributes"]
 
         # batch_size should not be present for single commands
-        assert 'db.operation.batch_size' not in attrs
+        assert "db.operation.batch_size" not in attrs
 
     def test_different_commands_record_correct_names(self, cluster_with_otel):
         """
@@ -4198,10 +4194,10 @@ class TestClusterMetricsRecording:
         cluster, operation_duration_mock = cluster_with_otel
 
         commands_to_test = [
-            ('SET', lambda: cluster.set('cmd_test', 'value')),
-            ('GET', lambda: cluster.get('cmd_test')),
-            ('PIPELINE', lambda: cluster.delete('cmd_test')),
-            ('PING', lambda: cluster.ping()),
+            ("SET", lambda: cluster.set("cmd_test", "value")),
+            ("GET", lambda: cluster.get("cmd_test")),
+            ("PIPELINE", lambda: cluster.delete("cmd_test")),
+            ("PING", lambda: cluster.ping()),
         ]
 
         for expected_cmd, cmd_func in commands_to_test:
@@ -4209,8 +4205,8 @@ class TestClusterMetricsRecording:
             cmd_func()
 
             call_args = operation_duration_mock.record.call_args
-            attrs = call_args[1]['attributes']
-            assert attrs['db.operation.name'] == expected_cmd
+            attrs = call_args[1]["attributes"]
+            assert attrs["db.operation.name"] == expected_cmd
 
     def test_command_error_records_metric_with_error_type(self, cluster_with_otel):
         """
@@ -4219,24 +4215,24 @@ class TestClusterMetricsRecording:
         cluster, operation_duration_mock = cluster_with_otel
 
         # Execute a command that will fail (wrong type operation)
-        cluster.set('error_test_key', 'string_value')
+        cluster.set("error_test_key", "string_value")
 
         try:
             # Try to use LPUSH on a string key - this will fail
-            cluster.lpush('error_test_key', 'value')
+            cluster.lpush("error_test_key", "value")
         except ResponseError:
             pass
 
         # Find the LPUSH event in recorded calls
         lpush_calls = [
-            call_obj for call_obj in operation_duration_mock.record.call_args_list
-            if call_obj[1]['attributes'].get('db.operation.name') == 'LPUSH'
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "LPUSH"
         ]
 
         assert len(lpush_calls) >= 1
-        attrs = lpush_calls[0][1]['attributes']
-        assert 'error.type' in attrs
-
+        attrs = lpush_calls[0][1]["attributes"]
+        assert "error.type" in attrs
 
 
 @pytest.mark.onlycluster
@@ -4258,7 +4254,7 @@ class TestClusterPipelineMetricsRecording:
         self.operation_duration = Mock()
 
         def create_histogram_side_effect(name, **kwargs):
-            if name == 'db.client.operation.duration':
+            if name == "db.client.operation.duration":
                 return self.operation_duration
             return Mock()
 
@@ -4282,15 +4278,11 @@ class TestClusterPipelineMetricsRecording:
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
 
         # Create collector with mocked meter
-        with patch('redis.observability.metrics.OTEL_AVAILABLE', True):
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
             collector = RedisMetricsCollector(mock_meter, config)
 
         # Patch the recorder to use our collector
-        with patch.object(
-            recorder,
-            '_get_or_create_collector',
-            return_value=collector
-        ):
+        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
             # Create a new event dispatcher and attach it to the cluster
             event_dispatcher = EventDispatcher()
             r._event_dispatcher = event_dispatcher
@@ -4308,8 +4300,8 @@ class TestClusterPipelineMetricsRecording:
 
         # Execute a pipeline
         pipe = cluster.pipeline()
-        pipe.set('pipe_key1', 'value1')
-        pipe.get('pipe_key1')
+        pipe.set("pipe_key1", "value1")
+        pipe.get("pipe_key1")
         pipe.execute()
 
         # Verify the Meter's histogram.record() was called
@@ -4324,8 +4316,8 @@ class TestClusterPipelineMetricsRecording:
         assert duration >= 0
 
         # Verify attributes
-        attrs = call_args[1]['attributes']
-        assert attrs['db.operation.name'] == 'PIPELINE'
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "PIPELINE"
 
     def test_pipeline_batch_size_recorded(self, cluster_pipeline_with_otel):
         """
@@ -4335,23 +4327,23 @@ class TestClusterPipelineMetricsRecording:
 
         # Execute a pipeline with 3 commands
         pipe = cluster.pipeline()
-        pipe.set('batch_key', 'value1')
-        pipe.get('batch_key')
-        pipe.delete('batch_key')
+        pipe.set("batch_key", "value1")
+        pipe.get("batch_key")
+        pipe.delete("batch_key")
         pipe.execute()
 
         # Find the PIPELINE event call
         pipeline_call = None
         for call_obj in operation_duration_mock.record.call_args_list:
-            attrs = call_obj[1]['attributes']
-            if attrs.get('db.operation.name') == 'PIPELINE':
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "PIPELINE":
                 pipeline_call = call_obj
                 break
 
         assert pipeline_call is not None
-        attrs = pipeline_call[1]['attributes']
-        assert 'db.operation.batch.size' in attrs
-        assert attrs['db.operation.batch.size'] == 3
+        attrs = pipeline_call[1]["attributes"]
+        assert "db.operation.batch.size" in attrs
+        assert attrs["db.operation.batch.size"] == 3
 
     def test_pipeline_server_attributes_recorded(self, cluster_pipeline_with_otel):
         """
@@ -4360,28 +4352,28 @@ class TestClusterPipelineMetricsRecording:
         cluster, operation_duration_mock = cluster_pipeline_with_otel
 
         pipe = cluster.pipeline()
-        pipe.set('server_attr_key', 'value')
+        pipe.set("server_attr_key", "value")
         pipe.execute()
 
         # Find the PIPELINE event call
         pipeline_call = None
         for call_obj in operation_duration_mock.record.call_args_list:
-            attrs = call_obj[1]['attributes']
-            if attrs.get('db.operation.name') == 'PIPELINE':
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "PIPELINE":
                 pipeline_call = call_obj
                 break
 
         assert pipeline_call is not None
-        attrs = pipeline_call[1]['attributes']
+        attrs = pipeline_call[1]["attributes"]
 
         # Verify server attributes are present
-        assert 'server.address' in attrs
-        assert isinstance(attrs['server.address'], str)
+        assert "server.address" in attrs
+        assert isinstance(attrs["server.address"], str)
 
-        assert 'server.port' in attrs
-        assert isinstance(attrs['server.port'], int)
+        assert "server.port" in attrs
+        assert isinstance(attrs["server.port"], int)
 
-        assert 'db.namespace' in attrs
+        assert "db.namespace" in attrs
 
     def test_pipeline_duration_is_positive(self, cluster_pipeline_with_otel):
         """
@@ -4390,14 +4382,14 @@ class TestClusterPipelineMetricsRecording:
         cluster, operation_duration_mock = cluster_pipeline_with_otel
 
         pipe = cluster.pipeline()
-        pipe.set('duration_key', 'value')
+        pipe.set("duration_key", "value")
         pipe.execute()
 
         # Find the PIPELINE event call
         pipeline_call = None
         for call_obj in operation_duration_mock.record.call_args_list:
-            attrs = call_obj[1]['attributes']
-            if attrs.get('db.operation.name') == 'PIPELINE':
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "PIPELINE":
                 pipeline_call = call_obj
                 break
 
@@ -4416,18 +4408,19 @@ class TestClusterPipelineMetricsRecording:
 
         # Execute first pipeline
         pipe1 = cluster.pipeline()
-        pipe1.set('multi_key1', 'value1')
+        pipe1.set("multi_key1", "value1")
         pipe1.execute()
 
         # Execute second pipeline
         pipe2 = cluster.pipeline()
-        pipe2.set('multi_key2', 'value2')
+        pipe2.set("multi_key2", "value2")
         pipe2.execute()
 
         # Count PIPELINE events
         pipeline_count = sum(
-            1 for call_obj in operation_duration_mock.record.call_args_list
-            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+            1
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
         )
 
         assert pipeline_count >= 2
@@ -4444,8 +4437,9 @@ class TestClusterPipelineMetricsRecording:
 
         # Count PIPELINE events - should be 0
         pipeline_count = sum(
-            1 for call_obj in operation_duration_mock.record.call_args_list
-            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+            1
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
         )
 
         assert pipeline_count == 0
@@ -4457,20 +4451,21 @@ class TestClusterPipelineMetricsRecording:
         cluster, operation_duration_mock = cluster_pipeline_with_otel
 
         # Set a string value
-        cluster.set('pipe_error_key', 'string_value')
+        cluster.set("pipe_error_key", "string_value")
 
         try:
             # Execute a pipeline with a command that will fail
             pipe = cluster.pipeline()
-            pipe.lpush('pipe_error_key', 'value')  # Will fail - wrong type
+            pipe.lpush("pipe_error_key", "value")  # Will fail - wrong type
             pipe.execute()
         except ResponseError:
             pass
 
         # Find the PIPELINE event calls
         pipeline_calls = [
-            call_obj for call_obj in operation_duration_mock.record.call_args_list
-            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
         ]
 
         # There should be at least one PIPELINE event
@@ -4485,19 +4480,20 @@ class TestClusterPipelineMetricsRecording:
         cluster, operation_duration_mock = cluster_pipeline_with_otel
 
         # Set a string value
-        cluster.set('pipe_err_type_key', 'string_value')
+        cluster.set("pipe_err_type_key", "string_value")
 
         try:
             pipe = cluster.pipeline()
-            pipe.lpush('pipe_err_type_key', 'value')  # Will fail - wrong type
+            pipe.lpush("pipe_err_type_key", "value")  # Will fail - wrong type
             pipe.execute()
         except ResponseError:
             pass
 
         # Find PIPELINE events with error.type
         pipeline_calls = [
-            call_obj for call_obj in operation_duration_mock.record.call_args_list
-            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
         ]
 
         # At least one PIPELINE event should exist
@@ -4505,14 +4501,15 @@ class TestClusterPipelineMetricsRecording:
 
         # Check if any has error.type (the one from _raise_first_error)
         error_calls = [
-            call_obj for call_obj in pipeline_calls
-            if 'error.type' in call_obj[1]['attributes']
+            call_obj
+            for call_obj in pipeline_calls
+            if "error.type" in call_obj[1]["attributes"]
         ]
 
         # The error event should have error.type
         if error_calls:
-            attrs = error_calls[0][1]['attributes']
-            assert 'error.type' in attrs
+            attrs = error_calls[0][1]["attributes"]
+            assert "error.type" in attrs
 
     def test_pipeline_multi_node_records_multiple_metrics(
         self, cluster_pipeline_with_otel
@@ -4525,13 +4522,14 @@ class TestClusterPipelineMetricsRecording:
         # Execute pipeline with keys that may go to different nodes
         pipe = cluster.pipeline()
         for i in range(10):
-            pipe.set(f'multi_node_key_{i}', f'value_{i}')
+            pipe.set(f"multi_node_key_{i}", f"value_{i}")
         pipe.execute()
 
         # Find PIPELINE events
         pipeline_calls = [
-            call_obj for call_obj in operation_duration_mock.record.call_args_list
-            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
         ]
 
         # Should have at least one PIPELINE event
@@ -4539,10 +4537,10 @@ class TestClusterPipelineMetricsRecording:
 
         # Each event should have server info
         for call_obj in pipeline_calls:
-            attrs = call_obj[1]['attributes']
-            assert 'server.address' in attrs
-            assert 'server.port' in attrs
-            assert 'db.namespace' in attrs
+            attrs = call_obj[1]["attributes"]
+            assert "server.address" in attrs
+            assert "server.port" in attrs
+            assert "db.namespace" in attrs
 
     def test_pipeline_metric_contains_batch_size_per_node(
         self, cluster_pipeline_with_otel
@@ -4554,15 +4552,16 @@ class TestClusterPipelineMetricsRecording:
 
         # Execute pipeline with commands
         pipe = cluster.pipeline()
-        pipe.set('batch_node_key1', 'value1')
-        pipe.set('batch_node_key2', 'value2')
-        pipe.set('batch_node_key3', 'value3')
+        pipe.set("batch_node_key1", "value1")
+        pipe.set("batch_node_key2", "value2")
+        pipe.set("batch_node_key3", "value3")
         pipe.execute()
 
         # Find PIPELINE events
         pipeline_calls = [
-            call_obj for call_obj in operation_duration_mock.record.call_args_list
-            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
         ]
 
         # Should have at least one PIPELINE event
@@ -4571,9 +4570,9 @@ class TestClusterPipelineMetricsRecording:
         # Each event should have batch_size
         total_batch_size = 0
         for call_obj in pipeline_calls:
-            attrs = call_obj[1]['attributes']
-            assert 'db.operation.batch.size' in attrs
-            total_batch_size += attrs['db.operation.batch.size']
+            attrs = call_obj[1]["attributes"]
+            assert "db.operation.batch.size" in attrs
+            total_batch_size += attrs["db.operation.batch.size"]
 
         # Total batch size should equal number of commands
         assert total_batch_size == 3
@@ -4585,14 +4584,15 @@ class TestClusterPipelineMetricsRecording:
         cluster, operation_duration_mock = cluster_pipeline_with_otel
 
         pipe = cluster.pipeline()
-        pipe.set('duration_node_key', 'value')
-        pipe.get('duration_node_key')
+        pipe.set("duration_node_key", "value")
+        pipe.get("duration_node_key")
         pipe.execute()
 
         # Find PIPELINE events
         pipeline_calls = [
-            call_obj for call_obj in operation_duration_mock.record.call_args_list
-            if call_obj[1]['attributes'].get('db.operation.name') == 'PIPELINE'
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
         ]
 
         assert len(pipeline_calls) >= 1

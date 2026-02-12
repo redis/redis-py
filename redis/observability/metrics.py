@@ -8,11 +8,21 @@ OTel semantic conventions for database clients.
 import logging
 import time
 from enum import Enum
-from typing import Any, Dict, Optional, Callable, List
+from typing import TYPE_CHECKING, Callable, Optional
 
-from redis.observability.attributes import AttributeBuilder, ConnectionState, REDIS_CLIENT_CONNECTION_NOTIFICATION, \
-    REDIS_CLIENT_CONNECTION_CLOSE_REASON, ERROR_TYPE, PubSubDirection, CSCResult, CSCReason, get_pool_name
-from redis.observability.config import OTelConfig, MetricGroup
+if TYPE_CHECKING:
+    from redis.connection import ConnectionPoolInterface
+
+from redis.observability.attributes import (
+    REDIS_CLIENT_CONNECTION_CLOSE_REASON,
+    REDIS_CLIENT_CONNECTION_NOTIFICATION,
+    AttributeBuilder,
+    CSCReason,
+    CSCResult,
+    PubSubDirection,
+    get_pool_name,
+)
+from redis.observability.config import MetricGroup, OTelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +38,7 @@ except ImportError:
     Meter = None
     UpDownCounter = None
 
+
 class CloseReason(Enum):
     """
     Enum representing the reason why a Redis client connection was closed.
@@ -40,6 +51,7 @@ class CloseReason(Enum):
         HEALTHCHECK_FAILED: The connection was closed because a health check
             or liveness check for the connection failed.
     """
+
     APPLICATION_CLOSE = "application_close"
     ERROR = "error"
     HEALTHCHECK_FAILED = "healthcheck_failed"
@@ -109,7 +121,7 @@ class RedisMetricsCollector:
         self.maintenance_notifications = self.meter.create_counter(
             name="redis.client.maintenance.notifications",
             unit="{notification}",
-            description="Tracks server-side maintenance notifications"
+            description="Tracks server-side maintenance notifications",
         )
 
     def _init_connection_basic_metrics(self) -> None:
@@ -153,7 +165,6 @@ class RedisMetricsCollector:
             unit="{connection}",
             description="Total number of closed connections",
         )
-
 
     def _init_command_metrics(self) -> None:
         """Initialize command execution metric instruments."""
@@ -204,14 +215,14 @@ class RedisMetricsCollector:
     # Resiliency metric recording methods
 
     def record_error_count(
-            self,
-            server_address: str,
-            server_port: int,
-            network_peer_address: str,
-            network_peer_port: int,
-            error_type: Exception,
-            retry_attempts: int,
-            is_internal: bool,
+        self,
+        server_address: str,
+        server_port: int,
+        network_peer_address: str,
+        network_peer_port: int,
+        error_type: Exception,
+        retry_attempts: int,
+        is_internal: bool,
     ):
         """
         Record error count
@@ -250,12 +261,12 @@ class RedisMetricsCollector:
         self.client_errors.add(1, attributes=attrs)
 
     def record_maint_notification_count(
-            self,
-            server_address: str,
-            server_port: int,
-            network_peer_address: str,
-            network_peer_port: int,
-            maint_notification: str
+        self,
+        server_address: str,
+        server_port: int,
+        network_peer_address: str,
+        network_peer_port: int,
+        maint_notification: str,
     ):
         """
         Record maintenance notification count
@@ -286,8 +297,8 @@ class RedisMetricsCollector:
         self.maintenance_notifications.add(1, attributes=attrs)
 
     def init_connection_count(
-            self,
-            callback: Callable,
+        self,
+        callback: Callable,
     ) -> None:
         """
         Initialize observable gauge for connection count metric.
@@ -295,8 +306,10 @@ class RedisMetricsCollector:
         Args:
             callback: Callback function to retrieve connection count
         """
-        if not MetricGroup.CONNECTION_BASIC in self.config.metric_groups \
-                and not self.connection_count:
+        if (
+            MetricGroup.CONNECTION_BASIC not in self.config.metric_groups
+            and not self.connection_count
+        ):
             return
 
         self.connection_count = self.meter.create_observable_gauge(
@@ -307,8 +320,8 @@ class RedisMetricsCollector:
         )
 
     def init_csc_items(
-            self,
-            callback: Callable,
+        self,
+        callback: Callable,
     ) -> None:
         """
         Initialize observable gauge for CSC items metric.
@@ -316,8 +329,7 @@ class RedisMetricsCollector:
         Args:
             callback: Callback function to retrieve CSC items count
         """
-        if not MetricGroup.CSC in self.config.metric_groups \
-                and not self.csc_items:
+        if MetricGroup.CSC not in self.config.metric_groups and not self.csc_items:
             return
 
         self.csc_items = self.meter.create_observable_gauge(
@@ -341,9 +353,9 @@ class RedisMetricsCollector:
         self.connection_timeouts.add(1, attributes=attrs)
 
     def record_connection_create_time(
-            self,
-            connection_pool: "ConnectionPoolInterface",
-            duration_seconds: float,
+        self,
+        connection_pool: "ConnectionPoolInterface",
+        duration_seconds: float,
     ) -> None:
         """
         Record time taken to create a new connection.
@@ -355,13 +367,15 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_create_time"):
             return
 
-        attrs = self.attr_builder.build_connection_attributes(pool_name=get_pool_name(connection_pool))
+        attrs = self.attr_builder.build_connection_attributes(
+            pool_name=get_pool_name(connection_pool)
+        )
         self.connection_create_time.record(duration_seconds, attributes=attrs)
 
     def record_connection_wait_time(
-            self,
-            pool_name: str,
-            duration_seconds: float,
+        self,
+        pool_name: str,
+        duration_seconds: float,
     ) -> None:
         """
         Record time taken to obtain a connection from the pool.
@@ -379,20 +393,19 @@ class RedisMetricsCollector:
     # Command execution metric recording methods
 
     def record_operation_duration(
-            self,
-            command_name: str,
-            duration_seconds: float,
-            server_address: Optional[str] = None,
-            server_port: Optional[int] = None,
-            db_namespace: Optional[int] = None,
-            batch_size: Optional[int] = None,
-            error_type: Optional[Exception] = None,
-            network_peer_address: Optional[str] = None,
-            network_peer_port: Optional[int] = None,
-            retry_attempts: Optional[int] = None,
-            is_blocking: Optional[bool] = None,
+        self,
+        command_name: str,
+        duration_seconds: float,
+        server_address: Optional[str] = None,
+        server_port: Optional[int] = None,
+        db_namespace: Optional[int] = None,
+        batch_size: Optional[int] = None,
+        error_type: Optional[Exception] = None,
+        network_peer_address: Optional[str] = None,
+        network_peer_port: Optional[int] = None,
+        retry_attempts: Optional[int] = None,
+        is_blocking: Optional[bool] = None,
     ) -> None:
-
         """
         Record command execution duration.
 
@@ -442,9 +455,9 @@ class RedisMetricsCollector:
         self.operation_duration.record(duration_seconds, attributes=attrs)
 
     def record_connection_closed(
-            self,
-            close_reason: Optional[CloseReason] = None,
-            error_type: Optional[Exception] = None,
+        self,
+        close_reason: Optional[CloseReason] = None,
+        error_type: Optional[Exception] = None,
     ) -> None:
         """
         Record a connection closed event.
@@ -469,10 +482,10 @@ class RedisMetricsCollector:
         self.connection_closed.add(1, attributes=attrs)
 
     def record_connection_relaxed_timeout(
-            self,
-            connection_name: str,
-            maint_notification: str,
-            relaxed: bool,
+        self,
+        connection_name: str,
+        maint_notification: str,
+        relaxed: bool,
     ) -> None:
         """
         Record a connection timeout relaxation event.
@@ -485,13 +498,15 @@ class RedisMetricsCollector:
         if not hasattr(self, "connection_relaxed_timeout"):
             return
 
-        attrs = self.attr_builder.build_connection_attributes(connection_name=connection_name)
+        attrs = self.attr_builder.build_connection_attributes(
+            connection_name=connection_name
+        )
         attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] = maint_notification
         self.connection_relaxed_timeout.add(1 if relaxed else -1, attributes=attrs)
 
     def record_connection_handoff(
-            self,
-            pool_name: str,
+        self,
+        pool_name: str,
     ) -> None:
         """
         Record a connection handoff event (e.g., after MOVING notification).
@@ -508,10 +523,10 @@ class RedisMetricsCollector:
     # PubSub metric recording methods
 
     def record_pubsub_message(
-            self,
-            direction: PubSubDirection,
-            channel: Optional[str] = None,
-            sharded: Optional[bool] = None,
+        self,
+        direction: PubSubDirection,
+        channel: Optional[str] = None,
+        sharded: Optional[bool] = None,
     ) -> None:
         """
         Record a PubSub message (published or received).
@@ -534,11 +549,11 @@ class RedisMetricsCollector:
     # Streaming metric recording methods
 
     def record_streaming_lag(
-            self,
-            lag_seconds: float,
-            stream_name: Optional[str] = None,
-            consumer_group: Optional[str] = None,
-            consumer_name: Optional[str] = None,
+        self,
+        lag_seconds: float,
+        stream_name: Optional[str] = None,
+        consumer_group: Optional[str] = None,
+        consumer_name: Optional[str] = None,
     ) -> None:
         """
         Record the lag of a streaming message.
@@ -562,8 +577,8 @@ class RedisMetricsCollector:
     # CSC metric recording methods
 
     def record_csc_request(
-            self,
-            result: Optional[CSCResult] = None,
+        self,
+        result: Optional[CSCResult] = None,
     ) -> None:
         """
         Record a Client Side Caching (CSC) request.
@@ -578,9 +593,9 @@ class RedisMetricsCollector:
         self.csc_requests.add(1, attributes=attrs)
 
     def record_csc_eviction(
-            self,
-            count: int,
-            reason: Optional[CSCReason] = None,
+        self,
+        count: int,
+        reason: Optional[CSCReason] = None,
     ) -> None:
         """
         Record a Client Side Caching (CSC) eviction.
@@ -596,8 +611,8 @@ class RedisMetricsCollector:
         self.csc_evictions.add(count, attributes=attrs)
 
     def record_csc_network_saved(
-            self,
-            bytes_saved: int,
+        self,
+        bytes_saved: int,
     ) -> None:
         """
         Record the number of bytes saved by using Client Side Caching (CSC).

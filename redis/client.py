@@ -62,8 +62,8 @@ from redis.maint_notifications import (
 )
 from redis.observability.attributes import PubSubDirection
 from redis.observability.recorder import (
-    record_operation_duration,
     record_error_count,
+    record_operation_duration,
     record_pubsub_message,
 )
 from redis.retry import Retry
@@ -504,8 +504,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         between the client and server.
         """
         return Pipeline(
-            self.connection_pool, self.response_callbacks, transaction, shard_hint,
-            event_dispatcher=self._event_dispatcher
+            self.connection_pool, self.response_callbacks, transaction, shard_hint
         )
 
     def transaction(
@@ -667,12 +666,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         return self.parse_response(conn, command_name, **options)
 
     def _close_connection(
-            self,
-            conn,
-            error: Optional[Exception] = None,
-            failure_count: Optional[int] = None,
-            start_time: Optional[float] = None,
-            command_name: Optional[str] = None,
+        self,
+        conn,
+        error: Optional[Exception] = None,
+        failure_count: Optional[int] = None,
+        start_time: Optional[float] = None,
+        command_name: Optional[str] = None,
     ) -> None:
         """
         Close the connection before retrying.
@@ -723,7 +722,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     conn, command_name, *args, **options
                 ),
                 failure_callback,
-                with_failure_count=True
+                with_failure_count=True,
             )
 
             record_operation_duration(
@@ -1022,12 +1021,12 @@ class PubSub:
             ttl -= 1
 
     def _reconnect(
-            self,
-            conn,
-            error: Optional[Exception] = None,
-            failure_count: Optional[int] = None,
-            start_time: Optional[float] = None,
-            command_name: Optional[str] = None,
+        self,
+        conn,
+        error: Optional[Exception] = None,
+        failure_count: Optional[int] = None,
+        start_time: Optional[float] = None,
+        command_name: Optional[str] = None,
     ) -> None:
         """
         The supported exceptions are already checked in the
@@ -1079,7 +1078,7 @@ class PubSub:
             response = conn.retry.call_with_retry(
                 lambda: command(*args, **kwargs),
                 failure_callback,
-                with_failure_count=True
+                with_failure_count=True,
             )
 
             if command_name:
@@ -1539,7 +1538,6 @@ class Pipeline(Redis):
         response_callbacks,
         transaction,
         shard_hint,
-        event_dispatcher: EventDispatcher
     ):
         self.connection_pool = connection_pool
         self.connection: Optional[Connection] = None
@@ -1550,7 +1548,6 @@ class Pipeline(Redis):
         self.command_stack = []
         self.scripts: Set[Script] = set()
         self.explicit_transaction = False
-        self._event_dispatcher = event_dispatcher
 
     def __enter__(self) -> "Pipeline":
         return self
@@ -1687,7 +1684,7 @@ class Pipeline(Redis):
                     conn, command_name, *args, **options
                 ),
                 failure_callback,
-                with_failure_count=True
+                with_failure_count=True,
             )
 
             record_operation_duration(
@@ -1710,7 +1707,6 @@ class Pipeline(Redis):
                 is_internal=False,
             )
             raise
-
 
     def pipeline_execute_command(self, *args, **options) -> "Pipeline":
         """
@@ -1926,7 +1922,7 @@ class Pipeline(Redis):
             response = conn.retry.call_with_retry(
                 lambda: execute(conn, stack, raise_on_error),
                 failure_callback,
-                with_failure_count=True
+                with_failure_count=True,
             )
 
             record_operation_duration(

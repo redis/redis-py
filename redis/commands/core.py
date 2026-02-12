@@ -58,15 +58,16 @@ from redis.utils import (
     deprecated_function,
     experimental_args,
     experimental_method,
-    extract_expire_flags, str_if_bytes,
+    extract_expire_flags,
+    str_if_bytes,
 )
 
-from .helpers import at_most_one_value_set, list_or_args
 from ..observability.attributes import PubSubDirection
 from ..observability.recorder import (
-    record_streaming_lag_from_response,
     record_pubsub_message,
+    record_streaming_lag_from_response,
 )
+from .helpers import at_most_one_value_set, list_or_args
 
 if TYPE_CHECKING:
     import redis.asyncio.client

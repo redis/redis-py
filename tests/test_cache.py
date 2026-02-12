@@ -17,7 +17,6 @@ from redis.cache import (
 )
 from redis.event import (
     EventDispatcher,
-    EventListenerInterface,
 )
 from redis.observability.attributes import CSCReason
 from tests.conftest import _get_client, skip_if_resp_version, skip_if_server_version_lt
@@ -1538,15 +1537,18 @@ class TestUnitCacheProxy:
     ):
         """Test that record_csc_eviction is called when cache exceeds max size."""
         from unittest.mock import patch
+
         # Create a cache with max_size=2
         cache = DefaultCache(CacheConfig(max_size=2))
         proxy = CacheProxy(cache)
 
-        with patch('redis.observability.recorder.record_csc_eviction') as mock_record:
+        with patch("redis.observability.recorder.record_csc_eviction") as mock_record:
             # Add 2 entries (at max capacity)
             for i in range(2):
                 cache_key = CacheKey(
-                    command="GET", redis_keys=(f"key{i}",), redis_args=("GET", f"key{i}")
+                    command="GET",
+                    redis_keys=(f"key{i}",),
+                    redis_args=("GET", f"key{i}"),
                 )
                 proxy.set(
                     CacheEntry(
@@ -1584,10 +1586,13 @@ class TestUnitCacheProxy:
     ):
         """Test that record_csc_eviction is NOT called when cache is under max size."""
         from unittest.mock import patch
+
         proxy = CacheProxy(mock_cache)
 
-        with patch('redis.observability.recorder.record_csc_eviction') as mock_record:
-            cache_key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        with patch("redis.observability.recorder.record_csc_eviction") as mock_record:
+            cache_key = CacheKey(
+                command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+            )
             proxy.set(
                 CacheEntry(
                     cache_key=cache_key,
@@ -1621,7 +1626,9 @@ class TestUnitCacheProxy:
         proxy = CacheProxy(mock_cache)
         assert proxy.size == 0
 
-        cache_key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
         proxy.set(
             CacheEntry(
                 cache_key=cache_key,
@@ -1636,7 +1643,9 @@ class TestUnitCacheProxy:
         """Test that get method delegates to the underlying cache."""
         proxy = CacheProxy(mock_cache)
 
-        cache_key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
         entry = CacheEntry(
             cache_key=cache_key,
             cache_value=b"bar",
@@ -1655,7 +1664,9 @@ class TestUnitCacheProxy:
         """Test that delete_by_cache_keys method delegates to the underlying cache."""
         proxy = CacheProxy(mock_cache)
 
-        cache_key = CacheKey(command="GET", redis_keys=("foo",), redis_args=("GET", "foo"))
+        cache_key = CacheKey(
+            command="GET", redis_keys=("foo",), redis_args=("GET", "foo")
+        )
         proxy.set(
             CacheEntry(
                 cache_key=cache_key,
@@ -1675,7 +1686,9 @@ class TestUnitCacheProxy:
         """Test that delete_by_redis_keys method delegates to the underlying cache."""
         proxy = CacheProxy(mock_cache)
 
-        cache_key = CacheKey(command="GET", redis_keys=(b"foo",), redis_args=("GET", "foo"))
+        cache_key = CacheKey(
+            command="GET", redis_keys=(b"foo",), redis_args=("GET", "foo")
+        )
         proxy.set(
             CacheEntry(
                 cache_key=cache_key,

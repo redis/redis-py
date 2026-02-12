@@ -9,8 +9,6 @@ These tests verify the OTelConfig class behavior including:
 - Runtime configuration changes
 """
 
-import pytest
-
 from redis.observability.config import OTelConfig, MetricGroup, TelemetryOption
 
 
@@ -69,9 +67,7 @@ class TestOTelConfigMetricGroups:
 
     def test_multiple_metric_groups(self):
         """Test setting multiple metric groups."""
-        config = OTelConfig(
-            metric_groups=[MetricGroup.COMMAND, MetricGroup.PUBSUB]
-        )
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND, MetricGroup.PUBSUB])
         assert MetricGroup.COMMAND in config.metric_groups
         assert MetricGroup.PUBSUB in config.metric_groups
 
@@ -107,18 +103,18 @@ class TestOTelConfigIncludeCommands:
 
     def test_include_commands_single(self):
         """Test include_commands with single command."""
-        config = OTelConfig(include_commands=['GET'])
-        assert config.include_commands == {'GET'}
+        config = OTelConfig(include_commands=["GET"])
+        assert config.include_commands == {"GET"}
 
     def test_include_commands_multiple(self):
         """Test include_commands with multiple commands."""
-        config = OTelConfig(include_commands=['GET', 'SET', 'DEL'])
-        assert config.include_commands == {'GET', 'SET', 'DEL'}
+        config = OTelConfig(include_commands=["GET", "SET", "DEL"])
+        assert config.include_commands == {"GET", "SET", "DEL"}
 
     def test_include_commands_empty_list(self):
         """Test include_commands with empty list results in empty set."""
         config = OTelConfig(include_commands=[])
-        assert config.include_commands == None
+        assert config.include_commands is None
 
 
 class TestOTelConfigExcludeCommands:
@@ -126,13 +122,13 @@ class TestOTelConfigExcludeCommands:
 
     def test_exclude_commands_single(self):
         """Test exclude_commands with single command."""
-        config = OTelConfig(exclude_commands=['PING'])
-        assert config.exclude_commands == {'PING'}
+        config = OTelConfig(exclude_commands=["PING"])
+        assert config.exclude_commands == {"PING"}
 
     def test_exclude_commands_multiple(self):
         """Test exclude_commands with multiple commands."""
-        config = OTelConfig(exclude_commands=['PING', 'INFO', 'DEBUG'])
-        assert config.exclude_commands == {'PING', 'INFO', 'DEBUG'}
+        config = OTelConfig(exclude_commands=["PING", "INFO", "DEBUG"])
+        assert config.exclude_commands == {"PING", "INFO", "DEBUG"}
 
     def test_exclude_commands_empty_list(self):
         """Test exclude_commands with empty list results in empty set."""
@@ -146,49 +142,49 @@ class TestOTelConfigShouldTrackCommand:
     def test_should_track_command_default_tracks_all(self):
         """Test that all commands are tracked by default."""
         config = OTelConfig()
-        assert config.should_track_command('GET') is True
-        assert config.should_track_command('SET') is True
-        assert config.should_track_command('PING') is True
+        assert config.should_track_command("GET") is True
+        assert config.should_track_command("SET") is True
+        assert config.should_track_command("PING") is True
 
     def test_should_track_command_case_insensitive(self):
         """Test that command matching is case-insensitive."""
-        config = OTelConfig(include_commands=['GET'])
-        assert config.should_track_command('GET') is True
-        assert config.should_track_command('get') is True
-        assert config.should_track_command('Get') is True
+        config = OTelConfig(include_commands=["GET"])
+        assert config.should_track_command("GET") is True
+        assert config.should_track_command("get") is True
+        assert config.should_track_command("Get") is True
 
     def test_should_track_command_with_include_list(self):
         """Test that only included commands are tracked."""
-        config = OTelConfig(include_commands=['GET', 'SET'])
-        assert config.should_track_command('GET') is True
-        assert config.should_track_command('SET') is True
-        assert config.should_track_command('DEL') is False
-        assert config.should_track_command('PING') is False
+        config = OTelConfig(include_commands=["GET", "SET"])
+        assert config.should_track_command("GET") is True
+        assert config.should_track_command("SET") is True
+        assert config.should_track_command("DEL") is False
+        assert config.should_track_command("PING") is False
 
     def test_should_track_command_with_exclude_list(self):
         """Test that excluded commands are not tracked."""
-        config = OTelConfig(exclude_commands=['PING', 'INFO'])
-        assert config.should_track_command('GET') is True
-        assert config.should_track_command('SET') is True
-        assert config.should_track_command('PING') is False
-        assert config.should_track_command('INFO') is False
+        config = OTelConfig(exclude_commands=["PING", "INFO"])
+        assert config.should_track_command("GET") is True
+        assert config.should_track_command("SET") is True
+        assert config.should_track_command("PING") is False
+        assert config.should_track_command("INFO") is False
 
     def test_should_track_command_include_takes_precedence(self):
         """Test that include_commands takes precedence over exclude_commands."""
         # When include_commands is set, exclude_commands is ignored
         config = OTelConfig(
-            include_commands=['GET', 'SET'],
-            exclude_commands=['GET']  # This should be ignored
+            include_commands=["GET", "SET"],
+            exclude_commands=["GET"],  # This should be ignored
         )
-        assert config.should_track_command('GET') is True
-        assert config.should_track_command('SET') is True
-        assert config.should_track_command('DEL') is False
+        assert config.should_track_command("GET") is True
+        assert config.should_track_command("SET") is True
+        assert config.should_track_command("DEL") is False
 
     def test_should_track_command_empty_include_tracks_all(self):
         """Test that empty include list tracks all commands."""
         config = OTelConfig(include_commands=[])
-        assert config.should_track_command('GET') is True
-        assert config.should_track_command('SET') is True
+        assert config.should_track_command("GET") is True
+        assert config.should_track_command("SET") is True
 
 
 class TestOTelConfigRepr:
@@ -198,7 +194,7 @@ class TestOTelConfigRepr:
         """Test that repr contains enabled_telemetry."""
         config = OTelConfig()
         repr_str = repr(config)
-        assert 'enabled_telemetry' in repr_str
+        assert "enabled_telemetry" in repr_str
 
 
 class TestOTelConfigPrivacyControls:
@@ -240,24 +236,28 @@ class TestOTelConfigHistogramBuckets:
     def test_default_operation_duration_buckets(self):
         """Test that default operation duration buckets are set correctly."""
         from redis.observability.config import default_operation_duration_buckets
+
         config = OTelConfig()
         assert config.buckets_operation_duration == default_operation_duration_buckets()
 
     def test_default_stream_processing_duration_buckets(self):
         """Test that default stream processing duration buckets are set correctly."""
         from redis.observability.config import default_histogram_buckets
+
         config = OTelConfig()
         assert config.buckets_stream_processing_duration == default_histogram_buckets()
 
     def test_default_connection_create_time_buckets(self):
         """Test that default connection create time buckets are set correctly."""
         from redis.observability.config import default_histogram_buckets
+
         config = OTelConfig()
         assert config.buckets_connection_create_time == default_histogram_buckets()
 
     def test_default_connection_wait_time_buckets(self):
         """Test that default connection wait time buckets are set correctly."""
         from redis.observability.config import default_histogram_buckets
+
         config = OTelConfig()
         assert config.buckets_connection_wait_time == default_histogram_buckets()
 
@@ -321,6 +321,7 @@ class TestDefaultBucketFunctions:
     def test_default_operation_duration_buckets_returns_sequence(self):
         """Test that default_operation_duration_buckets returns a sequence."""
         from redis.observability.config import default_operation_duration_buckets
+
         buckets = default_operation_duration_buckets()
         assert isinstance(buckets, (list, tuple))
         assert len(buckets) > 0
@@ -328,6 +329,7 @@ class TestDefaultBucketFunctions:
     def test_default_histogram_buckets_returns_sequence(self):
         """Test that default_histogram_buckets returns a sequence."""
         from redis.observability.config import default_histogram_buckets
+
         buckets = default_histogram_buckets()
         assert isinstance(buckets, (list, tuple))
         assert len(buckets) > 0
@@ -335,24 +337,28 @@ class TestDefaultBucketFunctions:
     def test_default_operation_duration_buckets_are_sorted(self):
         """Test that default operation duration buckets are in ascending order."""
         from redis.observability.config import default_operation_duration_buckets
+
         buckets = list(default_operation_duration_buckets())
         assert buckets == sorted(buckets)
 
     def test_default_histogram_buckets_are_sorted(self):
         """Test that default histogram buckets are in ascending order."""
         from redis.observability.config import default_histogram_buckets
+
         buckets = list(default_histogram_buckets())
         assert buckets == sorted(buckets)
 
     def test_default_operation_duration_buckets_are_positive(self):
         """Test that all default operation duration bucket values are positive."""
         from redis.observability.config import default_operation_duration_buckets
+
         buckets = default_operation_duration_buckets()
         assert all(b > 0 for b in buckets)
 
     def test_default_histogram_buckets_are_positive(self):
         """Test that all default histogram bucket values are positive."""
         from redis.observability.config import default_histogram_buckets
+
         buckets = default_histogram_buckets()
         assert all(b > 0 for b in buckets)
 

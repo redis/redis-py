@@ -28,7 +28,8 @@ from redis.cache import (
     CacheFactory,
     CacheFactoryInterface,
     CacheInterface,
-    CacheKey, CacheProxy,
+    CacheKey,
+    CacheProxy,
 )
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
@@ -52,20 +53,27 @@ from .maint_notifications import (
     MaintenanceState,
     MaintNotificationsConfig,
     MaintNotificationsConnectionHandler,
-    MaintNotificationsPoolHandler, MaintenanceNotification,
+    MaintNotificationsPoolHandler,
 )
-from .observability.attributes import AttributeBuilder, DB_CLIENT_CONNECTION_STATE, ConnectionState, \
-    DB_CLIENT_CONNECTION_POOL_NAME, CSCReason, CSCResult, get_pool_name
+from .observability.attributes import (
+    DB_CLIENT_CONNECTION_POOL_NAME,
+    DB_CLIENT_CONNECTION_STATE,
+    AttributeBuilder,
+    ConnectionState,
+    CSCReason,
+    CSCResult,
+    get_pool_name,
+)
 from .observability.metrics import CloseReason
 from .observability.recorder import (
-    record_error_count,
+    init_csc_items,
+    record_connection_closed,
     record_connection_create_time,
     record_connection_wait_time,
-    record_connection_closed,
-    record_csc_request,
     record_csc_eviction,
     record_csc_network_saved,
-    init_csc_items,
+    record_csc_request,
+    record_error_count,
     register_csc_items_callback,
 )
 from .retry import Retry
@@ -824,7 +832,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             orig_socket_timeout,
             orig_socket_connect_timeout,
             self._parser,
-            event_dispatcher=self._event_dispatcher
+            event_dispatcher=self._event_dispatcher,
         )
 
     def __repr__(self):
@@ -903,8 +911,10 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if retry_socket_connect:
                 sock = self.retry.call_with_retry(
                     lambda: self._connect(),
-                    lambda error, failure_count: self.disconnect(error=error, failure_count=failure_count),
-                    with_failure_count=True
+                    lambda error, failure_count: self.disconnect(
+                        error=error, failure_count=failure_count
+                    ),
+                    with_failure_count=True,
                 )
             else:
                 sock = self._connect()
@@ -1107,9 +1117,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         except OSError:
             pass
 
-        error = kwargs.get('error')
-        failure_count = kwargs.get('failure_count')
-        health_check_failed = kwargs.get('health_check_failed')
+        error = kwargs.get("error")
+        failure_count = kwargs.get("failure_count")
+        health_check_failed = kwargs.get("health_check_failed")
 
         if error:
             if health_check_failed:
@@ -1153,7 +1163,9 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
 
     def _ping_failed(self, error, failure_count):
         """Function to call when PING fails"""
-        self.disconnect(error=error, failure_count=failure_count, health_check_failed=True)
+        self.disconnect(
+            error=error, failure_count=failure_count, health_check_failed=True
+        )
 
     def check_health(self):
         """Check the health of the connection with a PING/PONG"""
@@ -1161,7 +1173,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             self.retry.call_with_retry(
                 self._send_ping,
                 lambda error, failure_count: self._ping_failed(error, failure_count),
-                with_failure_count=True
+                with_failure_count=True,
             )
 
     def send_packed_command(self, command, check_health=True):
@@ -2730,7 +2742,6 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         "Get a connection from the pool"
 
         # Start timing for observability
-        start_time_acquired = time.monotonic()
         self._checkpid()
         is_created = False
 
@@ -2900,8 +2911,12 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         free_connections_attributes = attributes.copy()
         in_use_connections_attributes = attributes.copy()
 
-        free_connections_attributes[DB_CLIENT_CONNECTION_STATE] = ConnectionState.IDLE.value
-        in_use_connections_attributes[DB_CLIENT_CONNECTION_STATE] = ConnectionState.USED.value
+        free_connections_attributes[DB_CLIENT_CONNECTION_STATE] = (
+            ConnectionState.IDLE.value
+        )
+        in_use_connections_attributes[DB_CLIENT_CONNECTION_STATE] = (
+            ConnectionState.USED.value
+        )
 
         return [
             (len(self._get_free_connections()), free_connections_attributes),

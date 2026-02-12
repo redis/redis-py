@@ -1,6 +1,5 @@
-import os
-from typing import Dict, List, Optional, Union, Sequence
 from enum import IntFlag, auto
+from typing import List, Optional, Sequence
 
 """
 OpenTelemetry configuration for redis-py.
@@ -9,8 +8,10 @@ This module handles configuration for OTel observability features,
 including parsing environment variables and validating settings.
 """
 
+
 class MetricGroup(IntFlag):
     """Metric groups that can be enabled/disabled."""
+
     RESILIENCY = auto()
     CONNECTION_BASIC = auto()
     CONNECTION_ADVANCED = auto()
@@ -19,12 +20,31 @@ class MetricGroup(IntFlag):
     STREAMING = auto()
     PUBSUB = auto()
 
+
 class TelemetryOption(IntFlag):
     """Telemetry options to export."""
+
     METRICS = auto()
 
+
 def default_operation_duration_buckets() -> Sequence[float]:
-    return [0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5]
+    return [
+        0.0001,
+        0.00025,
+        0.0005,
+        0.001,
+        0.0025,
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1,
+        2.5,
+    ]
+
 
 def default_histogram_buckets() -> Sequence[float]:
     return [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10]
@@ -83,22 +103,26 @@ class OTelConfig:
     DEFAULT_METRIC_GROUPS = MetricGroup.CONNECTION_BASIC | MetricGroup.RESILIENCY
 
     def __init__(
-            self,
-            # Core enablement
-            enabled_telemetry: Optional[List[TelemetryOption]] = None,
-            # Metrics-specific
-            metric_groups: Optional[List[MetricGroup]] = None,
-            # Redis-specific telemetry controls
-            include_commands: Optional[List[str]] = None,
-            exclude_commands: Optional[List[str]] = None,
-            # Privacy controls
-            hide_pubsub_channel_names: bool = False,
-            hide_stream_names: bool = False,
-            # Bucket sizes
-            buckets_operation_duration: Sequence[float] = default_operation_duration_buckets(),
-            buckets_stream_processing_duration: Sequence[float] = default_histogram_buckets(),
-            buckets_connection_create_time: Sequence[float] = default_histogram_buckets(),
-            buckets_connection_wait_time: Sequence[float] = default_histogram_buckets(),
+        self,
+        # Core enablement
+        enabled_telemetry: Optional[List[TelemetryOption]] = None,
+        # Metrics-specific
+        metric_groups: Optional[List[MetricGroup]] = None,
+        # Redis-specific telemetry controls
+        include_commands: Optional[List[str]] = None,
+        exclude_commands: Optional[List[str]] = None,
+        # Privacy controls
+        hide_pubsub_channel_names: bool = False,
+        hide_stream_names: bool = False,
+        # Bucket sizes
+        buckets_operation_duration: Sequence[
+            float
+        ] = default_operation_duration_buckets(),
+        buckets_stream_processing_duration: Sequence[
+            float
+        ] = default_histogram_buckets(),
+        buckets_connection_create_time: Sequence[float] = default_histogram_buckets(),
+        buckets_connection_wait_time: Sequence[float] = default_histogram_buckets(),
     ):
         # Core enablement
         if enabled_telemetry is None:
@@ -154,6 +178,4 @@ class OTelConfig:
         return command_upper not in self.exclude_commands
 
     def __repr__(self) -> str:
-        return (
-            f"OTelConfig(enabled_telemetry={self.enabled_telemetry}"
-        )
+        return f"OTelConfig(enabled_telemetry={self.enabled_telemetry}"

@@ -10,7 +10,7 @@ These tests verify the OTelProviderManager and ObservabilityInstance classes inc
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from redis.observability.config import OTelConfig, TelemetryOption
 from redis.observability.providers import (
@@ -35,11 +35,11 @@ class TestOTelProviderManagerInit:
         """Test initialization with custom config."""
         config = OTelConfig(
             enabled_telemetry=[TelemetryOption.METRICS],
-            exclude_commands=['DEBUG'],
+            exclude_commands=["DEBUG"],
         )
         manager = OTelProviderManager(config)
 
-        assert 'DEBUG' in manager.config.exclude_commands
+        assert "DEBUG" in manager.config.exclude_commands
 
 
 class TestOTelProviderManagerGetMeterProvider:
@@ -59,8 +59,9 @@ class TestOTelProviderManagerGetMeterProvider:
         config = OTelConfig()
         manager = OTelProviderManager(config)
 
-        with patch('opentelemetry.metrics') as mock_metrics:
+        with patch("opentelemetry.metrics") as mock_metrics:
             from opentelemetry.metrics import NoOpMeterProvider
+
             mock_metrics.get_meter_provider.return_value = NoOpMeterProvider()
 
             with pytest.raises(RuntimeError) as exc_info:
@@ -75,9 +76,9 @@ class TestOTelProviderManagerGetMeterProvider:
 
         mock_provider = Mock()
         # Make sure it's not a NoOpMeterProvider
-        mock_provider.__class__.__name__ = 'MeterProvider'
+        mock_provider.__class__.__name__ = "MeterProvider"
 
-        with patch('opentelemetry.metrics') as mock_metrics:
+        with patch("opentelemetry.metrics") as mock_metrics:
             mock_metrics.get_meter_provider.return_value = mock_provider
             result = manager.get_meter_provider()
 
@@ -90,7 +91,7 @@ class TestOTelProviderManagerGetMeterProvider:
 
         mock_provider = Mock()
 
-        with patch('opentelemetry.metrics') as mock_metrics:
+        with patch("opentelemetry.metrics") as mock_metrics:
             mock_metrics.get_meter_provider.return_value = mock_provider
 
             # Call twice
@@ -110,7 +111,7 @@ class TestOTelProviderManagerShutdown:
         config = OTelConfig()
         manager = OTelProviderManager(config)
 
-        with patch.object(manager, 'force_flush', return_value=True) as mock_flush:
+        with patch.object(manager, "force_flush", return_value=True) as mock_flush:
             result = manager.shutdown(timeout_millis=5000)
 
         mock_flush.assert_called_once_with(timeout_millis=5000)
@@ -121,7 +122,7 @@ class TestOTelProviderManagerShutdown:
         config = OTelConfig()
         manager = OTelProviderManager(config)
 
-        with patch.object(manager, 'force_flush', return_value=True) as mock_flush:
+        with patch.object(manager, "force_flush", return_value=True) as mock_flush:
             manager.shutdown()
 
         mock_flush.assert_called_once_with(timeout_millis=30000)
@@ -183,7 +184,7 @@ class TestOTelProviderManagerContextManager:
         config = OTelConfig()
         manager = OTelProviderManager(config)
 
-        with patch.object(manager, 'shutdown') as mock_shutdown:
+        with patch.object(manager, "shutdown") as mock_shutdown:
             manager.__exit__(None, None, None)
 
         mock_shutdown.assert_called_once()
@@ -192,7 +193,7 @@ class TestOTelProviderManagerContextManager:
         """Test using OTelProviderManager with 'with' statement."""
         config = OTelConfig()
 
-        with patch.object(OTelProviderManager, 'shutdown') as mock_shutdown:
+        with patch.object(OTelProviderManager, "shutdown") as mock_shutdown:
             with OTelProviderManager(config) as manager:
                 assert manager.config is config
 
@@ -209,8 +210,8 @@ class TestOTelProviderManagerRepr:
 
         repr_str = repr(manager)
 
-        assert 'OTelProviderManager' in repr_str
-        assert 'config=' in repr_str
+        assert "OTelProviderManager" in repr_str
+        assert "config=" in repr_str
 
 
 class TestObservabilityInstanceInit:
@@ -236,17 +237,17 @@ class TestObservabilityInstanceInit:
     def test_init_method_replaces_existing_manager(self):
         """Test that init() replaces existing provider manager."""
         instance = ObservabilityInstance()
-        config1 = OTelConfig(exclude_commands=['DEBUG'])
-        config2 = OTelConfig(exclude_commands=['SLOWLOG'])
+        config1 = OTelConfig(exclude_commands=["DEBUG"])
+        config2 = OTelConfig(exclude_commands=["SLOWLOG"])
 
         instance.init(config1)
         old_manager = instance._provider_manager
 
-        with patch.object(old_manager, 'shutdown') as mock_shutdown:
+        with patch.object(old_manager, "shutdown") as mock_shutdown:
             instance.init(config2)
 
         mock_shutdown.assert_called_once()
-        assert 'SLOWLOG' in instance._provider_manager.config.exclude_commands
+        assert "SLOWLOG" in instance._provider_manager.config.exclude_commands
 
 
 class TestObservabilityInstanceIsEnabled:
@@ -315,7 +316,9 @@ class TestObservabilityInstanceShutdown:
         config = OTelConfig()
         instance.init(config)
 
-        with patch.object(instance._provider_manager, 'shutdown', return_value=True) as mock_shutdown:
+        with patch.object(
+            instance._provider_manager, "shutdown", return_value=True
+        ) as mock_shutdown:
             result = instance.shutdown(timeout_millis=5000)
 
         mock_shutdown.assert_called_once_with(5000)
@@ -328,7 +331,7 @@ class TestObservabilityInstanceShutdown:
         config = OTelConfig()
         instance.init(config)
 
-        with patch.object(instance._provider_manager, 'shutdown', return_value=True):
+        with patch.object(instance._provider_manager, "shutdown", return_value=True):
             instance.shutdown()
 
         assert instance._provider_manager is None
@@ -351,7 +354,9 @@ class TestObservabilityInstanceForceFlush:
         config = OTelConfig()
         instance.init(config)
 
-        with patch.object(instance._provider_manager, 'force_flush', return_value=True) as mock_flush:
+        with patch.object(
+            instance._provider_manager, "force_flush", return_value=True
+        ) as mock_flush:
             result = instance.force_flush(timeout_millis=5000)
 
         mock_flush.assert_called_once_with(5000)
@@ -365,6 +370,7 @@ class TestGetObservabilityInstance:
         """Test that get_observability_instance returns the same instance."""
         # Reset the global instance for this test
         import redis.observability.providers as providers
+
         original_instance = providers._observability_instance
 
         try:
@@ -381,6 +387,7 @@ class TestGetObservabilityInstance:
     def test_get_observability_instance_creates_new_if_none(self):
         """Test that get_observability_instance creates a new instance if none exists."""
         import redis.observability.providers as providers
+
         original_instance = providers._observability_instance
 
         try:
@@ -396,6 +403,7 @@ class TestGetObservabilityInstance:
     def test_get_observability_instance_returns_existing(self):
         """Test that get_observability_instance returns existing instance."""
         import redis.observability.providers as providers
+
         original_instance = providers._observability_instance
 
         try:
@@ -427,12 +435,12 @@ class TestObservabilityInstanceIntegration:
         assert manager is not None
 
         # Force flush (with mocked provider)
-        with patch.object(manager, 'force_flush', return_value=True):
+        with patch.object(manager, "force_flush", return_value=True):
             flush_result = instance.force_flush()
             assert flush_result is True
 
         # Shutdown
-        with patch.object(manager, 'shutdown', return_value=True):
+        with patch.object(manager, "shutdown", return_value=True):
             shutdown_result = instance.shutdown()
             assert shutdown_result is True
 
@@ -442,16 +450,16 @@ class TestObservabilityInstanceIntegration:
     def test_reinitialize_after_shutdown(self):
         """Test that instance can be reinitialized after shutdown."""
         instance = ObservabilityInstance()
-        config1 = OTelConfig(exclude_commands=['DEBUG'])
-        config2 = OTelConfig(exclude_commands=['SLOWLOG'])
+        config1 = OTelConfig(exclude_commands=["DEBUG"])
+        config2 = OTelConfig(exclude_commands=["SLOWLOG"])
 
         # First initialization
         instance.init(config1)
-        with patch.object(instance._provider_manager, 'shutdown', return_value=True):
+        with patch.object(instance._provider_manager, "shutdown", return_value=True):
             instance.shutdown()
 
         # Second initialization
         instance.init(config2)
 
         assert instance.is_enabled() is True
-        assert 'SLOWLOG' in instance._provider_manager.config.exclude_commands
+        assert "SLOWLOG" in instance._provider_manager.config.exclude_commands

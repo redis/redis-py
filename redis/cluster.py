@@ -41,10 +41,6 @@ from redis.event import (
     ClientType,
     EventDispatcher,
 )
-from redis.observability.recorder import (
-    record_operation_duration,
-    record_error_count,
-)
 from redis.exceptions import (
     AskError,
     AuthenticationError,
@@ -67,6 +63,10 @@ from redis.exceptions import (
 )
 from redis.lock import Lock
 from redis.maint_notifications import MaintNotificationsConfig
+from redis.observability.recorder import (
+    record_error_count,
+    record_operation_duration,
+)
 from redis.retry import Retry
 from redis.utils import (
     deprecated_args,
@@ -1000,7 +1000,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             retry=self.retry,
             lock=self._lock,
             transaction=transaction,
-            event_dispatcher=self._event_dispatcher
+            event_dispatcher=self._event_dispatcher,
         )
 
     def lock(
@@ -1580,11 +1580,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         raise e
 
     def _emit_after_command_execution_event(
-            self,
-            command_name: str,
-            duration_seconds: float,
-            connection: Connection,
-            error=None
+        self,
+        command_name: str,
+        duration_seconds: float,
+        connection: Connection,
+        error=None,
     ):
         """
         Records operation duration metric directly.
@@ -1599,11 +1599,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         )
 
     def _emit_on_error_event(
-            self,
-            error: Exception,
-            connection: Connection,
-            is_internal: bool = True,
-            retry_attempts: Optional[int] = None,
+        self,
+        error: Exception,
+        connection: Connection,
+        is_internal: bool = True,
+        retry_attempts: Optional[int] = None,
     ):
         """
         Records error count metric directly.
@@ -3599,8 +3599,10 @@ class TransactionStrategy(AbstractStrategy):
     def _immediate_execute_command(self, *args, **options):
         return self._retry.call_with_retry(
             lambda: self._get_connection_and_send_command(*args, **options),
-            lambda error, failure_count: self._reinitialize_on_error(error, failure_count),
-            with_failure_count=True
+            lambda error, failure_count: self._reinitialize_on_error(
+                error, failure_count
+            ),
+            with_failure_count=True,
         )
 
     def _get_connection_and_send_command(self, *args, **options):
@@ -3700,7 +3702,7 @@ class TransactionStrategy(AbstractStrategy):
                 self.annotate_exception(r, cmd.position + 1, cmd.args)
 
                 record_operation_duration(
-                    command_name='TRANSACTION',
+                    command_name="TRANSACTION",
                     duration_seconds=time.monotonic() - start_time,
                     server_address=self._transaction_connection.host,
                     server_port=self._transaction_connection.port,
@@ -3721,8 +3723,10 @@ class TransactionStrategy(AbstractStrategy):
     ):
         return self._retry.call_with_retry(
             lambda: self._execute_transaction(stack, raise_on_error),
-            lambda error, failure_count: self._reinitialize_on_error(error, failure_count),
-            with_failure_count=True
+            lambda error, failure_count: self._reinitialize_on_error(
+                error, failure_count
+            ),
+            with_failure_count=True,
         )
 
     def _execute_transaction(
@@ -3793,7 +3797,7 @@ class TransactionStrategy(AbstractStrategy):
         self._executing = False
 
         record_operation_duration(
-            command_name='TRANSACTION',
+            command_name="TRANSACTION",
             duration_seconds=time.monotonic() - start_time,
             server_address=connection.host,
             server_port=connection.port,

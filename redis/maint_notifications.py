@@ -7,12 +7,12 @@ import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
-from redis.event import EventDispatcherInterface, EventDispatcher
+from redis.event import EventDispatcher, EventDispatcherInterface
 from redis.observability.attributes import get_pool_name
 from redis.observability.recorder import (
-    record_maint_notification_count,
-    record_connection_relaxed_timeout,
     record_connection_handoff,
+    record_connection_relaxed_timeout,
+    record_maint_notification_count,
 )
 from redis.typing import Number
 
@@ -586,7 +586,9 @@ class MaintNotificationsPoolHandler:
         # Copy all data that should be shared between connections
         # but each connection should have its own pool handler
         # since each connection can be in a different state
-        copy = MaintNotificationsPoolHandler(self.pool, self.config, self.event_dispatcher)
+        copy = MaintNotificationsPoolHandler(
+            self.pool, self.config, self.event_dispatcher
+        )
         copy._processed_notifications = self._processed_notifications
         copy._lock = self._lock
         copy.connection = None
@@ -801,7 +803,9 @@ class MaintNotificationsConnectionHandler:
             return
 
         if notification_type:
-            self.handle_maintenance_start_notification(MaintenanceState.MAINTENANCE, notification=notification)
+            self.handle_maintenance_start_notification(
+                MaintenanceState.MAINTENANCE, notification=notification
+            )
         else:
             self.handle_maintenance_completed_notification(notification=notification)
 
@@ -821,8 +825,8 @@ class MaintNotificationsConnectionHandler:
         # extend the timeout for all created connections
         self.connection.update_current_socket_timeout(self.config.relaxed_timeout)
 
-        if kwargs.get('notification'):
-            notification = kwargs.get('notification')
+        if kwargs.get("notification"):
+            notification = kwargs.get("notification")
             record_connection_relaxed_timeout(
                 connection_name=repr(self.connection),
                 maint_notification=notification.__class__.__name__,
@@ -842,8 +846,8 @@ class MaintNotificationsConnectionHandler:
         self.connection.update_current_socket_timeout(-1)
         self.connection.maintenance_state = MaintenanceState.NONE
 
-        if kwargs.get('notification'):
-            notification = kwargs.get('notification')
+        if kwargs.get("notification"):
+            notification = kwargs.get("notification")
             record_connection_relaxed_timeout(
                 connection_name=repr(self.connection),
                 maint_notification=notification.__class__.__name__,

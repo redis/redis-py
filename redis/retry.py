@@ -10,7 +10,8 @@ from typing import (
     Optional,
     Tuple,
     Type,
-    TypeVar, Union,
+    TypeVar,
+    Union,
 )
 
 from redis.exceptions import ConnectionError, TimeoutError

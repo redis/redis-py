@@ -4,10 +4,10 @@ from enum import Enum
 
 
 class ExceptionType(Enum):
-    NETWORK = 'network'
-    TLS = 'tls'
-    AUTH = 'auth'
-    SERVER = 'server'
+    NETWORK = "network"
+    TLS = "tls"
+    AUTH = "auth"
+    SERVER = "server"
 
 
 class RedisError(Exception):
