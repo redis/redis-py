@@ -45,9 +45,9 @@ DEFAULT_AUTO_FALLBACK_INTERVAL = 120
 
 
 class InitialHealthCheck(Enum):
-    ALL_HEALTHY = "all_healthy"
-    MAJORITY_HEALTHY = "majority_healthy"
-    ANY_HEALTHY = "any_healthy"
+    ALL_AVAILABLE = "all_available"
+    MAJORITY_AVAILABLE = "majority_available"
+    ONE_AVAILABLE = "one_available"
 
 
 def default_event_dispatcher() -> EventDispatcherInterface:
@@ -157,7 +157,7 @@ class MultiDbConfig:
     event_dispatcher: EventDispatcherInterface = field(
         default_factory=default_event_dispatcher
     )
-    initial_health_check_policy: InitialHealthCheck = InitialHealthCheck.ALL_HEALTHY
+    initial_health_check_policy: InitialHealthCheck = InitialHealthCheck.ALL_AVAILABLE
 
     def databases(self) -> Databases:
         databases = WeightedList()
