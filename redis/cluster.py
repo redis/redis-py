@@ -81,7 +81,10 @@ from redis.utils import (
 )
 
 logger = logging.getLogger(__name__)
-debug_log_enabled = logger.isEnabledFor(logging.DEBUG)
+
+
+def is_debug_log_enabled():
+    return logger.isEnabledFor(logging.DEBUG)
 
 
 def get_node_name(host: str, port: Union[str, int]) -> str:
@@ -1546,7 +1549,7 @@ class RedisCluster(
                 self.nodes_manager.initialize()
                 raise e
             except MovedError as e:
-                if debug_log_enabled:
+                if is_debug_log_enabled():
                     socket_address = self._extracts_socket_address(connection)
                     logger.debug(
                         f"MOVED error received for command {args}, on node {target_node.name}, "
@@ -1573,7 +1576,7 @@ class RedisCluster(
                     self.nodes_manager.move_slot(e)
                 moved = True
             except TryAgainError:
-                if debug_log_enabled:
+                if is_debug_log_enabled():
                     socket_address = self._extracts_socket_address(connection)
                     logger.debug(
                         f"TRYAGAIN error received for command {args}, on node {target_node.name}, "
@@ -1582,7 +1585,7 @@ class RedisCluster(
                 if ttl < self.RedisClusterRequestTTL / 2:
                     time.sleep(0.05)
             except AskError as e:
-                if debug_log_enabled:
+                if is_debug_log_enabled():
                     socket_address = self._extracts_socket_address(connection)
                     logger.debug(
                         f"ASK error received for command {args}, on node {target_node.name}, "
@@ -2125,7 +2128,7 @@ class NodesManager:
             additional_startup_nodes = [
                 ClusterNode(host, port) for host, port in additional_startup_nodes_info
             ]
-            if debug_log_enabled:
+            if is_debug_log_enabled():
                 logger.debug(
                     f"Topology refresh: using additional nodes: {[node.name for node in additional_startup_nodes]}; "
                     f"and startup nodes: {[node.name for node in startup_nodes]}"
@@ -2138,7 +2141,7 @@ class NodesManager:
 
                     else:
                         # Create a new Redis connection
-                        if debug_log_enabled:
+                        if is_debug_log_enabled():
                             logger.debug(
                                 "Topology refresh: Creating new Redis connection to "
                                 f"{startup_node.host}:{startup_node.port}; "
