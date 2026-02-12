@@ -1551,8 +1551,9 @@ class RedisCluster(
             except MovedError as e:
                 if is_debug_log_enabled():
                     socket_address = self._extracts_socket_address(connection)
+                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
                     logger.debug(
-                        f"MOVED error received for command {args}, on node {target_node.name}, "
+                        f"MOVED error received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
                     )
                 # First, we will try to patch the slots/nodes cache with the
@@ -1578,8 +1579,9 @@ class RedisCluster(
             except TryAgainError:
                 if is_debug_log_enabled():
                     socket_address = self._extracts_socket_address(connection)
+                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
                     logger.debug(
-                        f"TRYAGAIN error received for command {args}, on node {target_node.name}, "
+                        f"TRYAGAIN error received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection} using local socket address: {socket_address}"
                     )
                 if ttl < self.RedisClusterRequestTTL / 2:
@@ -1587,8 +1589,9 @@ class RedisCluster(
             except AskError as e:
                 if is_debug_log_enabled():
                     socket_address = self._extracts_socket_address(connection)
+                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
                     logger.debug(
-                        f"ASK error received for command {args}, on node {target_node.name}, "
+                        f"ASK error received for command {args_log_str}, on node {target_node.name}, "
                         f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
                     )
                 redirect_addr = get_node_name(host=e.host, port=e.port)
@@ -2147,7 +2150,8 @@ class NodesManager:
                                 f"{startup_node.host}:{startup_node.port}; "
                                 f"with socket_timeout: {kwargs.get('socket_timeout', 'not set')}, and "
                                 f"socket_connect_timeout: {kwargs.get('socket_connect_timeout', 'not set')}, "
-                                f"and maint_notifications_config: {self.maint_notifications_config}"
+                                "and maint_notifications enabled: "
+                                f"{self.maint_notifications_config.enabled if self.maint_notifications_config else False}"
                             )
                         r = self.create_redis_node(
                             startup_node.host,
