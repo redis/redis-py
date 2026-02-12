@@ -1912,12 +1912,12 @@ class TestConfig(SearchTestsBase):
         client.hset("h", "t1", "hello")
         with pytest.raises(redis.ResponseError) as err:
             client.ft().explain(Query("(*)").dialect(1))
-        assert "Syntax error" in str(err)
+        assert "Syntax error" in str(err.value)
         assert "WILDCARD" in client.ft().explain(Query("(*)"))
 
         with pytest.raises(redis.ResponseError) as err:
             client.ft().explain(Query("$hello").dialect(1))
-        assert "Syntax error" in str(err)
+        assert "Syntax error" in str(err.value)
         q = Query("$hello")
         expected = "UNION {\n  hello\n  +hello(expanded)\n}\n"
         assert expected in client.ft().explain(q, query_params={"hello": "hello"})
@@ -1926,7 +1926,7 @@ class TestConfig(SearchTestsBase):
         assert expected in client.ft().explain(Query("@title:(@num:[0 10])").dialect(1))
         with pytest.raises(redis.ResponseError) as err:
             client.ft().explain(Query("@title:(@num:[0 10])"))
-        assert "Syntax error" in str(err)
+        assert "Syntax error" in str(err.value)
 
 
 class TestAggregations(SearchTestsBase):

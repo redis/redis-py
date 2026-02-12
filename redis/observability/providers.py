@@ -170,7 +170,7 @@ class OTelProviderManager:
         """Context manager entry."""
         return self
 
-    def __exit__(self):
+    def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit - shutdown provider."""
         self.shutdown()
 
