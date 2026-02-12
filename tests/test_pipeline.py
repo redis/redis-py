@@ -461,10 +461,10 @@ class TestPipeline:
             )
 
 
-class TestPipelineEventEmission:
+class TestPipelineMetricsRecording:
     """
-    Unit tests that verify AfterCommandExecutionEvent is properly emitted from Pipeline
-    and delivered to the Meter through the event dispatcher chain.
+    Unit tests that verify metrics are properly recorded from Pipeline
+    and delivered to the Meter through the observability recorder.
 
     These tests use fully mocked connection and connection pool - no real Redis
     or OTel integration is used.
@@ -500,13 +500,20 @@ class TestPipelineEventEmission:
 
         # Create mock histogram for operation duration
         self.operation_duration = mock.MagicMock()
+        # Create mock counter for client errors
+        self.client_errors = mock.MagicMock()
 
         def create_histogram_side_effect(name, **kwargs):
             if name == 'db.client.operation.duration':
                 return self.operation_duration
             return mock.MagicMock()
 
-        meter.create_counter.return_value = mock.MagicMock()
+        def create_counter_side_effect(name, **kwargs):
+            if name == 'redis.client.errors':
+                return self.client_errors
+            return mock.MagicMock()
+
+        meter.create_counter.side_effect = create_counter_side_effect
         meter.create_up_down_counter.return_value = mock.MagicMock()
         meter.create_histogram.side_effect = create_histogram_side_effect
 
@@ -552,9 +559,9 @@ class TestPipelineEventEmission:
         # Cleanup
         recorder.reset_collector()
 
-    def test_pipeline_execute_emits_event_to_meter(self, setup_pipeline_with_otel):
+    def test_pipeline_execute_records_metric(self, setup_pipeline_with_otel):
         """
-        Test that executing a pipeline emits AfterCommandExecutionEvent
+        Test that executing a pipeline records operation duration metric
         which is delivered to the Meter's histogram.record() method.
         """
         pipeline, operation_duration_mock = setup_pipeline_with_otel
@@ -593,12 +600,12 @@ class TestPipelineEventEmission:
         assert attrs['server.port'] == 6379
         assert attrs['db.namespace'] == '0'
 
-    def test_pipeline_no_transaction_emits_pipeline_command_name(
+    def test_pipeline_no_transaction_records_pipeline_command_name(
         self, mock_connection_pool, mock_connection, mock_meter
     ):
         """
         Test that executing a pipeline without transaction
-        emits AfterCommandExecutionEvent with command_name='PIPELINE'.
+        records metric with command_name='PIPELINE'.
         """
         recorder.reset_collector()
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
@@ -633,15 +640,17 @@ class TestPipelineEventEmission:
 
         recorder.reset_collector()
 
-    def test_pipeline_error_emits_event_with_error(
+    def test_pipeline_error_records_error_count(
         self, mock_connection_pool, mock_connection, mock_meter
     ):
         """
         Test that when a pipeline execution raises an exception,
-        AfterCommandExecutionEvent is still emitted with error information.
+        record_error_count is called (not record_operation_duration).
+        Direct failures call record_error_count, not record_operation_duration.
         """
         recorder.reset_collector()
-        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+        # Enable RESILIENCY metric group for error counting
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND, MetricGroup.RESILIENCY])
 
         with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
             collector = RedisMetricsCollector(mock_meter, config)
@@ -666,14 +675,15 @@ class TestPipelineEventEmission:
             with pytest.raises(redis.ResponseError):
                 pipeline.execute()
 
-            # Verify the Meter's histogram.record() was still called
-            self.operation_duration.record.assert_called_once()
+            # For direct failures (no retries), record_error_count is called
+            # record_operation_duration is NOT called for direct failures
+            self.operation_duration.record.assert_not_called()
 
-            # Verify error type is recorded in attributes
-            call_args = self.operation_duration.record.call_args
-            attrs = call_args[1]['attributes']
-            assert attrs['db.operation.name'] == 'PIPELINE'
-            assert 'error.type' in attrs
+            # Verify record_error_count was called
+            self.client_errors.add.assert_called_once()
+            error_call_args = self.client_errors.add.call_args
+            error_attrs = error_call_args[1]['attributes']
+            assert 'error.type' in error_attrs
 
         recorder.reset_collector()
 
@@ -723,11 +733,11 @@ class TestPipelineEventEmission:
         assert attrs['server.port'] == 6379
         assert attrs['db.namespace'] == '0'
 
-    def test_multiple_pipeline_executions_emit_multiple_events(
+    def test_multiple_pipeline_executions_record_multiple_metrics(
         self, mock_connection_pool, mock_connection, mock_meter
     ):
         """
-        Test that each pipeline execution emits a separate event to the Meter.
+        Test that each pipeline execution records a separate metric to the Meter.
         """
         recorder.reset_collector()
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
@@ -770,11 +780,11 @@ class TestPipelineEventEmission:
 
         recorder.reset_collector()
 
-    def test_empty_pipeline_does_not_emit_event(
+    def test_empty_pipeline_does_not_record_metric(
         self, mock_connection_pool, mock_connection, mock_meter
     ):
         """
-        Test that an empty pipeline (no commands) does not emit an event.
+        Test that an empty pipeline (no commands) does not record a metric.
         """
         recorder.reset_collector()
         config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
@@ -802,17 +812,17 @@ class TestPipelineEventEmission:
             # Should return empty list
             assert result == []
 
-            # No event should be emitted for empty pipeline
+            # No metric should be recorded for empty pipeline
             self.operation_duration.record.assert_not_called()
 
         recorder.reset_collector()
 
-    def test_pipeline_retry_emits_event_on_each_attempt(
+    def test_pipeline_retry_records_metric_on_each_attempt(
         self, mock_connection_pool, mock_meter
     ):
         """
-        Test that when a pipeline is retried, an AfterCommandExecutionEvent
-        is emitted for each retry attempt with retry_attempts attribute.
+        Test that when a pipeline is retried, operation duration metric
+        is recorded for each retry attempt with retry_attempts attribute.
         """
         # Create connection with retry behavior
         mock_connection = mock.MagicMock()
@@ -900,12 +910,13 @@ class TestPipelineEventEmission:
 
         recorder.reset_collector()
 
-    def test_pipeline_retry_exhausted_emits_final_error_event(
+    def test_pipeline_retry_exhausted_records_final_error_metrics(
         self, mock_connection_pool, mock_meter
     ):
         """
-        Test that when all retries are exhausted, a final AfterCommandExecutionEvent
-        is emitted with the error.
+        Test that when all retries are exhausted, metrics are recorded correctly:
+        - record_operation_duration is called for each retry attempt (with error info)
+        - record_error_count is called for the final error (after all retries exhausted)
         """
         mock_connection = mock.MagicMock()
         mock_connection.host = 'localhost'
@@ -934,7 +945,8 @@ class TestPipelineEventEmission:
         mock_connection_pool.get_connection.return_value = mock_connection
 
         recorder.reset_collector()
-        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+        # Enable both COMMAND and RESILIENCY metric groups
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND, MetricGroup.RESILIENCY])
 
         with mock.patch('redis.observability.metrics.OTEL_AVAILABLE', True):
             collector = RedisMetricsCollector(mock_meter, config)
@@ -964,164 +976,21 @@ class TestPipelineEventEmission:
             with pytest.raises(redis.ConnectionError):
                 pipeline.execute()
 
-            # Verify histogram.record() was called 3 times:
-            # 2 retry attempts + 1 final error
-            assert self.operation_duration.record.call_count == 3
+            # Verify histogram.record() was called 2 times (for retry attempts only)
+            # Final error does NOT call record_operation_duration
+            assert self.operation_duration.record.call_count == 2
 
             calls = self.operation_duration.record.call_args_list
 
-            # All calls should have error.type
+            # Both retry calls should have error.type
             for call in calls:
                 assert 'error.type' in call[1]['attributes']
                 assert call[1]['attributes']['db.operation.name'] == 'PIPELINE'
 
+            # Verify record_error_count was called once for the final error
+            self.client_errors.add.assert_called_once()
+            error_call_args = self.client_errors.add.call_args
+            error_attrs = error_call_args[1]['attributes']
+            assert 'error.type' in error_attrs
+
         recorder.reset_collector()
-
-    def test_pipeline_on_error_event_emitted_on_retry(
-        self, mock_connection_pool, mock_meter
-    ):
-        """
-        Test that OnErrorEvent is emitted during pipeline retry attempts.
-        """
-
-        mock_connection = mock.MagicMock()
-        mock_connection.host = 'localhost'
-        mock_connection.port = 6379
-        mock_connection.db = 0
-
-        max_retries = 1
-
-        def call_with_retry_impl(do, fail, is_retryable=None, with_failure_count=False):
-            """Simulate retry behavior - fail once, then succeed."""
-            for attempt in range(max_retries + 1):
-                try:
-                    return do()
-                except redis.ConnectionError as e:
-                    if attempt < max_retries:
-                        if with_failure_count:
-                            fail(e, attempt + 1)
-                        else:
-                            fail(e)
-                    else:
-                        raise
-
-        mock_connection.retry.call_with_retry = call_with_retry_impl
-        mock_connection.retry.get_retries.return_value = max_retries
-
-        mock_connection_pool.get_connection.return_value = mock_connection
-
-        # Track OnErrorEvent dispatches
-        error_events = []
-
-        class ErrorEventTracker(EventListenerInterface):
-            def listen(self, event: object):
-                if isinstance(event, OnErrorEvent):
-                    error_events.append(event)
-
-        event_dispatcher = EventDispatcher()
-        tracker = ErrorEventTracker()
-        event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
-
-        pipeline = Pipeline(
-            connection_pool=mock_connection_pool,
-            response_callbacks={},
-            transaction=False,
-            shard_hint=None,
-            event_dispatcher=event_dispatcher,
-        )
-
-        # Make pipeline fail once then succeed
-        call_count = [0]
-
-        def execute_pipeline_impl(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                raise redis.ConnectionError("Connection failed")
-            return [True]
-
-        pipeline._execute_pipeline = mock.MagicMock(
-            side_effect=execute_pipeline_impl
-        )
-        pipeline.command_stack = [(('SET', 'key', 'value'), {})]
-
-        # Execute pipeline
-        pipeline.execute()
-
-        # Verify OnErrorEvent was dispatched during retry
-        assert len(error_events) == 1
-        assert error_events[0].server_address == 'localhost'
-        assert error_events[0].server_port == 6379
-        assert error_events[0].retry_attempts == 1
-
-    def test_pipeline_on_error_event_emitted_on_final_failure(
-        self, mock_connection_pool, mock_meter
-    ):
-        """
-        Test that OnErrorEvent is emitted when pipeline fails after all retries.
-        """
-
-        mock_connection = mock.MagicMock()
-        mock_connection.host = 'localhost'
-        mock_connection.port = 6379
-        mock_connection.db = 0
-
-        max_retries = 1
-
-        def call_with_retry_impl(do, fail, is_retryable=None, with_failure_count=False):
-            """Simulate retry behavior - always fail."""
-            for attempt in range(max_retries + 1):
-                try:
-                    return do()
-                except redis.ConnectionError as e:
-                    if attempt < max_retries:
-                        if with_failure_count:
-                            fail(e, attempt + 1)
-                        else:
-                            fail(e)
-                    else:
-                        raise
-
-        mock_connection.retry.call_with_retry = call_with_retry_impl
-        mock_connection.retry.get_retries.return_value = max_retries
-
-        mock_connection_pool.get_connection.return_value = mock_connection
-
-        # Track OnErrorEvent dispatches
-        error_events = []
-
-        class ErrorEventTracker(EventListenerInterface):
-            def listen(self, event: object):
-                if isinstance(event, OnErrorEvent):
-                    error_events.append(event)
-
-        event_dispatcher = EventDispatcher()
-        tracker = ErrorEventTracker()
-        event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
-
-        pipeline = Pipeline(
-            connection_pool=mock_connection_pool,
-            response_callbacks={},
-            transaction=False,
-            shard_hint=None,
-            event_dispatcher=event_dispatcher,
-        )
-
-        # Make pipeline always fail
-        pipeline._execute_pipeline = mock.MagicMock(
-            side_effect=redis.ConnectionError("Connection failed")
-        )
-        pipeline.command_stack = [(('SET', 'key', 'value'), {})]
-
-        # Execute pipeline - should fail
-        with pytest.raises(redis.ConnectionError):
-            pipeline.execute()
-
-        # Verify OnErrorEvent was dispatched:
-        # 1 during retry + 1 on final failure
-        assert len(error_events) == 2
-
-        # First event is from retry
-        assert error_events[0].retry_attempts == 1
-
-        # Second event is from final failure (is_internal=False)
-        assert error_events[1].is_internal is False

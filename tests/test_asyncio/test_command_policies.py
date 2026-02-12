@@ -1,7 +1,7 @@
 import random
+from unittest.mock import patch
 
 import pytest
-from mock import patch
 
 from redis import ResponseError
 from redis._parsers.commands import CommandPolicies, RequestPolicy, ResponsePolicy

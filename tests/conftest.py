@@ -589,6 +589,9 @@ def mock_cache() -> CacheInterface:
 @pytest.fixture()
 def mock_connection() -> ConnectionInterface:
     mock_connection = Mock(spec=ConnectionInterface)
+    # Add host and port attributes needed by find_connection_owner
+    mock_connection.host = "127.0.0.1"
+    mock_connection.port = 6379
     return mock_connection
 
 

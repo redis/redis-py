@@ -876,6 +876,120 @@ class TestPubSubSubcommands:
         channels = [(b"foo", 1), (b"bar", 2), (b"baz", 3)]
         assert r.pubsub_shardnumsub("foo", "bar", "baz", target_nodes="all") == channels
 
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_ssubscribe_multiple_channels_different_nodes(self, r):
+        """
+        Test subscribing to multiple sharded channels on different nodes.
+        Validates that the generator properly handles multiple node_pubsub_mapping entries.
+        """
+        pubsub = r.pubsub()
+        channel1 = "test-channel:{0}"
+        channel2 = "test-channel:{6}"
+
+        # Subscribe to first channel
+        pubsub.ssubscribe(channel1)
+        msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+        assert msg is not None
+        assert msg["type"] == "ssubscribe"
+
+        # Subscribe to second channel (likely different node)
+        pubsub.ssubscribe(channel2)
+        msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+        assert msg is not None
+        assert msg["type"] == "ssubscribe"
+
+        # Verify both channels are in shard_channels
+        assert channel1.encode() in pubsub.shard_channels
+        assert channel2.encode() in pubsub.shard_channels
+
+        pubsub.close()
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_ssubscribe_multiple_channels_publish_and_read(self, r):
+        """
+        Test publishing to multiple sharded channels and reading messages.
+        Validates that _sharded_message_generator properly cycles through
+        multiple node_pubsub_mapping entries.
+        """
+        pubsub = r.pubsub()
+        channel1 = "test-channel:{0}"
+        channel2 = "test-channel:{6}"
+        msg1_data = "message-1"
+        msg2_data = "message-2"
+
+        # Subscribe to both channels
+        pubsub.ssubscribe(channel1, channel2)
+
+        # Read subscription confirmations
+        for _ in range(2):
+            msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+            assert msg is not None
+            assert msg["type"] == "ssubscribe"
+
+        # Publish messages to both channels
+        r.spublish(channel1, msg1_data)
+        r.spublish(channel2, msg2_data)
+
+        # Read messages - should get both messages
+        messages = []
+        for _ in range(2):
+            msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+            assert msg is not None
+            assert msg["type"] == "smessage"
+            messages.append(msg)
+
+        # Verify we got messages from both channels
+        channels_received = {msg["channel"] for msg in messages}
+        assert channel1.encode() in channels_received
+        assert channel2.encode() in channels_received
+
+        pubsub.close()
+
+    @pytest.mark.onlycluster
+    @skip_if_server_version_lt("7.0.0")
+    def test_generator_handles_concurrent_mapping_changes(self, r):
+        """
+        Test that the generator properly handles mapping changes during iteration.
+        This validates the fix for the RuntimeError: dictionary changed size during iteration.
+        """
+        pubsub = r.pubsub()
+        channel1 = "test-channel:{0}"
+        channel2 = "test-channel:{6}"
+
+        # Subscribe to first channel
+        pubsub.ssubscribe(channel1)
+        msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+        assert msg is not None
+        assert msg["type"] == "ssubscribe"
+
+        # Get initial mapping size (cluster pubsub only)
+        assert hasattr(pubsub, "node_pubsub_mapping"), "Test requires ClusterPubSub"
+        initial_size = len(pubsub.node_pubsub_mapping)
+
+        # Subscribe to second channel (modifies mapping during potential iteration)
+        pubsub.ssubscribe(channel2)
+        msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+        assert msg is not None
+        assert msg["type"] == "ssubscribe"
+
+        # Verify mapping was updated
+        assert len(pubsub.node_pubsub_mapping) >= initial_size
+
+        # Publish and read messages - should not raise RuntimeError
+        r.spublish(channel1, "msg1")
+        r.spublish(channel2, "msg2")
+
+        messages_received = 0
+        for _ in range(2):
+            msg = wait_for_message(pubsub, timeout=1.0, func=pubsub.get_sharded_message)
+            if msg and msg["type"] == "smessage":
+                messages_received += 1
+
+        assert messages_received == 2
+        pubsub.close()
+
 
 class TestPubSubPings:
     @skip_if_server_version_lt("3.0.0")
@@ -895,6 +1009,67 @@ class TestPubSubPings:
         assert wait_for_message(p) == make_message(
             type="pong", channel=None, data="hello world", pattern=None
         )
+
+
+@pytest.mark.onlynoncluster
+class TestPubSubHealthCheckResponse:
+    """Tests for health check response validation with different decode_responses settings"""
+
+    def test_is_health_check_response_decode_false_list_format(self, r):
+        """Test is_health_check_response recognizes list format with decode_responses=False"""
+        p = r.pubsub()
+        # List format: [b"pong", b"redis-py-health-check"]
+        assert p.is_health_check_response([b"pong", b"redis-py-health-check"])
+
+    def test_is_health_check_response_decode_false_bytes_format(self, r):
+        """Test is_health_check_response recognizes bytes format with decode_responses=False"""
+        p = r.pubsub()
+        # Bytes format: b"redis-py-health-check"
+        assert p.is_health_check_response(b"redis-py-health-check")
+
+    def test_is_health_check_response_decode_false_rejects_string(self, r):
+        """Test is_health_check_response rejects string format with decode_responses=False"""
+        p = r.pubsub()
+        # String format should NOT be recognized when decode_responses=False
+        assert not p.is_health_check_response("redis-py-health-check")
+
+    def test_is_health_check_response_decode_true_list_format(self, request):
+        """Test is_health_check_response recognizes list format with decode_responses=True"""
+        r = _get_client(redis.Redis, request, decode_responses=True)
+        p = r.pubsub()
+        # List format: ["pong", "redis-py-health-check"]
+        assert p.is_health_check_response(["pong", "redis-py-health-check"])
+
+    def test_is_health_check_response_decode_true_string_format(self, request):
+        """Test is_health_check_response recognizes string format with decode_responses=True"""
+        r = _get_client(redis.Redis, request, decode_responses=True)
+        p = r.pubsub()
+        # String format: "redis-py-health-check" (THE FIX!)
+        assert p.is_health_check_response("redis-py-health-check")
+
+    def test_is_health_check_response_decode_true_rejects_bytes(self, request):
+        """Test is_health_check_response rejects bytes format with decode_responses=True"""
+        r = _get_client(redis.Redis, request, decode_responses=True)
+        p = r.pubsub()
+        # Bytes format should NOT be recognized when decode_responses=True
+        assert not p.is_health_check_response(b"redis-py-health-check")
+
+    def test_is_health_check_response_decode_true_rejects_invalid(self, request):
+        """Test is_health_check_response rejects invalid responses with decode_responses=True"""
+        r = _get_client(redis.Redis, request, decode_responses=True)
+        p = r.pubsub()
+        # Invalid responses should be rejected
+        assert not p.is_health_check_response("invalid-response")
+        assert not p.is_health_check_response(["pong", "invalid-response"])
+        assert not p.is_health_check_response(None)
+
+    def test_is_health_check_response_decode_false_rejects_invalid(self, r):
+        """Test is_health_check_response rejects invalid responses with decode_responses=False"""
+        p = r.pubsub()
+        # Invalid responses should be rejected
+        assert not p.is_health_check_response(b"invalid-response")
+        assert not p.is_health_check_response([b"pong", b"invalid-response"])
+        assert not p.is_health_check_response(None)
 
 
 @pytest.mark.onlynoncluster
@@ -1167,10 +1342,10 @@ class TestBaseException:
         assert is_connected()
 
 
-class TestPubSubEventEmission:
+class TestPubSubMetricsRecording:
     """
-    Unit tests that verify AfterCommandExecutionEvent and OnErrorEvent are properly
-    emitted from PubSub and delivered to the Meter through the event dispatcher chain.
+    Unit tests that verify metrics are properly recorded from PubSub operations
+    through the direct record_* function calls.
 
     These tests use fully mocked connection and connection pool - no real Redis
     or OTel integration is used.
@@ -1263,9 +1438,9 @@ class TestPubSubEventEmission:
         # Cleanup
         recorder.reset_collector()
 
-    def test_pubsub_execute_emits_event_to_meter(self, setup_pubsub_with_otel):
+    def test_pubsub_execute_records_metric(self, setup_pubsub_with_otel):
         """
-        Test that executing a PubSub command emits AfterCommandExecutionEvent
+        Test that executing a PubSub command records operation duration metric
         which is delivered to the Meter's histogram.record() method.
         """
 
@@ -1295,12 +1470,12 @@ class TestPubSubEventEmission:
         assert attrs['server.port'] == 6379
         assert attrs['db.namespace'] == '0'
 
-    def test_pubsub_error_emits_event_with_error(
+    def test_pubsub_error_records_metric_with_error(
         self, mock_connection_pool, mock_connection, mock_meter
     ):
         """
         Test that when a PubSub command raises an exception,
-        AfterCommandExecutionEvent is still emitted with error information.
+        operation duration metric is still recorded with error information.
         """
 
         recorder.reset_collector()
@@ -1354,12 +1529,12 @@ class TestPubSubEventEmission:
         assert attrs['server.port'] == 6379
         assert attrs['db.namespace'] == '0'
 
-    def test_pubsub_retry_emits_event_on_each_attempt(
+    def test_pubsub_retry_records_metric_on_each_attempt(
         self, mock_connection_pool, mock_meter
     ):
         """
-        Test that when a PubSub command is retried, an AfterCommandExecutionEvent
-        is emitted for each retry attempt with retry_attempts attribute.
+        Test that when a PubSub command is retried, operation duration metric
+        is recorded for each retry attempt with retry_attempts attribute.
         """
 
         # Create connection with retry behavior
@@ -1433,12 +1608,12 @@ class TestPubSubEventEmission:
 
         recorder.reset_collector()
 
-    def test_pubsub_retry_exhausted_emits_final_error_event(
+    def test_pubsub_retry_exhausted_records_final_error_metric(
         self, mock_connection_pool, mock_meter
     ):
         """
-        Test that when all retries are exhausted, a final AfterCommandExecutionEvent
-        is emitted with the error.
+        Test that when all retries are exhausted, a final operation duration metric
+        is recorded with the error.
         """
 
         mock_connection = mock.MagicMock()
@@ -1504,147 +1679,9 @@ class TestPubSubEventEmission:
 
         recorder.reset_collector()
 
-    def test_pubsub_on_error_event_emitted_on_retry(
-        self, mock_connection_pool, mock_meter
-    ):
+    def test_pubsub_no_metric_when_no_command_name(self, setup_pubsub_with_otel):
         """
-        Test that OnErrorEvent is emitted during PubSub retry attempts.
-        """
-
-        mock_connection = mock.MagicMock()
-        mock_connection.host = 'localhost'
-        mock_connection.port = 6379
-        mock_connection.db = 0
-        mock_connection.should_reconnect.return_value = False
-
-        max_retries = 1
-
-        def call_with_retry_impl(func, error_handler):
-            """Simulate retry behavior - fail once, then succeed."""
-            for attempt in range(max_retries + 1):
-                try:
-                    return func()
-                except redis.ConnectionError as e:
-                    if attempt < max_retries:
-                        error_handler(e, attempt + 1)
-                    else:
-                        raise
-
-        mock_connection.retry.call_with_retry = call_with_retry_impl
-        mock_connection.retry.get_retries.return_value = max_retries
-
-        mock_connection_pool.get_connection.return_value = mock_connection
-
-        # Track OnErrorEvent dispatches
-        error_events = []
-
-        class ErrorEventTracker(EventListenerInterface):
-            def listen(self, event: object):
-                if isinstance(event, OnErrorEvent):
-                    error_events.append(event)
-
-        event_dispatcher = EventDispatcher()
-        tracker = ErrorEventTracker()
-        event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
-
-        pubsub = PubSub(
-            connection_pool=mock_connection_pool,
-            event_dispatcher=event_dispatcher,
-        )
-        pubsub.connection = mock_connection
-
-        # Make command fail once then succeed
-        call_count = [0]
-
-        def command_impl(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                raise redis.ConnectionError("Connection failed")
-            return True
-
-        mock_command = mock.MagicMock(side_effect=command_impl)
-
-        # Execute command
-        pubsub._execute(pubsub.connection, mock_command, 'SUBSCRIBE', 'foo')
-
-        # Verify OnErrorEvent was dispatched during retry
-        assert len(error_events) == 1
-        assert error_events[0].server_address == 'localhost'
-        assert error_events[0].server_port == 6379
-        assert error_events[0].retry_attempts == 1
-
-    def test_pubsub_on_error_event_emitted_on_final_failure(
-        self, mock_connection_pool, mock_meter
-    ):
-        """
-        Test that OnErrorEvent is emitted when PubSub command fails after all retries.
-        """
-
-        mock_connection = mock.MagicMock()
-        mock_connection.host = 'localhost'
-        mock_connection.port = 6379
-        mock_connection.db = 0
-        mock_connection.should_reconnect.return_value = False
-
-        max_retries = 1
-
-        def call_with_retry_impl(func, error_handler):
-            """Simulate retry behavior - always fail."""
-            for attempt in range(max_retries + 1):
-                try:
-                    return func()
-                except redis.ConnectionError as e:
-                    if attempt < max_retries:
-                        error_handler(e, attempt + 1)
-                    else:
-                        raise
-
-        mock_connection.retry.call_with_retry = call_with_retry_impl
-        mock_connection.retry.get_retries.return_value = max_retries
-
-        mock_connection_pool.get_connection.return_value = mock_connection
-
-        # Track OnErrorEvent dispatches
-        error_events = []
-
-        class ErrorEventTracker(EventListenerInterface):
-            def listen(self, event: object):
-                if isinstance(event, OnErrorEvent):
-                    error_events.append(event)
-
-        event_dispatcher = EventDispatcher()
-        tracker = ErrorEventTracker()
-        event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
-
-        pubsub = PubSub(
-            connection_pool=mock_connection_pool,
-            event_dispatcher=event_dispatcher,
-        )
-        pubsub.connection = mock_connection
-
-        # Make command always fail
-        mock_command = mock.MagicMock(
-            side_effect=redis.ConnectionError("Connection failed")
-        )
-
-        # Execute command - should fail
-        with pytest.raises(redis.ConnectionError):
-            pubsub._execute(pubsub.connection, mock_command, 'SUBSCRIBE', 'foo')
-
-        # Verify OnErrorEvent was dispatched:
-        # 1 during retry + 1 on final failure
-        assert len(error_events) == 2
-
-        # First event is from retry
-        assert error_events[0].retry_attempts == 1
-
-        # Second event is from final failure (is_internal=False)
-        assert error_events[1].is_internal is False
-        assert error_events[1].retry_attempts == max_retries
-
-    def test_pubsub_no_event_when_no_command_name(self, setup_pubsub_with_otel):
-        """
-        Test that no AfterCommandExecutionEvent is emitted when command_name is None.
+        Test that no metric is recorded when command_name is None.
         """
         pubsub, operation_duration_mock = setup_pubsub_with_otel
 
@@ -1656,11 +1693,11 @@ class TestPubSubEventEmission:
         # Verify no event was emitted
         operation_duration_mock.record.assert_not_called()
 
-    def test_pubsub_different_commands_emit_correct_names(
+    def test_pubsub_different_commands_record_correct_names(
         self, mock_connection_pool, mock_connection, mock_meter
     ):
         """
-        Test that different PubSub commands emit events with correct command names.
+        Test that different PubSub commands record metrics with correct command names.
         """
 
         recorder.reset_collector()

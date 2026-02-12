@@ -6,8 +6,12 @@ import pytest
 import redis
 from redis.exceptions import ConnectionError, RedisError
 
-from .conftest import skip_if_cryptography, skip_if_nocryptography
-from .ssl_utils import CertificateType, get_tls_certificates
+from .conftest import (
+    skip_if_cryptography,
+    skip_if_nocryptography,
+    skip_if_server_version_lt,
+)
+from .ssl_utils import CertificateType, get_tls_certificates, CN_USERNAME
 
 
 @pytest.mark.ssl
@@ -20,10 +24,10 @@ class TestSSL:
 
     @pytest.fixture(autouse=True)
     def _set_ssl_certs(self, request):
-        tls_cert_subdir = request.session.config.REDIS_INFO["tls_cert_subdir"]
-        self.client_certs = get_tls_certificates(tls_cert_subdir)
+        self.tls_cert_subdir = request.session.config.REDIS_INFO["tls_cert_subdir"]
+        self.client_certs = get_tls_certificates(self.tls_cert_subdir)
         self.server_certs = get_tls_certificates(
-            tls_cert_subdir, cert_type=CertificateType.server
+            self.tls_cert_subdir, cert_type=CertificateType.server
         )
 
     def test_ssl_with_invalid_cert(self, request):
@@ -423,5 +427,42 @@ class TestSSL:
             finally:
                 mock_sock.close()
 
+        finally:
+            r.close()
+
+    @skip_if_server_version_lt("8.5.0")
+    def test_ssl_authenticate_with_client_cert(self, request, r):
+        """Test that when client certificate is used for authentication,
+        the connection is created successfully"""
+
+        try:
+            # Non SSL client, to setup ACL
+            assert r.acl_setuser(
+                CN_USERNAME,
+                enabled=True,
+                reset=True,
+                passwords=["+clientpass"],
+                keys=["*"],
+                commands=["+acl"],
+            )
+        finally:
+            r.close()
+
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        client_cn_cert, client_cn_key, ca_cert = get_tls_certificates(
+            self.tls_cert_subdir, CertificateType.client_cn
+        )
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_certfile=client_cn_cert,
+            ssl_keyfile=client_cn_key,
+            ssl_cert_reqs="required",
+            ssl_ca_certs=ca_cert,
+        )
+        try:
+            assert r.acl_whoami() == CN_USERNAME
         finally:
             r.close()

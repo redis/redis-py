@@ -672,6 +672,63 @@ class TestPubSubPings:
 
 
 @pytest.mark.onlynoncluster
+class TestPubSubHealthCheckResponse:
+    """Tests for health check response validation with different decode_responses settings"""
+
+    async def test_health_check_response_decode_false_list_format(self, r: redis.Redis):
+        """Test health_check_response includes list format with decode_responses=False"""
+        p = r.pubsub()
+        # List format: [b"pong", b"redis-py-health-check"]
+        assert [b"pong", b"redis-py-health-check"] in p.health_check_response
+        await p.aclose()
+
+    async def test_health_check_response_decode_false_bytes_format(
+        self, r: redis.Redis
+    ):
+        """Test health_check_response includes bytes format with decode_responses=False"""
+        p = r.pubsub()
+        # Bytes format: b"redis-py-health-check"
+        assert b"redis-py-health-check" in p.health_check_response
+        await p.aclose()
+
+    async def test_health_check_response_decode_true_list_format(self, create_redis):
+        """Test health_check_response includes list format with decode_responses=True"""
+        r = await create_redis(decode_responses=True)
+        p = r.pubsub()
+        # List format: ["pong", "redis-py-health-check"]
+        assert ["pong", "redis-py-health-check"] in p.health_check_response
+        await p.aclose()
+        await r.aclose()
+
+    async def test_health_check_response_decode_true_string_format(self, create_redis):
+        """Test health_check_response includes string format with decode_responses=True"""
+        r = await create_redis(decode_responses=True)
+        p = r.pubsub()
+        # String format: "redis-py-health-check" (THE FIX!)
+        assert "redis-py-health-check" in p.health_check_response
+        await p.aclose()
+        await r.aclose()
+
+    async def test_health_check_response_decode_false_excludes_string(
+        self, r: redis.Redis
+    ):
+        """Test health_check_response excludes string format with decode_responses=False"""
+        p = r.pubsub()
+        # String format should NOT be in the list when decode_responses=False
+        assert "redis-py-health-check" not in p.health_check_response
+        await p.aclose()
+
+    async def test_health_check_response_decode_true_excludes_bytes(self, create_redis):
+        """Test health_check_response excludes bytes format with decode_responses=True"""
+        r = await create_redis(decode_responses=True)
+        p = r.pubsub()
+        # Bytes format should NOT be in the list when decode_responses=True
+        assert b"redis-py-health-check" not in p.health_check_response
+        await p.aclose()
+        await r.aclose()
+
+
+@pytest.mark.onlynoncluster
 class TestPubSubConnectionKilled:
     @skip_if_server_version_lt("3.0.0")
     async def test_connection_error_raised_when_connection_dies(

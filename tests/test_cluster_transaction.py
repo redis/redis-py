@@ -14,6 +14,7 @@ from redis.event import EventDispatcher, EventListenerInterface
 from redis.observability import recorder
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector
+from redis.cluster import PRIMARY, ClusterNode, RedisCluster
 from redis.retry import Retry
 
 from .conftest import skip_if_server_version_lt
@@ -131,9 +132,6 @@ class TestClusterTransaction:
 
         with (
             patch.object(Redis, "parse_response") as parse_response,
-            patch.object(
-                NodesManager, "_update_moved_slots"
-            ) as manager_update_moved_slots,
         ):
 
             def ask_redirect_effect(connection, *args, **options):
@@ -156,8 +154,6 @@ class TestClusterTransaction:
                     f" {slot} {node_importing.name}"
                 )
 
-            manager_update_moved_slots.assert_called()
-
     @pytest.mark.onlycluster
     def test_retry_transaction_during_slot_migration_successful(self, r):
         """
@@ -171,9 +167,6 @@ class TestClusterTransaction:
 
         with (
             patch.object(Redis, "parse_response") as parse_response,
-            patch.object(
-                NodesManager, "_update_moved_slots"
-            ) as manager_update_moved_slots,
         ):
 
             def ask_redirect_effect(conn, *args, **options):
@@ -195,15 +188,7 @@ class TestClusterTransaction:
                 else:
                     assert False, f"unexpected node {conn.host}:{conn.port} was called"
 
-            def update_moved_slot():  # simulate slot table update
-                ask_error = r.nodes_manager._moved_exception
-                assert ask_error is not None, "No AskError was previously triggered"
-                assert f"{ask_error.host}:{ask_error.port}" == node_importing.name
-                r.nodes_manager._moved_exception = None
-                r.nodes_manager.slots_cache[slot] = [node_importing]
-
             parse_response.side_effect = ask_redirect_effect
-            manager_update_moved_slots.side_effect = update_moved_slot
 
             result = None
             with r.pipeline(transaction=True) as pipe:
@@ -293,13 +278,24 @@ class TestClusterTransaction:
         mock_pool._lock = threading.RLock()
 
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
-        node_importing.redis_connection.connection_pool = mock_pool
-        r.nodes_manager.slots_cache[slot] = [node_importing]
-        r.reinitialize_steps = 1
+        # Set mock connection's host/port to match the node for find_connection_owner
+        mock_connection.host = node_importing.host
+        mock_connection.port = node_importing.port
+        # Save original pool to restore later
+        original_pool = node_importing.redis_connection.connection_pool
+        original_slots_cache = r.nodes_manager.slots_cache[slot]
+        try:
+            node_importing.redis_connection.connection_pool = mock_pool
+            r.nodes_manager.slots_cache[slot] = [node_importing]
+            r.reinitialize_steps = 1
 
-        with r.pipeline(transaction=True) as pipe:
-            pipe.set(key, "val")
-            assert pipe.execute() == [b"OK"]
+            with r.pipeline(transaction=True) as pipe:
+                pipe.set(key, "val")
+                assert pipe.execute() == [b"OK"]
+        finally:
+            # Restore original pool so teardown can work
+            node_importing.redis_connection.connection_pool = original_pool
+            r.nodes_manager.slots_cache[slot] = original_slots_cache
 
     @pytest.mark.onlycluster
     def test_retry_transaction_on_connection_error_with_watched_keys(
@@ -316,17 +312,29 @@ class TestClusterTransaction:
         mock_pool.get_connection.return_value = mock_connection
         mock_pool._available_connections = [mock_connection]
         mock_pool._lock = threading.RLock()
+        mock_pool.connection_kwargs = {}
 
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
-        node_importing.redis_connection.connection_pool = mock_pool
-        r.nodes_manager.slots_cache[slot] = [node_importing]
-        r.reinitialize_steps = 1
+        # Set mock connection's host/port to match the node for find_connection_owner
+        mock_connection.host = node_importing.host
+        mock_connection.port = node_importing.port
+        # Save original pool to restore later
+        original_pool = node_importing.redis_connection.connection_pool
+        original_slots_cache = r.nodes_manager.slots_cache[slot]
+        try:
+            node_importing.redis_connection.connection_pool = mock_pool
+            r.nodes_manager.slots_cache[slot] = [node_importing]
+            r.reinitialize_steps = 1
 
-        with r.pipeline(transaction=True) as pipe:
-            pipe.watch(key)
-            pipe.multi()
-            pipe.set(key, "val")
-            assert pipe.execute() == [b"OK"]
+            with r.pipeline(transaction=True) as pipe:
+                pipe.watch(key)
+                pipe.multi()
+                pipe.set(key, "val")
+                assert pipe.execute() == [b"OK"]
+        finally:
+            # Restore original pool so teardown can work
+            node_importing.redis_connection.connection_pool = original_pool
+            r.nodes_manager.slots_cache[slot] = original_slots_cache
 
     @pytest.mark.onlycluster
     def test_exec_error_raised(self, r):
@@ -404,14 +412,14 @@ class TestClusterTransaction:
 
 
 @pytest.mark.onlycluster
-class TestClusterTransactionEventEmission:
+class TestClusterTransactionMetricsRecording:
     """
-    Integration tests that verify AfterCommandExecutionEvent is properly emitted
+    Integration tests that verify metrics are properly recorded
     from ClusterPipeline (transaction mode) and delivered to the Meter through
-    the event dispatcher chain.
+    the observability recorder.
 
     These tests use a real Redis cluster connection but mock the OTel Meter
-    to verify events are correctly emitted.
+    to verify metrics are correctly recorded.
     """
 
     @pytest.fixture
@@ -462,11 +470,11 @@ class TestClusterTransactionEventEmission:
         # Cleanup
         recorder.reset_collector()
 
-    def test_transaction_execute_emits_event_to_meter(
+    def test_transaction_execute_records_metric(
         self, cluster_transaction_with_otel
     ):
         """
-        Test that transaction execute emits AfterCommandExecutionEvent to Meter.
+        Test that transaction execute records operation duration metric to Meter.
         """
         cluster, operation_duration_mock = cluster_transaction_with_otel
 
@@ -579,11 +587,11 @@ class TestClusterTransactionEventEmission:
         assert isinstance(duration, float)
         assert duration >= 0
 
-    def test_multiple_transaction_executions_emit_multiple_events(
+    def test_multiple_transaction_executions_record_multiple_metrics(
         self, cluster_transaction_with_otel
     ):
         """
-        Test that multiple transaction executions emit multiple events.
+        Test that multiple transaction executions record multiple metrics.
         """
         cluster, operation_duration_mock = cluster_transaction_with_otel
 
@@ -605,11 +613,11 @@ class TestClusterTransactionEventEmission:
 
         assert transaction_count >= 2
 
-    def test_empty_transaction_does_not_emit_event(
+    def test_empty_transaction_does_not_record_metric(
         self, cluster_transaction_with_otel
     ):
         """
-        Test that an empty transaction does not emit TRANSACTION events.
+        Test that an empty transaction does not record TRANSACTION metrics.
         """
         cluster, operation_duration_mock = cluster_transaction_with_otel
 
@@ -625,9 +633,9 @@ class TestClusterTransactionEventEmission:
 
         assert transaction_count == 0
 
-    def test_transaction_with_watch_emits_event(self, cluster_transaction_with_otel):
+    def test_transaction_with_watch_records_metric(self, cluster_transaction_with_otel):
         """
-        Test that transaction with WATCH emits event correctly.
+        Test that transaction with WATCH records metric correctly.
         """
         cluster, operation_duration_mock = cluster_transaction_with_otel
 
@@ -653,11 +661,11 @@ class TestClusterTransactionEventEmission:
         attrs = transaction_call[1]['attributes']
         assert attrs['db.operation.name'] == 'TRANSACTION'
 
-    # Tests for new event emission in TransactionStrategy
+    # Tests for metrics recording in TransactionStrategy
 
-    def test_watch_command_emits_event(self, cluster_transaction_with_otel):
+    def test_watch_command_records_metric(self, cluster_transaction_with_otel):
         """
-        Test that WATCH command emits AfterCommandExecutionEvent.
+        Test that WATCH command records operation duration metric.
         """
         cluster, operation_duration_mock = cluster_transaction_with_otel
 
@@ -682,11 +690,11 @@ class TestClusterTransactionEventEmission:
         assert 'server.address' in attrs
         assert 'server.port' in attrs
 
-    def test_immediate_command_emits_event_with_server_info(
+    def test_immediate_command_records_metric_with_server_info(
         self, cluster_transaction_with_otel
     ):
         """
-        Test that immediate commands (WATCH, GET before MULTI) emit events
+        Test that immediate commands (WATCH, GET before MULTI) record metrics
         with server address and port.
         """
         cluster, operation_duration_mock = cluster_transaction_with_otel
@@ -724,44 +732,11 @@ class TestClusterTransactionEventEmission:
         assert 'server.address' in get_attrs
         assert 'server.port' in get_attrs
 
-    def test_on_error_event_emitted_on_transaction_failure(
+    def test_transaction_error_records_metric_with_error_type(
         self, cluster_transaction_with_otel
     ):
         """
-        Test that OnErrorEvent is emitted when a transaction command fails.
-        """
-
-        cluster, _ = cluster_transaction_with_otel
-
-        error_events = []
-
-        class ErrorEventTracker(EventListenerInterface):
-            def listen(self, event: object):
-                error_events.append(event)
-
-        tracker = ErrorEventTracker()
-        cluster._event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
-
-        # Set a string value
-        cluster.set('{tx_error}key', 'string_value')
-
-        with cluster.pipeline(transaction=True) as tx:
-            try:
-                # Try to use LPUSH on a string key inside transaction
-                tx.lpush('{tx_error}key', 'value')
-                tx.execute()
-            except ResponseError:
-                pass
-
-        # Note: ResponseError from EXEC doesn't trigger OnErrorEvent
-        # OnErrorEvent is for connection/cluster errors during retry
-        # This test verifies the event dispatcher is properly set up
-
-    def test_transaction_error_emits_event_with_error_type(
-        self, cluster_transaction_with_otel
-    ):
-        """
-        Test that when a transaction fails, the emitted event includes error.type.
+        Test that when a transaction fails, the recorded metric includes error.type.
         """
         cluster, operation_duration_mock = cluster_transaction_with_otel
 
@@ -785,37 +760,11 @@ class TestClusterTransactionEventEmission:
         # There should be at least one TRANSACTION event
         assert len(transaction_calls) >= 1
 
-    def test_successful_transaction_no_error_event(
+    def test_watch_and_transaction_record_separate_metrics(
         self, cluster_transaction_with_otel
     ):
         """
-        Test that successful transactions do not emit OnErrorEvent.
-        """
-
-        cluster, _ = cluster_transaction_with_otel
-
-        error_events = []
-
-        class ErrorEventTracker(EventListenerInterface):
-            def listen(self, event: object):
-                error_events.append(event)
-
-        tracker = ErrorEventTracker()
-        cluster._event_dispatcher.register_listeners({OnErrorEvent: [tracker]})
-
-        with cluster.pipeline(transaction=True) as tx:
-            tx.set('{success_tx}key', 'value')
-            tx.get('{success_tx}key')
-            tx.execute()
-
-        # No error events should be emitted for successful transaction
-        assert len(error_events) == 0
-
-    def test_watch_and_transaction_emit_separate_events(
-        self, cluster_transaction_with_otel
-    ):
-        """
-        Test that WATCH commands and TRANSACTION emit separate events.
+        Test that WATCH commands and TRANSACTION record separate metrics.
         """
         cluster, operation_duration_mock = cluster_transaction_with_otel
 
@@ -844,10 +793,10 @@ class TestClusterTransactionEventEmission:
         assert watch_count >= 1
         assert transaction_count >= 1
 
-    def test_immediate_get_command_emits_event(self, cluster_transaction_with_otel):
+    def test_immediate_get_command_records_metric(self, cluster_transaction_with_otel):
         """
         Test that GET command executed immediately (after WATCH, before MULTI)
-        emits AfterCommandExecutionEvent.
+        records operation duration metric.
         """
         cluster, operation_duration_mock = cluster_transaction_with_otel
 
