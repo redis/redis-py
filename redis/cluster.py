@@ -1564,6 +1564,12 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 raise
             except ResponseError as e:
                 e.connection = connection
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
             except Exception as e:
                 if connection:
