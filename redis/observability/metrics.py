@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Optional imports - OTel SDK may not be installed
 try:
-    from opentelemetry.metrics import Counter, Histogram, Meter, UpDownCounter
+    from opentelemetry.metrics import Meter
 
     OTEL_AVAILABLE = True
 except ImportError:

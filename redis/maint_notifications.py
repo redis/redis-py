@@ -7,7 +7,6 @@ import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
-from redis.event import EventDispatcher, EventDispatcherInterface
 from redis.observability.attributes import get_pool_name
 from redis.observability.recorder import (
     record_connection_handoff,
@@ -566,18 +565,12 @@ class MaintNotificationsPoolHandler:
         self,
         pool: "MaintNotificationsAbstractConnectionPool",
         config: MaintNotificationsConfig,
-        event_dispatcher: Optional[EventDispatcherInterface] = None,
     ) -> None:
         self.pool = pool
         self.config = config
         self._processed_notifications = set()
         self._lock = threading.RLock()
         self.connection = None
-
-        if event_dispatcher is not None:
-            self.event_dispatcher = event_dispatcher
-        else:
-            self.event_dispatcher = EventDispatcher()
 
     def set_connection(self, connection: "MaintNotificationsAbstractConnection"):
         self.connection = connection
@@ -586,9 +579,7 @@ class MaintNotificationsPoolHandler:
         # Copy all data that should be shared between connections
         # but each connection should have its own pool handler
         # since each connection can be in a different state
-        copy = MaintNotificationsPoolHandler(
-            self.pool, self.config, self.event_dispatcher
-        )
+        copy = MaintNotificationsPoolHandler(self.pool, self.config)
         copy._processed_notifications = self._processed_notifications
         copy._lock = self._lock
         copy.connection = None
