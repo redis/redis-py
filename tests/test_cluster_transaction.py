@@ -276,9 +276,10 @@ class TestClusterTransaction:
         mock_pool._lock = threading.RLock()
 
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
-        # Set mock connection's host/port to match the node for find_connection_owner
+        # Set mock connection's host/port/db to match the node for find_connection_owner
         mock_connection.host = node_importing.host
         mock_connection.port = node_importing.port
+        mock_connection.db = 0
         # Save original pool to restore later
         original_pool = node_importing.redis_connection.connection_pool
         original_slots_cache = r.nodes_manager.slots_cache[slot]
@@ -313,9 +314,10 @@ class TestClusterTransaction:
         mock_pool.connection_kwargs = {}
 
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
-        # Set mock connection's host/port to match the node for find_connection_owner
+        # Set mock connection's host/port/db to match the node for find_connection_owner
         mock_connection.host = node_importing.host
         mock_connection.port = node_importing.port
+        mock_connection.db = 0
         # Save original pool to restore later
         original_pool = node_importing.redis_connection.connection_pool
         original_slots_cache = r.nodes_manager.slots_cache[slot]
