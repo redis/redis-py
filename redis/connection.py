@@ -2190,7 +2190,7 @@ class MaintNotificationsAbstractConnectionPool:
                 self._event_dispatcher = EventDispatcher()
 
             self._maint_notifications_pool_handler = MaintNotificationsPoolHandler(
-                self, maint_notifications_config, self._event_dispatcher
+                self, maint_notifications_config
             )
 
             self._update_connection_kwargs_for_maint_notifications(
@@ -2258,7 +2258,7 @@ class MaintNotificationsAbstractConnectionPool:
         # first update pool settings
         if not self._maint_notifications_pool_handler:
             self._maint_notifications_pool_handler = MaintNotificationsPoolHandler(
-                self, maint_notifications_config, self._event_dispatcher
+                self, maint_notifications_config
             )
         else:
             self._maint_notifications_pool_handler.config = maint_notifications_config
