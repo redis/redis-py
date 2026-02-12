@@ -2638,6 +2638,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self._fork_lock = threading.RLock()
         self._lock = threading.RLock()
 
+        # Generate unique pool ID for observability (matches go-redis behavior)
+        import secrets
+
+        self._pool_id = secrets.token_hex(4)
+
         MaintNotificationsAbstractConnectionPool.__init__(
             self,
             maint_notifications_config=maint_notifications_config,
@@ -2906,8 +2911,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         pass
 
     def get_connection_count(self) -> List[tuple[int, dict]]:
+        from redis.observability.attributes import get_pool_name
+
         attributes = AttributeBuilder.build_base_attributes()
-        attributes[DB_CLIENT_CONNECTION_POOL_NAME] = repr(self)
+        attributes[DB_CLIENT_CONNECTION_POOL_NAME] = get_pool_name(self)
         free_connections_attributes = attributes.copy()
         in_use_connections_attributes = attributes.copy()
 

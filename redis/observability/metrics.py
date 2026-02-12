@@ -128,7 +128,7 @@ class RedisMetricsCollector:
         """Initialize basic connection metrics."""
         self.connection_create_time = self.meter.create_histogram(
             name="db.client.connection.create_time",
-            unit="{seconds}",
+            unit="s",
             description="Time to create a new connection",
             explicit_bucket_boundaries_advisory=self.config.buckets_connection_create_time,
         )
@@ -155,7 +155,7 @@ class RedisMetricsCollector:
 
         self.connection_wait_time = self.meter.create_histogram(
             name="db.client.connection.wait_time",
-            unit="{seconds}",
+            unit="s",
             description="Time to obtain an open connection from the pool",
             explicit_bucket_boundaries_advisory=self.config.buckets_connection_wait_time,
         )
@@ -170,7 +170,7 @@ class RedisMetricsCollector:
         """Initialize command execution metric instruments."""
         self.operation_duration = self.meter.create_histogram(
             name="db.client.operation.duration",
-            unit="{seconds}",
+            unit="s",
             description="Command execution duration",
             explicit_bucket_boundaries_advisory=self.config.buckets_operation_duration,
         )
@@ -187,7 +187,7 @@ class RedisMetricsCollector:
         """Initialize Streaming metric instruments."""
         self.stream_lag = self.meter.create_histogram(
             name="redis.client.stream.lag",
-            unit="{seconds}",
+            unit="s",
             description="End-to-end lag per message, showing how stale are the messages when the application starts processing them.",
             explicit_bucket_boundaries_advisory=self.config.buckets_stream_processing_duration,
         )
@@ -208,7 +208,7 @@ class RedisMetricsCollector:
 
         self.csc_network_saved = self.meter.create_counter(
             name="redis.client.csc.network_saved",
-            unit="{bytes}",
+            unit="By",
             description="The total number of bytes saved by using CSC",
         )
 
@@ -314,7 +314,7 @@ class RedisMetricsCollector:
 
         self.connection_count = self.meter.create_observable_gauge(
             name="db.client.connection.count",
-            unit="connections",
+            unit="{connection}",
             description="Number of connections in the pool",
             callbacks=[callback],
         )

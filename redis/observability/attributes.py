@@ -352,22 +352,26 @@ def get_pool_name(pool: "ConnectionPoolInterface") -> str:
     Get a short string representation of a connection pool for observability.
 
     This provides a concise pool identifier suitable for use as a metric attribute,
-    in the format: ClassName(host:port/db)
+    in the format: host:port_uniqueID (matching go-redis format)
 
     Args:
         pool: Connection pool instance
 
     Returns:
-        Short pool name in format "ClassName(host:port/db)"
+        Short pool name in format "host:port_uniqueID"
 
     Example:
         >>> pool = ConnectionPool(host='localhost', port=6379, db=0)
         >>> get_pool_name(pool)
-        'ConnectionPool(localhost:6379/0)'
+        'localhost:6379_a1b2c3d4'
     """
     host = pool.connection_kwargs.get("host", "unknown")
     port = pool.connection_kwargs.get("port", 6379)
-    db = pool.connection_kwargs.get("db", 0)
-    class_name = pool.__class__.__name__
 
-    return f"{class_name}({host}:{port}/{db})"
+    # Get unique pool ID if available (added for observability)
+    pool_id = getattr(pool, "_pool_id", "")
+
+    if pool_id:
+        return f"{host}:{port}_{pool_id}"
+    else:
+        return f"{host}:{port}"
