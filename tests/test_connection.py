@@ -750,21 +750,36 @@ class TestConnectionPoolGetConnectionCount:
 
     def test_get_connection_count_includes_pool_name_in_attributes(self):
         """Test that get_connection_count includes pool name in attributes."""
+        from redis.observability.attributes import get_pool_name
 
         pool = ConnectionPool(max_connections=10)
 
         counts = pool.get_connection_count()
 
-        idle_count, idle_attrs = counts[0]
-        used_count, used_attrs = counts[1]
+        _, idle_attrs = counts[0]
+        _, used_attrs = counts[1]
 
         # Both should have the pool name
         assert DB_CLIENT_CONNECTION_POOL_NAME in idle_attrs
         assert DB_CLIENT_CONNECTION_POOL_NAME in used_attrs
 
-        # Pool name should be the repr of the pool
-        assert repr(pool) in idle_attrs[DB_CLIENT_CONNECTION_POOL_NAME]
-        assert repr(pool) in used_attrs[DB_CLIENT_CONNECTION_POOL_NAME]
+        # Pool name should match the format from get_pool_name() (host:port_uniqueID)
+        expected_pool_name = get_pool_name(pool)
+        assert idle_attrs[DB_CLIENT_CONNECTION_POOL_NAME] == expected_pool_name
+        assert used_attrs[DB_CLIENT_CONNECTION_POOL_NAME] == expected_pool_name
+
+        # Verify the pool name has the expected format (host:port_uniqueID)
+        assert "unknown:6379_" in expected_pool_name
+
+        # Verify the unique ID is 8 hex characters (matching go-redis)
+        parts = expected_pool_name.split("_")
+        assert len(parts) == 2, (
+            f"Pool name should have format host:port_id, got: {expected_pool_name}"
+        )
+        unique_id = parts[1]
+        assert len(unique_id) == 8, (
+            f"Unique ID should be 8 characters, got: {unique_id}"
+        )
 
         pool.disconnect()
 
