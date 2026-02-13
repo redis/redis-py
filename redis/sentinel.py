@@ -21,6 +21,10 @@ class SlaveNotFoundError(ConnectionError):
     pass
 
 
+# Alias for REPLICA terminology (Redis 5.0+)
+ReplicaNotFoundError = SlaveNotFoundError
+
+
 class SentinelManagedConnection(Connection):
     def __init__(self, **kwargs):
         self.connection_pool = kwargs.pop("connection_pool")
@@ -198,6 +202,10 @@ class SentinelConnectionPool(ConnectionPool):
         "Round-robin slave balancer"
         return self.proxy.rotate_slaves()
 
+    def rotate_replicas(self):
+        "Round-robin replica balancer"
+        return self.rotate_slaves()
+
 
 class Sentinel(SentinelCommands):
     """
@@ -343,6 +351,10 @@ class Sentinel(SentinelCommands):
             slaves_alive.append((slave["ip"], slave["port"]))
         return slaves_alive
 
+    def filter_replicas(self, replicas):
+        "Remove replicas that are in an ODOWN or SDOWN state"
+        return self.filter_slaves(replicas)
+
     def discover_slaves(self, service_name):
         "Returns a list of alive slaves for service ``service_name``"
         for sentinel in self.sentinels:
@@ -354,6 +366,10 @@ class Sentinel(SentinelCommands):
             if slaves:
                 return slaves
         return []
+
+    def discover_replicas(self, service_name):
+        "Returns a list of alive replicas for service ``service_name``"
+        return self.discover_slaves(service_name)
 
     def master_for(
         self,
@@ -422,4 +438,35 @@ class Sentinel(SentinelCommands):
         connection_kwargs.update(kwargs)
         return redis_class.from_pool(
             connection_pool_class(service_name, self, **connection_kwargs)
+        )
+
+    def replica_for(
+        self,
+        service_name,
+        redis_class=Redis,
+        connection_pool_class=SentinelConnectionPool,
+        **kwargs,
+    ):
+        """
+        Returns redis client instance for the ``service_name`` replica(s).
+
+        A SentinelConnectionPool class is used to retrieve the replica's
+        address before establishing a new connection.
+
+        By default clients will be a :py:class:`~redis.Redis` instance.
+        Specify a different class to the ``redis_class`` argument if you
+        desire something different.
+
+        The ``connection_pool_class`` specifies the connection pool to use.
+        The SentinelConnectionPool will be used by default.
+
+        All other keyword arguments are merged with any connection_kwargs
+        passed to this class and passed to the connection pool as keyword
+        arguments to be used to initialize Redis connections.
+        """
+        return self.slave_for(
+            service_name,
+            redis_class=redis_class,
+            connection_pool_class=connection_pool_class,
+            **kwargs,
         )
