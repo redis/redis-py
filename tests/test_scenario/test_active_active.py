@@ -3,6 +3,7 @@ import logging
 import os
 import threading
 from time import sleep
+from typing import Optional
 
 import pytest
 
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def trigger_network_failure_action(
-    fault_injector_client, config, event: threading.Event = None
+    fault_injector_client, config, event: Optional[threading.Event] = None
 ):
     action_request = ActionRequest(
         action_type=ActionType.NETWORK_FAILURE,

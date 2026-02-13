@@ -5,9 +5,14 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Union
 
 from redis.typing import Number
+
+if TYPE_CHECKING:
+    from redis.cluster import MaintNotificationsAbstractRedisCluster
+
+logger = logging.getLogger(__name__)
 
 
 class MaintenanceState(enum.Enum):
@@ -394,6 +399,138 @@ class NodeFailedOverNotification(MaintenanceNotification):
         return hash((self.__class__.__name__, int(self.id)))
 
 
+class OSSNodeMigratingNotification(MaintenanceNotification):
+    """
+    Notification for when a Redis OSS API client is used and a node is in the process of migrating slots.
+
+    This notification is received when a node starts migrating its slots to another node
+    during cluster rebalancing or maintenance operations.
+
+    Args:
+        id (int): Unique identifier for this notification
+        slots (Optional[List[int]]): List of slots being migrated
+    """
+
+    DEFAULT_TTL = 30
+
+    def __init__(
+        self,
+        id: int,
+        slots: Optional[str] = None,
+    ):
+        super().__init__(id, OSSNodeMigratingNotification.DEFAULT_TTL)
+        self.slots = slots
+
+    def __repr__(self) -> str:
+        expiry_time = self.creation_time + self.ttl
+        remaining = max(0, expiry_time - time.monotonic())
+        return (
+            f"{self.__class__.__name__}("
+            f"id={self.id}, "
+            f"slots={self.slots}, "
+            f"ttl={self.ttl}, "
+            f"creation_time={self.creation_time}, "
+            f"expires_at={expiry_time}, "
+            f"remaining={remaining:.1f}s, "
+            f"expired={self.is_expired()}"
+            f")"
+        )
+
+    def __eq__(self, other) -> bool:
+        """
+        Two OSSNodeMigratingNotification notifications are considered equal if they have the same
+        id and are of the same type.
+        """
+        if not isinstance(other, OSSNodeMigratingNotification):
+            return False
+        return self.id == other.id and type(self) is type(other)
+
+    def __hash__(self) -> int:
+        """
+        Return a hash value for the notification to allow
+        instances to be used in sets and as dictionary keys.
+
+        Returns:
+            int: Hash value based on notification type and id
+        """
+        return hash((self.__class__.__name__, int(self.id)))
+
+
+class OSSNodeMigratedNotification(MaintenanceNotification):
+    """
+    Notification for when a Redis OSS API client is used and a node has completed migrating slots.
+
+    This notification is received when a node has finished migrating all its slots
+    to other nodes during cluster rebalancing or maintenance operations.
+
+    Args:
+        id (int): Unique identifier for this notification
+        nodes_to_slots_mapping (Dict[str, List[Dict[str, str]]]): Map of source node address
+            to list of destination mappings. Each destination mapping is a dict with
+            the destination node address as key and the slot range as value.
+
+            Structure example:
+            {
+                "127.0.0.1:6379": [
+                    {"127.0.0.1:6380": "1-100"},
+                    {"127.0.0.1:6381": "101-200"}
+                ],
+                "127.0.0.1:6382": [
+                    {"127.0.0.1:6383": "201-300"}
+                ]
+            }
+
+            Where:
+            - Key (str): Source node address in "host:port" format
+            - Value (List[Dict[str, str]]): List of destination mappings where each dict
+              contains destination node address as key and slot range as value
+    """
+
+    DEFAULT_TTL = 120
+
+    def __init__(
+        self,
+        id: int,
+        nodes_to_slots_mapping: Dict[str, List[Dict[str, str]]],
+    ):
+        super().__init__(id, OSSNodeMigratedNotification.DEFAULT_TTL)
+        self.nodes_to_slots_mapping = nodes_to_slots_mapping
+
+    def __repr__(self) -> str:
+        expiry_time = self.creation_time + self.ttl
+        remaining = max(0, expiry_time - time.monotonic())
+        return (
+            f"{self.__class__.__name__}("
+            f"id={self.id}, "
+            f"nodes_to_slots_mapping={self.nodes_to_slots_mapping}, "
+            f"ttl={self.ttl}, "
+            f"creation_time={self.creation_time}, "
+            f"expires_at={expiry_time}, "
+            f"remaining={remaining:.1f}s, "
+            f"expired={self.is_expired()}"
+            f")"
+        )
+
+    def __eq__(self, other) -> bool:
+        """
+        Two OSSNodeMigratedNotification notifications are considered equal if they have the same
+        id and are of the same type.
+        """
+        if not isinstance(other, OSSNodeMigratedNotification):
+            return False
+        return self.id == other.id and type(self) is type(other)
+
+    def __hash__(self) -> int:
+        """
+        Return a hash value for the notification to allow
+        instances to be used in sets and as dictionary keys.
+
+        Returns:
+            int: Hash value based on notification type and id
+        """
+        return hash((self.__class__.__name__, int(self.id)))
+
+
 def _is_private_fqdn(host: str) -> bool:
     """
     Determine if an FQDN is likely to be internal/private.
@@ -432,6 +569,27 @@ def _is_private_fqdn(host: str) -> bool:
 
     # If none of the internal patterns match, assume it's external
     return False
+
+
+def add_debug_log_for_notification(
+    connection: "MaintNotificationsAbstractConnection",
+    notification: Union[str, MaintenanceNotification],
+):
+    if logger.isEnabledFor(logging.DEBUG):
+        socket_address = None
+        try:
+            socket_address = (
+                connection._sock.getsockname() if connection._sock else None
+            )
+            socket_address = socket_address[1] if socket_address else None
+        except (AttributeError, OSError):
+            pass
+
+        logger.debug(
+            f"Handling maintenance notification: {notification}, "
+            f"with connection: {connection}, connected to ip {connection.get_resolved_ip()}, "
+            f"local socket port: {socket_address}",
+        )
 
 
 class MaintNotificationsConfig:
@@ -591,7 +749,7 @@ class MaintNotificationsPoolHandler:
         if isinstance(notification, NodeMovingNotification):
             return self.handle_node_moving_notification(notification)
         else:
-            logging.error(f"Unhandled notification type: {notification}")
+            logger.error(f"Unhandled notification type: {notification}")
 
     def handle_node_moving_notification(self, notification: NodeMovingNotification):
         if (
@@ -607,6 +765,11 @@ class MaintNotificationsPoolHandler:
                 return
 
             with self.pool._lock:
+                logger.debug(
+                    f"Handling node MOVING notification: {notification}, "
+                    f"with connection: {self.connection}, connected to ip "
+                    f"{self.connection.get_resolved_ip() if self.connection else None}"
+                )
                 if (
                     self.config.proactive_reconnect
                     or self.config.is_relaxed_timeouts_enabled()
@@ -710,6 +873,11 @@ class MaintNotificationsPoolHandler:
         notification_hash = hash(notification)
 
         with self._lock:
+            logger.debug(
+                f"Reverting temporary changes related to notification: {notification}, "
+                f"with connection: {self.connection}, connected to ip "
+                f"{self.connection.get_resolved_ip() if self.connection else None}"
+            )
             # if the current maintenance_notification_hash in kwargs is not matching the notification
             # it means there has been a new moving notification after this one
             # and we don't need to revert the kwargs yet
@@ -755,8 +923,10 @@ class MaintNotificationsConnectionHandler:
     _NOTIFICATION_TYPES: dict[type["MaintenanceNotification"], int] = {
         NodeMigratingNotification: 1,
         NodeFailingOverNotification: 1,
+        OSSNodeMigratingNotification: 1,
         NodeMigratedNotification: 0,
         NodeFailedOverNotification: 0,
+        OSSNodeMigratedNotification: 0,
     }
 
     def __init__(
@@ -772,17 +942,21 @@ class MaintNotificationsConnectionHandler:
         notification_type = self._NOTIFICATION_TYPES.get(notification.__class__, None)
 
         if notification_type is None:
-            logging.error(f"Unhandled notification type: {notification}")
+            logger.error(f"Unhandled notification type: {notification}")
             return
 
         if notification_type:
-            self.handle_maintenance_start_notification(MaintenanceState.MAINTENANCE)
+            self.handle_maintenance_start_notification(
+                MaintenanceState.MAINTENANCE, notification
+            )
         else:
             self.handle_maintenance_completed_notification()
 
     def handle_maintenance_start_notification(
-        self, maintenance_state: MaintenanceState
+        self, maintenance_state: MaintenanceState, notification: MaintenanceNotification
     ):
+        add_debug_log_for_notification(self.connection, notification)
+
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING
             or not self.config.is_relaxed_timeouts_enabled()
@@ -795,6 +969,11 @@ class MaintNotificationsConnectionHandler:
         )
         # extend the timeout for all created connections
         self.connection.update_current_socket_timeout(self.config.relaxed_timeout)
+        if isinstance(notification, OSSNodeMigratingNotification):
+            # add the notification id to the set of processed start maint notifications
+            # this is used to skip the unrelaxing of the timeouts if we have received more than
+            # one start notification before the the final end notification
+            self.connection.add_maint_start_notification(notification.id)
 
     def handle_maintenance_completed_notification(self):
         # Only reset timeouts if state is not MOVING and relaxed timeouts are enabled
@@ -803,8 +982,133 @@ class MaintNotificationsConnectionHandler:
             or not self.config.is_relaxed_timeouts_enabled()
         ):
             return
+        add_debug_log_for_notification(self.connection, "MAINTENANCE_COMPLETED")
         self.connection.reset_tmp_settings(reset_relaxed_timeout=True)
         # Maintenance completed - reset the connection
         # timeouts by providing -1 as the relaxed timeout
         self.connection.update_current_socket_timeout(-1)
         self.connection.maintenance_state = MaintenanceState.NONE
+        # reset the sets that keep track of received start maint
+        # notifications and skipped end maint notifications
+        self.connection.reset_received_notifications()
+
+
+class OSSMaintNotificationsHandler:
+    def __init__(
+        self,
+        cluster_client: "MaintNotificationsAbstractRedisCluster",
+        config: MaintNotificationsConfig,
+    ) -> None:
+        self.cluster_client = cluster_client
+        self.config = config
+        self._processed_notifications = set()
+        self._in_progress = set()
+        self._lock = threading.RLock()
+
+    def get_handler_for_connection(self):
+        # Copy all data that should be shared between connections
+        # but each connection should have its own pool handler
+        # since each connection can be in a different state
+        copy = OSSMaintNotificationsHandler(self.cluster_client, self.config)
+        copy._processed_notifications = self._processed_notifications
+        copy._in_progress = self._in_progress
+        copy._lock = self._lock
+        return copy
+
+    def remove_expired_notifications(self):
+        with self._lock:
+            for notification in tuple(self._processed_notifications):
+                if notification.is_expired():
+                    self._processed_notifications.remove(notification)
+
+    def handle_notification(self, notification: MaintenanceNotification):
+        if isinstance(notification, OSSNodeMigratedNotification):
+            self.handle_oss_maintenance_completed_notification(notification)
+        else:
+            logger.error(f"Unhandled notification type: {notification}")
+
+    def handle_oss_maintenance_completed_notification(
+        self, notification: OSSNodeMigratedNotification
+    ):
+        self.remove_expired_notifications()
+
+        with self._lock:
+            if (
+                notification in self._in_progress
+                or notification in self._processed_notifications
+            ):
+                # we are already handling this notification or it has already been processed
+                # we should skip in_progress notification since when we reinitialize the cluster
+                # we execute a CLUSTER SLOTS command that can use a different connection
+                # that has also has the notification and we don't want to
+                # process the same notification twice
+                return
+
+            logger.debug(f"Handling SMIGRATED notification: {notification}")
+            self._in_progress.add(notification)
+
+            # Extract the information about the src and destination nodes that are affected
+            # by the maintenance. nodes_to_slots_mapping structure:
+            # {
+            #     "src_host:port": [
+            #         {"dest_host:port": "slot_range"},
+            #         ...
+            #     ],
+            #     ...
+            # }
+            additional_startup_nodes_info = []
+            affected_nodes = set()
+            for (
+                src_address,
+                dest_mappings,
+            ) in notification.nodes_to_slots_mapping.items():
+                src_host, src_port = src_address.split(":")
+                src_node = self.cluster_client.nodes_manager.get_node(
+                    host=src_host, port=src_port
+                )
+                if src_node is not None:
+                    affected_nodes.add(src_node)
+
+                for dest_mapping in dest_mappings:
+                    for dest_address in dest_mapping.keys():
+                        dest_host, dest_port = dest_address.split(":")
+                        additional_startup_nodes_info.append(
+                            (dest_host, int(dest_port))
+                        )
+
+            # Updates the cluster slots cache with the new slots mapping
+            # This will also update the nodes cache with the new nodes mapping
+            self.cluster_client.nodes_manager.initialize(
+                disconnect_startup_nodes_pools=False,
+                additional_startup_nodes_info=additional_startup_nodes_info,
+            )
+
+            all_nodes = set(affected_nodes)
+            all_nodes = all_nodes.union(
+                self.cluster_client.nodes_manager.nodes_cache.values()
+            )
+
+            for current_node in all_nodes:
+                if current_node.redis_connection is None:
+                    continue
+                with current_node.redis_connection.connection_pool._lock:
+                    if current_node in affected_nodes:
+                        # mark for reconnect all in use connections to the node - this will force them to
+                        # disconnect after they complete their current commands
+                        # Some of them might be used by sub sub and we don't know which ones - so we disconnect
+                        # all in flight connections after they are done with current command execution
+                        for conn in current_node.redis_connection.connection_pool._get_in_use_connections():
+                            conn.mark_for_reconnect()
+
+                    if (
+                        current_node
+                        not in self.cluster_client.nodes_manager.nodes_cache.values()
+                    ):
+                        # disconnect all free connections to the node - this node will be dropped
+                        # from the cluster, so we don't need to revert the timeouts
+                        for conn in current_node.redis_connection.connection_pool._get_free_connections():
+                            conn.disconnect()
+
+            # mark the notification as processed
+            self._processed_notifications.add(notification)
+            self._in_progress.remove(notification)
