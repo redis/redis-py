@@ -87,23 +87,23 @@ def record_operation_duration(
             return  # Observability not enabled
 
     # Record the metric
-    # try:
-    _metrics_collector.record_operation_duration(
-        command_name=command_name,
-        duration_seconds=duration_seconds,
-        server_address=server_address,
-        server_port=server_port,
-        db_namespace=db_namespace,
-        error_type=error,
-        network_peer_address=server_address,
-        network_peer_port=server_port,
-        is_blocking=is_blocking,
-        batch_size=batch_size,
-        retry_attempts=retry_attempts,
-    )
-    # except Exception:
-    #     # Don't let metric recording errors break Redis operations
-    #     pass
+    try:
+        _metrics_collector.record_operation_duration(
+            command_name=command_name,
+            duration_seconds=duration_seconds,
+            server_address=server_address,
+            server_port=server_port,
+            db_namespace=db_namespace,
+            error_type=error,
+            network_peer_address=server_address,
+            network_peer_port=server_port,
+            is_blocking=is_blocking,
+            batch_size=batch_size,
+            retry_attempts=retry_attempts,
+        )
+    except Exception:
+        # Don't let metric recording errors break Redis operations
+        pass
 
 
 def record_connection_create_time(
@@ -130,13 +130,13 @@ def record_connection_create_time(
         if _metrics_collector is None:
             return
 
-    # try:
-    _metrics_collector.record_connection_create_time(
-        connection_pool=connection_pool,
-        duration_seconds=duration_seconds,
-    )
-    # except Exception:
-    #     pass
+    try:
+        _metrics_collector.record_connection_create_time(
+            connection_pool=connection_pool,
+            duration_seconds=duration_seconds,
+        )
+    except Exception:
+        pass
 
 
 def init_connection_count() -> None:
@@ -160,12 +160,12 @@ def init_connection_count() -> None:
 
         return observations
 
-    # try:
-    _metrics_collector.init_connection_count(
-        callback=observable_callback,
-    )
-    # except Exception:
-    #     pass
+    try:
+        _metrics_collector.init_connection_count(
+            callback=observable_callback,
+        )
+    except Exception:
+        pass
 
 
 def register_pools_connection_count(
@@ -181,20 +181,23 @@ def register_pools_connection_count(
         if _metrics_collector is None:
             return
 
-    # Lazy import
-    from opentelemetry.metrics import Observation
+    try:
+        # Lazy import
+        from opentelemetry.metrics import Observation
 
-    def connection_count_callback():
-        observations = []
-        for connection_pool in connection_pools:
-            for count, attributes in connection_pool.get_connection_count():
-                observations.append(Observation(count, attributes=attributes))
-        return observations
+        def connection_count_callback():
+            observations = []
+            for connection_pool in connection_pools:
+                for count, attributes in connection_pool.get_connection_count():
+                    observations.append(Observation(count, attributes=attributes))
+            return observations
 
-    observables_registry = get_observables_registry_instance()
-    observables_registry.register(
-        CONNECTION_COUNT_REGISTRY_KEY, connection_count_callback
-    )
+        observables_registry = get_observables_registry_instance()
+        observables_registry.register(
+            CONNECTION_COUNT_REGISTRY_KEY, connection_count_callback
+        )
+    except Exception:
+        pass
 
 
 def record_connection_timeout(
@@ -216,12 +219,12 @@ def record_connection_timeout(
         if _metrics_collector is None:
             return
 
-    # try:
-    _metrics_collector.record_connection_timeout(
-        pool_name=pool_name,
-    )
-    # except Exception:
-    #     pass
+    try:
+        _metrics_collector.record_connection_timeout(
+            pool_name=pool_name,
+        )
+    except Exception:
+        pass
 
 
 def record_connection_wait_time(
@@ -247,13 +250,13 @@ def record_connection_wait_time(
         if _metrics_collector is None:
             return
 
-    # try:
-    _metrics_collector.record_connection_wait_time(
-        pool_name=pool_name,
-        duration_seconds=duration_seconds,
-    )
-    # except Exception:
-    #     pass
+    try:
+        _metrics_collector.record_connection_wait_time(
+            pool_name=pool_name,
+            duration_seconds=duration_seconds,
+        )
+    except Exception:
+        pass
 
 
 def record_connection_closed(
@@ -277,13 +280,13 @@ def record_connection_closed(
         if _metrics_collector is None:
             return
 
-    # try:
-    _metrics_collector.record_connection_closed(
-        close_reason=close_reason,
-        error_type=error_type,
-    )
-    # except Exception:
-    #     pass
+    try:
+        _metrics_collector.record_connection_closed(
+            close_reason=close_reason,
+            error_type=error_type,
+        )
+    except Exception:
+        pass
 
 
 def record_connection_relaxed_timeout(
@@ -309,14 +312,14 @@ def record_connection_relaxed_timeout(
         if _metrics_collector is None:
             return
 
-    # try:
-    _metrics_collector.record_connection_relaxed_timeout(
-        connection_name=connection_name,
-        maint_notification=maint_notification,
-        relaxed=relaxed,
-    )
-    # except Exception:
-    #     pass
+    try:
+        _metrics_collector.record_connection_relaxed_timeout(
+            connection_name=connection_name,
+            maint_notification=maint_notification,
+            relaxed=relaxed,
+        )
+    except Exception:
+        pass
 
 
 def record_connection_handoff(
@@ -338,12 +341,12 @@ def record_connection_handoff(
         if _metrics_collector is None:
             return
 
-    # try:
-    _metrics_collector.record_connection_handoff(
-        pool_name=pool_name,
-    )
-    # except Exception:
-    #     pass
+    try:
+        _metrics_collector.record_connection_handoff(
+            pool_name=pool_name,
+        )
+    except Exception:
+        pass
 
 
 def record_error_count(
@@ -377,18 +380,18 @@ def record_error_count(
         if _metrics_collector is None:
             return
 
-    # try:
-    _metrics_collector.record_error_count(
-        server_address=server_address,
-        server_port=server_port,
-        network_peer_address=network_peer_address,
-        network_peer_port=network_peer_port,
-        error_type=error_type,
-        retry_attempts=retry_attempts,
-        is_internal=is_internal,
-    )
-    # except Exception:
-    #     pass
+    try:
+        _metrics_collector.record_error_count(
+            server_address=server_address,
+            server_port=server_port,
+            network_peer_address=network_peer_address,
+            network_peer_port=network_peer_port,
+            error_type=error_type,
+            retry_attempts=retry_attempts,
+            is_internal=is_internal,
+        )
+    except Exception:
+        pass
 
 
 def record_pubsub_message(
@@ -421,11 +424,14 @@ def record_pubsub_message(
         if config is not None and config.hide_pubsub_channel_names:
             effective_channel = None
 
-    _metrics_collector.record_pubsub_message(
-        direction=direction,
-        channel=effective_channel,
-        sharded=sharded,
-    )
+    try:
+        _metrics_collector.record_pubsub_message(
+            direction=direction,
+            channel=effective_channel,
+            sharded=sharded,
+        )
+    except Exception:
+        pass
 
 
 def record_streaming_lag(
@@ -457,15 +463,15 @@ def record_streaming_lag(
         if config is not None and config.hide_stream_names:
             effective_stream_name = None
 
-    # try:
-    _metrics_collector.record_streaming_lag(
-        lag_seconds=lag_seconds,
-        stream_name=effective_stream_name,
-        consumer_group=consumer_group,
-        consumer_name=consumer_name,
-    )
-    # except Exception:
-    #     pass
+    try:
+        _metrics_collector.record_streaming_lag(
+            lag_seconds=lag_seconds,
+            stream_name=effective_stream_name,
+            consumer_group=consumer_group,
+            consumer_name=consumer_name,
+        )
+    except Exception:
+        pass
 
 
 def record_streaming_lag_from_response(
@@ -494,20 +500,40 @@ def record_streaming_lag_from_response(
     if not response:
         return
 
-    now = datetime.now().timestamp()
+    try:
+        now = datetime.now().timestamp()
 
-    # Check if stream names should be hidden
-    config = _get_config()
-    hide_stream_names = config is not None and config.hide_stream_names
+        # Check if stream names should be hidden
+        config = _get_config()
+        hide_stream_names = config is not None and config.hide_stream_names
 
-    # RESP3 format: dict
-    if isinstance(response, dict):
-        for stream_name, stream_messages in response.items():
-            effective_stream_name = (
-                None if hide_stream_names else str_if_bytes(stream_name)
-            )
-            for messages in stream_messages:
-                for message in messages:
+        # RESP3 format: dict
+        if isinstance(response, dict):
+            for stream_name, stream_messages in response.items():
+                effective_stream_name = (
+                    None if hide_stream_names else str_if_bytes(stream_name)
+                )
+                for messages in stream_messages:
+                    for message in messages:
+                        message_id, _ = message
+                        message_id = str_if_bytes(message_id)
+                        timestamp, _ = message_id.split("-")
+                        # Ensure lag is non-negative (clock skew can cause negative values)
+                        lag_seconds = max(0.0, now - int(timestamp) / 1000)
+
+                        _metrics_collector.record_streaming_lag(
+                            lag_seconds=lag_seconds,
+                            stream_name=effective_stream_name,
+                            consumer_group=consumer_group,
+                            consumer_name=consumer_name,
+                        )
+        else:
+            # RESP2 format: list
+            for stream_entry in response:
+                stream_name = str_if_bytes(stream_entry[0])
+                effective_stream_name = None if hide_stream_names else stream_name
+
+                for message in stream_entry[1]:
                     message_id, _ = message
                     message_id = str_if_bytes(message_id)
                     timestamp, _ = message_id.split("-")
@@ -520,25 +546,8 @@ def record_streaming_lag_from_response(
                         consumer_group=consumer_group,
                         consumer_name=consumer_name,
                     )
-    else:
-        # RESP2 format: list
-        for stream_entry in response:
-            stream_name = str_if_bytes(stream_entry[0])
-            effective_stream_name = None if hide_stream_names else stream_name
-
-            for message in stream_entry[1]:
-                message_id, _ = message
-                message_id = str_if_bytes(message_id)
-                timestamp, _ = message_id.split("-")
-                # Ensure lag is non-negative (clock skew can cause negative values)
-                lag_seconds = max(0.0, now - int(timestamp) / 1000)
-
-                _metrics_collector.record_streaming_lag(
-                    lag_seconds=lag_seconds,
-                    stream_name=effective_stream_name,
-                    consumer_group=consumer_group,
-                    consumer_name=consumer_name,
-                )
+    except Exception:
+        pass
 
 
 def record_maint_notification_count(
@@ -568,16 +577,16 @@ def record_maint_notification_count(
         if _metrics_collector is None:
             return
 
-    # try:
-    _metrics_collector.record_maint_notification_count(
-        server_address=server_address,
-        server_port=server_port,
-        network_peer_address=network_peer_address,
-        network_peer_port=network_peer_port,
-        maint_notification=maint_notification,
-    )
-    # except Exception:
-    #     pass
+    try:
+        _metrics_collector.record_maint_notification_count(
+            server_address=server_address,
+            server_port=server_port,
+            network_peer_address=network_peer_address,
+            network_peer_port=network_peer_port,
+            maint_notification=maint_notification,
+        )
+    except Exception:
+        pass
 
 
 def record_csc_request(
@@ -596,9 +605,12 @@ def record_csc_request(
         if _metrics_collector is None:
             return
 
-    _metrics_collector.record_csc_request(
-        result=result,
-    )
+    try:
+        _metrics_collector.record_csc_request(
+            result=result,
+        )
+    except Exception:
+        pass
 
 
 def init_csc_items() -> None:
@@ -622,9 +634,12 @@ def init_csc_items() -> None:
 
         return observations
 
-    _metrics_collector.init_csc_items(
-        callback=observable_callback,
-    )
+    try:
+        _metrics_collector.init_csc_items(
+            callback=observable_callback,
+        )
+    except Exception:
+        pass
 
 
 def register_csc_items_callback(
@@ -656,8 +671,11 @@ def register_csc_items_callback(
             )
         ]
 
-    observables_registry = get_observables_registry_instance()
-    observables_registry.register(CSC_ITEMS_REGISTRY_KEY, csc_items_callback)
+    try:
+        observables_registry = get_observables_registry_instance()
+        observables_registry.register(CSC_ITEMS_REGISTRY_KEY, csc_items_callback)
+    except Exception:
+        pass
 
 
 def record_csc_eviction(
@@ -678,10 +696,13 @@ def record_csc_eviction(
         if _metrics_collector is None:
             return
 
-    _metrics_collector.record_csc_eviction(
-        count=count,
-        reason=reason,
-    )
+    try:
+        _metrics_collector.record_csc_eviction(
+            count=count,
+            reason=reason,
+        )
+    except Exception:
+        pass
 
 
 def record_csc_network_saved(
@@ -700,9 +721,12 @@ def record_csc_network_saved(
         if _metrics_collector is None:
             return
 
-    _metrics_collector.record_csc_network_saved(
-        bytes_saved=bytes_saved,
-    )
+    try:
+        _metrics_collector.record_csc_network_saved(
+            bytes_saved=bytes_saved,
+        )
+    except Exception:
+        pass
 
 
 def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
