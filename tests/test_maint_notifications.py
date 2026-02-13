@@ -998,6 +998,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_pool._lock.__enter__ = Mock(return_value=None)
         mock_pool._lock.__exit__ = Mock(return_value=None)
         mock_pool.connection_kwargs = {"host": "localhost", "port": 6379, "db": 0}
+        mock_pool._pool_id = "a1b2c3d4"  # Mock the unique pool ID
 
         config = MaintNotificationsConfig(
             enabled=True, proactive_reconnect=True, relaxed_timeout=20
@@ -1012,7 +1013,7 @@ class TestMaintNotificationsMetricsRecording:
             handler.handle_node_moving_notification(notification)
 
         mock_record_connection_handoff.assert_called_once_with(
-            pool_name="Mock(localhost:6379/0)",
+            pool_name="localhost:6379_a1b2c3d4",
         )
 
     @patch("redis.maint_notifications.record_connection_handoff")
