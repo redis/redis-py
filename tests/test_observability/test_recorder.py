@@ -267,9 +267,7 @@ class TestRecordConnectionCreateTime:
 
         # Verify attributes
         attrs = call_args[1]["attributes"]
-        assert (
-            attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "localhost:6379_a1b2c3d4"
-        )
+        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "localhost:6379_a1b2c3d4"
 
 
 class TestRecordConnectionTimeout:
