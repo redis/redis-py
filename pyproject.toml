@@ -52,6 +52,11 @@ jwt = [
 circuit_breaker = [
     "pybreaker>=1.4.0"
 ]
+otel = [
+    "opentelemetry-api>=1.30.0",
+    "opentelemetry-sdk>=1.30.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0",
+]
 
 [project.urls]
 Changes = "https://github.com/redis/redis-py/releases"

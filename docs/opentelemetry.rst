@@ -27,8 +27,187 @@ Using tracing, you can break down requests into spans. **Span** is an operation 
 
 To learn more about tracing, see `Distributed Tracing using OpenTelemetry <https://uptrace.dev/opentelemetry/distributed-tracing.html>`_.
 
-OpenTelemetry instrumentation
------------------------------
+Native OpenTelemetry Integration (Recommended)
+----------------------------------------------
+
+redis-py includes built-in support for OpenTelemetry metrics collection. This native integration is the **recommended approach** as it provides comprehensive metrics without requiring external instrumentation packages.
+
+Installation
+^^^^^^^^^^^^
+
+To use native OpenTelemetry support, install the required dependencies:
+
+.. code-block:: shell
+
+   pip install redis[otel]
+
+Basic Setup
+^^^^^^^^^^^
+
+Initialize OpenTelemetry observability once at application startup. All Redis clients will automatically collect metrics:
+
+.. code-block:: python
+
+   from opentelemetry import metrics
+   from opentelemetry.sdk.metrics import MeterProvider
+   from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+   from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+
+   # 1. Set up OpenTelemetry MeterProvider
+   exporter = OTLPMetricExporter(endpoint="http://localhost:4318/v1/metrics")
+   reader = PeriodicExportingMetricReader(exporter=exporter, export_interval_millis=10000)
+   provider = MeterProvider(metric_readers=[reader])
+   metrics.set_meter_provider(provider)
+
+   # 2. Initialize redis-py observability
+   from redis.observability import get_observability_instance, OTelConfig
+
+   otel = get_observability_instance()
+   otel.init(OTelConfig())
+
+   # 3. Use Redis as usual - metrics are collected automatically
+   import redis
+   r = redis.Redis(host='localhost', port=6379)
+   r.set('key', 'value')  # Metrics collected automatically
+   r.get('key')
+
+   # 4. Shutdown observability at application exit
+   otel.shutdown()
+
+Configuration Options
+^^^^^^^^^^^^^^^^^^^^^
+
+The ``OTelConfig`` class provides fine-grained control over metrics collection:
+
+.. code-block:: python
+
+   from redis.observability import OTelConfig, MetricGroup
+
+   config = OTelConfig(
+       # Metric groups to enable (default: CONNECTION_BASIC | RESILIENCY)
+       metric_groups=[
+           MetricGroup.CONNECTION_BASIC,    # Connection creation time, relaxed timeout
+           MetricGroup.CONNECTION_ADVANCED, # Connection wait time, timeouts, closed connections
+           MetricGroup.COMMAND,             # Command execution duration
+           MetricGroup.RESILIENCY,          # Error counts, maintenance notifications
+           MetricGroup.PUBSUB,              # PubSub message counts
+           MetricGroup.STREAMING,           # Stream message lag
+           MetricGroup.CSC,                 # Client Side Caching metrics
+       ],
+
+       # Filter which commands to track
+       include_commands=['GET', 'SET', 'HGET'],  # Only track these commands
+       # OR
+       exclude_commands=['DEBUG', 'SLOWLOG'],    # Track all except these
+
+       # Privacy controls
+       hide_pubsub_channel_names=True,  # Hide channel names in PubSub metrics
+       hide_stream_names=True,          # Hide stream names in streaming metrics
+   )
+
+   otel = get_observability_instance()
+   otel.init(config)
+
+Available Metric Groups
+^^^^^^^^^^^^^^^^^^^^^^^
+
++------------------------+----------------------------------------------------------+
+| Metric Group           | Description                                              |
++========================+==========================================================+
+| ``CONNECTION_BASIC``   | Connection creation time, relaxed timeout, handoff       |
++------------------------+----------------------------------------------------------+
+| ``CONNECTION_ADVANCED``| Connection wait time, timeouts, closed connections       |
++------------------------+----------------------------------------------------------+
+| ``COMMAND``            | Command execution duration                               |
++------------------------+----------------------------------------------------------+
+| ``RESILIENCY``         | Error counts, maintenance notifications                  |
++------------------------+----------------------------------------------------------+
+| ``PUBSUB``             | PubSub message counts (publish/receive)                  |
++------------------------+----------------------------------------------------------+
+| ``STREAMING``          | Stream message lag (XREAD/XREADGROUP)                    |
++------------------------+----------------------------------------------------------+
+| ``CSC``                | Client Side Caching (requests, evictions, bytes saved)   |
++------------------------+----------------------------------------------------------+
+
+Available Metrics
+^^^^^^^^^^^^^^^^^
+
+The following metrics are collected based on enabled metric groups:
+
+**Connection Metrics:**
+
+- ``db.client.connection.create_time`` - Time to create a new connection (histogram)
+- ``db.client.connection.timeouts`` - Number of connection timeouts (counter)
+- ``db.client.connection.wait_time`` - Time to obtain a connection from pool (histogram)
+- ``db.client.connection.count`` - Current number of connections (observable gauge)
+- ``redis.client.connection.closed`` - Total closed connections (counter)
+- ``redis.client.connection.relaxed_timeout`` - Relaxed timeout events (up/down counter)
+- ``redis.client.connection.handoff`` - Connection handoff events (counter)
+
+**Command Metrics:**
+
+- ``db.client.operation.duration`` - Command execution duration (histogram)
+
+**Resiliency Metrics:**
+
+- ``redis.client.errors`` - Error counts with error type (counter)
+- ``redis.client.maintenance.notifications`` - Server maintenance notifications (counter)
+
+**PubSub Metrics:**
+
+- ``redis.client.pubsub.messages`` - Published and received messages (counter)
+
+**Streaming Metrics:**
+
+- ``redis.client.stream.lag`` - End-to-end message lag (histogram)
+
+**Client Side Caching (CSC) Metrics:**
+
+- ``redis.client.csc.requests`` - Cache requests with hit/miss result (counter)
+- ``redis.client.csc.evictions`` - Cache evictions (counter)
+- ``redis.client.csc.network_saved`` - Bytes saved by caching (counter)
+- ``redis.client.csc.items`` - Current cache size (observable gauge)
+
+Custom Histogram Buckets
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can customize histogram bucket boundaries for better granularity:
+
+.. code-block:: python
+
+   config = OTelConfig(
+       buckets_operation_duration=[0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1],
+       buckets_connection_create_time=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+       buckets_connection_wait_time=[0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1],
+       buckets_stream_processing_duration=[0.001, 0.01, 0.1, 1, 10],
+   )
+
+Context Manager Usage
+^^^^^^^^^^^^^^^^^^^^^
+
+For automatic cleanup, use the context manager pattern:
+
+.. code-block:: python
+
+   from redis.observability import get_observability_instance, OTelConfig
+
+   otel = get_observability_instance()
+
+   with otel.get_provider_manager():
+       # Redis operations here
+       r = redis.Redis()
+       r.set('key', 'value')
+   # Metrics are automatically flushed on exit
+
+Error Handling
+^^^^^^^^^^^^^^
+
+The native integration is designed to be non-intrusive. All metric recording functions are wrapped with try-except blocks, ensuring that any errors during metric collection will not affect your Redis operations.
+
+External OpenTelemetry Instrumentation (Alternative)
+----------------------------------------------------
+
+As an alternative to the native integration, you can use the external ``opentelemetry-instrumentation-redis`` package. This approach uses monkey-patching to instrument redis-py.
 
 Instrumentations are plugins for popular frameworks and libraries that use OpenTelemetry API to record important operations, for example, HTTP requests, DB queries, logs, errors, and more.
 

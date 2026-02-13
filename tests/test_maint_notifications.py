@@ -627,7 +627,9 @@ class TestMaintNotificationsConnectionHandler:
             self.handler, "handle_maintenance_start_notification"
         ) as mock_handle:
             self.handler.handle_notification(notification)
-            mock_handle.assert_called_once_with(MaintenanceState.MAINTENANCE)
+            mock_handle.assert_called_once_with(
+                MaintenanceState.MAINTENANCE, notification=notification
+            )
 
     def test_handle_notification_migrated(self):
         """Test handling of NodeMigratedNotification."""
@@ -637,7 +639,7 @@ class TestMaintNotificationsConnectionHandler:
             self.handler, "handle_maintenance_completed_notification"
         ) as mock_handle:
             self.handler.handle_notification(notification)
-            mock_handle.assert_called_once_with()
+            mock_handle.assert_called_once_with(notification=notification)
 
     def test_handle_notification_failing_over(self):
         """Test handling of NodeFailingOverNotification."""
@@ -647,7 +649,9 @@ class TestMaintNotificationsConnectionHandler:
             self.handler, "handle_maintenance_start_notification"
         ) as mock_handle:
             self.handler.handle_notification(notification)
-            mock_handle.assert_called_once_with(MaintenanceState.MAINTENANCE)
+            mock_handle.assert_called_once_with(
+                MaintenanceState.MAINTENANCE, notification=notification
+            )
 
     def test_handle_notification_failed_over(self):
         """Test handling of NodeFailedOverNotification."""
@@ -657,7 +661,7 @@ class TestMaintNotificationsConnectionHandler:
             self.handler, "handle_maintenance_completed_notification"
         ) as mock_handle:
             self.handler.handle_notification(notification)
-            mock_handle.assert_called_once_with()
+            mock_handle.assert_called_once_with(notification=notification)
 
     def test_handle_notification_unknown_type(self):
         """Test handling of unknown notification type."""
@@ -894,3 +898,168 @@ class TestMaintNotificationsConfigEndpointType:
         # Test with endpoint_type set to EXTERNAL_IP
         config = MaintNotificationsConfig(endpoint_type=EndpointType.EXTERNAL_IP)
         assert config.get_endpoint_type("localhost", conn) == EndpointType.EXTERNAL_IP
+
+
+class TestMaintNotificationsMetricsRecording:
+    """
+    Tests for metrics recording from maintenance notification handlers.
+    These tests verify that the OTel recorder functions are called with correct arguments.
+    """
+
+    @patch("redis.maint_notifications.record_maint_notification_count")
+    def test_connection_handler_calls_record_maint_notification_count(
+        self, mock_record_maint_notification_count
+    ):
+        """Test that handle_notification calls record_maint_notification_count."""
+        mock_connection = Mock()
+        mock_connection.maintenance_state = MaintenanceState.NONE
+        mock_connection.host = "localhost"
+        mock_connection.port = 6379
+
+        config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
+        handler = MaintNotificationsConnectionHandler(mock_connection, config)
+
+        notification = NodeMigratingNotification(id=1, ttl=5)
+        handler.handle_notification(notification)
+
+        mock_record_maint_notification_count.assert_called_once_with(
+            server_address="localhost",
+            server_port=6379,
+            network_peer_address="localhost",
+            network_peer_port=6379,
+            maint_notification=notification.__class__.__name__,
+        )
+
+    @patch("redis.maint_notifications.record_connection_relaxed_timeout")
+    def test_connection_handler_calls_record_connection_relaxed_timeout_on_start(
+        self, mock_record_connection_relaxed_timeout
+    ):
+        """Test that handle_notification calls record_connection_relaxed_timeout with relaxed=True."""
+        mock_connection = Mock()
+        mock_connection.maintenance_state = MaintenanceState.NONE
+
+        config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
+        handler = MaintNotificationsConnectionHandler(mock_connection, config)
+
+        notification = NodeMigratingNotification(id=1, ttl=5)
+        handler.handle_notification(notification)
+
+        mock_record_connection_relaxed_timeout.assert_called_once_with(
+            connection_name=repr(mock_connection),
+            maint_notification=notification.__class__.__name__,
+            relaxed=True,
+        )
+
+    @patch("redis.maint_notifications.record_connection_relaxed_timeout")
+    def test_connection_handler_calls_record_connection_relaxed_timeout_on_complete(
+        self, mock_record_connection_relaxed_timeout
+    ):
+        """Test that handle_notification calls record_connection_relaxed_timeout with relaxed=False."""
+        mock_connection = Mock()
+        mock_connection.maintenance_state = MaintenanceState.MAINTENANCE
+
+        config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
+        handler = MaintNotificationsConnectionHandler(mock_connection, config)
+
+        notification = NodeMigratedNotification(id=1)
+        handler.handle_notification(notification)
+
+        mock_record_connection_relaxed_timeout.assert_called_once_with(
+            connection_name=repr(mock_connection),
+            maint_notification=notification.__class__.__name__,
+            relaxed=False,
+        )
+
+    @patch("redis.maint_notifications.record_connection_relaxed_timeout")
+    def test_connection_handler_no_relaxed_timeout_call_when_disabled(
+        self, mock_record_connection_relaxed_timeout
+    ):
+        """Test that record_connection_relaxed_timeout is not called when relaxed_timeout is disabled."""
+        mock_connection = Mock()
+        mock_connection.maintenance_state = MaintenanceState.NONE
+        mock_connection.host = "localhost"
+        mock_connection.port = 6379
+
+        config = MaintNotificationsConfig(enabled=True, relaxed_timeout=-1)
+        handler = MaintNotificationsConnectionHandler(mock_connection, config)
+
+        notification = NodeMigratingNotification(id=1, ttl=5)
+        handler.handle_notification(notification)
+
+        mock_record_connection_relaxed_timeout.assert_not_called()
+
+    @patch("redis.maint_notifications.record_connection_handoff")
+    def test_pool_handler_calls_record_connection_handoff(
+        self, mock_record_connection_handoff
+    ):
+        """Test that handle_node_moving_notification calls record_connection_handoff."""
+        mock_pool = Mock()
+        mock_pool._lock = MagicMock()
+        mock_pool._lock.__enter__ = Mock(return_value=None)
+        mock_pool._lock.__exit__ = Mock(return_value=None)
+        mock_pool.connection_kwargs = {"host": "localhost", "port": 6379, "db": 0}
+        mock_pool._pool_id = "a1b2c3d4"  # Mock the unique pool ID
+
+        config = MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=20
+        )
+        handler = MaintNotificationsPoolHandler(mock_pool, config)
+
+        notification = NodeMovingNotification(
+            id=1, new_node_host="localhost", new_node_port=6379, ttl=10
+        )
+
+        with patch("threading.Timer"):
+            handler.handle_node_moving_notification(notification)
+
+        mock_record_connection_handoff.assert_called_once_with(
+            pool_name="localhost:6379_a1b2c3d4",
+        )
+
+    @patch("redis.maint_notifications.record_connection_handoff")
+    def test_pool_handler_no_handoff_call_when_already_processed(
+        self, mock_record_connection_handoff
+    ):
+        """Test that record_connection_handoff is not called for already processed notification."""
+        mock_pool = Mock()
+        mock_pool._lock = MagicMock()
+        mock_pool._lock.__enter__ = Mock(return_value=None)
+        mock_pool._lock.__exit__ = Mock(return_value=None)
+
+        config = MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=True, relaxed_timeout=20
+        )
+        handler = MaintNotificationsPoolHandler(mock_pool, config)
+
+        notification = NodeMovingNotification(
+            id=1, new_node_host="localhost", new_node_port=6379, ttl=10
+        )
+        # Add notification to processed set
+        handler._processed_notifications.add(notification)
+
+        handler.handle_node_moving_notification(notification)
+
+        mock_record_connection_handoff.assert_not_called()
+
+    @patch("redis.maint_notifications.record_connection_handoff")
+    def test_pool_handler_no_handoff_call_when_disabled(
+        self, mock_record_connection_handoff
+    ):
+        """Test that record_connection_handoff is not called when both features are disabled."""
+        mock_pool = Mock()
+        mock_pool._lock = MagicMock()
+        mock_pool._lock.__enter__ = Mock(return_value=None)
+        mock_pool._lock.__exit__ = Mock(return_value=None)
+
+        config = MaintNotificationsConfig(
+            enabled=True, proactive_reconnect=False, relaxed_timeout=-1
+        )
+        handler = MaintNotificationsPoolHandler(mock_pool, config)
+
+        notification = NodeMovingNotification(
+            id=1, new_node_host="localhost", new_node_port=6379, ttl=10
+        )
+
+        handler.handle_node_moving_notification(notification)
+
+        mock_record_connection_handoff.assert_not_called()

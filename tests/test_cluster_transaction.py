@@ -3,12 +3,16 @@ from typing import Tuple
 from unittest.mock import patch, Mock
 
 import pytest
+from redis.exceptions import ResponseError
 
 import redis
 from redis import CrossSlotTransactionError, ConnectionPool, RedisClusterException
 from redis.backoff import NoBackoff
 from redis.client import Redis
 from redis.cluster import PRIMARY, ClusterNode, RedisCluster
+from redis.observability import recorder
+from redis.observability.config import OTelConfig, MetricGroup
+from redis.observability.metrics import RedisMetricsCollector
 from redis.retry import Retry
 
 from .conftest import skip_if_server_version_lt
@@ -272,9 +276,10 @@ class TestClusterTransaction:
         mock_pool._lock = threading.RLock()
 
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
-        # Set mock connection's host/port to match the node for find_connection_owner
+        # Set mock connection's host/port/db to match the node for find_connection_owner
         mock_connection.host = node_importing.host
         mock_connection.port = node_importing.port
+        mock_connection.db = 0
         # Save original pool to restore later
         original_pool = node_importing.redis_connection.connection_pool
         original_slots_cache = r.nodes_manager.slots_cache[slot]
@@ -309,9 +314,10 @@ class TestClusterTransaction:
         mock_pool.connection_kwargs = {}
 
         _node_migrating, node_importing = _find_source_and_target_node_for_slot(r, slot)
-        # Set mock connection's host/port to match the node for find_connection_owner
+        # Set mock connection's host/port/db to match the node for find_connection_owner
         mock_connection.host = node_importing.host
         mock_connection.port = node_importing.port
+        mock_connection.db = 0
         # Save original pool to restore later
         original_pool = node_importing.redis_connection.connection_pool
         original_slots_cache = r.nodes_manager.slots_cache[slot]
@@ -403,3 +409,419 @@ class TestClusterTransaction:
 
             assert not pipe._execution_strategy._watching
             assert not pipe.command_stack
+
+
+@pytest.mark.onlycluster
+class TestClusterTransactionMetricsRecording:
+    """
+    Integration tests that verify metrics are properly recorded
+    from ClusterPipeline (transaction mode) and delivered to the Meter through
+    the observability recorder.
+
+    These tests use a real Redis cluster connection but mock the OTel Meter
+    to verify metrics are correctly recorded.
+    """
+
+    @pytest.fixture
+    def mock_meter(self):
+        """Create a mock Meter that tracks all instrument calls."""
+        meter = Mock()
+
+        # Create mock histogram for operation duration
+        self.operation_duration = Mock()
+
+        def create_histogram_side_effect(name, **kwargs):
+            if name == "db.client.operation.duration":
+                return self.operation_duration
+            return Mock()
+
+        meter.create_counter.return_value = Mock()
+        meter.create_up_down_counter.return_value = Mock()
+        meter.create_histogram.side_effect = create_histogram_side_effect
+
+        return meter
+
+    @pytest.fixture
+    def cluster_transaction_with_otel(self, r, mock_meter):
+        """
+        Setup a ClusterPipeline (transaction mode) with real connection
+        and mocked OTel collector.
+        Returns tuple of (cluster, operation_duration_mock).
+        """
+
+        # Reset any existing collector state
+        recorder.reset_collector()
+
+        # Create config with COMMAND group enabled
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        # Create collector with mocked meter
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Patch the recorder to use our collector
+        with patch.object(recorder, "_get_or_create_collector", return_value=collector):
+            yield r, self.operation_duration
+
+        # Cleanup
+        recorder.reset_collector()
+
+    def test_transaction_execute_records_metric(self, cluster_transaction_with_otel):
+        """
+        Test that transaction execute records operation duration metric to Meter.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        # Execute a transaction
+        with cluster.pipeline(transaction=True) as tx:
+            tx.set("{tx_key}1", "value1")
+            tx.get("{tx_key}1")
+            tx.execute()
+
+        # Verify the Meter's histogram.record() was called
+        operation_duration_mock.record.assert_called()
+
+        # Find the TRANSACTION event call
+        transaction_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "TRANSACTION":
+                transaction_call = call_obj
+                break
+
+        assert transaction_call is not None
+
+        # Verify duration was recorded
+        duration = transaction_call[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+        # Verify attributes
+        attrs = transaction_call[1]["attributes"]
+        assert attrs["db.operation.name"] == "TRANSACTION"
+
+    def test_transaction_server_attributes_recorded(
+        self, cluster_transaction_with_otel
+    ):
+        """
+        Test that server address, port, and db namespace are recorded for transaction.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.set("{server_attr}key", "value")
+            tx.execute()
+
+        # Find the TRANSACTION event call
+        transaction_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "TRANSACTION":
+                transaction_call = call_obj
+                break
+
+        assert transaction_call is not None
+        attrs = transaction_call[1]["attributes"]
+
+        # Verify server attributes are present
+        assert "server.address" in attrs
+        assert isinstance(attrs["server.address"], str)
+
+        assert "server.port" in attrs
+        assert isinstance(attrs["server.port"], int)
+
+        assert "db.namespace" in attrs
+
+    def test_transaction_batch_size_recorded(self, cluster_transaction_with_otel):
+        """
+        Test that transaction batch_size is correctly recorded.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        # Execute a transaction with 3 commands
+        with cluster.pipeline(transaction=True) as tx:
+            tx.set("{batch}key1", "value1")
+            tx.get("{batch}key1")
+            tx.delete("{batch}key1")
+            tx.execute()
+
+        # Find the TRANSACTION event call
+        transaction_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "TRANSACTION":
+                transaction_call = call_obj
+                break
+
+        assert transaction_call is not None
+        attrs = transaction_call[1]["attributes"]
+        assert "db.operation.batch.size" in attrs
+        assert attrs["db.operation.batch.size"] == 3
+
+    def test_transaction_duration_is_positive(self, cluster_transaction_with_otel):
+        """
+        Test that the recorded duration for transaction is a positive float.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.set("{duration}key", "value")
+            tx.execute()
+
+        # Find the TRANSACTION event call
+        transaction_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "TRANSACTION":
+                transaction_call = call_obj
+                break
+
+        assert transaction_call is not None
+        duration = transaction_call[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+    def test_multiple_transaction_executions_record_multiple_metrics(
+        self, cluster_transaction_with_otel
+    ):
+        """
+        Test that multiple transaction executions record multiple metrics.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        # Execute first transaction
+        with cluster.pipeline(transaction=True) as tx1:
+            tx1.set("{multi1}key", "value1")
+            tx1.execute()
+
+        # Execute second transaction
+        with cluster.pipeline(transaction=True) as tx2:
+            tx2.set("{multi2}key", "value2")
+            tx2.execute()
+
+        # Count TRANSACTION events
+        transaction_count = sum(
+            1
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "TRANSACTION"
+        )
+
+        assert transaction_count >= 2
+
+    def test_empty_transaction_does_not_record_metric(
+        self, cluster_transaction_with_otel
+    ):
+        """
+        Test that an empty transaction does not record TRANSACTION metrics.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        # Execute an empty transaction
+        with cluster.pipeline(transaction=True) as tx:
+            tx.execute()
+
+        # Count TRANSACTION events - should be 0
+        transaction_count = sum(
+            1
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "TRANSACTION"
+        )
+
+        assert transaction_count == 0
+
+    def test_transaction_with_watch_records_metric(self, cluster_transaction_with_otel):
+        """
+        Test that transaction with WATCH records metric correctly.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        # Set initial value
+        cluster.set("{watch}key", "0")
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.watch("{watch}key")
+            val = tx.get("{watch}key")
+            tx.multi()
+            tx.set("{watch}key", int(val or 0) + 1)
+            tx.execute()
+
+        # Find the TRANSACTION event call
+        transaction_call = None
+        for call_obj in operation_duration_mock.record.call_args_list:
+            attrs = call_obj[1]["attributes"]
+            if attrs.get("db.operation.name") == "TRANSACTION":
+                transaction_call = call_obj
+                break
+
+        assert transaction_call is not None
+        attrs = transaction_call[1]["attributes"]
+        assert attrs["db.operation.name"] == "TRANSACTION"
+
+    # Tests for metrics recording in TransactionStrategy
+
+    def test_watch_command_records_metric(self, cluster_transaction_with_otel):
+        """
+        Test that WATCH command records operation duration metric.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        # Set initial value
+        cluster.set("{watch_event}key", "value")
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.watch("{watch_event}key")
+            tx.multi()
+            tx.set("{watch_event}key", "new_value")
+            tx.execute()
+
+        # Find the WATCH event call
+        watch_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "WATCH"
+        ]
+
+        assert len(watch_calls) >= 1
+        attrs = watch_calls[0][1]["attributes"]
+        assert attrs["db.operation.name"] == "WATCH"
+        assert "server.address" in attrs
+        assert "server.port" in attrs
+
+    def test_immediate_command_records_metric_with_server_info(
+        self, cluster_transaction_with_otel
+    ):
+        """
+        Test that immediate commands (WATCH, GET before MULTI) record metrics
+        with server address and port.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        cluster.set("{immediate}key", "value")
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.watch("{immediate}key")
+            tx.get("{immediate}key")
+            tx.multi()
+            tx.set("{immediate}key", "updated")
+            tx.execute()
+
+        # Find WATCH and GET events
+        watch_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "WATCH"
+        ]
+        get_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "GET"
+        ]
+
+        # Verify WATCH event has server info
+        assert len(watch_calls) >= 1
+        watch_attrs = watch_calls[0][1]["attributes"]
+        assert "server.address" in watch_attrs
+        assert isinstance(watch_attrs["server.address"], str)
+        assert "server.port" in watch_attrs
+        assert isinstance(watch_attrs["server.port"], int)
+
+        # Verify GET event has server info
+        assert len(get_calls) >= 1
+        get_attrs = get_calls[0][1]["attributes"]
+        assert "server.address" in get_attrs
+        assert "server.port" in get_attrs
+
+    def test_transaction_error_records_metric_with_error_type(
+        self, cluster_transaction_with_otel
+    ):
+        """
+        Test that when a transaction fails, the recorded metric includes error.type.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        # Set a string value
+        cluster.set("{tx_err_type}key", "string_value")
+
+        try:
+            with cluster.pipeline(transaction=True) as tx:
+                # Try to use LPUSH on a string key - this will fail
+                tx.lpush("{tx_err_type}key", "value")
+                tx.execute()
+        except ResponseError:
+            pass
+
+        # Find the TRANSACTION event call - it should have error.type
+        transaction_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "TRANSACTION"
+        ]
+
+        # There should be at least one TRANSACTION event
+        assert len(transaction_calls) >= 1
+
+    def test_watch_and_transaction_record_separate_metrics(
+        self, cluster_transaction_with_otel
+    ):
+        """
+        Test that WATCH commands and TRANSACTION record separate metrics.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        cluster.set("{separate}key", "0")
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.watch("{separate}key")
+            val = tx.get("{separate}key")
+            tx.multi()
+            tx.set("{separate}key", int(val or 0) + 1)
+            tx.execute()
+
+        # Count WATCH events
+        watch_count = sum(
+            1
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "WATCH"
+        )
+
+        # Count TRANSACTION events
+        transaction_count = sum(
+            1
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "TRANSACTION"
+        )
+
+        # Should have at least 1 WATCH and 1 TRANSACTION event
+        assert watch_count >= 1
+        assert transaction_count >= 1
+
+    def test_immediate_get_command_records_metric(self, cluster_transaction_with_otel):
+        """
+        Test that GET command executed immediately (after WATCH, before MULTI)
+        records operation duration metric.
+        """
+        cluster, operation_duration_mock = cluster_transaction_with_otel
+
+        cluster.set("{imm_get}key", "test_value")
+
+        with cluster.pipeline(transaction=True) as tx:
+            tx.watch("{imm_get}key")
+            # This GET is executed immediately because we're watching
+            tx.get("{imm_get}key")
+            tx.multi()
+            tx.set("{imm_get}key", "new_value")
+            tx.execute()
+
+        # Find GET events
+        get_calls = [
+            call_obj
+            for call_obj in operation_duration_mock.record.call_args_list
+            if call_obj[1]["attributes"].get("db.operation.name") == "GET"
+        ]
+
+        assert len(get_calls) >= 1
+        attrs = get_calls[0][1]["attributes"]
+        assert attrs["db.operation.name"] == "GET"
+        assert "server.address" in attrs
+        assert "server.port" in attrs
+        assert "db.namespace" in attrs
