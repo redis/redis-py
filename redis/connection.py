@@ -910,7 +910,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         try:
             if retry_socket_connect:
                 sock = self.retry.call_with_retry(
-                    lambda: self._connect(),
+                    self._connect,
                     lambda error, failure_count: self.disconnect(
                         error=error, failure_count=failure_count
                     ),
