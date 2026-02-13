@@ -1172,7 +1172,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         if self.health_check_interval and time.monotonic() > self.next_health_check:
             self.retry.call_with_retry(
                 self._send_ping,
-                lambda error, failure_count: self._ping_failed(error, failure_count),
+                self._ping_failed,
                 with_failure_count=True,
             )
 
