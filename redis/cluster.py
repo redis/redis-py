@@ -3605,9 +3605,7 @@ class TransactionStrategy(AbstractStrategy):
     def _immediate_execute_command(self, *args, **options):
         return self._retry.call_with_retry(
             lambda: self._get_connection_and_send_command(*args, **options),
-            lambda error, failure_count: self._reinitialize_on_error(
-                error, failure_count
-            ),
+            self._reinitialize_on_error,
             with_failure_count=True,
         )
 
