@@ -968,7 +968,7 @@ class MaintNotificationsConnectionHandler:
                 MaintenanceState.MAINTENANCE, notification
             )
         else:
-            self.handle_maintenance_completed_notification()
+            self.handle_maintenance_completed_notification(notification=notification)
 
     def handle_maintenance_start_notification(
         self, maintenance_state: MaintenanceState, notification: MaintenanceNotification
@@ -1015,6 +1015,14 @@ class MaintNotificationsConnectionHandler:
         # reset the sets that keep track of received start maint
         # notifications and skipped end maint notifications
         self.connection.reset_received_notifications()
+
+        if kwargs.get("notification"):
+            notification = kwargs["notification"]
+            record_connection_relaxed_timeout(
+                connection_name=repr(self.connection),
+                maint_notification=notification.__class__.__name__,
+                relaxed=False,
+            )
 
 
 class OSSMaintNotificationsHandler:
@@ -1136,9 +1144,3 @@ class OSSMaintNotificationsHandler:
             # mark the notification as processed
             self._processed_notifications.add(notification)
             self._in_progress.remove(notification)
-
-        record_connection_relaxed_timeout(
-            connection_name=repr(self.connection),
-            maint_notification=notification.__class__.__name__,
-            relaxed=False,
-        )

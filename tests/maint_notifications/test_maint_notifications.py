@@ -1211,7 +1211,7 @@ class TestMaintNotificationsMetricsRecording:
         mock_connection = Mock()
         mock_connection.maintenance_state = MaintenanceState.MAINTENANCE
 
-        config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
+        config = MaintNotificationsConfig(relaxed_timeout=20)
         handler = MaintNotificationsConnectionHandler(mock_connection, config)
 
         notification = NodeMigratedNotification(id=1)
