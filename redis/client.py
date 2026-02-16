@@ -59,6 +59,7 @@ from redis.exceptions import (
 from redis.lock import Lock
 from redis.maint_notifications import (
     MaintNotificationsConfig,
+    OSSMaintNotificationsHandler,
 )
 from redis.observability.attributes import PubSubDirection
 from redis.observability.recorder import (
@@ -69,6 +70,7 @@ from redis.observability.recorder import (
 from redis.retry import Retry
 from redis.utils import (
     _set_info_logger,
+    check_protocol_version,
     deprecated_args,
     safe_str,
     str_if_bytes,
@@ -262,6 +264,9 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         maint_notifications_config: Optional[MaintNotificationsConfig] = None,
+        oss_cluster_maint_notifications_handler: Optional[
+            OSSMaintNotificationsHandler
+        ] = None,
     ) -> None:
         """
         Initialize a new Redis client.
@@ -302,12 +307,17 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
         lib_version:
             **Deprecated.** Use driver_info instead. Library version for CLIENT SETINFO.
         maint_notifications_config:
-            configuration the pool to support maintenance notifications - see
+            configures the pool to support maintenance notifications - see
             `redis.maint_notifications.MaintNotificationsConfig` for details.
             Only supported with RESP3
             If not provided and protocol is RESP3, the maintenance notifications
             will be enabled by default (logic is included in the connection pool
             initialization).
+            Argument is ignored when connection_pool is provided.
+        oss_cluster_maint_notifications_handler:
+            handler for OSS cluster notifications - see
+            `redis.maint_notifications.OSSMaintNotificationsHandler` for details.
+            Only supported with RESP3
             Argument is ignored when connection_pool is provided.
         """
         if event_dispatcher is None:
@@ -383,7 +393,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                             "ssl_ciphers": ssl_ciphers,
                         }
                     )
-                if (cache_config or cache) and protocol in [3, "3"]:
+                if (cache_config or cache) and check_protocol_version(protocol, 3):
                     kwargs.update(
                         {
                             "cache": cache,
@@ -404,6 +414,12 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                     kwargs.update(
                         {
                             "maint_notifications_config": maint_notifications_config,
+                        }
+                    )
+                if oss_cluster_maint_notifications_handler:
+                    kwargs.update(
+                        {
+                            "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
                         }
                     )
             connection_pool = ConnectionPool(**kwargs)

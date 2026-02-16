@@ -856,7 +856,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     slot = None
                 else:
                     slot = await self._determine_slot(*args)
-                if not slot:
+                if slot is None:
                     command_policies = CommandPolicies()
                 else:
                     command_policies = CommandPolicies(
@@ -1211,6 +1211,9 @@ class ClusterNode:
 
     def __eq__(self, obj: Any) -> bool:
         return isinstance(obj, ClusterNode) and obj.name == self.name
+
+    def __hash__(self) -> int:
+        return hash(self.name)
 
     _DEL_MESSAGE = "Unclosed ClusterNode object"
 
@@ -2188,7 +2191,7 @@ class PipelineStrategy(AbstractStrategy):
                             slot = None
                         else:
                             slot = await client._determine_slot(*cmd.args)
-                        if not slot:
+                        if slot is None:
                             command_policies = CommandPolicies()
                         else:
                             command_policies = CommandPolicies(

@@ -3767,7 +3767,9 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMOVE", src, dst, value)
 
-    def spop(self, name: KeyT, count: Optional[int] = None) -> Union[str, List, None]:
+    def spop(
+        self, name: KeyT, count: Optional[int] = None
+    ) -> Union[Awaitable[Union[str, List, None]], str, List, None]:
         """
         Remove and return a random member of set ``name``
 
@@ -3778,7 +3780,7 @@ class SetCommands(CommandsProtocol):
 
     def srandmember(
         self, name: KeyT, number: Optional[int] = None
-    ) -> Union[str, List, None]:
+    ) -> Union[Awaitable[Union[str, List, None]], str, List, None]:
         """
         If ``number`` is None, returns a random member of set ``name``.
 

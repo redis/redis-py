@@ -11,6 +11,8 @@ from redis.maint_notifications import (
     NodeMigratedNotification,
     NodeFailingOverNotification,
     NodeFailedOverNotification,
+    OSSNodeMigratingNotification,
+    OSSNodeMigratedNotification,
     MaintNotificationsConfig,
     MaintNotificationsPoolHandler,
     MaintNotificationsConnectionHandler,
@@ -381,6 +383,253 @@ class TestNodeFailedOverNotification:
         assert hash(notification1) != hash(notification3)
 
 
+class TestOSSNodeMigratingNotification:
+    """Test the OSSNodeMigratingNotification class."""
+
+    def test_init_with_defaults(self):
+        """Test OSSNodeMigratingNotification initialization with default values."""
+        with patch("time.monotonic", return_value=1000):
+            notification = OSSNodeMigratingNotification(id=1)
+            assert notification.id == 1
+            assert notification.ttl == OSSNodeMigratingNotification.DEFAULT_TTL
+            assert notification.creation_time == 1000
+            assert notification.slots is None
+
+    def test_init_with_all_parameters(self):
+        """Test OSSNodeMigratingNotification initialization with all parameters."""
+        with patch("time.monotonic", return_value=1000):
+            slots = "1,2,3,4,5"
+            notification = OSSNodeMigratingNotification(
+                id=1,
+                slots=slots,
+            )
+            assert notification.id == 1
+            assert notification.ttl == OSSNodeMigratingNotification.DEFAULT_TTL
+            assert notification.creation_time == 1000
+            assert notification.slots == slots
+
+    def test_default_ttl(self):
+        """Test that DEFAULT_TTL is used correctly."""
+        assert OSSNodeMigratingNotification.DEFAULT_TTL == 30
+        notification = OSSNodeMigratingNotification(id=1)
+        assert notification.ttl == 30
+
+    def test_repr(self):
+        """Test OSSNodeMigratingNotification string representation."""
+        with patch("time.monotonic", return_value=1000):
+            notification = OSSNodeMigratingNotification(
+                id=1,
+                slots="1,2,3",
+            )
+
+        with patch("time.monotonic", return_value=1005):  # 5 seconds later
+            repr_str = repr(notification)
+            assert "OSSNodeMigratingNotification" in repr_str
+            assert "id=1" in repr_str
+            assert "ttl=30" in repr_str
+            assert "remaining=25.0s" in repr_str
+            assert "expired=False" in repr_str
+
+    def test_equality_same_id_and_type(self):
+        """Test equality for notifications with same id and type."""
+        notification1 = OSSNodeMigratingNotification(
+            id=1,
+            slots="1,2,3",
+        )
+        notification2 = OSSNodeMigratingNotification(
+            id=1,
+            slots="4,5,6",
+        )
+        # Should be equal because id and type are the same
+        assert notification1 == notification2
+
+    def test_equality_different_id(self):
+        """Test inequality for notifications with different id."""
+        notification1 = OSSNodeMigratingNotification(id=1)
+        notification2 = OSSNodeMigratingNotification(id=2)
+        assert notification1 != notification2
+
+    def test_equality_different_type(self):
+        """Test inequality for notifications of different types."""
+        notification1 = OSSNodeMigratingNotification(id=1)
+        notification2 = NodeMigratingNotification(id=1, ttl=30)
+        assert notification1 != notification2
+
+    def test_hash_same_id_and_type(self):
+        """Test hash for notifications with same id and type."""
+        notification1 = OSSNodeMigratingNotification(
+            id=1,
+            slots="1,2,3",
+        )
+        notification2 = OSSNodeMigratingNotification(
+            id=1,
+            slots="4,5,6",
+        )
+        # Should have same hash because id and type are the same
+        assert hash(notification1) == hash(notification2)
+
+    def test_hash_different_id(self):
+        """Test hash for notifications with different id."""
+        notification1 = OSSNodeMigratingNotification(id=1)
+        notification2 = OSSNodeMigratingNotification(id=2)
+        assert hash(notification1) != hash(notification2)
+
+    def test_in_set(self):
+        """Test that notifications can be used in sets."""
+        notification1 = OSSNodeMigratingNotification(id=1)
+        notification2 = OSSNodeMigratingNotification(id=1)
+        notification3 = OSSNodeMigratingNotification(id=2)
+        notification4 = OSSNodeMigratingNotification(id=2)
+
+        notification_set = {notification1, notification2, notification3, notification4}
+        assert (
+            len(notification_set) == 2
+        )  # notification1 and notification2 should be the same
+
+
+class TestOSSNodeMigratedNotification:
+    """Test the OSSNodeMigratedNotification class."""
+
+    def test_init_with_defaults(self):
+        """Test OSSNodeMigratedNotification initialization with default values."""
+        with patch("time.monotonic", return_value=1000):
+            nodes_to_slots_mapping = {"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]}
+            notification = OSSNodeMigratedNotification(
+                id=1, nodes_to_slots_mapping=nodes_to_slots_mapping
+            )
+            assert notification.id == 1
+            assert notification.ttl == OSSNodeMigratedNotification.DEFAULT_TTL
+            assert notification.creation_time == 1000
+            assert notification.nodes_to_slots_mapping == nodes_to_slots_mapping
+
+    def test_init_with_all_parameters(self):
+        """Test OSSNodeMigratedNotification initialization with all parameters."""
+        with patch("time.monotonic", return_value=1000):
+            nodes_to_slots_mapping = {
+                "127.0.0.1:6379": [
+                    {"127.0.0.1:6380": "1-100"},
+                    {"127.0.0.1:6381": "101-200"},
+                ]
+            }
+            notification = OSSNodeMigratedNotification(
+                id=1,
+                nodes_to_slots_mapping=nodes_to_slots_mapping,
+            )
+            assert notification.id == 1
+            assert notification.ttl == OSSNodeMigratedNotification.DEFAULT_TTL
+            assert notification.creation_time == 1000
+            assert notification.nodes_to_slots_mapping == nodes_to_slots_mapping
+
+    def test_default_ttl(self):
+        """Test that DEFAULT_TTL is used correctly."""
+        assert OSSNodeMigratedNotification.DEFAULT_TTL == 120
+        notification = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+        assert notification.ttl == 120
+
+    def test_repr(self):
+        """Test OSSNodeMigratedNotification string representation."""
+        with patch("time.monotonic", return_value=1000):
+            nodes_to_slots_mapping = {"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]}
+            notification = OSSNodeMigratedNotification(
+                id=1,
+                nodes_to_slots_mapping=nodes_to_slots_mapping,
+            )
+
+        with patch("time.monotonic", return_value=1010):  # 10 seconds later
+            repr_str = repr(notification)
+            assert "OSSNodeMigratedNotification" in repr_str
+            assert "id=1" in repr_str
+            assert "ttl=120" in repr_str
+            assert "remaining=110.0s" in repr_str
+            assert "expired=False" in repr_str
+
+    def test_equality_same_id_and_type(self):
+        """Test equality for notifications with same id and type."""
+        notification1 = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+        notification2 = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6381": "101-200"}]},
+        )
+        # Should be equal because id and type are the same
+        assert notification1 == notification2
+
+    def test_equality_different_id(self):
+        """Test inequality for notifications with different id."""
+        notification1 = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+        notification2 = OSSNodeMigratedNotification(
+            id=2,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+        assert notification1 != notification2
+
+    def test_equality_different_type(self):
+        """Test inequality for notifications of different types."""
+        notification1 = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+        notification2 = NodeMigratedNotification(id=1)
+        assert notification1 != notification2
+
+    def test_hash_same_id_and_type(self):
+        """Test hash for notifications with same id and type."""
+        notification1 = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+        notification2 = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6381": "101-200"}]},
+        )
+        # Should have same hash because id and type are the same
+        assert hash(notification1) == hash(notification2)
+
+    def test_hash_different_id(self):
+        """Test hash for notifications with different id."""
+        notification1 = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+        notification2 = OSSNodeMigratedNotification(
+            id=2,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+        assert hash(notification1) != hash(notification2)
+
+    def test_in_set(self):
+        """Test that notifications can be used in sets."""
+        notification1 = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+        notification2 = OSSNodeMigratedNotification(
+            id=1,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6380": "1-100"}]},
+        )
+        notification3 = OSSNodeMigratedNotification(
+            id=2,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6381": "101-200"}]},
+        )
+        notification4 = OSSNodeMigratedNotification(
+            id=2,
+            nodes_to_slots_mapping={"127.0.0.1:6379": [{"127.0.0.1:6381": "101-200"}]},
+        )
+
+        notification_set = {notification1, notification2, notification3, notification4}
+        assert (
+            len(notification_set) == 2
+        )  # notification1 and notification2 should be the same
+
+
 class TestMaintNotificationsConfig:
     """Test the MaintNotificationsConfig class."""
 
@@ -609,6 +858,8 @@ class TestMaintNotificationsConnectionHandler:
     def setup_method(self):
         """Set up test fixtures."""
         self.mock_connection = Mock()
+        # Configure _sock.getsockname() to return a proper tuple (host, port)
+        self.mock_connection._sock.getsockname.return_value = ("127.0.0.1", 12345)
         self.config = MaintNotificationsConfig(enabled=True, relaxed_timeout=20)
         self.handler = MaintNotificationsConnectionHandler(
             self.mock_connection, self.config
@@ -628,7 +879,7 @@ class TestMaintNotificationsConnectionHandler:
         ) as mock_handle:
             self.handler.handle_notification(notification)
             mock_handle.assert_called_once_with(
-                MaintenanceState.MAINTENANCE, notification=notification
+                MaintenanceState.MAINTENANCE, notification
             )
 
     def test_handle_notification_migrated(self):
@@ -639,7 +890,7 @@ class TestMaintNotificationsConnectionHandler:
             self.handler, "handle_maintenance_completed_notification"
         ) as mock_handle:
             self.handler.handle_notification(notification)
-            mock_handle.assert_called_once_with(notification=notification)
+            mock_handle.assert_called_once_with()
 
     def test_handle_notification_failing_over(self):
         """Test handling of NodeFailingOverNotification."""
@@ -650,7 +901,7 @@ class TestMaintNotificationsConnectionHandler:
         ) as mock_handle:
             self.handler.handle_notification(notification)
             mock_handle.assert_called_once_with(
-                MaintenanceState.MAINTENANCE, notification=notification
+                MaintenanceState.MAINTENANCE, notification
             )
 
     def test_handle_notification_failed_over(self):
@@ -661,7 +912,7 @@ class TestMaintNotificationsConnectionHandler:
             self.handler, "handle_maintenance_completed_notification"
         ) as mock_handle:
             self.handler.handle_notification(notification)
-            mock_handle.assert_called_once_with(notification=notification)
+            mock_handle.assert_called_once_with()
 
     def test_handle_notification_unknown_type(self):
         """Test handling of unknown notification type."""
@@ -678,7 +929,7 @@ class TestMaintNotificationsConnectionHandler:
         handler = MaintNotificationsConnectionHandler(self.mock_connection, config)
 
         result = handler.handle_maintenance_start_notification(
-            MaintenanceState.MAINTENANCE
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
         )
 
         assert result is None
@@ -689,7 +940,7 @@ class TestMaintNotificationsConnectionHandler:
         self.mock_connection.maintenance_state = MaintenanceState.MOVING
 
         result = self.handler.handle_maintenance_start_notification(
-            MaintenanceState.MAINTENANCE
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
         )
         assert result is None
         self.mock_connection.update_current_socket_timeout.assert_not_called()
@@ -698,7 +949,9 @@ class TestMaintNotificationsConnectionHandler:
         """Test successful maintenance start notification handling for migrating."""
         self.mock_connection.maintenance_state = MaintenanceState.NONE
 
-        self.handler.handle_maintenance_start_notification(MaintenanceState.MAINTENANCE)
+        self.handler.handle_maintenance_start_notification(
+            MaintenanceState.MAINTENANCE, NodeMigratingNotification(id=1, ttl=5)
+        )
 
         assert self.mock_connection.maintenance_state == MaintenanceState.MAINTENANCE
         self.mock_connection.update_current_socket_timeout.assert_called_once_with(20)

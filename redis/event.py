@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Type, Union
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
+from redis.utils import check_protocol_version
 from redis.observability.recorder import (
     init_connection_count,
     register_pools_connection_count,
@@ -80,9 +81,6 @@ class EventDispatcher(EventDispatcherInterface):
         """
         Dispatcher that dispatches events to listeners associated with given event.
         """
-        # Note: Metric-related event listeners have been removed.
-        # Metrics are now recorded directly via record_* functions in
-        # redis.observability.recorder to eliminate EventDispatcher lock contention.
         self._event_listeners_mapping: Dict[
             Type[object], List[EventListenerInterface]
         ] = {
@@ -435,7 +433,7 @@ class RegisterReAuthForPubSub(EventListenerInterface):
     def listen(self, event: AfterPubSubConnectionInstantiationEvent):
         if isinstance(
             event.pubsub_connection.credential_provider, StreamingCredentialProvider
-        ) and event.pubsub_connection.get_protocol() in [3, "3"]:
+        ) and check_protocol_version(event.pubsub_connection.get_protocol(), 3):
             self._event = event
             self._connection = event.pubsub_connection
             self._connection_pool = event.connection_pool
