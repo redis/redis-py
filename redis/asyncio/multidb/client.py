@@ -24,7 +24,6 @@ from redis.multidb.exception import (
     NoValidDatabaseException,
     UnhealthyDatabaseException,
 )
-
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import experimental
 

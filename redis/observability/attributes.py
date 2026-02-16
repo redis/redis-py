@@ -84,6 +84,7 @@ class CSCReason(Enum):
     FULL = "full"
     INVALIDATION = "invalidation"
 
+
 class GeoFailoverReason(Enum):
     AUTOMATIC = "automatic"
     MANUAL = "manual"
@@ -411,6 +412,7 @@ def get_pool_name(pool: "ConnectionPoolInterface") -> str:
         return f"{host}:{port}_{pool_id}"
     else:
         return f"{host}:{port}"
+
 
 def get_db_name(database: Union["SyncDatabase", "AsyncDatabase"]):
     """

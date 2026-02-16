@@ -91,9 +91,7 @@ class SyncCommandExecutor(CommandExecutor):
 
     @active_database.setter
     @abstractmethod
-    def active_database(
-        self, value: Tuple[SyncDatabase, GeoFailoverReason]
-    ) -> None:
+    def active_database(self, value: Tuple[SyncDatabase, GeoFailoverReason]) -> None:
         """Sets the currently active database.
 
         Args:
@@ -222,9 +220,7 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         return self._active_database
 
     @active_database.setter
-    def active_database(
-        self, value: Tuple[SyncDatabase, GeoFailoverReason]
-    ) -> None:
+    def active_database(self, value: Tuple[SyncDatabase, GeoFailoverReason]) -> None:
         database, reason = value
         old_active = self._active_database
         self._active_database = database
