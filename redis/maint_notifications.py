@@ -1142,4 +1142,3 @@ class OSSMaintNotificationsHandler:
             maint_notification=notification.__class__.__name__,
             relaxed=False,
         )
-

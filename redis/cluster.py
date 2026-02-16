@@ -63,14 +63,13 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
-from redis.maint_notifications import MaintNotificationsConfig
-from redis.observability.recorder import (
-    record_error_count,
-    record_operation_duration,
-)
 from redis.maint_notifications import (
     MaintNotificationsConfig,
     OSSMaintNotificationsHandler,
+)
+from redis.observability.recorder import (
+    record_error_count,
+    record_operation_duration,
 )
 from redis.retry import Retry
 from redis.utils import (
@@ -1631,7 +1630,7 @@ class RedisCluster(
                     error=e,
                     connection=connection,
                 )
-            except TryAgainError:
+            except TryAgainError as e:
                 if is_debug_log_enabled():
                     socket_address = self._extracts_socket_address(connection)
                     args_log_str = truncate_text(" ".join(map(safe_str, args)))

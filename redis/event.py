@@ -6,11 +6,11 @@ from typing import Dict, List, Optional, Type, Union
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
-from redis.utils import check_protocol_version
 from redis.observability.recorder import (
     init_connection_count,
     register_pools_connection_count,
 )
+from redis.utils import check_protocol_version
 
 
 class EventListenerInterface(ABC):
