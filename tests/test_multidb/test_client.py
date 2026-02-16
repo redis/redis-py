@@ -759,6 +759,158 @@ class TestMultiDbClient:
 
 
 @pytest.mark.onlynoncluster
+class TestGeoFailoverMetricRecording:
+    """Tests for geo failover metric recording in MultiDBClient."""
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_manual_failover_records_metric(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        Test that set_active_database records geo failover metric with MANUAL reason.
+        """
+        from redis.observability.attributes import GeoFailoverReason
+
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db1.client.execute_command.return_value = "OK1"
+            mock_db.client.execute_command.return_value = "OK"
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                # Initial active database should be mock_db1 (highest weight)
+                assert client.set("key", "value") == "OK1"
+
+                # Now manually switch to mock_db
+                # Patch at the module where it's imported
+                with patch(
+                    "redis.multidb.command_executor.record_geo_failover"
+                ) as mock_record_geo_failover:
+                    client.set_active_database(mock_db)
+
+                    # Verify record_geo_failover was called with correct arguments
+                    mock_record_geo_failover.assert_called_once()
+                    call_kwargs = mock_record_geo_failover.call_args[1]
+                    assert call_kwargs["fail_from"] == mock_db1
+                    assert call_kwargs["fail_to"] == mock_db
+                    assert call_kwargs["reason"] == GeoFailoverReason.MANUAL
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_automatic_failover_records_metric(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        Test that automatic failover records geo failover metric with AUTOMATIC reason.
+        """
+        from redis.observability.attributes import GeoFailoverReason
+
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db1.client.execute_command.return_value = "OK1"
+            mock_db2.client.execute_command.return_value = "OK2"
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                # Initial active database should be mock_db1 (highest weight)
+                assert client.set("key", "value") == "OK1"
+
+                # Simulate mock_db1 becoming unhealthy (circuit open)
+                mock_db1.circuit.state = CBState.OPEN
+
+                # Configure the failover strategy to return mock_db2 when database() is called
+                # The DefaultFailoverStrategyExecutor calls self._strategy.database()
+                mock_multi_db_config.failover_strategy.database.return_value = mock_db2
+
+                # Patch at the module where it's imported
+                with patch(
+                    "redis.multidb.command_executor.record_geo_failover"
+                ) as mock_record_geo_failover:
+                    # Execute a command - this should trigger automatic failover
+                    assert client.set("key", "value") == "OK2"
+
+                    # Verify record_geo_failover was called with AUTOMATIC reason
+                    mock_record_geo_failover.assert_called_once()
+                    call_kwargs = mock_record_geo_failover.call_args[1]
+                    assert call_kwargs["fail_from"] == mock_db1
+                    assert call_kwargs["fail_to"] == mock_db2
+                    assert call_kwargs["reason"] == GeoFailoverReason.AUTOMATIC
+            finally:
+                client.close()
+
+    @pytest.mark.parametrize(
+        "mock_multi_db_config,mock_db, mock_db1, mock_db2",
+        [
+            (
+                {},
+                {"weight": 0.2, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.7, "circuit": {"state": CBState.CLOSED}},
+                {"weight": 0.5, "circuit": {"state": CBState.CLOSED}},
+            ),
+        ],
+        indirect=True,
+    )
+    def test_no_metric_recorded_when_same_database(
+        self, mock_multi_db_config, mock_db, mock_db1, mock_db2, mock_hc
+    ):
+        """
+        Test that no geo failover metric is recorded when active database doesn't change.
+        """
+        databases = create_weighted_list(mock_db, mock_db1, mock_db2)
+        mock_multi_db_config.health_checks = [mock_hc]
+
+        with patch.object(mock_multi_db_config, "databases", return_value=databases):
+            mock_db1.client.execute_command.return_value = "OK1"
+            mock_hc.check_health.return_value = True
+
+            client = MultiDBClient(mock_multi_db_config)
+            try:
+                # Initial active database should be mock_db1 (highest weight)
+                assert client.set("key", "value") == "OK1"
+
+                # Patch at the module where it's imported
+                with patch(
+                    "redis.multidb.command_executor.record_geo_failover"
+                ) as mock_record_geo_failover:
+                    # Set active database to the same database
+                    client.set_active_database(mock_db1)
+
+                    # Verify record_geo_failover was NOT called
+                    mock_record_geo_failover.assert_not_called()
+            finally:
+                client.close()
+
+
+@pytest.mark.onlynoncluster
 class TestInitialHealthCheckPolicy:
     """Tests for initial health check policy evaluation."""
 

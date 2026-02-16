@@ -54,7 +54,11 @@ class AsyncCommandExecutor(CommandExecutor):
 
     @abstractmethod
     async def set_active_database(self, database: AsyncDatabase) -> None:
-        """Sets the currently active database."""
+        """Sets the currently active database.
+
+        Args:
+            database: The new active database.
+        """
         pass
 
     @property

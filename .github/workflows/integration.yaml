@@ -126,9 +126,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ redis_version ]
     # in pipeline ofter these pypy jobs hang, so their timeout is set
-    # to just 40 minutes - close to the max time the jobs are running at the moment
+    # to just 50 minutes - close to the max time the jobs are running at the moment
     # adding more tests will make them even slower, and we will need to adjust the timeout
-    timeout-minutes: 40
+    timeout-minutes: 50
     strategy:
       max-parallel: 30
       fail-fast: false

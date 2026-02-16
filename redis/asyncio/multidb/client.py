@@ -24,6 +24,7 @@ from redis.multidb.exception import (
     NoValidDatabaseException,
     UnhealthyDatabaseException,
 )
+
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import experimental
 
@@ -120,7 +121,9 @@ class MultiDBClient(AsyncRedisModuleCommands, AsyncCoreCommands):
 
             # Set states according to a weights and circuit state
             if database.circuit.state == CBState.CLOSED and not is_active_db_found:
-                await self.command_executor.set_active_database(database)
+                # Directly set the active database during initialization
+                # without recording a geo failover metric
+                self.command_executor._active_database = database
                 is_active_db_found = True
 
         if not is_active_db_found:

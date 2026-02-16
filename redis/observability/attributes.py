@@ -8,12 +8,14 @@ Reference: https://opentelemetry.io/docs/specs/semconv/database/redis/
 """
 
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 import redis
 
 if TYPE_CHECKING:
+    from redis.asyncio.multidb.database import AsyncDatabase
     from redis.connection import ConnectionPoolInterface
+    from redis.multidb.database import SyncDatabase
 
 # Database semantic convention attributes
 DB_SYSTEM = "db.system"
@@ -38,6 +40,11 @@ SERVER_PORT = "server.port"
 DB_CLIENT_CONNECTION_POOL_NAME = "db.client.connection.pool.name"
 DB_CLIENT_CONNECTION_STATE = "db.client.connection.state"
 DB_CLIENT_CONNECTION_NAME = "db.client.connection.name"
+
+# Geofailover attributes
+DB_CLIENT_GEOFAILOVER_FAIL_FROM = "db.client.geofailover.fail_from"
+DB_CLIENT_GEOFAILOVER_FAIL_TO = "db.client.geofailover.fail_to"
+DB_CLIENT_GEOFAILOVER_REASON = "db.client.geofailover.reason"
 
 # Redis-specific attributes
 REDIS_CLIENT_LIBRARY = "redis.client.library"
@@ -76,6 +83,10 @@ class CSCResult(Enum):
 class CSCReason(Enum):
     FULL = "full"
     INVALIDATION = "invalidation"
+
+class GeoFailoverReason(Enum):
+    AUTOMATIC = "automatic"
+    MANUAL = "manual"
 
 
 class AttributeBuilder:
@@ -328,6 +339,31 @@ class AttributeBuilder:
         return attrs
 
     @staticmethod
+    def build_geo_failover_attributes(
+        fail_from: Union["SyncDatabase", "AsyncDatabase"],
+        fail_to: Union["SyncDatabase", "AsyncDatabase"],
+        reason: GeoFailoverReason,
+    ) -> Dict[str, Any]:
+        """
+        Build attributes for a geo failover.
+
+        Args:
+            fail_from: Database failed from
+            fail_to: Database failed to
+            reason: Reason for the failover
+
+        Returns:
+            Dictionary of geo failover attributes
+        """
+        attrs: Dict[str, Any] = AttributeBuilder.build_base_attributes()
+
+        attrs[DB_CLIENT_GEOFAILOVER_FAIL_FROM] = get_db_name(fail_from)
+        attrs[DB_CLIENT_GEOFAILOVER_FAIL_TO] = get_db_name(fail_to)
+        attrs[DB_CLIENT_GEOFAILOVER_REASON] = reason.value
+
+        return attrs
+
+    @staticmethod
     def build_pool_name(
         server_address: str,
         server_port: int,
@@ -375,3 +411,20 @@ def get_pool_name(pool: "ConnectionPoolInterface") -> str:
         return f"{host}:{port}_{pool_id}"
     else:
         return f"{host}:{port}"
+
+def get_db_name(database: Union["SyncDatabase", "AsyncDatabase"]):
+    """
+    Get a short string representation of a database for observability.
+
+    Args:
+        database: Database instance
+
+    Returns:
+        Short database name in format "{host}:{port}/{weight}"
+    """
+
+    host = database.client.get_connection_kwargs()["host"]
+    port = database.client.get_connection_kwargs()["port"]
+    weight = database.weight
+
+    return f"{host}:{port}/{weight}"

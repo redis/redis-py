@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 if TYPE_CHECKING:
     from redis.connection import ConnectionPoolInterface
+    from redis.multidb.database import SyncDatabase
 
 from redis.observability.attributes import (
     REDIS_CLIENT_CONNECTION_CLOSE_REASON,
@@ -19,6 +20,7 @@ from redis.observability.attributes import (
     AttributeBuilder,
     CSCReason,
     CSCResult,
+    GeoFailoverReason,
     PubSubDirection,
     get_pool_name,
 )
@@ -122,6 +124,12 @@ class RedisMetricsCollector:
             name="redis.client.maintenance.notifications",
             unit="{notification}",
             description="Tracks server-side maintenance notifications",
+        )
+
+        self.geo_failovers = self.meter.create_counter(
+            name="redis.client.geofailover.failovers",
+            unit="{geofailover}",
+            description="Total count of failovers happened using MultiDbClient.",
         )
 
     def _init_connection_basic_metrics(self) -> None:
@@ -295,6 +303,32 @@ class RedisMetricsCollector:
 
         attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] = maint_notification
         self.maintenance_notifications.add(1, attributes=attrs)
+
+    def record_geo_failover(
+        self,
+        fail_from: "SyncDatabase",
+        fail_to: "SyncDatabase",
+        reason: GeoFailoverReason,
+    ):
+        """
+        Record geo failover
+
+        Args:
+            fail_from: Database failed from
+            fail_to: Database failed to
+            reason: Reason for the failover
+        """
+
+        if not hasattr(self, "geo_failovers"):
+            return
+
+        attrs = self.attr_builder.build_geo_failover_attributes(
+            fail_from=fail_from,
+            fail_to=fail_to,
+            reason=reason,
+        )
+
+        return self.geo_failovers.add(1, attributes=attrs)
 
     def init_connection_count(
         self,

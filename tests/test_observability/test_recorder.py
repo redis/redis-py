@@ -16,6 +16,7 @@ from redis.observability.registry import (
     get_observables_registry_instance,
 )
 from redis.observability.attributes import (
+    GeoFailoverReason,
     PubSubDirection,
     # Connection pool attributes
     DB_CLIENT_CONNECTION_POOL_NAME,
@@ -42,21 +43,26 @@ from redis.observability.attributes import (
     REDIS_CLIENT_CONSUMER_GROUP,
     REDIS_CLIENT_CONSUMER_NAME,
     DB_CLIENT_CONNECTION_NAME,
+    # Geo failover attributes
+    DB_CLIENT_GEOFAILOVER_FAIL_FROM,
+    DB_CLIENT_GEOFAILOVER_FAIL_TO,
+    DB_CLIENT_GEOFAILOVER_REASON,
 )
 from redis.observability.config import OTelConfig, MetricGroup
 from redis.observability.metrics import RedisMetricsCollector, CloseReason
 from redis.observability.recorder import (
-    record_operation_duration,
+    record_connection_closed,
     record_connection_create_time,
+    record_connection_handoff,
+    record_connection_relaxed_timeout,
     record_connection_timeout,
     record_connection_wait_time,
-    record_connection_closed,
-    record_connection_relaxed_timeout,
-    record_connection_handoff,
     record_error_count,
+    record_geo_failover,
+    record_operation_duration,
     record_pubsub_message,
-    reset_collector,
     record_streaming_lag,
+    reset_collector,
 )
 
 
@@ -71,6 +77,7 @@ class MockInstruments:
         self.connection_closed = MagicMock()
         self.connection_handoff = MagicMock()
         self.pubsub_messages = MagicMock()
+        self.geo_failovers = MagicMock()
 
         # Gauges
         self.connection_count = MagicMock()
@@ -105,6 +112,7 @@ def mock_meter(mock_instruments):
             "redis.client.connection.closed": mock_instruments.connection_closed,
             "redis.client.connection.handoff": mock_instruments.connection_handoff,
             "redis.client.pubsub.messages": mock_instruments.pubsub_messages,
+            "redis.client.geofailover.failovers": mock_instruments.geo_failovers,
         }
         return instrument_map.get(name, MagicMock())
 
@@ -519,6 +527,77 @@ class TestRecordMaintNotificationCount:
         assert attrs[SERVER_ADDRESS] == "redis-primary"
         assert attrs[SERVER_PORT] == 6380
         assert attrs[REDIS_CLIENT_CONNECTION_NOTIFICATION] == "MIGRATING"
+
+
+class TestRecordGeoFailover:
+    """Tests for record_geo_failover - verifies Counter.add() calls."""
+
+    @pytest.fixture
+    def mock_database(self):
+        """Create a mock database with required attributes."""
+        mock_db = MagicMock()
+        mock_db.client.get_connection_kwargs.return_value = {
+            "host": "localhost",
+            "port": 6379,
+        }
+        mock_db.weight = 1.0
+        return mock_db
+
+    @pytest.fixture
+    def mock_database_secondary(self):
+        """Create a secondary mock database with different attributes."""
+        mock_db = MagicMock()
+        mock_db.client.get_connection_kwargs.return_value = {
+            "host": "redis-secondary",
+            "port": 6380,
+        }
+        mock_db.weight = 0.5
+        return mock_db
+
+    def test_record_geo_failover_automatic(
+        self, setup_recorder, mock_database, mock_database_secondary
+    ):
+        """Test recording automatic geo failover."""
+        instruments = setup_recorder
+
+        record_geo_failover(
+            fail_from=mock_database,
+            fail_to=mock_database_secondary,
+            reason=GeoFailoverReason.AUTOMATIC,
+        )
+
+        instruments.geo_failovers.add.assert_called_once()
+        call_args = instruments.geo_failovers.add.call_args
+
+        # Counter increments by 1
+        assert call_args[0][0] == 1
+
+        attrs = call_args[1]["attributes"]
+        assert attrs[DB_CLIENT_GEOFAILOVER_FAIL_FROM] == "localhost:6379/1.0"
+        assert attrs[DB_CLIENT_GEOFAILOVER_FAIL_TO] == "redis-secondary:6380/0.5"
+        assert attrs[DB_CLIENT_GEOFAILOVER_REASON] == "automatic"
+
+    def test_record_geo_failover_manual(
+        self, setup_recorder, mock_database, mock_database_secondary
+    ):
+        """Test recording manual geo failover."""
+        instruments = setup_recorder
+
+        record_geo_failover(
+            fail_from=mock_database_secondary,
+            fail_to=mock_database,
+            reason=GeoFailoverReason.MANUAL,
+        )
+
+        instruments.geo_failovers.add.assert_called_once()
+        call_args = instruments.geo_failovers.add.call_args
+
+        assert call_args[0][0] == 1
+
+        attrs = call_args[1]["attributes"]
+        assert attrs[DB_CLIENT_GEOFAILOVER_FAIL_FROM] == "redis-secondary:6380/0.5"
+        assert attrs[DB_CLIENT_GEOFAILOVER_FAIL_TO] == "localhost:6379/1.0"
+        assert attrs[DB_CLIENT_GEOFAILOVER_REASON] == "manual"
 
 
 class TestRecordPubsubMessage:
