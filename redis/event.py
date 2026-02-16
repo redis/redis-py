@@ -6,6 +6,10 @@ from typing import Dict, List, Optional, Type, Union
 
 from redis.auth.token import TokenInterface
 from redis.credentials import CredentialProvider, StreamingCredentialProvider
+from redis.observability.recorder import (
+    init_connection_count,
+    register_pools_connection_count,
+)
 from redis.utils import check_protocol_version
 
 
@@ -84,7 +88,8 @@ class EventDispatcher(EventDispatcherInterface):
                 ReAuthConnectionListener(),
             ],
             AfterPooledConnectionsInstantiationEvent: [
-                RegisterReAuthForPooledConnections()
+                RegisterReAuthForPooledConnections(),
+                InitializeConnectionCountObservability(),
             ],
             AfterSingleConnectionInstantiationEvent: [
                 RegisterReAuthForSingleConnection()
@@ -467,3 +472,16 @@ class RegisterReAuthForPubSub(EventListenerInterface):
 
     async def _raise_on_error_async(self, error: Exception):
         raise EventException(error, self._event)
+
+
+class InitializeConnectionCountObservability(EventListenerInterface):
+    """
+    Listener that initializes connection count observability.
+    """
+
+    def listen(self, event: AfterPooledConnectionsInstantiationEvent):
+        # Initialize gauge only once, subsequent calls won't have an affect.
+        init_connection_count()
+
+        # Register pools for connection count observability.
+        register_pools_connection_count(event.connection_pools)

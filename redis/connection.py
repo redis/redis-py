@@ -29,6 +29,7 @@ from redis.cache import (
     CacheFactoryInterface,
     CacheInterface,
     CacheKey,
+    CacheProxy,
 )
 
 from ._parsers import Encoder, _HiredisParser, _RESP2Parser, _RESP3Parser
@@ -54,6 +55,27 @@ from .maint_notifications import (
     MaintNotificationsConnectionHandler,
     MaintNotificationsPoolHandler,
     OSSMaintNotificationsHandler,
+)
+from .observability.attributes import (
+    DB_CLIENT_CONNECTION_POOL_NAME,
+    DB_CLIENT_CONNECTION_STATE,
+    AttributeBuilder,
+    ConnectionState,
+    CSCReason,
+    CSCResult,
+    get_pool_name,
+)
+from .observability.metrics import CloseReason
+from .observability.recorder import (
+    init_csc_items,
+    record_connection_closed,
+    record_connection_create_time,
+    record_connection_wait_time,
+    record_csc_eviction,
+    record_csc_network_saved,
+    record_csc_request,
+    record_error_count,
+    register_csc_items_callback,
 )
 from .retry import Retry
 from .utils import (
@@ -193,7 +215,7 @@ class ConnectionInterface:
         pass
 
     @abstractmethod
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         pass
 
     @abstractmethod
@@ -291,6 +313,7 @@ class MaintNotificationsAbstractConnection:
             OSSMaintNotificationsHandler
         ] = None,
         parser: Optional[Union[_HiredisParser, _RESP3Parser]] = None,
+        event_dispatcher: Optional[EventDispatcher] = None,
     ):
         """
         Initialize the maintenance notifications for the connection.
@@ -311,6 +334,12 @@ class MaintNotificationsAbstractConnection:
         self.maint_notifications_config = maint_notifications_config
         self.maintenance_state = maintenance_state
         self.maintenance_notification_hash = maintenance_notification_hash
+
+        if event_dispatcher is not None:
+            self.event_dispatcher = event_dispatcher
+        else:
+            self.event_dispatcher = EventDispatcher()
+
         self._configure_maintenance_notifications(
             maint_notifications_pool_handler,
             orig_host_address,
@@ -384,7 +413,7 @@ class MaintNotificationsAbstractConnection:
         pass
 
     @abstractmethod
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         pass
 
     def _configure_maintenance_notifications(
@@ -881,6 +910,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             orig_socket_connect_timeout,
             oss_cluster_maint_notifications_handler,
             self._parser,
+            event_dispatcher=self._event_dispatcher,
         )
 
     def __repr__(self):
@@ -958,14 +988,38 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         try:
             if retry_socket_connect:
                 sock = self.retry.call_with_retry(
-                    lambda: self._connect(), lambda error: self.disconnect(error)
+                    self._connect,
+                    lambda error, failure_count: self.disconnect(
+                        error=error, failure_count=failure_count
+                    ),
+                    with_failure_count=True,
                 )
             else:
                 sock = self._connect()
         except socket.timeout:
-            raise TimeoutError("Timeout connecting to server")
+            e = TimeoutError("Timeout connecting to server")
+            record_error_count(
+                server_address=self.host,
+                server_port=self.port,
+                network_peer_address=self.host,
+                network_peer_port=self.port,
+                error_type=e,
+                retry_attempts=0,
+                is_internal=False,
+            )
+            raise e
         except OSError as e:
-            raise ConnectionError(self._error_message(e))
+            e = ConnectionError(self._error_message(e))
+            record_error_count(
+                server_address=getattr(self, "host", None),
+                server_port=getattr(self, "port", None),
+                network_peer_address=getattr(self, "host", None),
+                network_peer_port=getattr(self, "port", None),
+                error_type=e,
+                retry_attempts=0,
+                is_internal=False,
+            )
+            raise e
 
         self._sock = sock
         try:
@@ -1119,7 +1173,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             if str_if_bytes(self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         "Disconnects from the Redis server"
         self._parser.on_disconnect()
 
@@ -1141,6 +1195,35 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             conn_sock.close()
         except OSError:
             pass
+
+        error = kwargs.get("error")
+        failure_count = kwargs.get("failure_count")
+        health_check_failed = kwargs.get("health_check_failed")
+
+        if error:
+            if health_check_failed:
+                close_reason = CloseReason.HEALTHCHECK_FAILED
+            else:
+                close_reason = CloseReason.ERROR
+
+            if failure_count is not None and failure_count > self.retry.get_retries():
+                record_error_count(
+                    server_address=self.host,
+                    server_port=self.port,
+                    network_peer_address=self.host,
+                    network_peer_port=self.port,
+                    error_type=error,
+                    retry_attempts=failure_count,
+                )
+
+            record_connection_closed(
+                close_reason=close_reason,
+                error_type=error,
+            )
+        else:
+            record_connection_closed(
+                close_reason=CloseReason.APPLICATION_CLOSE,
+            )
 
         if self.maintenance_state == MaintenanceState.MAINTENANCE:
             # this block will be executed only if the connection was in maintenance state
@@ -1168,14 +1251,20 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
         if str_if_bytes(self.read_response()) != "PONG":
             raise ConnectionError("Bad response from PING health check")
 
-    def _ping_failed(self, error):
+    def _ping_failed(self, error, failure_count):
         """Function to call when PING fails"""
-        self.disconnect()
+        self.disconnect(
+            error=error, failure_count=failure_count, health_check_failed=True
+        )
 
     def check_health(self):
         """Check the health of the connection with a PING/PONG"""
         if self.health_check_interval and time.monotonic() > self.next_health_check:
-            self.retry.call_with_retry(self._send_ping, self._ping_failed)
+            self.retry.call_with_retry(
+                self._send_ping,
+                self._ping_failed,
+                with_failure_count=True,
+            )
 
     def send_packed_command(self, command, check_health=True):
         """Send an already packed command to the Redis server"""
@@ -1451,6 +1540,8 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
         self.retry = self._conn.retry
         self.host = self._conn.host
         self.port = self._conn.port
+        self.db = self._conn.db
+        self._event_dispatcher = self._conn._event_dispatcher
         self.credential_provider = conn.credential_provider
         self._pool_lock = pool_lock
         self._cache = cache
@@ -1471,6 +1562,7 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
                 self._conn.socket_connect_timeout,
                 self._conn._oss_cluster_maint_notifications_handler,
                 self._conn._get_parser(),
+                event_dispatcher=self._conn.event_dispatcher,
             )
 
     def repr_pieces(self):
@@ -1530,10 +1622,10 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     def on_connect(self):
         self._conn.on_connect()
 
-    def disconnect(self, *args):
+    def disconnect(self, *args, **kwargs):
         with self._cache_lock:
             self._cache.flush()
-        self._conn.disconnect(*args)
+        self._conn.disconnect(*args, **kwargs)
 
     def check_health(self):
         self._conn.check_health()
@@ -1601,17 +1693,26 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
     ):
         with self._cache_lock:
             # Check if command response exists in a cache and it's not in progress.
-            if (
-                self._current_command_cache_key is not None
-                and self._cache.get(self._current_command_cache_key) is not None
-                and self._cache.get(self._current_command_cache_key).status
-                != CacheEntryStatus.IN_PROGRESS
-            ):
-                res = copy.deepcopy(
-                    self._cache.get(self._current_command_cache_key).cache_value
+            if self._current_command_cache_key is not None:
+                if (
+                    self._cache.get(self._current_command_cache_key) is not None
+                    and self._cache.get(self._current_command_cache_key).status
+                    != CacheEntryStatus.IN_PROGRESS
+                ):
+                    res = copy.deepcopy(
+                        self._cache.get(self._current_command_cache_key).cache_value
+                    )
+                    self._current_command_cache_key = None
+                    record_csc_request(
+                        result=CSCResult.HIT,
+                    )
+                    record_csc_network_saved(
+                        bytes_saved=len(res),
+                    )
+                    return res
+                record_csc_request(
+                    result=CSCResult.MISS,
                 )
-                self._current_command_cache_key = None
-                return res
 
         response = self._conn.read_response(
             disable_decoding=disable_decoding,
@@ -1788,7 +1889,13 @@ class CacheProxyConnection(MaintNotificationsAbstractConnection, ConnectionInter
             if data[1] is None:
                 self._cache.flush()
             else:
-                self._cache.delete_by_redis_keys(data[1])
+                keys_deleted = self._cache.delete_by_redis_keys(data[1])
+
+                if len(keys_deleted) > 0:
+                    record_csc_eviction(
+                        count=len(keys_deleted),
+                        reason=CSCReason.INVALIDATION,
+                    )
 
 
 class SSLConnection(Connection):
@@ -2155,6 +2262,13 @@ class ConnectionPoolInterface(ABC):
     def re_auth_callback(self, token: TokenInterface):
         pass
 
+    @abstractmethod
+    def get_connection_count(self) -> list[tuple[int, dict]]:
+        """
+        Returns a connection count (both idle and in use).
+        """
+        pass
+
 
 class MaintNotificationsAbstractConnectionPool:
     """
@@ -2186,6 +2300,14 @@ class MaintNotificationsAbstractConnectionPool:
                 raise RedisError(
                     "Maintenance notifications handlers on connection are only supported with RESP version 3"
                 )
+
+            self._event_dispatcher = kwargs.get("event_dispatcher", None)
+            if self._event_dispatcher is None:
+                self._event_dispatcher = EventDispatcher()
+
+            self._maint_notifications_pool_handler = MaintNotificationsPoolHandler(
+                self, maint_notifications_config
+            )
             if oss_cluster_maint_notifications_handler:
                 self._oss_cluster_maint_notifications_handler = (
                     oss_cluster_maint_notifications_handler
@@ -2664,6 +2786,10 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         self.cache = None
         self._cache_factory = cache_factory
 
+        self._event_dispatcher = self._connection_kwargs.get("event_dispatcher", None)
+        if self._event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+
         if connection_kwargs.get("cache_config") or connection_kwargs.get("cache"):
             if not check_protocol_version(self._connection_kwargs.get("protocol"), 3):
                 raise RedisError("Client caching is only supported with RESP version 3")
@@ -2677,18 +2803,20 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
                 self.cache = cache
             else:
                 if self._cache_factory is not None:
-                    self.cache = self._cache_factory.get_cache()
+                    self.cache = CacheProxy(self._cache_factory.get_cache())
                 else:
                     self.cache = CacheFactory(
                         self._connection_kwargs.get("cache_config")
                     ).get_cache()
 
+            init_csc_items()
+            register_csc_items_callback(
+                callback=lambda: self.cache.size,
+                pool_name=get_pool_name(self),
+            )
+
         connection_kwargs.pop("cache", None)
         connection_kwargs.pop("cache_config", None)
-
-        self._event_dispatcher = self._connection_kwargs.get("event_dispatcher", None)
-        if self._event_dispatcher is None:
-            self._event_dispatcher = EventDispatcher()
 
         # a lock to protect the critical section in _checkpid().
         # this lock is acquired when the process id changes, such as
@@ -2701,6 +2829,11 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
         self._fork_lock = threading.RLock()
         self._lock = threading.RLock()
+
+        # Generate unique pool ID for observability (matches go-redis behavior)
+        import secrets
+
+        self._pool_id = secrets.token_hex(4)
 
         MaintNotificationsAbstractConnectionPool.__init__(
             self,
@@ -2805,12 +2938,19 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
     def get_connection(self, command_name=None, *keys, **options) -> "Connection":
         "Get a connection from the pool"
 
+        # Start timing for observability
         self._checkpid()
+        is_created = False
+
         with self._lock:
             try:
                 connection = self._available_connections.pop()
             except IndexError:
+                # Start timing for observability
+                start_time_created = time.monotonic()
+
                 connection = self.make_connection()
+                is_created = True
             self._in_use_connections.add(connection)
 
         try:
@@ -2837,6 +2977,12 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
             # leak it
             self.release(connection)
             raise
+
+        if is_created:
+            record_connection_create_time(
+                connection_pool=self,
+                duration_seconds=time.monotonic() - start_time_created,
+            )
         return connection
 
     def get_encoder(self) -> Encoder:
@@ -2955,6 +3101,26 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
         :return:
         """
         pass
+
+    def get_connection_count(self) -> List[tuple[int, dict]]:
+        from redis.observability.attributes import get_pool_name
+
+        attributes = AttributeBuilder.build_base_attributes()
+        attributes[DB_CLIENT_CONNECTION_POOL_NAME] = get_pool_name(self)
+        free_connections_attributes = attributes.copy()
+        in_use_connections_attributes = attributes.copy()
+
+        free_connections_attributes[DB_CLIENT_CONNECTION_STATE] = (
+            ConnectionState.IDLE.value
+        )
+        in_use_connections_attributes[DB_CLIENT_CONNECTION_STATE] = (
+            ConnectionState.USED.value
+        )
+
+        return [
+            (len(self._get_free_connections()), free_connections_attributes),
+            (len(self._get_in_use_connections()), in_use_connections_attributes),
+        ]
 
 
 class BlockingConnectionPool(ConnectionPool):
@@ -3086,8 +3252,10 @@ class BlockingConnectionPool(ConnectionPool):
         create new connections when we need to, i.e.: the actual number of
         connections will only increase in response to demand.
         """
+        start_time_acquired = time.monotonic()
         # Make sure we haven't changed process.
         self._checkpid()
+        is_created = False
 
         # Try and get a connection from the pool. If one isn't available within
         # self.timeout then raise a ``ConnectionError``.
@@ -3106,7 +3274,10 @@ class BlockingConnectionPool(ConnectionPool):
             # If the ``connection`` is actually ``None`` then that's a cue to make
             # a new connection to add to the pool.
             if connection is None:
+                # Start timing for observability
+                start_time_created = time.monotonic()
                 connection = self.make_connection()
+                is_created = True
         finally:
             if self._locked:
                 try:
@@ -3134,6 +3305,17 @@ class BlockingConnectionPool(ConnectionPool):
             # release the connection back to the pool so that we don't leak it
             self.release(connection)
             raise
+
+        if is_created:
+            record_connection_create_time(
+                connection_pool=self,
+                duration_seconds=time.monotonic() - start_time_created,
+            )
+
+        record_connection_wait_time(
+            pool_name=get_pool_name(self),
+            duration_seconds=time.monotonic() - start_time_acquired,
+        )
 
         return connection
 

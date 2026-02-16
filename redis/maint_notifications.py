@@ -7,6 +7,12 @@ import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Union
 
+from redis.observability.attributes import get_pool_name
+from redis.observability.recorder import (
+    record_connection_handoff,
+    record_connection_relaxed_timeout,
+    record_maint_notification_count,
+)
 from redis.typing import Number
 
 if TYPE_CHECKING:
@@ -845,6 +851,10 @@ class MaintNotificationsPoolHandler:
                 args=(notification,),
             ).start()
 
+            record_connection_handoff(
+                pool_name=get_pool_name(self.pool),
+            )
+
             self._processed_notifications.add(notification)
 
     def run_proactive_reconnect(self, moving_address_src: Optional[str] = None):
@@ -941,6 +951,14 @@ class MaintNotificationsConnectionHandler:
         # get the notification type by checking its class in the _NOTIFICATION_TYPES dict
         notification_type = self._NOTIFICATION_TYPES.get(notification.__class__, None)
 
+        record_maint_notification_count(
+            server_address=self.connection.host,
+            server_port=self.connection.port,
+            network_peer_address=self.connection.host,
+            network_peer_port=self.connection.port,
+            maint_notification=notification.__class__.__name__,
+        )
+
         if notification_type is None:
             logger.error(f"Unhandled notification type: {notification}")
             return
@@ -950,7 +968,7 @@ class MaintNotificationsConnectionHandler:
                 MaintenanceState.MAINTENANCE, notification
             )
         else:
-            self.handle_maintenance_completed_notification()
+            self.handle_maintenance_completed_notification(notification=notification)
 
     def handle_maintenance_start_notification(
         self, maintenance_state: MaintenanceState, notification: MaintenanceNotification
@@ -975,7 +993,13 @@ class MaintNotificationsConnectionHandler:
             # one start notification before the the final end notification
             self.connection.add_maint_start_notification(notification.id)
 
-    def handle_maintenance_completed_notification(self):
+        record_connection_relaxed_timeout(
+            connection_name=repr(self.connection),
+            maint_notification=notification.__class__.__name__,
+            relaxed=True,
+        )
+
+    def handle_maintenance_completed_notification(self, **kwargs):
         # Only reset timeouts if state is not MOVING and relaxed timeouts are enabled
         if (
             self.connection.maintenance_state == MaintenanceState.MOVING
@@ -991,6 +1015,14 @@ class MaintNotificationsConnectionHandler:
         # reset the sets that keep track of received start maint
         # notifications and skipped end maint notifications
         self.connection.reset_received_notifications()
+
+        if kwargs.get("notification"):
+            notification = kwargs["notification"]
+            record_connection_relaxed_timeout(
+                connection_name=repr(self.connection),
+                maint_notification=notification.__class__.__name__,
+                relaxed=False,
+            )
 
 
 class OSSMaintNotificationsHandler:
