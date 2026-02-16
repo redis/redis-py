@@ -890,7 +890,7 @@ class TestMaintNotificationsConnectionHandler:
             self.handler, "handle_maintenance_completed_notification"
         ) as mock_handle:
             self.handler.handle_notification(notification)
-            mock_handle.assert_called_once_with()
+            mock_handle.assert_called_once_with(notification=notification)
 
     def test_handle_notification_failing_over(self):
         """Test handling of NodeFailingOverNotification."""
@@ -912,7 +912,7 @@ class TestMaintNotificationsConnectionHandler:
             self.handler, "handle_maintenance_completed_notification"
         ) as mock_handle:
             self.handler.handle_notification(notification)
-            mock_handle.assert_called_once_with()
+            mock_handle.assert_called_once_with(notification=notification)
 
     def test_handle_notification_unknown_type(self):
         """Test handling of unknown notification type."""
