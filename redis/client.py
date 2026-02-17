@@ -703,7 +703,7 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
                 server_address=conn.host,
-                server_port=conn.port,
+                server_port=conn.port if hasattr(conn, "port") else None,
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
