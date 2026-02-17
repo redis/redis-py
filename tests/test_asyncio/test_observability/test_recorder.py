@@ -226,6 +226,7 @@ class TestRecordConnectionCreateTime:
         mock_pool = MagicMock()
         mock_pool.__class__.__name__ = "ConnectionPool"
         mock_pool.connection_kwargs = {"host": "localhost", "port": 6379, "db": 0}
+        mock_pool._pool_id = "a1b2c3d4"  # Mock the unique pool ID
 
         await recorder.record_connection_create_time(
             connection_pool=mock_pool,
@@ -235,10 +236,12 @@ class TestRecordConnectionCreateTime:
         instruments.connection_create_time.record.assert_called_once()
         call_args = instruments.connection_create_time.record.call_args
 
+        # Verify duration value
         assert call_args[0][0] == 0.050
+
+        # Verify attributes
         attrs = call_args[1]["attributes"]
-        # Pool name is generated from class name and connection kwargs
-        assert "localhost:6379/0" in attrs[DB_CLIENT_CONNECTION_POOL_NAME]
+        assert attrs[DB_CLIENT_CONNECTION_POOL_NAME] == "localhost:6379_a1b2c3d4"
 
 
 @pytest.mark.asyncio

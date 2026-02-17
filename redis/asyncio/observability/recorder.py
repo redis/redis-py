@@ -55,10 +55,6 @@ async def _get_or_create_collector() -> Optional[RedisMetricsCollector]:
     if _async_metrics_collector is not None:
         return _async_metrics_collector
 
-    # Double-check after acquiring lock
-    if _async_metrics_collector is not None:
-        return _async_metrics_collector
-
     try:
         manager = get_observability_instance().get_provider_manager()
         if manager is None or not manager.config.enabled_telemetry:
@@ -133,19 +129,22 @@ async def record_operation_duration(
     if collector is None:
         return
 
-    collector.record_operation_duration(
-        command_name=command_name,
-        duration_seconds=duration_seconds,
-        server_address=server_address,
-        server_port=server_port,
-        db_namespace=db_namespace,
-        error_type=error,
-        network_peer_address=server_address,
-        network_peer_port=server_port,
-        is_blocking=is_blocking,
-        batch_size=batch_size,
-        retry_attempts=retry_attempts,
-    )
+    try:
+        collector.record_operation_duration(
+            command_name=command_name,
+            duration_seconds=duration_seconds,
+            server_address=server_address,
+            server_port=server_port,
+            db_namespace=db_namespace,
+            error_type=error,
+            network_peer_address=server_address,
+            network_peer_port=server_port,
+            is_blocking=is_blocking,
+            batch_size=batch_size,
+            retry_attempts=retry_attempts,
+        )
+    except Exception:
+        pass
 
 
 async def record_connection_create_time(
@@ -163,10 +162,13 @@ async def record_connection_create_time(
     if collector is None:
         return
 
-    collector.record_connection_create_time(
-        connection_pool=connection_pool,
-        duration_seconds=duration_seconds,
-    )
+    try:
+        collector.record_connection_create_time(
+            connection_pool=connection_pool,
+            duration_seconds=duration_seconds,
+        )
+    except Exception:
+        pass
 
 
 async def init_connection_count() -> None:
@@ -187,9 +189,12 @@ async def init_connection_count() -> None:
 
         return observations
 
-    collector.init_connection_count(
-        callback=observable_callback,
-    )
+    try:
+        collector.init_connection_count(
+            callback=observable_callback,
+        )
+    except Exception:
+        pass
 
 
 async def register_pools_connection_count(
@@ -212,10 +217,13 @@ async def register_pools_connection_count(
                 observations.append(Observation(count, attributes=attributes))
         return observations
 
-    observables_registry = get_observables_registry_instance()
-    observables_registry.register(
-        CONNECTION_COUNT_REGISTRY_KEY, connection_count_callback
-    )
+    try:
+        observables_registry = get_observables_registry_instance()
+        observables_registry.register(
+            CONNECTION_COUNT_REGISTRY_KEY, connection_count_callback
+        )
+    except Exception:
+        pass
 
 
 async def record_connection_timeout(
@@ -231,9 +239,12 @@ async def record_connection_timeout(
     if collector is None:
         return
 
-    collector.record_connection_timeout(
-        pool_name=pool_name,
-    )
+    try:
+        collector.record_connection_timeout(
+            pool_name=pool_name,
+        )
+    except Exception:
+        pass
 
 
 async def record_connection_wait_time(
@@ -251,10 +262,13 @@ async def record_connection_wait_time(
     if collector is None:
         return
 
-    collector.record_connection_wait_time(
-        pool_name=pool_name,
-        duration_seconds=duration_seconds,
-    )
+    try:
+        collector.record_connection_wait_time(
+            pool_name=pool_name,
+            duration_seconds=duration_seconds,
+        )
+    except Exception:
+        pass
 
 
 async def record_connection_closed(
@@ -272,10 +286,13 @@ async def record_connection_closed(
     if collector is None:
         return
 
-    collector.record_connection_closed(
-        close_reason=close_reason,
-        error_type=error_type,
-    )
+    try:
+        collector.record_connection_closed(
+            close_reason=close_reason,
+            error_type=error_type,
+        )
+    except Exception:
+        pass
 
 
 async def record_connection_relaxed_timeout(
@@ -295,11 +312,14 @@ async def record_connection_relaxed_timeout(
     if collector is None:
         return
 
-    collector.record_connection_relaxed_timeout(
-        connection_name=connection_name,
-        maint_notification=maint_notification,
-        relaxed=relaxed,
-    )
+    try:
+        collector.record_connection_relaxed_timeout(
+            connection_name=connection_name,
+            maint_notification=maint_notification,
+            relaxed=relaxed,
+        )
+    except Exception:
+        pass
 
 
 async def record_connection_handoff(
@@ -315,9 +335,12 @@ async def record_connection_handoff(
     if collector is None:
         return
 
-    collector.record_connection_handoff(
-        pool_name=pool_name,
-    )
+    try:
+        collector.record_connection_handoff(
+            pool_name=pool_name,
+        )
+    except Exception:
+        pass
 
 
 async def record_error_count(
@@ -345,15 +368,18 @@ async def record_error_count(
     if collector is None:
         return
 
-    collector.record_error_count(
-        server_address=server_address,
-        server_port=server_port,
-        network_peer_address=network_peer_address,
-        network_peer_port=network_peer_port,
-        error_type=error_type,
-        retry_attempts=retry_attempts,
-        is_internal=is_internal,
-    )
+    try:
+        collector.record_error_count(
+            server_address=server_address,
+            server_port=server_port,
+            network_peer_address=network_peer_address,
+            network_peer_port=network_peer_port,
+            error_type=error_type,
+            retry_attempts=retry_attempts,
+            is_internal=is_internal,
+        )
+    except Exception:
+        pass
 
 
 async def record_pubsub_message(
@@ -383,11 +409,14 @@ async def record_pubsub_message(
             # Normalize bytes to str for OTel attributes
             effective_channel = str_if_bytes(channel)
 
-    collector.record_pubsub_message(
-        direction=direction,
-        channel=effective_channel,
-        sharded=sharded,
-    )
+    try:
+        collector.record_pubsub_message(
+            direction=direction,
+            channel=effective_channel,
+            sharded=sharded,
+        )
+    except Exception:
+        pass
 
 
 async def record_streaming_lag(
@@ -416,12 +445,15 @@ async def record_streaming_lag(
         if config is not None and config.hide_stream_names:
             effective_stream_name = None
 
-    collector.record_streaming_lag(
-        lag_seconds=lag_seconds,
-        stream_name=effective_stream_name,
-        consumer_group=consumer_group,
-        consumer_name=consumer_name,
-    )
+    try:
+        collector.record_streaming_lag(
+            lag_seconds=lag_seconds,
+            stream_name=effective_stream_name,
+            consumer_group=consumer_group,
+            consumer_name=consumer_name,
+        )
+    except Exception:
+        pass
 
 
 async def record_streaming_lag_from_response(
@@ -446,20 +478,40 @@ async def record_streaming_lag_from_response(
     if not response:
         return
 
-    now = datetime.now().timestamp()
+    try:
+        now = datetime.now().timestamp()
 
-    # Check if stream names should be hidden
-    config = await _get_config()
-    hide_stream_names = config is not None and config.hide_stream_names
+        # Check if stream names should be hidden
+        config = await _get_config()
+        hide_stream_names = config is not None and config.hide_stream_names
 
-    # RESP3 format: dict
-    if isinstance(response, dict):
-        for stream_name, stream_messages in response.items():
-            effective_stream_name = (
-                None if hide_stream_names else str_if_bytes(stream_name)
-            )
-            for messages in stream_messages:
-                for message in messages:
+        # RESP3 format: dict
+        if isinstance(response, dict):
+            for stream_name, stream_messages in response.items():
+                effective_stream_name = (
+                    None if hide_stream_names else str_if_bytes(stream_name)
+                )
+                for messages in stream_messages:
+                    for message in messages:
+                        message_id, _ = message
+                        message_id = str_if_bytes(message_id)
+                        timestamp, _ = message_id.split("-")
+                        # Ensure lag is non-negative (clock skew can cause negative values)
+                        lag_seconds = max(0.0, now - int(timestamp) / 1000)
+
+                        collector.record_streaming_lag(
+                            lag_seconds=lag_seconds,
+                            stream_name=effective_stream_name,
+                            consumer_group=consumer_group,
+                            consumer_name=consumer_name,
+                        )
+        else:
+            # RESP2 format: list
+            for stream_entry in response:
+                stream_name = str_if_bytes(stream_entry[0])
+                effective_stream_name = None if hide_stream_names else stream_name
+
+                for message in stream_entry[1]:
                     message_id, _ = message
                     message_id = str_if_bytes(message_id)
                     timestamp, _ = message_id.split("-")
@@ -472,25 +524,8 @@ async def record_streaming_lag_from_response(
                         consumer_group=consumer_group,
                         consumer_name=consumer_name,
                     )
-    else:
-        # RESP2 format: list
-        for stream_entry in response:
-            stream_name = str_if_bytes(stream_entry[0])
-            effective_stream_name = None if hide_stream_names else stream_name
-
-            for message in stream_entry[1]:
-                message_id, _ = message
-                message_id = str_if_bytes(message_id)
-                timestamp, _ = message_id.split("-")
-                # Ensure lag is non-negative (clock skew can cause negative values)
-                lag_seconds = max(0.0, now - int(timestamp) / 1000)
-
-                collector.record_streaming_lag(
-                    lag_seconds=lag_seconds,
-                    stream_name=effective_stream_name,
-                    consumer_group=consumer_group,
-                    consumer_name=consumer_name,
-                )
+    except Exception:
+        pass
 
 
 async def record_maint_notification_count(
@@ -514,13 +549,16 @@ async def record_maint_notification_count(
     if collector is None:
         return
 
-    collector.record_maint_notification_count(
-        server_address=server_address,
-        server_port=server_port,
-        network_peer_address=network_peer_address,
-        network_peer_port=network_peer_port,
-        maint_notification=maint_notification,
-    )
+    try:
+        collector.record_maint_notification_count(
+            server_address=server_address,
+            server_port=server_port,
+            network_peer_address=network_peer_address,
+            network_peer_port=network_peer_port,
+            maint_notification=maint_notification,
+        )
+    except Exception:
+        pass
 
 
 async def record_geo_failover(
