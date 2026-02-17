@@ -1016,6 +1016,17 @@ class UnixDomainSocketConnection(AbstractConnection):
         self.path = path
         super().__init__(**kwargs)
 
+    # host and port properties are required for OTel instrumentation compatibility.
+    # TCP Connection has these as attributes; Unix sockets use path instead.
+
+    @property
+    def host(self):
+        return self.path
+
+    @property
+    def port(self):
+        return None
+
     def repr_pieces(self) -> Iterable[Tuple[str, Union[str, int]]]:
         pieces = [("path", self.path), ("db", self.db)]
         if self.client_name:
