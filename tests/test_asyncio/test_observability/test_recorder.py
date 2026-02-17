@@ -20,10 +20,13 @@ from redis.observability.attributes import (
     DB_OPERATION_NAME,
     DB_RESPONSE_STATUS_CODE,
     ERROR_TYPE,
+    NETWORK_PEER_ADDRESS,
+    NETWORK_PEER_PORT,
     DB_CLIENT_CONNECTION_POOL_NAME,
     DB_CLIENT_GEOFAILOVER_FAIL_FROM,
     DB_CLIENT_GEOFAILOVER_FAIL_TO,
     DB_CLIENT_GEOFAILOVER_REASON,
+    REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS,
     REDIS_CLIENT_STREAM_NAME,
     REDIS_CLIENT_CONSUMER_GROUP,
     REDIS_CLIENT_CONSUMER_NAME,
@@ -356,22 +359,54 @@ class TestRecordErrorCount:
     """Tests for record_error_count - verifies Counter.add() calls."""
 
     async def test_record_error_count(self, setup_async_recorder):
-        """Test that error count is recorded correctly."""
+        """Test recording error count with all attributes."""
         instruments = setup_async_recorder
 
+        error = ConnectionError("Connection refused")
         await recorder.record_error_count(
             server_address="localhost",
             server_port=6379,
             network_peer_address="127.0.0.1",
             network_peer_port=6379,
-            error_type=ConnectionError("Connection refused"),
+            error_type=error,
             retry_attempts=3,
             is_internal=True,
         )
 
         instruments.client_errors.add.assert_called_once()
         call_args = instruments.client_errors.add.call_args
+
         assert call_args[0][0] == 1
+        attrs = call_args[1]["attributes"]
+        assert attrs[SERVER_ADDRESS] == "localhost"
+        assert attrs[SERVER_PORT] == 6379
+        assert attrs[NETWORK_PEER_ADDRESS] == "127.0.0.1"
+        assert attrs[NETWORK_PEER_PORT] == 6379
+        assert attrs[ERROR_TYPE] == "ConnectionError"
+        assert attrs[REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS] == 3
+
+    async def test_record_error_count_with_is_internal_false(self, setup_async_recorder):
+        """Test recording error count with is_internal=False."""
+        instruments = setup_async_recorder
+
+        error = TimeoutError("Connection timed out")
+        await recorder.record_error_count(
+            server_address="localhost",
+            server_port=6379,
+            network_peer_address="127.0.0.1",
+            network_peer_port=6379,
+            error_type=error,
+            retry_attempts=2,
+            is_internal=False,
+        )
+
+        instruments.client_errors.add.assert_called_once()
+        call_args = instruments.client_errors.add.call_args
+
+        assert call_args[0][0] == 1
+        attrs = call_args[1]["attributes"]
+        assert attrs[ERROR_TYPE] == "TimeoutError"
+        assert attrs[REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS] == 2
 
 
 @pytest.mark.asyncio

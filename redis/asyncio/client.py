@@ -2,6 +2,7 @@ import asyncio
 import copy
 import inspect
 import re
+import time
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -79,6 +80,7 @@ from redis.utils import (
     str_if_bytes,
     truncate_text,
 )
+from redis.asyncio.observability.recorder import record_error_count
 
 if TYPE_CHECKING and SSL_AVAILABLE:
     from ssl import TLSVersion, VerifyFlags, VerifyMode
@@ -734,6 +736,13 @@ class Redis(
         command_name = args[0]
         conn = self.connection or await pool.get_connection()
 
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = [0]
+
+        def failure_callback(error, failure_count):
+            actual_retry_attempts[0] = failure_count
+            return self._close_connection(conn)
+
         if self.single_connection_client:
             await self._single_conn_lock.acquire()
         try:
@@ -741,8 +750,20 @@ class Redis(
                 lambda: self._send_command_parse_response(
                     conn, command_name, *args, **options
                 ),
-                lambda _: self._close_connection(conn),
+                failure_callback,
+                with_failure_count=True,
             )
+        except Exception as e:
+            await record_error_count(
+                server_address=conn.host,
+                server_port=conn.port,
+                network_peer_address=conn.host,
+                network_peer_port=conn.port,
+                error_type=e,
+                retry_attempts=actual_retry_attempts[0],
+                is_internal=False,
+            )
+            raise
         finally:
             if self.single_connection_client:
                 self._single_conn_lock.release()
@@ -1024,10 +1045,35 @@ class PubSub:
         called by the # connection to resubscribe us to any channels and
         patterns we were previously listening to
         """
-        return await conn.retry.call_with_retry(
-            lambda: command(*args, **kwargs),
-            lambda _: self._reconnect(conn),
-        )
+        if not len(args) == 0:
+            command_name = args[0]
+        else:
+            command_name = None
+
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = [0]
+
+        def failure_callback(error, failure_count):
+            actual_retry_attempts[0] = failure_count
+            return self._reconnect(conn)
+
+        try:
+            return await conn.retry.call_with_retry(
+                lambda: command(*args, **kwargs),
+                failure_callback,
+                with_failure_count=True,
+            )
+        except Exception as e:
+            await record_error_count(
+                server_address=conn.host,
+                server_port=conn.port,
+                network_peer_address=conn.host,
+                network_peer_port=conn.port,
+                error_type=e,
+                retry_attempts=actual_retry_attempts[0],
+                is_internal=False,
+            )
+            raise
 
     async def parse_response(self, block: bool = True, timeout: float = 0):
         """Parse the response from a publish/subscribe command"""
@@ -1432,7 +1478,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         self,
         conn: Connection,
         error: Exception,
-    ):
+        failure_count: Optional[int] = None,
+    ) -> None:
         """
         Close the connection reset watching state and
         raise an exception if we were watching.
@@ -1467,12 +1514,32 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             conn = await self.connection_pool.get_connection()
             self.connection = conn
 
-        return await conn.retry.call_with_retry(
-            lambda: self._send_command_parse_response(
-                conn, command_name, *args, **options
-            ),
-            lambda error: self._disconnect_reset_raise_on_watching(conn, error),
-        )
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = [0]
+
+        def failure_callback(error, failure_count):
+            actual_retry_attempts[0] = failure_count
+            return self._disconnect_reset_raise_on_watching(conn, error, failure_count)
+
+        try:
+            return await conn.retry.call_with_retry(
+                lambda: self._send_command_parse_response(
+                    conn, command_name, *args, **options
+                ),
+                failure_callback,
+                with_failure_count=True,
+            )
+        except Exception as e:
+            await record_error_count(
+                server_address=conn.host,
+                server_port=conn.port,
+                network_peer_address=conn.host,
+                network_peer_port=conn.port,
+                error_type=e,
+                retry_attempts=actual_retry_attempts[0],
+                is_internal=False,
+            )
+            raise
 
     def pipeline_execute_command(self, *args, **options):
         """
@@ -1654,8 +1721,10 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             await self.load_scripts()
         if self.is_transaction or self.explicit_transaction:
             execute = self._execute_transaction
+            operation_name = "MULTI"
         else:
             execute = self._execute_pipeline
+            operation_name = "PIPELINE"
 
         conn = self.connection
         if not conn:
@@ -1665,11 +1734,31 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             self.connection = conn
         conn = cast(Connection, conn)
 
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = [0]
+        stack_len = len(stack)
+
+        def failure_callback(error, failure_count):
+            actual_retry_attempts[0] = failure_count
+            return self._disconnect_raise_on_watching(conn, error)
+
         try:
             return await conn.retry.call_with_retry(
                 lambda: execute(conn, stack, raise_on_error),
-                lambda error: self._disconnect_raise_on_watching(conn, error),
+                failure_callback,
+                with_failure_count=True,
             )
+        except Exception as e:
+            await record_error_count(
+                server_address=conn.host,
+                server_port=conn.port,
+                network_peer_address=conn.host,
+                network_peer_port=conn.port,
+                error_type=e,
+                retry_attempts=actual_retry_attempts[0],
+                is_internal=False,
+            )
+            raise
         finally:
             await self.reset()
 
