@@ -8,9 +8,10 @@ OTel semantic conventions for database clients.
 import logging
 import time
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional, Union
 
 if TYPE_CHECKING:
+    from redis.asyncio.multidb.database import AsyncDatabase
     from redis.connection import ConnectionPoolInterface
     from redis.multidb.database import SyncDatabase
 
@@ -306,8 +307,8 @@ class RedisMetricsCollector:
 
     def record_geo_failover(
         self,
-        fail_from: "SyncDatabase",
-        fail_to: "SyncDatabase",
+        fail_from: Union["SyncDatabase", "AsyncDatabase"],
+        fail_to: Union["SyncDatabase", "AsyncDatabase"],
         reason: GeoFailoverReason,
     ):
         """
