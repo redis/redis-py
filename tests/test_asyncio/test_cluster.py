@@ -3817,7 +3817,7 @@ class TestAsyncClusterMetricsRecording:
         attrs = call_args[1]["attributes"]
 
         # batch_size should not be present for single commands
-        assert "db.operation.batch_size" not in attrs
+        assert "db.operation.batch.size" not in attrs
 
     async def test_command_error_records_metric_with_error_type(
         self, cluster_with_otel
