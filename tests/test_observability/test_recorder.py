@@ -246,6 +246,29 @@ class TestRecordOperationDuration:
         assert attrs[DB_RESPONSE_STATUS_CODE] == "error"
         assert attrs[ERROR_TYPE] == "ConnectionError"
 
+    def test_record_operation_duration_with_bytes_command_name(self, setup_recorder):
+        """Test that bytes command names are converted to strings for OTel exporters."""
+
+        instruments = setup_recorder
+
+        # Pass command_name as bytes (as it can come from args[0])
+        record_operation_duration(
+            command_name=b"SET",
+            duration_seconds=0.005,
+            server_address="localhost",
+            server_port=6379,
+            db_namespace="0",
+            error=None,
+        )
+
+        instruments.operation_duration.record.assert_called_once()
+        call_args = instruments.operation_duration.record.call_args
+
+        attrs = call_args[1]["attributes"]
+        # Verify command_name is converted to uppercase string, not bytes
+        assert attrs[DB_OPERATION_NAME] == "SET"
+        assert isinstance(attrs[DB_OPERATION_NAME], str)
+
 
 class TestRecordConnectionCreateTime:
     """Tests for record_connection_create_time - verifies Histogram.record() calls."""

@@ -1043,6 +1043,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 return response
             except BusyLoadingError as e:
                 e.connection = target_node
+                await self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=target_node,
+                    error=e,
+                )
                 raise
             except MaxConnectionsError as e:
                 # MaxConnectionsError indicates client-side resource exhaustion
@@ -1050,6 +1056,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 # Don't treat this as a node failure - just re-raise the error
                 # without reinitializing the cluster.
                 e.connection = target_node
+                await self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=target_node,
+                    error=e,
+                )
                 raise
             except (ConnectionError, TimeoutError) as e:
                 # Connection retries are being handled in the node's
@@ -1067,6 +1079,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 # The retry loop will handle initialize() AND replace_default_node()
                 self._initialize = True
                 e.connection = target_node
+                await self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=target_node,
+                    error=e,
+                )
                 raise
             except (ClusterDownError, SlotNotCoveredError) as e:
                 # ClusterDownError can occur during a failover and to get
@@ -1081,6 +1099,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 await self.aclose()
                 await asyncio.sleep(0.25)
                 e.connection = target_node
+                await self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=target_node,
+                    error=e,
+                )
                 raise
             except MovedError as e:
                 # First, we will try to patch the slots/nodes cache with the
@@ -1149,10 +1173,22 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 raise
             except Exception as e:
                 e.connection = target_node
+                await self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=target_node,
+                    error=e,
+                )
                 raise
 
         e = ClusterError("TTL exhausted.")
         e.connection = target_node
+        await self._record_command_metric(
+            command_name=command,
+            duration_seconds=time.monotonic() - start_time,
+            connection=target_node,
+            error=e,
+        )
         raise e
 
     def pipeline(
@@ -2364,6 +2400,13 @@ class PipelineStrategy(AbstractStrategy):
 
         # Record operation duration for each node
         for node_name, (node, commands) in nodes.items():
+            # Find the first error in this node's commands, if any
+            node_error = None
+            for cmd in commands:
+                if isinstance(cmd.result, Exception):
+                    node_error = cmd.result
+                    break
+
             await record_operation_duration(
                 command_name="PIPELINE",
                 duration_seconds=time.monotonic() - start_time,
@@ -2371,6 +2414,7 @@ class PipelineStrategy(AbstractStrategy):
                 server_port=node.port,
                 db_namespace=str(node.db),
                 batch_size=len(commands),
+                error=node_error,
             )
 
         if any(errors):

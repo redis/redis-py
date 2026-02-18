@@ -1557,6 +1557,12 @@ class RedisCluster(
                 return response
             except AuthenticationError as e:
                 e.connection = connection
+                self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
             except MaxConnectionsError as e:
                 # MaxConnectionsError indicates client-side resource exhaustion
@@ -1564,6 +1570,12 @@ class RedisCluster(
                 # Don't treat this as a node failure - just re-raise the error
                 # without reinitializing the cluster.
                 e.connection = connection
+                self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
             except (ConnectionError, TimeoutError) as e:
                 # ConnectionError can also be raised if we couldn't get a
@@ -1591,6 +1603,12 @@ class RedisCluster(
                 # DON'T set redis_connection = None - keep the pool for reuse
                 self.nodes_manager.initialize()
                 e.connection = connection
+                self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise e
             except MovedError as e:
                 if is_debug_log_enabled():
@@ -1686,6 +1704,12 @@ class RedisCluster(
                 self.nodes_manager.initialize()
 
                 e.connection = connection
+                self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
             except ResponseError as e:
                 e.connection = connection
@@ -1701,6 +1725,12 @@ class RedisCluster(
                     connection.disconnect()
 
                 e.connection = connection
+                self._record_command_metric(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise e
             finally:
                 if connection is not None:
@@ -1708,6 +1738,12 @@ class RedisCluster(
 
         e = ClusterError("TTL exhausted.")
         e.connection = connection
+        self._record_command_metric(
+            command_name=command,
+            duration_seconds=time.monotonic() - start_time,
+            connection=connection,
+            error=e,
+        )
         raise e
 
     def _record_command_metric(
@@ -3515,6 +3551,13 @@ class PipelineStrategy(AbstractStrategy):
             for n in node_commands:
                 n.read()
 
+                # Find the first error in this node's commands, if any
+                node_error = None
+                for cmd in n.commands:
+                    if isinstance(cmd.result, Exception):
+                        node_error = cmd.result
+                        break
+
                 record_operation_duration(
                     command_name="PIPELINE",
                     duration_seconds=time.monotonic() - start_time,
@@ -3522,6 +3565,7 @@ class PipelineStrategy(AbstractStrategy):
                     server_port=n.connection.port,
                     db_namespace=str(n.connection.db),
                     batch_size=len(n.commands),
+                    error=node_error,
                 )
         finally:
             # release all of the redis connections we allocated earlier
