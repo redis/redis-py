@@ -1010,7 +1010,6 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 network_peer_port=self.port,
                 error_type=e,
                 retry_attempts=actual_retry_attempts[0],
-                is_internal=True,
             )
             raise e
         except OSError as e:
@@ -1022,7 +1021,6 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
                 network_peer_port=getattr(self, "port", None),
                 error_type=e,
                 retry_attempts=actual_retry_attempts[0],
-                is_internal=True,
             )
             raise e
 
