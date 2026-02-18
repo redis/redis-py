@@ -2686,6 +2686,8 @@ class TransactionStrategy(AbstractStrategy):
                     server_address=self._transaction_connection.host,
                     server_port=self._transaction_connection.port,
                     db_namespace=str(self._transaction_connection.db),
+                    error=r,
+                    batch_size=len(stack),
                 )
 
                 raise r
