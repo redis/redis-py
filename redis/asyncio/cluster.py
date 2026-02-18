@@ -2787,15 +2787,6 @@ class TransactionStrategy(AbstractStrategy):
 
         self._executing = False
 
-        await record_operation_duration(
-            command_name="TRANSACTION",
-            duration_seconds=time.monotonic() - start_time,
-            server_address=connection.host,
-            server_port=connection.port,
-            db_namespace=str(connection.db),
-            batch_size=len(self._command_queue),
-        )
-
         # EXEC clears any watched keys
         self._watching = False
 
@@ -2832,6 +2823,16 @@ class TransactionStrategy(AbstractStrategy):
                         r, **cmd.kwargs
                     )
             data.append(r)
+
+        await record_operation_duration(
+            command_name="TRANSACTION",
+            duration_seconds=time.monotonic() - start_time,
+            server_address=connection.host,
+            server_port=connection.port,
+            db_namespace=str(connection.db),
+            batch_size=len(self._command_queue),
+        )
+
         return data
 
     async def reset(self):
