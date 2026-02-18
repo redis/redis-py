@@ -26,8 +26,12 @@ from typing import (
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
-from ..observability.attributes import AttributeBuilder, DB_CLIENT_CONNECTION_POOL_NAME, DB_CLIENT_CONNECTION_STATE, \
-    ConnectionState
+from ..observability.attributes import (
+    AttributeBuilder,
+    DB_CLIENT_CONNECTION_POOL_NAME,
+    DB_CLIENT_CONNECTION_STATE,
+    ConnectionState,
+)
 from ..utils import SSL_AVAILABLE
 
 if SSL_AVAILABLE:
