@@ -130,7 +130,7 @@ class AttributeBuilder:
 
     @staticmethod
     def build_operation_attributes(
-        command_name: Optional[str] = None,
+        command_name: Optional[Union[str, bytes]] = None,
         batch_size: Optional[int] = None,
         network_peer_address: Optional[str] = None,
         network_peer_port: Optional[int] = None,
@@ -142,7 +142,7 @@ class AttributeBuilder:
         Build attributes for a Redis operation (command execution).
 
         Args:
-            command_name: Redis command name (e.g., 'GET', 'SET', 'MULTI')
+            command_name: Redis command name (e.g., 'GET', 'SET', 'MULTI'), can be str or bytes
             batch_size: Number of commands in batch (for pipelines/transactions)
             network_peer_address: Resolved peer address
             network_peer_port: Peer port number
@@ -156,6 +156,9 @@ class AttributeBuilder:
         attrs: Dict[str, Any] = {}
 
         if command_name is not None:
+            # Ensure command_name is a string (it can be bytes from args[0])
+            if isinstance(command_name, bytes):
+                command_name = command_name.decode("utf-8", errors="replace")
             attrs[DB_OPERATION_NAME] = command_name.upper()
 
         if batch_size is not None:

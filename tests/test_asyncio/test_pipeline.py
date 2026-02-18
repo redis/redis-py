@@ -8,6 +8,12 @@ from tests.conftest import skip_if_server_version_lt
 from .compat import aclosing
 from .conftest import wait_for_command
 
+from unittest.mock import MagicMock, patch, AsyncMock
+from redis.asyncio.client import Pipeline
+from redis.asyncio.observability import recorder as async_recorder
+from redis.observability.config import OTelConfig, MetricGroup
+from redis.observability.metrics import RedisMetricsCollector
+
 
 class TestPipeline:
     async def test_pipeline_is_true(self, r):
@@ -459,3 +465,324 @@ class TestPipeline:
             p_transaction.msetex(
                 {"key1_transaction": "value1", "key2_transaction": "value2"}, ex=10
             )
+
+
+@pytest.mark.asyncio
+class TestAsyncPipelineOperationDurationMetricsRecording:
+    """
+    Unit tests that verify operation duration metrics are properly recorded
+    from async Pipeline via record_operation_duration function calls.
+
+    These tests use fully mocked connection and connection pool - no real Redis
+    or OTel integration is used.
+    """
+
+    @pytest.fixture
+    def mock_async_connection(self):
+        """Create a mock async connection with required attributes."""
+        conn = MagicMock()
+        conn.host = "localhost"
+        conn.port = 6379
+        conn.db = 0
+
+        # Create a real Retry object that just executes the function directly
+        async def mock_call_with_retry(
+            do, fail, is_retryable=None, with_failure_count=False
+        ):
+            return await do()
+
+        conn.retry = MagicMock()
+        conn.retry.call_with_retry = mock_call_with_retry
+        conn.retry.get_retries.return_value = 0
+
+        return conn
+
+    @pytest.fixture
+    def mock_async_connection_pool(self, mock_async_connection):
+        """Create a mock async connection pool."""
+        pool = MagicMock()
+        pool.get_connection = AsyncMock(return_value=mock_async_connection)
+        pool.release = AsyncMock()
+        pool.get_encoder.return_value = MagicMock()
+        pool.get_protocol.return_value = 2
+        return pool
+
+    @pytest.fixture
+    def mock_meter(self):
+        """Create a mock Meter that tracks all instrument calls."""
+        meter = MagicMock()
+
+        # Create mock histogram for operation duration
+        self.operation_duration = MagicMock()
+        # Create mock counter for client errors
+        self.client_errors = MagicMock()
+
+        def create_histogram_side_effect(name, **kwargs):
+            if name == "db.client.operation.duration":
+                return self.operation_duration
+            return MagicMock()
+
+        def create_counter_side_effect(name, **kwargs):
+            if name == "redis.client.errors":
+                return self.client_errors
+            return MagicMock()
+
+        meter.create_counter.side_effect = create_counter_side_effect
+        meter.create_up_down_counter.return_value = MagicMock()
+        meter.create_histogram.side_effect = create_histogram_side_effect
+        meter.create_observable_gauge.return_value = MagicMock()
+
+        return meter
+
+    @pytest.fixture
+    def setup_pipeline_with_otel(
+        self, mock_async_connection_pool, mock_async_connection, mock_meter
+    ):
+        """
+        Setup a Pipeline with mocked connection and OTel collector.
+        Returns tuple of (pipeline, operation_duration_mock).
+        """
+
+        # Reset any existing collector state
+        async_recorder.reset_collector()
+
+        # Create config with COMMAND group enabled
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        # Create collector with mocked meter
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        # Patch the recorder to use our collector
+        with patch.object(
+            async_recorder,
+            "_get_or_create_collector",
+            new=AsyncMock(return_value=collector),
+        ):
+            # Create pipeline with mocked connection pool
+            pipeline = Pipeline(
+                connection_pool=mock_async_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+            )
+
+            yield pipeline, self.operation_duration
+
+        # Cleanup
+        async_recorder.reset_collector()
+
+    async def test_pipeline_execute_records_operation_duration(
+        self, setup_pipeline_with_otel
+    ):
+        """
+        Test that executing a pipeline records operation duration metric
+        which is delivered to the Meter's histogram.record() method.
+        """
+        pipeline, operation_duration_mock = setup_pipeline_with_otel
+
+        # Mock _execute_transaction to return successful responses
+        pipeline._execute_transaction = AsyncMock(return_value=[True, True, b"value1"])
+
+        # Queue commands in the pipeline
+        pipeline.command_stack = [
+            (("SET", "key1", "value1"), {}),
+            (("SET", "key2", "value2"), {}),
+            (("GET", "key1"), {}),
+        ]
+
+        # Execute the pipeline
+        await pipeline.execute()
+
+        # Verify the Meter's histogram.record() was called
+        operation_duration_mock.record.assert_called_once()
+
+        # Get the call arguments
+        call_args = operation_duration_mock.record.call_args
+
+        # Verify duration was recorded (first positional arg)
+        duration = call_args[0][0]
+        assert isinstance(duration, float)
+        assert duration >= 0
+
+        # Verify attributes
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.name"] == "MULTI"
+        assert attrs["db.operation.batch.size"] == 3
+        assert attrs["server.address"] == "localhost"
+        assert attrs["server.port"] == 6379
+        assert attrs["db.namespace"] == "0"
+
+    async def test_pipeline_no_transaction_records_pipeline_command_name(
+        self, mock_async_connection_pool, mock_async_connection, mock_meter
+    ):
+        """
+        Test that executing a pipeline without transaction
+        records metric with command_name='PIPELINE'.
+        """
+        async_recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with patch.object(
+            async_recorder,
+            "_get_or_create_collector",
+            new=AsyncMock(return_value=collector),
+        ):
+            # Create pipeline with transaction=False
+            pipeline = Pipeline(
+                connection_pool=mock_async_connection_pool,
+                response_callbacks={},
+                transaction=False,  # Non-transaction mode
+                shard_hint=None,
+            )
+
+            pipeline._execute_pipeline = AsyncMock(return_value=[True, True])
+            pipeline.command_stack = [
+                (("SET", "key1", "value1"), {}),
+                (("SET", "key2", "value2"), {}),
+            ]
+
+            await pipeline.execute()
+
+            # Verify command name is PIPELINE
+            call_args = self.operation_duration.record.call_args
+            attrs = call_args[1]["attributes"]
+            assert attrs["db.operation.name"] == "PIPELINE"
+
+        async_recorder.reset_collector()
+
+    async def test_pipeline_batch_size_recorded_correctly(
+        self, setup_pipeline_with_otel
+    ):
+        """
+        Test that the batch_size attribute correctly reflects
+        the number of commands in the pipeline.
+        """
+        pipeline, operation_duration_mock = setup_pipeline_with_otel
+
+        pipeline._execute_transaction = AsyncMock(
+            return_value=[True, True, True, True, True]
+        )
+
+        # Queue exactly 5 commands
+        pipeline.command_stack = [
+            (("SET", "key1", "v1"), {}),
+            (("SET", "key2", "v2"), {}),
+            (("SET", "key3", "v3"), {}),
+            (("SET", "key4", "v4"), {}),
+            (("SET", "key5", "v5"), {}),
+        ]
+
+        await pipeline.execute()
+
+        # Verify batch_size is 5
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]["attributes"]
+        assert attrs["db.operation.batch.size"] == 5
+
+    async def test_pipeline_server_attributes_recorded(self, setup_pipeline_with_otel):
+        """
+        Test that server address, port, and db namespace are correctly recorded.
+        """
+        pipeline, operation_duration_mock = setup_pipeline_with_otel
+
+        pipeline._execute_transaction = AsyncMock(return_value=[True])
+        pipeline.command_stack = [(("PING",), {})]
+
+        await pipeline.execute()
+
+        call_args = operation_duration_mock.record.call_args
+        attrs = call_args[1]["attributes"]
+
+        # Verify server attributes match mock connection
+        assert attrs["server.address"] == "localhost"
+        assert attrs["server.port"] == 6379
+        assert attrs["db.namespace"] == "0"
+
+    async def test_multiple_pipeline_executions_record_multiple_metrics(
+        self, mock_async_connection_pool, mock_async_connection, mock_meter
+    ):
+        """
+        Test that each pipeline execution records a separate metric to the Meter.
+        """
+        async_recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with patch.object(
+            async_recorder,
+            "_get_or_create_collector",
+            new=AsyncMock(return_value=collector),
+        ):
+            # First pipeline execution
+            pipeline1 = Pipeline(
+                connection_pool=mock_async_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+            )
+            pipeline1._execute_transaction = AsyncMock(return_value=[True])
+            pipeline1.command_stack = [(("SET", "key1", "value1"), {})]
+            await pipeline1.execute()
+
+            # Second pipeline execution
+            pipeline2 = Pipeline(
+                connection_pool=mock_async_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+            )
+            pipeline2._execute_transaction = AsyncMock(return_value=[True, True])
+            pipeline2.command_stack = [
+                (("SET", "key2", "value2"), {}),
+                (("SET", "key3", "value3"), {}),
+            ]
+            await pipeline2.execute()
+
+            # Verify histogram.record() was called twice
+            assert self.operation_duration.record.call_count == 2
+
+        async_recorder.reset_collector()
+
+    async def test_empty_pipeline_does_not_record_metric(
+        self, mock_async_connection_pool, mock_async_connection, mock_meter
+    ):
+        """
+        Test that an empty pipeline (no commands) does not record a metric.
+        """
+        async_recorder.reset_collector()
+        config = OTelConfig(metric_groups=[MetricGroup.COMMAND])
+
+        with patch("redis.observability.metrics.OTEL_AVAILABLE", True):
+            collector = RedisMetricsCollector(mock_meter, config)
+
+        with patch.object(
+            async_recorder,
+            "_get_or_create_collector",
+            new=AsyncMock(return_value=collector),
+        ):
+            pipeline = Pipeline(
+                connection_pool=mock_async_connection_pool,
+                response_callbacks={},
+                transaction=True,
+                shard_hint=None,
+            )
+
+            # Empty command stack
+            pipeline.command_stack = []
+
+            # Execute empty pipeline
+            result = await pipeline.execute()
+
+            # Should return empty list
+            assert result == []
+
+            # No metric should be recorded for empty pipeline
+            self.operation_duration.record.assert_not_called()
+
+        async_recorder.reset_collector()
