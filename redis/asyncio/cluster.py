@@ -35,6 +35,7 @@ from redis._parsers.helpers import (
 from redis.asyncio.client import ResponseCallbackT
 from redis.asyncio.connection import Connection, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
+from redis.asyncio.observability.recorder import record_error_count
 from redis.asyncio.retry import Retry
 from redis.auth.token import TokenInterface
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
@@ -817,6 +818,27 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             )
         return nodes
 
+    async def _emit_on_error_event(
+        self,
+        error: Exception,
+        connection: Union[Connection, "ClusterNode"],
+        is_internal: bool = True,
+        retry_attempts: Optional[int] = None,
+    ):
+        """
+        Records error count metric directly.
+        Accepts either a Connection or ClusterNode object.
+        """
+        await record_error_count(
+            server_address=connection.host,
+            server_port=connection.port,
+            network_peer_address=connection.host,
+            network_peer_port=connection.port,
+            error_type=error,
+            retry_attempts=retry_attempts if retry_attempts is not None else 0,
+            is_internal=is_internal,
+        )
+
     async def execute_command(self, *args: EncodableT, **kwargs: Any) -> Any:
         """
         Execute a raw command on the appropriate cluster node or target_nodes.
@@ -875,6 +897,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
         # Add one for the first execution
         execute_attempts = 1 + retry_attempts
+        failure_count = 0
         for _ in range(execute_attempts):
             if self._initialize:
                 await self.initialize()
@@ -929,9 +952,24 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     # The nodes and slots cache were should be reinitialized.
                     # Try again with the new cluster setup.
                     retry_attempts -= 1
+                    failure_count += 1
+
+                    if hasattr(e, "connection"):
+                        await self._emit_on_error_event(
+                            error=e,
+                            connection=e.connection,
+                            retry_attempts=failure_count,
+                        )
                     continue
                 else:
                     # raise the exception
+                    if hasattr(e, "connection"):
+                        await self._emit_on_error_event(
+                            error=e,
+                            connection=e.connection,
+                            retry_attempts=failure_count,
+                            is_internal=False,
+                        )
                     raise e
 
     async def _execute_command(
@@ -962,15 +1000,17 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     moved = False
 
                 return await target_node.execute_command(*args, **kwargs)
-            except BusyLoadingError:
+            except BusyLoadingError as e:
+                e.connection = target_node
                 raise
-            except MaxConnectionsError:
+            except MaxConnectionsError as e:
                 # MaxConnectionsError indicates client-side resource exhaustion
                 # (too many connections in the pool), not a node failure.
                 # Don't treat this as a node failure - just re-raise the error
                 # without reinitializing the cluster.
+                e.connection = target_node
                 raise
-            except (ConnectionError, TimeoutError):
+            except (ConnectionError, TimeoutError) as e:
                 # Connection retries are being handled in the node's
                 # Retry object.
                 # Mark active connections for reconnect and disconnect free ones
@@ -985,8 +1025,9 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 # Signal that reinitialization is needed
                 # The retry loop will handle initialize() AND replace_default_node()
                 self._initialize = True
+                e.connection = target_node
                 raise
-            except (ClusterDownError, SlotNotCoveredError):
+            except (ClusterDownError, SlotNotCoveredError) as e:
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
@@ -998,6 +1039,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
 
                 await self.aclose()
                 await asyncio.sleep(0.25)
+                e.connection = target_node
                 raise
             except MovedError as e:
                 # First, we will try to patch the slots/nodes cache with the
@@ -1019,14 +1061,34 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 else:
                     self.nodes_manager.move_slot(e)
                 moved = True
+                await self._emit_on_error_event(
+                    error=e,
+                    connection=target_node,
+                )
             except AskError as e:
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
-            except TryAgainError:
+                await self._emit_on_error_event(
+                    error=e,
+                    connection=target_node,
+                )
+            except TryAgainError as e:
                 if ttl < self.RedisClusterRequestTTL / 2:
                     await asyncio.sleep(0.05)
+                await self._emit_on_error_event(
+                    error=e,
+                    connection=target_node,
+                )
+            except ResponseError as e:
+                e.connection = target_node
+                raise
+            except Exception as e:
+                e.connection = target_node
+                raise
 
-        raise ClusterError("TTL exhausted.")
+        e = ClusterError("TTL exhausted.")
+        e.connection = target_node
+        raise e
 
     def pipeline(
         self, transaction: Optional[Any] = None, shard_hint: Optional[Any] = None
@@ -2433,6 +2495,7 @@ class TransactionStrategy(AbstractStrategy):
         return await self._retry.call_with_retry(
             lambda: self._get_connection_and_send_command(*args, **options),
             self._reinitialize_on_error,
+            with_failure_count=True,
         )
 
     async def _get_connection_and_send_command(self, *args, **options):
@@ -2440,9 +2503,13 @@ class TransactionStrategy(AbstractStrategy):
         # Only disconnect if not watching - disconnecting would lose WATCH state
         if not self._watching:
             await redis_node.disconnect_if_needed(connection)
-        return await self._send_command_parse_response(
-            connection, redis_node, args[0], *args, **options
-        )
+        try:
+            return await self._send_command_parse_response(
+                connection, redis_node, args[0], *args, **options
+            )
+        except Exception as e:
+            e.connection = connection
+            raise
 
     async def _send_command_parse_response(
         self,
@@ -2463,7 +2530,18 @@ class TransactionStrategy(AbstractStrategy):
             self._watching = False
         return output
 
-    async def _reinitialize_on_error(self, error):
+    async def _reinitialize_on_error(self, error, failure_count):
+        if hasattr(error, "connection"):
+            await record_error_count(
+                server_address=error.connection.host,
+                server_port=error.connection.port,
+                network_peer_address=error.connection.host,
+                network_peer_port=error.connection.port,
+                error_type=error,
+                retry_attempts=failure_count,
+                is_internal=True,
+            )
+
         if self._watching:
             if type(error) in self.SLOT_REDIRECT_ERRORS and self._executing:
                 raise WatchError("Slot rebalancing occurred while watching keys")
@@ -2521,7 +2599,10 @@ class TransactionStrategy(AbstractStrategy):
     ):
         return await self._retry.call_with_retry(
             lambda: self._execute_transaction(stack, raise_on_error),
-            self._reinitialize_on_error,
+            lambda error, failure_count: self._reinitialize_on_error(
+                error, failure_count
+            ),
+            with_failure_count=True,
         )
 
     async def _execute_transaction(
@@ -2560,6 +2641,7 @@ class TransactionStrategy(AbstractStrategy):
             errors.append(e)
         except self.CONNECTION_ERRORS as cluster_error:
             self._annotate_exception(cluster_error, 0, "MULTI")
+            cluster_error.connection = connection
             raise
 
         # and all the other commands
@@ -2574,6 +2656,7 @@ class TransactionStrategy(AbstractStrategy):
                     errors.append(slot_error)
                 except self.CONNECTION_ERRORS as cluster_error:
                     self._annotate_exception(cluster_error, i + 1, command.args)
+                    cluster_error.connection = connection
                     raise
                 except ResponseError as e:
                     self._annotate_exception(e, i + 1, command.args)

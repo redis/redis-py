@@ -26,6 +26,12 @@ from typing import (
 )
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
+from ..observability.attributes import (
+    DB_CLIENT_CONNECTION_POOL_NAME,
+    DB_CLIENT_CONNECTION_STATE,
+    AttributeBuilder,
+    ConnectionState,
+)
 from ..utils import SSL_AVAILABLE
 
 if SSL_AVAILABLE:
@@ -49,6 +55,7 @@ if sys.version_info >= (3, 11, 3):
 else:
     from async_timeout import timeout as async_timeout
 
+from redis.asyncio.observability.recorder import record_error_count
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.connection import DEFAULT_RESP_VERSION
@@ -325,7 +332,10 @@ class AbstractConnection:
             lambda: self.connect_check_health(
                 check_health=True, retry_socket_connect=False
             ),
-            lambda error: self.disconnect(),
+            lambda error, failure_count: self.disconnect(
+                error=error, failure_count=failure_count
+            ),
+            with_failure_count=True,
         )
 
     async def connect_check_health(
@@ -333,19 +343,48 @@ class AbstractConnection:
     ):
         if self.is_connected:
             return
+        # Track actual retry attempts for error reporting
+        actual_retry_attempts = [0]
+
+        def failure_callback(error, failure_count):
+            actual_retry_attempts[0] = failure_count
+            return self.disconnect(error=error, failure_count=failure_count)
+
         try:
             if retry_socket_connect:
                 await self.retry.call_with_retry(
-                    lambda: self._connect(), lambda error: self.disconnect()
+                    lambda: self._connect(),
+                    failure_callback,
+                    with_failure_count=True,
                 )
             else:
                 await self._connect()
         except asyncio.CancelledError:
             raise  # in 3.7 and earlier, this is an Exception, not BaseException
         except (socket.timeout, asyncio.TimeoutError):
-            raise TimeoutError("Timeout connecting to server")
+            e = TimeoutError("Timeout connecting to server")
+            await record_error_count(
+                server_address=self.host,
+                server_port=self.port,
+                network_peer_address=self.host,
+                network_peer_port=self.port,
+                error_type=e,
+                retry_attempts=actual_retry_attempts[0],
+                is_internal=False,
+            )
+            raise e
         except OSError as e:
-            raise ConnectionError(self._error_message(e))
+            e = ConnectionError(self._error_message(e))
+            await record_error_count(
+                server_address=getattr(self, "host", None),
+                server_port=getattr(self, "port", None),
+                network_peer_address=getattr(self, "host", None),
+                network_peer_port=getattr(self, "port", None),
+                error_type=e,
+                retry_attempts=actual_retry_attempts[0],
+                is_internal=False,
+            )
+            raise e
         except Exception as exc:
             raise ConnectionError(exc) from exc
 
@@ -517,7 +556,13 @@ class AbstractConnection:
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    async def disconnect(self, nowait: bool = False) -> None:
+    async def disconnect(
+        self,
+        nowait: bool = False,
+        error: Optional[Exception] = None,
+        failure_count: Optional[int] = None,
+        health_check_failed: bool = False,
+    ) -> None:
         """Disconnects from the Redis server"""
         try:
             async with async_timeout(self.socket_connect_timeout):
@@ -542,15 +587,28 @@ class AbstractConnection:
                 f"Timed out closing connection after {self.socket_connect_timeout}"
             ) from None
 
+        if error:
+            if failure_count is not None and failure_count > self.retry.get_retries():
+                await record_error_count(
+                    server_address=self.host,
+                    server_port=self.port,
+                    network_peer_address=self.host,
+                    network_peer_port=self.port,
+                    error_type=error,
+                    retry_attempts=failure_count,
+                )
+
     async def _send_ping(self):
         """Send PING, expect PONG in return"""
         await self.send_command("PING", check_health=False)
         if str_if_bytes(await self.read_response()) != "PONG":
             raise ConnectionError("Bad response from PING health check")
 
-    async def _ping_failed(self, error):
+    async def _ping_failed(self, error, failure_count):
         """Function to call when PING fails"""
-        await self.disconnect()
+        await self.disconnect(
+            error=error, failure_count=failure_count, health_check_failed=True
+        )
 
     async def check_health(self):
         """Check the health of the connection with a PING/PONG"""
@@ -558,7 +616,9 @@ class AbstractConnection:
             self.health_check_interval
             and asyncio.get_running_loop().time() > self.next_health_check
         ):
-            await self.retry.call_with_retry(self._send_ping, self._ping_failed)
+            await self.retry.call_with_retry(
+                self._send_ping, self._ping_failed, with_failure_count=True
+            )
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:
         self._writer.writelines(command)
@@ -1377,6 +1437,29 @@ class ConnectionPool:
         :return:
         """
         pass
+
+    def get_connection_count(self) -> List[tuple[int, dict]]:
+        """
+        Returns a connection count (both idle and in use).
+        """
+        from redis.observability.attributes import get_pool_name
+
+        attributes = AttributeBuilder.build_base_attributes()
+        attributes[DB_CLIENT_CONNECTION_POOL_NAME] = get_pool_name(self)
+        free_connections_attributes = attributes.copy()
+        in_use_connections_attributes = attributes.copy()
+
+        free_connections_attributes[DB_CLIENT_CONNECTION_STATE] = (
+            ConnectionState.IDLE.value
+        )
+        in_use_connections_attributes[DB_CLIENT_CONNECTION_STATE] = (
+            ConnectionState.USED.value
+        )
+
+        return [
+            (len(self._available_connections), free_connections_attributes),
+            (len(self._in_use_connections), in_use_connections_attributes),
+        ]
 
 
 class BlockingConnectionPool(ConnectionPool):

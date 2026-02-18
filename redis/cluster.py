@@ -3867,7 +3867,7 @@ class TransactionStrategy(AbstractStrategy):
                 network_peer_port=error.connection.port,
                 error_type=error,
                 retry_attempts=failure_count,
-                is_internal=False,
+                is_internal=True,
             )
 
         if self._watching:
