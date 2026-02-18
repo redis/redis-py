@@ -2,7 +2,6 @@ import asyncio
 import copy
 import inspect
 import re
-import time
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -39,6 +38,7 @@ from redis.asyncio.connection import (
     UnixDomainSocketConnection,
 )
 from redis.asyncio.lock import Lock
+from redis.asyncio.observability.recorder import record_error_count
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import (
@@ -80,7 +80,6 @@ from redis.utils import (
     str_if_bytes,
     truncate_text,
 )
-from redis.asyncio.observability.recorder import record_error_count
 
 if TYPE_CHECKING and SSL_AVAILABLE:
     from ssl import TLSVersion, VerifyFlags, VerifyMode

@@ -236,4 +236,3 @@ class TestAsyncRedisClientErrorMetricsRecording:
             assert attrs[SERVER_PORT] == 6379
 
         async_recorder.reset_collector()
-

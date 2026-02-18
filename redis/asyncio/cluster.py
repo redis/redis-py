@@ -35,6 +35,7 @@ from redis._parsers.helpers import (
 from redis.asyncio.client import ResponseCallbackT
 from redis.asyncio.connection import Connection, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
+from redis.asyncio.observability.recorder import record_error_count
 from redis.asyncio.retry import Retry
 from redis.auth.token import TokenInterface
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
@@ -76,7 +77,6 @@ from redis.exceptions import (
     TryAgainError,
     WatchError,
 )
-from redis.asyncio.observability.recorder import record_error_count
 from redis.typing import AnyKeyT, EncodableT, KeyT
 from redis.utils import (
     SSL_AVAILABLE,

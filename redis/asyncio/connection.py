@@ -27,9 +27,9 @@ from typing import (
 from urllib.parse import ParseResult, parse_qs, unquote, urlparse
 
 from ..observability.attributes import (
-    AttributeBuilder,
     DB_CLIENT_CONNECTION_POOL_NAME,
     DB_CLIENT_CONNECTION_STATE,
+    AttributeBuilder,
     ConnectionState,
 )
 from ..utils import SSL_AVAILABLE
@@ -55,6 +55,7 @@ if sys.version_info >= (3, 11, 3):
 else:
     from async_timeout import timeout as async_timeout
 
+from redis.asyncio.observability.recorder import record_error_count
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.connection import DEFAULT_RESP_VERSION
@@ -79,7 +80,6 @@ from .._parsers import (
     _AsyncRESP2Parser,
     _AsyncRESP3Parser,
 )
-from redis.asyncio.observability.recorder import record_error_count
 
 SYM_STAR = b"*"
 SYM_DOLLAR = b"$"

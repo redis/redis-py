@@ -385,7 +385,9 @@ class TestRecordErrorCount:
         assert attrs[ERROR_TYPE] == "ConnectionError"
         assert attrs[REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS] == 3
 
-    async def test_record_error_count_with_is_internal_false(self, setup_async_recorder):
+    async def test_record_error_count_with_is_internal_false(
+        self, setup_async_recorder
+    ):
         """Test recording error count with is_internal=False."""
         instruments = setup_async_recorder
 
