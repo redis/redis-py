@@ -332,7 +332,10 @@ class AbstractConnection:
             lambda: self.connect_check_health(
                 check_health=True, retry_socket_connect=False
             ),
-            lambda error: self.disconnect(),
+            lambda error, failure_count: self.disconnect(
+                error=error, failure_count=failure_count
+            ),
+            with_failure_count=True,
         )
 
     async def connect_check_health(
@@ -343,7 +346,11 @@ class AbstractConnection:
         try:
             if retry_socket_connect:
                 await self.retry.call_with_retry(
-                    lambda: self._connect(), lambda error: self.disconnect()
+                    lambda: self._connect(),
+                    lambda error, failure_count: self.disconnect(
+                        error=error, failure_count=failure_count
+                    ),
+                    with_failure_count=True,
                 )
             else:
                 await self._connect()
@@ -592,9 +599,11 @@ class AbstractConnection:
         if str_if_bytes(await self.read_response()) != "PONG":
             raise ConnectionError("Bad response from PING health check")
 
-    async def _ping_failed(self, error):
+    async def _ping_failed(self, error, failure_count):
         """Function to call when PING fails"""
-        await self.disconnect()
+        await self.disconnect(
+            error=error, failure_count=failure_count, health_check_failed=True
+        )
 
     async def check_health(self):
         """Check the health of the connection with a PING/PONG"""
@@ -602,7 +611,9 @@ class AbstractConnection:
             self.health_check_interval
             and asyncio.get_running_loop().time() > self.next_health_check
         ):
-            await self.retry.call_with_retry(self._send_ping, self._ping_failed)
+            await self.retry.call_with_retry(
+                self._send_ping, self._ping_failed, with_failure_count=True
+            )
 
     async def _send_packed_command(self, command: Iterable[bytes]) -> None:
         self._writer.writelines(command)

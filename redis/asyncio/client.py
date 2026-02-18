@@ -715,7 +715,12 @@ class Redis(
         await conn.send_command(*args)
         return await self.parse_response(conn, command_name, **options)
 
-    async def _close_connection(self, conn: Connection):
+    async def _close_connection(
+        self,
+        conn: Connection,
+        error: Optional[BaseException] = None,
+        failure_count: Optional[int] = None,
+    ):
         """
         Close the connection before retrying.
 
@@ -725,7 +730,7 @@ class Redis(
         After we disconnect the connection, it will try to reconnect and
         do a health check as part of the send_command logic(on connection level).
         """
-        await conn.disconnect()
+        await conn.disconnect(error=error, failure_count=failure_count)
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
     async def execute_command(self, *args, **options):
@@ -740,7 +745,7 @@ class Redis(
 
         def failure_callback(error, failure_count):
             actual_retry_attempts[0] = failure_count
-            return self._close_connection(conn)
+            return self._close_connection(conn, error, failure_count)
 
         if self.single_connection_client:
             await self._single_conn_lock.acquire()
@@ -1029,11 +1034,16 @@ class PubSub:
             )
         )
 
-    async def _reconnect(self, conn):
+    async def _reconnect(
+        self,
+        conn,
+        error: Optional[BaseException] = None,
+        failure_count: Optional[int] = None,
+    ):
         """
         Try to reconnect
         """
-        await conn.disconnect()
+        await conn.disconnect(error=error, failure_count=failure_count)
         await conn.connect()
 
     async def _execute(self, conn, command, *args, **kwargs):
@@ -1054,7 +1064,7 @@ class PubSub:
 
         def failure_callback(error, failure_count):
             actual_retry_attempts[0] = failure_count
-            return self._reconnect(conn)
+            return self._reconnect(conn, error, failure_count)
 
         try:
             return await conn.retry.call_with_retry(
@@ -1692,7 +1702,12 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 if not exist:
                     s.sha = await immediate("SCRIPT LOAD", s.script)
 
-    async def _disconnect_raise_on_watching(self, conn: Connection, error: Exception):
+    async def _disconnect_raise_on_watching(
+        self,
+        conn: Connection,
+        error: Exception,
+        failure_count: Optional[int] = None,
+    ):
         """
         Close the connection, raise an exception if we were watching.
 
@@ -1702,7 +1717,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         After we disconnect the connection, it will try to reconnect and
         do a health check as part of the send_command logic(on connection level).
         """
-        await conn.disconnect()
+        await conn.disconnect(error=error, failure_count=failure_count)
         # if we were watching a variable, the watch is no longer valid
         # since this connection has died. raise a WatchError, which
         # indicates the user should retry this transaction.
@@ -1739,7 +1754,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
 
         def failure_callback(error, failure_count):
             actual_retry_attempts[0] = failure_count
-            return self._disconnect_raise_on_watching(conn, error)
+            return self._disconnect_raise_on_watching(conn, error, failure_count)
 
         try:
             return await conn.retry.call_with_retry(
