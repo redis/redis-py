@@ -11,6 +11,7 @@ from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.multidb.circuit import State as CBState
 from redis.multidb.failure_detector import CommandFailureDetector
+from redis.observability.attributes import GeoFailoverReason
 from tests.test_asyncio.test_multidb.conftest import create_weighted_list
 
 
@@ -43,10 +44,10 @@ class TestDefaultCommandExecutor:
             command_retry=Retry(NoBackoff(), 0),
         )
 
-        await executor.set_active_database(mock_db1)
+        await executor.set_active_database(mock_db1, GeoFailoverReason.MANUAL)
         assert await executor.execute_command("SET", "key", "value") == "OK1"
 
-        await executor.set_active_database(mock_db2)
+        await executor.set_active_database(mock_db2, GeoFailoverReason.MANUAL)
         assert await executor.execute_command("SET", "key", "value") == "OK2"
         assert mock_ed.register_listeners.call_count == 1
         assert mock_fd.register_command_execution.call_count == 2

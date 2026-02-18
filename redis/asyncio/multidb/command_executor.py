@@ -20,11 +20,13 @@ from redis.asyncio.multidb.failover import (
     FailoverStrategyExecutor,
 )
 from redis.asyncio.multidb.failure_detector import AsyncFailureDetector
+from redis.asyncio.observability.recorder import record_geo_failover
 from redis.asyncio.retry import Retry
 from redis.event import AsyncOnCommandsFailEvent, EventDispatcherInterface
 from redis.multidb.circuit import State as CBState
 from redis.multidb.command_executor import BaseCommandExecutor, CommandExecutor
 from redis.multidb.config import DEFAULT_AUTO_FALLBACK_INTERVAL
+from redis.observability.attributes import GeoFailoverReason
 from redis.typing import KeyT
 
 
@@ -53,11 +55,14 @@ class AsyncCommandExecutor(CommandExecutor):
         pass
 
     @abstractmethod
-    async def set_active_database(self, database: AsyncDatabase) -> None:
+    async def set_active_database(
+        self, database: AsyncDatabase, reason: GeoFailoverReason
+    ) -> None:
         """Sets the currently active database.
 
         Args:
             database: The new active database.
+            reason: The reason for the failover.
         """
         pass
 
@@ -176,11 +181,18 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
     def active_database(self) -> Optional[AsyncDatabase]:
         return self._active_database
 
-    async def set_active_database(self, database: AsyncDatabase) -> None:
+    async def set_active_database(
+        self, database: AsyncDatabase, reason: GeoFailoverReason
+    ) -> None:
         old_active = self._active_database
         self._active_database = database
 
         if old_active is not None and old_active is not database:
+            await record_geo_failover(
+                fail_from=old_active,
+                fail_to=database,
+                reason=reason,
+            )
             await self._event_dispatcher.dispatch_async(
                 AsyncActiveDatabaseChanged(
                     old_active,
@@ -312,7 +324,8 @@ class DefaultCommandExecutor(BaseCommandExecutor, AsyncCommandExecutor):
             )
         ):
             await self.set_active_database(
-                await self._failover_strategy_executor.execute()
+                await self._failover_strategy_executor.execute(),
+                GeoFailoverReason.AUTOMATIC,
             )
             self._schedule_next_fallback()
 
