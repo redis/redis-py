@@ -1475,14 +1475,14 @@ class RedisCluster(
                     failure_count += 1
 
                     if hasattr(e, "connection"):
-                        self._emit_after_command_execution_event(
+                        self._record_command_metric(
                             command_name=args[0],
                             duration_seconds=time.monotonic() - start_time,
                             connection=e.connection,
                             error=e,
                         )
 
-                        self._emit_on_error_event(
+                        self._record_error_metric(
                             error=e,
                             connection=e.connection,
                             retry_attempts=failure_count,
@@ -1491,7 +1491,7 @@ class RedisCluster(
                 else:
                     # raise the exception
                     if hasattr(e, "connection"):
-                        self._emit_on_error_event(
+                        self._record_error_metric(
                             error=e,
                             connection=e.connection,
                             retry_attempts=failure_count,
@@ -1549,7 +1549,7 @@ class RedisCluster(
                         response, **kwargs
                     )
 
-                self._emit_after_command_execution_event(
+                self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=connection,
@@ -1620,13 +1620,13 @@ class RedisCluster(
                 else:
                     self.nodes_manager.move_slot(e)
                 moved = True
-                self._emit_after_command_execution_event(
+                self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=connection,
                     error=e,
                 )
-                self._emit_on_error_event(
+                self._record_error_metric(
                     error=e,
                     connection=connection,
                 )
@@ -1641,13 +1641,13 @@ class RedisCluster(
                 if ttl < self.RedisClusterRequestTTL / 2:
                     time.sleep(0.05)
 
-                self._emit_after_command_execution_event(
+                self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=connection,
                     error=e,
                 )
-                self._emit_on_error_event(
+                self._record_error_metric(
                     error=e,
                     connection=connection,
                 )
@@ -1662,13 +1662,13 @@ class RedisCluster(
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
 
-                self._emit_after_command_execution_event(
+                self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=connection,
                     error=e,
                 )
-                self._emit_on_error_event(
+                self._record_error_metric(
                     error=e,
                     connection=connection,
                 )
@@ -1689,7 +1689,7 @@ class RedisCluster(
                 raise
             except ResponseError as e:
                 e.connection = connection
-                self._emit_after_command_execution_event(
+                self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=connection,
@@ -1710,7 +1710,7 @@ class RedisCluster(
         e.connection = connection
         raise e
 
-    def _emit_after_command_execution_event(
+    def _record_command_metric(
         self,
         command_name: str,
         duration_seconds: float,
@@ -1729,7 +1729,7 @@ class RedisCluster(
             error=error,
         )
 
-    def _emit_on_error_event(
+    def _record_error_metric(
         self,
         error: Exception,
         connection: Connection,

@@ -821,7 +821,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             )
         return nodes
 
-    async def _emit_on_error_event(
+    async def _record_error_metric(
         self,
         error: Exception,
         connection: Union[Connection, "ClusterNode"],
@@ -842,7 +842,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             is_internal=is_internal,
         )
 
-    async def _emit_after_command_execution_event(
+    async def _record_command_metric(
         self,
         command_name: str,
         duration_seconds: float,
@@ -982,13 +982,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     failure_count += 1
 
                     if hasattr(e, "connection"):
-                        await self._emit_after_command_execution_event(
+                        await self._record_command_metric(
                             command_name=command,
                             duration_seconds=time.monotonic() - start_time,
                             connection=e.connection,
                             error=e,
                         )
-                        await self._emit_on_error_event(
+                        await self._record_error_metric(
                             error=e,
                             connection=e.connection,
                             retry_attempts=failure_count,
@@ -997,7 +997,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 else:
                     # raise the exception
                     if hasattr(e, "connection"):
-                        await self._emit_on_error_event(
+                        await self._record_error_metric(
                             error=e,
                             connection=e.connection,
                             retry_attempts=failure_count,
@@ -1035,7 +1035,7 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     moved = False
 
                 response = await target_node.execute_command(*args, **kwargs)
-                await self._emit_after_command_execution_event(
+                await self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=target_node,
@@ -1102,45 +1102,45 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 else:
                     self.nodes_manager.move_slot(e)
                 moved = True
-                await self._emit_after_command_execution_event(
+                await self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=target_node,
                     error=e,
                 )
-                await self._emit_on_error_event(
+                await self._record_error_metric(
                     error=e,
                     connection=target_node,
                 )
             except AskError as e:
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
-                await self._emit_after_command_execution_event(
+                await self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=target_node,
                     error=e,
                 )
-                await self._emit_on_error_event(
+                await self._record_error_metric(
                     error=e,
                     connection=target_node,
                 )
             except TryAgainError as e:
                 if ttl < self.RedisClusterRequestTTL / 2:
                     await asyncio.sleep(0.05)
-                await self._emit_after_command_execution_event(
+                await self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=target_node,
                     error=e,
                 )
-                await self._emit_on_error_event(
+                await self._record_error_metric(
                     error=e,
                     connection=target_node,
                 )
             except ResponseError as e:
                 e.connection = target_node
-                await self._emit_after_command_execution_event(
+                await self._record_command_metric(
                     command_name=command,
                     duration_seconds=time.monotonic() - start_time,
                     connection=target_node,
