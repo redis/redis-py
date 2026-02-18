@@ -35,7 +35,10 @@ from redis._parsers.helpers import (
 from redis.asyncio.client import ResponseCallbackT
 from redis.asyncio.connection import Connection, SSLConnection, parse_url
 from redis.asyncio.lock import Lock
-from redis.asyncio.observability.recorder import record_error_count
+from redis.asyncio.observability.recorder import (
+    record_error_count,
+    record_operation_duration,
+)
 from redis.asyncio.retry import Retry
 from redis.auth.token import TokenInterface
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff
@@ -839,6 +842,26 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             is_internal=is_internal,
         )
 
+    async def _emit_after_command_execution_event(
+        self,
+        command_name: str,
+        duration_seconds: float,
+        connection: Union[Connection, "ClusterNode"],
+        error: Optional[Exception] = None,
+    ):
+        """
+        Records operation duration metric directly.
+        Accepts either a Connection or ClusterNode object.
+        """
+        await record_operation_duration(
+            command_name=command_name,
+            duration_seconds=duration_seconds,
+            server_address=connection.host,
+            server_port=connection.port,
+            db_namespace=str(connection.db),
+            error=error,
+        )
+
     async def execute_command(self, *args: EncodableT, **kwargs: Any) -> Any:
         """
         Execute a raw command on the appropriate cluster node or target_nodes.
@@ -898,6 +921,10 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         # Add one for the first execution
         execute_attempts = 1 + retry_attempts
         failure_count = 0
+
+        # Start timing for observability
+        start_time = time.monotonic()
+
         for _ in range(execute_attempts):
             if self._initialize:
                 await self.initialize()
@@ -955,6 +982,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     failure_count += 1
 
                     if hasattr(e, "connection"):
+                        await self._emit_after_command_execution_event(
+                            command_name=command,
+                            duration_seconds=time.monotonic() - start_time,
+                            connection=e.connection,
+                            error=e,
+                        )
                         await self._emit_on_error_event(
                             error=e,
                             connection=e.connection,
@@ -978,6 +1011,8 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         asking = moved = False
         redirect_addr = None
         ttl = self.RedisClusterRequestTTL
+        command = args[0]
+        start_time = time.monotonic()
 
         while ttl > 0:
             ttl -= 1
@@ -999,7 +1034,13 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                     )
                     moved = False
 
-                return await target_node.execute_command(*args, **kwargs)
+                response = await target_node.execute_command(*args, **kwargs)
+                await self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=target_node,
+                )
+                return response
             except BusyLoadingError as e:
                 e.connection = target_node
                 raise
@@ -1061,6 +1102,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
                 else:
                     self.nodes_manager.move_slot(e)
                 moved = True
+                await self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=target_node,
+                    error=e,
+                )
                 await self._emit_on_error_event(
                     error=e,
                     connection=target_node,
@@ -1068,6 +1115,12 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             except AskError as e:
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
+                await self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=target_node,
+                    error=e,
+                )
                 await self._emit_on_error_event(
                     error=e,
                     connection=target_node,
@@ -1075,12 +1128,24 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
             except TryAgainError as e:
                 if ttl < self.RedisClusterRequestTTL / 2:
                     await asyncio.sleep(0.05)
+                await self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=target_node,
+                    error=e,
+                )
                 await self._emit_on_error_event(
                     error=e,
                     connection=target_node,
                 )
             except ResponseError as e:
                 e.connection = target_node
+                await self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=target_node,
+                    error=e,
+                )
                 raise
             except Exception as e:
                 e.connection = target_node
@@ -2287,12 +2352,26 @@ class PipelineStrategy(AbstractStrategy):
                 nodes[node.name] = (node, [])
             nodes[node.name][1].append(cmd)
 
+        # Start timing for observability
+        start_time = time.monotonic()
+
         errors = await asyncio.gather(
             *(
                 asyncio.create_task(node[0].execute_pipeline(node[1]))
                 for node in nodes.values()
             )
         )
+
+        # Record operation duration for each node
+        for node_name, (node, commands) in nodes.items():
+            await record_operation_duration(
+                command_name="PIPELINE",
+                duration_seconds=time.monotonic() - start_time,
+                server_address=node.host,
+                server_port=node.port,
+                db_namespace=str(node.db),
+                batch_size=len(commands),
+            )
 
         if any(errors):
             if allow_redirections:
@@ -2503,12 +2582,34 @@ class TransactionStrategy(AbstractStrategy):
         # Only disconnect if not watching - disconnecting would lose WATCH state
         if not self._watching:
             await redis_node.disconnect_if_needed(connection)
+
+        # Start timing for observability
+        start_time = time.monotonic()
+
         try:
-            return await self._send_command_parse_response(
+            response = await self._send_command_parse_response(
                 connection, redis_node, args[0], *args, **options
             )
+
+            await record_operation_duration(
+                command_name=args[0],
+                duration_seconds=time.monotonic() - start_time,
+                server_address=connection.host,
+                server_port=connection.port,
+                db_namespace=str(connection.db),
+            )
+
+            return response
         except Exception as e:
             e.connection = connection
+            await record_operation_duration(
+                command_name=args[0],
+                duration_seconds=time.monotonic() - start_time,
+                server_address=connection.host,
+                server_port=connection.port,
+                db_namespace=str(connection.db),
+                error=e,
+            )
             raise
 
     async def _send_command_parse_response(
@@ -2571,13 +2672,22 @@ class TransactionStrategy(AbstractStrategy):
 
         self._executing = False
 
-    def _raise_first_error(self, responses, stack):
+    async def _raise_first_error(self, responses, stack, start_time):
         """
         Raise the first exception on the stack
         """
         for r, cmd in zip(responses, stack):
             if isinstance(r, Exception):
                 self._annotate_exception(r, cmd.position + 1, cmd.args)
+
+                await record_operation_duration(
+                    command_name="TRANSACTION",
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=self._transaction_connection.host,
+                    server_port=self._transaction_connection.port,
+                    db_namespace=str(self._transaction_connection.db),
+                )
+
                 raise r
 
     def mset_nonatomic(
@@ -2627,6 +2737,10 @@ class TransactionStrategy(AbstractStrategy):
         )
         commands = [c.args for c in stack if EMPTY_RESPONSE not in c.kwargs]
         packed_commands = connection.pack_commands(commands)
+
+        # Start timing for observability
+        start_time = time.monotonic()
+
         await connection.send_packed_command(packed_commands)
         errors = []
 
@@ -2673,6 +2787,15 @@ class TransactionStrategy(AbstractStrategy):
 
         self._executing = False
 
+        await record_operation_duration(
+            command_name="TRANSACTION",
+            duration_seconds=time.monotonic() - start_time,
+            server_address=connection.host,
+            server_port=connection.port,
+            db_namespace=str(connection.db),
+            batch_size=len(self._command_queue),
+        )
+
         # EXEC clears any watched keys
         self._watching = False
 
@@ -2693,9 +2816,10 @@ class TransactionStrategy(AbstractStrategy):
 
         # find any errors in the response and raise if necessary
         if raise_on_error or len(errors) > 0:
-            self._raise_first_error(
+            await self._raise_first_error(
                 response,
                 self._command_queue,
+                start_time,
             )
 
         # We have to run response callbacks manually

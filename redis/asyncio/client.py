@@ -2,6 +2,7 @@ import asyncio
 import copy
 import inspect
 import re
+import time
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -38,7 +39,10 @@ from redis.asyncio.connection import (
     UnixDomainSocketConnection,
 )
 from redis.asyncio.lock import Lock
-from redis.asyncio.observability.recorder import record_error_count
+from redis.asyncio.observability.recorder import (
+    record_error_count,
+    record_operation_duration,
+)
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.client import (
@@ -720,6 +724,8 @@ class Redis(
         conn: Connection,
         error: Optional[BaseException] = None,
         failure_count: Optional[int] = None,
+        start_time: Optional[float] = None,
+        command_name: Optional[str] = None,
     ):
         """
         Close the connection before retrying.
@@ -730,6 +736,17 @@ class Redis(
         After we disconnect the connection, it will try to reconnect and
         do a health check as part of the send_command logic(on connection level).
         """
+        if error and failure_count <= conn.retry.get_retries():
+            await record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
+                error=error,
+                retry_attempts=failure_count,
+            )
+
         await conn.disconnect(error=error, failure_count=failure_count)
 
     # COMMAND EXECUTION AND PROTOCOL PARSING
@@ -740,23 +757,36 @@ class Redis(
         command_name = args[0]
         conn = self.connection or await pool.get_connection()
 
+        # Start timing for observability
+        start_time = time.monotonic()
         # Track actual retry attempts for error reporting
         actual_retry_attempts = [0]
 
         def failure_callback(error, failure_count):
             actual_retry_attempts[0] = failure_count
-            return self._close_connection(conn, error, failure_count)
+            return self._close_connection(
+                conn, error, failure_count, start_time, command_name
+            )
 
         if self.single_connection_client:
             await self._single_conn_lock.acquire()
         try:
-            return await conn.retry.call_with_retry(
+            result = await conn.retry.call_with_retry(
                 lambda: self._send_command_parse_response(
                     conn, command_name, *args, **options
                 ),
                 failure_callback,
                 with_failure_count=True,
             )
+
+            await record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
+            )
+            return result
         except Exception as e:
             await record_error_count(
                 server_address=conn.host,
@@ -1039,10 +1069,26 @@ class PubSub:
         conn,
         error: Optional[BaseException] = None,
         failure_count: Optional[int] = None,
+        start_time: Optional[float] = None,
+        command_name: Optional[str] = None,
     ):
         """
-        Try to reconnect
+        The supported exceptions are already checked in the
+        retry object so we don't need to do it here.
+
+        In this error handler we are trying to reconnect to the server.
         """
+        if error and failure_count <= conn.retry.get_retries():
+            if command_name:
+                await record_operation_duration(
+                    command_name=command_name,
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=conn.host,
+                    server_port=conn.port,
+                    db_namespace=str(conn.db),
+                    error=error,
+                    retry_attempts=failure_count,
+                )
         await conn.disconnect(error=error, failure_count=failure_count)
         await conn.connect()
 
@@ -1059,19 +1105,32 @@ class PubSub:
         else:
             command_name = None
 
+        # Start timing for observability
+        start_time = time.monotonic()
         # Track actual retry attempts for error reporting
         actual_retry_attempts = [0]
 
         def failure_callback(error, failure_count):
             actual_retry_attempts[0] = failure_count
-            return self._reconnect(conn, error, failure_count)
+            return self._reconnect(conn, error, failure_count, start_time, command_name)
 
         try:
-            return await conn.retry.call_with_retry(
+            response = await conn.retry.call_with_retry(
                 lambda: command(*args, **kwargs),
                 failure_callback,
                 with_failure_count=True,
             )
+
+            if command_name:
+                await record_operation_duration(
+                    command_name=command_name,
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=conn.host,
+                    server_port=conn.port,
+                    db_namespace=str(conn.db),
+                )
+
+            return response
         except Exception as e:
             await record_error_count(
                 server_address=conn.host,
@@ -1488,6 +1547,8 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         conn: Connection,
         error: Exception,
         failure_count: Optional[int] = None,
+        start_time: Optional[float] = None,
+        command_name: Optional[str] = None,
     ) -> None:
         """
         Close the connection reset watching state and
@@ -1499,6 +1560,16 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         After we disconnect the connection, it will try to reconnect and
         do a health check as part of the send_command logic(on connection level).
         """
+        if error and failure_count <= conn.retry.get_retries():
+            await record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
+                error=error,
+                retry_attempts=failure_count,
+            )
         await conn.disconnect()
         # if we were already watching a variable, the watch is no longer
         # valid since this connection has died. raise a WatchError, which
@@ -1523,21 +1594,35 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             conn = await self.connection_pool.get_connection()
             self.connection = conn
 
+        # Start timing for observability
+        start_time = time.monotonic()
         # Track actual retry attempts for error reporting
         actual_retry_attempts = [0]
 
         def failure_callback(error, failure_count):
             actual_retry_attempts[0] = failure_count
-            return self._disconnect_reset_raise_on_watching(conn, error, failure_count)
+            return self._disconnect_reset_raise_on_watching(
+                conn, error, failure_count, start_time, command_name
+            )
 
         try:
-            return await conn.retry.call_with_retry(
+            response = await conn.retry.call_with_retry(
                 lambda: self._send_command_parse_response(
                     conn, command_name, *args, **options
                 ),
                 failure_callback,
                 with_failure_count=True,
             )
+
+            await record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
+            )
+
+            return response
         except Exception as e:
             await record_error_count(
                 server_address=conn.host,
@@ -1707,6 +1792,9 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         conn: Connection,
         error: Exception,
         failure_count: Optional[int] = None,
+        start_time: Optional[float] = None,
+        command_name: Optional[str] = None,
+        batch_size: Optional[int] = None,
     ):
         """
         Close the connection, raise an exception if we were watching.
@@ -1717,6 +1805,17 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         After we disconnect the connection, it will try to reconnect and
         do a health check as part of the send_command logic(on connection level).
         """
+        if error and failure_count <= conn.retry.get_retries():
+            await record_operation_duration(
+                command_name=command_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
+                error=error,
+                retry_attempts=failure_count,
+                batch_size=batch_size,
+            )
         await conn.disconnect(error=error, failure_count=failure_count)
         # if we were watching a variable, the watch is no longer valid
         # since this connection has died. raise a WatchError, which
@@ -1748,20 +1847,34 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
             self.connection = conn
         conn = cast(Connection, conn)
 
+        # Start timing for observability
+        start_time = time.monotonic()
         # Track actual retry attempts for error reporting
         actual_retry_attempts = [0]
         stack_len = len(stack)
 
         def failure_callback(error, failure_count):
             actual_retry_attempts[0] = failure_count
-            return self._disconnect_raise_on_watching(conn, error, failure_count)
+            return self._disconnect_raise_on_watching(
+                conn, error, failure_count, start_time, operation_name, stack_len
+            )
 
         try:
-            return await conn.retry.call_with_retry(
+            response = await conn.retry.call_with_retry(
                 lambda: execute(conn, stack, raise_on_error),
                 failure_callback,
                 with_failure_count=True,
             )
+
+            await record_operation_duration(
+                command_name=operation_name,
+                duration_seconds=time.monotonic() - start_time,
+                server_address=conn.host,
+                server_port=conn.port,
+                db_namespace=str(conn.db),
+                batch_size=stack_len,
+            )
+            return response
         except Exception as e:
             await record_error_count(
                 server_address=conn.host,
