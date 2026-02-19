@@ -1,11 +1,17 @@
 import asyncio
 import re
 from unittest import mock
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
-from redis.asyncio.connection import Connection, to_bool
+from redis.asyncio.connection import (
+    BlockingConnectionPool,
+    Connection,
+    ConnectionPool,
+    to_bool,
+)
 from redis.auth.token import TokenInterface
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
@@ -992,3 +998,134 @@ class TestHealthCheck:
             assert await wait_for_message(p) is None
             m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)
+
+
+@pytest.mark.asyncio
+class TestAsyncConnectionPoolMetricsRecording:
+    """Tests for async ConnectionPool metrics recording (create time and wait time)."""
+
+    async def test_connection_pool_records_create_time_on_new_connection(self):
+        """Test that ConnectionPool.get_connection() records create time when a new connection is created."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        pool = ConnectionPool(max_connections=10)
+
+        # Mock the ensure_connection to avoid actual connection
+        mock_connection = MagicMock()
+        mock_connection.is_connected = False
+        mock_connection.disconnect = AsyncMock()
+
+        # Patch where the functions are used (in redis.asyncio.connection module)
+        with patch.object(pool, "make_connection", return_value=mock_connection):
+            with patch.object(pool, "ensure_connection", new_callable=AsyncMock):
+                with patch(
+                    "redis.asyncio.connection.record_connection_create_time",
+                    new_callable=AsyncMock,
+                ) as mock_record:
+                    await pool.get_connection()
+
+                    # Verify record_connection_create_time was called
+                    mock_record.assert_called_once()
+                    call_kwargs = mock_record.call_args[1]
+                    assert call_kwargs["connection_pool"] is pool
+                    assert call_kwargs["duration_seconds"] > 0
+
+        await pool.disconnect()
+
+    async def test_connection_pool_does_not_record_create_time_for_existing_connection(
+        self,
+    ):
+        """Test that ConnectionPool.get_connection() does not record create time when reusing an existing connection."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        pool = ConnectionPool(max_connections=10)
+
+        # Add a mock connection to available connections
+        mock_connection = MagicMock()
+        mock_connection.disconnect = AsyncMock()
+        pool._available_connections.append(mock_connection)
+
+        with patch.object(pool, "ensure_connection", new_callable=AsyncMock):
+            with patch(
+                "redis.asyncio.connection.record_connection_create_time",
+                new_callable=AsyncMock,
+            ) as mock_record:
+                await pool.get_connection()
+
+                # Verify record_connection_create_time was NOT called
+                mock_record.assert_not_called()
+
+        await pool.disconnect()
+
+    async def test_blocking_connection_pool_records_create_time_and_wait_time(self):
+        """Test that BlockingConnectionPool.get_connection() records both create time and wait time."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        pool = BlockingConnectionPool(max_connections=10, timeout=5)
+
+        # Mock the ensure_connection to avoid actual connection
+        mock_connection = MagicMock()
+        mock_connection.is_connected = False
+        mock_connection.disconnect = AsyncMock()
+
+        # Patch where the functions are used (in redis.asyncio.connection module)
+        with patch.object(pool, "make_connection", return_value=mock_connection):
+            with patch.object(pool, "ensure_connection", new_callable=AsyncMock):
+                with patch(
+                    "redis.asyncio.connection.record_connection_create_time",
+                    new_callable=AsyncMock,
+                ) as mock_create_time:
+                    with patch(
+                        "redis.asyncio.connection.record_connection_wait_time",
+                        new_callable=AsyncMock,
+                    ) as mock_wait_time:
+                        await pool.get_connection()
+
+                        # Verify record_connection_create_time was called
+                        mock_create_time.assert_called_once()
+                        create_kwargs = mock_create_time.call_args[1]
+                        assert create_kwargs["connection_pool"] is pool
+                        assert create_kwargs["duration_seconds"] > 0
+
+                        # Verify record_connection_wait_time was called
+                        mock_wait_time.assert_called_once()
+                        wait_kwargs = mock_wait_time.call_args[1]
+                        assert "pool_name" in wait_kwargs
+                        assert wait_kwargs["duration_seconds"] > 0
+
+        await pool.disconnect()
+
+    async def test_blocking_connection_pool_records_only_wait_time_for_existing_connection(
+        self,
+    ):
+        """Test that BlockingConnectionPool.get_connection() records only wait time when reusing an existing connection."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        pool = BlockingConnectionPool(max_connections=10, timeout=5)
+
+        # Add a mock connection to available connections
+        mock_connection = MagicMock()
+        mock_connection.disconnect = AsyncMock()
+        pool._available_connections.append(mock_connection)
+
+        with patch.object(pool, "ensure_connection", new_callable=AsyncMock):
+            with patch(
+                "redis.asyncio.connection.record_connection_create_time",
+                new_callable=AsyncMock,
+            ) as mock_create_time:
+                with patch(
+                    "redis.asyncio.connection.record_connection_wait_time",
+                    new_callable=AsyncMock,
+                ) as mock_wait_time:
+                    await pool.get_connection()
+
+                    # Verify record_connection_create_time was NOT called
+                    mock_create_time.assert_not_called()
+
+                    # Verify record_connection_wait_time was still called
+                    mock_wait_time.assert_called_once()
+                    wait_kwargs = mock_wait_time.call_args[1]
+                    assert "pool_name" in wait_kwargs
+                    assert wait_kwargs["duration_seconds"] > 0
+
+        await pool.disconnect()

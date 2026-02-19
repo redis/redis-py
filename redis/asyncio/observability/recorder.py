@@ -33,8 +33,8 @@ from redis.observability.registry import get_observables_registry_instance
 from redis.utils import str_if_bytes
 
 if TYPE_CHECKING:
+    from redis.asyncio.connection import ConnectionPool
     from redis.asyncio.multidb.database import AsyncDatabase
-    from redis.connection import ConnectionPoolInterface
     from redis.observability.config import OTelConfig
 
 # Global metrics collector instance (lazy-initialized)
@@ -148,7 +148,7 @@ async def record_operation_duration(
 
 
 async def record_connection_create_time(
-    connection_pool: "ConnectionPoolInterface",
+    connection_pool: "ConnectionPool",
     duration_seconds: float,
 ) -> None:
     """
@@ -198,7 +198,7 @@ async def init_connection_count() -> None:
 
 
 async def register_pools_connection_count(
-    connection_pools: List["ConnectionPoolInterface"],
+    connection_pools: List["ConnectionPool"],
 ) -> None:
     """
     Add connection pools to connection count observable registry.

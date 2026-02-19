@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 import redis
 
 if TYPE_CHECKING:
+    from redis.asyncio.connection import ConnectionPool
     from redis.asyncio.multidb.database import AsyncDatabase
     from redis.connection import ConnectionPoolInterface
     from redis.multidb.database import SyncDatabase
@@ -387,7 +388,7 @@ class AttributeBuilder:
         return f"{server_address}:{server_port}/{db_namespace}"
 
 
-def get_pool_name(pool: "ConnectionPoolInterface") -> str:
+def get_pool_name(pool: Union["ConnectionPoolInterface", "ConnectionPool"]) -> str:
     """
     Get a short string representation of a connection pool for observability.
 
