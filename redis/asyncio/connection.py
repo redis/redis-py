@@ -4,6 +4,7 @@ import enum
 import inspect
 import socket
 import sys
+import time
 import warnings
 import weakref
 from abc import abstractmethod
@@ -31,6 +32,7 @@ from ..observability.attributes import (
     DB_CLIENT_CONNECTION_STATE,
     AttributeBuilder,
     ConnectionState,
+    get_pool_name,
 )
 from ..utils import SSL_AVAILABLE
 
@@ -55,7 +57,11 @@ if sys.version_info >= (3, 11, 3):
 else:
     from async_timeout import timeout as async_timeout
 
-from redis.asyncio.observability.recorder import record_error_count
+from redis.asyncio.observability.recorder import (
+    record_connection_create_time,
+    record_connection_wait_time,
+    record_error_count,
+)
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.connection import DEFAULT_RESP_VERSION
@@ -1311,12 +1317,28 @@ class ConnectionPool:
     )
     async def get_connection(self, command_name=None, *keys, **options):
         """Get a connected connection from the pool"""
+        # Track connection count before to detect if a new connection is created
         async with self._lock:
+            connections_before = len(self._available_connections) + len(
+                self._in_use_connections
+            )
+            start_time_created = time.monotonic()
             connection = self.get_available_connection()
+            connections_after = len(self._available_connections) + len(
+                self._in_use_connections
+            )
+            is_created = connections_after > connections_before
 
         # We now perform the connection check outside of the lock.
         try:
             await self.ensure_connection(connection)
+
+            if is_created:
+                await record_connection_create_time(
+                    connection_pool=self,
+                    duration_seconds=time.monotonic() - start_time_created,
+                )
+
             return connection
         except BaseException:
             await self.release(connection)
@@ -1442,8 +1464,6 @@ class ConnectionPool:
         """
         Returns a connection count (both idle and in use).
         """
-        from redis.observability.attributes import get_pool_name
-
         attributes = AttributeBuilder.build_base_attributes()
         attributes[DB_CLIENT_CONNECTION_POOL_NAME] = get_pool_name(self)
         free_connections_attributes = attributes.copy()
@@ -1519,17 +1539,41 @@ class BlockingConnectionPool(ConnectionPool):
     )
     async def get_connection(self, command_name=None, *keys, **options):
         """Gets a connection from the pool, blocking until one is available"""
+        # Start timing for wait time observability
+        start_time_acquired = time.monotonic()
+
         try:
             async with self._condition:
                 async with async_timeout(self.timeout):
                     await self._condition.wait_for(self.can_get_connection)
+                    # Track connection count before to detect if a new connection is created
+                    connections_before = len(self._available_connections) + len(
+                        self._in_use_connections
+                    )
+                    start_time_created = time.monotonic()
                     connection = super().get_available_connection()
+                    connections_after = len(self._available_connections) + len(
+                        self._in_use_connections
+                    )
+                    is_created = connections_after > connections_before
         except asyncio.TimeoutError as err:
             raise ConnectionError("No connection available.") from err
 
         # We now perform the connection check outside of the lock.
         try:
             await self.ensure_connection(connection)
+
+            if is_created:
+                await record_connection_create_time(
+                    connection_pool=self,
+                    duration_seconds=time.monotonic() - start_time_created,
+                )
+
+            await record_connection_wait_time(
+                pool_name=get_pool_name(self),
+                duration_seconds=time.monotonic() - start_time_acquired,
+            )
+
             return connection
         except BaseException:
             await self.release(connection)
