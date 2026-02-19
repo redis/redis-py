@@ -50,9 +50,11 @@ Redis Cluster Example:
 """
 
 import re
+import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Union
+from enum import Enum
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
 
 from redis.exceptions import (
     AskError,
@@ -82,12 +84,6 @@ class EventType:
     These are provided for convenience and IDE autocomplete. You can use
     any string as an event type - new Redis events will work without
     needing library updates.
-
-    Example:
-        >>> from redis.keyspace_notifications import EventType, keyevent_channel
-        >>> channel = keyevent_channel(EventType.SET, db=0)
-        >>> # Or just use a string directly:
-        >>> channel = keyevent_channel("set", db=0)
     """
 
     # String commands
@@ -193,18 +189,74 @@ class EventType:
     SETIFNE = "setifne"
 
 
-# Backwards compatibility alias
-KeyNotificationType = EventType
+class NotifyKeyspaceEvents(str, Enum):
+    """
+    Configuration values for Redis notify-keyspace-events setting.
 
+    These values control which keyspace notifications Redis will publish.
+    Multiple flags can be combined (e.g., "Kg" for keyspace + generic events).
 
-# Channel prefixes used by Redis keyspace notifications
-KEYSPACE_PREFIX = "__keyspace@"
-KEYEVENT_PREFIX = "__keyevent@"
+    See: https://redis.io/docs/latest/develop/use/keyspace-notifications/
 
-# Regex patterns for parsing keyspace/keyevent channels
-# Pattern: __keyspace@<db>__:<key> or __keyevent@<db>__:<event>
-_KEYSPACE_PATTERN = re.compile(r"^__keyspace@(\d+|\*)__:(.+)$")
-_KEYEVENT_PATTERN = re.compile(r"^__keyevent@(\d+|\*)__:(.+)$")
+    Example:
+        >>> notifications = ClusterKeyspaceNotifications(
+        ...     cluster,
+        ...     notify_keyspace_events=NotifyKeyspaceEvents.ALL
+        ... )
+    """
+
+    # Composite presets (most commonly used)
+    ALL = "KEA"
+    """All events: keyspace + keyevent + all command types."""
+
+    KEYSPACE_ALL = "KA"
+    """Keyspace notifications for all command types."""
+
+    KEYEVENT_ALL = "EA"
+    """Keyevent notifications for all command types."""
+
+    # Individual flags (can be combined as strings)
+    KEYSPACE = "K"
+    """Enable keyspace notifications (__keyspace@<db>__:<key>)."""
+
+    KEYEVENT = "E"
+    """Enable keyevent notifications (__keyevent@<db>__:<event>)."""
+
+    GENERIC = "g"
+    """Generic commands: DEL, EXPIRE, RENAME, etc."""
+
+    STRING = "$"
+    """String commands: SET, INCR, etc."""
+
+    LIST = "l"
+    """List commands: LPUSH, RPOP, etc."""
+
+    SET = "s"
+    """Set commands: SADD, SREM, etc."""
+
+    HASH = "h"
+    """Hash commands: HSET, HDEL, etc."""
+
+    SORTED_SET = "z"
+    """Sorted set commands: ZADD, ZREM, etc."""
+
+    STREAM = "t"
+    """Stream commands: XADD, XDEL, etc."""
+
+    EXPIRED = "x"
+    """Expired events (key TTL reached)."""
+
+    EVICTED = "e"
+    """Evicted events (key evicted due to maxmemory policy)."""
+
+    KEY_MISS = "m"
+    """Key miss events (key accessed but doesn't exist)."""
+
+    NEW_KEY = "n"
+    """New key events (alias for 'n' flag)."""
+
+    ALL_COMMANDS = "A"
+    """Alias for 'g$lshztxe' - all command types."""
 
 
 @dataclass
@@ -225,6 +277,15 @@ class KeyNotification:
         channel: The original channel name
         is_keyspace: True if this is a keyspace notification, False for keyevent
     """
+
+    # Regex patterns for parsing keyspace/keyevent channels
+    # Pattern: __keyspace@<db>__:<key> or __keyevent@<db>__:<event>
+    _KEYSPACE_PATTERN: ClassVar[re.Pattern] = re.compile(
+        r"^__keyspace@(\d+|\*)__:(.+)$"
+    )
+    _KEYEVENT_PATTERN: ClassVar[re.Pattern] = re.compile(
+        r"^__keyevent@(\d+|\*)__:(.+)$"
+    )
 
     key: str
     event_type: str
@@ -327,7 +388,7 @@ class KeyNotification:
             key_prefix = key_prefix.decode("utf-8", errors="replace")
 
         # Try keyspace pattern first: __keyspace@<db>__:<key>
-        match = _KEYSPACE_PATTERN.match(channel)
+        match = cls._KEYSPACE_PATTERN.match(channel)
         if match:
             db_str, key = match.groups()
             database = int(db_str) if db_str != "*" else -1
@@ -348,7 +409,7 @@ class KeyNotification:
             )
 
         # Try keyevent pattern: __keyevent@<db>__:<event>
-        match = _KEYEVENT_PATTERN.match(channel)
+        match = cls._KEYEVENT_PATTERN.match(channel)
         if match:
             db_str, event_type = match.groups()
             database = int(db_str) if db_str != "*" else -1
@@ -410,6 +471,8 @@ class KeyspaceChannel:
         >>> pubsub.subscribe(channel)
     """
 
+    PREFIX: ClassVar[str] = "__keyspace@"
+
     def __init__(self, key_or_pattern: str, db: int = 0):
         """
         Create a keyspace notification channel.
@@ -423,7 +486,7 @@ class KeyspaceChannel:
         self._channel_str = self._build_channel_string()
 
     def _build_channel_string(self) -> str:
-        return f"{KEYSPACE_PREFIX}{self.db}__:{self.key_or_pattern}"
+        return f"{self.PREFIX}{self.db}__:{self.key_or_pattern}"
 
     @property
     def is_pattern(self) -> bool:
@@ -475,6 +538,8 @@ class KeyeventChannel:
         >>> pubsub.subscribe(channel)
     """
 
+    PREFIX: ClassVar[str] = "__keyevent@"
+
     def __init__(self, event: str, db: int = 0):
         """
         Create a keyevent notification channel.
@@ -488,7 +553,7 @@ class KeyeventChannel:
         self._channel_str = self._build_channel_string()
 
     def _build_channel_string(self) -> str:
-        return f"{KEYEVENT_PREFIX}{self.db}__:{self.event}"
+        return f"{self.PREFIX}{self.db}__:{self.event}"
 
     @property
     def is_pattern(self) -> bool:
@@ -536,14 +601,14 @@ def is_keyspace_channel(channel: Union[str, bytes]) -> bool:
     """Check if a channel is a keyspace notification channel."""
     if isinstance(channel, bytes):
         channel = channel.decode("utf-8", errors="replace")
-    return channel.startswith(KEYSPACE_PREFIX)
+    return channel.startswith(KeyspaceChannel.PREFIX)
 
 
 def is_keyevent_channel(channel: Union[str, bytes]) -> bool:
     """Check if a channel is a keyevent notification channel."""
     if isinstance(channel, bytes):
         channel = channel.decode("utf-8", errors="replace")
-    return channel.startswith(KEYEVENT_PREFIX)
+    return channel.startswith(KeyeventChannel.PREFIX)
 
 
 def is_keyspace_notification_channel(channel: Union[str, bytes]) -> bool:
@@ -600,34 +665,6 @@ class ClusterKeyspaceNotifications:
     In Redis Cluster, keyspace notifications are NOT broadcast between nodes.
     Each node only emits notifications for keys it owns. This class automatically
     subscribes to all primary nodes in the cluster and handles topology changes.
-
-    Example usage:
-        >>> from redis.cluster import RedisCluster
-        >>> from redis.keyspace_notifications import (
-        ...     ClusterKeyspaceNotifications,
-        ...     KeyNotificationType,
-        ... )
-        >>>
-        >>> rc = RedisCluster(host="localhost", port=7000)
-        >>> ksn = ClusterKeyspaceNotifications(rc)
-        >>>
-        >>> # Subscribe to keyspace events for keys matching "user:*"
-        >>> ksn.subscribe_keyspace("user:*", db=0)
-        >>>
-        >>> # Or subscribe to all SET events
-        >>> ksn.subscribe_keyevent(KeyNotificationType.SET, db=0)
-        >>>
-        >>> # With a handler callback
-        >>> def handle_notification(notification):
-        ...     print(f"Key {notification.key} was modified: {notification.event_type}")
-        >>> ksn.subscribe_keyspace("cache:*", db=0, handler=handle_notification)
-        >>>
-        >>> # Start listening (blocking)
-        >>> for notification in ksn.listen():
-        ...     print(f"{notification.key}: {notification.event_type}")
-        >>>
-        >>> # Or use get_message for non-blocking
-        >>> notification = ksn.get_message()
     """
 
     def __init__(
@@ -635,6 +672,9 @@ class ClusterKeyspaceNotifications:
         redis_cluster,
         key_prefix: Optional[Union[str, bytes]] = None,
         ignore_subscribe_messages: bool = True,
+        notify_keyspace_events: Optional[
+            Union[str, NotifyKeyspaceEvents]
+        ] = NotifyKeyspaceEvents.ALL,
     ):
         """
         Initialize the cluster keyspace notification manager.
@@ -644,6 +684,11 @@ class ClusterKeyspaceNotifications:
             key_prefix: Optional prefix to filter and strip from keys in notifications
             ignore_subscribe_messages: If True, subscribe/unsubscribe confirmations
                                       are not returned by get_message/listen
+            notify_keyspace_events: Configures the notify-keyspace-events setting on
+                                   all cluster nodes. Defaults to NotifyKeyspaceEvents.ALL.
+                                   Set to None to skip configuration. Can use enum values
+                                   or combine flags as strings (e.g., "Kg$").
+                                   See NotifyKeyspaceEvents for available options.
         """
         self.cluster = redis_cluster
         self.key_prefix = key_prefix
@@ -668,6 +713,26 @@ class ClusterKeyspaceNotifications:
         # Periodic topology check interval (in seconds)
         self._topology_check_interval: float = 1.0
         self._last_topology_check: float = 0.0
+
+        # Enable keyspace notifications on all nodes if requested
+        if notify_keyspace_events is not None:
+            self._configure_keyspace_notifications(notify_keyspace_events)
+
+    def _configure_keyspace_notifications(
+        self, events: Union[str, NotifyKeyspaceEvents]
+    ) -> None:
+        """
+        Configure notify-keyspace-events on all primary nodes in the cluster.
+
+        Args:
+            events: The notify-keyspace-events configuration value
+                   (e.g., NotifyKeyspaceEvents.ALL or "KEA")
+        """
+        # Get the string value (handles both enum and plain strings)
+        events_str = events.value if isinstance(events, NotifyKeyspaceEvents) else events
+        for node in self._get_all_primary_nodes():
+            redis_conn = self.cluster.get_redis_connection(node)
+            redis_conn.config_set("notify-keyspace-events", events_str)
 
     def _get_all_primary_nodes(self):
         """Get all primary nodes in the cluster."""
@@ -738,15 +803,23 @@ class ClusterKeyspaceNotifications:
         Example:
             >>> # Using Channel classes (recommended)
             >>> ksn.subscribe(KeyspaceChannel("user:123", db=0))
-            >>> ksn.subscribe(KeyspaceChannel.pattern("user:", db=0))
+            >>> ksn.subscribe(KeyspaceChannel("user:*", db=0))
             >>>
             >>> # Using strings
             >>> ksn.subscribe("__keyspace@0__:user:123")
             >>> ksn.subscribe("__keyspace@0__:user:*")
             >>>
             >>> # With handler
-            >>> ksn.subscribe(KeyspaceChannel.pattern("cache:", db=0), handler=my_handler)
+            >>> ksn.subscribe(KeyspaceChannel("cache:*", db=0), handler=my_handler)
         """
+        # Wrap the handler to convert raw messages to KeyNotification objects
+        wrapped_handler = None
+        if handler is not None:
+            def wrapped_handler(message):
+                notification = KeyNotification.from_message(message)
+                if notification is not None:
+                    handler(notification)
+
         patterns = {}
         exact_channels = {}
 
@@ -754,9 +827,9 @@ class ClusterKeyspaceNotifications:
             # Convert Channel objects to strings for use as dict keys
             channel_str = str(channel) if hasattr(channel, "_channel_str") else channel
             if _is_pattern(channel):
-                patterns[channel_str] = handler
+                patterns[channel_str] = wrapped_handler
             else:
-                exact_channels[channel_str] = handler
+                exact_channels[channel_str] = wrapped_handler
 
         if patterns:
             self._subscribed_patterns.update(patterns)
@@ -799,7 +872,7 @@ class ClusterKeyspaceNotifications:
     def subscribe_keyspace(
         self,
         key_or_pattern: str,
-        db: Optional[int] = None,
+        db: int = 0,
         handler: Optional[Callable[[KeyNotification], None]] = None,
     ):
         """
@@ -810,7 +883,7 @@ class ClusterKeyspaceNotifications:
 
         Args:
             key_or_pattern: The key or pattern to monitor. Use '*' for wildcards.
-            db: The database number. If None, uses '*' to match all databases.
+            db: The database number (default 0, which is the only db in cluster).
             handler: Optional callback for notifications.
 
         Example:
@@ -819,17 +892,14 @@ class ClusterKeyspaceNotifications:
             >>>
             >>> # Monitor all keys with a prefix
             >>> ksn.subscribe_keyspace("user:*", db=0)
-            >>>
-            >>> # Monitor across all databases
-            >>> ksn.subscribe_keyspace("session:*")
         """
-        channel = keyspace_channel(key_or_pattern, db=db)
+        channel = KeyspaceChannel(key_or_pattern, db=db)
         self.subscribe(channel, handler=handler)
 
     def subscribe_keyevent(
         self,
         event: str,
-        db: Optional[int] = None,
+        db: int = 0,
         handler: Optional[Callable[[KeyNotification], None]] = None,
     ):
         """
@@ -840,15 +910,12 @@ class ClusterKeyspaceNotifications:
 
         Args:
             event: The event type to monitor (e.g., EventType.SET or "set")
-            db: The database number. If None, uses '*' to match all databases.
+            db: The database number (default 0, which is the only db in cluster).
             handler: Optional callback for notifications.
 
         Example:
             >>> # Monitor all SET events
-            >>> ksn.subscribe_keyevent(EventType.SET, db=0)
-            >>>
-            >>> # Monitor all DEL events across all databases
-            >>> ksn.subscribe_keyevent("del")
+            >>> ksn.subscribe_keyevent(EventType.SET)
             >>>
             >>> # Monitor all EXPIRED events with a handler
             >>> ksn.subscribe_keyevent(
@@ -856,7 +923,7 @@ class ClusterKeyspaceNotifications:
             ...     handler=lambda n: print(f"Key expired: {n.key}")
             ... )
         """
-        channel = keyevent_channel(event, db=db)
+        channel = KeyeventChannel(event, db=db)
         self.subscribe(channel, handler=handler)
 
     def _create_pubsub_iterator(self):
@@ -1068,6 +1135,74 @@ class ClusterKeyspaceNotifications:
         self._subscribed_patterns.clear()
         self._subscribed_channels.clear()
 
+    def run_in_thread(
+        self,
+        sleep_time: float = 0.0,
+        daemon: bool = False,
+        exception_handler: Optional[
+            Callable[
+                [Exception, "ClusterKeyspaceNotifications", "KeyspaceWorkerThread"],
+                None,
+            ]
+        ] = None,
+    ) -> "KeyspaceWorkerThread":
+        """
+        Start a background thread that polls for notifications and triggers handlers.
+
+        This method spawns a thread that continuously calls get_message() to
+        process incoming notifications. When a notification arrives, any
+        registered handler for that channel/pattern is invoked automatically.
+
+        All subscriptions must have handlers registered before calling this method.
+
+        Args:
+            sleep_time: Time in seconds to wait between polling cycles.
+                       Also used as the timeout for get_message(). Default 0.0.
+            daemon: If True, the thread will be a daemon thread and will be
+                   terminated when the main program exits. Default False.
+            exception_handler: Optional callback invoked when an exception occurs
+                              in the worker thread. Receives (exception, notifications,
+                              thread) as arguments. If None, exceptions are raised.
+
+        Returns:
+            KeyspaceWorkerThread: The started worker thread. Call stop() on it
+                                 to stop the thread and close the notifications.
+
+        Raises:
+            RedisError: If any subscription doesn't have a handler registered.
+
+        Example:
+            >>> def my_handler(notification):
+            ...     print(f"Got: {notification.key} - {notification.event_type}")
+            >>>
+            >>> notifications = ClusterKeyspaceNotifications(cluster)
+            >>> notifications.subscribe(KeyspaceChannel("user:*"), handler=my_handler)
+            >>>
+            >>> # Start background processing
+            >>> thread = notifications.run_in_thread(sleep_time=0.1, daemon=True)
+            >>>
+            >>> # ... do other work, handlers are called automatically ...
+            >>>
+            >>> # When done:
+            >>> thread.stop()
+        """
+        # Verify all subscriptions have handlers
+        for channel, handler in self._subscribed_channels.items():
+            if handler is None:
+                raise RedisError(f"Channel '{channel}' has no handler registered")
+        for pattern, handler in self._subscribed_patterns.items():
+            if handler is None:
+                raise RedisError(f"Pattern '{pattern}' has no handler registered")
+
+        thread = KeyspaceWorkerThread(
+            self,
+            sleep_time,
+            daemon=daemon,
+            exception_handler=exception_handler,
+        )
+        thread.start()
+        return thread
+
     def __enter__(self):
         return self
 
@@ -1080,3 +1215,62 @@ class ClusterKeyspaceNotifications:
         """Check if there are any active subscriptions."""
         return bool(self._subscribed_patterns or self._subscribed_channels)
 
+
+class KeyspaceWorkerThread(threading.Thread):
+    """
+    Background thread for processing keyspace notifications.
+
+    This thread continuously polls for notifications and invokes registered
+    handlers. It's created by ClusterKeyspaceNotifications.run_in_thread().
+
+    Example:
+        >>> thread = notifications.run_in_thread(sleep_time=0.1)
+        >>> # ... handlers are called automatically ...
+        >>> thread.stop()  # Stop the thread and close notifications
+    """
+
+    def __init__(
+        self,
+        notifications: ClusterKeyspaceNotifications,
+        sleep_time: float,
+        daemon: bool = False,
+        exception_handler: Optional[
+            Callable[
+                [Exception, ClusterKeyspaceNotifications, "KeyspaceWorkerThread"],
+                None,
+            ]
+        ] = None,
+    ):
+        super().__init__()
+        self.daemon = daemon
+        self.notifications = notifications
+        self.sleep_time = sleep_time
+        self.exception_handler = exception_handler
+        self._running = threading.Event()
+
+    def run(self) -> None:
+        """Main loop that polls for notifications and triggers handlers."""
+        if self._running.is_set():
+            return
+        self._running.set()
+        notifications = self.notifications
+        sleep_time = self.sleep_time
+        while self._running.is_set():
+            try:
+                notifications.get_message(
+                    ignore_subscribe_messages=True, timeout=sleep_time
+                )
+            except BaseException as e:
+                if self.exception_handler is None:
+                    raise
+                self.exception_handler(e, notifications, self)
+        notifications.close()
+
+    def stop(self) -> None:
+        """
+        Stop the worker thread.
+
+        This signals the thread to exit its run loop. The thread will close
+        the notifications object before terminating.
+        """
+        self._running.clear()

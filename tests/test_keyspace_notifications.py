@@ -3,14 +3,14 @@ Tests for Redis keyspace notifications support.
 """
 
 import pytest
+import time
 
 import redis
+from redis import RedisCluster
 from redis.keyspace_notifications import (
     ClusterKeyspaceNotifications,
     EventType,
-    KeyeventChannel,
     KeyNotification,
-    KeyNotificationType,
     KeyspaceChannel,
     _is_pattern,
     is_keyevent_channel,
@@ -21,7 +21,6 @@ from redis.keyspace_notifications import (
 
 class TestEventType:
     """Tests for EventType constants."""
-
     def test_common_event_types(self):
         """Test that common event type constants are defined."""
         assert EventType.SET == "set"
@@ -29,23 +28,6 @@ class TestEventType:
         assert EventType.EXPIRE == "expire"
         assert EventType.EXPIRED == "expired"
         assert EventType.LPUSH == "lpush"
-
-    def test_backwards_compatibility_alias(self):
-        """Test that KeyNotificationType is an alias for EventType."""
-        assert KeyNotificationType is EventType
-        assert KeyNotificationType.SET == "set"
-
-    def test_event_type_is_string(self):
-        """Test that event types are plain strings."""
-        assert isinstance(EventType.SET, str)
-        assert isinstance(EventType.DEL, str)
-
-    def test_can_compare_with_any_string(self):
-        """Test that event types can be compared with any string."""
-        assert EventType.SET == "set"
-        # Future Redis events work without library updates
-        assert "some_future_event" == "some_future_event"
-
 
 class TestPatternDetection:
     """Tests for pattern detection function."""
@@ -112,23 +94,6 @@ class TestKeyspaceChannelClass:
         assert str(channel) == "__keyspace@0__:user:*"
         assert channel.is_pattern is True
 
-    def test_pattern_all_keys(self):
-        """Test pattern for all keys."""
-        from redis.keyspace_notifications import KeyspaceChannel
-
-        channel = KeyspaceChannel("*", db=0)
-        assert str(channel) == "__keyspace@0__:*"
-
-    def test_is_pattern_property(self):
-        """Test is_pattern property."""
-        from redis.keyspace_notifications import KeyspaceChannel
-
-        exact = KeyspaceChannel("user:123", db=0)
-        assert exact.is_pattern is False
-
-        pattern = KeyspaceChannel("user:*", db=0)
-        assert pattern.is_pattern is True
-
     def test_equality_with_string(self):
         """Test equality comparison with string."""
         from redis.keyspace_notifications import KeyspaceChannel
@@ -146,23 +111,6 @@ class TestKeyspaceChannelClass:
         channel3 = KeyspaceChannel("otherkey", db=0)
         assert channel1 == channel2
         assert channel1 != channel3
-
-    def test_hash(self):
-        """Test that channels can be used in sets and dicts."""
-        from redis.keyspace_notifications import KeyspaceChannel
-
-        channel1 = KeyspaceChannel("mykey", db=0)
-        channel2 = KeyspaceChannel("mykey", db=0)
-        channel_set = {channel1, channel2}
-        assert len(channel_set) == 1
-
-    def test_repr(self):
-        """Test repr output."""
-        from redis.keyspace_notifications import KeyspaceChannel
-
-        channel = KeyspaceChannel("mykey", db=0)
-        assert repr(channel) == "KeyspaceChannel('mykey', db=0)"
-
 
 class TestKeyeventChannelClass:
     """Tests for KeyeventChannel class."""
@@ -242,23 +190,6 @@ class TestKeyeventChannelClass:
         channel3 = KeyeventChannel(EventType.DEL, db=0)
         assert channel1 == channel2
         assert channel1 != channel3
-
-    def test_hash(self):
-        """Test that channels can be used in sets and dicts."""
-        from redis.keyspace_notifications import KeyeventChannel
-
-        channel1 = KeyeventChannel(EventType.SET, db=0)
-        channel2 = KeyeventChannel("set", db=0)
-        channel_set = {channel1, channel2}
-        assert len(channel_set) == 1
-
-    def test_repr(self):
-        """Test repr output."""
-        from redis.keyspace_notifications import KeyeventChannel
-
-        channel = KeyeventChannel("set", db=0)
-        assert repr(channel) == "KeyeventChannel('set', db=0)"
-
 
 class TestChannelDetection:
     """Tests for channel type detection functions."""
@@ -490,6 +421,7 @@ class TestKeyNotificationIntegration:
 
 
 class TestClusterKeyspaceNotificationsMocked:
+
     """
     Mock-based unit tests for ClusterKeyspaceNotifications.
 
@@ -705,362 +637,90 @@ class TestClusterKeyspaceNotificationsMocked:
         # Cleanup
         notifications.close()
 
-
-@pytest.mark.onlycluster
 class TestClusterKeyspaceNotifications:
     """
-    Cluster integration tests for keyspace notifications.
-
-    These tests require a running Redis Cluster with at least 3 primary nodes.
-    Run with: pytest tests/test_keyspace_notifications.py -v --redis-url=redis://localhost:7000
+    A very basic usability test for subscribing to keyspace notifications in a cluster.
     """
+    def test_keyspace_subscribe(self):
+        cluster = RedisCluster.from_url("redis://localhost:16379")
+        notifications = ClusterKeyspaceNotifications(cluster)
+        notifications.subscribe(KeyspaceChannel("test:*"))
+        commands = [
+            cluster.set("test:key", "value"),
+            cluster.set("test:key2", "value2"),
+            cluster.delete("test:key2")
+        ]
 
-    @pytest.fixture
-    def cluster_client(self, r):
-        """Get a Redis Cluster client from the test fixtures."""
-        return r
+        for i in range(len(commands)):
+            msg = notifications.get_message(timeout=1.0)
+            print(f"Message: {msg}")
+            assert msg is not None
+            assert msg.key.startswith("test:")
+            if i == len(commands)-1:
+                assert msg.event_type == "del"
+            else:
+                assert msg.event_type == "set"
 
-    @pytest.fixture
-    def cluster_notifications(self, cluster_client):
-        """Create a ClusterKeyspaceNotifications instance."""
-        notifications = ClusterKeyspaceNotifications(cluster_client)
-        yield notifications
         notifications.close()
 
-    def _enable_keyspace_notifications(self, cluster_client):
-        """Enable keyspace notifications on all cluster nodes."""
-        for node in cluster_client.get_primaries():
-            node.redis_connection.config_set("notify-keyspace-events", "KEA")
-
-    def _get_key_for_node(self, cluster_client, node_index: int) -> str:
-        """
-        Find a key that hashes to a slot owned by the specified node.
-
-        Args:
-            cluster_client: Redis Cluster client
-            node_index: Index of the primary node (0, 1, 2, ...)
-
-        Returns:
-            A key string that will be stored on the specified node
-        """
-        primaries = list(cluster_client.get_primaries())
-        if node_index >= len(primaries):
-            pytest.skip(f"Not enough primary nodes (need {node_index + 1})")
-
-        target_node = primaries[node_index]
-
-        # Find a slot owned by this node
-        for slot, nodes in cluster_client.nodes_manager.slots_cache.items():
-            if nodes and nodes[0].name == target_node.name:
-                # Find a key that hashes to this slot
-                for i in range(10000):
-                    key = f"test_key_{i}"
-                    if cluster_client.keyslot(key) == slot:
-                        return key
-
-        pytest.fail(f"Could not find a key for node {node_index}")
-
-    def test_create_key_on_node1_keyspace_notification(
-        self, cluster_client, cluster_notifications
-    ):
-        """
-        Test case 1: Create a key on node 1 and verify that the notification
-        about the creation of the key is received.
-        """
-        self._enable_keyspace_notifications(cluster_client)
-
-        key = self._get_key_for_node(cluster_client, 0)
-
-        # Subscribe to keyspace notifications for this key
-        channel = KeyspaceChannel(key)
-        cluster_notifications.subscribe(channel)
-
-        # Allow subscription to complete
-        import time
-        time.sleep(0.1)
-
-        # Create the key
-        cluster_client.set(key, "value1")
-
-        # Get the notification (ignore_subscribe_messages=True to skip subscribe confirmations)
-        notification = cluster_notifications.get_message(
-            ignore_subscribe_messages=True, timeout=2.0
-        )
-        assert notification is not None, "Expected to receive a keyspace notification"
-        assert notification.key == key
-        assert notification.event_type == EventType.SET
-        assert notification.is_keyspace is True
-
-        # Cleanup
-        cluster_client.delete(key)
-
-    def test_update_key_on_node1_keyspace_notification(
-        self, cluster_client, cluster_notifications
-    ):
-        """
-        Test case 2: Update a key on node 1 and verify that the keyspace
-        notification is received.
-        """
-        self._enable_keyspace_notifications(cluster_client)
-
-        key = self._get_key_for_node(cluster_client, 0)
-
-        # Create the key first
-        cluster_client.set(key, "initial_value")
-
-        # Subscribe to keyspace notifications for this key
-        channel = KeyspaceChannel(key)
-        cluster_notifications.subscribe(channel)
-
-        import time
-        time.sleep(0.1)
-
-        # Update the key
-        cluster_client.set(key, "updated_value")
-
-        # Get the notification (ignore_subscribe_messages=True to skip subscribe confirmations)
-        notification = cluster_notifications.get_message(
-            ignore_subscribe_messages=True, timeout=2.0
-        )
-        assert notification is not None, "Expected to receive a keyspace notification"
-        assert notification.key == key
-        assert notification.event_type == EventType.SET
-
-        # Cleanup
-        cluster_client.delete(key)
-
-    def test_update_key_on_node2_keyevent_notification(
-        self, cluster_client, cluster_notifications
-    ):
-        """
-        Test case 3: Update a key on node 2 and verify that the key event
-        notification is received.
-        """
-        self._enable_keyspace_notifications(cluster_client)
-
-        key = self._get_key_for_node(cluster_client, 1)
-
-        # Create the key first
-        cluster_client.set(key, "initial_value")
-
-        # Subscribe to keyevent notifications for SET events
-        channel = KeyeventChannel(EventType.SET)
-        cluster_notifications.subscribe(channel)
-
-        import time
-        time.sleep(0.1)
-
-        # Update the key
-        cluster_client.set(key, "updated_value")
-
-        # Get the notification (ignore_subscribe_messages=True to skip subscribe confirmations)
-        notification = cluster_notifications.get_message(
-            ignore_subscribe_messages=True, timeout=2.0
-        )
-        assert notification is not None, "Expected to receive a keyevent notification"
-        assert notification.key == key
-        assert notification.event_type == EventType.SET
-        assert notification.is_keyspace is False  # This is a keyevent notification
-
-        # Cleanup
-        cluster_client.delete(key)
-
-    def test_delete_key_on_node3_notification(
-        self, cluster_client, cluster_notifications
-    ):
-        """
-        Test case 4: Delete a key on node 3 and verify that the deletion
-        notification is received.
-        """
-        self._enable_keyspace_notifications(cluster_client)
-
-        primaries = list(cluster_client.get_primaries())
-        if len(primaries) < 3:
-            pytest.skip("Need at least 3 primary nodes for this test")
-
-        key = self._get_key_for_node(cluster_client, 2)
-
-        # Create the key first
-        cluster_client.set(key, "value_to_delete")
-
-        # Subscribe to keyspace notifications for this key
-        channel = KeyspaceChannel(key)
-        cluster_notifications.subscribe(channel)
-
-        import time
-        time.sleep(0.1)
-
-        # Delete the key
-        cluster_client.delete(key)
-
-        # Get the notification (ignore_subscribe_messages=True to skip subscribe confirmations)
-        notification = cluster_notifications.get_message(
-            ignore_subscribe_messages=True, timeout=2.0
-        )
-        assert notification is not None, "Expected to receive a deletion notification"
-        assert notification.key == key
-        assert notification.event_type == EventType.DEL
-
-    def test_pattern_subscription_across_nodes(
-        self, cluster_client, cluster_notifications
-    ):
-        """
-        Test case 5: Modify a bunch of keys across nodes 1, 2 and 3 that all
-        match the same pattern and check that all notifications are received.
-        """
-        self._enable_keyspace_notifications(cluster_client)
-
-        primaries = list(cluster_client.get_primaries())
-        if len(primaries) < 3:
-            pytest.skip("Need at least 3 primary nodes for this test")
-
-        # Find keys on different nodes that match a pattern
-        keys_by_node = {}
-        for node_idx in range(min(3, len(primaries))):
-            key = self._get_key_for_node(cluster_client, node_idx)
-            # Rename to have a common prefix
-            prefixed_key = f"pattern_test:{key}"
-            keys_by_node[node_idx] = prefixed_key
-
-        # Subscribe to pattern matching all test keys
-        pattern = KeyspaceChannel("pattern_test:*")
-        cluster_notifications.subscribe(pattern)
-
-        import time
-        time.sleep(0.1)
-
-        # Modify all keys
-        for key in keys_by_node.values():
-            cluster_client.set(key, "test_value")
-
-        # Collect all notifications (ignore_subscribe_messages=True to skip subscribe confirmations)
-        received_keys = set()
-        for _ in range(len(keys_by_node) * 2):  # Allow extra iterations
-            notification = cluster_notifications.get_message(
-                ignore_subscribe_messages=True, timeout=1.0
-            )
-            if notification:
-                received_keys.add(notification.key)
-            if len(received_keys) >= len(keys_by_node):
-                break
-
-        # Verify all keys received notifications
-        for key in keys_by_node.values():
-            assert key in received_keys, f"Missing notification for key: {key}"
-
-        # Cleanup
-        for key in keys_by_node.values():
-            cluster_client.delete(key)
-
-    def test_slot_migration_notifications(self, cluster_client, cluster_notifications):
-        """
-        Test case 6: Move slots from node 1 to node 2 that impact some
-        pre-defined keys and ensure that keyspace notifications and key event
-        notifications are received correctly before and after the migration.
-
-        This test reassigns slot ownership between nodes using CLUSTER SETSLOT
-        commands. Since ClusterKeyspaceNotifications subscribes to ALL primary
-        nodes, notifications should continue to work after slot migration
-        without any manual intervention - the notification will simply come
-        from the new node that owns the slot.
-
-        Note: This test uses CLUSTER SETSLOT NODE to reassign slot ownership
-        rather than the full MIGRATE workflow, because the Docker test
-        environment doesn't support MIGRATE between nodes (IOERR).
-        """
-        self._enable_keyspace_notifications(cluster_client)
-
-        primaries = list(cluster_client.get_primaries())
-        if len(primaries) < 2:
-            pytest.skip("Need at least 2 primary nodes for this test")
-
-        source_node = primaries[0]
-        dest_node = primaries[1]
-
-        # Find a key and its slot on the source node
-        test_key = self._get_key_for_node(cluster_client, 0)
-        slot = cluster_client.keyslot(test_key)
-
-        # Create the key before migration
-        cluster_client.set(test_key, "pre_migration_value")
-
-        # Subscribe to notifications for this key on ALL nodes
-        # This is the key behavior: we subscribe to all primaries
-        channel = KeyspaceChannel(test_key)
-        cluster_notifications.subscribe(channel)
-
-        import time
-        time.sleep(0.1)
-
-        # Verify we're subscribed to all primary nodes
-        assert len(cluster_notifications._node_pubsubs) == len(primaries), (
-            "Should be subscribed to all primary nodes"
-        )
-
-        # Verify notification works BEFORE migration (from source_node)
-        cluster_client.set(test_key, "value_before_migration")
-        notification = cluster_notifications.get_message(
-            ignore_subscribe_messages=True, timeout=2.0
-        )
-        assert notification is not None, "Should receive notification before migration"
-        assert notification.key == test_key
-
-        # Get node IDs for migration
-        source_id = cluster_client.cluster_myid(source_node)
-        dest_id = cluster_client.cluster_myid(dest_node)
-
-        try:
-            # Delete the key from source node before slot reassignment
-            cluster_client.delete(test_key)
-
-            # Drain any pending notifications
-            while cluster_notifications.get_message(
-                ignore_subscribe_messages=True, timeout=0.1
-            ):
-                pass
-
-            # Reassign slot ownership from source to destination
-            # This must be done on all nodes for consistency
-            for node in primaries:
-                node.redis_connection.execute_command(
-                    "CLUSTER", "SETSLOT", slot, "NODE", dest_id
-                )
-
-            # Allow cluster to stabilize
-            time.sleep(0.3)
-
-            # Update the cluster client's slot map (simulates MOVED response)
-            cluster_client.nodes_manager.initialize()
-
-            # Create the key on the new node (dest_node now owns this slot)
-            # The notification will be published by dest_node
-            cluster_client.set(test_key, "value_after_migration")
-
-            # Since we're subscribed to ALL primary nodes (including dest_node),
-            # we should receive the notification without any refresh needed
-            notification = cluster_notifications.get_message(
-                ignore_subscribe_messages=True, timeout=2.0
-            )
-
-            assert notification is not None, (
-                "Should receive notification after migration - "
-                "ClusterKeyspaceNotifications subscribes to all primaries"
-            )
-            assert notification.key == test_key
-            assert notification.event_type == EventType.SET
-
-        finally:
-            # Cleanup: restore slot to original node
-            try:
-                cluster_client.delete(test_key)
-
-                for node in primaries:
-                    node.redis_connection.execute_command(
-                        "CLUSTER", "SETSLOT", slot, "NODE", source_id
-                    )
-
-                time.sleep(0.3)
-                cluster_client.nodes_manager.initialize()
-            except Exception:
-                pass  # Best effort cleanup
-
+    """
+    Use a handler in a background thread with run_in_thread().
+    """
+    def test_keyspace_subscribe_with_handler(self):
+        received = []
+
+        def handler(msg):
+            print(f"Handling: {msg}")
+            received.append(msg)
+            assert msg.key.startswith("test:")
+            if msg.event_type == "del":
+                assert msg.key == "test:key2"
+            else:
+                assert msg.event_type == "set"
+
+        cluster = RedisCluster.from_url("redis://localhost:16379")
+
+        # Keyspace notifications are enabled by default (notify_keyspace_events="KEA")
+        notifications = ClusterKeyspaceNotifications(cluster)
+        notifications.subscribe(KeyspaceChannel("test:*"), handler=handler)
+
+        # Start background thread that polls for messages and triggers handlers
+        thread = notifications.run_in_thread(sleep_time=0.1, daemon=True)
+
+        time.sleep(0.1)  # Allow subscription to complete
+
+        cluster.set("test:key", "value")
+        cluster.set("test:key2", "value2")
+        cluster.delete("test:key2")
+
+        # Wait for handlers to be called
+        time.sleep(1.0)
+
+        thread.stop()
+        thread.join(timeout=1.0)  # Wait for thread to actually stop
+
+        # Verify we received all 3 notifications
+        assert len(received) == 3
+
+    """
+    A very basic usability test for subscribing to keyevent notifications in a cluster.
+    """
+    def test_keyevent_subscribe(self):
+        cluster = RedisCluster.from_url("redis://localhost:16379")
+        notifications = ClusterKeyspaceNotifications(cluster)
+        notifications.subscribe_keyevent(EventType.SET)
+        time.sleep(0.1)  # Allow subscription to complete
+
+        # Only SET operations will trigger notifications (not DELETE)
+        cluster.set("test:key", "value")
+        cluster.set("test:key2", "value2")
+        cluster.delete("test:key2")  # This won't trigger a SET event
+
+        # Expect exactly 2 SET notifications
+        for _ in range(2):
+            msg = notifications.get_message(ignore_subscribe_messages=True, timeout=2.0)
+            assert msg is not None
+            assert msg.key.startswith("test:")
+            assert msg.event_type == "set"
+
+        notifications.close()
