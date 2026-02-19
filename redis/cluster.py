@@ -1725,10 +1725,10 @@ class RedisCluster(
                     redis_node.connection_pool.release(connection)
 
         e = ClusterError("TTL exhausted.")
-        # int his case we should have had active connection
-        # if we are here - we have received many MOVED or ASK errors and finally exhausted the TTL
-        # this means that we have a used an active connection to read from the socket.
-        # this is used to report the metrics based on host and port info
+        # In this case we should have an active connection.
+        # If we are here, we have received many MOVED or ASK errors and finally exhausted the TTL.
+        # This means that we used an active connection to read from the socket.
+        # This is used to report metrics based on the host and port information.
         e.connection = connection
         raise e
 
