@@ -1557,10 +1557,10 @@ class RedisCluster(
                 return response
             except AuthenticationError as e:
                 # AuthenticationError can be raised if the connection was not authenticated successfully.
-                # In this case, the connection object is not set yet.
-                # The connection in the error is used to report the metrics based on host and port info
-                # so we use the target node object which contains the host and port info
-                e.connection = target_node
+                # The connection in the error is used to report the metrics based on host and port info.
+                # Prefer the actual connection object when available, and fall back to the target node
+                # (which also contains host and port info) when the connection is not yet set.
+                e.connection = connection if connection is not None else target_node
                 raise
             except MaxConnectionsError as e:
                 # MaxConnectionsError indicates client-side resource exhaustion
