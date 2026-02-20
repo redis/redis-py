@@ -881,7 +881,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             p = DEFAULT_RESP_VERSION
         except ValueError:
             raise ConnectionError("protocol must be an integer")
-        finally:
+        else:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
                 # p = DEFAULT_RESP_VERSION
@@ -3088,13 +3088,13 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def _get_free_connections(self):
         with self._lock:
-            return self._available_connections
+            return list(self._available_connections)
 
     def _get_in_use_connections(self):
         with self._lock:
-            return self._in_use_connections
+            return set(self._in_use_connections)
 
-    async def _mock(self, error: RedisError):
+    def _mock(self, error: RedisError):
         """
         Dummy functions, needs to be passed as error callback to retry object.
         :param error:

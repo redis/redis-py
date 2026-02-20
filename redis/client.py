@@ -702,8 +702,8 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
@@ -744,17 +744,17 @@ class Redis(RedisModuleCommands, CoreCommands, SentinelCommands):
             record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
             )
             return result
         except Exception as e:
             record_error_count(
-                server_address=conn.host,
-                server_port=conn.port,
-                network_peer_address=conn.host,
-                network_peer_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
                 error_type=e,
                 retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
@@ -1055,8 +1055,8 @@ class PubSub:
                 record_operation_duration(
                     command_name=command_name,
                     duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
+                    server_address=getattr(conn, "host", None),
+                    server_port=getattr(conn, "port", None),
                     db_namespace=str(conn.db),
                     error=error,
                     retry_attempts=failure_count,
@@ -1101,18 +1101,18 @@ class PubSub:
                 record_operation_duration(
                     command_name=command_name,
                     duration_seconds=time.monotonic() - start_time,
-                    server_address=conn.host,
-                    server_port=conn.port,
+                    server_address=getattr(conn, "host", None),
+                    server_port=getattr(conn, "port", None),
                     db_namespace=str(conn.db),
                 )
 
             return response
         except Exception as e:
             record_error_count(
-                server_address=conn.host,
-                server_port=conn.port,
-                network_peer_address=conn.host,
-                network_peer_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
                 error_type=e,
                 retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
@@ -1652,8 +1652,8 @@ class Pipeline(Redis):
             record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
@@ -1706,18 +1706,18 @@ class Pipeline(Redis):
             record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
             )
 
             return response
         except Exception as e:
             record_error_count(
-                server_address=conn.host,
-                server_port=conn.port,
-                network_peer_address=conn.host,
-                network_peer_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
                 error_type=e,
                 retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
@@ -1885,8 +1885,8 @@ class Pipeline(Redis):
             record_operation_duration(
                 command_name=command_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
@@ -1944,18 +1944,18 @@ class Pipeline(Redis):
             record_operation_duration(
                 command_name=operation_name,
                 duration_seconds=time.monotonic() - start_time,
-                server_address=conn.host,
-                server_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
                 batch_size=stack_len,
             )
             return response
         except Exception as e:
             record_error_count(
-                server_address=conn.host,
-                server_port=conn.port,
-                network_peer_address=conn.host,
-                network_peer_port=conn.port,
+                server_address=getattr(conn, "host", None),
+                server_port=getattr(conn, "port", None),
+                network_peer_address=getattr(conn, "host", None),
+                network_peer_port=getattr(conn, "port", None),
                 error_type=e,
                 retry_attempts=actual_retry_attempts[0],
                 is_internal=False,
