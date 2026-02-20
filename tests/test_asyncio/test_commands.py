@@ -5437,7 +5437,7 @@ class TestAsyncXreadXreadgroupMetricsExport:
             result = await r.xread(streams={stream: "0"})
 
             # Verify the async recorder was called
-            mock_recorder.assert_called_once()
+            mock_recorder.assert_awaited_once()
             call_args = mock_recorder.call_args
             # Verify response was passed to the recorder
             assert call_args[1]["response"] is not None
@@ -5476,7 +5476,7 @@ class TestAsyncXreadXreadgroupMetricsExport:
             )
 
             # Verify the async recorder was called with consumer info
-            mock_recorder.assert_called_once()
+            mock_recorder.assert_awaited_once()
             call_args = mock_recorder.call_args
             assert call_args[1]["response"] is not None
             assert call_args[1]["consumer_group"] == group
@@ -5505,7 +5505,7 @@ class TestAsyncXreadXreadgroupMetricsExport:
             result = await r.xread(streams={stream: msg_id})
 
             # Verify the async recorder was called (even with empty response)
-            mock_recorder.assert_called_once()
+            mock_recorder.assert_awaited_once()
             # Result should be None or empty
             assert result is None or result == []
 
