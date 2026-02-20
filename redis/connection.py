@@ -881,7 +881,7 @@ class AbstractConnection(MaintNotificationsAbstractConnection, ConnectionInterfa
             p = DEFAULT_RESP_VERSION
         except ValueError:
             raise ConnectionError("protocol must be an integer")
-        finally:
+        else:
             if p < 2 or p > 3:
                 raise ConnectionError("protocol must be either 2 or 3")
                 # p = DEFAULT_RESP_VERSION
