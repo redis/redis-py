@@ -872,8 +872,8 @@ class PubSub:
     will be returned and it's safe to start listening again.
     """
 
-    PUBLISH_MESSAGE_TYPES = ("message", "pmessage")
-    UNSUBSCRIBE_MESSAGE_TYPES = ("unsubscribe", "punsubscribe")
+    PUBLISH_MESSAGE_TYPES = ("message", "pmessage", "smessage")
+    UNSUBSCRIBE_MESSAGE_TYPES = ("unsubscribe", "punsubscribe", "sunsubscribe")
     HEALTH_CHECK_MESSAGE = "redis-py-health-check"
 
     def __init__(
