@@ -8,6 +8,7 @@ import datetime
 import re
 import sys
 from string import ascii_letters
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -5423,15 +5424,13 @@ class TestAsyncXreadXreadgroupMetricsExport:
     @skip_if_server_version_lt("5.0.0")
     async def test_async_xread_exports_streaming_lag_metric(self, r: redis.Redis):
         """Test that async xread exports streaming lag metric."""
-        from unittest.mock import AsyncMock, patch
-
         stream = "test-stream-metrics"
 
         # Add a message to the stream
         await r.xadd(stream, {"foo": "bar"})
 
         with patch(
-            "redis.asyncio.observability.recorder.record_streaming_lag_from_response",
+            "redis.commands.core.async_record_streaming_lag",
             new_callable=AsyncMock,
         ) as mock_recorder:
             # Read from the stream
@@ -5453,8 +5452,6 @@ class TestAsyncXreadXreadgroupMetricsExport:
         self, r: redis.Redis
     ):
         """Test that async xreadgroup exports streaming lag metric with consumer group info."""
-        from unittest.mock import AsyncMock, patch
-
         stream = "test-stream-metrics-group"
         group = "test-group"
         consumer = "test-consumer"
@@ -5468,7 +5465,7 @@ class TestAsyncXreadXreadgroupMetricsExport:
             pass
 
         with patch(
-            "redis.asyncio.observability.recorder.record_streaming_lag_from_response",
+            "redis.commands.core.async_record_streaming_lag",
             new_callable=AsyncMock,
         ) as mock_recorder:
             # Read from the stream via consumer group
@@ -5494,8 +5491,6 @@ class TestAsyncXreadXreadgroupMetricsExport:
     @skip_if_server_version_lt("5.0.0")
     async def test_async_xread_handles_empty_response(self, r: redis.Redis):
         """Test that async xread handles empty response gracefully."""
-        from unittest.mock import AsyncMock, patch
-
         stream = "test-stream-empty"
 
         # Create an empty stream by adding and deleting a message
@@ -5503,7 +5498,7 @@ class TestAsyncXreadXreadgroupMetricsExport:
         await r.xdel(stream, msg_id)
 
         with patch(
-            "redis.asyncio.observability.recorder.record_streaming_lag_from_response",
+            "redis.commands.core.async_record_streaming_lag",
             new_callable=AsyncMock,
         ) as mock_recorder:
             # Read from the stream starting after the deleted message

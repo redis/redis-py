@@ -1,6 +1,5 @@
 # from __future__ import annotations
 
-import asyncio
 import datetime
 import hashlib
 import inspect
@@ -34,6 +33,9 @@ from typing import (
     Union,
 )
 
+from redis.asyncio.observability.recorder import (
+    record_streaming_lag_from_response as async_record_streaming_lag,
+)
 from redis.exceptions import ConnectionError, DataError, NoScriptError, RedisError
 from redis.typing import (
     AbsExpiryT,
@@ -4458,9 +4460,6 @@ class StreamCommands(CommandsProtocol):
             # Async client - wrap in coroutine that awaits and records
             async def _record_and_return():
                 actual_response = await response
-                from redis.asyncio.observability.recorder import (
-                    record_streaming_lag_from_response as async_record_streaming_lag,
-                )
 
                 await async_record_streaming_lag(response=actual_response)
                 return actual_response
@@ -4535,9 +4534,6 @@ class StreamCommands(CommandsProtocol):
             # Async client - wrap in coroutine that awaits and records
             async def _record_and_return():
                 actual_response = await response
-                from redis.asyncio.observability.recorder import (
-                    record_streaming_lag_from_response as async_record_streaming_lag,
-                )
 
                 await async_record_streaming_lag(
                     response=actual_response,
