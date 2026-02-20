@@ -39,14 +39,13 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
                 self._buffer.rewind(pos)
             raise
         else:
-            try:
-                self._buffer.purge()
-            except AttributeError:
-                # Buffer was closed/None during read, so purge is not possible
-                # This can happen when connection is closed by some other thread
-                # We don't want to raise here, as we already have extracted the result
-                # and we don't want to lose it
-                pass
+            if self._buffer is not None:
+                try:
+                    self._buffer.purge()
+                except AttributeError:
+                    # Buffer may have been set to None by another thread after
+                    # the check above; result is still valid so we don't raise
+                    pass
             return result
 
     def _read_response(self, disable_decoding=False, push_request=False):
