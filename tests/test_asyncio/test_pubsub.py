@@ -1156,7 +1156,7 @@ class TestPubSubHandleMessageMetrics:
             )
 
             # Verify record_pubsub_message was called
-            mock_record.assert_called_once()
+            mock_record.assert_awaited_once()
             call_kwargs = mock_record.call_args[1]
             from redis.observability.attributes import PubSubDirection
 
@@ -1175,7 +1175,7 @@ class TestPubSubHandleMessageMetrics:
                 mock_pubsub, response, ignore_subscribe_messages=False
             )
 
-            mock_record.assert_called_once()
+            mock_record.assert_awaited_once()
             call_kwargs = mock_record.call_args[1]
             from redis.observability.attributes import PubSubDirection
 
