@@ -12,6 +12,9 @@ from redis.asyncio.connection import (
     ConnectionPool,
     to_bool,
 )
+from unittest.mock import AsyncMock, MagicMock
+
+from redis.observability.metrics import CloseReason
 from redis.auth.token import TokenInterface
 from tests.conftest import skip_if_redis_enterprise, skip_if_server_version_lt
 
@@ -1129,3 +1132,71 @@ class TestAsyncConnectionPoolMetricsRecording:
                     assert wait_kwargs["duration_seconds"] > 0
 
         await pool.disconnect()
+
+    async def test_connection_disconnect_records_connection_closed_on_error(self):
+        """Test that Connection.disconnect() records connection closed with ERROR reason when error is provided."""
+
+        conn = Connection()
+        conn._writer = MagicMock()
+        conn._writer.close = MagicMock()
+        conn._writer.wait_closed = AsyncMock()
+        conn._reader = MagicMock()
+
+        with patch(
+            "redis.asyncio.connection.record_connection_closed",
+            new_callable=AsyncMock,
+        ) as mock_record:
+            error = ConnectionError("Connection lost")
+            await conn.disconnect(error=error)
+
+            # Verify record_connection_closed was called with ERROR reason
+            mock_record.assert_called_once()
+            call_kwargs = mock_record.call_args[1]
+            assert call_kwargs["close_reason"] == CloseReason.ERROR
+            assert call_kwargs["error_type"] is error
+
+    async def test_connection_disconnect_records_connection_closed_on_healthcheck_failed(
+        self,
+    ):
+        """Test that Connection.disconnect() records connection closed with HEALTHCHECK_FAILED reason."""
+
+        conn = Connection()
+        conn._writer = MagicMock()
+        conn._writer.close = MagicMock()
+        conn._writer.wait_closed = AsyncMock()
+        conn._reader = MagicMock()
+
+        with patch(
+            "redis.asyncio.connection.record_connection_closed",
+            new_callable=AsyncMock,
+        ) as mock_record:
+            error = ConnectionError("Health check failed")
+            await conn.disconnect(error=error, health_check_failed=True)
+
+            # Verify record_connection_closed was called with HEALTHCHECK_FAILED reason
+            mock_record.assert_called_once()
+            call_kwargs = mock_record.call_args[1]
+            assert call_kwargs["close_reason"] == CloseReason.HEALTHCHECK_FAILED
+            assert call_kwargs["error_type"] is error
+
+    async def test_connection_disconnect_records_connection_closed_on_application_close(
+        self,
+    ):
+        """Test that Connection.disconnect() records connection closed with APPLICATION_CLOSE reason for normal close."""
+
+        conn = Connection()
+        conn._writer = MagicMock()
+        conn._writer.close = MagicMock()
+        conn._writer.wait_closed = AsyncMock()
+        conn._reader = MagicMock()
+
+        with patch(
+            "redis.asyncio.connection.record_connection_closed",
+            new_callable=AsyncMock,
+        ) as mock_record:
+            await conn.disconnect()
+
+            # Verify record_connection_closed was called with APPLICATION_CLOSE reason
+            mock_record.assert_called_once()
+            call_kwargs = mock_record.call_args[1]
+            assert call_kwargs["close_reason"] == CloseReason.APPLICATION_CLOSE
