@@ -17,6 +17,8 @@ from unittest import mock
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
+from redis.asyncio.client import PubSub
+
 from redis.exceptions import ConnectionError
 from redis.typing import EncodableT
 from tests.conftest import get_protocol_version, skip_if_server_version_lt
@@ -1142,7 +1144,6 @@ class TestPubSubHandleMessageMetrics:
 
     async def test_handle_message_records_metric_for_message_type(self, mock_pubsub):
         """Test that handle_message calls record_pubsub_message for 'message' type."""
-        from redis.asyncio.client import PubSub
 
         response = [b"message", b"test-channel", b"test-data"]
 
@@ -1164,7 +1165,6 @@ class TestPubSubHandleMessageMetrics:
 
     async def test_handle_message_records_metric_for_pmessage_type(self, mock_pubsub):
         """Test that handle_message calls record_pubsub_message for 'pmessage' type."""
-        from redis.asyncio.client import PubSub
 
         response = [b"pmessage", b"test-pattern*", b"test-channel", b"test-data"]
 
@@ -1186,7 +1186,6 @@ class TestPubSubHandleMessageMetrics:
         self, mock_pubsub
     ):
         """Test that handle_message does NOT call record_pubsub_message for 'subscribe' type."""
-        from redis.asyncio.client import PubSub
 
         response = [b"subscribe", b"test-channel", 1]
 
@@ -1203,7 +1202,6 @@ class TestPubSubHandleMessageMetrics:
         self, mock_pubsub
     ):
         """Test that handle_message does NOT call record_pubsub_message for 'pong' type."""
-        from redis.asyncio.client import PubSub
 
         response = b"PONG"
 
