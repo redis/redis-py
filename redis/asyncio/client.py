@@ -42,6 +42,7 @@ from redis.asyncio.lock import Lock
 from redis.asyncio.observability.recorder import (
     record_error_count,
     record_operation_duration,
+    record_pubsub_message,
 )
 from redis.asyncio.retry import Retry
 from redis.backoff import ExponentialWithJitterBackoff
@@ -74,6 +75,7 @@ from redis.exceptions import (
     ResponseError,
     WatchError,
 )
+from redis.observability.attributes import PubSubDirection
 from redis.typing import ChannelT, EncodableT, KeyT
 from redis.utils import (
     SSL_AVAILABLE,
@@ -1332,6 +1334,13 @@ class PubSub:
                 "channel": response[1],
                 "data": response[2],
             }
+
+        if message_type in ["message", "pmessage"]:
+            channel = str_if_bytes(message["channel"])
+            await record_pubsub_message(
+                direction=PubSubDirection.RECEIVE,
+                channel=channel,
+            )
 
         # if this is an unsubscribe message, remove it from memory
         if message_type in self.UNSUBSCRIBE_MESSAGE_TYPES:

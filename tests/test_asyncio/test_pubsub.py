@@ -3,7 +3,7 @@ import functools
 import socket
 import sys
 from typing import Optional
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock, MagicMock
 
 # the functionality is available in 3.11.x but has a major issue before
 # 3.11.3. See https://github.com/redis/redis-py/issues/2633
@@ -1121,3 +1121,97 @@ class TestBaseException:
 
         # the timeout on the read should not cause disconnect
         assert pubsub.connection.is_connected
+
+
+@pytest.mark.asyncio
+class TestPubSubHandleMessageMetrics:
+    """Tests for handle_message recording pubsub metrics."""
+
+    @pytest.fixture
+    def mock_pubsub(self):
+        """Create a mock PubSub instance for testing handle_message."""
+        pubsub = MagicMock()
+        pubsub.UNSUBSCRIBE_MESSAGE_TYPES = ("unsubscribe", "punsubscribe")
+        pubsub.PUBLISH_MESSAGE_TYPES = ("message", "pmessage")
+        pubsub.pending_unsubscribe_patterns = set()
+        pubsub.pending_unsubscribe_channels = set()
+        pubsub.patterns = {}
+        pubsub.channels = {}
+        pubsub.ignore_subscribe_messages = False
+        return pubsub
+
+    async def test_handle_message_records_metric_for_message_type(self, mock_pubsub):
+        """Test that handle_message calls record_pubsub_message for 'message' type."""
+        from redis.asyncio.client import PubSub
+
+        response = [b"message", b"test-channel", b"test-data"]
+
+        with patch(
+            "redis.asyncio.client.record_pubsub_message", new_callable=AsyncMock
+        ) as mock_record:
+            # Call the actual handle_message method
+            await PubSub.handle_message(
+                mock_pubsub, response, ignore_subscribe_messages=False
+            )
+
+            # Verify record_pubsub_message was called
+            mock_record.assert_called_once()
+            call_kwargs = mock_record.call_args[1]
+            from redis.observability.attributes import PubSubDirection
+
+            assert call_kwargs["direction"] == PubSubDirection.RECEIVE
+            assert call_kwargs["channel"] == "test-channel"
+
+    async def test_handle_message_records_metric_for_pmessage_type(self, mock_pubsub):
+        """Test that handle_message calls record_pubsub_message for 'pmessage' type."""
+        from redis.asyncio.client import PubSub
+
+        response = [b"pmessage", b"test-pattern*", b"test-channel", b"test-data"]
+
+        with patch(
+            "redis.asyncio.client.record_pubsub_message", new_callable=AsyncMock
+        ) as mock_record:
+            await PubSub.handle_message(
+                mock_pubsub, response, ignore_subscribe_messages=False
+            )
+
+            mock_record.assert_called_once()
+            call_kwargs = mock_record.call_args[1]
+            from redis.observability.attributes import PubSubDirection
+
+            assert call_kwargs["direction"] == PubSubDirection.RECEIVE
+            assert call_kwargs["channel"] == "test-channel"
+
+    async def test_handle_message_does_not_record_metric_for_subscribe_type(
+        self, mock_pubsub
+    ):
+        """Test that handle_message does NOT call record_pubsub_message for 'subscribe' type."""
+        from redis.asyncio.client import PubSub
+
+        response = [b"subscribe", b"test-channel", 1]
+
+        with patch(
+            "redis.asyncio.client.record_pubsub_message", new_callable=AsyncMock
+        ) as mock_record:
+            await PubSub.handle_message(
+                mock_pubsub, response, ignore_subscribe_messages=False
+            )
+
+            mock_record.assert_not_called()
+
+    async def test_handle_message_does_not_record_metric_for_pong_type(
+        self, mock_pubsub
+    ):
+        """Test that handle_message does NOT call record_pubsub_message for 'pong' type."""
+        from redis.asyncio.client import PubSub
+
+        response = b"PONG"
+
+        with patch(
+            "redis.asyncio.client.record_pubsub_message", new_callable=AsyncMock
+        ) as mock_record:
+            await PubSub.handle_message(
+                mock_pubsub, response, ignore_subscribe_messages=False
+            )
+
+            mock_record.assert_not_called()
