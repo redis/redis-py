@@ -63,7 +63,6 @@ from redis.asyncio.observability.recorder import (
     record_connection_wait_time,
     record_error_count,
 )
-from redis.observability.metrics import CloseReason
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.connection import DEFAULT_RESP_VERSION
@@ -78,6 +77,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.observability.metrics import CloseReason
 from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
