@@ -45,6 +45,10 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S:%f",
 )
 
+# Set DEBUG level for specific redis-py loggers
+logging.getLogger("redis.maint_notifications").setLevel(logging.DEBUG)
+logging.getLogger("redis.cluster").setLevel(logging.DEBUG)
+
 BIND_TIMEOUT = 60
 MIGRATE_TIMEOUT = 60
 FAILOVER_TIMEOUT = 15

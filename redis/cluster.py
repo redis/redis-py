@@ -1573,8 +1573,13 @@ class RedisCluster(
                 e.connection = target_node
                 raise
             except (ConnectionError, TimeoutError) as e:
-                # if we have a connection, use it, otherwise use the target node
-                # object which contains the host and port info
+                if is_debug_log_enabled():
+                    socket_address = self._extracts_socket_address(connection)
+                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    logger.debug(
+                        f"{type(e).__name__} received for command {args_log_str}, on node {target_node.name}, "
+                        f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
+                    )
                 # this is used to report the metrics based on host and port info
                 e.connection = connection if connection else target_node
 
