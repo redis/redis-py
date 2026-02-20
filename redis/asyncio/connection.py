@@ -58,6 +58,7 @@ else:
     from async_timeout import timeout as async_timeout
 
 from redis.asyncio.observability.recorder import (
+    record_connection_closed,
     record_connection_create_time,
     record_connection_wait_time,
     record_error_count,
@@ -76,6 +77,7 @@ from redis.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from redis.observability.metrics import CloseReason
 from redis.typing import EncodableT
 from redis.utils import HIREDIS_AVAILABLE, str_if_bytes
 
@@ -594,6 +596,11 @@ class AbstractConnection:
             ) from None
 
         if error:
+            if health_check_failed:
+                close_reason = CloseReason.HEALTHCHECK_FAILED
+            else:
+                close_reason = CloseReason.ERROR
+
             if failure_count is not None and failure_count > self.retry.get_retries():
                 await record_error_count(
                     server_address=self.host,
@@ -603,6 +610,15 @@ class AbstractConnection:
                     error_type=error,
                     retry_attempts=failure_count,
                 )
+
+            await record_connection_closed(
+                close_reason=close_reason,
+                error_type=error,
+            )
+        else:
+            await record_connection_closed(
+                close_reason=CloseReason.APPLICATION_CLOSE,
+            )
 
     async def _send_ping(self):
         """Send PING, expect PONG in return"""
