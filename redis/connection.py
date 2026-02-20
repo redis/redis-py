@@ -3088,13 +3088,13 @@ class ConnectionPool(MaintNotificationsAbstractConnectionPool, ConnectionPoolInt
 
     def _get_free_connections(self):
         with self._lock:
-            return self._available_connections
+            return list(self._available_connections)
 
     def _get_in_use_connections(self):
         with self._lock:
-            return self._in_use_connections
+            return set(self._in_use_connections)
 
-    async def _mock(self, error: RedisError):
+    def _mock(self, error: RedisError):
         """
         Dummy functions, needs to be passed as error callback to retry object.
         :param error:
