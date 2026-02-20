@@ -21,12 +21,12 @@ from redis.exceptions import (
 class TestClusterErrorHandlingMetrics:
     """Tests for cluster error handling with metrics."""
 
-    def test_authentication_error_uses_target_node_for_metrics(self):
+    def test_authentication_error_uses_connection_when_available(self):
         """
-        Test that AuthenticationError uses target_node for metrics when connection
-        is not yet established.
+        Test that AuthenticationError uses connection when available, otherwise target_node.
 
         This validates the error handling in cluster.py lines 1558-1564.
+        The code prefers the actual connection object when available.
         """
         # Create a real ClusterNode
         target_node = ClusterNode(host="127.0.0.1", port=7000, server_type="primary")
@@ -60,9 +60,10 @@ class TestClusterErrorHandlingMetrics:
                         with pytest.raises(AuthenticationError) as exc_info:
                             cluster._execute_command(target_node, "GET", "key")
 
-                        # Verify the library code set connection attribute to target_node
+                        # Verify the library code set connection attribute to the connection
+                        # (prefers connection over target_node when connection is available)
                         assert hasattr(exc_info.value, "connection")
-                        assert exc_info.value.connection == target_node
+                        assert exc_info.value.connection == mock_connection
 
     def test_max_connections_error_uses_target_node_for_metrics(self):
         """
