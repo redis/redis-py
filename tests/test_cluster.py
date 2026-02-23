@@ -3844,6 +3844,101 @@ class TestClusterPipeline:
         assert response[0]
         assert r.get(f"{hashkey}:foo") == b"bar"
 
+    def test_connection_leak_on_non_timeout_error_during_connect(self, r):
+        """
+        Test that connections are not leaked when a non-TimeoutError/ConnectionError
+        is raised during get_connection(). The bugfix ensures that if an error
+        occurs that isn't explicitly handled, we don't leak connections.
+        """
+        # Ensure keys map to different nodes
+        assert r.keyslot("a") != r.keyslot("b")
+
+        orig_func = redis.cluster.get_connection
+        with patch("redis.cluster.get_connection") as get_connection:
+
+            def raise_custom_error(target_node, *args, **kwargs):
+                # Raise a RuntimeError (not ConnectionError or TimeoutError)
+                # on the second call (when getting second connection)
+                if get_connection.call_count == 2:
+                    raise RuntimeError("Some unexpected error during connection")
+                else:
+                    return orig_func(target_node, *args, **kwargs)
+
+            get_connection.side_effect = raise_custom_error
+
+            with pytest.raises(RuntimeError):
+                r.pipeline().get("a").get("b").execute()
+
+        # Verify that all connections were returned to the pool
+        # (not leaked) even though a non-standard error was raised
+        for cluster_node in r.nodes_manager.nodes_cache.values():
+            connection_pool = cluster_node.redis_connection.connection_pool
+            num_of_conns = len(connection_pool._available_connections)
+            assert num_of_conns == connection_pool._created_connections, (
+                f"Connection leaked: expected {connection_pool._created_connections} "
+                f"available, got {num_of_conns}"
+            )
+
+    def test_dirty_connection_not_reused(self, r):
+        """
+        Test that dirty connections (with unread responses) are not reused.
+        A dirty connection is one where we've written commands but haven't
+        read all responses. If such a connection is returned to the pool,
+        the next caller will read responses from the previous request.
+        """
+        # Ensure we're using multiple nodes to test the dirty connection scenario
+        assert r.keyslot("a") != r.keyslot("b")
+
+        # Mock the write method to raise an error after writing to only some nodes
+        orig_write = redis.cluster.NodeCommands.write
+
+        write_count = 0
+
+        def mock_write(self):
+            nonlocal write_count
+            write_count += 1
+            # Allow the first write to succeed
+            if write_count == 1:
+                return orig_write(self)
+            # Simulate a failure after the first write (leaving connection dirty)
+            else:
+                raise RuntimeError("Simulated write error")
+
+        # Patch Connection.disconnect so we can assert that at least one
+        # connection was disconnected when the write error occurred.
+        original_disconnect = Connection.disconnect
+        disconnect_called = []
+
+        def track_disconnect(self, *args):
+            disconnect_called.append(True)
+            return original_disconnect(self, *args)
+
+        with patch.object(Connection, "disconnect", track_disconnect):
+            with patch.object(redis.cluster.NodeCommands, "write", mock_write):
+                with pytest.raises(RuntimeError):
+                    r.pipeline().get("a").get("b").execute()
+
+            # Ensure that at least one connection was disconnected as part of
+            # handling the dirty connection created by the write failure.
+            assert disconnect_called, (
+                "Expected at least one connection to be disconnected when "
+                "handling a dirty connection, but disconnect() was not called."
+            )
+        # After the error, verify that no connections are in the available pool
+        # with dirty state (unread responses). If a connection is dirty, it should
+        # have been disconnected before being returned to the pool.
+        # We verify this by checking the connections can be reused successfully.
+        try:
+            # Try to execute a command on each connection to verify
+            # they're clean (not holding responses from previous requests)
+            result = r.ping()
+            assert result is True
+        except Exception as e:
+            pytest.fail(
+                f"Connection reuse after dirty state failed: {e}. "
+                f"This indicates a dirty connection was returned to the pool."
+            )
+
 
 @pytest.mark.onlycluster
 class TestReadOnlyPipeline:

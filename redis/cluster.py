@@ -3068,7 +3068,9 @@ class PipelineCommand:
 class NodeCommands:
     """ """
 
-    def __init__(self, parse_response, connection_pool, connection):
+    def __init__(
+        self, parse_response, connection_pool: ConnectionPool, connection: Connection
+    ):
         """ """
         self.parse_response = parse_response
         self.connection_pool = connection_pool
@@ -3423,15 +3425,18 @@ class PipelineStrategy(AbstractStrategy):
         attempt = sorted(stack, key=lambda x: x.position)
         is_default_node = False
         # build a list of node objects based on node names we need to
-        nodes = {}
+        nodes: dict[str, NodeCommands] = {}
+        nodes_written = 0
+        nodes_read = 0
 
-        # as we move through each command that still needs to be processed,
-        # we figure out the slot number that command maps to, then from
-        # the slot determine the node.
-        for c in attempt:
-            command_policies = self._pipe._policy_resolver.resolve(c.args[0].lower())
-
-            while True:
+        try:
+            # as we move through each command that still needs to be processed,
+            # we figure out the slot number that command maps to, then from
+            # the slot determine the node.
+            for c in attempt:
+                command_policies = self._pipe._policy_resolver.resolve(
+                    c.args[0].lower()
+                )
                 # refer to our internal node -> slot table that
                 # tells us where a given command should route to.
                 # (it might be possible we have a cached node that no longer
@@ -3506,6 +3511,7 @@ class PipelineStrategy(AbstractStrategy):
                     try:
                         connection = get_connection(redis_node)
                     except (ConnectionError, TimeoutError):
+                        # Release any connections we've already acquired before clearing nodes
                         for n in nodes.values():
                             n.connection_pool.release(n.connection)
                         # Connection retries are being handled in the node's
@@ -3513,6 +3519,7 @@ class PipelineStrategy(AbstractStrategy):
                         self._nodes_manager.initialize()
                         if is_default_node:
                             self._pipe.replace_default_node()
+                        nodes = {}
                         raise
                     nodes[node_name] = NodeCommands(
                         redis_node.parse_response,
@@ -3520,23 +3527,22 @@ class PipelineStrategy(AbstractStrategy):
                         connection,
                     )
                 nodes[node_name].append(c)
-                break
 
-        # send the commands in sequence.
-        # we  write to all the open sockets for each node first,
-        # before reading anything
-        # this allows us to flush all the requests out across the
-        # network
-        # so that we can read them from different sockets as they come back.
-        # we dont' multiplex on the sockets as they come available,
-        # but that shouldn't make too much difference.
+            # send the commands in sequence.
+            # we  write to all the open sockets for each node first,
+            # before reading anything
+            # this allows us to flush all the requests out across the
+            # network
+            # so that we can read them from different sockets as they come back.
+            # we dont' multiplex on the sockets as they come available,
+            # but that shouldn't make too much difference.
 
-        # Start timing for observability
-        start_time = time.monotonic()
+            # Start timing for observability
+            start_time = time.monotonic()
 
-        try:
             node_commands = nodes.values()
             for n in node_commands:
+                nodes_written += 1
                 n.write()
 
             for n in node_commands:
@@ -3550,26 +3556,24 @@ class PipelineStrategy(AbstractStrategy):
                     db_namespace=str(n.connection.db),
                     batch_size=len(n.commands),
                 )
+                nodes_read += 1
         finally:
-            # release all of the redis connections we allocated earlier
+            # release all the redis connections we allocated earlier
             # back into the connection pool.
-            # we used to do this step as part of a try/finally block,
-            # but it is really dangerous to
-            # release connections back into the pool if for some
-            # reason the socket has data still left in it
-            # from a previous operation. The write and
-            # read operations already have try/catch around them for
-            # all known types of errors including connection
-            # and socket level errors.
-            # So if we hit an exception, something really bad
-            # happened and putting any oF
-            # these connections back into the pool is a very bad idea.
-            # the socket might have unread buffer still sitting in it,
-            # and then the next time we read from it we pass the
-            # buffered result back from a previous command and
-            # every single request after to that connection will always get
-            # a mismatched result.
-            for n in nodes.values():
+            # if the connection is dirty (that is: we've written
+            # commands to it, but haven't read the responses), we need
+            # to close the connection before returning it to the pool.
+            # otherwise, the next caller to use this connection will
+            # read the response from _this_ request, not its own request.
+            # disconnecting discards the dirty state & forces the next
+            # caller to reconnect.
+            # NOTE: dicts have a consistent ordering; we're iterating
+            # through nodes.values() in the same order as we are when
+            # reading / writing to the connections above, which is critical
+            # for how we're using the nodes_written/nodes_read offsets.
+            for i, n in enumerate(nodes.values()):
+                if i < nodes_written and i >= nodes_read:
+                    n.connection.disconnect()
                 n.connection_pool.release(n.connection)
 
         # if the response isn't an exception it is a
