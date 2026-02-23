@@ -41,7 +41,6 @@ from redis.observability.attributes import (
     # Streaming attributes
     REDIS_CLIENT_STREAM_NAME,
     REDIS_CLIENT_CONSUMER_GROUP,
-    REDIS_CLIENT_CONSUMER_NAME,
     DB_CLIENT_CONNECTION_NAME,
     # Geo failover attributes
     DB_CLIENT_GEOFAILOVER_FAIL_FROM,
@@ -672,7 +671,6 @@ class TestRecordStreamingLag:
         attrs = call_args[1]["attributes"]
         assert attrs[REDIS_CLIENT_STREAM_NAME] == "my-stream"
         assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
-        assert attrs[REDIS_CLIENT_CONSUMER_NAME] == "consumer-1"
 
     def test_record_streaming_lag_minimal(self, setup_recorder):
         """Test recording streaming lag with only required attributes."""
@@ -803,7 +801,6 @@ class TestHideStreamNames:
         # Stream name should NOT be in attributes when hidden
         assert REDIS_CLIENT_STREAM_NAME not in attrs
         assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
-        assert attrs[REDIS_CLIENT_CONSUMER_NAME] == "consumer-1"
 
     def test_stream_name_visible_when_not_configured(self, setup_recorder):
         """Test that stream name is visible when hide_stream_names=False (default)."""

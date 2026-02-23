@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 DB_SYSTEM = "db.system"
 DB_NAMESPACE = "db.namespace"
 DB_OPERATION_NAME = "db.operation.name"
-DB_OPERATION_BATCH_SIZE = "db.operation.batch.size"
 DB_RESPONSE_STATUS_CODE = "db.response.status_code"
 DB_STORED_PROCEDURE_NAME = "db.stored_procedure.name"
 
@@ -59,8 +58,7 @@ REDIS_CLIENT_PUBSUB_SHARDED = "redis.client.pubsub.sharded"
 REDIS_CLIENT_ERROR_INTERNAL = "redis.client.errors.internal"
 REDIS_CLIENT_ERROR_CATEGORY = "redis.client.errors.category"
 REDIS_CLIENT_STREAM_NAME = "redis.client.stream.name"
-REDIS_CLIENT_CONSUMER_GROUP = "redis.client.consumer_group"
-REDIS_CLIENT_CONSUMER_NAME = "redis.client.consumer_name"
+REDIS_CLIENT_CONSUMER_GROUP = "redis.client.stream.consumer_group"
 REDIS_CLIENT_CSC_RESULT = "redis.client.csc.result"
 REDIS_CLIENT_CSC_REASON = "redis.client.csc.reason"
 
@@ -131,7 +129,6 @@ class AttributeBuilder:
     @staticmethod
     def build_operation_attributes(
         command_name: Optional[str] = None,
-        batch_size: Optional[int] = None,
         network_peer_address: Optional[str] = None,
         network_peer_port: Optional[int] = None,
         stored_procedure_name: Optional[str] = None,
@@ -143,7 +140,6 @@ class AttributeBuilder:
 
         Args:
             command_name: Redis command name (e.g., 'GET', 'SET', 'MULTI')
-            batch_size: Number of commands in batch (for pipelines/transactions)
             network_peer_address: Resolved peer address
             network_peer_port: Peer port number
             stored_procedure_name: Lua script name or SHA1 digest
@@ -157,9 +153,6 @@ class AttributeBuilder:
 
         if command_name is not None:
             attrs[DB_OPERATION_NAME] = command_name.upper()
-
-        if batch_size is not None:
-            attrs[DB_OPERATION_BATCH_SIZE] = batch_size
 
         if network_peer_address is not None:
             attrs[NETWORK_PEER_ADDRESS] = network_peer_address
@@ -303,9 +296,6 @@ class AttributeBuilder:
 
         if consumer_group is not None:
             attrs[REDIS_CLIENT_CONSUMER_GROUP] = consumer_group
-
-        if consumer_name is not None:
-            attrs[REDIS_CLIENT_CONSUMER_NAME] = consumer_name
 
         return attrs
 

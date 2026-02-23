@@ -1870,7 +1870,6 @@ class Pipeline(Redis):
         failure_count: Optional[int] = None,
         start_time: Optional[float] = None,
         command_name: Optional[str] = None,
-        batch_size: Optional[int] = None,
     ) -> None:
         """
         Close the connection, raise an exception if we were watching.
@@ -1890,7 +1889,6 @@ class Pipeline(Redis):
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
-                batch_size=batch_size,
             )
         conn.disconnect()
         # if we were watching a variable, the watch is no longer valid
@@ -1926,12 +1924,11 @@ class Pipeline(Redis):
         start_time = time.monotonic()
         # Track actual retry attempts for error reporting
         actual_retry_attempts = [0]
-        stack_len = len(stack)
 
         def failure_callback(error, failure_count):
             actual_retry_attempts[0] = failure_count
             self._disconnect_raise_on_watching(
-                conn, error, failure_count, start_time, operation_name, stack_len
+                conn, error, failure_count, start_time, operation_name
             )
 
         try:
@@ -1947,7 +1944,6 @@ class Pipeline(Redis):
                 server_address=getattr(conn, "host", None),
                 server_port=getattr(conn, "port", None),
                 db_namespace=str(conn.db),
-                batch_size=stack_len,
             )
             return response
         except Exception as e:

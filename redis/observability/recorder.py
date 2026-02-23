@@ -54,7 +54,6 @@ def record_operation_duration(
     db_namespace: Optional[str] = None,
     error: Optional[Exception] = None,
     is_blocking: Optional[bool] = None,
-    batch_size: Optional[int] = None,
     retry_attempts: Optional[int] = None,
 ) -> None:
     """
@@ -71,7 +70,6 @@ def record_operation_duration(
         db_namespace: Redis database index
         error: Exception if command failed, None if successful
         is_blocking: Whether the operation is a blocking command
-        batch_size: Number of commands in batch (for pipelines/transactions)
         retry_attempts: Number of retry attempts made
 
     Example:
@@ -100,7 +98,6 @@ def record_operation_duration(
             network_peer_address=server_address,
             network_peer_port=server_port,
             is_blocking=is_blocking,
-            batch_size=batch_size,
             retry_attempts=retry_attempts,
         )
     except Exception:

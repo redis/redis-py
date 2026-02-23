@@ -555,8 +555,6 @@ class TestClusterTransactionMetricsRecording:
 
         assert transaction_call is not None
         attrs = transaction_call[1]["attributes"]
-        assert "db.operation.batch.size" in attrs
-        assert attrs["db.operation.batch.size"] == 3
 
     def test_transaction_duration_is_positive(self, cluster_transaction_with_otel):
         """

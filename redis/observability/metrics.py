@@ -433,7 +433,6 @@ class RedisMetricsCollector:
         server_address: Optional[str] = None,
         server_port: Optional[int] = None,
         db_namespace: Optional[int] = None,
-        batch_size: Optional[int] = None,
         error_type: Optional[Exception] = None,
         network_peer_address: Optional[str] = None,
         network_peer_port: Optional[int] = None,
@@ -449,7 +448,6 @@ class RedisMetricsCollector:
             server_address: Redis server address
             server_port: Redis server port
             db_namespace: Redis database index
-            batch_size: Number of commands in batch (for pipelines/transactions)
             error_type: Error type if operation failed
             network_peer_address: Resolved peer address
             network_peer_port: Peer port number
@@ -473,7 +471,6 @@ class RedisMetricsCollector:
         attrs.update(
             self.attr_builder.build_operation_attributes(
                 command_name=command_name,
-                batch_size=batch_size,
                 network_peer_address=network_peer_address,
                 network_peer_port=network_peer_port,
                 retry_attempts=retry_attempts,

@@ -4176,20 +4176,6 @@ class TestClusterMetricsRecording:
         assert isinstance(duration, float)
         assert duration >= 0
 
-    def test_no_batch_size_for_single_command(self, cluster_with_otel):
-        """
-        Test that single commands don't include batch_size attribute.
-        """
-        cluster, operation_duration_mock = cluster_with_otel
-
-        cluster.get("single_command_key")
-
-        call_args = operation_duration_mock.record.call_args
-        attrs = call_args[1]["attributes"]
-
-        # batch_size should not be present for single commands
-        assert "db.operation.batch_size" not in attrs
-
     def test_different_commands_record_correct_names(self, cluster_with_otel):
         """
         Test that different commands record metrics with correct command names.
@@ -4324,32 +4310,6 @@ class TestClusterPipelineMetricsRecording:
         # Verify attributes
         attrs = call_args[1]["attributes"]
         assert attrs["db.operation.name"] == "PIPELINE"
-
-    def test_pipeline_batch_size_recorded(self, cluster_pipeline_with_otel):
-        """
-        Test that pipeline batch_size is correctly recorded.
-        """
-        cluster, operation_duration_mock = cluster_pipeline_with_otel
-
-        # Execute a pipeline with 3 commands
-        pipe = cluster.pipeline()
-        pipe.set("batch_key", "value1")
-        pipe.get("batch_key")
-        pipe.delete("batch_key")
-        pipe.execute()
-
-        # Find the PIPELINE event call
-        pipeline_call = None
-        for call_obj in operation_duration_mock.record.call_args_list:
-            attrs = call_obj[1]["attributes"]
-            if attrs.get("db.operation.name") == "PIPELINE":
-                pipeline_call = call_obj
-                break
-
-        assert pipeline_call is not None
-        attrs = pipeline_call[1]["attributes"]
-        assert "db.operation.batch.size" in attrs
-        assert attrs["db.operation.batch.size"] == 3
 
     def test_pipeline_server_attributes_recorded(self, cluster_pipeline_with_otel):
         """
@@ -4547,41 +4507,6 @@ class TestClusterPipelineMetricsRecording:
             assert "server.address" in attrs
             assert "server.port" in attrs
             assert "db.namespace" in attrs
-
-    def test_pipeline_metric_contains_batch_size_per_node(
-        self, cluster_pipeline_with_otel
-    ):
-        """
-        Test that pipeline metrics contain correct batch_size for each node.
-        """
-        cluster, operation_duration_mock = cluster_pipeline_with_otel
-
-        # Execute pipeline with commands
-        pipe = cluster.pipeline()
-        pipe.set("batch_node_key1", "value1")
-        pipe.set("batch_node_key2", "value2")
-        pipe.set("batch_node_key3", "value3")
-        pipe.execute()
-
-        # Find PIPELINE events
-        pipeline_calls = [
-            call_obj
-            for call_obj in operation_duration_mock.record.call_args_list
-            if call_obj[1]["attributes"].get("db.operation.name") == "PIPELINE"
-        ]
-
-        # Should have at least one PIPELINE event
-        assert len(pipeline_calls) >= 1
-
-        # Each event should have batch_size
-        total_batch_size = 0
-        for call_obj in pipeline_calls:
-            attrs = call_obj[1]["attributes"]
-            assert "db.operation.batch.size" in attrs
-            total_batch_size += attrs["db.operation.batch.size"]
-
-        # Total batch size should equal number of commands
-        assert total_batch_size == 3
 
     def test_pipeline_duration_recorded_per_node(self, cluster_pipeline_with_otel):
         """

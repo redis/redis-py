@@ -591,7 +591,6 @@ class TestPipelineMetricsRecording:
         # Verify attributes
         attrs = call_args[1]["attributes"]
         assert attrs["db.operation.name"] == "MULTI"
-        assert attrs["db.operation.batch.size"] == 3
         assert attrs["server.address"] == "localhost"
         assert attrs["server.port"] == 6379
         assert attrs["db.namespace"] == "0"
@@ -680,33 +679,6 @@ class TestPipelineMetricsRecording:
             assert "error.type" in error_attrs
 
         recorder.reset_collector()
-
-    def test_pipeline_batch_size_recorded_correctly(self, setup_pipeline_with_otel):
-        """
-        Test that the batch_size attribute correctly reflects
-        the number of commands in the pipeline.
-        """
-        pipeline, operation_duration_mock = setup_pipeline_with_otel
-
-        pipeline._execute_transaction = mock.MagicMock(
-            return_value=[True, True, True, True, True]
-        )
-
-        # Queue exactly 5 commands
-        pipeline.command_stack = [
-            (("SET", "key1", "v1"), {}),
-            (("SET", "key2", "v2"), {}),
-            (("SET", "key3", "v3"), {}),
-            (("SET", "key4", "v4"), {}),
-            (("SET", "key5", "v5"), {}),
-        ]
-
-        pipeline.execute()
-
-        # Verify batch_size is 5
-        call_args = operation_duration_mock.record.call_args
-        attrs = call_args[1]["attributes"]
-        assert attrs["db.operation.batch.size"] == 5
 
     def test_pipeline_server_attributes_recorded(self, setup_pipeline_with_otel):
         """
@@ -891,10 +863,6 @@ class TestPipelineMetricsRecording:
 
             # Last call should be success (no error.type)
             assert "error.type" not in calls[2][1]["attributes"]
-
-            # All calls should have batch_size
-            for call in calls:
-                assert call[1]["attributes"]["db.operation.batch.size"] == 2
 
         recorder.reset_collector()
 
