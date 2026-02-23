@@ -9,7 +9,7 @@ The benchmark uses a comprehensive load generator that exercises all Redis opera
 (commands, pubsub, streaming, CSC, connections) in each iteration. This ensures
 consistent test conditions when comparing different OTel configurations.
 
-Run one scenario at a time:
+Run one scenario at a time (sync client - default):
     python -m benchmarks.otel_benchmark --scenario baseline --baseline-tag v5.2.1
     python -m benchmarks.otel_benchmark --scenario otel_disabled
     python -m benchmarks.otel_benchmark --scenario otel_noop
@@ -17,12 +17,18 @@ Run one scenario at a time:
     python -m benchmarks.otel_benchmark --scenario otel_enabled_http
     python -m benchmarks.otel_benchmark --scenario otel_enabled_grpc
 
+Run with async client:
+    python -m benchmarks.otel_benchmark --scenario baseline --baseline-tag v5.2.1 --async
+    python -m benchmarks.otel_benchmark --scenario otel_disabled --async
+    python -m benchmarks.otel_benchmark --scenario otel_enabled_http --async
+
 Specify which OTel metric groups to enable:
     python -m benchmarks.otel_benchmark --scenario otel_enabled_http --metric-groups command,pubsub
     python -m benchmarks.otel_benchmark --scenario otel_enabled_http --metric-groups all
 """
 
 import argparse
+import asyncio
 import json
 import os
 import statistics
@@ -393,6 +399,306 @@ class ComprehensiveLoadGenerator:
         )
 
 
+class AsyncComprehensiveLoadGenerator:
+    """
+    Async comprehensive load generator that exercises all Redis operations concurrently.
+
+    Each iteration performs operations concurrently where possible:
+    - Command operations (SET/GET) - triggers COMMAND metrics
+    - PubSub operations (PUBLISH) - triggers PUBSUB metrics
+    - Streaming operations (XADD/XREAD) - triggers STREAMING metrics
+    - Connection pool operations - triggers CONNECTION metrics
+
+    This ensures consistent test conditions across all OTel configurations
+    while maximizing throughput through concurrent execution.
+    """
+
+    def __init__(self, config: LoadGeneratorConfig, redis_module: Any = None):
+        """
+        Initialize the async comprehensive load generator.
+
+        Args:
+            config: Load generator configuration
+            redis_module: Optional redis module to use (for baseline testing with
+                         a different redis-py version). If None, imports redis normally.
+        """
+        self.config = config
+        self.redis_module = redis_module
+        self.latencies: List[float] = []
+        self.errors: int = 0
+        self.first_error: Optional[str] = None
+        self._value = "x" * config.value_size_bytes
+        self._key_counter = 0
+        self._message_counter = 0
+
+        # Resources (initialized in setup)
+        self.client = None
+        self.pubsub_publisher = None
+        self.pubsub = None
+        self.stream_name = f"{config.key_prefix}:stream"
+        self.pubsub_channel = f"{config.key_prefix}:channel"
+        self.consumer_group = "benchmark_group"
+        self.consumer_name = "benchmark_consumer"
+
+        # Resource tracking
+        self.cpu_samples: List[float] = []
+        self.memory_samples: List[float] = []
+        self._process = psutil.Process() if PSUTIL_AVAILABLE else None
+
+    def _get_redis_module(self) -> Any:
+        """Get the redis module to use."""
+        if self.redis_module is not None:
+            return self.redis_module
+        import redis
+        return redis
+
+    def _get_key(self) -> str:
+        """Generate a key for the current operation."""
+        key = f"{self.config.key_prefix}:{self._key_counter % 1000}"
+        self._key_counter += 1
+        return key
+
+    async def setup(self) -> None:
+        """Set up all Redis resources."""
+        redis_mod = self._get_redis_module()
+        Redis = redis_mod.asyncio.Redis
+
+        # Main client for commands
+        self.client = Redis(
+            host=self.config.redis_host,
+            port=self.config.redis_port,
+            decode_responses=True
+        )
+
+        # PubSub publisher (separate connection)
+        self.pubsub_publisher = Redis(
+            host=self.config.redis_host,
+            port=self.config.redis_port,
+            decode_responses=True
+        )
+
+        # PubSub subscriber
+        subscriber = Redis(
+            host=self.config.redis_host,
+            port=self.config.redis_port,
+            decode_responses=True
+        )
+        self.pubsub = subscriber.pubsub()
+        await self.pubsub.subscribe(self.pubsub_channel)
+        # Consume subscription confirmation
+        await self.pubsub.get_message(timeout=1.0)
+
+        # Create stream and consumer group
+        try:
+            await self.client.xgroup_create(
+                self.stream_name,
+                self.consumer_group,
+                id="0",
+                mkstream=True
+            )
+        except Exception:
+            # Group may already exist
+            pass
+
+    async def teardown(self) -> None:
+        """Clean up all Redis resources."""
+        if self.pubsub:
+            try:
+                await self.pubsub.unsubscribe()
+                await self.pubsub.aclose()
+            except Exception:
+                pass
+
+        if self.pubsub_publisher:
+            try:
+                await self.pubsub_publisher.aclose()
+            except Exception:
+                pass
+
+        if self.client:
+            try:
+                await self.client.delete(self.stream_name)
+            except Exception:
+                pass
+            try:
+                await self.client.aclose()
+            except Exception:
+                pass
+
+    async def _run_operation(self) -> float:
+        """
+        Run a comprehensive operation cycle concurrently and return latency in ms.
+
+        Each cycle includes concurrent execution of:
+        1. SET + GET (command metrics)
+        2. PUBLISH + get_message (pubsub metrics)
+        3. XADD + XREADGROUP + XACK (streaming metrics)
+
+        Note: CSC (Client-Side Caching) is not included in async benchmark
+        as CSC metrics export is not supported for async client.
+        """
+        key = self._get_key()
+        start = time.perf_counter()
+
+        try:
+            self._message_counter += 1
+
+            # Group 1: Independent write operations (run concurrently)
+            write_tasks = [
+                self.client.set(key, self._value),
+                self.pubsub_publisher.publish(self.pubsub_channel, f"msg:{self._message_counter}"),
+                self.client.xadd(
+                    self.stream_name,
+                    {"data": self._value[:50]},
+                    maxlen=1000
+                ),
+            ]
+
+            await asyncio.gather(*write_tasks)
+
+            # Group 2: Independent read operations (run concurrently)
+            read_tasks = [
+                self.client.get(key),
+                self.pubsub.get_message(timeout=0.001),
+            ]
+
+            await asyncio.gather(*read_tasks)
+
+            # Group 3: Stream read (depends on xadd completing first)
+            messages = await self.client.xreadgroup(
+                self.consumer_group,
+                self.consumer_name,
+                {self.stream_name: ">"},
+                count=1,
+                block=1
+            )
+
+            # Acknowledge messages concurrently
+            if messages:
+                ack_tasks = [
+                    self.client.xack(self.stream_name, self.consumer_group, eid)
+                    for stream_name, entries in messages
+                    for eid, _ in entries
+                ]
+                if ack_tasks:
+                    await asyncio.gather(*ack_tasks)
+
+        except Exception as e:
+            if self.first_error is None:
+                self.first_error = str(e)
+            self.errors += 1
+
+        end = time.perf_counter()
+        return (end - start) * 1000  # Convert to milliseconds
+
+    async def warmup(self) -> None:
+        """Run warmup operations to stabilize connections."""
+        print(f"  Warming up for {self.config.warmup_seconds}s...")
+        end_time = time.monotonic() + self.config.warmup_seconds
+        while time.monotonic() < end_time:
+            await self._run_operation()
+        self.latencies.clear()
+        self.errors = 0
+        self.first_error = None
+        self._key_counter = 0
+        self._message_counter = 0
+
+    def _sample_resources(self) -> None:
+        """Sample current CPU and memory usage."""
+        if self._process is None:
+            return
+        try:
+            cpu = self._process.cpu_percent(interval=None)
+            if cpu > 0:
+                self.cpu_samples.append(cpu)
+            mem_info = self._process.memory_info()
+            self.memory_samples.append(mem_info.rss / (1024 * 1024))
+        except Exception:
+            pass
+
+    async def run(self) -> BenchmarkResult:
+        """Run the load generator for the configured duration."""
+        self.latencies = []
+        self.errors = 0
+        self.first_error = None
+        self.cpu_samples = []
+        self.memory_samples = []
+
+        # Initialize CPU percent tracking
+        if self._process:
+            try:
+                self._process.cpu_percent(interval=None)
+            except Exception:
+                pass
+
+        print(f"  Running load for {self.config.duration_seconds}s...")
+        start_time = time.monotonic()
+        end_time = start_time + self.config.duration_seconds
+        last_sample_time = start_time
+        sample_interval = 0.5
+
+        while time.monotonic() < end_time:
+            latency = await self._run_operation()
+            if latency > 0:
+                self.latencies.append(latency)
+
+            # Sample resources periodically
+            current_time = time.monotonic()
+            if current_time - last_sample_time >= sample_interval:
+                self._sample_resources()
+                last_sample_time = current_time
+
+        # Final resource sample
+        self._sample_resources()
+
+        actual_duration = time.monotonic() - start_time
+        return self._calculate_results(actual_duration)
+
+    def _calculate_results(self, duration: float) -> BenchmarkResult:
+        """Calculate benchmark results from collected latencies."""
+        if not self.latencies:
+            return BenchmarkResult(
+                scenario="unknown", duration_seconds=duration, total_operations=0,
+                operations_per_second=0, avg_latency_ms=0, p50_latency_ms=0,
+                p95_latency_ms=0, p99_latency_ms=0, min_latency_ms=0,
+                max_latency_ms=0, errors=self.errors, first_error=self.first_error,
+            )
+
+        sorted_latencies = sorted(self.latencies)
+        # Count operations per cycle:
+        # - 2 command ops (SET + GET)
+        # - 2 pubsub ops (PUBLISH + get_message)
+        # - 3 stream ops (XADD + XREADGROUP + XACK)
+        # Note: CSC is not included in async benchmark (not supported)
+        ops_per_cycle = 7
+        total_ops = len(self.latencies) * ops_per_cycle
+
+        # Calculate resource usage stats
+        cpu_avg = statistics.mean(self.cpu_samples) if self.cpu_samples else None
+        cpu_max = max(self.cpu_samples) if self.cpu_samples else None
+        mem_avg = statistics.mean(self.memory_samples) if self.memory_samples else None
+        mem_max = max(self.memory_samples) if self.memory_samples else None
+
+        return BenchmarkResult(
+            scenario="unknown",
+            duration_seconds=duration,
+            total_operations=total_ops,
+            operations_per_second=total_ops / duration,
+            avg_latency_ms=statistics.mean(self.latencies),
+            p50_latency_ms=sorted_latencies[len(sorted_latencies) // 2],
+            p95_latency_ms=sorted_latencies[int(len(sorted_latencies) * 0.95)],
+            p99_latency_ms=sorted_latencies[int(len(sorted_latencies) * 0.99)],
+            min_latency_ms=min(self.latencies),
+            max_latency_ms=max(self.latencies),
+            errors=self.errors,
+            first_error=self.first_error,
+            cpu_percent_avg=cpu_avg,
+            cpu_percent_max=cpu_max,
+            memory_mb_avg=mem_avg,
+            memory_mb_max=mem_max,
+        )
+
+
 def print_result(result: BenchmarkResult, iterations: int = 1) -> None:
     """Print a single benchmark result."""
     print("\n" + "=" * 60)
@@ -523,6 +829,10 @@ def parse_args() -> argparse.Namespace:
         "--export-interval", type=int, default=10000,
         help="OTel metric export interval in milliseconds (default: 10000)"
     )
+    parser.add_argument(
+        "--async", dest="use_async", action="store_true",
+        help="Use async Redis client instead of sync client"
+    )
     return parser.parse_args()
 
 
@@ -582,6 +892,63 @@ def run_baseline_scenario(tag: str, config: LoadGeneratorConfig) -> Optional[Ben
                 return result
             finally:
                 generator.teardown()
+
+        finally:
+            # Restore original sys.path and clear redis modules again
+            sys.path[:] = original_path
+            _clear_redis_modules()
+
+
+async def run_baseline_scenario_async(tag: str, config: LoadGeneratorConfig) -> Optional[BenchmarkResult]:
+    """
+    Run async benchmark against a baseline git tag using AsyncComprehensiveLoadGenerator.
+
+    This clones the repo at the specified tag, manipulates sys.path to import
+    the old redis-py version, and runs the benchmark using the async comprehensive
+    load generator for consistent comparison with other scenarios.
+
+    Returns:
+        BenchmarkResult or None on failure
+    """
+    repo_root = Path(__file__).parent.parent
+
+    with TemporaryDirectory() as tmpdir:
+        print(f"  Cloning repository at tag {tag}...")
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth", "1", "--branch", tag, str(repo_root), tmpdir],
+                check=True, capture_output=True, text=True
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"  ERROR: Failed to clone tag {tag}: {e.stderr}")
+            return None
+
+        # Save original sys.path and modules state
+        original_path = sys.path.copy()
+
+        try:
+            # Clear any existing redis imports and prepend cloned directory
+            _clear_redis_modules()
+            sys.path.insert(0, tmpdir)
+
+            # Import redis from the cloned directory
+            import redis as baseline_redis
+
+            print(f"  Using redis from: {baseline_redis.__file__}")
+
+            # Create async comprehensive generator with baseline redis module
+            generator = AsyncComprehensiveLoadGenerator(config, redis_module=baseline_redis)
+            await generator.setup()
+            try:
+                await generator.warmup()
+                result = await generator.run()
+                result.scenario = "baseline"
+                result.metadata["tag"] = tag
+                result.metadata["description"] = "Baseline without OTel code (async)"
+                result.metadata["client_type"] = "async"
+                return result
+            finally:
+                await generator.teardown()
 
         finally:
             # Restore original sys.path and clear redis modules again
@@ -758,6 +1125,31 @@ def run_iteration(scenario: str, config: LoadGeneratorConfig, description: str) 
         generator.teardown()
 
 
+async def run_iteration_async(scenario: str, config: LoadGeneratorConfig, description: str) -> BenchmarkResult:
+    """
+    Run a single async benchmark iteration using the AsyncComprehensiveLoadGenerator.
+
+    Args:
+        scenario: The scenario name
+        config: Load generator configuration
+        description: Description of the scenario
+
+    Returns:
+        BenchmarkResult from the async comprehensive load generator
+    """
+    generator = AsyncComprehensiveLoadGenerator(config)
+    await generator.setup()
+    try:
+        await generator.warmup()
+        result = await generator.run()
+        result.scenario = scenario
+        result.metadata["description"] = description
+        result.metadata["client_type"] = "async"
+        return result
+    finally:
+        await generator.teardown()
+
+
 def main() -> int:
     """Main entry point for the benchmark."""
     args = parse_args()
@@ -779,13 +1171,15 @@ def main() -> int:
             print(f"Valid options: {', '.join(sorted(valid_groups))}")
             return 1
 
+    client_type = "async" if args.use_async else "sync"
     print("=" * 60)
-    print(f"OTel Benchmark: {args.scenario}")
+    print(f"OTel Benchmark: {args.scenario} ({client_type} client)")
     if args.baseline_tag:
         print(f"Baseline tag: {args.baseline_tag}")
     if metric_group_names:
         print(f"Metric groups: {', '.join(metric_group_names)}")
     print("=" * 60)
+    print(f"Client type: {client_type}")
     print(f"Duration: {args.duration}s per iteration")
     print(f"Warmup: {args.warmup}s per iteration")
     print(f"Iterations: {args.iterations}")
@@ -812,6 +1206,14 @@ def main() -> int:
         print(f"  {description}")
 
     # Run benchmark iterations
+    if args.use_async:
+        return asyncio.run(_run_async_benchmark(args, config, description))
+    else:
+        return _run_sync_benchmark(args, config, description)
+
+
+def _run_sync_benchmark(args: argparse.Namespace, config: LoadGeneratorConfig, description: str) -> int:
+    """Run sync benchmark iterations."""
     results: List[BenchmarkResult] = []
     for i in range(args.iterations):
         print(f"\n--- Iteration {i + 1}/{args.iterations} ---")
@@ -823,6 +1225,35 @@ def main() -> int:
                 return 1
         else:
             result = run_iteration(args.scenario, config, description)
+
+        results.append(result)
+        print(f"  Ops/sec: {result.operations_per_second:,.0f}")
+
+    # Average results across all iterations
+    final_result = average_results(results)
+
+    # Output results
+    if args.json:
+        print(json.dumps(asdict(final_result), indent=2))
+    else:
+        print_result(final_result, iterations=args.iterations)
+
+    return 0
+
+
+async def _run_async_benchmark(args: argparse.Namespace, config: LoadGeneratorConfig, description: str) -> int:
+    """Run async benchmark iterations."""
+    results: List[BenchmarkResult] = []
+    for i in range(args.iterations):
+        print(f"\n--- Iteration {i + 1}/{args.iterations} ---")
+
+        if args.scenario == "baseline":
+            result = await run_baseline_scenario_async(tag=args.baseline_tag, config=config)
+            if result is None:
+                print("ERROR: Baseline benchmark failed")
+                return 1
+        else:
+            result = await run_iteration_async(args.scenario, config, description)
 
         results.append(result)
         print(f"  Ops/sec: {result.operations_per_second:,.0f}")
