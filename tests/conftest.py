@@ -163,6 +163,13 @@ def pytest_addoption(parser):
         help="Name of the Redis endpoint the tests should be executed on",
     )
 
+    parser.addoption(
+        "--cluster-endpoint-name",
+        action="store",
+        default=None,
+        help="Name of the Redis endpoint with OSS API the tests should be executed on",
+    )
+
 
 def _get_info(redis_url):
     client = redis.Redis.from_url(redis_url)
@@ -497,6 +504,9 @@ def _gen_cluster_mock_resp(r, response):
     connection = Mock(spec=Connection)
     connection.retry = Retry(NoBackoff(), 0)
     connection.read_response.return_value = response
+    connection.host = "localhost"
+    connection.port = 6379
+    connection.db = 0
     with mock.patch.object(r, "connection", connection):
         yield r
 

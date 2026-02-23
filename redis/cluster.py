@@ -1,3 +1,4 @@
+import logging
 import random
 import socket
 import sys
@@ -62,9 +63,17 @@ from redis.exceptions import (
     WatchError,
 )
 from redis.lock import Lock
-from redis.maint_notifications import MaintNotificationsConfig
+from redis.maint_notifications import (
+    MaintNotificationsConfig,
+    OSSMaintNotificationsHandler,
+)
+from redis.observability.recorder import (
+    record_error_count,
+    record_operation_duration,
+)
 from redis.retry import Retry
 from redis.utils import (
+    check_protocol_version,
     deprecated_args,
     deprecated_function,
     dict_merge,
@@ -74,6 +83,12 @@ from redis.utils import (
     str_if_bytes,
     truncate_text,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def is_debug_log_enabled():
+    return logger.isEnabledFor(logging.DEBUG)
 
 
 def get_node_name(host: str, port: Union[str, int]) -> str:
@@ -208,6 +223,7 @@ REDIS_ALLOWED_KEYS = (
     "username",
     "cache",
     "cache_config",
+    "maint_notifications_config",
 )
 KWARGS_DISABLED_KEYS = ("host", "port", "retry")
 
@@ -223,6 +239,69 @@ def cleanup_kwargs(**kwargs):
     }
 
     return connection_kwargs
+
+
+class MaintNotificationsAbstractRedisCluster:
+    """
+    Abstract class for handling maintenance notifications logic.
+    This class is expected to be used as base class together with RedisCluster.
+
+    This class is intended to be used with multiple inheritance!
+
+    All logic related to maintenance notifications is encapsulated in this class.
+    """
+
+    def __init__(
+        self,
+        maint_notifications_config: Optional[MaintNotificationsConfig],
+        **kwargs,
+    ):
+        # Initialize maintenance notifications
+        is_protocol_supported = check_protocol_version(kwargs.get("protocol"), 3)
+
+        if (
+            maint_notifications_config
+            and maint_notifications_config.enabled
+            and not is_protocol_supported
+        ):
+            raise RedisError(
+                "Maintenance notifications handlers on connection are only supported with RESP version 3"
+            )
+        if maint_notifications_config is None and is_protocol_supported:
+            maint_notifications_config = MaintNotificationsConfig()
+
+        self.maint_notifications_config = maint_notifications_config
+
+        if self.maint_notifications_config and self.maint_notifications_config.enabled:
+            self._oss_cluster_maint_notifications_handler = (
+                OSSMaintNotificationsHandler(self, self.maint_notifications_config)
+            )
+            # Update connection kwargs for all future nodes connections
+            self._update_connection_kwargs_for_maint_notifications(
+                self._oss_cluster_maint_notifications_handler
+            )
+            # Update existing nodes connections - they are created as part of the RedisCluster constructor
+            for node in self.get_nodes():
+                if node.redis_connection is None:
+                    continue
+                node.redis_connection.connection_pool.update_maint_notifications_config(
+                    self.maint_notifications_config,
+                    oss_cluster_maint_notifications_handler=self._oss_cluster_maint_notifications_handler,
+                )
+        else:
+            self._oss_cluster_maint_notifications_handler = None
+
+    def _update_connection_kwargs_for_maint_notifications(
+        self, oss_cluster_maint_notifications_handler: OSSMaintNotificationsHandler
+    ):
+        """
+        Update the connection kwargs for all future connections.
+        """
+        self.nodes_manager.connection_kwargs.update(
+            {
+                "oss_cluster_maint_notifications_handler": oss_cluster_maint_notifications_handler,
+            }
+        )
 
 
 class AbstractRedisCluster:
@@ -472,7 +551,9 @@ class AbstractRedisCluster:
                     self.nodes_manager.default_node = random.choice(replicas)
 
 
-class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
+class RedisCluster(
+    AbstractRedisCluster, MaintNotificationsAbstractRedisCluster, RedisClusterCommands
+):
     @classmethod
     def from_url(cls, url: str, **kwargs: Any) -> "RedisCluster":
         """
@@ -547,18 +628,19 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         cache_config: Optional[CacheConfig] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
         policy_resolver: PolicyResolver = StaticPolicyResolver(),
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         **kwargs,
     ):
         """
-         Initialize a new RedisCluster client.
+        Initialize a new RedisCluster client.
 
-         :param startup_nodes:
-             List of nodes from which initial bootstrapping can be done
-         :param host:
-             Can be used to point to a startup node
-         :param port:
-             Can be used to point to a startup node
-         :param require_full_coverage:
+        :param startup_nodes:
+            List of nodes from which initial bootstrapping can be done
+        :param host:
+            Can be used to point to a startup node
+        :param port:
+            Can be used to point to a startup node
+        :param require_full_coverage:
             When set to False (default value): the client will not require a
             full coverage of the slots. However, if not all slots are covered,
             and at least one node has 'cluster-require-full-coverage' set to
@@ -569,30 +651,30 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             cluster client. If not all slots are covered, RedisClusterException
             will be thrown.
         :param read_from_replicas:
-             @deprecated - please use load_balancing_strategy instead
-             Enable read from replicas in READONLY mode. You can read possibly
-             stale data.
-             When set to true, read commands will be assigned between the
-             primary and its replications in a Round-Robin manner.
+            @deprecated - please use load_balancing_strategy instead
+            Enable read from replicas in READONLY mode. You can read possibly
+            stale data.
+            When set to true, read commands will be assigned between the
+            primary and its replications in a Round-Robin manner.
         :param load_balancing_strategy:
-             Enable read from replicas in READONLY mode and defines the load balancing
-             strategy that will be used for cluster node selection.
-             The data read from replicas is eventually consistent with the data in primary nodes.
+            Enable read from replicas in READONLY mode and defines the load balancing
+            strategy that will be used for cluster node selection.
+            The data read from replicas is eventually consistent with the data in primary nodes.
         :param dynamic_startup_nodes:
-             Set the RedisCluster's startup nodes to all of the discovered nodes.
-             If true (default value), the cluster's discovered nodes will be used to
-             determine the cluster nodes-slots mapping in the next topology refresh.
-             It will remove the initial passed startup nodes if their endpoints aren't
-             listed in the CLUSTER SLOTS output.
-             If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
-             specific IP addresses, it is best to set it to false.
+            Set the RedisCluster's startup nodes to all of the discovered nodes.
+            If true (default value), the cluster's discovered nodes will be used to
+            determine the cluster nodes-slots mapping in the next topology refresh.
+            It will remove the initial passed startup nodes if their endpoints aren't
+            listed in the CLUSTER SLOTS output.
+            If you use dynamic DNS endpoints for startup nodes but CLUSTER SLOTS lists
+            specific IP addresses, it is best to set it to false.
         :param cluster_error_retry_attempts:
-             @deprecated - Please configure the 'retry' object instead
-             In case 'retry' object is set - this argument is ignored!
+            @deprecated - Please configure the 'retry' object instead
+            In case 'retry' object is set - this argument is ignored!
 
-             Number of times to retry before raising an error when
-             :class:`~.TimeoutError` or :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError` or
-             :class:`~.ClusterDownError` are encountered
+            Number of times to retry before raising an error when
+            :class:`~.TimeoutError` or :class:`~.ConnectionError`, :class:`~.SlotNotCoveredError` or
+            :class:`~.ClusterDownError` are encountered
         :param retry:
             A retry object that defines the retry strategy and the number of
             retries for the cluster client.
@@ -617,14 +699,22 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             which the nodes _think_ they are, to addresses at which a client may
             reach them, such as when they sit behind a proxy.
 
-         :**kwargs:
-             Extra arguments that will be sent into Redis instance when created
-             (See Official redis-py doc for supported kwargs - the only limitation
-              is that you can't provide 'retry' object as part of kwargs.
-         [https://github.com/andymccurdy/redis-py/blob/master/redis/client.py])
-             Some kwargs are not supported and will raise a
-             RedisClusterException:
-                 - db (Redis do not support database SELECT in cluster mode)
+        :param maint_notifications_config:
+            Configures the nodes connections to support maintenance notifications - see
+            `redis.maint_notifications.MaintNotificationsConfig` for details.
+            Only supported with RESP3.
+            If not provided and protocol is RESP3, the maintenance notifications
+            will be enabled by default (logic is included in the NodesManager
+            initialization).
+        :**kwargs:
+            Extra arguments that will be sent into Redis instance when created
+            (See Official redis-py doc for supported kwargs - the only limitation
+            is that you can't provide 'retry' object as part of kwargs.
+            [https://github.com/andymccurdy/redis-py/blob/master/redis/client.py])
+            Some kwargs are not supported and will raise a
+            RedisClusterException:
+                - db (Redis do not support database SELECT in cluster mode)
+
         """
         if startup_nodes is None:
             startup_nodes = []
@@ -698,8 +788,15 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             kwargs.get("decode_responses", False),
         )
         protocol = kwargs.get("protocol", None)
-        if (cache_config or cache) and protocol not in [3, "3"]:
+        if (cache_config or cache) and not check_protocol_version(protocol, 3):
             raise RedisError("Client caching is only supported with RESP version 3")
+
+        if maint_notifications_config and not check_protocol_version(protocol, 3):
+            raise RedisError(
+                "Maintenance notifications are only supported with RESP version 3"
+            )
+        if check_protocol_version(protocol, 3) and maint_notifications_config is None:
+            maint_notifications_config = MaintNotificationsConfig()
 
         self.command_flags = self.__class__.COMMAND_FLAGS.copy()
         self.node_flags = self.__class__.NODE_FLAGS.copy()
@@ -712,6 +809,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         else:
             self._event_dispatcher = event_dispatcher
         self.startup_nodes = startup_nodes
+
         self.nodes_manager = NodesManager(
             startup_nodes=startup_nodes,
             from_url=from_url,
@@ -721,6 +819,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             cache=cache,
             cache_config=cache_config,
             event_dispatcher=self._event_dispatcher,
+            maint_notifications_config=maint_notifications_config,
             **kwargs,
         )
 
@@ -764,6 +863,10 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         # Node where FT.AGGREGATE command is executed.
         self._aggregate_nodes = None
         self._lock = threading.RLock()
+
+        MaintNotificationsAbstractRedisCluster.__init__(
+            self, maint_notifications_config, **kwargs
+        )
 
     def __enter__(self):
         return self
@@ -996,6 +1099,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
             retry=self.retry,
             lock=self._lock,
             transaction=transaction,
+            event_dispatcher=self._event_dispatcher,
         )
 
     def lock(
@@ -1294,7 +1398,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     slot = None
                 else:
                     slot = self.determine_slot(*args)
-                if not slot:
+                if slot is None:
                     command_policies = CommandPolicies()
                 else:
                     command_policies = CommandPolicies(
@@ -1322,6 +1426,11 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         retry_attempts = 0 if target_nodes_specified else self.retry.get_retries()
         # Add one for the first execution
         execute_attempts = 1 + retry_attempts
+        failure_count = 0
+
+        # Start timing for observability
+        start_time = time.monotonic()
+
         for _ in range(execute_attempts):
             try:
                 res = {}
@@ -1332,6 +1441,7 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                         request_policy=command_policies.request_policy,
                         nodes_flag=passed_targets,
                     )
+
                     if not target_nodes:
                         raise RedisClusterException(
                             f"No targets were found to execute {args} command on"
@@ -1362,9 +1472,31 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     # The nodes and slots cache were reinitialized.
                     # Try again with the new cluster setup.
                     retry_attempts -= 1
+                    failure_count += 1
+
+                    if hasattr(e, "connection"):
+                        self._emit_after_command_execution_event(
+                            command_name=args[0],
+                            duration_seconds=time.monotonic() - start_time,
+                            connection=e.connection,
+                            error=e,
+                        )
+
+                        self._emit_on_error_event(
+                            error=e,
+                            connection=e.connection,
+                            retry_attempts=failure_count,
+                        )
                     continue
                 else:
                     # raise the exception
+                    if hasattr(e, "connection"):
+                        self._emit_on_error_event(
+                            error=e,
+                            connection=e.connection,
+                            retry_attempts=failure_count,
+                            is_internal=False,
+                        )
                     raise e
 
     def _execute_command(self, target_node, *args, **kwargs):
@@ -1378,6 +1510,9 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
         asking = False
         moved = False
         ttl = int(self.RedisClusterRequestTTL)
+
+        # Start timing for observability
+        start_time = time.monotonic()
 
         while ttl > 0:
             ttl -= 1
@@ -1413,16 +1548,41 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                     response = self.cluster_response_callbacks[command](
                         response, **kwargs
                     )
+
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                )
                 return response
-            except AuthenticationError:
+            except AuthenticationError as e:
+                # AuthenticationError can be raised if the connection was not authenticated successfully.
+                # The connection in the error is used to report the metrics based on host and port info.
+                # Prefer the actual connection object when available, and fall back to the target node
+                # (which also contains host and port info) when the connection is not yet set.
+                e.connection = connection if connection is not None else target_node
                 raise
-            except MaxConnectionsError:
+            except MaxConnectionsError as e:
                 # MaxConnectionsError indicates client-side resource exhaustion
                 # (too many connections in the pool), not a node failure.
                 # Don't treat this as a node failure - just re-raise the error
                 # without reinitializing the cluster.
+                # The connection in the error is used to report the metrics based on host and port info
+                # so we use the target node object which contains the host and port info
+                # because we did not get the connection yet
+                e.connection = target_node
                 raise
             except (ConnectionError, TimeoutError) as e:
+                if is_debug_log_enabled():
+                    socket_address = self._extracts_socket_address(connection)
+                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    logger.debug(
+                        f"{type(e).__name__} received for command {args_log_str}, on node {target_node.name}, "
+                        f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
+                    )
+                # this is used to report the metrics based on host and port info
+                e.connection = connection if connection else target_node
+
                 # ConnectionError can also be raised if we couldn't get a
                 # connection from the pool before timing out, so check that
                 # this is an actual connection before attempting to disconnect.
@@ -1449,6 +1609,13 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 self.nodes_manager.initialize()
                 raise e
             except MovedError as e:
+                if is_debug_log_enabled():
+                    socket_address = self._extracts_socket_address(connection)
+                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    logger.debug(
+                        f"MOVED error received for command {args_log_str}, on node {target_node.name}, "
+                        f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
+                    )
                 # First, we will try to patch the slots/nodes cache with the
                 # redirected node output and try again. If MovedError exceeds
                 # 'reinitialize_steps' number of times, we will force
@@ -1459,19 +1626,69 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
                 # RedisCluster constructor.
                 self.reinitialize_counter += 1
                 if self._should_reinitialized():
-                    self.nodes_manager.initialize()
+                    # during this call all connections are closed or marked for disconnect,
+                    # so we don't need to disconnect the changed node's connections
+                    self.nodes_manager.initialize(
+                        additional_startup_nodes_info=[(e.host, e.port)]
+                    )
                     # Reset the counter
                     self.reinitialize_counter = 0
                 else:
                     self.nodes_manager.move_slot(e)
                 moved = True
-            except TryAgainError:
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
+                self._emit_on_error_event(
+                    error=e,
+                    connection=connection,
+                )
+            except TryAgainError as e:
+                if is_debug_log_enabled():
+                    socket_address = self._extracts_socket_address(connection)
+                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    logger.debug(
+                        f"TRYAGAIN error received for command {args_log_str}, on node {target_node.name}, "
+                        f"and connection: {connection} using local socket address: {socket_address}"
+                    )
                 if ttl < self.RedisClusterRequestTTL / 2:
                     time.sleep(0.05)
+
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
+                self._emit_on_error_event(
+                    error=e,
+                    connection=connection,
+                )
             except AskError as e:
+                if is_debug_log_enabled():
+                    socket_address = self._extracts_socket_address(connection)
+                    args_log_str = truncate_text(" ".join(map(safe_str, args)))
+                    logger.debug(
+                        f"ASK error received for command {args_log_str}, on node {target_node.name}, "
+                        f"and connection: {connection} using local socket address: {socket_address}, error: {e}"
+                    )
                 redirect_addr = get_node_name(host=e.host, port=e.port)
                 asking = True
-            except (ClusterDownError, SlotNotCoveredError):
+
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
+                self._emit_on_error_event(
+                    error=e,
+                    connection=connection,
+                )
+            except (ClusterDownError, SlotNotCoveredError) as e:
                 # ClusterDownError can occur during a failover and to get
                 # self-healed, we will try to reinitialize the cluster layout
                 # and retry executing the command
@@ -1483,18 +1700,95 @@ class RedisCluster(AbstractRedisCluster, RedisClusterCommands):
 
                 time.sleep(0.25)
                 self.nodes_manager.initialize()
+
+                # if we have a connection, use it, otherwise use the target node
+                # object which contains the host and port info
+                # this is used to report the metrics based on host and port info
+                e.connection = connection if connection else target_node
                 raise
-            except ResponseError:
+            except ResponseError as e:
+                # this is used to report the metrics based on host and port info
+                e.connection = connection
+                self._emit_after_command_execution_event(
+                    command_name=command,
+                    duration_seconds=time.monotonic() - start_time,
+                    connection=connection,
+                    error=e,
+                )
                 raise
             except Exception as e:
                 if connection:
                     connection.disconnect()
+
+                # if we have a connection, use it, otherwise use the target node
+                # object which contains the host and port info
+                # this is used to report the metrics based on host and port info
+                e.connection = connection if connection else target_node
                 raise e
             finally:
                 if connection is not None:
                     redis_node.connection_pool.release(connection)
 
-        raise ClusterError("TTL exhausted.")
+        e = ClusterError("TTL exhausted.")
+        # In this case we should have an active connection.
+        # If we are here, we have received many MOVED or ASK errors and finally exhausted the TTL.
+        # This means that we used an active connection to read from the socket.
+        # This is used to report metrics based on the host and port information.
+        e.connection = connection
+        raise e
+
+    def _emit_after_command_execution_event(
+        self,
+        command_name: str,
+        duration_seconds: float,
+        connection: Connection,
+        error=None,
+    ):
+        """
+        Records operation duration metric directly.
+        """
+        record_operation_duration(
+            command_name=command_name,
+            duration_seconds=duration_seconds,
+            server_address=connection.host,
+            server_port=connection.port,
+            db_namespace=str(connection.db),
+            error=error,
+        )
+
+    def _emit_on_error_event(
+        self,
+        error: Exception,
+        connection: Connection,
+        is_internal: bool = True,
+        retry_attempts: Optional[int] = None,
+    ):
+        """
+        Records error count metric directly.
+        """
+        record_error_count(
+            server_address=connection.host,
+            server_port=connection.port,
+            network_peer_address=connection.host,
+            network_peer_port=connection.port,
+            error_type=error,
+            retry_attempts=retry_attempts if retry_attempts is not None else 0,
+            is_internal=is_internal,
+        )
+
+    def _extracts_socket_address(
+        self, connection: Optional[Connection]
+    ) -> Optional[int]:
+        if connection is None:
+            return None
+        try:
+            socket_address = (
+                connection._sock.getsockname() if connection._sock else None
+            )
+            socket_address = socket_address[1] if socket_address else None
+        except (AttributeError, OSError):
+            pass
+        return socket_address
 
     def close(self) -> None:
         try:
@@ -1581,6 +1875,9 @@ class ClusterNode:
     def __eq__(self, obj):
         return isinstance(obj, ClusterNode) and obj.name == self.name
 
+    def __hash__(self):
+        return hash(self.name)
+
 
 class LoadBalancingStrategy(Enum):
     ROUND_ROBIN = "round_robin"
@@ -1647,6 +1944,7 @@ class NodesManager:
         cache_config: Optional[CacheConfig] = None,
         cache_factory: Optional[CacheFactoryInterface] = None,
         event_dispatcher: Optional[EventDispatcher] = None,
+        maint_notifications_config: Optional[MaintNotificationsConfig] = None,
         **kwargs,
     ):
         self.nodes_cache: dict[str, ClusterNode] = {}
@@ -1687,6 +1985,8 @@ class NodesManager:
         self._credential_provider = self.connection_kwargs.get(
             "credential_provider", None
         )
+        self.maint_notifications_config = maint_notifications_config
+
         self.initialize()
 
     def get_node(
@@ -1859,7 +2159,10 @@ class NodesManager:
         for node in nodes:
             if node.redis_connection is None:
                 node.redis_connection = self.create_redis_node(
-                    host=node.host, port=node.port, **self.connection_kwargs
+                    host=node.host,
+                    port=node.port,
+                    maint_notifications_config=self.maint_notifications_config,
+                    **self.connection_kwargs,
                 )
                 connection_pools.append(node.redis_connection.connection_pool)
 
@@ -1869,7 +2172,12 @@ class NodesManager:
             )
         )
 
-    def create_redis_node(self, host, port, **kwargs):
+    def create_redis_node(
+        self,
+        host,
+        port,
+        **kwargs,
+    ):
         # We are configuring the connection pool not to retry
         # connections on lower level clients to avoid retrying
         # connections to nodes that are not reachable
@@ -1883,13 +2191,8 @@ class NodesManager:
             backoff=NoBackoff(), retries=0, supported_errors=(ConnectionError,)
         )
 
-        protocol = kwargs.get("protocol", None)
-        if protocol in [3, "3"]:
-            kwargs.update(
-                {"maint_notifications_config": MaintNotificationsConfig(enabled=False)}
-            )
         if self.from_url:
-            # Create a redis node with a costumed connection pool
+            # Create a redis node with a custom connection pool
             kwargs.update({"host": host})
             kwargs.update({"port": port})
             kwargs.update({"cache": self._cache})
@@ -1934,11 +2237,29 @@ class NodesManager:
         with self._lock:
             return self._epoch
 
-    def initialize(self):
+    def initialize(
+        self,
+        additional_startup_nodes_info: Optional[List[Tuple[str, int]]] = None,
+        disconnect_startup_nodes_pools: bool = True,
+    ):
         """
         Initializes the nodes cache, slots cache and redis connections.
         :startup_nodes:
             Responsible for discovering other nodes in the cluster
+        :disconnect_startup_nodes_pools:
+            Whether to disconnect the connection pool of the startup nodes
+            after the initialization is complete. This is useful when the
+            startup nodes are not part of the cluster and we want to avoid
+            keeping the connection open.
+        :additional_startup_nodes_info:
+            Additional nodes to add temporarily to the startup nodes.
+            The additional nodes will be used just in the process of extraction of the slots
+            and nodes information from the cluster.
+            This is useful when we want to add new nodes to the cluster
+            and initialize the client
+            with them.
+            The format of the list is a list of tuples, where each tuple contains
+            the host and port of the node.
         """
         self.reset()
         tmp_nodes_cache = {}
@@ -1949,6 +2270,8 @@ class NodesManager:
         kwargs = self.connection_kwargs
         exception = None
         epoch = self._get_epoch()
+        if additional_startup_nodes_info is None:
+            additional_startup_nodes_info = []
 
         with self._initialization_lock:
             with self._lock:
@@ -1960,26 +2283,61 @@ class NodesManager:
             with self._lock:
                 startup_nodes = tuple(self.startup_nodes.values())
 
-            for startup_node in startup_nodes:
+            additional_startup_nodes = [
+                ClusterNode(host, port) for host, port in additional_startup_nodes_info
+            ]
+            if is_debug_log_enabled():
+                logger.debug(
+                    f"Topology refresh: using additional nodes: {[node.name for node in additional_startup_nodes]}; "
+                    f"and startup nodes: {[node.name for node in startup_nodes]}"
+                )
+
+            for startup_node in (*startup_nodes, *additional_startup_nodes):
                 try:
                     if startup_node.redis_connection:
                         r = startup_node.redis_connection
+
                     else:
                         # Create a new Redis connection
+                        if is_debug_log_enabled():
+                            socket_timeout = kwargs.get("socket_timeout", "not set")
+                            socket_connect_timeout = kwargs.get(
+                                "socket_connect_timeout", "not set"
+                            )
+                            maint_enabled = (
+                                self.maint_notifications_config.enabled
+                                if self.maint_notifications_config
+                                else False
+                            )
+                            logger.debug(
+                                "Topology refresh: Creating new Redis connection to "
+                                f"{startup_node.host}:{startup_node.port}; "
+                                f"with socket_timeout: {socket_timeout}, and "
+                                f"socket_connect_timeout: {socket_connect_timeout}, "
+                                "and maint_notifications enabled: "
+                                f"{maint_enabled}"
+                            )
                         r = self.create_redis_node(
-                            startup_node.host, startup_node.port, **kwargs
+                            startup_node.host,
+                            startup_node.port,
+                            maint_notifications_config=self.maint_notifications_config,
+                            **kwargs,
                         )
-                        self.startup_nodes[startup_node.name].redis_connection = r
+                        if startup_node in self.startup_nodes.values():
+                            self.startup_nodes[startup_node.name].redis_connection = r
+                        else:
+                            startup_node.redis_connection = r
                     try:
                         # Make sure cluster mode is enabled on this node
                         cluster_slots = str_if_bytes(r.execute_command("CLUSTER SLOTS"))
-                        with r.connection_pool._lock:
-                            # take care to clear connections before we move on
-                            # mark all active connections for reconnect - they will be
-                            # reconnected on next use, but will allow current in flight commands to complete first
-                            r.connection_pool.update_active_connections_for_reconnect()
-                            # Needed to clear READONLY state when it is no longer applicable
-                            r.connection_pool.disconnect_free_connections()
+                        if disconnect_startup_nodes_pools:
+                            with r.connection_pool._lock:
+                                # take care to clear connections before we move on
+                                # mark all active connections for reconnect - they will be
+                                # reconnected on next use, but will allow current in flight commands to complete first
+                                r.connection_pool.update_active_connections_for_reconnect()
+                                # Needed to clear READONLY state when it is no longer applicable
+                                r.connection_pool.disconnect_free_connections()
                     except ResponseError:
                         raise RedisClusterException(
                             "Cluster mode is not enabled on this node"
@@ -2408,6 +2766,7 @@ class ClusterPipeline(RedisCluster):
         lock=None,
         transaction=False,
         policy_resolver: PolicyResolver = StaticPolicyResolver(),
+        event_dispatcher: Optional["EventDispatcher"] = None,
         **kwargs,
     ):
         """ """
@@ -2476,6 +2835,11 @@ class ClusterPipeline(RedisCluster):
         }
 
         self._policy_resolver = policy_resolver
+
+        if event_dispatcher is None:
+            self._event_dispatcher = EventDispatcher()
+        else:
+            self._event_dispatcher = event_dispatcher
 
     def __repr__(self):
         """ """
@@ -2704,7 +3068,9 @@ class PipelineCommand:
 class NodeCommands:
     """ """
 
-    def __init__(self, parse_response, connection_pool, connection):
+    def __init__(
+        self, parse_response, connection_pool: ConnectionPool, connection: Connection
+    ):
         """ """
         self.parse_response = parse_response
         self.connection_pool = connection_pool
@@ -2971,7 +3337,7 @@ class PipelineStrategy(AbstractStrategy):
     def execute_command(self, *args, **kwargs):
         return self.pipeline_execute_command(*args, **kwargs)
 
-    def _raise_first_error(self, stack):
+    def _raise_first_error(self, stack, start_time):
         """
         Raise the first exception on the stack
         """
@@ -2979,6 +3345,14 @@ class PipelineStrategy(AbstractStrategy):
             r = c.result
             if isinstance(r, Exception):
                 self.annotate_exception(r, c.position + 1, c.args)
+
+                record_operation_duration(
+                    command_name="PIPELINE",
+                    duration_seconds=time.monotonic() - start_time,
+                    batch_size=len(stack),
+                    error=r,
+                )
+
                 raise r
 
     def execute(self, raise_on_error: bool = True) -> List[Any]:
@@ -3051,15 +3425,18 @@ class PipelineStrategy(AbstractStrategy):
         attempt = sorted(stack, key=lambda x: x.position)
         is_default_node = False
         # build a list of node objects based on node names we need to
-        nodes = {}
+        nodes: dict[str, NodeCommands] = {}
+        nodes_written = 0
+        nodes_read = 0
 
-        # as we move through each command that still needs to be processed,
-        # we figure out the slot number that command maps to, then from
-        # the slot determine the node.
-        for c in attempt:
-            command_policies = self._pipe._policy_resolver.resolve(c.args[0].lower())
-
-            while True:
+        try:
+            # as we move through each command that still needs to be processed,
+            # we figure out the slot number that command maps to, then from
+            # the slot determine the node.
+            for c in attempt:
+                command_policies = self._pipe._policy_resolver.resolve(
+                    c.args[0].lower()
+                )
                 # refer to our internal node -> slot table that
                 # tells us where a given command should route to.
                 # (it might be possible we have a cached node that no longer
@@ -3134,6 +3511,7 @@ class PipelineStrategy(AbstractStrategy):
                     try:
                         connection = get_connection(redis_node)
                     except (ConnectionError, TimeoutError):
+                        # Release any connections we've already acquired before clearing nodes
                         for n in nodes.values():
                             n.connection_pool.release(n.connection)
                         # Connection retries are being handled in the node's
@@ -3141,6 +3519,7 @@ class PipelineStrategy(AbstractStrategy):
                         self._nodes_manager.initialize()
                         if is_default_node:
                             self._pipe.replace_default_node()
+                        nodes = {}
                         raise
                     nodes[node_name] = NodeCommands(
                         redis_node.parse_response,
@@ -3148,43 +3527,53 @@ class PipelineStrategy(AbstractStrategy):
                         connection,
                     )
                 nodes[node_name].append(c)
-                break
 
-        # send the commands in sequence.
-        # we  write to all the open sockets for each node first,
-        # before reading anything
-        # this allows us to flush all the requests out across the
-        # network
-        # so that we can read them from different sockets as they come back.
-        # we dont' multiplex on the sockets as they come available,
-        # but that shouldn't make too much difference.
-        try:
+            # send the commands in sequence.
+            # we  write to all the open sockets for each node first,
+            # before reading anything
+            # this allows us to flush all the requests out across the
+            # network
+            # so that we can read them from different sockets as they come back.
+            # we dont' multiplex on the sockets as they come available,
+            # but that shouldn't make too much difference.
+
+            # Start timing for observability
+            start_time = time.monotonic()
+
             node_commands = nodes.values()
             for n in node_commands:
+                nodes_written += 1
                 n.write()
 
             for n in node_commands:
                 n.read()
+
+                record_operation_duration(
+                    command_name="PIPELINE",
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=n.connection.host,
+                    server_port=n.connection.port,
+                    db_namespace=str(n.connection.db),
+                    batch_size=len(n.commands),
+                )
+                nodes_read += 1
         finally:
-            # release all of the redis connections we allocated earlier
+            # release all the redis connections we allocated earlier
             # back into the connection pool.
-            # we used to do this step as part of a try/finally block,
-            # but it is really dangerous to
-            # release connections back into the pool if for some
-            # reason the socket has data still left in it
-            # from a previous operation. The write and
-            # read operations already have try/catch around them for
-            # all known types of errors including connection
-            # and socket level errors.
-            # So if we hit an exception, something really bad
-            # happened and putting any oF
-            # these connections back into the pool is a very bad idea.
-            # the socket might have unread buffer still sitting in it,
-            # and then the next time we read from it we pass the
-            # buffered result back from a previous command and
-            # every single request after to that connection will always get
-            # a mismatched result.
-            for n in nodes.values():
+            # if the connection is dirty (that is: we've written
+            # commands to it, but haven't read the responses), we need
+            # to close the connection before returning it to the pool.
+            # otherwise, the next caller to use this connection will
+            # read the response from _this_ request, not its own request.
+            # disconnecting discards the dirty state & forces the next
+            # caller to reconnect.
+            # NOTE: dicts have a consistent ordering; we're iterating
+            # through nodes.values() in the same order as we are when
+            # reading / writing to the connections above, which is critical
+            # for how we're using the nodes_written/nodes_read offsets.
+            for i, n in enumerate(nodes.values()):
+                if i < nodes_written and i >= nodes_read:
+                    n.connection.disconnect()
                 n.connection_pool.release(n.connection)
 
         # if the response isn't an exception it is a
@@ -3250,7 +3639,7 @@ class PipelineStrategy(AbstractStrategy):
             response.append(c.result)
 
         if raise_on_error:
-            self._raise_first_error(stack)
+            self._raise_first_error(stack, start_time)
 
         return response
 
@@ -3451,13 +3840,42 @@ class TransactionStrategy(AbstractStrategy):
         return self._retry.call_with_retry(
             lambda: self._get_connection_and_send_command(*args, **options),
             self._reinitialize_on_error,
+            with_failure_count=True,
         )
 
     def _get_connection_and_send_command(self, *args, **options):
         redis_node, connection = self._get_client_and_connection_for_transaction()
-        return self._send_command_parse_response(
-            connection, redis_node, args[0], *args, **options
-        )
+
+        # Start timing for observability
+        start_time = time.monotonic()
+
+        try:
+            response = self._send_command_parse_response(
+                connection, redis_node, args[0], *args, **options
+            )
+
+            record_operation_duration(
+                command_name=args[0],
+                duration_seconds=time.monotonic() - start_time,
+                server_address=connection.host,
+                server_port=connection.port,
+                db_namespace=str(connection.db),
+            )
+
+            return response
+        except Exception as e:
+            if connection:
+                # this is used to report the metrics based on host and port info
+                e.connection = connection
+            record_operation_duration(
+                command_name=args[0],
+                duration_seconds=time.monotonic() - start_time,
+                server_address=connection.host,
+                server_port=connection.port,
+                db_namespace=str(connection.db),
+                error=e,
+            )
+            raise
 
     def _send_command_parse_response(
         self, conn, redis_node: Redis, command_name, *args, **options
@@ -3473,7 +3891,18 @@ class TransactionStrategy(AbstractStrategy):
             self._watching = False
         return output
 
-    def _reinitialize_on_error(self, error):
+    def _reinitialize_on_error(self, error, failure_count):
+        if hasattr(error, "connection"):
+            record_error_count(
+                server_address=error.connection.host,
+                server_port=error.connection.port,
+                network_peer_address=error.connection.host,
+                network_peer_port=error.connection.port,
+                error_type=error,
+                retry_attempts=failure_count,
+                is_internal=False,
+            )
+
         if self._watching:
             if type(error) in self.SLOT_REDIRECT_ERRORS and self._executing:
                 raise WatchError("Slot rebalancing occurred while watching keys")
@@ -3504,13 +3933,22 @@ class TransactionStrategy(AbstractStrategy):
 
         self._executing = False
 
-    def _raise_first_error(self, responses, stack):
+    def _raise_first_error(self, responses, stack, start_time):
         """
         Raise the first exception on the stack
         """
         for r, cmd in zip(responses, stack):
             if isinstance(r, Exception):
                 self.annotate_exception(r, cmd.position + 1, cmd.args)
+
+                record_operation_duration(
+                    command_name="TRANSACTION",
+                    duration_seconds=time.monotonic() - start_time,
+                    server_address=self._transaction_connection.host,
+                    server_port=self._transaction_connection.port,
+                    db_namespace=str(self._transaction_connection.db),
+                )
+
                 raise r
 
     def execute(self, raise_on_error: bool = True) -> List[Any]:
@@ -3525,7 +3963,10 @@ class TransactionStrategy(AbstractStrategy):
     ):
         return self._retry.call_with_retry(
             lambda: self._execute_transaction(stack, raise_on_error),
-            self._reinitialize_on_error,
+            lambda error, failure_count: self._reinitialize_on_error(
+                error, failure_count
+            ),
+            with_failure_count=True,
         )
 
     def _execute_transaction(
@@ -3547,6 +3988,10 @@ class TransactionStrategy(AbstractStrategy):
         )
         commands = [c.args for c in stack if EMPTY_RESPONSE not in c.options]
         packed_commands = connection.pack_commands(commands)
+
+        # Start timing for observability
+        start_time = time.monotonic()
+
         connection.send_packed_command(packed_commands)
         errors = []
 
@@ -3591,6 +4036,15 @@ class TransactionStrategy(AbstractStrategy):
 
         self._executing = False
 
+        record_operation_duration(
+            command_name="TRANSACTION",
+            duration_seconds=time.monotonic() - start_time,
+            server_address=connection.host,
+            server_port=connection.port,
+            db_namespace=str(connection.db),
+            batch_size=len(self._command_queue),
+        )
+
         # EXEC clears any watched keys
         self._watching = False
 
@@ -3614,6 +4068,7 @@ class TransactionStrategy(AbstractStrategy):
             self._raise_first_error(
                 response,
                 self._command_queue,
+                start_time,
             )
 
         # We have to run response callbacks manually

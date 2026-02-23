@@ -35,7 +35,7 @@ class TestSSL:
         sslclient = redis.from_url(ssl_url)
         with pytest.raises(ConnectionError) as e:
             sslclient.ping()
-        assert "SSL: CERTIFICATE_VERIFY_FAILED" in str(e)
+        assert "SSL: CERTIFICATE_VERIFY_FAILED" in str(e.value)
         sslclient.close()
 
     def test_ssl_connection(self, request):
@@ -58,7 +58,7 @@ class TestSSL:
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
-        assert "Connection closed by server" in str(e)
+        assert "Connection closed by server" in str(e.value)
         r.close()
 
     def test_validating_self_signed_certificate(self, request):
@@ -128,7 +128,7 @@ class TestSSL:
         )
         with pytest.raises(RedisError) as e:
             r.ping()
-        assert "No cipher can be selected" in str(e)
+        assert "No cipher can be selected" in str(e.value)
         r.close()
 
     @pytest.mark.parametrize(
@@ -152,7 +152,7 @@ class TestSSL:
         )
         with pytest.raises(RedisError) as e:
             r.ping()
-        assert "No cipher can be selected" in str(e)
+        assert "No cipher can be selected" in str(e.value)
         r.close()
 
     def _create_oscp_conn(self, request):
@@ -175,7 +175,7 @@ class TestSSL:
         r = self._create_oscp_conn(request)
         with pytest.raises(RedisError) as e:
             r.ping()
-        assert "cryptography is not installed" in str(e)
+        assert "cryptography is not installed" in str(e.value)
         r.close()
 
     @skip_if_nocryptography()
@@ -183,7 +183,7 @@ class TestSSL:
         r = self._create_oscp_conn(request)
         with pytest.raises(ConnectionError) as e:
             assert r.ping()
-        assert "No AIA information present in ssl certificate" in str(e)
+        assert "No AIA information present in ssl certificate" in str(e.value)
         r.close()
 
     @skip_if_nocryptography()
@@ -209,7 +209,7 @@ class TestSSL:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
                 with pytest.raises(ConnectionError) as e:
                     assert ocsp.is_valid()
-                assert "REVOKED" in str(e)
+                assert "REVOKED" in str(e.value)
 
     @skip_if_nocryptography()
     def test_unauthorized_ocsp(self):
@@ -234,7 +234,7 @@ class TestSSL:
                 ocsp = OCSPVerifier(wrapped, hostname, 443)
                 with pytest.raises(ConnectionError) as e:
                     assert ocsp.is_valid()
-                assert "from the" in str(e)
+                assert "from the" in str(e.value)
 
     @skip_if_nocryptography()
     def test_unauthorized_then_direct(self):
@@ -291,7 +291,7 @@ class TestSSL:
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
-        assert "no ocsp response present" in str(e)
+        assert "no ocsp response present" in str(e.value)
         r.close()
 
         r = redis.Redis(
@@ -307,7 +307,7 @@ class TestSSL:
 
         with pytest.raises(ConnectionError) as e:
             r.ping()
-        assert "no ocsp response present" in str(e)
+        assert "no ocsp response present" in str(e.value)
         r.close()
 
     def test_cert_reqs_none_with_check_hostname(self, request):

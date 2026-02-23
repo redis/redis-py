@@ -59,8 +59,14 @@ from redis.utils import (
     experimental_args,
     experimental_method,
     extract_expire_flags,
+    str_if_bytes,
 )
 
+from ..observability.attributes import PubSubDirection
+from ..observability.recorder import (
+    record_pubsub_message,
+    record_streaming_lag_from_response,
+)
 from .helpers import at_most_one_value_set, list_or_args
 
 if TYPE_CHECKING:
@@ -3761,7 +3767,9 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMOVE", src, dst, value)
 
-    def spop(self, name: KeyT, count: Optional[int] = None) -> Union[str, List, None]:
+    def spop(
+        self, name: KeyT, count: Optional[int] = None
+    ) -> Union[Awaitable[Union[str, List, None]], str, List, None]:
         """
         Remove and return a random member of set ``name``
 
@@ -3772,7 +3780,7 @@ class SetCommands(CommandsProtocol):
 
     def srandmember(
         self, name: KeyT, number: Optional[int] = None
-    ) -> Union[str, List, None]:
+    ) -> Union[Awaitable[Union[str, List, None]], str, List, None]:
         """
         If ``number`` is None, returns a random member of set ``name``.
 
@@ -4442,7 +4450,11 @@ class StreamCommands(CommandsProtocol):
         keys, values = zip(*streams.items())
         pieces.extend(keys)
         pieces.extend(values)
-        return self.execute_command("XREAD", *pieces, keys=keys)
+        response = self.execute_command("XREAD", *pieces, keys=keys)
+
+        record_streaming_lag_from_response(response=response)
+
+        return response
 
     def xreadgroup(
         self,
@@ -4502,7 +4514,15 @@ class StreamCommands(CommandsProtocol):
         pieces.append(b"STREAMS")
         pieces.extend(streams.keys())
         pieces.extend(streams.values())
-        return self.execute_command("XREADGROUP", *pieces, **options)
+        response = self.execute_command("XREADGROUP", *pieces, **options)
+
+        record_streaming_lag_from_response(
+            response=response,
+            consumer_group=groupname,
+            consumer_name=consumername,
+        )
+
+        return response
 
     def xrevrange(
         self,
@@ -6269,7 +6289,12 @@ class PubSubCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/publish
         """
-        return self.execute_command("PUBLISH", channel, message, **kwargs)
+        response = self.execute_command("PUBLISH", channel, message, **kwargs)
+        record_pubsub_message(
+            direction=PubSubDirection.PUBLISH,
+            channel=str_if_bytes(channel),
+        )
+        return response
 
     def spublish(self, shard_channel: ChannelT, message: EncodableT) -> ResponseT:
         """
@@ -6278,7 +6303,13 @@ class PubSubCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/spublish
         """
-        return self.execute_command("SPUBLISH", shard_channel, message)
+        response = self.execute_command("SPUBLISH", shard_channel, message)
+        record_pubsub_message(
+            direction=PubSubDirection.PUBLISH,
+            channel=str_if_bytes(shard_channel),
+            sharded=True,
+        )
+        return response
 
     def pubsub_channels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
         """

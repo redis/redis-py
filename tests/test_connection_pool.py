@@ -4,11 +4,17 @@ import time
 from contextlib import closing
 from threading import Thread
 from unittest import mock
+from unittest.mock import MagicMock
 
 import pytest
 import redis
 from redis.cache import CacheConfig
 from redis.connection import CacheProxyConnection, Connection, to_bool
+from redis.event import (
+    AfterConnectionReleasedEvent,
+    EventDispatcher,
+    EventListenerInterface,
+)
 from redis.utils import SSL_AVAILABLE
 
 from .conftest import (
@@ -42,6 +48,9 @@ class DummyConnection:
 
     def should_reconnect(self):
         return False
+
+    def re_auth(self):
+        pass
 
 
 class TestConnectionPool:
@@ -955,3 +964,52 @@ class TestHealthCheck:
             assert wait_for_message(p) is None
             m.assert_called_with("PING", p.HEALTH_CHECK_MESSAGE, check_health=False)
             self.assert_interval_advanced(p.connection)
+
+
+class TestConnectionPoolReleasedEventEmission:
+    """Tests for AfterConnectionReleasedEvent emission from ConnectionPool."""
+
+    def test_connection_released_event_emitted_on_release(self):
+        """Test that AfterConnectionReleasedEvent is emitted when releasing a connection."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners(
+            {
+                AfterConnectionReleasedEvent: [listener],
+            }
+        )
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        conn = pool.get_connection()
+        pool.release(conn)
+
+        listener.listen.assert_called_once()
+        event = listener.listen.call_args[0][0]
+        assert isinstance(event, AfterConnectionReleasedEvent)
+
+    def test_connection_released_event_not_emitted_for_foreign_connection(self):
+        """Test that AfterConnectionReleasedEvent is NOT emitted for connections not owned by pool."""
+        event_dispatcher = EventDispatcher()
+        listener = MagicMock(spec=EventListenerInterface)
+        event_dispatcher.register_listeners(
+            {
+                AfterConnectionReleasedEvent: [listener],
+            }
+        )
+
+        pool = redis.ConnectionPool(
+            connection_class=DummyConnection,
+            event_dispatcher=event_dispatcher,
+        )
+
+        # Create a connection that doesn't belong to this pool
+        foreign_conn = DummyConnection()
+
+        pool.release(foreign_conn)
+
+        # Event should NOT be emitted for foreign connection
+        listener.listen.assert_not_called()
