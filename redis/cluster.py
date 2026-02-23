@@ -3511,6 +3511,7 @@ class PipelineStrategy(AbstractStrategy):
                     try:
                         connection = get_connection(redis_node)
                     except (ConnectionError, TimeoutError):
+                        # Release any connections we've already acquired before clearing nodes
                         for n in nodes.values():
                             n.connection_pool.release(n.connection)
                         # Connection retries are being handled in the node's

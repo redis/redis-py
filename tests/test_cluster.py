@@ -3906,14 +3906,21 @@ class TestClusterPipeline:
 
         # Patch Connection.disconnect so we can assert that at least one
         # connection was disconnected when the write error occurred.
-        with patch.object(Connection, "disconnect", wraps=Connection.disconnect) as mock_disconnect:
+        original_disconnect = Connection.disconnect
+        disconnect_called = []
+
+        def track_disconnect(self, *args):
+            disconnect_called.append(True)
+            return original_disconnect(self, *args)
+
+        with patch.object(Connection, "disconnect", track_disconnect):
             with patch.object(redis.cluster.NodeCommands, "write", mock_write):
                 with pytest.raises(RuntimeError):
                     r.pipeline().get("a").get("b").execute()
 
             # Ensure that at least one connection was disconnected as part of
             # handling the dirty connection created by the write failure.
-            assert mock_disconnect.called, (
+            assert disconnect_called, (
                 "Expected at least one connection to be disconnected when "
                 "handling a dirty connection, but disconnect() was not called."
             )
