@@ -201,6 +201,56 @@ class TestPubSubSubscribeUnsubscribe:
         kwargs = make_subscribe_test_data(r.pubsub(), "shard_channel")
         self._test_resubscribe_on_reconnection(**kwargs)
 
+    @pytest.mark.onlynoncluster
+    def test_resubscribe_binary_channel_on_reconnection(self, r):
+        """Binary channel names that are not valid UTF-8 must survive
+        reconnection without raising ``UnicodeDecodeError``.
+        See https://github.com/redis/redis-py/issues/3912
+        """
+        # b'\x80\x81\x82' is deliberately invalid UTF-8
+        binary_channel = b"\x80\x81\x82"
+        p = r.pubsub()
+        p.subscribe(binary_channel)
+        assert wait_for_message(p) is not None  # consume subscribe ack
+
+        # force reconnect
+        p.connection.disconnect()
+
+        # get_message triggers on_connect → re-subscribe; must not raise
+        messages = []
+        for _ in range(1):
+            message = wait_for_message(p)
+            assert message is not None
+            messages.append(message)
+
+        assert len(messages) == 1
+        assert messages[0]["type"] == "subscribe"
+        assert messages[0]["channel"] == binary_channel
+
+    @pytest.mark.onlynoncluster
+    def test_resubscribe_binary_pattern_on_reconnection(self, r):
+        """Binary pattern names that are not valid UTF-8 must survive
+        reconnection without raising ``UnicodeDecodeError``.
+        See https://github.com/redis/redis-py/issues/3912
+        """
+        binary_pattern = b"\x80\x81*"
+        p = r.pubsub()
+        p.psubscribe(binary_pattern)
+        assert wait_for_message(p) is not None  # consume psubscribe ack
+
+        # force reconnect
+        p.connection.disconnect()
+
+        messages = []
+        for _ in range(1):
+            message = wait_for_message(p)
+            assert message is not None
+            messages.append(message)
+
+        assert len(messages) == 1
+        assert messages[0]["type"] == "psubscribe"
+        assert messages[0]["channel"] == binary_pattern
+
     def _test_subscribed_property(
         self, p, sub_type, unsub_type, sub_func, unsub_func, keys
     ):
