@@ -177,7 +177,9 @@ class TestPubSubSubscribeUnsubscribe:
         # get_message triggers on_connect → re-subscribe; must not raise
         messages = []
         for _ in range(1):
-            messages.append(await wait_for_message(p))
+            message = await wait_for_message(p)
+            assert message is not None
+            messages.append(message)
 
         assert len(messages) == 1
         assert messages[0]["type"] == "subscribe"
@@ -198,7 +200,9 @@ class TestPubSubSubscribeUnsubscribe:
 
         messages = []
         for _ in range(1):
-            messages.append(await wait_for_message(p))
+            message = await wait_for_message(p)
+            assert message is not None
+            messages.append(message)
 
         assert len(messages) == 1
         assert messages[0]["type"] == "psubscribe"

@@ -219,7 +219,9 @@ class TestPubSubSubscribeUnsubscribe:
         # get_message triggers on_connect → re-subscribe; must not raise
         messages = []
         for _ in range(1):
-            messages.append(wait_for_message(p))
+            message = wait_for_message(p)
+            assert message is not None
+            messages.append(message)
 
         assert len(messages) == 1
         assert messages[0]["type"] == "subscribe"
@@ -241,7 +243,9 @@ class TestPubSubSubscribeUnsubscribe:
 
         messages = []
         for _ in range(1):
-            messages.append(wait_for_message(p))
+            message = wait_for_message(p)
+            assert message is not None
+            messages.append(message)
 
         assert len(messages) == 1
         assert messages[0]["type"] == "psubscribe"
@@ -1173,9 +1177,9 @@ class TestPubSubTimeouts:
         # Ensure p has the event attribute your wait_for_message would call:
         ev = getattr(p, "subscribed_event", None)
 
-        assert (
-            ev is not None
-        ), "PubSub event attribute not found (check redis-py version)"
+        assert ev is not None, (
+            "PubSub event attribute not found (check redis-py version)"
+        )
 
         with patch.object(ev, "wait") as mock:
             assert wait_for_message(p) == make_message("subscribe", "foo", 1)
