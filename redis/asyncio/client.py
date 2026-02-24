@@ -1858,7 +1858,6 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         start_time = time.monotonic()
         # Track actual retry attempts for error reporting
         actual_retry_attempts = [0]
-        stack_len = len(stack)
 
         def failure_callback(error, failure_count):
             actual_retry_attempts[0] = failure_count
