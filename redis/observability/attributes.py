@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 DB_SYSTEM = "db.system"
 DB_NAMESPACE = "db.namespace"
 DB_OPERATION_NAME = "db.operation.name"
-DB_OPERATION_BATCH_SIZE = "db.operation.batch.size"
 DB_RESPONSE_STATUS_CODE = "db.response.status_code"
 DB_STORED_PROCEDURE_NAME = "db.stored_procedure.name"
 
@@ -60,7 +59,6 @@ REDIS_CLIENT_ERROR_INTERNAL = "redis.client.errors.internal"
 REDIS_CLIENT_ERROR_CATEGORY = "redis.client.errors.category"
 REDIS_CLIENT_STREAM_NAME = "redis.client.stream.name"
 REDIS_CLIENT_CONSUMER_GROUP = "redis.client.consumer_group"
-REDIS_CLIENT_CONSUMER_NAME = "redis.client.consumer_name"
 REDIS_CLIENT_CSC_RESULT = "redis.client.csc.result"
 REDIS_CLIENT_CSC_REASON = "redis.client.csc.reason"
 
@@ -157,9 +155,6 @@ class AttributeBuilder:
 
         if command_name is not None:
             attrs[DB_OPERATION_NAME] = command_name.upper()
-
-        if batch_size is not None:
-            attrs[DB_OPERATION_BATCH_SIZE] = batch_size
 
         if network_peer_address is not None:
             attrs[NETWORK_PEER_ADDRESS] = network_peer_address
@@ -303,9 +298,6 @@ class AttributeBuilder:
 
         if consumer_group is not None:
             attrs[REDIS_CLIENT_CONSUMER_GROUP] = consumer_group
-
-        if consumer_name is not None:
-            attrs[REDIS_CLIENT_CONSUMER_NAME] = consumer_name
 
         return attrs
 

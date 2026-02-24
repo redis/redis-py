@@ -32,7 +32,7 @@ from redis.observability.attributes import (
 from redis.observability.metrics import CloseReason, RedisMetricsCollector
 from redis.observability.providers import get_observability_instance
 from redis.observability.registry import get_observables_registry_instance
-from redis.utils import str_if_bytes
+from redis.utils import deprecated_args, str_if_bytes
 
 if TYPE_CHECKING:
     from redis.connection import ConnectionPoolInterface
@@ -46,6 +46,11 @@ CONNECTION_COUNT_REGISTRY_KEY = "connection_count"
 CSC_ITEMS_REGISTRY_KEY = "csc_items"
 
 
+@deprecated_args(
+    args_to_warn=["batch_size"],
+    reason="The batch_size argument is no longer used and will be removed in the next major version.",
+    version="7.2.1",
+)
 def record_operation_duration(
     command_name: str,
     duration_seconds: float,
@@ -100,7 +105,6 @@ def record_operation_duration(
             network_peer_address=server_address,
             network_peer_port=server_port,
             is_blocking=is_blocking,
-            batch_size=batch_size,
             retry_attempts=retry_attempts,
         )
     except Exception:
@@ -436,6 +440,11 @@ def record_pubsub_message(
         pass
 
 
+@deprecated_args(
+    args_to_warn=["consumer_name"],
+    reason="The consumer_name argument is no longer used and will be removed in the next major version.",
+    version="7.2.1",
+)
 def record_streaming_lag(
     lag_seconds: float,
     stream_name: Optional[str] = None,
@@ -470,12 +479,16 @@ def record_streaming_lag(
             lag_seconds=lag_seconds,
             stream_name=effective_stream_name,
             consumer_group=consumer_group,
-            consumer_name=consumer_name,
         )
     except Exception:
         pass
 
 
+@deprecated_args(
+    args_to_warn=["consumer_name"],
+    reason="The consumer_name argument is no longer used and will be removed in the next major version.",
+    version="7.2.1",
+)
 def record_streaming_lag_from_response(
     response,
     consumer_group: Optional[str] = None,
@@ -527,7 +540,6 @@ def record_streaming_lag_from_response(
                             lag_seconds=lag_seconds,
                             stream_name=effective_stream_name,
                             consumer_group=consumer_group,
-                            consumer_name=consumer_name,
                         )
         else:
             # RESP2 format: list
@@ -546,7 +558,6 @@ def record_streaming_lag_from_response(
                         lag_seconds=lag_seconds,
                         stream_name=effective_stream_name,
                         consumer_group=consumer_group,
-                        consumer_name=consumer_name,
                     )
     except Exception:
         pass

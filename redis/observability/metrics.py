@@ -25,6 +25,7 @@ from redis.observability.attributes import (
     get_pool_name,
 )
 from redis.observability.config import MetricGroup, OTelConfig
+from redis.utils import deprecated_args
 
 logger = logging.getLogger(__name__)
 
@@ -426,6 +427,11 @@ class RedisMetricsCollector:
 
     # Command execution metric recording methods
 
+    @deprecated_args(
+        args_to_warn=["batch_size"],
+        reason="The batch_size argument is no longer used and will be removed in the next major version.",
+        version="7.2.1",
+    )
     def record_operation_duration(
         self,
         command_name: str,
@@ -473,7 +479,6 @@ class RedisMetricsCollector:
         attrs.update(
             self.attr_builder.build_operation_attributes(
                 command_name=command_name,
-                batch_size=batch_size,
                 network_peer_address=network_peer_address,
                 network_peer_port=network_peer_port,
                 retry_attempts=retry_attempts,
@@ -582,6 +587,11 @@ class RedisMetricsCollector:
 
     # Streaming metric recording methods
 
+    @deprecated_args(
+        args_to_warn=["consumer_name"],
+        reason="The consumer_name argument is no longer used and will be removed in the next major version.",
+        version="7.2.1",
+    )
     def record_streaming_lag(
         self,
         lag_seconds: float,
@@ -604,7 +614,6 @@ class RedisMetricsCollector:
         attrs = self.attr_builder.build_streaming_attributes(
             stream_name=stream_name,
             consumer_group=consumer_group,
-            consumer_name=consumer_name,
         )
         self.stream_lag.record(lag_seconds, attributes=attrs)
 
