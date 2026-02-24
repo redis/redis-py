@@ -2413,7 +2413,6 @@ class PipelineStrategy(AbstractStrategy):
                 server_address=node.host,
                 server_port=node.port,
                 db_namespace=str(node.db),
-                batch_size=len(commands),
                 error=node_error,
             )
 
@@ -2731,7 +2730,6 @@ class TransactionStrategy(AbstractStrategy):
                     server_port=self._transaction_connection.port,
                     db_namespace=str(self._transaction_connection.db),
                     error=r,
-                    batch_size=len(stack),
                 )
 
                 raise r
@@ -2876,7 +2874,6 @@ class TransactionStrategy(AbstractStrategy):
             server_address=connection.host,
             server_port=connection.port,
             db_namespace=str(connection.db),
-            batch_size=len(self._command_queue),
         )
 
         return data

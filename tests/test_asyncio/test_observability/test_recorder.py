@@ -29,7 +29,6 @@ from redis.observability.attributes import (
     REDIS_CLIENT_OPERATION_RETRY_ATTEMPTS,
     REDIS_CLIENT_STREAM_NAME,
     REDIS_CLIENT_CONSUMER_GROUP,
-    REDIS_CLIENT_CONSUMER_NAME,
     REDIS_CLIENT_PUBSUB_CHANNEL,
     REDIS_CLIENT_PUBSUB_MESSAGE_DIRECTION,
     REDIS_CLIENT_PUBSUB_SHARDED,
@@ -609,7 +608,6 @@ class TestRecordStreamingLag:
             lag_seconds=0.150,
             stream_name="test_stream",
             consumer_group="test_group",
-            consumer_name="test_consumer",
         )
 
         instruments.stream_lag.record.assert_called_once()
@@ -673,7 +671,6 @@ class TestRecordStreamingLagFromResponse:
         await recorder.record_streaming_lag_from_response(
             response=response,
             consumer_group="my-group",
-            consumer_name="consumer-1",
         )
 
         instruments.stream_lag.record.assert_called_once()
@@ -681,7 +678,6 @@ class TestRecordStreamingLagFromResponse:
         attrs = call_args[1]["attributes"]
         assert attrs[REDIS_CLIENT_STREAM_NAME] == "test-stream"
         assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
-        assert attrs[REDIS_CLIENT_CONSUMER_NAME] == "consumer-1"
         # Lag should be non-negative and small (just created)
         assert call_args[0][0] >= 0.0
         assert call_args[0][0] < 1.0  # Should be less than 1 second
@@ -710,7 +706,6 @@ class TestRecordStreamingLagFromResponse:
         await recorder.record_streaming_lag_from_response(
             response=response,
             consumer_group="my-group",
-            consumer_name="consumer-1",
         )
 
         instruments.stream_lag.record.assert_called_once()
@@ -719,7 +714,6 @@ class TestRecordStreamingLagFromResponse:
         # Stream name should be normalized from bytes to str
         assert attrs[REDIS_CLIENT_STREAM_NAME] == "test-stream"
         assert attrs[REDIS_CLIENT_CONSUMER_GROUP] == "my-group"
-        assert attrs[REDIS_CLIENT_CONSUMER_NAME] == "consumer-1"
 
     async def test_record_streaming_lag_from_response_multiple_messages(
         self, setup_async_recorder
@@ -745,7 +739,6 @@ class TestRecordStreamingLagFromResponse:
         await recorder.record_streaming_lag_from_response(
             response=response,
             consumer_group="my-group",
-            consumer_name="consumer-1",
         )
 
         # Should record lag for each message
@@ -770,7 +763,6 @@ class TestRecordStreamingLagFromResponse:
         await recorder.record_streaming_lag_from_response(
             response=response,
             consumer_group="my-group",
-            consumer_name="consumer-1",
         )
 
         # Should record lag for each stream
@@ -798,7 +790,6 @@ class TestRecordStreamingLagFromResponse:
         await recorder.record_streaming_lag_from_response(
             response=response,
             consumer_group="my-group",
-            consumer_name="consumer-1",
         )
 
         instruments.stream_lag.record.assert_called_once()
@@ -829,7 +820,6 @@ class TestRecordStreamingLagFromResponse:
         await recorder.record_streaming_lag_from_response(
             response=response,
             consumer_group="my-group",
-            consumer_name="consumer-1",
         )
 
         instruments.stream_lag.record.assert_called_once()
@@ -846,7 +836,6 @@ class TestRecordStreamingLagFromResponse:
         await recorder.record_streaming_lag_from_response(
             response=None,
             consumer_group="my-group",
-            consumer_name="consumer-1",
         )
 
         # Should not record anything for empty response
@@ -875,7 +864,6 @@ class TestRecordStreamingLagFromResponse:
         await recorder.record_streaming_lag_from_response(
             response=response,
             consumer_group="my-group",
-            consumer_name="consumer-1",
         )
 
         instruments.stream_lag.record.assert_called_once()
