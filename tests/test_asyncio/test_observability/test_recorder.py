@@ -932,7 +932,7 @@ class TestRecorderDisabled:
                 "host", 6379, "127.0.0.1", 6379, "MOVING"
             )
             await recorder.record_pubsub_message(PubSubDirection.PUBLISH)
-            await recorder.record_streaming_lag(0.1, "stream", "group", "consumer")
+            await recorder.record_streaming_lag(0.1, "stream", "group")
 
         recorder.reset_collector()
 

@@ -5448,10 +5448,10 @@ class TestAsyncXreadXreadgroupMetricsExport:
         await r.delete(stream)
 
     @skip_if_server_version_lt("5.0.0")
-    async def test_async_xreadgroup_exports_streaming_lag_metric_with_consumer_info(
+    async def test_async_xreadgroup_exports_streaming_lag_metric_with_consumer_group(
         self, r: redis.Redis
     ):
-        """Test that async xreadgroup exports streaming lag metric with consumer group info."""
+        """Test that async xreadgroup exports streaming lag metric with consumer group."""
         stream = "test-stream-metrics-group"
         group = "test-group"
         consumer = "test-consumer"
@@ -5475,12 +5475,11 @@ class TestAsyncXreadXreadgroupMetricsExport:
                 streams={stream: ">"},
             )
 
-            # Verify the async recorder was called with consumer info
+            # Verify the async recorder was called with consumer group
             mock_recorder.assert_awaited_once()
             call_args = mock_recorder.call_args
             assert call_args[1]["response"] is not None
             assert call_args[1]["consumer_group"] == group
-            assert call_args[1]["consumer_name"] == consumer
             # Verify result is returned correctly
             assert result is not None
 

@@ -458,8 +458,12 @@ class TestStreamingCredentialProvider:
         mock_pubsub_connection.get_protocol.return_value = 3
         mock_pubsub_connection.credential_provider = credential_provider
         mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
+        mock_pubsub_connection.host = "localhost"
+        mock_pubsub_connection.port = 6379
         mock_another_connection = AsyncMock(spec=Connection)
         mock_another_connection.retry = Retry(NoBackoff(), 3)
+        mock_another_connection.host = "localhost"
+        mock_another_connection.port = 6379
 
         mock_pool = AsyncMock(spec=ConnectionPool)
         mock_pool.connection_kwargs = {
@@ -527,8 +531,12 @@ class TestStreamingCredentialProvider:
         mock_pubsub_connection.get_protocol.return_value = 2
         mock_pubsub_connection.credential_provider = credential_provider
         mock_pubsub_connection.retry = Retry(NoBackoff(), 3)
+        mock_pubsub_connection.host = "localhost"
+        mock_pubsub_connection.port = 6379
         mock_another_connection = AsyncMock(spec=Connection)
         mock_another_connection.retry = Retry(NoBackoff(), 3)
+        mock_another_connection.host = "localhost"
+        mock_another_connection.port = 6379
 
         mock_pool = AsyncMock(spec=ConnectionPool)
         mock_pool.connection_kwargs = {

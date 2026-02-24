@@ -60,7 +60,7 @@ async def test_single_connection():
     in_use = False
 
     class Retry_:
-        async def call_with_retry(self, _, __):
+        async def call_with_retry(self, _, __, with_failure_count=False):
             # If we remove the single-client lock, this error gets raised as two
             # coroutines will be vying for the `in_use` flag due to the two
             # asymmetric sleep calls
@@ -77,6 +77,8 @@ async def test_single_connection():
 
     mock_conn = mock.AsyncMock(spec=Connection)
     mock_conn.retry = Retry_()
+    mock_conn.host = "localhost"
+    mock_conn.port = 6379
 
     async def get_conn():
         # Validate only one client is created in single-client mode when
