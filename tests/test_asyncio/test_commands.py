@@ -5505,8 +5505,8 @@ class TestAsyncXreadXreadgroupMetricsExport:
 
             # Verify the async recorder was called (even with empty response)
             mock_recorder.assert_awaited_once()
-            # Result should be None or empty
-            assert result is None or result == []
+            # Result should be None or empty ([] for RESP2, {} for RESP3)
+            assert result is None or result == [] or result == {}
 
         # Cleanup
         await r.delete(stream)
