@@ -3940,32 +3940,6 @@ class TestAsyncClusterPipelineMetricsRecording:
         attrs = call_args[1]["attributes"]
         assert attrs["db.operation.name"] == "PIPELINE"
 
-    async def test_pipeline_batch_size_recorded(self, cluster_pipeline_with_otel):
-        """
-        Test that pipeline batch_size is correctly recorded.
-        """
-        cluster, operation_duration_mock = cluster_pipeline_with_otel
-
-        # Execute a pipeline with 3 commands
-        pipe = cluster.pipeline()
-        pipe.set("batch_key", "value1")
-        pipe.get("batch_key")
-        pipe.delete("batch_key")
-        await pipe.execute()
-
-        # Find the PIPELINE event call
-        pipeline_call = None
-        for call_obj in operation_duration_mock.record.call_args_list:
-            attrs = call_obj[1]["attributes"]
-            if attrs.get("db.operation.name") == "PIPELINE":
-                pipeline_call = call_obj
-                break
-
-        assert pipeline_call is not None
-        attrs = pipeline_call[1]["attributes"]
-        assert "db.operation.batch.size" in attrs
-        assert attrs["db.operation.batch.size"] == 3
-
     async def test_pipeline_server_attributes_recorded(
         self, cluster_pipeline_with_otel
     ):

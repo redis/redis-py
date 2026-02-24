@@ -4538,7 +4538,6 @@ class StreamCommands(CommandsProtocol):
                 await async_record_streaming_lag(
                     response=actual_response,
                     consumer_group=groupname,
-                    consumer_name=consumername,
                 )
                 return actual_response
 

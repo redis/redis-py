@@ -1803,7 +1803,6 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         failure_count: Optional[int] = None,
         start_time: Optional[float] = None,
         command_name: Optional[str] = None,
-        batch_size: Optional[int] = None,
     ):
         """
         Close the connection, raise an exception if we were watching.
@@ -1823,7 +1822,6 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 db_namespace=str(conn.db),
                 error=error,
                 retry_attempts=failure_count,
-                batch_size=batch_size,
             )
         await conn.disconnect(error=error, failure_count=failure_count)
         # if we were watching a variable, the watch is no longer valid
@@ -1865,7 +1863,7 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
         def failure_callback(error, failure_count):
             actual_retry_attempts[0] = failure_count
             return self._disconnect_raise_on_watching(
-                conn, error, failure_count, start_time, operation_name, stack_len
+                conn, error, failure_count, start_time, operation_name
             )
 
         try:
@@ -1881,7 +1879,6 @@ class Pipeline(Redis):  # lgtm [py/init-calls-subclass]
                 server_address=conn.host,
                 server_port=conn.port,
                 db_namespace=str(conn.db),
-                batch_size=stack_len,
             )
             return response
         except Exception as e:

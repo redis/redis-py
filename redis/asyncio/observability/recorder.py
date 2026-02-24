@@ -100,7 +100,6 @@ async def record_operation_duration(
     db_namespace: Optional[str] = None,
     error: Optional[Exception] = None,
     is_blocking: Optional[bool] = None,
-    batch_size: Optional[int] = None,
     retry_attempts: Optional[int] = None,
 ) -> None:
     """
@@ -117,7 +116,6 @@ async def record_operation_duration(
         db_namespace: Redis database index
         error: Exception if command failed, None if successful
         is_blocking: Whether the operation is a blocking command
-        batch_size: Number of commands in batch (for pipelines/transactions)
         retry_attempts: Number of retry attempts made
 
     Example:
@@ -140,7 +138,6 @@ async def record_operation_duration(
             network_peer_address=server_address,
             network_peer_port=server_port,
             is_blocking=is_blocking,
-            batch_size=batch_size,
             retry_attempts=retry_attempts,
         )
     except Exception:
@@ -423,7 +420,6 @@ async def record_streaming_lag(
     lag_seconds: float,
     stream_name: Optional[str] = None,
     consumer_group: Optional[str] = None,
-    consumer_name: Optional[str] = None,
 ) -> None:
     """
     Record the lag of a streaming message.
@@ -432,7 +428,6 @@ async def record_streaming_lag(
         lag_seconds: Lag in seconds
         stream_name: Stream name
         consumer_group: Consumer group name
-        consumer_name: Consumer name
     """
     collector = await _get_or_create_collector()
     if collector is None:
@@ -450,7 +445,6 @@ async def record_streaming_lag(
             lag_seconds=lag_seconds,
             stream_name=effective_stream_name,
             consumer_group=consumer_group,
-            consumer_name=consumer_name,
         )
     except Exception:
         pass
@@ -459,7 +453,6 @@ async def record_streaming_lag(
 async def record_streaming_lag_from_response(
     response,
     consumer_group: Optional[str] = None,
-    consumer_name: Optional[str] = None,
 ) -> None:
     """
     Record streaming lag from XREAD/XREADGROUP response.
@@ -469,7 +462,6 @@ async def record_streaming_lag_from_response(
     Args:
         response: Response from XREAD/XREADGROUP command
         consumer_group: Consumer group name (for XREADGROUP)
-        consumer_name: Consumer name (for XREADGROUP)
     """
     collector = await _get_or_create_collector()
     if collector is None:
@@ -503,7 +495,6 @@ async def record_streaming_lag_from_response(
                             lag_seconds=lag_seconds,
                             stream_name=effective_stream_name,
                             consumer_group=consumer_group,
-                            consumer_name=consumer_name,
                         )
         else:
             # RESP2 format: list
@@ -522,7 +513,6 @@ async def record_streaming_lag_from_response(
                         lag_seconds=lag_seconds,
                         stream_name=effective_stream_name,
                         consumer_group=consumer_group,
-                        consumer_name=consumer_name,
                     )
     except Exception:
         pass
