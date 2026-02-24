@@ -59,7 +59,7 @@ def record_operation_duration(
     db_namespace: Optional[str] = None,
     error: Optional[Exception] = None,
     is_blocking: Optional[bool] = None,
-    batch_size: Optional[int] = None,
+    batch_size: Optional[int] = None,  # noqa: ARG001 - kept for API compatibility
     retry_attempts: Optional[int] = None,
 ) -> None:
     """
@@ -449,7 +449,7 @@ def record_streaming_lag(
     lag_seconds: float,
     stream_name: Optional[str] = None,
     consumer_group: Optional[str] = None,
-    consumer_name: Optional[str] = None,
+    consumer_name: Optional[str] = None,  # noqa: ARG001 - kept for API compatibility
 ) -> None:
     """
     Record the lag of a streaming message.
@@ -492,7 +492,7 @@ def record_streaming_lag(
 def record_streaming_lag_from_response(
     response,
     consumer_group: Optional[str] = None,
-    consumer_name: Optional[str] = None,
+    consumer_name: Optional[str] = None,  # noqa: ARG001 - kept for API compatibility
 ) -> None:
     """
     Record streaming lag from XREAD/XREADGROUP response.

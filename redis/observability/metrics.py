@@ -439,7 +439,7 @@ class RedisMetricsCollector:
         server_address: Optional[str] = None,
         server_port: Optional[int] = None,
         db_namespace: Optional[int] = None,
-        batch_size: Optional[int] = None,
+        batch_size: Optional[int] = None,  # noqa: ARG002 - kept for API compatibility
         error_type: Optional[Exception] = None,
         network_peer_address: Optional[str] = None,
         network_peer_port: Optional[int] = None,
@@ -597,7 +597,7 @@ class RedisMetricsCollector:
         lag_seconds: float,
         stream_name: Optional[str] = None,
         consumer_group: Optional[str] = None,
-        consumer_name: Optional[str] = None,
+        consumer_name: Optional[str] = None,  # noqa: ARG002 - kept for API compatibility
     ) -> None:
         """
         Record the lag of a streaming message.
