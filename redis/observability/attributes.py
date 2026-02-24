@@ -129,7 +129,7 @@ class AttributeBuilder:
     @staticmethod
     def build_operation_attributes(
         command_name: Optional[str] = None,
-        batch_size: Optional[int] = None,  # noqa: ARG004 - kept for API compatibility
+        batch_size: Optional[int] = None,  # noqa
         network_peer_address: Optional[str] = None,
         network_peer_port: Optional[int] = None,
         stored_procedure_name: Optional[str] = None,
@@ -278,7 +278,7 @@ class AttributeBuilder:
     def build_streaming_attributes(
         stream_name: Optional[str] = None,
         consumer_group: Optional[str] = None,
-        consumer_name: Optional[str] = None,  # noqa: ARG004 - kept for API compatibility
+        consumer_name: Optional[str] = None,  # noqa
     ) -> Dict[str, Any]:
         """
         Build attributes for a streaming operation.
