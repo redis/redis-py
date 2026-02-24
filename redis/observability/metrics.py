@@ -226,13 +226,13 @@ class RedisMetricsCollector:
 
     def record_error_count(
         self,
-        server_address: str,
-        server_port: int,
-        network_peer_address: str,
-        network_peer_port: int,
-        error_type: Exception,
-        retry_attempts: int,
-        is_internal: bool,
+        server_address: Optional[str] = None,
+        server_port: Optional[int] = None,
+        network_peer_address: Optional[str] = None,
+        network_peer_port: Optional[int] = None,
+        error_type: Optional[Exception] = None,
+        retry_attempts: Optional[int] = None,
+        is_internal: Optional[bool] = None,
     ):
         """
         Record error count
