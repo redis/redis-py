@@ -1,13 +1,8 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Type, Union
+from typing import List, Optional, Type, Union
 
 import pybreaker
-
-try:
-    from typing import Optional  # Py 3.11+
-except ImportError:
-    from typing_extensions import Optional
 
 from redis import ConnectionPool, Redis, RedisCluster
 from redis.backoff import ExponentialWithJitterBackoff, NoBackoff

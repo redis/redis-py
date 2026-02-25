@@ -2,12 +2,7 @@ import math
 import threading
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import List, Type
-
-try:
-    from typing import Optional  # Py 3.11+
-except ImportError:
-    from typing_extensions import Optional
+from typing import List, Optional, Type
 
 from redis.multidb.circuit import State as CBState
 
