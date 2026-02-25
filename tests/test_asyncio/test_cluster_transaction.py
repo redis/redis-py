@@ -276,6 +276,9 @@ class TestClusterTransaction:
             "Conn error"
         )
         mock_connection.retry = Retry(NoBackoff(), 0)
+        mock_connection.host = node_importing.host
+        mock_connection.port = node_importing.port
+        mock_connection.db = 0
 
         node_importing._free.append(mock_connection)
         r.nodes_manager.slots_cache[slot] = [node_importing]
@@ -306,6 +309,9 @@ class TestClusterTransaction:
             "Conn error"
         )
         mock_connection.retry = Retry(NoBackoff(), 0)
+        mock_connection.host = node_importing.host
+        mock_connection.port = node_importing.port
+        mock_connection.db = 0
 
         node_importing._free.append(mock_connection)
         r.nodes_manager.slots_cache[slot] = [node_importing]
