@@ -1006,7 +1006,11 @@ class MaintNotificationsConnectionHandler:
             or not self.config.is_relaxed_timeouts_enabled()
         ):
             return
-        add_debug_log_for_notification(self.connection, "MAINTENANCE_COMPLETED")
+        if kwargs.get("notification"):
+            notification = kwargs["notification"]
+        add_debug_log_for_notification(
+            self.connection, notification if notification else "MAINTENANCE_COMPLETED"
+        )
         self.connection.reset_tmp_settings(reset_relaxed_timeout=True)
         # Maintenance completed - reset the connection
         # timeouts by providing -1 as the relaxed timeout
@@ -1016,8 +1020,7 @@ class MaintNotificationsConnectionHandler:
         # notifications and skipped end maint notifications
         self.connection.reset_received_notifications()
 
-        if kwargs.get("notification"):
-            notification = kwargs["notification"]
+        if notification:
             record_connection_relaxed_timeout(
                 connection_name=repr(self.connection),
                 maint_notification=notification.__class__.__name__,
