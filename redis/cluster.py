@@ -3910,6 +3910,24 @@ class TransactionStrategy(AbstractStrategy):
             or type(error) in self.CONNECTION_ERRORS
         ):
             if self._transaction_connection:
+                if is_debug_log_enabled():
+                    socket_address = None
+                    try:
+                        socket_address = (
+                            self._transaction_connection._sock.getsockname()
+                            if self._transaction_connection._sock
+                            else None
+                        )
+                        socket_address = socket_address[1] if socket_address else None
+                    except (AttributeError, OSError):
+                        pass
+
+                    logger.debug(
+                        f"Operation failed, "
+                        f"with connection: {self._transaction_connection}, "
+                        f"connected to ip {self._transaction_connection.get_resolved_ip()}, "
+                        f"local socket port: {socket_address}"
+                    )
                 # Disconnect and release back to pool
                 self._transaction_connection.disconnect()
                 node = self._nodes_manager.find_connection_owner(
