@@ -853,12 +853,17 @@ class RedisCluster(AbstractRedis, AbstractRedisCluster, AsyncRedisClusterCommand
         Records operation duration metric directly.
         Accepts either a Connection or ClusterNode object.
         """
+        # Connection has db attribute, ClusterNode has connection_kwargs
+        if hasattr(connection, "db"):
+            db = connection.db
+        else:
+            db = connection.connection_kwargs.get("db", 0)
         await record_operation_duration(
             command_name=command_name,
             duration_seconds=duration_seconds,
             server_address=connection.host,
             server_port=connection.port,
-            db_namespace=str(connection.db),
+            db_namespace=str(db) if db is not None else None,
             error=error,
         )
 
@@ -2407,12 +2412,13 @@ class PipelineStrategy(AbstractStrategy):
                     node_error = cmd.result
                     break
 
+            db = node.connection_kwargs.get("db", 0)
             await record_operation_duration(
                 command_name="PIPELINE",
                 duration_seconds=time.monotonic() - start_time,
                 server_address=node.host,
                 server_port=node.port,
-                db_namespace=str(node.db),
+                db_namespace=str(db) if db is not None else None,
                 error=node_error,
             )
 
