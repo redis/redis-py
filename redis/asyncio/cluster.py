@@ -1493,7 +1493,9 @@ class NodesManager:
                     # not to wait for the disconnects
                     removed_node = old.pop(name)
                     removed_node.update_active_connections_for_reconnect()
-                    task = asyncio.create_task(removed_node.disconnect_free_connections())
+                    task = asyncio.create_task(
+                        removed_node.disconnect_free_connections()
+                    )
                     self._background_tasks.add(task)
                     task.add_done_callback(self._background_tasks.discard)
 
