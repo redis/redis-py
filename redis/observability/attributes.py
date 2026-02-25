@@ -130,7 +130,7 @@ class AttributeBuilder:
     @staticmethod
     def build_operation_attributes(
         command_name: Optional[Union[str, bytes]] = None,
-        batch_size: Optional[int] = None, # noqa
+        batch_size: Optional[int] = None,  # noqa
         network_peer_address: Optional[str] = None,
         network_peer_port: Optional[int] = None,
         stored_procedure_name: Optional[str] = None,
