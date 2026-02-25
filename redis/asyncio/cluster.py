@@ -1585,6 +1585,7 @@ class NodesManager:
     __slots__ = (
         "_dynamic_startup_nodes",
         "_event_dispatcher",
+        "_background_tasks",
         "connection_kwargs",
         "default_node",
         "nodes_cache",
@@ -1618,6 +1619,7 @@ class NodesManager:
         self.read_load_balancer = LoadBalancer()
         self._initialize_lock: asyncio.Lock = asyncio.Lock()
 
+        self._background_tasks: Set[asyncio.Task] = set()
         self._dynamic_startup_nodes: bool = dynamic_startup_nodes
         if event_dispatcher is None:
             self._event_dispatcher = EventDispatcher()
@@ -1659,7 +1661,11 @@ class NodesManager:
                     # not to wait for the disconnects
                     removed_node = old.pop(name)
                     removed_node.update_active_connections_for_reconnect()
-                    asyncio.create_task(removed_node.disconnect_free_connections())  # noqa
+                    task = asyncio.create_task(
+                        removed_node.disconnect_free_connections()
+                    )
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
 
         for name, node in new.items():
             if name in old:
