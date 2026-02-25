@@ -2,6 +2,15 @@
 
 import datetime
 import hashlib
+
+# Try to import the xxhash library as an optional dependency
+try:
+    import xxhash
+
+    HAS_XXHASH = True
+except ImportError:
+    HAS_XXHASH = False
+
 import warnings
 from enum import Enum
 from typing import (
@@ -50,8 +59,14 @@ from redis.utils import (
     experimental_args,
     experimental_method,
     extract_expire_flags,
+    str_if_bytes,
 )
 
+from ..observability.attributes import PubSubDirection
+from ..observability.recorder import (
+    record_pubsub_message,
+    record_streaming_lag_from_response,
+)
 from .helpers import at_most_one_value_set, list_or_args
 
 if TYPE_CHECKING:
@@ -394,6 +409,11 @@ class ACLCommands(CommandsProtocol):
 
 
 AsyncACLCommands = ACLCommands
+
+
+class HotkeysMetricsTypes(Enum):
+    CPU = "CPU"
+    NET = "NET"
 
 
 class ManagementCommands(CommandsProtocol):
@@ -1397,6 +1417,94 @@ class ManagementCommands(CommandsProtocol):
             "FAILOVER is intentionally not implemented in the client."
         )
 
+    def hotkeys_start(
+        self,
+        metrics: List[HotkeysMetricsTypes],
+        count: Optional[int] = None,
+        duration: Optional[int] = None,
+        sample_ratio: Optional[int] = None,
+        slots: Optional[List[int]] = None,
+        **kwargs,
+    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
+        """
+        Start collecting hotkeys data.
+        Returns an error if there is an ongoing collection session.
+
+        Args:
+            count: The number of keys to collect in each criteria (CPU and network consumption)
+            metrics: List of metrics to track. Supported values: [HotkeysMetricsTypes.CPU, HotkeysMetricsTypes.NET]
+            duration: Automatically stop the collection after `duration` seconds
+            sample_ratio: Commands are sampled with probability 1/ratio (1 means no sampling)
+            slots: Only track keys on the specified hash slots
+
+        For more information, see https://redis.io/commands/hotkeys-start
+        """
+        args: List[Union[str, int]] = ["HOTKEYS", "START"]
+
+        # Add METRICS
+        args.extend(["METRICS", len(metrics)])
+        args.extend([str(m.value) for m in metrics])
+
+        # Add COUNT
+        if count is not None:
+            args.extend(["COUNT", count])
+
+        # Add optional DURATION
+        if duration is not None:
+            args.extend(["DURATION", duration])
+
+        # Add optional SAMPLE ratio
+        if sample_ratio is not None:
+            args.extend(["SAMPLE", sample_ratio])
+
+        # Add optional SLOTS
+        if slots is not None:
+            args.append("SLOTS")
+            args.append(len(slots))
+            args.extend(slots)
+
+        return self.execute_command(*args, **kwargs)
+
+    def hotkeys_stop(
+        self, **kwargs
+    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
+        """
+        Stop the ongoing hotkeys collection session (if any).
+        The results of the last collection session are kept for consumption with HOTKEYS GET.
+
+        For more information, see https://redis.io/commands/hotkeys-stop
+        """
+        return self.execute_command("HOTKEYS STOP", **kwargs)
+
+    def hotkeys_reset(
+        self, **kwargs
+    ) -> Union[Awaitable[Union[str, bytes]], Union[str, bytes]]:
+        """
+        Discard the last hotkeys collection session results (in order to save memory).
+        Error if there is an ongoing collection session.
+
+        For more information, see https://redis.io/commands/hotkeys-reset
+        """
+        return self.execute_command("HOTKEYS RESET", **kwargs)
+
+    def hotkeys_get(
+        self, **kwargs
+    ) -> Union[
+        Awaitable[list[dict[Union[str, bytes], Any]]],
+        list[dict[Union[str, bytes], Any]],
+    ]:
+        """
+        Retrieve the result of the ongoing collection session (if any),
+        or the last collection session (if any).
+
+        HOTKEYS GET response is wrapped in an array for aggregation support.
+        Each node returns a single-element array, allowing multiple node
+        responses to be concatenated by DMC or other aggregators.
+
+        For more information, see https://redis.io/commands/hotkeys-get
+        """
+        return self.execute_command("HOTKEYS GET", **kwargs)
+
 
 class AsyncManagementCommands(ManagementCommands):
     async def command_info(self, **kwargs) -> None:
@@ -1889,7 +1997,45 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("EXPIRETIME", key)
 
     @experimental_method()
-    def digest(self, name: KeyT) -> Optional[str]:
+    def digest_local(self, value: Union[bytes, str]) -> Union[bytes, str]:
+        """
+        Compute the hexadecimal digest of the value locally, without sending it to the server.
+
+        This is useful for conditional operations like IFDEQ/IFDNE where you need to
+        compute the digest client-side before sending a command.
+
+        Warning:
+        **Experimental** - This API may change or be removed without notice.
+
+        Arguments:
+          - value: Union[bytes, str] - the value to compute the digest of.
+            If a string is provided, it will be encoded using UTF-8 before hashing,
+            which matches Redis's default encoding behavior.
+
+        Returns:
+          - (str | bytes) the XXH3 digest of the value as a hex string (16 hex characters).
+            Returns bytes if decode_responses is False, otherwise returns str.
+
+        For more information, see https://redis.io/commands/digest
+        """
+        if not HAS_XXHASH:
+            raise NotImplementedError(
+                "XXHASH support requires the optional 'xxhash' library. "
+                "Install it with 'pip install xxhash' or use this package's extra with "
+                "'pip install redis[xxhash]' to enable this feature."
+            )
+
+        local_digest = xxhash.xxh3_64(value).hexdigest()
+
+        # To align with digest, we want to return bytes if decode_responses is False.
+        # The following works because of Python's mixin-based client class hierarchy.
+        if not self.get_encoder().decode_responses:
+            local_digest = local_digest.encode()
+
+        return local_digest
+
+    @experimental_method()
+    def digest(self, name: KeyT) -> Union[str, bytes, None]:
         """
         Return the digest of the value stored at the specified key.
 
@@ -3621,7 +3767,9 @@ class SetCommands(CommandsProtocol):
         """
         return self.execute_command("SMOVE", src, dst, value)
 
-    def spop(self, name: KeyT, count: Optional[int] = None) -> Union[str, List, None]:
+    def spop(
+        self, name: KeyT, count: Optional[int] = None
+    ) -> Union[Awaitable[Union[str, List, None]], str, List, None]:
         """
         Remove and return a random member of set ``name``
 
@@ -3632,7 +3780,7 @@ class SetCommands(CommandsProtocol):
 
     def srandmember(
         self, name: KeyT, number: Optional[int] = None
-    ) -> Union[str, List, None]:
+    ) -> Union[Awaitable[Union[str, List, None]], str, List, None]:
         """
         If ``number`` is None, returns a random member of set ``name``.
 
@@ -3730,6 +3878,8 @@ class StreamCommands(CommandsProtocol):
         minid: Union[StreamIdT, None] = None,
         limit: Optional[int] = None,
         ref_policy: Optional[Literal["KEEPREF", "DELREF", "ACKED"]] = None,
+        idmpauto: Optional[str] = None,
+        idmp: Optional[tuple[str, bytes]] = None,
     ) -> ResponseT:
         """
         Add to a stream.
@@ -3747,6 +3897,17 @@ class StreamCommands(CommandsProtocol):
             - KEEPREF (default): When trimming, preserves references in consumer groups' PEL
             - DELREF: When trimming, removes all references from consumer groups' PEL
             - ACKED: When trimming, only removes entries acknowledged by all consumer groups
+        idmpauto: Producer ID for automatic idempotent ID calculation.
+            Automatically calculates an idempotent ID based on entry content to prevent
+            duplicate entries. Can only be used with id='*'. Creates an IDMP map if it
+            doesn't exist yet. The producer ID must be unique per producer and consistent
+            across restarts.
+        idmp: Tuple of (producer_id, idempotent_id) for explicit idempotent ID.
+            Uses a specific idempotent ID to prevent duplicate entries. Can only be used
+            with id='*'. The producer ID must be unique per producer and consistent across
+            restarts. The idempotent ID must be unique per message and per producer.
+            Shorter idempotent IDs require less memory and allow faster processing.
+            Creates an IDMP map if it doesn't exist yet.
 
         For more information, see https://redis.io/commands/xadd
         """
@@ -3754,9 +3915,27 @@ class StreamCommands(CommandsProtocol):
         if maxlen is not None and minid is not None:
             raise DataError("Only one of ```maxlen``` or ```minid``` may be specified")
 
+        if idmpauto is not None and idmp is not None:
+            raise DataError("Only one of ```idmpauto``` or ```idmp``` may be specified")
+
+        if (idmpauto is not None or idmp is not None) and id != "*":
+            raise DataError("IDMPAUTO and IDMP can only be used with id='*'")
+
         if ref_policy is not None and ref_policy not in {"KEEPREF", "DELREF", "ACKED"}:
             raise DataError("XADD ref_policy must be one of: KEEPREF, DELREF, ACKED")
 
+        if nomkstream:
+            pieces.append(b"NOMKSTREAM")
+        if ref_policy is not None:
+            pieces.append(ref_policy)
+        if idmpauto is not None:
+            pieces.extend([b"IDMPAUTO", idmpauto])
+        if idmp is not None:
+            if not isinstance(idmp, tuple) or len(idmp) != 2:
+                raise DataError(
+                    "XADD idmp must be a tuple of (producer_id, idempotent_id)"
+                )
+            pieces.extend([b"IDMP", idmp[0], idmp[1]])
         if maxlen is not None:
             if not isinstance(maxlen, int) or maxlen < 0:
                 raise DataError("XADD maxlen must be non-negative integer")
@@ -3771,16 +3950,76 @@ class StreamCommands(CommandsProtocol):
             pieces.append(minid)
         if limit is not None:
             pieces.extend([b"LIMIT", limit])
-        if nomkstream:
-            pieces.append(b"NOMKSTREAM")
-        if ref_policy is not None:
-            pieces.append(ref_policy)
         pieces.append(id)
         if not isinstance(fields, dict) or len(fields) == 0:
             raise DataError("XADD fields must be a non-empty dict")
         for pair in fields.items():
             pieces.extend(pair)
         return self.execute_command("XADD", name, *pieces)
+
+    def xcfgset(
+        self,
+        name: KeyT,
+        idmp_duration: Optional[int] = None,
+        idmp_maxsize: Optional[int] = None,
+    ) -> ResponseT:
+        """
+        Configure the idempotency parameters for a stream's IDMP map.
+
+        Sets how long Redis remembers each idempotent ID (iid) and the maximum
+        number of iids to track. This command clears the existing IDMP map
+        (Redis forgets all previously stored iids), but only if the configuration
+        value actually changes.
+
+        Args:
+            name: The name of the stream.
+            idmp_duration: How long Redis remembers each iid in seconds.
+                Default: 100 seconds (or value set by stream-idmp-duration config).
+                Minimum: 1 second, Maximum: 300 seconds.
+                Redis won't forget an iid for this duration (unless maxsize is reached).
+                Should accommodate application crash recovery time.
+            idmp_maxsize: Maximum number of iids Redis remembers per producer ID (pid).
+                Default: 100 iids (or value set by stream-idmp-maxsize config).
+                Minimum: 1 iid, Maximum: 1,000,000 (1M) iids.
+                Should be set to: mark-delay [in msec] × (messages/msec) + margin.
+                Example: 10K msgs/sec (10 msgs/msec), 80 msec mark-delay
+                → maxsize = 10 × 80 + margin = 1000 iids.
+
+        Returns:
+            OK on success.
+
+        For more information, see https://redis.io/commands/xcfgset
+        """
+        if idmp_duration is None and idmp_maxsize is None:
+            raise DataError(
+                "XCFGSET requires at least one of idmp_duration or idmp_maxsize"
+            )
+
+        pieces: list[EncodableT] = []
+
+        if idmp_duration is not None:
+            if (
+                not isinstance(idmp_duration, int)
+                or idmp_duration < 1
+                or idmp_duration > 300
+            ):
+                raise DataError(
+                    "XCFGSET idmp_duration must be an integer between 1 and 300"
+                )
+            pieces.extend([b"IDMP-DURATION", idmp_duration])
+
+        if idmp_maxsize is not None:
+            if (
+                not isinstance(idmp_maxsize, int)
+                or idmp_maxsize < 1
+                or idmp_maxsize > 1000000
+            ):
+                raise DataError(
+                    "XCFGSET idmp_maxsize must be an integer between 1 and 1,000,000"
+                )
+            pieces.extend([b"IDMP-MAXSIZE", idmp_maxsize])
+
+        return self.execute_command("XCFGSET", name, *pieces)
 
     def xautoclaim(
         self,
@@ -4211,7 +4450,11 @@ class StreamCommands(CommandsProtocol):
         keys, values = zip(*streams.items())
         pieces.extend(keys)
         pieces.extend(values)
-        return self.execute_command("XREAD", *pieces, keys=keys)
+        response = self.execute_command("XREAD", *pieces, keys=keys)
+
+        record_streaming_lag_from_response(response=response)
+
+        return response
 
     def xreadgroup(
         self,
@@ -4271,7 +4514,14 @@ class StreamCommands(CommandsProtocol):
         pieces.append(b"STREAMS")
         pieces.extend(streams.keys())
         pieces.extend(streams.values())
-        return self.execute_command("XREADGROUP", *pieces, **options)
+        response = self.execute_command("XREADGROUP", *pieces, **options)
+
+        record_streaming_lag_from_response(
+            response=response,
+            consumer_group=groupname,
+        )
+
+        return response
 
     def xrevrange(
         self,
@@ -4699,8 +4949,8 @@ class SortedSetCommands(CommandsProtocol):
         command,
         dest: Union[KeyT, None],
         name: KeyT,
-        start: int,
-        end: int,
+        start: EncodableT,
+        end: EncodableT,
         desc: bool = False,
         byscore: bool = False,
         bylex: bool = False,
@@ -4738,8 +4988,8 @@ class SortedSetCommands(CommandsProtocol):
     def zrange(
         self,
         name: KeyT,
-        start: int,
-        end: int,
+        start: EncodableT,
+        end: EncodableT,
         desc: bool = False,
         withscores: bool = False,
         score_cast_func: Union[type, Callable] = float,
@@ -4828,8 +5078,8 @@ class SortedSetCommands(CommandsProtocol):
         self,
         dest: KeyT,
         name: KeyT,
-        start: int,
-        end: int,
+        start: EncodableT,
+        end: EncodableT,
         byscore: bool = False,
         bylex: bool = False,
         desc: bool = False,
@@ -6038,7 +6288,12 @@ class PubSubCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/publish
         """
-        return self.execute_command("PUBLISH", channel, message, **kwargs)
+        response = self.execute_command("PUBLISH", channel, message, **kwargs)
+        record_pubsub_message(
+            direction=PubSubDirection.PUBLISH,
+            channel=str_if_bytes(channel),
+        )
+        return response
 
     def spublish(self, shard_channel: ChannelT, message: EncodableT) -> ResponseT:
         """
@@ -6047,7 +6302,13 @@ class PubSubCommands(CommandsProtocol):
 
         For more information, see https://redis.io/commands/spublish
         """
-        return self.execute_command("SPUBLISH", shard_channel, message)
+        response = self.execute_command("SPUBLISH", shard_channel, message)
+        record_pubsub_message(
+            direction=PubSubDirection.PUBLISH,
+            channel=str_if_bytes(shard_channel),
+            sharded=True,
+        )
+        return response
 
     def pubsub_channels(self, pattern: PatternT = "*", **kwargs) -> ResponseT:
         """

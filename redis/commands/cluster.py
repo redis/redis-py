@@ -3,6 +3,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncIterator,
+    Awaitable,
     Dict,
     Iterable,
     Iterator,
@@ -38,6 +39,7 @@ from .core import (
     AsyncScriptCommands,
     DataAccessCommands,
     FunctionCommands,
+    HotkeysMetricsTypes,
     ManagementCommands,
     ModuleCommands,
     PubSubCommands,
@@ -827,6 +829,54 @@ class ClusterManagementCommands(ManagementCommands):
             target_nodes=target_nodes,
         )
 
+    def hotkeys_start(
+        self,
+        metrics: List[HotkeysMetricsTypes],
+        count: Optional[int] = None,
+        duration: Optional[int] = None,
+        sample_ratio: Optional[int] = None,
+        slots: Optional[List[int]] = None,
+        **kwargs,
+    ) -> Union[str, bytes]:
+        """
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
+
+        For more information see https://redis.io/commands/hotkeys-start
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    def hotkeys_stop(self, **kwargs) -> Union[str, bytes]:
+        """
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
+
+        For more information see https://redis.io/commands/hotkeys-stop
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    def hotkeys_reset(self, **kwargs) -> Union[str, bytes]:
+        """
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
+
+        For more information see https://redis.io/commands/hotkeys-reset
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    def hotkeys_get(self, **kwargs) -> list[dict[Union[str, bytes], Any]]:
+        """
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
+
+        For more information see https://redis.io/commands/hotkeys-get
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
 
 class AsyncClusterManagementCommands(
     ClusterManagementCommands, AsyncManagementCommands
@@ -922,6 +972,56 @@ class AsyncClusterManagementCommands(
             optout,
             noloop,
             target_nodes=target_nodes,
+        )
+
+    async def hotkeys_start(
+        self,
+        metrics: List[HotkeysMetricsTypes],
+        count: Optional[int] = None,
+        duration: Optional[int] = None,
+        sample_ratio: Optional[int] = None,
+        slots: Optional[List[int]] = None,
+        **kwargs,
+    ) -> Awaitable[Union[str, bytes]]:
+        """
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
+
+        For more information see https://redis.io/commands/hotkeys-start
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    async def hotkeys_stop(self, **kwargs) -> Awaitable[Union[str, bytes]]:
+        """
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
+
+        For more information see https://redis.io/commands/hotkeys-stop
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    async def hotkeys_reset(self, **kwargs) -> Awaitable[Union[str, bytes]]:
+        """
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
+
+        For more information see https://redis.io/commands/hotkeys-reset
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
+        )
+
+    async def hotkeys_get(
+        self, **kwargs
+    ) -> Awaitable[list[dict[Union[str, bytes], Any]]]:
+        """
+        Cluster client does not support hotkeys command. Please use the non-cluster client.
+
+        For more information see https://redis.io/commands/hotkeys-get
+        """
+        raise NotImplementedError(
+            "HOTKEYS commands are not supported in cluster mode. Please use the non-cluster client."
         )
 
 

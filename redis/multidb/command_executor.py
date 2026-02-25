@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Tuple
 
 from redis.client import Pipeline, PubSub, PubSubWorkerThread
 from redis.event import EventDispatcherInterface, OnCommandsFailEvent
@@ -21,6 +21,8 @@ from redis.multidb.failover import (
     FailoverStrategyExecutor,
 )
 from redis.multidb.failure_detector import FailureDetector
+from redis.observability.attributes import GeoFailoverReason
+from redis.observability.recorder import record_geo_failover
 from redis.retry import Retry
 
 
@@ -89,8 +91,13 @@ class SyncCommandExecutor(CommandExecutor):
 
     @active_database.setter
     @abstractmethod
-    def active_database(self, database: SyncDatabase) -> None:
-        """Sets the currently active database."""
+    def active_database(self, value: Tuple[SyncDatabase, GeoFailoverReason]) -> None:
+        """Sets the currently active database.
+
+        Args:
+            value: A tuple of (database, reason) where database is the new active
+                   database and reason is the GeoFailoverReason for the change.
+        """
         pass
 
     @property
@@ -213,11 +220,17 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
         return self._active_database
 
     @active_database.setter
-    def active_database(self, database: SyncDatabase) -> None:
+    def active_database(self, value: Tuple[SyncDatabase, GeoFailoverReason]) -> None:
+        database, reason = value
         old_active = self._active_database
         self._active_database = database
 
         if old_active is not None and old_active is not database:
+            record_geo_failover(
+                fail_from=old_active,
+                fail_to=database,
+                reason=reason,
+            )
             self._event_dispatcher.dispatch(
                 ActiveDatabaseChanged(
                     old_active,
@@ -325,7 +338,10 @@ class DefaultCommandExecutor(SyncCommandExecutor, BaseCommandExecutor):
                 and self._next_fallback_attempt <= datetime.now()
             )
         ):
-            self.active_database = self._failover_strategy_executor.execute()
+            self.active_database = (
+                self._failover_strategy_executor.execute(),
+                GeoFailoverReason.AUTOMATIC,
+            )
             self._schedule_next_fallback()
 
     def _register_command_execution(self, cmd: tuple):

@@ -4,6 +4,8 @@ from urllib.parse import urlparse
 import pytest
 import pytest_asyncio
 import redis.asyncio as redis
+from tests.conftest import skip_if_server_version_lt
+from tests.ssl_utils import get_tls_certificates, CertificateType, CN_USERNAME
 
 # Skip test or not based on cryptography installation
 try:
@@ -141,3 +143,93 @@ class TestSSL:
 
         finally:
             await r.aclose()
+
+    async def test_ssl_ca_path_parameter(self, request):
+        """Test that ssl_ca_path parameter is properly passed to SSLConnection"""
+        ssl_url = request.config.option.redis_ssl_url
+        parsed_url = urlparse(ssl_url)
+
+        # Test with a mock ca_path directory
+        test_ca_path = "/tmp/test_ca_certs"
+
+        r = redis.Redis(
+            host=parsed_url.hostname,
+            port=parsed_url.port,
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_ca_path=test_ca_path,
+        )
+
+        try:
+            # Get the connection to verify ssl_ca_path is passed through
+            conn = r.connection_pool.make_connection()
+            assert isinstance(conn, redis.SSLConnection)
+
+            # Verify the ca_path is stored in the SSL context
+            assert conn.ssl_context.ca_path == test_ca_path
+        finally:
+            await r.aclose()
+
+    async def test_ssl_password_parameter(self, request):
+        """Test that ssl_password parameter is properly passed to SSLConnection"""
+        ssl_url = request.config.option.redis_ssl_url
+        parsed_url = urlparse(ssl_url)
+
+        # Test with a mock password for encrypted private key
+        test_password = "test_key_password"
+
+        r = redis.Redis(
+            host=parsed_url.hostname,
+            port=parsed_url.port,
+            ssl=True,
+            ssl_cert_reqs="none",
+            ssl_password=test_password,
+        )
+
+        try:
+            # Get the connection to verify ssl_password is passed through
+            conn = r.connection_pool.make_connection()
+            assert isinstance(conn, redis.SSLConnection)
+
+            # Verify the password is stored in the SSL context
+            assert conn.ssl_context.password == test_password
+        finally:
+            await r.aclose()
+
+    @skip_if_server_version_lt("8.5.0")
+    async def test_ssl_authenticate_with_client_cert(self, request, r):
+        """Test that when client certificate is used for authentication,
+        the connection is created successfully"""
+
+        try:
+            # Non SSL client, to setup ACL
+            assert await r.acl_setuser(
+                CN_USERNAME,
+                enabled=True,
+                reset=True,
+                passwords=["+clientpass"],
+                keys=["*"],
+                commands=["+acl"],
+            )
+        finally:
+            await r.close()
+
+        ssl_url = request.config.option.redis_ssl_url
+        p = urlparse(ssl_url)[1].split(":")
+        client_cn_cert, client_cn_key, ca_cert = get_tls_certificates(
+            request.session.config.REDIS_INFO["tls_cert_subdir"],
+            CertificateType.client_cn,
+        )
+        r = redis.Redis(
+            host=p[0],
+            port=p[1],
+            ssl=True,
+            ssl_certfile=client_cn_cert,
+            ssl_keyfile=client_cn_key,
+            ssl_cert_reqs="required",
+            ssl_ca_certs=ca_cert,
+        )
+        try:
+            assert await r.acl_whoami() == CN_USERNAME
+        finally:
+            await r.close()

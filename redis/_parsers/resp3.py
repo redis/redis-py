@@ -20,6 +20,7 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
         self.pubsub_push_handler_func = self.handle_pubsub_push_response
         self.node_moving_push_handler_func = None
         self.maintenance_push_handler_func = None
+        self.oss_cluster_maint_push_handler_func = None
         self.invalidation_push_handler_func = None
 
     def handle_pubsub_push_response(self, response):
@@ -28,17 +29,23 @@ class _RESP3Parser(_RESPBase, PushNotificationsParser):
         return response
 
     def read_response(self, disable_decoding=False, push_request=False):
-        pos = self._buffer.get_pos() if self._buffer else None
+        pos = self._buffer.get_pos() if self._buffer is not None else None
         try:
             result = self._read_response(
                 disable_decoding=disable_decoding, push_request=push_request
             )
         except BaseException:
-            if self._buffer:
+            if self._buffer is not None:
                 self._buffer.rewind(pos)
             raise
         else:
-            self._buffer.purge()
+            if self._buffer is not None:
+                try:
+                    self._buffer.purge()
+                except AttributeError:
+                    # Buffer may have been set to None by another thread after
+                    # the check above; result is still valid so we don't raise
+                    pass
             return result
 
     def _read_response(self, disable_decoding=False, push_request=False):
